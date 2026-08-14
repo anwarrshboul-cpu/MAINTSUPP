@@ -1,12 +1,14 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "npx vinext build"
+    "builder": "RAILPACK",
+    "buildCommand": "D1_NODE_SHIM=1 npx vinext build"
   },
   "deploy": {
     "startCommand": "npx vinext start",
+    "healthcheckPath": "/",
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 3
+    "restartPolicyMaxRetries": 3,
+    "numReplicas": 1
   }
 }
