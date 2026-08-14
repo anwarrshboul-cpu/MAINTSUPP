@@ -2,13 +2,31 @@
  * The one way this app talks to the API.
  *
  * `credentials: "include"` on every call, because the session lives in an
- * HttpOnly cookie set by the Railway API on a different origin — without it the
- * browser sends nothing and every authenticated request 401s, which looks
- * exactly like a broken login.
+ * HttpOnly cookie set by the API — without it the browser sends nothing and
+ * every authenticated request 401s, which looks exactly like a broken login.
+ *
+ * There are two base URLs, because the browser and the server reach the API by
+ * different routes.
+ *
+ * The browser goes through THIS origin, at /api/*, which next.config.ts
+ * rewrites to the API. It cannot call the API's own hostname directly: the
+ * session cookie is SameSite=Lax, and a browser withholds a Lax cookie from a
+ * cross-site request. On stock platform hostnames — a vercel.app page calling
+ * an up.railway.app API — sign-in succeeds, the cookie is stored, and every
+ * request after it arrives anonymous. Going through the proxy makes the cookie
+ * first-party, which is what Lax is asking for.
+ *
+ * The server has no cookie jar to protect and no origin to be relative to, so
+ * it calls the API's absolute address.
  */
-export const API_URL = (
+export const API_ORIGIN = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787"
 ).replace(/\/+$/, "");
+
+/** Must match the `source` prefix of the rewrite in next.config.ts. */
+export const API_PROXY_PATH = "/api";
+
+export const API_URL = typeof window === "undefined" ? API_ORIGIN : API_PROXY_PATH;
 
 export type ApiResult<T> =
   | { ok: true; data: T }
