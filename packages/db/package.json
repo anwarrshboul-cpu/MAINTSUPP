@@ -1,0 +1,15 @@
+{
+  "name": "@maintsupp/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Schema, migrations and the one database client. Runs on local PGlite and hosted Postgres (Supabase) from the same SQL.",
+  "exports": {
+    ".": "./src/client.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "scripts": {
+    "migrate": "node src/migrate.ts",
+    "verify": "node src/verify.ts"
+  }
+}

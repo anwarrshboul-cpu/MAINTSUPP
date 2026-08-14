@@ -59,3 +59,29 @@ next-env.d.ts
 /db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md
 /db/monday-export/NEXT-SESSION.md
 /db/monday-export/UPDATES-PANEL-CAPTURE.md
+
+# Worker local environment (Supabase config)
+.dev.vars
+
+# Local PGlite development database
+.pglite/
+
+# Local file storage (apps/api/src/lib/storage.ts, the no-cloud-account driver).
+# Photographs of the inside of client premises. Never committed, and never
+# served as a static directory — reads go through a signed URL the API checks.
+.storage/
+
+# Next.js build output (apps/web)
+apps/web/.next/
+apps/web/next-env.d.ts
+
+# Import report — contains real client location strings
+import-d1-report.txt
+
+# Phase 2 audit — names real client sites, and inventories the unfixed
+# security gaps of a deployed product. The repository is public.
+PHASE-2-AUDIT.md
+
+# Leftover QA databases from parallel verification runs
+.pglite-qa/
+.storage/

@@ -1,0 +1,10 @@
+# Copy to `.dev.vars` for local development. Safe to commit — no secrets here.
+#
+# SUPABASE_PUBLISHABLE_KEY is the anon/publishable key and is public by design:
+# it identifies the project, and RLS is what guards the data.
+#
+# The service-role key is NOT listed here and must never be put in .dev.vars
+# used by the client bundle. It belongs only in Supabase Edge Function secrets.
+SUPABASE_URL="https://<project-ref>.supabase.co"
+SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
+MAINTSUPP_SITE_URL="http://localhost:5174"

@@ -30,5 +30,6 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "//": "apps/* and packages/* are excluded deliberately: they are the Phase 2 monorepo and run on Node's native TypeScript (explicit .ts import specifiers, NodeNext resolution) or on Next.js's own compiler. Type-checking them under THIS config — bundler resolution, ES2017 — reports 38 errors that are not errors in the toolchain that actually builds them. apps/web has its own tsconfig.json; apps/api and packages/db are checked by `npm run api:test` executing them.",
+  "exclude": ["node_modules", "apps", "packages"]
 }

@@ -1,0 +1,898 @@
+/* MAINTSUPP portal — the signed-in screens.
+
+   Imported by the portal shell layout only, so Next code-splits it away from
+   the public share page: a contractor opening one job from WhatsApp on mobile
+   data must not download a dashboard's stylesheet to read it. That is the same
+   rule globals.css states, kept by putting the board's styles in their own file
+   rather than appending them there.
+
+   Every colour is a token from globals.css, so light and dark both work with no
+   palette defined twice. Class names are prefixed `p-` to keep them clearly
+   separate from the shared primitives (.card, .chip, .btn, .alert) which are
+   reused as-is. */
+
+.p-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* ------------------------------------------------------------------ top bar -- */
+
+.p-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+  /* The notch: without this the mark sits under the status bar in landscape. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+.p-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 8px 14px;
+}
+
+.p-top-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.p-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+/*
+ * The name is the only elastic thing in this row, and at 320px it is already
+ * squeezed to 0px — so the ROLE BADGE's width alone decided whether the header
+ * fitted. It did not: CLIENT ADMIN overflowed the document by 37px, CONTRACTOR
+ * and SUPER ADMIN by 34px, CLIENT USER by 29px. OWNER and ADMIN are the two
+ * shortest badges and fitted, which is why an owner-only pass sees nothing
+ * wrong — the bug is invisible to the person most likely to look for it.
+ *
+ * Below 360px the name is dropped outright rather than shrunk to an ellipsis
+ * of nothing, and the badge is allowed to shrink. What a phone user needs from
+ * this row is the mark, which role they are in, and the way out.
+ */
+.p-who-name {
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.p-badge {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The owner badge is the one that must be unmistakable: it is the account that
+   cannot be deleted, deactivated or downgraded, so it is filled in the brand
+   colour rather than outlined like every other role. */
+.p-badge--owner {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.p-signout {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.p-signout:disabled { opacity: 0.6; cursor: progress; }
+
+/*
+ * Narrow phones: 320px.
+ *
+ * The name is the only elastic thing in this row and is already squeezed to 0px
+ * at this width, so the ROLE BADGE's width alone decided whether the header
+ * fitted — and for four of the six roles it did not (CLIENT ADMIN overflowed by
+ * 37px, CONTRACTOR and SUPER ADMIN by 34, CLIENT USER by 29). OWNER and ADMIN
+ * are the two shortest badges and fitted, which is why an owner-only pass sees
+ * nothing wrong.
+ *
+ * This block MUST come after `.p-badge`. It is the same specificity, so source
+ * order decides, and declared earlier it lost to `flex: none` and shrank the
+ * overflow without removing it — 21px instead of 37px, which is still a page
+ * that scrolls sideways.
+ */
+@media (max-width: 359px) {
+  .p-who-name { display: none; }
+  .p-badge {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Two long words ("CLIENT ADMIN") need somewhere to break, or the box
+       refuses to shrink no matter what flex says. */
+    white-space: nowrap;
+    letter-spacing: 0;
+  }
+  .p-top-row { gap: 6px; padding-left: 10px; padding-right: 10px; }
+  .p-signout { padding: 0 10px; }
+}
+
+/* Nav scrolls sideways inside its own strip; the page never does. */
+.p-nav {
+  display: flex;
+  gap: 4px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 10px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.p-nav::-webkit-scrollbar { display: none; }
+
+.p-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.p-nav a.is-on { border-bottom-color: var(--brand); color: var(--ink); }
+.p-nav a:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 6px; }
+
+/* -------------------------------------------------------------------- page -- */
+
+.p-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 16px 14px calc(40px + env(safe-area-inset-bottom));
+}
+
+.p-h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.25; overflow-wrap: anywhere; }
+.p-lede { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+
+.p-section { margin-top: 22px; }
+
+.p-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.p-section-head h2 { margin: 0; }
+
+/* ------------------------------------------------------------- queue tabs -- */
+
+.p-queues {
+  display: flex;
+  gap: 6px;
+  margin: 0 -14px 12px;
+  padding: 2px 14px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.p-queues::-webkit-scrollbar { display: none; }
+
+.p-queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.p-queue.is-on {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.p-queue:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.p-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.p-queue.is-on .p-count { background: rgba(0, 0, 0, 0.16); color: inherit; }
+
+/* --------------------------------------------------------------- toolbar -- */
+
+.p-toolbar {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+@media (min-width: 640px) {
+  .p-toolbar { grid-template-columns: 1fr 240px auto; align-items: end; }
+}
+
+.p-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.p-field > span { color: var(--muted); font-size: 12px; font-weight: 650; }
+
+.p-input,
+.p-select,
+.p-textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  /* 16px minimum or iOS Safari zooms the page on focus and leaves it scrolled
+     sideways with the keyboard up. */
+  font-size: 16px;
+}
+
+.p-textarea { resize: vertical; }
+
+.p-input:focus-visible,
+.p-select:focus-visible,
+.p-textarea:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  border-color: var(--brand);
+}
+
+.p-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.p-btn--ghost { border-color: var(--line-strong); background: var(--card); color: var(--ink); }
+.p-btn--danger { border-color: var(--red-fg); background: var(--card); color: var(--red-fg); }
+.p-btn--wide { width: 100%; }
+/* Compact, for controls that sit inside a file row or under a 120px thumbnail
+   — two 44px buttons there would be wider than the picture they act on. 36px
+   is still a comfortable tap target for a deliberate, confirming action. */
+.p-btn--sm { min-height: 36px; padding: 0 10px; font-size: 13px; }
+.p-btn:disabled { opacity: 0.6; cursor: progress; }
+.p-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.p-btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ----------------------------------------------------------------- board -- */
+
+/* auto-fill, not auto-fit: an empty board keeps its column width instead of one
+   group stretching the full width of a desktop screen. Single column on a
+   phone, so the page itself never scrolls sideways.
+
+   260px is chosen against the 1120px page: four columns plus their gaps fit
+   exactly, which is what the widest queue (Jobs Booked) needs to be readable
+   without scrolling. */
+.p-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.p-group {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.p-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.p-group-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.p-group-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.p-cards { margin: 0; padding: 8px; list-style: none; display: grid; gap: 8px; }
+
+.p-jobcard {
+  display: block;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg);
+  color: inherit;
+  text-decoration: none;
+}
+
+.p-jobcard:hover { border-color: var(--line-strong); }
+.p-jobcard:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.p-jobcard-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.p-jobcard-ref { font-variant-numeric: tabular-nums; letter-spacing: 0.03em; }
+.p-jobcard-date { margin-left: auto; white-space: nowrap; }
+
+.p-jobcard-title {
+  margin: 4px 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.p-jobcard-site { margin: 0 0 8px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+
+.p-empty { padding: 14px; color: var(--muted); font-size: 14px; }
+
+.p-more {
+  width: calc(100% - 16px);
+  min-height: 44px;
+  margin: 0 8px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.p-more:hover { color: var(--ink); }
+.p-more:disabled { cursor: progress; }
+
+/* ------------------------------------------------------------- job detail -- */
+
+.p-jobhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Only the title block flexes. Letting both children grow splits the row in
+   half and leaves Copy Link stranded in the middle instead of top-right. */
+.p-jobhead > div:first-child { min-width: 0; flex: 1; }
+.p-jobhead > div + div { flex: none; text-align: right; }
+
+.p-panel {
+  padding: 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.p-panel + .p-panel { margin-top: 12px; }
+
+.p-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.p-facts div { min-width: 0; }
+.p-facts dt { color: var(--muted); font-size: 12px; }
+.p-facts dd { margin: 2px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+
+.p-thread { margin: 0; padding: 0; list-style: none; }
+.p-thread li { padding: 10px 0; border-top: 1px solid var(--line); }
+.p-thread li:first-child { border-top: 0; }
+
+.p-files { margin: 0; padding: 0; list-style: none; }
+
+.p-files li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.p-files li:first-child { border-top: 0; }
+/* The name takes the slack so the controls after it stay on the right and stay
+   the same size whatever the file is called. */
+.p-files li > span:first-child { flex: 1 1 auto; min-width: 0; }
+
+/* A pending non-image sits in the same grid as the pending thumbnails, so it
+   needs to lay itself out as a row rather than inherit a tile. */
+.p-files-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* Release and discard, under the picture they judge. */
+.p-shotbtns { margin-top: 6px; }
+
+/* ------------------------------------------------------------------ rows -- */
+
+.p-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+
+.p-row {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--card);
+}
+
+.p-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.p-row-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.p-row-when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+.p-grid2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+@media (min-width: 560px) {
+  .p-grid2 { grid-template-columns: 1fr 1fr; }
+}
+
+.p-mono { font-variant-numeric: tabular-nums; letter-spacing: 0.03em; }
+.p-muted { color: var(--muted); }
+.p-bad { color: var(--red-fg); }
+.p-small { font-size: 13px; }
+.p-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+
+.p-copyfield {
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.p-checks { display: grid; gap: 2px; max-height: 190px; overflow-y: auto; padding: 4px 0; }
+
+.p-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.p-check input { width: 18px; height: 18px; flex: none; accent-color: var(--brand); }
+
+/* ------------------------------------------------------------- analytics -- */
+
+/* Read aloud, never drawn. Table captions and the units after a bar's number
+   ("4 jobs") belong to a screen reader: sighted readers get the unit from the
+   heading above the chart, and repeating it on every row would be noise. Not
+   `display: none`, which removes it from the accessibility tree as well. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The sequential ramp: ONE hue, seven steps, light to dark.
+
+   Every chart on the analytics screen shows ORDERED data — stages run New to
+   Done, buckets run young to old, months run left to right, spend runs small to
+   large — so the colour carries the order and nothing else. A rainbow across
+   seven stages would invite the reader to look for meaning in "green versus
+   purple" that the data does not contain.
+
+   Defined on bare :root so a viewer with no colour preference gets the complete
+   set, exactly as globals.css does; dark only overrides. Dark is a chosen set of
+   steps against the dark surface, not an inversion of the light one — flipping
+   these produces pale slabs that glare on a phone at night. */
+:root {
+  --ramp-1: #cdeeea;
+  --ramp-2: #a7e1db;
+  --ramp-3: #7fd2ca;
+  --ramp-4: #56c1b8;
+  --ramp-5: #2faea4;
+  --ramp-6: #178f86;
+  --ramp-7: #0b6b64;
+
+  /* The heat steps are the half of the ramp that keeps --ink legible on top of
+     them, because a heat cell prints its own value inside the colour. */
+  --heat-0: var(--bg);
+  --heat-1: #e8f5f3;
+  --heat-2: #c6e9e5;
+  --heat-3: #96d9d2;
+  --heat-4: #62c5bc;
+  --heat-5: #2faea4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ramp-1: #1b3634;
+    --ramp-2: #1d453f;
+    --ramp-3: #1a564d;
+    --ramp-4: #16675c;
+    --ramp-5: #12796c;
+    --ramp-6: #10907f;
+    --ramp-7: #16a897;
+
+    --heat-1: #15282a;
+    --heat-2: #163b3a;
+    --heat-3: #155049;
+    --heat-4: #0f645a;
+    --heat-5: #0d7268;
+  }
+}
+
+.p-step-1 { background: var(--ramp-1); }
+.p-step-2 { background: var(--ramp-2); }
+.p-step-3 { background: var(--ramp-3); }
+.p-step-4 { background: var(--ramp-4); }
+.p-step-5 { background: var(--ramp-5); }
+.p-step-6 { background: var(--ramp-6); }
+.p-step-7 { background: var(--ramp-7); }
+
+/* Headline numbers. auto-fit so four tiles sit in a row on a laptop and two on
+   a phone, without a breakpoint per count. */
+.p-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.p-stat {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--card);
+}
+
+.p-stat dt { color: var(--muted); font-size: 12px; font-weight: 650; }
+
+.p-stat dd {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 750;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.p-stat-note { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+
+/* A bar chart is a description list: the label is the term, the bar and its
+   number are the definition. Screen readers then read "Quotes, 4 jobs" rather
+   than announcing a decorative div. */
+.p-chart { display: grid; gap: 8px; margin: 0; }
+
+.p-chart-row {
+  display: grid;
+  grid-template-columns: minmax(0, 96px) 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.p-chart-row dt {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.p-chart-row dd { margin: 0; min-width: 0; }
+
+.p-track {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--bg);
+  /* The track is the axis: a zero-length bar still shows where zero is. */
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.p-fill { height: 100%; border-radius: 0 6px 6px 0; }
+
+/* The value never wears the series colour — it is text, so it wears ink. */
+.p-chart-value {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.p-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.p-legend-scale { display: flex; align-items: center; gap: 3px; }
+
+.p-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+/* A wide table scrolls INSIDE this, never the page. `-14px` margins let it use
+   the full width of a phone screen while the page keeps its gutter. */
+.p-tablewrap {
+  margin: 0 -14px;
+  padding: 0 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.p-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.p-table th,
+.p-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.p-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.p-table td.p-num,
+.p-table th.p-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A link in a table row is a tap target, and 14px text in an 8px cell is 38px
+   tall — under the 44px minimum, on the one screen most likely to be read on a
+   phone. This raises the row rather than shrinking the gap between rows. */
+.p-table a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.p-table tbody tr:last-child td { border-bottom: 0; }
+.p-table tfoot td { border-top: 1px solid var(--line-strong); font-weight: 700; }
+
+/* The first column of a wide table stays put while the months scroll past. */
+.p-table th.p-sticky,
+.p-table td.p-sticky {
+  position: sticky;
+  left: 0;
+  background: var(--card);
+  white-space: normal;
+  min-width: 120px;
+}
+
+/* The one chip globals.css does not carry, because only the portal has a
+   "this certificate is in date" state to show. */
+.p-chip--good { background: var(--good-bg); color: var(--good-fg); }
+
+.p-heat-0 { background: var(--heat-0); color: var(--muted); }
+.p-heat-1 { background: var(--heat-1); }
+.p-heat-2 { background: var(--heat-2); }
+.p-heat-3 { background: var(--heat-3); }
+.p-heat-4 { background: var(--heat-4); }
+.p-heat-5 { background: var(--heat-5); }
+
+/* --------------------------------------------------------------- settings -- */
+
+.p-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* The state is spelled out beside the control. A switch whose only state is
+   its own position is unreadable the moment somebody is unsure which way is
+   on. */
+.p-switch-state {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.p-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Touch targets for inline links.
+
+   Three links measured 16–18px tall at 390px: the "← Board" crumb and the two
+   `tel:` numbers on the job and triage screens. They are bare text with no box,
+   so they inherit the line height and nothing else.
+
+   `tel:` links matter most here — this page is read on a phone in a corridor
+   and ringing the store is the usual next action, so the one control a thumb
+   reaches for was the smallest thing on the screen. `width: fit-content` keeps
+   the hit area on the digits rather than stretching it across the row, where
+   it would swallow taps meant for neighbouring fields. */
+.p-jobhead a,
+.p-facts a[href^="tel:"] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  width: fit-content;
+}
+
+/* ------------------------------------------------------------- assignment -- */
+
+/* The accept / decline / ETA block on a job. Separated from the assign form
+   above it so the two do not read as one control: on a job that is offered to
+   a contractor, staff see both, and "Decline" sitting flush against "Reassign"
+   invites the wrong one. */
+.p-assignact { margin-top: 14px; }
+
+/* The contractor's list is read one-handed in a car park, so the row's own
+   phone number needs the same 44px target the job screen gives it. */
+.p-row a[href^="tel:"] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* --------------------------------------------------------- monthly summary -- */
+
+/* A bar under the figure in a table cell, not instead of it.
+   The number is always rendered — this is `aria-hidden` decoration that makes
+   a column of twelve integers scannable, and it is scaled against the largest
+   value across BOTH the raised and completed columns so the two can be
+   compared by eye. A per-column scale would draw 2 completed as wide as 40
+   raised. */
+.p-mbar {
+  display: block;
+  height: 4px;
+  min-width: 2px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--brand);
+}
+
+.p-mbar--done { background: var(--good-fg); }
+
+/* A secondary button: the shape of `.p-btn`, without claiming to be the
+   primary action on the card. Used for "Open the full job", which was a 16px
+   inline link and is the contractor's only route into the job it names. */
+.p-btn--quiet {
+  border-color: var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+}
+
+.p-open-job {
+  width: 100%;
+  margin-top: 10px;
+}

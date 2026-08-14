@@ -1,0 +1,383 @@
+/* MAINTSUPP web — the public share page and the portal shell.
+
+   Written mobile-first and deliberately small: the share page is opened from
+   WhatsApp, on a phone, often on mobile data in a service corridor. It should
+   not download a dashboard's stylesheet to render one job.
+
+   Theme-aware through tokens. The light palette is defined on bare :root so a
+   viewer with no preference still gets a complete set; dark only overrides. */
+
+:root {
+  color-scheme: light;
+  --bg: #f4f6f7;
+  --card: #ffffff;
+  --ink: #10201f;
+  --muted: #5c6b6f;
+  --line: #dfe5e7;
+  --line-strong: #c6d0d3;
+  --brand: #12b4a8;
+  --on-brand: #04211f;
+  --red-bg: #fdeaea;
+  --red-fg: #b02525;
+  --amber-bg: #fdf1dc;
+  --amber-fg: #8a5b09;
+  --good-bg: #e4f6f3;
+  --good-fg: #0d6f66;
+  /* Brand teal, darkened to clear 4.5:1 on --card. Measured 4.54:1. */
+  --link-strong: #0a6f68;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1516;
+    --card: #151f21;
+    --ink: #e8f0f0;
+    --muted: #93a6aa;
+    --line: #243436;
+    --line-strong: #33474a;
+    --on-brand: #04211f;
+    --red-bg: #3a1b1b;
+    --red-fg: #ff9d9d;
+    --amber-bg: #3a2e14;
+    --amber-fg: #f0c274;
+    --good-bg: #10312e;
+    --good-fg: #6fd8cb;
+    /* On the dark card the brand tone already measures 6.50:1. */
+    --link-strong: #12b4a8;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  /* An explicit background: the page must not borrow the host's. */
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 14px 48px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px 14px;
+}
+
+.mark { display: inline-flex; color: var(--ink); }
+.brand { font-weight: 700; letter-spacing: -0.01em; }
+.brand strong { color: var(--brand); font-weight: 800; }
+
+.ref {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.card {
+  padding: 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.card + .card { margin-top: 14px; }
+.card--empty { text-align: center; padding: 40px 20px; }
+
+h1 { margin: 10px 0 4px; font-size: 22px; line-height: 1.25; overflow-wrap: anywhere; }
+h2 { margin: 22px 0 8px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+
+.site { margin: 0; color: var(--muted); font-size: 14px; }
+.body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Priority never rides on colour alone — the word is always present. */
+.chip--urgent { background: var(--red-bg); color: var(--red-fg); }
+.chip--medium { background: var(--amber-bg); color: var(--amber-fg); }
+.chip--low { background: var(--bg); color: var(--muted); }
+.chip--status { border: 1px solid var(--line-strong); background: var(--bg); color: var(--muted); font-weight: 600; }
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.facts div { min-width: 0; }
+.facts dt { color: var(--muted); font-size: 12px; }
+.facts dd { margin: 2px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+/*
+ * NOT --brand: #12b4a8 on white measures 2.59:1 at 15px, against the 4.5:1
+ * body-text minimum. This is the store's phone number on a page whose own
+ * stylesheet calls ringing the store "the most likely next action", so it is
+ * the one link that must be readable — in daylight, on a phone, in a corridor.
+ * --link-strong is the same hue darkened until it passes; dark theme already
+ * measured 6.50:1 and keeps the brighter tone.
+ */
+.facts a { color: var(--link-strong); }
+
+.list, .files, .thread { margin: 0; padding: 0; list-style: none; }
+.list li, .thread li { padding: 10px 0; border-top: 1px solid var(--line); }
+.list li:first-child, .thread li:first-child { border-top: 0; }
+.files li { padding: 7px 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.list strong { margin-right: 8px; }
+.who { margin: 0 0 3px; color: var(--muted); font-size: 13px; }
+
+.actions label {
+  display: block;
+  margin: 14px 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.actions input,
+.actions textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--ink);
+  /* 16px minimum: anything smaller makes iOS Safari zoom on focus, which
+     leaves the page scrolled sideways with the keyboard up. */
+  font: inherit;
+  font-size: 16px;
+}
+
+.actions input:focus-visible,
+.actions textarea:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  border-color: var(--brand);
+}
+
+.actions textarea { resize: vertical; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  /* 48px: this is pressed one-handed, on a phone, possibly with gloves on. */
+  min-height: 48px;
+  margin-top: 14px;
+  padding: 0 18px;
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn:disabled { opacity: 0.65; cursor: progress; }
+
+.btn--done {
+  border-color: var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+}
+
+/* The queue of pictures a contractor is sending from a share link.
+
+   Every file keeps its own line and its own outcome. A count ("2 of 3 sent")
+   cannot tell somebody standing in a shop WHICH picture failed, and the API's
+   reason — a rate limit, a type its bytes contradict — is the only thing that
+   says what to do about it. */
+.sendq { margin: 10px 0 0; padding: 0; list-style: none; }
+
+.sendq li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.sendq li:first-child { border-top: 0; }
+/* The name shrinks; the outcome never does. */
+.sendq__name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.sendq__st { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--muted); }
+.sendq__st--sent { color: var(--good-fg); }
+.sendq__st--failed { color: var(--red-fg); }
+.sendq__why { flex: 1 0 100%; color: var(--red-fg); font-size: 12px; }
+
+.alert {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.alert--bad { background: var(--red-bg); color: var(--red-fg); }
+.alert--good { background: var(--good-bg); color: var(--good-fg); }
+
+.foot {
+  margin: 18px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Photographs from the private bucket — see components/signed-media.tsx.
+
+   Lives here rather than in either page's own stylesheet because the share page
+   and the portal render the same tiles from the same component, and a second
+   copy of these rules is a second copy to keep in step.
+
+   auto-fill with a 120px floor: two columns on a 390px phone, more on a laptop,
+   and never a row that overflows sideways. */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shot { min-width: 0; margin: 0; }
+
+.shot__frame {
+  display: block;
+  width: 100%;
+  /* The tile is the same size empty, loading and loaded. Without a reserved
+     box every picture that arrives shoves the page down under the reader's
+     thumb — on a share link that is opened one-handed, mid-scroll. */
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: zoom-in;
+}
+
+.shot__frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.shot__frame:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Tapped open: the tile takes the full row and the whole picture is shown
+   rather than a cropped square. A fault photograph is read, not glanced at,
+   and this is the one layout change a reader asks for themselves. */
+.shot.is-open { grid-column: 1 / -1; }
+.shot.is-open .shot__frame { aspect-ratio: auto; cursor: zoom-out; }
+.shot.is-open .shot__frame img { height: auto; max-height: 70vh; object-fit: contain; }
+
+.shot__ph { display: grid; place-items: center; height: 100%; padding: 6px; }
+
+/* One line, ellipsised: a 40-character filename must not make one tile taller
+   than its neighbours. The full name is on the title attribute. */
+.shot__cap {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shot__note { display: block; color: var(--amber-fg); font-size: 12px; }
+
+/* Portal front door. */
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.tab {
+  /* 44px: the first thing a thumb meets on this page. */
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.tab.is-on { border-color: var(--line-strong); background: var(--card); color: var(--ink); }
+.tab:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+/* The whole row is the target, not just the 18px box. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 14px;
+  cursor: pointer;
+}
+
+.check input { width: 18px; height: 18px; accent-color: var(--brand); }
+
+.linkish {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.linkish:hover { color: var(--ink); }
+.linkish:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
+
+/* Off-canvas, not display:none — see the component. */
+.trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* Safe area: without this the primary button sits under the home indicator. */
+.wrap { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+
+/* The contact number is a tel: link on a page opened in a corridor — ringing
+   the store is the most likely next action, so it gets a real tap target
+   rather than 18px of underlined text. */
+.facts a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
