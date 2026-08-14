@@ -1,0 +1,32 @@
+# What Vercel needs is package.json, package-lock.json and apps/web. Everything
+# below is either local runtime state, a build artifact, or real client data.
+#
+# Vercel does NOT read .gitignore, so anything ignored there is uploaded unless
+# it is named here. Without this file the upload is 3.6 GB.
+
+# Local runtime state and caches
+.wrangler
+.sites-runtime
+.pglite
+.pglite-qa
+.openai
+node_modules
+dist
+build
+.next
+apps/web/.next
+*.tsbuildinfo
+
+# Real client data. db/backups is a database snapshot; .storage is the
+# no-cloud-account file driver holding invoices, compliance certificates and
+# photographs of the inside of client premises.
+.storage
+db/backups
+db/monday-export
+import-d1-report.txt
+PHASE-2-AUDIT.md
+
+# Secrets
+.dev.vars
+.env.monday
+.env.supabase-parked
