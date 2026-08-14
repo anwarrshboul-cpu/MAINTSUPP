@@ -75,6 +75,11 @@ next-env.d.ts
 apps/web/.next/
 apps/web/next-env.d.ts
 
+# TypeScript incremental build state. Committing it broke the Railway build:
+# Nixpacks mounts a cache DIRECTORY at this path, and refuses to start the
+# container when a file is already there ("not a directory").
+*.tsbuildinfo
+
 # Import report — contains real client location strings
 import-d1-report.txt
 

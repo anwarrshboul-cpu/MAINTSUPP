@@ -76,7 +76,7 @@ Environment (see `apps/api/.env.example`):
 
 | Variable | Notes |
 |---|---|
-| `DATABASE_URL` | the **pooler** URL, port 6543 |
+| `DATABASE_URL` | the **session** pooler URL, port **5432** — 6543 deadlocks it, see §1 |
 | `WEB_URL` | the Vercel origin — every emailed link is built from it |
 | `CORS_ORIGINS` | comma-separated exact origins. Never `*` |
 | `RESEND_API_KEY` | **without it, no email is sent** — see below |
