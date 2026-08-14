@@ -1,0 +1,6555 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { Avatar, BrandMark, Icon, type IconName } from "../../components";
+/*
+ * `mock-data.ts` is deliberately NOT imported here.
+ *
+ * It used to seed three pieces of state — the jobs, the document register and
+ * the site list — so the dashboard had something to draw before its fetches
+ * landed. The comment said it was for the marketing preview; nothing in
+ * `(marketing)` has rendered this component for a long time, so the only
+ * readers were real ones.
+ *
+ * What that bought was a first paint of somebody else's portfolio, and, when a
+ * fetch failed, a permanent one: a chip reading "Sample data — workspace
+ * unavailable" over dashboards still computing spend, compliance and SLA from
+ * eleven invented jobs. A caption does not undo a £42,540 figure sitting next
+ * to it, and nobody reads a caption to find out whether the number above it is
+ * theirs.
+ *
+ * Empty is honest. Every screen below already has an empty state, because an
+ * genuinely empty workspace was always possible.
+ */
+import type {
+  BoardOptionColumn,
+  ComplianceState,
+  AttachmentKind,
+  FileRecord,
+  MaintenanceBoardColumn,
+  MaintenanceRequest,
+  Priority,
+  RequestActivityEntry,
+  RequestUpdate,
+  RequestDrawerTab,
+  RequestStage,
+  StoreRecord,
+} from "../../lib/types";
+import { AccountMenu } from "./account-menu";
+import { chipInk } from "./chip-ink";
+import {
+  awaitingApprovalStatuses,
+  awaitingPartsStatuses,
+} from "./dashboard-meters";
+import { ThemeToggle } from "./theme-toggle";
+import { DashboardWidgets, type DashboardWidget } from "./dashboard-widgets";
+import { EvidenceManager } from "./evidence-manager";
+import { BeforeAfter } from "./before-after";
+// Stage 20 — the sidebar is arranged per person. See sidebar-nav.tsx.
+import { SidebarNav, type SidebarNavEntry } from "./sidebar-nav";
+import { uploadEvidenceFile } from "../../lib/client-upload";
+import {
+  LiveMaintenanceBoard,
+  type MaintenanceBoardSnapshot,
+  type MaintenanceBoardSnapshotColumn,
+} from "./live-board";
+import { RaiseTicketButton } from "./raise-ticket";
+// The Updates panel, built against monday's — see update-thread.tsx.
+import { UpdateThread, type ComposerHandle } from "./update-thread";
+import "./update-thread.css";
+import { installSessionGuard } from "./session-guard";
+import { publishedBoardOptions } from "../../lib/board-option-registry";
+import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
+import { priorityOptions } from "./board-model";
+import {
+  classifySpend,
+  ComplianceExpiryTimeline,
+  ContractorScorecard,
+  CostByCategory,
+  OpenJobAgeing,
+  ReactiveVsPlanned,
+  SiteAttention,
+  SlaPerformance,
+  SpendAgainstBudget,
+  SpendMatrix,
+} from "./dashboard-insights";
+import { storeDocumentationResponsibility } from "../../../db/monday-board-spec";
+import ContractorLinkPanel from "./contractor-link-panel";
+import { SitesManager } from "./sites/sites-manager";
+import { AdminClientsView } from "./views/admin-clients";
+import { AdminRolesView } from "./views/admin-roles";
+import { AdminUsersView } from "./views/admin-users";
+import { StoreDocumentationBoard } from "./views/store-documentation-board";
+import { complianceTrend, tradeBreakdown } from "./views/overview-series";
+import { UnitsManager } from "./units/units-manager";
+import {
+  defaultWorkspaceSettings,
+  type WorkspaceContractor,
+  type WorkspaceMember,
+  type WorkspacePlannedItem,
+  type WorkspaceSettings,
+  type WorkspaceSnapshot,
+  type WorkspaceUnit,
+} from "../../lib/workspace-data";
+import {
+  WorkspaceDataManager,
+  type ManagerTab,
+} from "./workspace-data-manager";
+import {
+  AnalyticsMetricCard,
+  AnalyticsToolbar,
+  DonutChart,
+  DonutLegend,
+  HorizontalBars,
+  TrendChart,
+  analyticsPeriodOptions,
+  withinAnalyticsPeriod,
+  type DonutSegment,
+} from "./dashboard-analytics";
+import {
+  PeriodCaption,
+  PeriodPicker,
+  SortDirectionSelect,
+  useStoredSortDirection,
+} from "./period-picker";
+import {
+  periodSpendSeries,
+  periodTrend,
+  resolvePeriod,
+  sortBySpend,
+} from "./period-model";
+
+export type Section =
+  | "overview"
+  | "maintenance"
+  | "units"
+  | "stores"
+  | "store-documentation"
+  | "contractors"
+  | "compliance"
+  | "calendar"
+  | "documents"
+  | "reports"
+  | "team"
+  | "settings"
+  // Stage 20 administration. Three sections rather than one screen with tabs,
+  // because each is gated on a different capability — a client who may see
+  // users must not be handed the roles editor by a tab they can click.
+  | "admin-users"
+  | "admin-roles"
+  | "admin-clients";
+
+type ViewMode = "board" | "list";
+
+type NotificationState = "read" | "dismissed";
+
+type DemoRole = "super_admin" | "admin" | "client";
+
+type OrganisationSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+  primaryColour: string;
+  planTier: string;
+  status: string;
+};
+
+type RuntimeWorkspaceContext = {
+  actor: { email: string; displayName: string; role: DemoRole };
+  currentOrganisation: OrganisationSummary;
+  organisations: OrganisationSummary[];
+  /**
+   * The identity the server resolved, and everything it may read.
+   *
+   * `organisationIds` is the authority on scope — the organisation cookie is a
+   * request the server honours only when it names one of these. Rendered in the
+   * sidebar because an empty board and a board you are not allowed to see look
+   * identical, so without it the scoping has to be taken on trust.
+   */
+  identity?: {
+    email: string;
+    organisationIds: string[];
+    crossOrganisation: boolean;
+    unaffiliated: boolean;
+  };
+  /**
+   * Every client and what each holds. Served only to a super admin; a client
+   * receives null, so this cannot leak another client's row counts.
+   */
+  tenantSummary?: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    maintenanceRequests: number;
+    sites: number;
+  }> | null;
+  testingMode: boolean;
+  authenticationEnabled: boolean;
+};
+
+type WorkspaceManagerState = {
+  tab: ManagerTab;
+  recordId?: string | null;
+};
+
+const managerTabBySection: Partial<Record<Section, ManagerTab>> = {
+  stores: "site",
+  compliance: "compliance",
+  units: "unit",
+  contractors: "contractor",
+  calendar: "planned",
+  team: "member",
+};
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+type NotificationStateEntry = {
+  requestId: string;
+  state: NotificationState;
+  updatedAt: string;
+};
+
+/** How a stored role reads to a person. */
+function roleLabel(role: string) {
+  if (role === "super_admin") return "Super Admin";
+  if (role === "admin") return "Admin";
+  return "Client";
+}
+
+const sectionMeta: Record<
+  Section,
+  { label: string; eyebrow: string; title: string; icon: IconName }
+> = {
+  "admin-users": {
+    label: "Users",
+    eyebrow: "Administration",
+    title: "Users & access",
+    icon: "user",
+  },
+  "admin-roles": {
+    label: "Roles",
+    eyebrow: "Administration",
+    title: "Roles & permissions",
+    icon: "settings",
+  },
+  "admin-clients": {
+    label: "All clients",
+    eyebrow: "Owner console",
+    title: "Every client workspace",
+    icon: "building",
+  },
+  overview: {
+    label: "Overview",
+    eyebrow: "Operations centre",
+    title: "Good morning",
+    icon: "grid",
+  },
+  maintenance: {
+    label: "Jobs",
+    eyebrow: "Work order management",
+    title: "Live job list",
+    icon: "wrench",
+  },
+  units: {
+    label: "Units",
+    eyebrow: "Asset register",
+    title: "Units & assets",
+    icon: "building",
+  },
+  stores: {
+    label: "Sites",
+    eyebrow: "Property portfolio",
+    // "& assets" because this screen is now the only way in to the unit
+    // register; opening a site lists the units on it.
+    title: "Sites, units & assets",
+    icon: "store",
+  },
+  "store-documentation": {
+    label: "Store Documentation",
+    eyebrow: "Compliance documents",
+    title: "Store Documentation UK",
+    icon: "document",
+  },
+  contractors: {
+    label: "Contractors",
+    eyebrow: "Supplier network",
+    title: "Contractor performance",
+    icon: "users",
+  },
+  compliance: {
+    label: "Compliance",
+    eyebrow: "Document control",
+    title: "Compliance tracker",
+    icon: "shield",
+  },
+  calendar: {
+    label: "Planned",
+    eyebrow: "Planned maintenance",
+    title: "Planned works calendar",
+    icon: "calendar",
+  },
+  documents: {
+    label: "Documents",
+    eyebrow: "Central file library",
+    title: "Documents & evidence",
+    icon: "folder",
+  },
+  reports: {
+    label: "Reports",
+    eyebrow: "Portfolio intelligence",
+    title: "Spend & reporting",
+    icon: "chart",
+  },
+  team: {
+    label: "Team",
+    eyebrow: "People & permissions",
+    title: "Workspace team",
+    icon: "users",
+  },
+  settings: {
+    label: "Settings",
+    eyebrow: "Workspace controls",
+    title: "Settings",
+    icon: "settings",
+  },
+};
+
+/*
+ * Stage 20. These two arrays used to *be* the sidebar — what you saw was a
+ * `.map` over them and nothing else. They are now the bottom layer of three:
+ * the order a workspace has before an admin has set a default and before the
+ * person looking at it has arranged anything.
+ *
+ * They are still written out here, in the file that draws the sidebar, because
+ * that is where anybody adding a section will look. `BUILT_IN_ORDER` in
+ * `app/api/navigation/layout.ts` is the server's copy of the same order, needed
+ * so `GET /api/navigation` can answer without a browser;
+ * `tests/stage-twenty-navigation.test.mjs` asserts the two agree, which is what
+ * makes a second copy safe rather than a second source of truth.
+ */
+/*
+ * "Units" is deliberately absent.
+ *
+ * It was a second door to data the Sites screen already shows: `site-detail`
+ * lists every unit on the site it belongs to, so the register was reachable
+ * twice and the sidebar offered two entries — "Units & assets" and "Sites &
+ * locations" — for one portfolio. The owner asked for one.
+ *
+ * The SECTION is kept, not deleted. `/dashboard/units` still resolves, the
+ * screen still renders, and no row in the asset register is affected; what
+ * changes is that the sidebar stops offering the duplicate. Anyone who has
+ * bookmarked it, or whose saved layout still names it, keeps working — a saved
+ * layout records arrangement, and existence comes from the catalogue.
+ */
+const navPrimary: Section[] = [
+  /*
+   * The owner's order, given explicitly: overview, jobs, store documentation,
+   * compliance, planned, then the rest, with settings last.
+   *
+   * It follows the working day rather than the data model — what is happening
+   * now, then the paperwork that is about to expire, then what is booked. The
+   * previous order put the site register third, which is a reference screen
+   * nobody opens first.
+   *
+   * Settings is last deliberately: it is the only entry that changes how the
+   * product behaves rather than showing what is in it.
+   */
+  "overview",
+  "maintenance",
+  "store-documentation",
+  "compliance",
+  "calendar",
+  "stores",
+  "contractors",
+  "documents",
+  "reports",
+  "settings",
+];
+
+const navSecondary: Section[] = ["team", "admin-users", "admin-roles", "admin-clients"];
+
+const sectionRoutes: Record<Section, string> = {
+  overview: "",
+  maintenance: "jobs",
+  calendar: "planned",
+  units: "units",
+  stores: "sites",
+  "store-documentation": "store-documentation",
+  contractors: "contractors",
+  compliance: "compliance",
+  documents: "documents",
+  reports: "reports",
+  settings: "settings",
+  team: "team",
+  // Nested, so the account menu's "Administration" link and the two screens
+  // beneath it are all addressable. The dashboard route joins segments.
+  "admin-users": "admin",
+  "admin-roles": "admin/roles",
+  "admin-clients": "admin/clients",
+};
+
+const routeSections: Record<string, Section> = Object.fromEntries(
+  Object.entries(sectionRoutes).map(([section, route]) => [
+    route,
+    section as Section,
+  ]),
+) as Record<string, Section>;
+
+/**
+ * Everything the sidebar is allowed to offer — the catalogue.
+ *
+ * Membership comes from `Object.keys(sectionMeta)`, *not* from `navPrimary` and
+ * `navSecondary`, and that difference is the point of the whole stage. Another
+ * team adding a section adds it to `sectionMeta` and `sectionRoutes`; it then
+ * appears in every person's sidebar with nobody's saved layout migrated,
+ * because a saved layout records *arrangement* while this records *existence*.
+ * Forgetting to also list it in `navPrimary` costs it a position — it lands at
+ * the end of "Workspace" — and never costs it a nav item.
+ *
+ * The two checks below are the 404 guard: no label without a destination. A
+ * key with a `sectionMeta` entry but no route would render a nav item that goes
+ * nowhere, which is precisely what "Add must not invent a destination" forbids.
+ */
+const builtInNavCatalogue: SidebarNavEntry[] = (() => {
+  const placed = new Map<string, string>([
+    ...navPrimary.map((key) => [key, "group:operations"] as const),
+    ...navSecondary.map((key) => [key, "group:workspace"] as const),
+  ]);
+  const ordered = [
+    ...navPrimary,
+    ...navSecondary,
+    ...Object.keys(sectionMeta).filter((key) => !placed.has(key)),
+  ];
+  return ordered
+    .filter(
+      (key) => key in sectionMeta && sectionRoutes[key as Section] !== undefined,
+    )
+    .map((key) => ({
+      key,
+      label: sectionMeta[key as Section].label,
+      icon: sectionMeta[key as Section].icon,
+      // A section nobody placed lands under "Workspace", where "Team" and the
+      // administrative screens already live.
+      group: placed.get(key) ?? "group:workspace",
+    }));
+})();
+
+/**
+ * A section this workspace added for itself — Stage 23.
+ *
+ * `surface` is the key of a BUILT-IN section, and it is what the screen area
+ * renders. That is the whole of "adding a section must not invent a
+ * destination": a workspace section can only ever point at something this file
+ * already draws. The filter below re-checks it here rather than trusting the
+ * server, because this file is the only thing that knows what it can render.
+ */
+type WorkspaceSectionEntry = {
+  key: string;
+  label: string;
+  icon: IconName;
+  surface: Section;
+  group: string;
+};
+
+function formatDate(value: string | null, includeTime = false) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "Europe/London",
+    ...(includeTime
+      ? { hour: "2-digit", minute: "2-digit", hour12: false }
+      : { year: "numeric" }),
+  }).format(new Date(value));
+}
+
+function formatMoney(value: number | null) {
+  if (value === null) return "Not quoted";
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function useCurrentTime() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/*
+ * Scroll lock for overlays.
+ *
+ * WHAT WAS WRONG: nothing stopped the page behind a drawer from scrolling.
+ * With the job drawer open on /dashboard/jobs at 390x844 — a fixed, full-
+ * screen 390x844 panel over a full-viewport scrim — `body` computed
+ * `overflow: visible` and the document was 90,120px tall. Scrolling moved the
+ * list underneath the drawer; closing it left you ~1,400px from where you
+ * started, in a list 107 screens long. The nav drawer behaved the same way,
+ * and its scrim, despite covering the whole viewport, prevented nothing: a
+ * scrim only swallows clicks, it does not stop a touch-drag or inertial
+ * scroll from reaching the scroller behind it.
+ *
+ * WHY THIS IS RIGHT: the lock is a shared counter, not a per-overlay flag.
+ * Two overlays can be open at once (the nav drawer over a board that already
+ * has a drawer open), and with independent flags whichever closed first would
+ * unlock the page while the other was still up, and would restore ITS saved
+ * scroll position over the other's. Counting means the page unlocks once, on
+ * the last close, and the offset is captured once, on the first open.
+ *
+ * `position: fixed` rather than `overflow: hidden` alone: on iOS Safari —
+ * every engineer standing in a shop — `overflow: hidden` on the body is not
+ * reliably honoured for touch scrolling, and taking the body out of flow is
+ * the technique that actually holds. Because that collapses the scroll
+ * position to 0, the offset is re-applied as a negative `top` so the page does
+ * not visibly jump, then restored on release. The restore is explicitly
+ * `instant`: `html` carries `scroll-behavior: smooth` (globals.css), so a
+ * default-behaviour restore would animate 90,000px back into place.
+ */
+let scrollLockDepth = 0;
+let scrollLockOffset = 0;
+
+function useScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return undefined;
+
+    if (scrollLockDepth === 0) {
+      scrollLockOffset = window.scrollY;
+      document.body.style.setProperty(
+        "--scroll-lock-offset",
+        `-${scrollLockOffset}px`,
+      );
+      document.body.classList.add("is-scroll-locked");
+    }
+    scrollLockDepth += 1;
+
+    return () => {
+      scrollLockDepth = Math.max(0, scrollLockDepth - 1);
+      if (scrollLockDepth > 0) return;
+      document.body.classList.remove("is-scroll-locked");
+      document.body.style.removeProperty("--scroll-lock-offset");
+      window.scrollTo({ top: scrollLockOffset, left: 0, behavior: "instant" });
+    };
+  }, [active]);
+}
+
+function activityActor(email: string | null) {
+  if (!email) return "Operations team";
+  if (email === "public-form") return "Request form";
+  const localPart = email.split("@")[0] || email;
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function activityDescription(entry: RequestActivityEntry) {
+  if (entry.action === "request.created") return "created this request.";
+  if (entry.action === "request.note_added") return "added an update.";
+  if (entry.action === "request.stage_changed") {
+    const stage =
+      typeof entry.detail.stage === "string" ? entry.detail.stage : "workflow";
+    return `moved the request to ${stage}.`;
+  }
+  if (entry.action === "request.fields_changed") {
+    return "updated the request details.";
+  }
+  if (entry.action.includes("file") || entry.action.includes("attachment")) {
+    return "updated the request files.";
+  }
+  return "updated this request.";
+}
+
+async function fetchRequestActivities(requestId: string) {
+  const response = await fetch(
+    `/api/maintenance?id=${encodeURIComponent(requestId)}`,
+    { headers: { Accept: "application/json" } },
+  );
+  const payload = (await response.json()) as {
+    activities?: RequestActivityEntry[];
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(payload.error || "The update history could not be loaded.");
+  }
+  return payload.activities ?? [];
+}
+
+function priorityClass(priority: Priority) {
+  return `priority priority--${priority.toLowerCase()}`;
+}
+
+function stageLabel(stage: RequestStage) {
+  return {
+    Incoming: "Incoming requests",
+    Booked: "Jobs booked",
+    Attention: "Needs attention",
+    Completed: "Recently completed",
+  }[stage];
+}
+
+function stageIcon(stage: RequestStage): IconName {
+  if (stage === "Completed") return "check";
+  if (stage === "Attention") return "alert";
+  if (stage === "Booked") return "calendar";
+  return "inbox";
+}
+
+function notificationCandidates(requests: MaintenanceRequest[]) {
+  return requests.filter(
+    (request) =>
+      request.stage !== "Completed" &&
+      (request.stage === "Attention" || request.priority === "Urgent"),
+  );
+}
+
+function complianceTone(state: ComplianceState) {
+  return `compliance-pill compliance-pill--${state
+    .toLowerCase()
+    .replaceAll(" ", "-")}`;
+}
+
+
+function downloadCsv(requests: MaintenanceRequest[]) {
+  const columns: (keyof MaintenanceRequest)[] = [
+    "id",
+    "title",
+    "location",
+    "priority",
+    "stage",
+    "status",
+    "engineer",
+    "contractor",
+    "assignee",
+    "requestedAt",
+    "dueAt",
+    "cost",
+  ];
+  const escapeCell = (value: unknown) =>
+    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = [
+    columns.join(","),
+    ...requests.map((request) =>
+      columns.map((column) => escapeCell(request[column])).join(","),
+    ),
+  ].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  link.download = `maintsupp-maintenance-${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function downloadTableCsv(
+  filename: string,
+  headers: string[],
+  rows: Array<Array<string | number | null>>,
+) {
+  const escapeCell = (value: unknown) =>
+    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = [headers, ...rows]
+    .map((row) => row.map(escapeCell).join(","))
+    .join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(
+    new Blob([csv], { type: "text/csv;charset=utf-8" }),
+  );
+  link.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function portfolioOptions(storeRows: StoreRecord[]) {
+  return [
+    { value: "all", label: "All portfolios" },
+    ...storeRows
+      .filter((store) => store.lifecycle === "Current")
+      .map((store) => ({ value: store.id, label: store.name })),
+  ];
+}
+
+/*
+ * `monthlySpendSeries` and `requestTrend` were deleted here, not moved.
+ *
+ * Both built their own window from `new Date()` and never saw the period
+ * control: the series was always the last N calendar months, and the trend was
+ * always twelve fixed seven-day buckets ending now. On any period older than 84
+ * days every sparkline on the screen was a flat line at zero underneath a
+ * number in the thousands, and on "March 2026" the spend chart drew five months
+ * that could not contain a row.
+ *
+ * `periodSpendSeries` and `periodTrend` in period-model.ts replace them and
+ * take the period as an argument, so a caller cannot forget to pass it.
+ */
+
+function requestAgeDays(request: MaintenanceRequest, now: number) {
+  return Math.max(
+    0,
+    Math.floor((now - new Date(request.requestedAt).getTime()) / 86_400_000),
+  );
+}
+
+/**
+ * The overview's open-jobs donut.
+ *
+ * Every arm of this used to sniff a substring, and `dashboard-meters.ts`
+ * already documents at length why that cannot be made safe: `includes("part")`
+ * matches "Third Par-t-y Delay", and on the live board that single false
+ * positive WAS the whole "Awaiting parts" figure. The meters above the board
+ * were fixed; this donut kept the old approach, so the same workspace answered
+ * the same question two different ways on two screens.
+ *
+ * Measured on the live data before this change: "On hold" swallowed 54 of 59
+ * open jobs — `includes("waiting")` matches "A-waiting Access" and four more —
+ * while "Scheduled" and "In progress" both read 0 against true counts of 9
+ * and 6.
+ *
+ * Labels are now named whole, from the same capture the meters use. The
+ * `stage` fallbacks are kept: stage is the app's own lifecycle field and is
+ * not a monday label, so it is not a guess.
+ */
+function jobStatusSegments(requests: MaintenanceRequest[]): DonutSegment[] {
+  const open = requests.filter((request) => request.stage !== "Completed");
+  const normalise = (value: string) =>
+    value.trim().toLowerCase().replace(/\s+/g, " ");
+  const inSet = (labels: readonly string[]) => {
+    const wanted = new Set(labels.map(normalise));
+    return (status: string) => wanted.has(normalise(status));
+  };
+
+  // Named from db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md, the same source
+  // dashboard-meters.ts reads. Adding a label in monday must be a deliberate
+  // change here, not a silent shift in what a segment means.
+  const isAwaitingParts = inSet(awaitingPartsStatuses);
+  const isOnHold = inSet([
+    ...awaitingApprovalStatuses,
+    "Awaiting Landlord Approval",
+    "Health And Safety Hold",
+    "Waiting for payment",
+    "Waiting for decisions",
+    "Awaiting Access",
+    "Third Party Delay",
+    "Blocked - Awaiting Response",
+  ]);
+  const isScheduled = inSet(["Job Scheduled", "Pending Scheduling"]);
+  const isInProgress = inSet(["Job In Progress", "Escalated", "Major works"]);
+
+  const classify = (request: MaintenanceRequest) => {
+    const status = request.status ?? "";
+    if (isAwaitingParts(status)) return "Awaiting parts";
+    if (isOnHold(status)) return "On hold";
+    if (isScheduled(status) || request.stage === "Booked") return "Scheduled";
+    if (isInProgress(status) || request.stage === "Attention") return "In progress";
+    return "Open";
+  };
+  const palette: Record<string, string> = {
+    Open: "#12b4a8",
+    "In progress": "#f26a21",
+    "Awaiting parts": "#f0a91f",
+    "On hold": "#5c82af",
+    Scheduled: "#55b878",
+  };
+  return Object.keys(palette).map((label) => ({
+    label,
+    value: open.filter((request) => classify(request) === label).length,
+    color: palette[label],
+  }));
+}
+
+function downloadFileRegister(files: FileRecord[]) {
+  const columns: (keyof FileRecord)[] = [
+    "id",
+    "name",
+    "kind",
+    "site",
+    "requestId",
+    "uploadedAt",
+    "size",
+    "status",
+  ];
+  const escapeCell = (value: unknown) =>
+    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = [
+    columns.join(","),
+    ...files.map((file) =>
+      columns.map((column) => escapeCell(file[column])).join(","),
+    ),
+  ].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  link.download = `maintsupp-document-register-${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+export default function PortalApp({
+  userName,
+  userEmail,
+  initialSection = "overview",
+}: {
+  userName: string;
+  userEmail: string;
+  /*
+   * A string, not a `Section`: `/dashboard/s/<slug>` resolves to a workspace
+   * section key, which is not in the union by construction.
+   */
+  initialSection?: Section | string;
+}) {
+  const [activeSection, setActiveSection] = useState<string>(initialSection);
+  const [workspaceSections, setWorkspaceSections] = useState<
+    WorkspaceSectionEntry[]
+  >([]);
+  const [requests, setRequests] =
+    useState<MaintenanceRequest[]>([]);
+  const requestsRef = useRef(requests);
+  const [selectedRequest, setSelectedRequest] =
+    useState<MaintenanceRequest | null>(null);
+  const [drawerInitialTab, setDrawerInitialTab] =
+    useState<RequestDrawerTab>("updates");
+  const [showCreateRequest, setShowCreateRequest] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  /*
+   * The nav drawer and the create-request modal are the two overlays the shell
+   * owns; the job drawer takes its own lock where it mounts. All three go
+   * through the same counter, so opening the nav over an open job drawer and
+   * closing it again leaves the page still locked and still in place.
+   */
+  useScrollLock(mobileNavOpen);
+  useScrollLock(showCreateRequest);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationStates, setNotificationStates] = useState<
+    Record<string, NotificationState>
+  >({});
+  const [toast, setToast] = useState<string | null>(null);
+  /*
+   * "loading" is the honest starting state, and it used to be "sample" — which
+   * was accurate only because sample data was on screen.
+   */
+  const [dataMode, setDataMode] = useState<"live" | "loading" | "unavailable">(
+    "loading",
+  );
+  const [demoRole, setDemoRole] = useState<DemoRole>("super_admin");
+  const [runtimeContext, setRuntimeContext] =
+    useState<RuntimeWorkspaceContext | null>(null);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceManager, setWorkspaceManager] =
+    useState<WorkspaceManagerState | null>(null);
+  const [documents, setDocuments] = useState<FileRecord[]>([]);
+  const [boardSnapshot, setBoardSnapshot] =
+    useState<MaintenanceBoardSnapshot | null>(null);
+
+  /*
+   * Before anything fetches. Every loader below is a request that can discover
+   * the session has ended, and this is what turns that discovery into a trip to
+   * the sign-in page instead of a screen full of error text.
+   */
+  useEffect(() => {
+    installSessionGuard();
+  }, []);
+
+  /*
+   * The theme is NOT written here any more.
+   *
+   * This effect used to set `body.dataset.theme = "dark"` unconditionally on
+   * mount and delete the attribute on unmount. It ran after the toggle had
+   * applied the stored choice, so a light preference was overwritten with dark
+   * on every mount and then corrected a tick later; the cleanup dropped `body`
+   * out of both theme blocks entirely. Its intent — "the shell must always have
+   * a theme attribute" — is now met before first paint by the boot script in
+   * app/(app)/layout.tsx, and kept in step by `useAppliedTheme` in the toggle.
+   */
+
+  useEffect(() => {
+    requestsRef.current = requests;
+  }, [requests]);
+
+  const loadRuntimeContext = useCallback(async () => {
+    const response = await fetch("/api/context", {
+      headers: { Accept: "application/json" },
+    });
+    const payload = (await response.json()) as {
+      context?: RuntimeWorkspaceContext;
+      error?: string;
+    };
+    if (!response.ok || !payload.context) {
+      throw new Error(payload.error || "The client workspace could not be loaded.");
+    }
+    setRuntimeContext(payload.context);
+    setDemoRole(payload.context.actor.role);
+    return payload.context;
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRuntimeContext().catch((error: unknown) => {
+        setToast(error instanceof Error ? error.message : "The client workspace could not be loaded.");
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRuntimeContext]);
+
+  const changeDemoRole = async (role: DemoRole) => {
+    setContextBusy(true);
+    try {
+      const response = await fetch("/api/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_role", role }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The test role could not be changed.");
+      window.location.reload();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "The test role could not be changed.");
+      setContextBusy(false);
+    }
+  };
+
+  const changeOrganisation = async (organisationId: string) => {
+    if (demoRole !== "super_admin") return;
+    setContextBusy(true);
+    try {
+      const response = await fetch("/api/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "select_organisation", organisationId }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The client workspace could not be selected.");
+      window.location.reload();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "The client workspace could not be selected.");
+      setContextBusy(false);
+    }
+  };
+
+  const createOrganisation = async () => {
+    if (demoRole !== "super_admin") return;
+    const name = window.prompt("Enter the client or organisation name:")?.trim();
+    if (!name) return;
+    setContextBusy(true);
+    try {
+      const response = await fetch("/api/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_organisation", name }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The client workspace could not be created.");
+      window.location.reload();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "The client workspace could not be created.");
+      setContextBusy(false);
+    }
+  };
+
+  const loadWorkspace = useCallback(async () => {
+    const response = await fetch("/api/workspace", {
+      headers: { Accept: "application/json" },
+    });
+    const payload = (await response.json()) as {
+      workspace?: WorkspaceSnapshot;
+      error?: string;
+    };
+    if (!response.ok || !payload.workspace) {
+      throw new Error(payload.error || "The shared workspace could not be loaded.");
+    }
+    setWorkspace(payload.workspace);
+    /*
+     * Deliberately NOT `setDataMode("live")`.
+     *
+     * The chip describes the JOBS on screen, because that is what every figure
+     * on every dashboard is computed from. The workspace fetch carries sites,
+     * contractors and settings — it succeeding says nothing about whether the
+     * job list did, and stamping "live" here painted "Live workspace" over a
+     * failed jobs load. Proven: with `/api/maintenance` failing and everything
+     * else healthy, the screen still claimed to be live.
+     */
+    return payload.workspace;
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadWorkspace().catch(() => undefined);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loadWorkspace]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadDocuments() {
+      try {
+        const response = await fetch("/api/files?limit=100", {
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          files?: Array<{
+            id: string;
+            requestId: string | null;
+            kind: string;
+            originalName: string;
+            byteSize: number;
+            createdAt: string;
+          }>;
+        };
+        if (!active || !payload.files) return;
+        const liveFiles: FileRecord[] = payload.files.map((file) => ({
+          id: file.id,
+          name: file.originalName,
+          kind:
+            file.kind === "completion"
+              ? "Completion evidence"
+              : file.kind === "issue"
+                ? "Issue evidence"
+                : "Workspace document",
+          site:
+            requestsRef.current.find((item) => item.id === file.requestId)?.location ??
+            "Shared workspace",
+          requestId: file.requestId,
+          uploadedAt: file.createdAt,
+          size: formatFileSize(file.byteSize),
+          status: "Current",
+        }));
+        setDocuments(liveFiles);
+      } catch {
+        /*
+         * The register stays empty rather than falling back to the bundled
+         * files. A document list is read to answer "do we hold the certificate"
+         * — the one question a stand-in answers wrongly, and confidently.
+         */
+        if (active) setDocuments([]);
+      }
+    }
+    loadDocuments();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncSectionFromHistory = () => {
+      const slug = window.location.pathname.split("/").filter(Boolean)[1] ?? "";
+      setActiveSection(routeSections[slug] ?? "overview");
+      setMobileNavOpen(false);
+    };
+    window.addEventListener("popstate", syncSectionFromHistory);
+    return () => window.removeEventListener("popstate", syncSectionFromHistory);
+  }, []);
+
+  /*
+   * Bumped to re-run the load below without a page reload.
+   *
+   * The figures on every dashboard come from one fetch of `/api/maintenance`
+   * that ran once on mount, so a job closed on someone else's screen stayed
+   * open on this one until the tab was reloaded — and nothing on screen said
+   * how old the numbers were. A counter is enough to re-enter the effect; the
+   * effect already owns the paging and the failure handling, so nothing about
+   * how the data is fetched is duplicated here.
+   */
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  /** When the figures on screen were last successfully read. Null until then. */
+  const [dataUpdatedAt, setDataUpdatedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function loadRequests() {
+      /*
+       * Every page of the board, not just the first.
+       *
+       * `/api/maintenance` was paged in Stage 16 after a bare `.limit(250)` made
+       * the board show 250 of 744 jobs while every total agreed with every other
+       * total. The server side was fixed; this caller was not — it asked for no
+       * limit, took the default 1000, and never read `hasMore`. Past 1000 jobs
+       * the dashboards would have gone quietly wrong in exactly the same way,
+       * and the oldest work — the overdue backlog — is what falls off the end.
+       */
+      try {
+        const collected: MaintenanceRequest[] = [];
+        let offset = 0;
+        for (;;) {
+          const response = await fetch(
+            `/api/maintenance?limit=1000&offset=${offset}`,
+            { headers: { Accept: "application/json" } },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = (await response.json()) as {
+            requests?: MaintenanceRequest[];
+            hasMore?: boolean;
+            nextOffset?: number | null;
+          };
+          if (!active) return;
+          collected.push(...(payload.requests ?? []));
+          if (!payload.hasMore || typeof payload.nextOffset !== "number") break;
+          offset = payload.nextOffset;
+        }
+        if (active) {
+          setRequests(collected);
+          setDataMode("live");
+          // Stamped only on success, so the time on screen is when the figures
+          // were last actually read — not when someone last pressed the button.
+          setDataUpdatedAt(new Date());
+        }
+      } catch {
+        /*
+         * Say so, and show nothing.
+         *
+         * Two rounds of this. First the chip said "Loading workspace" for ever,
+         * so a 503 from D1 presented `mock-data.ts` as the customer's own
+         * figures. Then the chip was made honest — but the invented rows stayed
+         * underneath it, and every dashboard on the screen went on computing
+         * spend, compliance and SLA from them. The rows are gone now: the state
+         * starts empty and a failure leaves it empty.
+         */
+        if (active) {
+          setRequests([]);
+          setDataMode("unavailable");
+        }
+      } finally {
+        if (active) setRefreshing(false);
+      }
+    }
+    loadRequests();
+    return () => {
+      active = false;
+    };
+  }, [refreshToken]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadNotificationStates() {
+      try {
+        const response = await fetch("/api/notifications", {
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          states?: NotificationStateEntry[];
+        };
+        if (!active) return;
+        setNotificationStates(
+          Object.fromEntries(
+            (payload.states ?? []).map((entry) => [
+              entry.requestId,
+              entry.state,
+            ]),
+          ),
+        );
+      } catch {
+        // The notification panel remains usable if preferences cannot load.
+      }
+    }
+
+    loadNotificationStates();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const saveWorkspaceRecord = async (
+    entity: ManagerTab | "settings",
+    id: string | null,
+    data: Record<string, unknown>,
+  ) => {
+    if (entity === "activity") return;
+    setWorkspaceBusy(true);
+    try {
+      const response = await fetch("/api/workspace", {
+        method: id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity, id, data }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "The shared record could not be saved.");
+      }
+      await loadWorkspace();
+      setToast("Shared workspace updated. Dashboard totals have been refreshed.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "The shared record could not be saved.");
+      throw error;
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const archiveWorkspaceRecord = async (entity: ManagerTab, id: string) => {
+    if (entity === "activity") return;
+    setWorkspaceBusy(true);
+    try {
+      const response = await fetch("/api/workspace", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity, id }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "The record could not be archived.");
+      }
+      await loadWorkspace();
+      setToast("Record archived. Its history remains available.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "The record could not be archived.");
+      throw error;
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const openWorkspaceManager = (tab?: ManagerTab, recordId?: string | null) => {
+    const fallbackTab = managerTabBySection[activeSurface] ?? "site";
+    setWorkspaceManager({ tab: tab ?? fallbackTab, recordId });
+  };
+
+  /*
+   * `/dashboard?manage=import` — how the avatar menu's "Import data" reaches
+   * the importer from the account screens, which have no manager to open.
+   * monday's own item opens the importer in place; this is the same landing,
+   * arrived at by URL. The parameter is stripped once consumed so a refresh
+   * does not reopen it.
+   */
+  useEffect(() => {
+    if (!workspace) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("manage") !== "import") return;
+    // Deferred through a timer like every other load in this file, so the
+    // manager opens on a later tick rather than cascading a render.
+    const timer = window.setTimeout(() => {
+      setWorkspaceManager({ tab: "import", recordId: null });
+      params.delete("manage");
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}`,
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [workspace]);
+
+  /* No fallback: an unreadable workspace has no sites, and saying so beats
+     drawing somebody else's estate. */
+  const currentStores = workspace?.stores ?? [];
+  const currentUnits = workspace?.units ?? [];
+  const currentContractors = workspace?.contractors ?? [];
+  const currentPlanned = workspace?.planned ?? [];
+  const currentTeam = workspace?.team ?? [];
+  const currentSettings = workspace?.settings ?? defaultWorkspaceSettings;
+  const displayUserName = runtimeContext?.actor.displayName ?? userName;
+  const displayUserEmail = runtimeContext?.actor.email ?? userEmail;
+
+  /*
+   * The workspace's own sections.
+   *
+   * `/api/navigation` returns them beside the arrangement, so the catalogue is
+   * complete in one request rather than one paint late. Deferred by a
+   * zero-delay timer like every other loader here, and a failed load leaves the
+   * built-in sidebar standing — it is already on screen.
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/navigation", {
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok) return;
+          const payload = (await response.json()) as {
+            sections?: WorkspaceSectionEntry[];
+          };
+          setWorkspaceSections(
+            (payload.sections ?? []).filter(
+              (entry) =>
+                entry.surface in sectionMeta &&
+                sectionRoutes[entry.surface] !== undefined,
+            ),
+          );
+        } catch {
+          // Built-in catalogue only. Nothing disappears; nothing 404s.
+        }
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  /*
+   * What may appear in the sidebar: what the product ships, then what this
+   * workspace added. Existence, never arrangement — the merge in
+   * `app/api/navigation/layout.ts` still decides order and visibility.
+   */
+  const navCatalogue = useMemo<SidebarNavEntry[]>(
+    () => [
+      ...builtInNavCatalogue,
+      ...workspaceSections.map((entry) => ({
+        key: entry.key,
+        label: entry.label,
+        icon: entry.icon,
+        group: entry.group,
+      })),
+    ],
+    [workspaceSections],
+  );
+
+  /*
+   * Which built-in screen is on. For a workspace section that is the surface it
+   * names; for a built-in section it is the section itself. A key that resolves
+   * to neither — a bookmark to a section since archived — falls back to
+   * Overview rather than rendering a blank page.
+   */
+  const activeCustom =
+    workspaceSections.find((entry) => entry.key === activeSection) ?? null;
+  const rawSurface = activeCustom ? activeCustom.surface : activeSection;
+  const activeSurface: Section = (
+    rawSurface in sectionMeta ? rawSurface : "overview"
+  ) as Section;
+
+  const setSection = (section: string) => {
+    setActiveSection(section);
+    setMobileNavOpen(false);
+    /*
+     * `s/` namespaces a workspace section's URL so it can never take a route a
+     * built-in section owns, now or in a later release.
+     */
+    const route =
+      sectionRoutes[section as Section] ??
+      (section.startsWith("section:")
+        ? `s/${section.slice("section:".length)}`
+        : "");
+    window.history.pushState({}, "", route ? `/dashboard/${route}` : "/dashboard");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openRequest = (
+    request: MaintenanceRequest,
+    tab: RequestDrawerTab = "updates",
+  ) => {
+    setDrawerInitialTab(tab);
+    setSelectedRequest(request);
+  };
+
+  const createRequest = async (
+    draft: CreateRequestDraft,
+    attachments: File[],
+  ) => {
+    const response = await fetch("/api/maintenance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      throw new Error(payload.error || "The request could not be saved.");
+    }
+
+    const payload = (await response.json()) as {
+      request: MaintenanceRequest;
+    };
+    let created = payload.request;
+    const failedUploads: string[] = [];
+
+    if (attachments.length) {
+      for (const file of attachments) {
+        try {
+          const uploadPayload = await uploadEvidenceFile({
+            file,
+            requestId: created.id,
+            kind: "issue",
+          });
+          if (uploadPayload.request) {
+            created = uploadPayload.request;
+          }
+        } catch (caught) {
+          failedUploads.push(
+            caught instanceof Error
+              ? caught.message
+              : `Could not upload ${file.name}.`,
+          );
+        }
+      }
+    }
+
+    setRequests((current) => [created, ...current]);
+    setDataMode("live");
+    setShowCreateRequest(false);
+    setToast(
+      failedUploads.length
+        ? `${created.id} was created. ${failedUploads.length} file${failedUploads.length === 1 ? "" : "s"} could not be uploaded.`
+        : `${created.id} has been created and routed to triage.`,
+    );
+    openRequest(created);
+  };
+
+  const persistRequestUpdate = async (
+    id: string,
+    update: {
+      stage?: RequestStage;
+      note?: string;
+      fields?: Record<string, string | number | null>;
+    },
+  ) => {
+    const response = await fetch("/api/maintenance", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...update }),
+    });
+    const payload = (await response.json()) as {
+      request?: MaintenanceRequest;
+      error?: string;
+    };
+    if (!response.ok || !payload.request) {
+      throw new Error(payload.error || "The update could not be saved.");
+    }
+    const updated = payload.request;
+    setRequests((current) =>
+      current.map((request) => (request.id === id ? updated : request)),
+    );
+    setSelectedRequest((current) => (current?.id === id ? updated : current));
+    setDataMode("live");
+    return updated;
+  };
+
+  const persistBoardCell = async (
+    requestId: string,
+    column: MaintenanceBoardColumn,
+    value: string | number | boolean | { start: string; end: string },
+  ) => {
+    const response = await fetch("/api/board", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_cell",
+        requestId,
+        columnId: column.id,
+        value,
+      }),
+    });
+    const payload = (await response.json()) as {
+      cell?: { requestId: string; columnId: string; value: string };
+      error?: string;
+    };
+    if (!response.ok || !payload.cell) {
+      throw new Error(payload.error || "The column value could not be saved.");
+    }
+    const key = `${requestId}::${column.id}`;
+    setBoardSnapshot((current) =>
+      current
+        ? {
+            ...current,
+            cellValues: {
+              ...current.cellValues,
+              [key]: payload.cell!.value,
+            },
+          }
+        : current,
+    );
+    window.dispatchEvent(new Event("maintsupp:refresh-board"));
+    return payload.cell.value;
+  };
+
+  const changeRequestStage = async (id: string, nextStage: RequestStage) => {
+    const before = requests.find((request) => request.id === id);
+    if (!before) return;
+    const optimistic = { ...before, stage: nextStage };
+    setRequests((current) =>
+      current.map((request) => (request.id === id ? optimistic : request)),
+    );
+    setSelectedRequest((current) =>
+      current?.id === id ? { ...current, stage: nextStage } : current,
+    );
+    try {
+      await persistRequestUpdate(id, { stage: nextStage });
+      setToast(`${id} moved to ${stageLabel(nextStage)}.`);
+    } catch (caught) {
+      setRequests((current) =>
+        current.map((request) => (request.id === id ? before : request)),
+      );
+      setSelectedRequest((current) => (current?.id === id ? before : current));
+      setToast(
+        caught instanceof Error
+          ? caught.message
+          : "The workflow update could not be saved.",
+      );
+    }
+  };
+
+  /*
+   * A comment goes to `item_updates`, which is where comments live.
+   *
+   * This used to call `persistRequestUpdate(id, { note })`, which incremented
+   * `comment_count` and wrote the text into `activity_log` as an audit row —
+   * so the app's own comments and monday's 218 imported ones sat in two
+   * different tables, and the counter was whatever the last writer said. One
+   * writer now, and `/api/updates` recomputes the count from a COUNT rather
+   * than incrementing, so a re-import cannot silently zero it.
+   */
+  const addRequestNote = async (
+    id: string,
+    note: string,
+    options: { parentId?: string | null; attachmentIds?: string[] } = {},
+  ) => {
+    const response = await fetch("/api/updates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: id,
+        body: note,
+        /*
+         * A reply is a comment with a parent, and this is the only way to make
+         * one. `/api/updates` has read `parentId` and validated it against the
+         * job since the route was written, but the sole caller never sent it —
+         * so the 47 replies imported from monday could be read and a 48th could
+         * only be created by hand in SQL.
+         */
+        parentId: options.parentId ?? null,
+        // Already uploaded by the composer; the route stamps `update_id` on
+        // them so they belong to the comment rather than only to the job.
+        attachmentIds: options.attachmentIds ?? [],
+      }),
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      /*
+       * Thrown, not swallowed.
+       *
+       * This used to `setToast(...)` and return normally, so the drawer's
+       * `await onAddUpdate(...)` resolved, its catch never ran, and it cleared
+       * the box and closed the composer — the caller's words gone, on a save
+       * that had failed. The drawer already renders the message beside the
+       * composer and keeps the draft; it only needs to be told.
+       */
+      throw new Error(payload.error ?? "That comment could not be saved.");
+    }
+    setToast("Comment added.");
+    // The drawer holds its own copy of the thread, and the board holds the
+    // count, so both are told rather than left to guess.
+    window.dispatchEvent(new Event("maintsupp:refresh-board"));
+  };
+
+  const persistNotificationState = useCallback(
+    async (requestIds: string[], state: NotificationState) => {
+      if (!requestIds.length) return;
+
+      try {
+        const response = await fetch("/api/notifications", {
+          method: "PATCH",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ requestIds, state }),
+        });
+        const payload = (await response.json()) as {
+          states?: NotificationStateEntry[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(
+            payload.error || "The notification could not be updated.",
+          );
+        }
+        setNotificationStates(
+          Object.fromEntries(
+            (payload.states ?? []).map((entry) => [
+              entry.requestId,
+              entry.state,
+            ]),
+          ),
+        );
+      } catch (caught) {
+        setToast(
+          caught instanceof Error
+            ? caught.message
+            : "The notification could not be updated.",
+        );
+        throw caught;
+      }
+    },
+    [],
+  );
+
+  /*
+   * The screen's framing, under the workspace's own name for it. A section
+   * called "CCTV" that draws the job board is titled CCTV, not "Live job list".
+   */
+  const surfaceMeta = sectionMeta[activeSurface];
+  const meta = activeCustom
+    ? { ...surfaceMeta, label: activeCustom.label, title: activeCustom.label }
+    : surfaceMeta;
+  const urgentCount = requests.filter(
+    (request) =>
+      request.priority === "Urgent" && request.stage !== "Completed",
+  ).length;
+  const notificationItems = useMemo(
+    () =>
+      notificationCandidates(requests).filter(
+        (request) => notificationStates[request.id] !== "dismissed",
+      ),
+    [notificationStates, requests],
+  );
+  const unreadNotificationCount = notificationItems.filter(
+    (request) => notificationStates[request.id] !== "read",
+  ).length;
+
+  return (
+    <div className="portal-shell">
+      <aside
+        className={`portal-sidebar${mobileNavOpen ? " portal-sidebar--open" : ""}`}
+      >
+        <div className="portal-sidebar__brand">
+          {/* The logo goes home. It was inert, which meant the only way out of
+              the dashboard was the browser's back button. */}
+          <Link href="/" aria-label="MAINTSUPP home">
+            <BrandMark />
+          </Link>
+          <button
+            className="icon-button sidebar-close"
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Close navigation"
+          >
+            <Icon name="close" size={19} />
+          </button>
+        </div>
+
+        <div className="workspace-switcher">
+          <span className="workspace-icon">
+            <Icon name="building" size={17} />
+          </span>
+          <span className="workspace-switcher__copy">
+            <small>Workspace</small>
+            {demoRole === "super_admin" ? (
+              <select
+                aria-label="Client workspace"
+                value={runtimeContext?.currentOrganisation.id ?? ""}
+                disabled={contextBusy || !runtimeContext}
+                onChange={(event) => void changeOrganisation(event.target.value)}
+              >
+                {(runtimeContext?.organisations ?? []).map((organisation) => (
+                  <option key={organisation.id} value={organisation.id}>
+                    {organisation.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <strong>{runtimeContext?.currentOrganisation.name ?? "Client workspace"}</strong>
+            )}
+          </span>
+          {demoRole === "super_admin" && (
+            <button
+              className="workspace-switcher__add"
+              type="button"
+              aria-label="Add client workspace"
+              title="Add client workspace"
+              disabled={contextBusy}
+              onClick={() => void createOrganisation()}
+            >
+              <Icon name="plus" size={16} />
+            </button>
+          )}
+        </div>
+
+        {/*
+          Who you are reading this workspace as.
+
+          The board itself looks identical whichever client you are — an empty
+          board and a board you are not allowed to see render the same way — so
+          without this the scoping is invisible and has to be taken on trust.
+          The email is the identity the server actually resolved, not the label
+          on the role selector, so if the two ever disagree it shows here.
+        */}
+        {runtimeContext?.identity && (
+          <div className="workspace-identity">
+            <span className="workspace-identity__email" title={runtimeContext.identity.email}>
+              {runtimeContext.identity.email}
+            </span>
+            <span className="workspace-identity__scope">
+              {runtimeContext.identity.crossOrganisation
+                ? `Every workspace · ${runtimeContext.identity.organisationIds.length}`
+                : "This workspace only"}
+            </span>
+          </div>
+        )}
+
+        {/*
+          The super admin's "view on everything" — the one screen that names
+          every client and what each holds. Served only to an actor the database
+          says is a super admin; a client gets `tenantSummary: null` and this
+          does not render, so it cannot leak another client's row counts.
+        */}
+        {runtimeContext?.tenantSummary && runtimeContext.tenantSummary.length > 1 && (
+          <div className="workspace-tenants">
+            <span className="nav-label">All clients</span>
+            {runtimeContext.tenantSummary.map((tenant) => (
+              <button
+                key={tenant.id}
+                type="button"
+                className={
+                  tenant.id === runtimeContext.currentOrganisation.id ? "is-active" : ""
+                }
+                disabled={contextBusy}
+                onClick={() => void changeOrganisation(tenant.id)}
+              >
+                <span className="workspace-tenants__name">{tenant.name}</span>
+                <span className="workspace-tenants__count">
+                  {tenant.maintenanceRequests === 0 && tenant.sites === 0
+                    ? "No data yet"
+                    : `${tenant.maintenanceRequests} jobs · ${tenant.sites} sites`}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/*
+          The sidebar, arranged by whoever is looking at it.
+
+          What used to be two `.map`s over two constants is now a rendering of
+          the layout `/api/navigation` resolves: this person's own arrangement
+          over the workspace default over the built-in order. `navCatalogue` is
+          what may appear; the stored layout only decides how. Nothing about the
+          resting appearance changed — same pill, same 19px icon, same counts.
+        */}
+        <SidebarNav
+          catalogue={navCatalogue}
+          activeSection={activeSection}
+          onSelect={(key) => setSection(key)}
+          badges={{ maintenance: urgentCount }}
+          onNotify={setToast}
+        />
+
+        <div className="sidebar-help">
+          <span className="sidebar-help__icon">
+            <Icon name="spark" size={17} />
+          </span>
+          <div>
+            <strong>Need a hand?</strong>
+            <span>MAINTSUPP support is online</span>
+          </div>
+        </div>
+
+        <div className="sidebar-profile">
+          <Avatar name={displayUserName} />
+          <span className="sidebar-profile__copy">
+            <strong>{displayUserName}</strong>
+            {/*
+              The role switcher is a demo affordance, and it is shown only while
+              nobody has actually signed in.
+              `resolveTenantAccess` refuses to let it widen a real session's
+              reach, so leaving it on screen for a signed-in user would offer a
+              control that silently does nothing — they would pick "Client",
+              watch the board not change, and reasonably conclude the app was
+              broken. Signed in, the role is stated as a fact instead.
+            */}
+            {runtimeContext?.testingMode === false ? (
+              <span className="sidebar-profile__role">
+                {roleLabel(runtimeContext.actor.role)}
+              </span>
+            ) : (
+              <label>
+                <span>Testing access</span>
+                <select
+                  aria-label="Demo access role"
+                  value={demoRole}
+                  disabled={contextBusy}
+                  onChange={(event) => void changeDemoRole(event.target.value as DemoRole)}
+                >
+                  <option value="super_admin">Super Admin</option>
+                  <option value="admin">Admin</option>
+                  <option value="client">Client</option>
+                </select>
+              </label>
+            )}
+          </span>
+        </div>
+      </aside>
+
+      {mobileNavOpen && (
+        <button
+          className="nav-scrim"
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
+      <div className="portal-main">
+        <header className="portal-topbar">
+          <button
+            className="icon-button mobile-menu"
+            type="button"
+            onClick={() => {
+              setNotificationsOpen(false);
+              setMobileNavOpen(true);
+            }}
+            aria-label="Open navigation"
+          >
+            <Icon name="menu" size={21} />
+          </button>
+
+          <div className="page-identity">
+            <span>{meta.eyebrow}</span>
+            <strong>
+              {activeSection === "overview"
+                ? `${meta.title}, ${displayUserName.split(" ")[0]}`
+                : meta.title}
+            </strong>
+          </div>
+
+          <div className="topbar-actions">
+            <ThemeToggle />
+            <span
+              className={`data-indicator data-indicator--${dataMode}`}
+              title={
+                dataMode === "unavailable"
+                  ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
+                  : undefined
+              }
+            >
+              <span />
+              {dataMode === "live"
+                ? "Live workspace"
+                : dataMode === "unavailable"
+                  ? "Workspace unavailable"
+                  : "Loading workspace"}
+            </span>
+            {/*
+              Refresh, and when the figures were last read.
+
+              Every dashboard on this screen derives from one fetch that ran on
+              mount, so a job closed on another screen stayed open here until
+              the tab was reloaded — and nothing said how old the numbers were.
+              The time is stamped on success only, so it reports when the data
+              was actually read rather than when the button was last pressed.
+
+              `aria-live="polite"` on the timestamp because it changes without
+              the user moving focus, and a screen reader that never announces it
+              would leave the same "how old is this" question the control exists
+              to answer.
+            */}
+            <button
+              className="secondary-button topbar-data-button"
+              type="button"
+              onClick={() => {
+                setRefreshing(true);
+                setRefreshToken((token) => token + 1);
+                // The board keeps its own snapshot, so it is told to re-read
+                // rather than left a version behind the meters above it.
+                window.dispatchEvent(new Event("maintsupp:refresh-board"));
+              }}
+              disabled={refreshing}
+              aria-label="Refresh the figures on screen"
+            >
+              <Icon name="refresh" size={17} />
+              <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
+            </button>
+            <span className="topbar-updated" aria-live="polite">
+              {dataUpdatedAt
+                ? `Updated ${dataUpdatedAt.toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : "Not yet loaded"}
+            </span>
+            <button
+              className="secondary-button topbar-data-button"
+              type="button"
+              onClick={() => openWorkspaceManager()}
+              disabled={!workspace}
+            >
+              <Icon name="settings" size={17} />
+              <span>Manage data</span>
+            </button>
+            <a className="topbar-link" href="/request">
+              <Icon name="plus" size={17} />
+              Public request form
+            </a>
+            <div className="notification-wrap">
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`}
+                aria-expanded={notificationsOpen}
+                aria-haspopup="dialog"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  setNotificationsOpen((open) => !open);
+                }}
+              >
+                <Icon name="bell" size={20} />
+                {unreadNotificationCount > 0 && (
+                  <span className="notification-dot" />
+                )}
+              </button>
+              {notificationsOpen && (
+                <NotificationPanel
+                  items={notificationItems}
+                  states={notificationStates}
+                  unreadCount={unreadNotificationCount}
+                  onMarkRead={(requestIds) =>
+                    persistNotificationState(requestIds, "read")
+                  }
+                  onDismiss={(requestIds) =>
+                    persistNotificationState(requestIds, "dismissed")
+                  }
+                  onOpen={(request) => {
+                    if (notificationStates[request.id] !== "read") {
+                      void persistNotificationState([request.id], "read").catch(
+                        () => undefined,
+                      );
+                    }
+                    openRequest(request);
+                    setSection("maintenance");
+                    setNotificationsOpen(false);
+                  }}
+                />
+              )}
+            </div>
+            {/*
+              monday's top-right icon row is notifications, inbox, invite
+              member, apps, help, the product grid, then the avatar. Three of
+              those have somewhere real to go here and are kept in monday's
+              relative order; the other two are deliberately absent rather than
+              present and dead:
+                · inbox — there is no cross-item update feed to open. The
+                  board drawer holds updates per job. `item_updates` was empty
+                  when this was written; monday's 218 comments and 47 replies
+                  have since been imported, so a feed is now buildable — but
+                  building one is a decision, not a consequence, and an inbox
+                  that opens onto a list nobody curates is worse than none.
+                · product grid — MAINTSUPP is one product; there is nothing to
+                  switch between.
+            */}
+            <Link
+              className="icon-button topbar-icon"
+              href="/dashboard/account/invite"
+              aria-label="Invite members"
+              title="Invite members"
+            >
+              <Icon name="users" size={19} />
+            </Link>
+            <Link
+              className="icon-button topbar-icon"
+              href="/dashboard/account/integrations"
+              aria-label="Integrations"
+              title="Integrations"
+            >
+              <Icon name="grid" size={19} />
+            </Link>
+            <Link
+              className="icon-button topbar-icon"
+              href="/dashboard/account/help"
+              aria-label="Get help"
+              title="Get help"
+            >
+              <Icon name="message" size={19} />
+            </Link>
+            <button
+              className="primary-button topbar-create"
+              type="button"
+              aria-label="New request"
+              onClick={() => setShowCreateRequest(true)}
+            >
+              <Icon name="plus" size={18} />
+              <span>New request</span>
+            </button>
+            {/*
+              The avatar was decorative. It is now monday's avatar menu: the
+              two-column Account / Explore panel, the workspace + plan pill
+              header, and the working-status row. `onImportData` is what makes
+              monday's "Import data" open the importer in place rather than
+              navigate away.
+            */}
+            <AccountMenu
+              userName={displayUserName}
+              userEmail={displayUserEmail}
+              onImportData={() => openWorkspaceManager("import")}
+              onNotify={setToast}
+            />
+          </div>
+        </header>
+
+        <main className="portal-content">
+          {/*
+            An unreadable job list is not a quiet zero.
+            
+            Overview and Reports are computed entirely from `requests`, so with
+            nothing loaded every tile reads £0, 0 open, 100% SLA — figures that
+            are indistinguishable from a genuinely quiet month, and sit beside
+            real annual budgets that DID load. The chip in the topbar says the
+            workspace could not be read; these two screens say it where the
+            numbers would have been.
+            
+            The other surfaces are not gated: the board, the registers and the
+            managers each read their own source and show their own empty state,
+            so they are never reporting a figure they did not measure.
+          */}
+          {activeSurface === "overview" && dataMode === "unavailable" && (
+            <WorkspaceUnavailable
+              onRetry={() => {
+                setRefreshing(true);
+                setRefreshToken((token) => token + 1);
+              }}
+              busy={refreshing}
+            />
+          )}
+          {activeSurface === "overview" && dataMode !== "unavailable" && (
+            <OverviewView
+              requests={requests}
+              stores={currentStores}
+              compliance={workspace?.compliance ?? []}
+              units={currentUnits}
+              onOpenRequest={(request) => {
+                openRequest(request);
+                setSection("maintenance");
+              }}
+              onNavigate={setSection}
+            />
+          )}
+          {activeSurface === "maintenance" && (
+            <LiveMaintenanceBoard
+              /* The section, not the board: two sections can read one board,
+                 and each keeps its own open tab. */
+              sectionKey={activeSection}
+              requests={requests}
+              onCreateDetailed={() => setShowCreateRequest(true)}
+              onOpenRequest={openRequest}
+              onRequestChange={(updated) => {
+                setRequests((current) =>
+                  current.map((request) =>
+                    request.id === updated.id ? updated : request,
+                  ),
+                );
+                setSelectedRequest((current) =>
+                  current?.id === updated.id ? updated : current,
+                );
+                setDataMode("live");
+              }}
+              onRequestCreated={(created) => {
+                setRequests((current) =>
+                  current.some((request) => request.id === created.id)
+                    ? current.map((request) =>
+                        request.id === created.id ? created : request,
+                      )
+                    : [created, ...current],
+                );
+                setDataMode("live");
+              }}
+              onRequestsDeleted={(requestIds) => {
+                setRequests((current) =>
+                  current.filter((request) => !requestIds.includes(request.id)),
+                );
+                setSelectedRequest((current) =>
+                  current && requestIds.includes(current.id) ? null : current,
+                );
+                setDataMode("live");
+              }}
+              onBoardSnapshotChange={setBoardSnapshot}
+              onNotify={setToast}
+              onOpenApps={() => setSection("settings")}
+            />
+          )}
+          {activeSurface === "stores" && <SitesManager onNotify={setToast} />}
+          {activeSurface === "store-documentation" && (
+            <StoreDocumentationBoard
+              onNotify={setToast}
+              onOpenApps={() => setSection("settings")}
+            />
+          )}
+          {activeSurface === "units" && (
+            <UnitsManager sites={currentStores} onNotify={setToast} />
+          )}
+          {activeSurface === "contractors" && (
+            <ContractorsView
+              contractors={currentContractors}
+              requests={requests}
+              onManage={(id) => openWorkspaceManager("contractor", id)}
+              onNotify={setToast}
+            />
+          )}
+          {activeSurface === "compliance" && (
+            <ComplianceView
+              stores={currentStores}
+              complianceRecords={workspace?.compliance ?? []}
+              onManage={(id) => openWorkspaceManager("compliance", id)}
+              onNotify={setToast}
+            />
+          )}
+          {activeSurface === "calendar" && (
+            <CalendarView
+              requests={requests}
+              planned={currentPlanned}
+              onManage={(id) => openWorkspaceManager("planned", id)}
+              onOpenRequest={(request) => {
+                openRequest(request);
+                setSection("maintenance");
+              }}
+            />
+          )}
+          {activeSurface === "documents" && (
+            <DocumentsView files={documents} />
+          )}
+          {activeSurface === "reports" && dataMode === "unavailable" && (
+            <WorkspaceUnavailable
+              onRetry={() => {
+                setRefreshing(true);
+                setRefreshToken((token) => token + 1);
+              }}
+              busy={refreshing}
+            />
+          )}
+          {activeSurface === "reports" && dataMode !== "unavailable" && (
+            <ReportsView
+              requests={requests}
+              stores={currentStores}
+              onNavigate={setSection}
+            />
+          )}
+          {activeSurface === "team" && (
+            <TeamView
+              userName={displayUserName}
+              userEmail={displayUserEmail}
+              team={currentTeam}
+              onManage={(id) => openWorkspaceManager("member", id)}
+            />
+          )}
+          {/*
+            Administration. Each screen re-checks its own capability against the
+            API rather than trusting that being routed here meant anything — the
+            sidebar can be rearranged by its owner, so the presence of a nav
+            item is not a permission.
+          */}
+          {activeSurface === "admin-users" && <AdminUsersView />}
+          {activeSurface === "admin-roles" && <AdminRolesView />}
+          {activeSurface === "admin-clients" && (
+            <AdminClientsView onSwitched={() => void loadRuntimeContext()} />
+          )}
+          {activeSurface === "settings" && (
+            <SettingsView
+              settings={currentSettings}
+              /*
+               * The categories actually in use, counted from the jobs on
+               * screen rather than from a fixed list. A hard-coded set would
+               * drift the first time somebody adds a category on the board,
+               * and the gate would then quietly not apply to it.
+               */
+              categories={Array.from(
+                new Set(
+                  requests
+                    .map((item) => (item.category ?? "").trim())
+                    .filter((value) => value && value !== "[object Object]"),
+                ),
+              ).sort((left, right) => left.localeCompare(right, "en-GB"))}
+              busy={workspaceBusy}
+              onSave={async (settings) => {
+                await saveWorkspaceRecord("settings", runtimeContext?.currentOrganisation.id ?? null, settings as unknown as Record<string, unknown>);
+              }}
+              onNotify={setToast}
+            />
+          )}
+        </main>
+      </div>
+
+      {selectedRequest && (
+        <RequestDrawer
+          key={`${selectedRequest.id}:${drawerInitialTab}`}
+          request={selectedRequest}
+          boardSnapshot={boardSnapshot}
+          initialTab={drawerInitialTab}
+          onClose={() => setSelectedRequest(null)}
+          onStatusChange={(nextStage) =>
+            changeRequestStage(selectedRequest.id, nextStage)
+          }
+          onAddUpdate={(note, options) =>
+            addRequestNote(selectedRequest.id, note, options)
+          }
+          onFieldsChange={(fields) =>
+            persistRequestUpdate(selectedRequest.id, { fields })
+          }
+          onBoardCellChange={(column, value) =>
+            persistBoardCell(selectedRequest.id, column, value)
+          }
+          onAddColumn={() =>
+            window.dispatchEvent(
+              new Event("maintsupp:open-column-picker"),
+            )
+          }
+          onRequestChange={(updated) => {
+            setRequests((current) =>
+              current.map((request) =>
+                request.id === updated.id ? updated : request,
+              ),
+            );
+            setSelectedRequest(updated);
+            setDataMode("live");
+          }}
+          onNotify={setToast}
+          /* The avatar beside the reply box, so the panel shows who is about to
+             speak — as monday's does. `displayUserName` is the same name the
+             shell puts in the top bar. */
+          currentUserName={displayUserName}
+        />
+      )}
+
+      {showCreateRequest && (
+        <CreateRequestModal
+          locations={currentStores.filter((store) => store.lifecycle === "Current").map((store) => store.name)}
+          onClose={() => setShowCreateRequest(false)}
+          onCreate={createRequest}
+        />
+      )}
+
+      {workspaceManager && workspace && (
+        <WorkspaceDataManager
+          workspace={workspace}
+          initialTab={workspaceManager.tab}
+          initialRecordId={workspaceManager.recordId}
+          busy={workspaceBusy}
+          onClose={() => setWorkspaceManager(null)}
+          onSave={saveWorkspaceRecord}
+          onArchive={archiveWorkspaceRecord}
+          onImported={() => {
+            // A monday import writes sites, groups and items straight into the
+            // database, so the whole snapshot is reloaded rather than patched.
+            void loadWorkspace().catch(() => undefined);
+          }}
+        />
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <span>
+            <Icon name="check" size={17} />
+          </span>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotificationPanel({
+  items,
+  states,
+  unreadCount,
+  onOpen,
+  onMarkRead,
+  onDismiss,
+}: {
+  items: MaintenanceRequest[];
+  states: Record<string, NotificationState>;
+  unreadCount: number;
+  onOpen: (request: MaintenanceRequest) => void;
+  onMarkRead: (requestIds: string[]) => Promise<void>;
+  onDismiss: (requestIds: string[]) => Promise<void>;
+}) {
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const unreadIds = items
+    .filter((request) => states[request.id] !== "read")
+    .map((request) => request.id);
+
+  const runAction = async (key: string, action: () => Promise<void>) => {
+    setBusyAction(key);
+    try {
+      await action();
+    } catch {
+      // The parent surfaces persistence failures in the global status toast.
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  return (
+    <div className="notification-panel" role="dialog" aria-label="Notifications">
+      <div className="notification-panel__header">
+        <div>
+          <strong>Notifications</strong>
+          <span>{unreadCount ? `${unreadCount} unread` : "All caught up"}</span>
+        </div>
+        {unreadIds.length > 0 && (
+          <button
+            type="button"
+            disabled={busyAction !== null}
+            onClick={() =>
+              void runAction("all", () => onMarkRead(unreadIds))
+            }
+          >
+            Mark all read
+          </button>
+        )}
+      </div>
+      <div className="notification-panel__list">
+        {items.length ? (
+          items.map((request) => {
+            const isUnread = states[request.id] !== "read";
+            const itemBusy = busyAction?.endsWith(`:${request.id}`) ?? false;
+            return (
+              <div
+                className={`notification-item${isUnread ? " is-unread" : ""}`}
+                key={request.id}
+              >
+                <button
+                  className="notification-item__open"
+                  type="button"
+                  onClick={() => onOpen(request)}
+                >
+                  <span className="notification-alert">
+                    <Icon name="alert" size={15} />
+                  </span>
+                  <span className="notification-item__copy">
+                    <strong>{request.title}</strong>
+                    <small>
+                      {request.location} · {request.id}
+                    </small>
+                  </span>
+                  {isUnread && <i aria-hidden="true" />}
+                </button>
+                <div className="notification-item__actions">
+                  {isUnread && (
+                    <button
+                      type="button"
+                      disabled={itemBusy}
+                      aria-label={`Mark ${request.id} as read`}
+                      title="Mark as read"
+                      onClick={() =>
+                        void runAction(`read:${request.id}`, () =>
+                          onMarkRead([request.id]),
+                        )
+                      }
+                    >
+                      <Icon name="check" size={14} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={itemBusy}
+                    aria-label={`Remove ${request.id} from notifications`}
+                    title="Remove notification"
+                    onClick={() =>
+                      void runAction(`dismiss:${request.id}`, () =>
+                        onDismiss([request.id]),
+                      )
+                    }
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="notification-panel__empty">
+            <span>
+              <Icon name="check" size={17} />
+            </span>
+            <strong>You’re all caught up</strong>
+            <small>New urgent work will appear here.</small>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OverviewView({
+  requests,
+  stores: storeRows,
+  compliance: complianceRecords,
+  units,
+  onNavigate,
+  onOpenRequest,
+}: {
+  requests: MaintenanceRequest[];
+  stores: StoreRecord[];
+  /**
+   * The workspace compliance register, derived from the Store Documentation
+   * board. The tile used to count `stores[].compliance`, which only covers
+   * sites that have a `sites` row, and counted a stored status string rather
+   * than a date — so it disagreed with /dashboard/compliance and with the
+   * Compliance Tracker about the same documents. One source, one verdict.
+   */
+  compliance: WorkspaceSnapshot["compliance"];
+  units: WorkspaceUnit[];
+  onNavigate: (section: Section) => void;
+  onOpenRequest: (request: MaintenanceRequest) => void;
+}) {
+  const now = useCurrentTime();
+  const [portfolio, setPortfolio] = useState("all");
+  const [period, setPeriod] = useState("90");
+  const scopedStores = useMemo(
+    () => storeRows.filter((store) => store.lifecycle === "Current" && (portfolio === "all" || store.id === portfolio)),
+    [portfolio, storeRows],
+  );
+  const scopedRequests = useMemo(
+    () => requests.filter((request) =>
+      (portfolio === "all" || request.siteId === portfolio) &&
+      withinAnalyticsPeriod(request.requestedAt, period, now),
+    ),
+    [now, period, portfolio, requests],
+  );
+  // Counted from the unit register only. This used to fall back to the number
+  // of sites when no units had been registered, which put a plausible number
+  // under the words "Active units" that was really a count of something else —
+  // a ten-site client with an empty asset register read as ten live units. If
+  // the register is empty the honest answer is zero, and the card says why.
+  const activeUnitCount = units.filter(
+    (unit) => unit.status === "Active" && (portfolio === "all" || unit.siteId === portfolio),
+  ).length;
+  const open = scopedRequests.filter((request) => request.stage !== "Completed");
+  const attention = open
+    .filter((request) => request.stage === "Attention" || request.priority === "Urgent")
+    .sort((left, right) => requestAgeDays(right, now) - requestAgeDays(left, now));
+  const completed = scopedRequests.filter((request) => request.stage === "Completed");
+  const overdue = open.filter(
+    (request) => request.dueAt && new Date(request.dueAt).getTime() < now,
+  );
+  const complianceItems = complianceRecords.filter(
+    (record) =>
+      record.state !== "Not required" &&
+      (portfolio === "all" || record.siteId === portfolio),
+  );
+  const complianceCounts = {
+    compliant: complianceItems.filter((item) => item.state === "Compliant").length,
+    expiring: complianceItems.filter((item) => item.state === "Expiring soon").length,
+    expired: complianceItems.filter((item) => item.state === "Expired").length,
+    missing: complianceItems.filter((item) => item.state === "Missing").length,
+  };
+  const compliancePercent = Math.round(
+    (complianceCounts.compliant / Math.max(complianceItems.length, 1)) * 100,
+  );
+  const statusSegments = jobStatusSegments(scopedRequests);
+  const tradeRows = tradeBreakdown(scopedRequests);
+  const spendSeries = periodSpendSeries(scopedRequests, period, now);
+  const overviewWindow = resolvePeriod(period, now);
+  const complianceSegments: DonutSegment[] = [
+    { label: "Compliant", value: complianceCounts.compliant, color: "#12b4a8" },
+    { label: "Expiring soon", value: complianceCounts.expiring, color: "#f0a91f" },
+    { label: "Expired", value: complianceCounts.expired, color: "#e2445c" },
+    { label: "Missing", value: complianceCounts.missing, color: "#5c82af" },
+  ];
+
+  return (
+    <div className="section-stack analytics-page">
+      <section className="analytics-page-heading">
+        <div><span>Live operations</span><h1>Dashboard Overview</h1></div>
+        <AnalyticsToolbar
+          portfolio={portfolio}
+          portfolios={portfolioOptions(storeRows)}
+          onPortfolioChange={setPortfolio}
+          period={period}
+          periods={analyticsPeriodOptions}
+          onPeriodChange={setPeriod}
+          onExport={() => downloadCsv(scopedRequests)}
+        />
+      </section>
+
+      <section className="analytics-metric-grid analytics-metric-grid--six">
+        <AnalyticsMetricCard label="Active units" value={String(activeUnitCount)} detail={activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} onClick={() => onNavigate("units")} />
+        <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.stage === "Attention", period, now)} onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, (request) => request.stage !== "Completed", period, now)} onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Overdue" value={String(overdue.length)} detail="Target date passed" icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Completed" value={String(completed.length)} detail="Verified closures" icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Compliance" value={`${compliancePercent}%`} detail={complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} onClick={() => onNavigate("compliance")} />
+      </section>
+
+      
+
+      <section className="analytics-bottom-grid">
+        <article className="analytics-panel analytics-spend-panel">
+          <header><h2>Spend trend</h2><span>{overviewWindow.label}</span></header>
+          {/*
+            Cost is optional on a job and most are still open, so a portfolio
+            can genuinely have no spend recorded. Plotting that as a line
+            pinned to the axis looks like a charting failure, and worse, it
+            invites the reader to conclude the work was free.
+          */}
+          {spendSeries.some((point) => point.value > 0)
+            ? <TrendChart items={spendSeries} valueFormatter={(value) => formatMoney(Math.round(value))} />
+            : <p className="analytics-empty">No costs recorded against jobs in this period. Spend appears here once jobs carry a cost.</p>}
+        </article>
+        <button className="analytics-panel analytics-score-panel" type="button" onClick={() => onNavigate("compliance")}>
+          <header><h2>Compliance score</h2></header>
+          <DonutChart segments={complianceSegments} value={complianceItems.length ? `${compliancePercent}%` : "—"} label="On track" size="medium" />
+          {/*
+            0% and "0 of 0" are different claims: one says the sites are failing
+            their requirements, the other says nobody has told us what the
+            requirements are. A new site has the second problem.
+          */}
+          <span>{complianceItems.length
+            ? `${complianceCounts.compliant} of ${complianceItems.length} requirements on track`
+            : "No compliance requirements recorded for these sites yet"}</span>
+          <strong>View compliance <Icon name="chevron" size={15} /></strong>
+        </button>
+        <article className="analytics-panel analytics-trades-panel">
+          <header><h2>Jobs by trade</h2></header>
+          {/*
+            An empty bar chart is indistinguishable from a broken one, so an
+            unfiltered period with no jobs says so in words instead of drawing
+            an axis with nothing on it.
+          */}
+          {tradeRows.length
+            ? <HorizontalBars items={tradeRows} />
+            : <p className="analytics-empty">No jobs in this period. Logged jobs are grouped here by the trade on the record.</p>}
+        </article>
+      </section>
+
+      {/*
+        Deeper panels. Each is computed from the same organisation-scoped rows
+        the tiles above use, so two accounts see two different pictures from one
+        code path, and each carries its own empty state — a new workspace has no
+        data at all, and a blank axis reads as broken rather than empty.
+      */}
+      {/*
+        Arrangeable. The panels are unchanged — what each COMPUTES is exactly
+        what it computed before — but the order and which ones appear now come
+        from the person's saved layout rather than from this file.
+      */}
+      {/* Last on the overview, on the owner's instruction: it is a
+          follow-up list rather than a headline, and it was sitting above
+          the panels people actually open first. */}
+      <section className="analytics-overview-grid">
+        <article className="analytics-panel analytics-attention-panel">
+          <header><h2>Units requiring attention</h2><button type="button" onClick={() => onNavigate("maintenance")}>View all <Icon name="chevron" size={15} /></button></header>
+          <div className="table-scroll">
+            <table className="analytics-table analytics-table--mobile-cards">
+              <thead><tr><th>Priority</th><th>Unit / Site</th><th>Issue</th><th>Status</th><th>Days</th></tr></thead>
+              <tbody>
+                {attention.slice(0, 5).map((request) => (
+                  <tr className="analytics-row" key={request.id} role="button" aria-label={`Open ${request.id}`} onClick={() => onOpenRequest(request)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") onOpenRequest(request); }}>
+                    <td data-label="Priority"><span className={priorityClass(request.priority)}>{request.priority}</span></td>
+                    <td data-label="Unit / Site">{request.location}</td>
+                    <td data-label="Issue"><strong>{request.title}</strong></td>
+                    <td data-label="Status"><span className="analytics-status">{request.status}</span></td>
+                    <td data-label="Days open">{requestAgeDays(request, now)}</td>
+                  </tr>
+                ))}
+                {!attention.length && <tr><td colSpan={5} className="analytics-empty">No jobs currently require attention.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="analytics-panel analytics-donut-panel">
+          <header><h2>Jobs by status</h2></header>
+          <div className="analytics-donut-layout">
+            <DonutChart segments={statusSegments} value={String(open.length)} label="Open jobs" />
+            <DonutLegend segments={statusSegments} />
+          </div>
+        </article>
+      </section>
+
+      <DashboardWidgets
+        surface="overview"
+        widgets={[
+          {
+            key: "sla",
+            label: "SLA performance",
+            render: () => <SlaPerformance requests={scopedRequests} />,
+          },
+          {
+            key: "ageing",
+            label: "Open job ageing",
+            render: () => (
+              <OpenJobAgeing requests={scopedRequests} now={now} onOpen={onOpenRequest} />
+            ),
+          },
+          {
+            key: "site-attention",
+            label: "Sites needing attention",
+            render: () => (
+              <SiteAttention
+                requests={scopedRequests}
+                compliance={scopedStores.flatMap((store) =>
+                  store.compliance.map((item) => ({
+                    ...item,
+                    id: `${store.id}-${item.kind}`,
+                    siteId: store.id,
+                    siteName: store.name,
+                  })),
+                )}
+                stores={scopedStores}
+              />
+            ),
+          },
+          {
+            key: "reactive-planned",
+            label: "Reactive vs planned",
+            render: () => (
+              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} />
+            ),
+          },
+          {
+            key: "spend-budget",
+            label: "Spend against budget",
+            render: () => (
+              <SpendAgainstBudget
+                requests={scopedRequests}
+                sites={storeRows}
+                period={period}
+                now={now}
+              />
+            ),
+          },
+        ] satisfies DashboardWidget[]}
+      />
+    </div>
+  );
+}
+
+export function LegacyMaintenanceView({
+  requests,
+  onCreate,
+  onOpenRequest,
+}: {
+  requests: MaintenanceRequest[];
+  onCreate: () => void;
+  onOpenRequest: (request: MaintenanceRequest) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [stage, setStage] = useState<"All" | RequestStage>("All");
+  const [priority, setPriority] = useState<"All" | Priority>("All");
+  const [viewMode, setViewMode] = useState<ViewMode>("board");
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return requests.filter((request) => {
+      const matchesQuery =
+        !needle ||
+        [
+          request.id,
+          request.title,
+          request.description,
+          request.location,
+          request.contractor ?? "",
+          request.assignee ?? "",
+        ].some((value) => value.toLowerCase().includes(needle));
+      return (
+        matchesQuery &&
+        (stage === "All" || request.stage === stage) &&
+        (priority === "All" || request.priority === priority)
+      );
+    });
+  }, [priority, query, requests, stage]);
+
+  const stages: RequestStage[] = [
+    "Incoming",
+    "Booked",
+    "Attention",
+    "Completed",
+  ];
+
+  return (
+    <div className="section-stack">
+      <section className="section-header">
+        <div>
+          <span className="eyebrow-chip">
+            <Icon name="wrench" size={15} />
+            End-to-end work orders
+          </span>
+          <h1>Maintenance requests</h1>
+          <p>
+            Triage, assign, approve and close every request with one traceable
+            activity history.
+          </p>
+        </div>
+        <button className="primary-button" type="button" onClick={onCreate}>
+          <Icon name="plus" size={18} />
+          New request
+        </button>
+      </section>
+
+      <section className="maintenance-summary">
+        <button
+          type="button"
+          className={stage === "All" ? "is-active" : ""}
+          onClick={() => setStage("All")}
+        >
+          <span>All requests</span>
+          <strong>{requests.length}</strong>
+        </button>
+        {stages.map((item) => (
+          <button
+            type="button"
+            key={item}
+            className={stage === item ? "is-active" : ""}
+            onClick={() => setStage(item)}
+          >
+            <span>{stageLabel(item)}</span>
+            <strong>
+              {requests.filter((request) => request.stage === item).length}
+            </strong>
+          </button>
+        ))}
+      </section>
+
+      <section className="panel maintenance-workspace">
+        <div className="workspace-toolbar">
+          <label className="search-field">
+            <Icon name="search" size={18} />
+            <input
+              aria-label="Search maintenance requests"
+              placeholder="Search by issue, ID, location or contractor…"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setQuery("")}
+              >
+                <Icon name="close" size={15} />
+              </button>
+            )}
+          </label>
+          <label className="select-control">
+            <Icon name="filter" size={17} />
+            <select
+              aria-label="Filter by priority"
+              value={priority}
+              onChange={(event) =>
+                setPriority(event.target.value as "All" | Priority)
+              }
+            >
+              <option>All</option>
+              <option>Urgent</option>
+              <option>High</option>
+              <option>Medium</option>
+              <option>Low</option>
+            </select>
+          </label>
+          <div className="view-switch" aria-label="Change view">
+            <button
+              type="button"
+              className={viewMode === "board" ? "is-active" : ""}
+              onClick={() => setViewMode("board")}
+              aria-label="Board view"
+            >
+              <Icon name="grid" size={17} />
+            </button>
+            <button
+              type="button"
+              className={viewMode === "list" ? "is-active" : ""}
+              onClick={() => setViewMode("list")}
+              aria-label="List view"
+            >
+              <Icon name="list" size={17} />
+            </button>
+          </div>
+          <button
+            className="secondary-button export-button"
+            type="button"
+            onClick={() => downloadCsv(filtered)}
+          >
+            <Icon name="download" size={17} />
+            Export
+          </button>
+        </div>
+
+        <div className="filter-result">
+          <span>
+            Showing <strong>{filtered.length}</strong> of {requests.length}{" "}
+            requests
+          </span>
+          {(query || stage !== "All" || priority !== "All") && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setStage("All");
+                setPriority("All");
+              }}
+            >
+              Reset filters
+            </button>
+          )}
+        </div>
+
+        {viewMode === "board" ? (
+          <div className="request-board">
+            {stages.map((item) => {
+              const group = filtered.filter(
+                (request) => request.stage === item,
+              );
+              return (
+                <div className={`board-column board-column--${item.toLowerCase()}`} key={item}>
+                  <div className="board-column__heading">
+                    <span>
+                      <Icon name={stageIcon(item)} size={16} />
+                    </span>
+                    <strong>{stageLabel(item)}</strong>
+                    <i>{group.length}</i>
+                  </div>
+                  <div className="board-column__body">
+                    {group.map((request) => (
+                      <RequestCard
+                        key={request.id}
+                        request={request}
+                        onOpen={() => onOpenRequest(request)}
+                      />
+                    ))}
+                    {!group.length && (
+                      <div className="board-empty">
+                        <Icon name="check" size={18} />
+                        No matching requests
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <RequestTable requests={filtered} onOpenRequest={onOpenRequest} />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RequestCard({
+  request,
+  onOpen,
+}: {
+  request: MaintenanceRequest;
+  onOpen: () => void;
+}) {
+  return (
+    <button className="request-card" type="button" onClick={onOpen}>
+      <span className="request-card__topline">
+        <span className={priorityClass(request.priority)}>
+          {request.priority}
+        </span>
+        <small>{request.id}</small>
+      </span>
+      <strong>{request.title}</strong>
+      <span className="request-location">
+        <Icon name="map" size={14} />
+        {request.location}
+      </span>
+      <p>{request.description}</p>
+      <span className="request-tags">
+        <span>
+          <Icon name="tool" size={13} />
+          {request.engineer}
+        </span>
+        <span>{request.category}</span>
+      </span>
+      <span className="request-card__footer">
+        <span className="mini-avatar">
+          {request.assignee ? request.assignee.charAt(0) : "—"}
+        </span>
+        <span>
+          <small>{request.status}</small>
+          <strong>{formatDate(request.nextUpdateAt ?? request.dueAt, true)}</strong>
+        </span>
+        <span className="comment-count">
+          <Icon name="message" size={14} />
+          {request.commentCount}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function RequestTable({
+  requests,
+  onOpenRequest,
+}: {
+  requests: MaintenanceRequest[];
+  onOpenRequest: (request: MaintenanceRequest) => void;
+}) {
+  return (
+    <div className="table-scroll">
+      <table className="data-table request-table">
+        <thead>
+          <tr>
+            <th>Request</th>
+            <th>Location</th>
+            <th>Priority</th>
+            <th>Engineer</th>
+            <th>Status</th>
+            <th>Assigned to</th>
+            <th>Next update</th>
+            <th aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map((request) => (
+            <tr key={request.id}>
+              <td>
+                <button
+                  className="table-primary"
+                  type="button"
+                  onClick={() => onOpenRequest(request)}
+                >
+                  <strong>{request.title}</strong>
+                  <span>
+                    {request.id} · {request.source}
+                  </span>
+                </button>
+              </td>
+              <td>{request.location}</td>
+              <td>
+                <span className={priorityClass(request.priority)}>
+                  {request.priority}
+                </span>
+              </td>
+              <td>{request.engineer}</td>
+              <td>
+                <span className="status-chip">{request.status}</span>
+              </td>
+              <td>{request.assignee ?? "Unassigned"}</td>
+              <td>{formatDate(request.nextUpdateAt, true)}</td>
+              <td>
+                <button
+                  className="icon-button table-open"
+                  type="button"
+                  onClick={() => onOpenRequest(request)}
+                  aria-label={`Open ${request.id}`}
+                >
+                  <Icon name="chevron" size={16} />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!requests.length && (
+        <div className="table-empty">
+          <Icon name="search" size={22} />
+          <strong>No matching requests</strong>
+          <span>Try a different search or filter.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/**
+ * What Overview and Reports show when the job list could not be read.
+ *
+ * Deliberately has no numbers on it. The alternative — the real panels drawn
+ * from an empty array — reads as a quiet month rather than a failure, and does
+ * it in the two places somebody goes specifically to find out how much has been
+ * spent.
+ */
+function WorkspaceUnavailable({
+  onRetry,
+  busy,
+}: {
+  onRetry: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="section-stack">
+      <section className="panel">
+        <div className="view-empty">
+          <h2>Your workspace could not be read</h2>
+          <p>
+            Nothing is shown here rather than something invented — every figure on
+            this screen is counted from your jobs, and they did not load. Your data
+            is not affected.
+          </p>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={onRetry}
+            disabled={busy}
+          >
+            <Icon name="refresh" size={17} />
+            {busy ? "Trying again…" : "Try again"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ComplianceView({
+  stores: storeRows,
+  complianceRecords,
+  onManage,
+  onNotify,
+}: {
+  stores: StoreRecord[];
+  complianceRecords: WorkspaceSnapshot["compliance"];
+  onManage: (id?: string | null) => void;
+  onNotify: (message: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"All" | ComplianceState>("All");
+  const [portfolio, setPortfolio] = useState("all");
+  const [expiryWindow, setExpiryWindow] = useState("all");
+  const [showAll, setShowAll] = useState(false);
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const now = useCurrentTime();
+
+  /*
+   * The register is the workspace's compliance records, not the site table's.
+   *
+   * This screen used to read `stores[].compliance`, which meant it could only
+   * ever describe stores that have a row in `sites` — ten seeded, fictional
+   * ones. The Store Documentation board holds thirty-one real stores, and
+   * twenty-one of them appeared on no compliance surface at all, including six
+   * of the seven stores with an expired certificate. `/api/workspace` now
+   * derives `compliance` from that board, so reading it here is what puts the
+   * estate on the screen. Stores that are in `sites` still resolve to their
+   * site id, so the portfolio filter, the drawer and Manage register keep
+   * working exactly as before.
+   */
+  const scopedCompliance = useMemo(() => {
+    if (portfolio === "all") return complianceRecords;
+    return complianceRecords.filter((record) => record.siteId === portfolio);
+  }, [complianceRecords, portfolio]);
+
+  const records = useMemo(
+    () => scopedCompliance.filter((record) => record.state !== "Not required"),
+    [scopedCompliance],
+  );
+
+  /** Every store the register speaks for, whether or not it has a `sites` row. */
+  const registerPortfolios = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const record of complianceRecords) {
+      if (!byId.has(record.siteId)) byId.set(record.siteId, record.siteName);
+    }
+    return [
+      { value: "all", label: "All portfolios" },
+      ...[...byId]
+        .map(([value, label]) => ({ value, label }))
+        .sort((left, right) => left.label.localeCompare(right.label, "en-GB")),
+    ];
+  }, [complianceRecords]);
+
+  const counts = useMemo(() => ({
+    Compliant: records.filter((record) => record.state === "Compliant").length,
+    "Expiring soon": records.filter((record) => record.state === "Expiring soon").length,
+    Expired: records.filter((record) => record.state === "Expired").length,
+    Missing: records.filter((record) => record.state === "Missing").length,
+  }), [records]);
+  const compliantPercent = Math.round(
+    (counts.Compliant / Math.max(records.length, 1)) * 100,
+  );
+  const managerFor = (siteId: string) =>
+    storeRows.find((store) => store.id === siteId)?.manager ?? "";
+  const needle = query.trim().toLowerCase();
+  const filteredRecords = records.filter((record) => {
+    const matchesSearch = !needle ||
+      [record.siteName, managerFor(record.siteId), record.kind, record.state]
+        .some((value) => value.toLowerCase().includes(needle));
+    const matchesStatus = filter === "All" || record.state === filter;
+    const matchesWindow = expiryWindow === "all" ||
+      !record.expiry ||
+      new Date(record.expiry).getTime() <= now + Number(expiryWindow) * 86_400_000;
+    return matchesSearch && matchesStatus && matchesWindow;
+  });
+  const expiringTypes = Array.from(
+    records
+      .filter((record) => record.state === "Expired" || record.state === "Expiring soon" ||
+        Boolean(record.expiry && new Date(record.expiry).getTime() <= now + 90 * 86_400_000))
+      .reduce((map, record) => {
+        map.set(record.kind, (map.get(record.kind) ?? 0) + 1);
+        return map;
+      }, new Map<string, number>()),
+  )
+    .map(([label, value], index) => ({
+      label,
+      value,
+      color: ["#f05b22", "#f68b1f", "#f0a91f", "#5c82af", "#6f8793"][index % 5],
+    }))
+    .sort((left, right) => right.value - left.value);
+  const scoreSegments: DonutSegment[] = [
+    { label: "Compliant", value: counts.Compliant, color: "#12b4a8" },
+    { label: "Expiring soon", value: counts["Expiring soon"], color: "#f0a91f" },
+    { label: "Expired", value: counts.Expired, color: "#e2445c" },
+    { label: "Missing", value: counts.Missing, color: "#5c82af" },
+  ];
+  /**
+   * Who chases a certificate, from the Store Documentation capture.
+   *
+   * This used to substring-match the requirement name, which had no answer for
+   * RAMS, the PLI or the store drawing — they contain none of the keywords, so
+   * all three fell through to the store manager. Anything the board does not
+   * define still falls back to the manager, which is the right answer for a
+   * requirement an admin has added themselves.
+   */
+  const responsibilityFor = (kind: string, siteId: string) =>
+    storeDocumentationResponsibility.get(kind) ||
+    managerFor(siteId) ||
+    "Store manager";
+
+  /**
+   * The store behind the "View" button.
+   *
+   * Most of the estate has no `sites` row — the Store Documentation board is
+   * the only place twenty-one of these stores exist — so the drawer is built
+   * from the register itself, taking the site record where there is one. Store
+   * type and address come off the board row rather than being left blank or
+   * invented.
+   */
+  const selectedStore = useMemo<StoreRecord | null>(() => {
+    if (!selectedSiteId) return null;
+    const forSite = complianceRecords.filter((record) => record.siteId === selectedSiteId);
+    if (forSite.length === 0) return null;
+    const documents = forSite.map((record) => ({
+      kind: record.kind,
+      state: record.state,
+      expiry: record.expiry,
+      fileCount: record.fileCount,
+    }));
+    const known = storeRows.find((store) => store.id === selectedSiteId);
+    if (known) return { ...known, compliance: documents };
+    return {
+      id: selectedSiteId,
+      name: forSite[0].siteName,
+      type: forSite[0].siteType || "Store",
+      region: "",
+      lifecycle: "",
+      status: "",
+      address: forSite[0].siteAddress || "No address on the board",
+      manager: "",
+      openRequests: 0,
+      annualBudgetPence: null,
+      compliance: documents,
+    };
+  }, [complianceRecords, selectedSiteId, storeRows]);
+
+  return (
+    <div className="section-stack analytics-page">
+      <section className="analytics-page-heading analytics-page-heading--wide-controls">
+        <div><span>Portfolio assurance</span><h1>Compliance overview</h1></div>
+        {/* A lapsed certificate is a job somebody has to do. Raised from the
+            screen that reports it rather than retyped into the board. */}
+        <RaiseTicketButton
+          context={{ section: "Compliance" }}
+          onRaised={(ticket) =>
+            onNotify(`${ticket.reference ?? ticket.title} raised for ${ticket.siteName}.`)
+          }
+          onNotify={onNotify}
+        />
+        <AnalyticsToolbar
+          portfolio={portfolio}
+          portfolios={registerPortfolios}
+          onPortfolioChange={setPortfolio}
+          period={expiryWindow}
+          periods={[
+            { value: "all", label: "All expiry dates" },
+            { value: "30", label: "Next 30 days" },
+            { value: "90", label: "Next 90 days" },
+            { value: "180", label: "Next 180 days" },
+          ]}
+          onPeriodChange={setExpiryWindow}
+          onExport={() => downloadTableCsv(
+            "maintsupp-compliance",
+            ["Site", "Requirement", "Responsibility", "Due date", "Status"],
+            filteredRecords.map((record) => [record.siteName, record.kind, responsibilityFor(record.kind, record.siteId), record.expiry, record.state]),
+          )}
+          exportLabel="Export register"
+        >
+          <button className="analytics-toolbar__button" type="button" onClick={() => onManage(null)}>
+            <Icon name="plus" size={17} /> Manage register
+          </button>
+          <label className="analytics-toolbar__search">
+            <Icon name="search" size={17} />
+            <input aria-label="Search certificates" type="search" placeholder="Search certificates…" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          <label>
+            <Icon name="shield" size={17} />
+            <select aria-label="Certificate status" value={filter} onChange={(event) => setFilter(event.target.value as "All" | ComplianceState)}>
+              <option>All</option><option>Compliant</option><option>Expiring soon</option><option>Expired</option><option>Missing</option>
+            </select>
+          </label>
+        </AnalyticsToolbar>
+      </section>
+
+      <section className="analytics-compliance-grid">
+        <article className="analytics-panel analytics-compliance-score">
+          <header><h2>Compliance score</h2></header>
+          <div className="analytics-compliance-score__body">
+            <DonutChart segments={scoreSegments} value={`${compliantPercent}%`} label={compliantPercent >= 80 ? "On track" : "Action required"} />
+            <DonutLegend segments={scoreSegments} />
+          </div>
+          <p>{counts.Compliant} of {records.length} requirements on track</p>
+        </article>
+
+        <article className="analytics-panel analytics-certificate-register">
+          <header><h2>Certificate register</h2><span>{filteredRecords.length} records</span></header>
+          <div className="table-scroll">
+            <table className="analytics-table analytics-table--mobile-cards">
+              <thead><tr><th>Site</th><th>Requirement</th><th>Responsibility</th><th>Due date</th><th>Status</th><th aria-label="Actions" /></tr></thead>
+              <tbody>
+                {filteredRecords.slice(0, showAll ? filteredRecords.length : 8).map((record) => (
+                  <tr key={record.id}>
+                    <td data-label="Site"><strong>{record.siteName}</strong></td>
+                    <td data-label="Requirement">{record.kind}</td>
+                    <td data-label="Responsibility">{responsibilityFor(record.kind, record.siteId)}</td>
+                    <td data-label="Due date">{record.expiry ? formatDate(record.expiry) : "—"}</td>
+                    <td data-label="Status"><span className={complianceTone(record.state)}><span />{record.state}</span></td>
+                    <td data-label="Actions"><div className="table-row-actions"><button className="table-text-action" type="button" onClick={() => setSelectedSiteId(record.siteId)}>View</button><button className="table-text-action" type="button" onClick={() => onManage(record.id.startsWith("board:") ? null : record.id)}>Edit <Icon name="chevron" size={14} /></button></div></td>
+                  </tr>
+                ))}
+                {!filteredRecords.length && <tr><td className="analytics-empty" colSpan={6}>No certificate records match these filters.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {filteredRecords.length > 8 && (
+            <button className="analytics-panel-footer" type="button" onClick={() => setShowAll((current) => !current)}>
+              {showAll ? "Show summary" : "View all certificates"} <Icon name="chevron" size={15} />
+            </button>
+          )}
+        </article>
+      </section>
+
+      <section className="analytics-panel analytics-expiry-types">
+        <header><div><h2>Expiring certificate types</h2><span>Certificates expired or due in the next 90 days</span></div></header>
+        <HorizontalBars items={expiringTypes.length ? expiringTypes : [{ label: "No certificates due", value: 0, color: "#5c82af" }]} />
+        <button className="analytics-panel-footer" type="button" onClick={() => { setFilter("Expiring soon"); setExpiryWindow("90"); }}>
+          View all expiring <Icon name="chevron" size={15} />
+        </button>
+      </section>
+
+      {/* A twelve-month forward view, so renewals are planned rather than chased. */}
+      <section className="insight-grid">
+        <ComplianceExpiryTimeline compliance={scopedCompliance} now={now} />
+      </section>
+
+      {selectedStore && (
+        <StoreComplianceDrawer
+          store={selectedStore}
+          onClose={() => setSelectedSiteId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function CalendarView({
+  requests,
+  planned,
+  onManage,
+  onOpenRequest,
+}: {
+  requests: MaintenanceRequest[];
+  planned: WorkspacePlannedItem[];
+  onManage: (id?: string | null) => void;
+  onOpenRequest: (request: MaintenanceRequest) => void;
+}) {
+  const today = useMemo(() => new Date(), []);
+  const [cursor, setCursor] = useState(
+    () => new Date(today.getFullYear(), today.getMonth(), 1),
+  );
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const monthLabel = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+  }).format(cursor);
+  const firstOffset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const previousMonthDays = new Date(year, month, 0).getDate();
+  const cells = useMemo(
+    () =>
+      Array.from({ length: 42 }, (_, index) => {
+        const day = index - firstOffset + 1;
+        if (day < 1) {
+          return {
+            day: previousMonthDays + day,
+            current: false,
+            date: new Date(year, month - 1, previousMonthDays + day),
+          };
+        }
+        if (day > daysInMonth) {
+          return {
+            day: day - daysInMonth,
+            current: false,
+            date: new Date(year, month + 1, day - daysInMonth),
+          };
+        }
+        return { day, current: true, date: new Date(year, month, day) };
+      }),
+    [daysInMonth, firstOffset, month, previousMonthDays, year],
+  );
+  const eventMap = useMemo(() => {
+    const map = new Map<string, MaintenanceRequest[]>();
+    for (const request of requests) {
+      if (!request.dueAt) continue;
+      const due = new Date(request.dueAt);
+      const key = `${due.getFullYear()}-${due.getMonth()}-${due.getDate()}`;
+      map.set(key, [...(map.get(key) ?? []), request]);
+    }
+    return map;
+  }, [requests]);
+
+  return (
+    <div className="section-stack">
+      <section className="section-header">
+        <div>
+          <span className="eyebrow-chip">
+            <Icon name="calendar" size={15} />
+            Planned visits & deadlines
+          </span>
+          <h1>Operations calendar</h1>
+          <p>
+            See booked visits, response deadlines and compliance renewals in one
+            schedule.
+          </p>
+        </div>
+        <div className="section-header__actions">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() =>
+              setCursor(new Date(today.getFullYear(), today.getMonth(), 1))
+            }
+          >
+            Today
+          </button>
+          <button className="primary-button" type="button" onClick={() => onManage(null)}><Icon name="plus" size={17} />Manage planned work</button>
+        </div>
+      </section>
+
+      {/*
+        The calendar first — Stage 23.
+        
+        Planned maintenance opened on the register: a list of the next six
+        tasks, with the month grid below the fold on a phone and often below it
+        on a laptop. The register answers "what is scheduled"; the calendar
+        answers "what is scheduled WHEN", which is the question somebody opens
+        a planned-maintenance screen to ask, and is how monday's calendar view
+        behaves. The register keeps everything it had, one scroll down.
+      */}
+      <section className="panel calendar-panel">
+        <div className="calendar-toolbar">
+          <div>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Previous month"
+              onClick={() => setCursor(new Date(year, month - 1, 1))}
+            >
+              <Icon
+                name="chevron"
+                size={18}
+                style={{ transform: "rotate(180deg)" }}
+              />
+            </button>
+            <h2>{monthLabel}</h2>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Next month"
+              onClick={() => setCursor(new Date(year, month + 1, 1))}
+            >
+              <Icon name="chevron" size={18} />
+            </button>
+          </div>
+          <div className="calendar-legend">
+            <span>
+              <i className="calendar-dot calendar-dot--urgent" />
+              Urgent
+            </span>
+            <span>
+              <i className="calendar-dot calendar-dot--visit" />
+              Booked visit
+            </span>
+            <span>
+              <i className="calendar-dot calendar-dot--standard" />
+              Standard
+            </span>
+          </div>
+        </div>
+        <div className="calendar-grid">
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
+            <div className="calendar-weekday" key={day}>
+              {day}
+            </div>
+          ))}
+          {cells.map((cell, index) => {
+            const events =
+              eventMap.get(
+                `${cell.date.getFullYear()}-${cell.date.getMonth()}-${cell.date.getDate()}`,
+              ) ?? [];
+            const isToday =
+              cell.date.getFullYear() === today.getFullYear() &&
+              cell.date.getMonth() === today.getMonth() &&
+              cell.date.getDate() === today.getDate();
+            return (
+              <div
+                className={`calendar-cell${cell.current ? "" : " is-muted"}${
+                  isToday ? " is-today" : ""
+                }`}
+                key={`${year}-${month}-${cell.day}-${cell.current}-${index}`}
+              >
+                <span>{cell.day}</span>
+                <div className="calendar-events">
+                  {events.slice(0, 3).map((event) => (
+                    <button
+                      type="button"
+                      className={`calendar-event calendar-event--${
+                        event.priority === "Urgent"
+                          ? "urgent"
+                          : event.stage === "Booked"
+                            ? "visit"
+                            : "standard"
+                      }`}
+                      key={event.id}
+                      onClick={() => onOpenRequest(event)}
+                      title={`${event.id}: ${event.title}`}
+                    >
+                      <strong>{event.title}</strong>
+                      <small>{event.location}</small>
+                    </button>
+                  ))}
+                  {events.length > 3 && <small>+{events.length - 3} more</small>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="panel planned-register-panel">
+        <div className="planned-register-panel__heading"><div><span>Shared planned maintenance</span><strong>{planned.filter((item) => item.status !== "Cancelled").length} active tasks</strong></div><button type="button" onClick={() => onManage(null)}>Open full register <Icon name="chevron" size={15} /></button></div>
+        <div className="planned-register-list">
+          {planned.filter((item) => item.status !== "Cancelled").slice(0, 6).map((item) => (
+            <button type="button" key={item.id} onClick={() => onManage(item.id)}>
+              <span className="planned-register-date"><strong>{new Date(item.nextDueAt).getDate()}</strong><small>{new Intl.DateTimeFormat("en-GB", { month: "short" }).format(new Date(item.nextDueAt))}</small></span>
+              <span><strong>{item.title}</strong><small>{item.siteName} · {item.frequency}</small></span>
+              <span className="status-chip">{item.status}</span>
+              <Icon name="chevron" size={15} />
+            </button>
+          ))}
+          {!planned.length && <div className="planned-register-empty">Add a planned task to connect recurring work to this calendar.</div>}
+        </div>
+      </section>
+
+    </div>
+  );
+}
+
+function DocumentsView({ files }: { files: FileRecord[] }) {
+  const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
+  const filtered = files.filter((file) =>
+    [file.name, file.kind, file.site, file.requestId ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  return (
+    <div className="section-stack">
+      <section className="section-header">
+        <div>
+          <span className="eyebrow-chip">
+            <Icon name="folder" size={15} />
+            Searchable evidence
+          </span>
+          <h1>Documents & evidence</h1>
+          <p>
+            Maintenance photos, certificates, approvals and invoices with a
+            clear owner and source.
+          </p>
+        </div>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => downloadFileRegister(filtered)}
+        >
+          <Icon name="download" size={17} />
+          Export register
+        </button>
+      </section>
+
+      <section className="document-stat-grid">
+        <div>
+          <Icon name="folder" size={20} />
+          <span>
+            <small>Total documents</small>
+            <strong>{files.length}</strong>
+          </span>
+        </div>
+        <div>
+          <Icon name="upload" size={20} />
+          <span>
+            <small>Added this month</small>
+            <strong>{files.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}</strong>
+          </span>
+        </div>
+        <div>
+          <Icon name="alert" size={20} />
+          <span>
+            <small>Require attention</small>
+            <strong>{files.filter((file) => file.status === "Expiring soon").length}</strong>
+          </span>
+        </div>
+      </section>
+
+      <section className="panel documents-panel">
+        <div className="workspace-toolbar">
+          <label className="search-field">
+            <Icon name="search" size={18} />
+            <input
+              aria-label="Search documents"
+              placeholder="Search files, sites or work order IDs…"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div className="view-switch" aria-label="Change document view">
+            <button
+              type="button"
+              className={viewMode === "board" ? "is-active" : ""}
+              onClick={() => setViewMode("board")}
+              aria-label="Grid view"
+            >
+              <Icon name="grid" size={17} />
+            </button>
+            <button
+              type="button"
+              className={viewMode === "list" ? "is-active" : ""}
+              onClick={() => setViewMode("list")}
+              aria-label="List view"
+            >
+              <Icon name="list" size={17} />
+            </button>
+          </div>
+        </div>
+
+        {viewMode === "list" ? (
+          <div className="table-scroll">
+            <table className="data-table document-table">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Type</th>
+                  <th>Site</th>
+                  <th>Work order</th>
+                  <th>Uploaded</th>
+                  <th>Size</th>
+                  <th>Status</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((file) => (
+                  <tr key={file.id}>
+                    <td>
+                      <button
+                        type="button"
+                        className="file-name-cell"
+                        onClick={() => setSelectedFile(file)}
+                      >
+                        <span>
+                          <Icon name="document" size={17} />
+                        </span>
+                        <strong>{file.name}</strong>
+                      </button>
+                    </td>
+                    <td>{file.kind}</td>
+                    <td>{file.site}</td>
+                    <td>{file.requestId ?? "—"}</td>
+                    <td>{formatDate(file.uploadedAt)}</td>
+                    <td>{file.size}</td>
+                    <td>
+                      <span
+                        className={`file-status file-status--${file.status
+                          .toLowerCase()
+                          .replaceAll(" ", "-")}`}
+                      >
+                        {file.status}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className="icon-button table-open"
+                        type="button"
+                        aria-label={`Open ${file.name}`}
+                        onClick={() => setSelectedFile(file)}
+                      >
+                        <Icon name="chevron" size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="document-grid">
+            {filtered.map((file) => (
+              <button
+                type="button"
+                key={file.id}
+                onClick={() => setSelectedFile(file)}
+              >
+                <span className="document-grid__icon">
+                  <Icon name="document" size={24} />
+                </span>
+                <strong>{file.name}</strong>
+                <span>{file.kind}</span>
+                <small>
+                  {file.site} · {file.size}
+                </small>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {selectedFile && (
+        <FileDetailDrawer
+          file={selectedFile}
+          onClose={() => setSelectedFile(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+
+/**
+ * A contractor's phone and email, as things you can act on.
+ *
+ * Both columns have existed on `contractors` since Stage 0 and the workspace
+ * payload has always carried them; nothing rendered either, so the register
+ * told you who a contractor was and gave you no way to reach them. On a phone —
+ * which is where this is used, standing in a shop — a number you cannot tap is
+ * a number you have to memorise and retype.
+ *
+ * `tel:` and `mailto:` are the whole mechanism. A phone opens the dialer, a
+ * desktop opens whatever the person has configured, and if they have nothing
+ * configured the text is still selectable. The number is printed as stored
+ * rather than reformatted: an operator recognises the spacing they typed, and
+ * guessing at a national format is how a leading zero goes missing.
+ *
+ * A contractor with neither is not an error — most rows have no phone yet — so
+ * it says so quietly rather than rendering an empty cell that reads as a bug.
+ */
+function ContractorContact({
+  contractor,
+}: {
+  contractor: { name: string; email?: string | null; phone?: string | null };
+}) {
+  const phone = (contractor.phone ?? "").trim();
+  const email = (contractor.email ?? "").trim();
+
+  if (!phone && !email) {
+    return <span className="contractor-contact__none">No contact details</span>;
+  }
+
+  return (
+    <span className="contractor-contact">
+      {phone && (
+        <a
+          className="contractor-contact__link"
+          // Strip spacing for the dial string only; the label keeps what was typed.
+          href={`tel:${phone.replace(/[^\d+]/g, "")}`}
+          aria-label={`Call ${contractor.name} on ${phone}`}
+        >
+          <Icon name="message" size={14} />
+          {phone}
+        </a>
+      )}
+      {email && (
+        <a
+          className="contractor-contact__link"
+          href={`mailto:${email}`}
+          aria-label={`Email ${contractor.name} at ${email}`}
+        >
+          <Icon name="inbox" size={14} />
+          {email}
+        </a>
+      )}
+    </span>
+  );
+}
+
+function ContractorsView({
+  contractors: registeredContractors,
+  requests,
+  onManage,
+  onNotify,
+}: {
+  contractors: WorkspaceContractor[];
+  requests: MaintenanceRequest[];
+  onManage: (id?: string | null) => void;
+  /* Toasts the raise control's outcome, the same channel every other screen
+     reports through. */
+  onNotify: (message: string) => void;
+}) {
+  const fallbackContractors = useMemo<WorkspaceContractor[]>(
+    () =>
+      Array.from(
+        requests.reduce((map, request) => {
+          const name = request.contractor ?? "Unassigned";
+          const current = map.get(name) ?? { name, assignedJobs: 0, completedJobs: 0, spend: 0, urgentJobs: 0, trades: new Set<string>() };
+          current.assignedJobs += 1;
+          current.completedJobs += request.stage === "Completed" ? 1 : 0;
+          current.spend += request.cost ?? 0;
+          current.urgentJobs += request.priority === "Urgent" && request.stage !== "Completed" ? 1 : 0;
+          current.trades.add(request.category);
+          map.set(name, current);
+          return map;
+        }, new Map<string, { name: string; assignedJobs: number; completedJobs: number; spend: number; urgentJobs: number; trades: Set<string> }>()),
+      ).map(([, contractor]) => ({
+        id: `contractor-${contractor.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        name: contractor.name,
+        email: null,
+        phone: null,
+        serviceCategories: Array.from(contractor.trades),
+        coverageAreas: ["UK"],
+        certifications: [],
+        insuranceExpiry: null,
+        availability: contractor.name === "Unassigned" ? "Inactive" : "Available",
+        rating: null,
+        active: contractor.name !== "Unassigned",
+        assignedJobs: contractor.assignedJobs,
+        completedJobs: contractor.completedJobs,
+        urgentJobs: contractor.urgentJobs,
+        spend: contractor.spend,
+      })),
+    [requests],
+  );
+  const contractors = registeredContractors.length ? registeredContractors : fallbackContractors;
+
+  return (
+    <div className="section-stack">
+      <section className="section-header"><div><span className="eyebrow-chip"><Icon name="users" size={15} />Managed network</span><h1>Contractors</h1><p>Qualifications, coverage, assigned work, completion performance and costs in one operational register.</p></div>
+        <div className="section-header__actions">
+          {/* Somebody looking at a contractor is usually about to give them
+              something to do. */}
+          <RaiseTicketButton
+            context={{ section: "Contractors" }}
+            onRaised={(ticket) =>
+              onNotify(`${ticket.reference ?? ticket.title} raised for ${ticket.siteName}.`)
+            }
+            onNotify={onNotify}
+          />
+          <button className="primary-button" type="button" onClick={() => onManage(null)}><Icon name="plus" size={17} />Manage contractors</button>
+        </div></section>
+      <section className="site-stat-grid">
+        <div><span className="site-stat-icon"><Icon name="users" size={19} /></span><small>Contractors</small><strong>{contractors.filter((item) => item.name !== "Unassigned").length}</strong></div>
+        <div><span className="site-stat-icon site-stat-icon--teal"><Icon name="check" size={19} /></span><small>Completed jobs</small><strong>{contractors.reduce((sum, item) => sum + item.completedJobs, 0)}</strong></div>
+        <div><span className="site-stat-icon site-stat-icon--orange"><Icon name="alert" size={19} /></span><small>Urgent actions</small><strong>{contractors.reduce((sum, item) => sum + item.urgentJobs, 0)}</strong></div>
+        <div><span className="site-stat-icon site-stat-icon--green"><Icon name="chart" size={19} /></span><small>Tracked spend</small><strong>{formatMoney(contractors.reduce((sum, item) => sum + item.spend, 0))}</strong></div>
+      </section>
+      <section className="panel sites-panel"><div className="table-scroll"><table className="data-table sites-table">
+        <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
+        <tbody>{contractors.map((contractor) => (
+          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
+        ))}</tbody>
+      </table></div></section>
+    </div>
+  );
+}
+
+function ReportsView({
+  requests,
+  stores: storeRows,
+  onNavigate,
+}: {
+  requests: MaintenanceRequest[];
+  stores: StoreRecord[];
+  onNavigate: (section: Section) => void;
+}) {
+  const now = useCurrentTime();
+  const [portfolio, setPortfolio] = useState("all");
+  /*
+   * "Last 12 months" rather than the old "365". The same twelve months of work,
+   * but as whole calendar months, so the chart underneath draws twelve labelled
+   * monthly buckets instead of a rolling window that starts mid-month.
+   */
+  const [period, setPeriod] = useState("12m");
+  /*
+   * Highest first, and the choice is remembered.
+   *
+   * Per person per BROWSER, not per account: `localStorage` is the only
+   * preference store this product has for a view setting — the board keeps its
+   * collapsed groups there and the theme toggle its palette — and the one
+   * server-side store, /api/dashboard-layout, records panel order and
+   * hidden-ness and nothing else. The same user on a second device gets the
+   * default back.
+   */
+  const [siteSpendOrder, setSiteSpendOrder] = useStoredSortDirection(
+    "maintsupp:reports:site-spend-order",
+  );
+  const [showAllRepeat, setShowAllRepeat] = useState(false);
+  /*
+   * The header cell that "Edit layout" is drawn into.
+   *
+   * The owner marked the control — which floated in its own bar under the
+   * Spend trend chart — and marked the empty space in this page's header row
+   * beside "All portfolios", the period picker and "Export spend", and asked
+   * for it there. `DashboardWidgets` still owns the layout, the panels and the
+   * saving; it is handed this node and portals its bar into it, so nothing
+   * about the arrangement moved, only the button. Overview passes no slot and
+   * keeps its bar exactly where it was.
+   *
+   * A callback ref rather than `getElementById`: it fires during the commit
+   * that creates the node, so the control appears on the first paint that has
+   * somewhere to put it, with no polling and no ordering assumption between
+   * two siblings.
+   */
+  const [layoutSlot, setLayoutSlot] = useState<HTMLElement | null>(null);
+  const periodWindow = resolvePeriod(period, now);
+  const scopedRequests = useMemo(
+    () => requests.filter((request) =>
+      (portfolio === "all" || request.siteId === portfolio) &&
+      withinAnalyticsPeriod(request.requestedAt, period, now)),
+    [now, period, portfolio, requests],
+  );
+  const analytics = useMemo(() => {
+    const spendBySite = new Map<string, number>();
+    let total = 0;
+    let reactive = 0;
+    let planned = 0;
+    let projects = 0;
+    for (const request of scopedRequests) {
+      const cost = request.cost ?? 0;
+      total += cost;
+      spendBySite.set(request.siteId, (spendBySite.get(request.siteId) ?? 0) + cost);
+      // One classifier, shared with the Reactive vs planned panel below.
+      const bucket = classifySpend(request);
+      if (bucket === "planned") planned += cost;
+      else if (bucket === "projects") projects += cost;
+      else reactive += cost;
+    }
+    const repeats = Array.from(
+      scopedRequests.reduce((map, request) => {
+        const current = map.get(request.category) ?? {
+          issue: request.category,
+          sites: new Set<string>(),
+          orders: 0,
+          spend: 0,
+          latest: request.requestedAt,
+        };
+        current.sites.add(request.siteId);
+        current.orders += 1;
+        current.spend += request.cost ?? 0;
+        if (new Date(request.requestedAt) > new Date(current.latest)) current.latest = request.requestedAt;
+        map.set(request.category, current);
+        return map;
+      }, new Map<string, { issue: string; sites: Set<string>; orders: number; spend: number; latest: string }>()),
+    )
+      .map(([, item]) => ({
+        ...item,
+        frequency: item.orders >= 4 ? "Weekly" : item.orders >= 2 ? "Fortnightly" : "Monthly",
+      }))
+      /*
+       * Orders, then spend, then name. The sort was on orders alone, which
+       * leaves every tie in whatever order the rows happened to arrive in — so
+       * the same period could list the same two categories either way round on
+       * two loads, and no SQL query could reproduce the table.
+       */
+      .sort(
+        (left, right) =>
+          right.orders - left.orders ||
+          right.spend - left.spend ||
+          left.issue.localeCompare(right.issue),
+      );
+    return {
+      total,
+      reactive,
+      planned,
+      projects,
+      bySite: sortBySpend(
+        storeRows
+          .map((store) => ({ id: store.id, label: store.name, value: spendBySite.get(store.id) ?? 0 }))
+          .filter((item) => item.value > 0),
+        siteSpendOrder,
+      ),
+      repeats,
+    };
+  }, [scopedRequests, siteSpendOrder, storeRows]);
+  const spendTrend = periodSpendSeries(scopedRequests, period, now);
+
+  return (
+    <div className="section-stack analytics-page">
+      <section className="analytics-page-heading">
+        <div>
+          <span>Decision-ready reporting</span>
+          <h1>Spend and reporting</h1>
+          {/*
+            The dates actually applied, under the heading. "Last quarter" does
+            not tell anyone which three months they are reading, and every
+            figure below depends on the answer.
+          */}
+          <PeriodCaption period={period} now={now} matched={scopedRequests.length} />
+        </div>
+        <AnalyticsToolbar
+          portfolio={portfolio}
+          portfolios={portfolioOptions(storeRows)}
+          onPortfolioChange={setPortfolio}
+          periodControl={<PeriodPicker value={period} onChange={setPeriod} now={now} />}
+          onExport={() => downloadCsv(scopedRequests)}
+          exportLabel="Export spend"
+          slotRef={setLayoutSlot}
+        />
+      </section>
+
+      <section className="analytics-metric-grid report-metric-grid">
+        {/*
+          An empty period reads as a dash and says so, never as £0.
+          £0 is a result — it says the portfolio spent nothing — and on a period
+          that simply holds no work that is a different and untrue claim.
+        */}
+        <AnalyticsMetricCard label="This period" value={scopedRequests.length ? formatMoney(analytics.total) : "—"} detail={scopedRequests.length ? `${scopedRequests.length} work orders` : "Nothing in this period"} icon="chart" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} />
+        <AnalyticsMetricCard label="Reactive" value={scopedRequests.length ? formatMoney(analytics.reactive) : "—"} detail="Day-to-day maintenance" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.tier < 4 && (request.cost ?? 0) < 1000, period, now)} />
+        <AnalyticsMetricCard label="Planned" value={scopedRequests.length ? formatMoney(analytics.planned) : "—"} detail="Compliance and planned work" icon="calendar" tone="blue" trend={periodTrend(scopedRequests, (request) => request.tier >= 4 || request.category.toLowerCase().includes("compliance"), period, now)} />
+        <AnalyticsMetricCard label="Projects" value={scopedRequests.length ? formatMoney(analytics.projects) : "—"} detail="Higher-value works" icon="document" tone="green" trend={periodTrend(scopedRequests, (request) => (request.cost ?? 0) >= 1000, period, now)} />
+      </section>
+
+      <section className="analytics-report-grid">
+        <article className="analytics-panel analytics-report-trend">
+          <header>
+            <div><h2>Spend trend</h2><strong>{scopedRequests.length ? formatMoney(analytics.total) : "—"}</strong><span>{periodWindow.recognised ? periodWindow.label : "No period selected"}</span></div>
+          </header>
+          {/*
+            The "Last 6 months / Last 12 months" control that sat here has gone.
+            It ignored the period above it, so a reader could set the tiles to
+            July and the chart to twelve months and be shown two different
+            windows on one screen, each labelled only "Spend trend". The period
+            IS the range now, and the buckets take their granularity from it —
+            hours across a day, days across a month, months across a year.
+          */}
+          {!periodWindow.recognised
+            ? <p className="analytics-empty">{periodWindow.reason}</p>
+            : spendTrend.some((point) => point.value > 0)
+              ? <TrendChart items={spendTrend} valueFormatter={(value) => formatMoney(Math.round(value))} />
+              : <p className="analytics-empty">{scopedRequests.length
+                  ? `None of the ${scopedRequests.length} jobs in ${periodWindow.label} carries a cost yet.`
+                  : `Nothing in this period — ${periodWindow.label}.`}</p>}
+        </article>
+
+        <article className="analytics-panel analytics-top-sites">
+          <header>
+            <h2>Top sites by spend</h2>
+            {/*
+              Highest first by default — it is a panel about the top. Reversing
+              it answers a real second question, which sites are cheap to run,
+              so it is a control rather than a hidden default.
+            */}
+            <SortDirectionSelect
+              value={siteSpendOrder}
+              onChange={setSiteSpendOrder}
+              label="Order sites by spend"
+            />
+            <button type="button" onClick={() => onNavigate("stores")}>View sites <Icon name="chevron" size={15} /></button>
+          </header>
+          {analytics.bySite.length ? (
+            <HorizontalBars
+              items={analytics.bySite.slice(0, 8)}
+              valueFormatter={(value) => formatMoney(value)}
+              onSelect={setPortfolio}
+            />
+          ) : (
+            <div className="analytics-empty">{periodWindow.recognised
+              ? `No job in ${periodWindow.label} carries a cost, so there is nothing to rank.`
+              : periodWindow.reason}</div>
+          )}
+        </article>
+      </section>
+
+      {/*
+        The spend questions the four tiles above cannot answer: which sites are
+        consistently expensive rather than expensive this period, which fault
+        types keep costing money, and who is doing the work.
+      */}
+      <DashboardWidgets
+        surface="reports"
+        barSlot={layoutSlot}
+        widgets={[
+          {
+            key: "spend-matrix",
+            label: "Spend matrix",
+            // The matrix needs the full row, not a third of it.
+            wide: true,
+            render: () => (
+              <SpendMatrix
+                requests={scopedRequests}
+                stores={storeRows}
+                now={now}
+                period={period}
+                direction={siteSpendOrder}
+              />
+            ),
+          },
+          {
+            key: "cost-by-category",
+            label: "Cost by job type",
+            render: () => <CostByCategory requests={scopedRequests} />,
+          },
+          {
+            key: "spend-budget",
+            label: "Spend against budget",
+            render: () => (
+              <SpendAgainstBudget
+                requests={scopedRequests}
+                sites={storeRows}
+                period={period}
+                now={now}
+              />
+            ),
+          },
+          {
+            key: "contractor-scorecard",
+            label: "Contractor scorecard",
+            render: () => <ContractorScorecard requests={scopedRequests} />,
+          },
+          {
+            key: "reactive-planned",
+            label: "Reactive vs planned",
+            render: () => (
+              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} />
+            ),
+          },
+        ] satisfies DashboardWidget[]}
+      />
+
+      {/* Last on this screen, on the owner's instruction. It is a follow-up
+          list rather than a headline, and it was sitting above the panels
+          people open first. */}
+      <section className="analytics-panel analytics-repeat-panel">
+        <header><h2>Repeat activity</h2><button type="button" onClick={() => setShowAllRepeat((current) => !current)}>{showAllRepeat ? "Show summary" : "View all"}</button></header>
+        <div className="table-scroll">
+          <table className="analytics-table analytics-table--mobile-cards">
+            <thead><tr><th>Issue</th><th>Activity</th><th>Sites</th><th>Orders</th><th>Spend</th><th>Last occurred</th><th>Frequency</th></tr></thead>
+            <tbody>
+              {analytics.repeats.slice(0, showAllRepeat ? analytics.repeats.length : 6).map((item) => (
+                <tr key={item.issue}>
+                  <td data-label="Issue"><strong>{item.issue || "Unlabelled"}</strong></td>
+                  <td data-label="Activity">Investigate, repair and verify</td>
+                  <td data-label="Sites">{item.sites.size}</td>
+                  <td data-label="Orders">{item.orders}</td>
+                  <td data-label="Spend">{item.spend ? formatMoney(item.spend) : "Not quoted"}</td>
+                  <td data-label="Last occurred">{formatDate(item.latest)}</td>
+                  <td data-label="Frequency"><span className="analytics-frequency">{item.frequency}</span></td>
+                </tr>
+              ))}
+              {!analytics.repeats.length && <tr><td className="analytics-empty" colSpan={7}>{periodWindow.recognised
+                ? `Nothing in this period — ${periodWindow.label}.`
+                : periodWindow.reason}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <button className="analytics-panel-footer" type="button" onClick={() => setShowAllRepeat((current) => !current)}>
+          {showAllRepeat ? "Show summary" : "View all repeat activity"} <Icon name="chevron" size={15} />
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function TeamView({
+  userName,
+  userEmail,
+  team,
+  onManage,
+}: {
+  userName: string;
+  userEmail: string;
+  team: WorkspaceMember[];
+  onManage: (id?: string | null) => void;
+}) {
+  const members = team.length
+    ? team
+    : [{ id: "current-user", name: userName, email: userEmail, role: "Super Admin", active: true, lastActive: "Now" }];
+
+  return (
+    <div className="section-stack">
+      <section className="section-header">
+        <div>
+          <span className="eyebrow-chip">
+            <Icon name="users" size={15} />
+            Role-based access
+          </span>
+          <h1>Workspace team</h1>
+          <p>
+            Control who can raise, manage, approve and close work across the
+            portfolio.
+          </p>
+        </div>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={() => onManage(null)}
+        >
+          <Icon name="plus" size={18} />
+          Add team member
+        </button>
+      </section>
+      <section className="panel team-panel">
+        <div className="team-list">
+          {members.map((member) => (
+            <div key={member.id} className={member.active ? "" : "is-inactive"}>
+              <Avatar name={member.name} />
+              <span className="team-person">
+                <strong>{member.name}</strong>
+                <small>{member.email}</small>
+              </span>
+              <span className="role-chip">{member.role}</span>
+              <span className="last-active">{member.lastActive}</span>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`Manage ${member.name}`}
+                onClick={() => onManage(member.id)}
+              >
+                <Icon name="more" size={18} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsView({
+  settings,
+  categories,
+  busy,
+  onSave,
+  onNotify,
+}: {
+  settings: WorkspaceSettings;
+  /** Every category the workspace's jobs actually use. */
+  categories: string[];
+  busy: boolean;
+  onSave: (settings: WorkspaceSettings) => Promise<void>;
+  onNotify: (message: string) => void;
+}) {
+  const [alerts, setAlerts] = useState({ ...settings.alerts });
+  const [slas, setSlas] = useState<WorkspaceSettings["slas"]>({ ...settings.slas });
+  const [evidenceCategories, setEvidenceCategories] = useState<string[]>(
+    settings.completionEvidenceCategories ?? [],
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setAlerts({ ...settings.alerts });
+      setSlas({ ...settings.slas });
+      setEvidenceCategories(settings.completionEvidenceCategories ?? []);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [settings]);
+
+  const saveSettings = async () => {
+    try {
+      /*
+       * Spread the whole settings object, not just the two this screen edits.
+       * `PATCH /api/workspace` replaces the stored JSON wholesale, so sending
+       * a partial object would clear `completionEvidenceCategories` every time
+       * somebody changed an SLA — a safety rule silently switched off by an
+       * unrelated save.
+       */
+      await onSave({
+        ...settings,
+        alerts,
+        slas,
+        completionEvidenceCategories: evidenceCategories,
+      });
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : "Settings could not be saved.");
+    }
+  };
+
+  return (
+    <div className="section-stack settings-width">
+      <section className="section-header">
+        <div>
+          <span className="eyebrow-chip">
+            <Icon name="settings" size={15} />
+            Workspace configuration
+          </span>
+          <h1>Settings</h1>
+          <p>
+            Configure service targets, notification rules and workspace
+            preferences.
+          </p>
+        </div>
+        <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
+          <Icon name="check" size={17} />
+          {busy ? "Saving…" : "Save settings"}
+        </button>
+      </section>
+
+      <section className="panel settings-card">
+        <div className="settings-card__heading">
+          <span>
+            <Icon name="bell" size={19} />
+          </span>
+          <div>
+            <h2>Notifications</h2>
+            <p>Choose the events that should trigger an email update.</p>
+          </div>
+        </div>
+        {[
+          {
+            key: "urgent" as const,
+            label: "Urgent maintenance requests",
+            detail: "Notify operations as soon as a priority issue is raised.",
+          },
+          {
+            key: "compliance" as const,
+            label: "Compliance expiry alerts",
+            detail: "Send reminders 90, 30 and 7 days before expiry.",
+          },
+          {
+            key: "daily" as const,
+            label: "Daily operations digest",
+            detail: "Receive a weekday summary at 08:00.",
+          },
+        ].map((setting) => (
+          <label className="setting-row" key={setting.key}>
+            <span>
+              <strong>{setting.label}</strong>
+              <small>{setting.detail}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={alerts[setting.key]}
+              onChange={(event) =>
+                setAlerts((current) => ({
+                  ...current,
+                  [setting.key]: event.target.checked,
+                }))
+              }
+            />
+            <i aria-hidden="true" />
+          </label>
+        ))}
+      </section>
+
+      <section className="panel settings-card">
+        <div className="settings-card__heading">
+          <span>
+            <Icon name="clock" size={19} />
+          </span>
+          <div>
+            <h2>Service levels</h2>
+            <p>Default response targets by priority.</p>
+          </div>
+        </div>
+        <div className="sla-settings">
+          {/*
+            Rendered from the board's Priority options rather than a fixed list.
+            The hard-coded ["Urgent", "High", "Medium", "Low"] included a "High"
+            monday does not have, so the screen offered a target that could
+            never apply to a job.
+          */}
+          {priorityOptions.map((option) => (
+            <div key={option.value}>
+              <span className={priorityClass(option.value as Priority)}>
+                {option.label ?? option.value}
+              </span>
+              <input
+                value={slas[option.value] ?? ""}
+                aria-label={`${option.value} SLA`}
+                onChange={(event) =>
+                  setSlas((current) => ({ ...current, [option.value]: event.target.value }))
+                }
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/*
+        J — which jobs cannot be closed without a photograph of the work.
+        
+        EMPTY BY DEFAULT, and it stays empty until somebody here says
+        otherwise. Turning a gate on for every category the moment this deploys
+        would stop coordinators closing jobs they have every right to close,
+        for a rule nobody agreed to. The recommended set is offered in one
+        click — physical repairs and replacements, where "it was done" is a
+        claim somebody may have to check against an invoice months later — but
+        choosing it is a decision made here, and it lands in the audit log like
+        any other settings change.
+        
+        The rule is enforced in `PATCH /api/maintenance`, not here. Hiding the
+        close control would not be a rule; a request from anything else would
+        close the job regardless.
+      */}
+      <section className="panel settings-card">
+        <div className="settings-card__head">
+          <h2>Completion evidence</h2>
+          <p>
+            Jobs in these categories cannot be marked Completed until a photograph
+            is filed in “Picture of completed works”. Everything else closes as it
+            does today.
+          </p>
+        </div>
+
+        <div className="settings-evidence">
+          <div className="settings-evidence__actions">
+            <button
+              type="button"
+              className="secondary-button admin-mini"
+              disabled={busy}
+              onClick={() =>
+                setEvidenceCategories([...RECOMMENDED_EVIDENCE_CATEGORIES])
+              }
+            >
+              Use the recommended set
+            </button>
+            <button
+              type="button"
+              className="secondary-button admin-mini"
+              disabled={busy || !evidenceCategories.length}
+              onClick={() => setEvidenceCategories([])}
+            >
+              Require none
+            </button>
+            <span className="settings-evidence__count">
+              {evidenceCategories.length
+                ? `${evidenceCategories.length} categories require a photograph`
+                : "No category requires a photograph"}
+            </span>
+          </div>
+
+          <ul className="settings-evidence__list">
+            {categories.map((category) => {
+              const on = evidenceCategories.includes(category);
+              return (
+                <li key={category}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={busy}
+                      onChange={() =>
+                        setEvidenceCategories((current) =>
+                          on
+                            ? current.filter((item) => item !== category)
+                            : [...current, category],
+                        )
+                      }
+                    />
+                    <span>{category}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type MobileRequestEditorKind =
+  | "text"
+  | "long_text"
+  | "number"
+  | "phone"
+  | "date"
+  | "timeline"
+  | "option";
+
+type MobileRequestEditorOption = {
+  value: string;
+  label: string;
+  color: string;
+  textColor?: string;
+  active?: boolean;
+};
+
+type MobileRequestFieldEditor = {
+  field: string;
+  title: string;
+  kind: MobileRequestEditorKind;
+  value: string;
+  allowEmpty?: boolean;
+  optionColumn?: BoardOptionColumn;
+  customColumn?: MaintenanceBoardColumn;
+  options?: MobileRequestEditorOption[];
+};
+
+
+function mondayDate(value: string | null) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "Europe/London",
+  }).format(new Date(value));
+}
+
+function mondayDateInput(value: string | null) {
+  return value ? value.slice(0, 10) : "";
+}
+
+function mondayChoice(column: BoardOptionColumn, value: string) {
+  return publishedBoardOptions().find(
+    (choice) => choice.columnKey === column && choice.value === value,
+  );
+}
+
+function mondayChoiceStyle(column: BoardOptionColumn, value: string) {
+  const choice = mondayChoice(column, value);
+  const background = choice?.color ?? "#c4c4c4";
+  // The ground is monday's and stays; only the label is ours to get right.
+  return { backgroundColor: background, color: chipInk(background, choice?.textColor) };
+}
+
+function MobileMondayField({
+  label,
+  children,
+  onClick,
+  variant = "plain",
+  empty = false,
+  style,
+}: {
+  label: string;
+  children?: ReactNode;
+  onClick?: () => void;
+  variant?:
+    | "plain"
+    | "long_text"
+    | "option"
+    | "timeline"
+    | "files"
+    | "link"
+    | "icon";
+  empty?: boolean;
+  style?: { backgroundColor: string; color: string };
+}) {
+  const className = `mobile-monday-field__value mobile-monday-field__value--${variant}${
+    empty ? " is-empty" : ""
+  }`;
+  return (
+    <div className="mobile-monday-field">
+      <span className="mobile-monday-field__label">{label}</span>
+      {onClick ? (
+        <button
+          type="button"
+          className={className}
+          style={style}
+          onClick={onClick}
+          aria-label={`Edit ${label}`}
+        >
+          {children}
+        </button>
+      ) : (
+        <div className={className} style={style}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileMondayFiles({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="mobile-monday-file-icons" aria-label={`${count} files`}>
+      {Array.from({ length: Math.min(3, count) }, (_, index) => (
+        <span key={index}>
+          <Icon name="image" size={13} />
+        </span>
+      ))}
+      {count > 3 && <small>+{count - 3}</small>}
+    </span>
+  );
+}
+
+const mobileLocationColours = [
+  "#00c875",
+  "#fdab3d",
+  "#e2445c",
+  "#0086c0",
+  "#579bfc",
+  "#a25ddc",
+  "#00a9a5",
+];
+
+function mobileBoardCellKey(requestId: string, columnId: string) {
+  return `${requestId}::${columnId}`;
+}
+
+function mobileCustomDateValue(value: string) {
+  if (!value) return "";
+  if (value.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(value) as { date?: unknown };
+      return typeof parsed.date === "string" ? parsed.date : "";
+    } catch {
+      return "";
+    }
+  }
+  return value.slice(0, 10);
+}
+
+function mobileCustomTimeline(value: string) {
+  if (!value) return { start: "", end: "" };
+  try {
+    const parsed = JSON.parse(value) as { start?: unknown; end?: unknown };
+    return {
+      start: typeof parsed.start === "string" ? parsed.start : "",
+      end: typeof parsed.end === "string" ? parsed.end : "",
+    };
+  } catch {
+    return { start: "", end: "" };
+  }
+}
+
+function mobileCustomChoices(column: MaintenanceBoardColumn) {
+  return column.type === "people"
+    ? column.settings.people ?? []
+    : column.settings.choices ?? [];
+}
+
+function MobileMondayColumns({
+  request,
+  boardSnapshot,
+  visible,
+  onEdit,
+  onOpenEvidence,
+  onBoardCellChange,
+  onAddColumn,
+  onNotify,
+}: {
+  request: MaintenanceRequest;
+  boardSnapshot: MaintenanceBoardSnapshot | null;
+  visible: boolean;
+  onEdit: (editor: MobileRequestFieldEditor) => void;
+  onOpenEvidence: (
+    kind: AttachmentKind | "all",
+    column?: MaintenanceBoardColumn,
+  ) => void;
+  onBoardCellChange: (
+    column: MaintenanceBoardColumn,
+    value: string | number | boolean | { start: string; end: string },
+  ) => Promise<string>;
+  onAddColumn: () => void;
+  onNotify: (message: string) => void;
+}) {
+  const columns = boardSnapshot?.columns ?? [];
+  const cellValues = boardSnapshot?.cellValues ?? {};
+  const fileCounts = boardSnapshot?.fileCounts ?? {};
+  const locationOptions: MobileRequestEditorOption[] = Array.from(
+    new Set([request.location].filter(Boolean)),
+  ).map((value, index) => ({
+    value,
+    label: value,
+    color: mobileLocationColours[index % mobileLocationColours.length],
+    textColor: "#ffffff",
+  }));
+  const selectedLocation = locationOptions.find(
+    (option) => option.value === request.location,
+  );
+  const currentGroup = (() => {
+    if (!boardSnapshot) return { id: "", name: request.stage };
+    const placement = boardSnapshot.items.find(
+      (item) => item.requestId === request.id,
+    );
+    const group = boardSnapshot.groups.find(
+      (candidate) => candidate.id === placement?.groupId,
+    );
+    return { id: group?.id ?? "", name: group?.name ?? request.stage };
+  })();
+
+  const edit = (
+    field: string,
+    title: string,
+    kind: MobileRequestEditorKind,
+    value: string,
+    extra: Pick<
+      MobileRequestFieldEditor,
+      | "allowEmpty"
+      | "optionColumn"
+      | "customColumn"
+      | "options"
+    > = {},
+  ) => onEdit({ field, title, kind, value, ...extra });
+
+  const renderSystemColumn = (entry: MaintenanceBoardSnapshotColumn) => {
+    const column = entry.column;
+    const key = entry.key;
+    const boardValue =
+      cellValues[mobileBoardCellKey(request.id, column.id)] ?? "";
+    switch (key) {
+      case "name": {
+        const value =
+          boardValue.trim() ||
+          (request.source === "Manual" ? "Manual" : "Incoming form answer");
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            onClick={() =>
+              edit("board-item", column.title, "text", value, {
+                customColumn: column,
+              })
+            }
+          >
+            {value}
+          </MobileMondayField>
+        );
+      }
+      case "location":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            empty={!request.location}
+            onClick={() =>
+              edit("location", column.title, "text", request.location)
+            }
+          >
+            {request.location}
+          </MobileMondayField>
+        );
+      case "description":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="long_text"
+            empty={!request.description}
+            onClick={() =>
+              edit(
+                "description",
+                column.title,
+                "long_text",
+                request.description,
+              )
+            }
+          >
+            {request.description}
+          </MobileMondayField>
+        );
+      case "tier":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="option"
+            style={mondayChoiceStyle("tier", String(request.tier))}
+            onClick={() =>
+              edit("tier", column.title, "option", String(request.tier), {
+                optionColumn: "tier",
+              })
+            }
+          >
+            Tier {request.tier}
+          </MobileMondayField>
+        );
+      case "engineer":
+      case "priority":
+      case "label":
+      case "status": {
+        const config = {
+          engineer: {
+            field: "engineer",
+            value: request.engineer,
+            optionColumn: "engineer" as const,
+          },
+          priority: {
+            field: "priority",
+            value: request.priority,
+            optionColumn: "priority" as const,
+          },
+          label: {
+            field: "category",
+            value: request.category,
+            optionColumn: "label" as const,
+          },
+          status: {
+            field: "status",
+            value: request.status,
+            optionColumn: "status" as const,
+          },
+        }[key];
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="option"
+            empty={!config.value}
+            style={mondayChoiceStyle(config.optionColumn, config.value)}
+            onClick={() =>
+              edit(config.field, column.title, "option", config.value, {
+                optionColumn: config.optionColumn,
+              })
+            }
+          >
+            {config.value}
+          </MobileMondayField>
+        );
+      }
+      case "contractor":
+      case "requester":
+      case "invoice": {
+        const config = {
+          contractor: {
+            field: "contractor",
+            value: request.contractor ?? "",
+          },
+          requester: { field: "requester", value: request.requester },
+          invoice: { field: "invoice", value: request.invoice ?? "" },
+        }[key];
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            empty={!config.value}
+            onClick={() =>
+              edit(config.field, column.title, "text", config.value, {
+                allowEmpty: true,
+              })
+            }
+          >
+            {config.value}
+          </MobileMondayField>
+        );
+      }
+      case "assignee":
+      case "approvedBy": {
+        const field = key === "assignee" ? "assignee" : "approvedBy";
+        const value =
+          key === "assignee" ? request.assignee ?? "" : request.approvedBy ?? "";
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="icon"
+            empty={!value}
+            onClick={() =>
+              edit(field, column.title, "text", value, { allowEmpty: true })
+            }
+          >
+            {value ? <Avatar name={value} size="small" /> : <Icon name="user" size={17} />}
+          </MobileMondayField>
+        );
+      }
+      case "requested":
+      case "completed":
+      case "nextUpdate": {
+        const config = {
+          requested: {
+            field: "requestedAt",
+            value: request.requestedAt,
+            allowEmpty: false,
+          },
+          completed: {
+            field: "completedAt",
+            value: request.completedAt,
+            allowEmpty: true,
+          },
+          nextUpdate: {
+            field: "nextUpdateAt",
+            value: request.nextUpdateAt,
+            allowEmpty: true,
+          },
+        }[key];
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            empty={!config.value}
+            onClick={() =>
+              edit(
+                config.field,
+                column.title,
+                "date",
+                mondayDateInput(config.value),
+                { allowEmpty: config.allowEmpty },
+              )
+            }
+          >
+            {mondayDate(config.value)}
+          </MobileMondayField>
+        );
+      }
+      case "timeline":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="timeline"
+            onClick={() =>
+              edit("dueAt", column.title, "date", mondayDateInput(request.dueAt), {
+                allowEmpty: true,
+              })
+            }
+          >
+            {request.dueAt
+              ? `${mondayDate(request.requestedAt)} – ${mondayDate(request.dueAt)}`
+              : "–"}
+          </MobileMondayField>
+        );
+      case "issuePictures":
+      case "completedPictures":
+      case "files": {
+        const kind: AttachmentKind | "all" =
+          key === "issuePictures"
+            ? "issue"
+            : key === "completedPictures"
+              ? "completion"
+              : "all";
+        const count =
+          key === "issuePictures"
+            ? request.issueAttachmentCount ?? 0
+            : key === "completedPictures"
+              ? request.completedAttachmentCount ?? 0
+              : request.attachmentCount;
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="files"
+            empty={!count}
+            onClick={() => onOpenEvidence(kind)}
+          >
+            <MobileMondayFiles count={count} />
+          </MobileMondayField>
+        );
+      }
+      case "cost":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            empty={request.cost === null}
+            onClick={() =>
+              edit(
+                "cost",
+                column.title,
+                "number",
+                request.cost === null ? "" : String(request.cost),
+                { allowEmpty: true },
+              )
+            }
+          >
+            {request.cost === null ? "" : request.cost.toLocaleString("en-GB")}
+          </MobileMondayField>
+        );
+      case "number":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            empty={!request.contact}
+            onClick={() =>
+              edit("contact", column.title, "phone", request.contact)
+            }
+          >
+            {request.contact}
+          </MobileMondayField>
+        );
+      case "storeLocation":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="option"
+            empty={!request.location}
+            style={{
+              backgroundColor: selectedLocation?.color ?? "#0086c0",
+              color: chipInk(
+                selectedLocation?.color ?? "#0086c0",
+                selectedLocation?.textColor,
+              ),
+            }}
+            onClick={() =>
+              edit("location", column.title, "option", request.location, {
+                options: locationOptions,
+              })
+            }
+          >
+            {request.location || "Choose a location"}
+          </MobileMondayField>
+        );
+      case "formView":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="link"
+            empty={!request.formUrl}
+            onClick={() =>
+              edit("formUrl", column.title, "text", request.formUrl ?? "", {
+                allowEmpty: true,
+              })
+            }
+          >
+            {request.formUrl}
+          </MobileMondayField>
+        );
+      case "move":
+        return (
+          <MobileMondayField
+            key={column.id}
+            label={column.title}
+            variant="option"
+            style={{ backgroundColor: "#579bfc", color: "#ffffff" }}
+            onClick={() =>
+              edit("board-group", column.title, "option", currentGroup.id, {
+                options: (boardSnapshot?.groups ?? []).map((group) => ({
+                  value: group.id,
+                  label: group.name,
+                  color: group.color,
+                  textColor: "#ffffff",
+                })),
+              })
+            }
+          >
+            {currentGroup.name}
+          </MobileMondayField>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderCustomColumn = (entry: MaintenanceBoardSnapshotColumn) => {
+    const column = entry.column;
+    const cellKey = mobileBoardCellKey(request.id, column.id);
+    const rawValue = cellValues[cellKey] ?? "";
+    if (column.type === "files") {
+      const count = fileCounts[cellKey] ?? 0;
+      return (
+        <MobileMondayField
+          key={column.id}
+          label={column.title}
+          variant="files"
+          empty={!count}
+          onClick={() => onOpenEvidence("all", column)}
+        >
+          <MobileMondayFiles count={count} />
+        </MobileMondayField>
+      );
+    }
+
+    if (
+      column.type === "status" ||
+      column.type === "dropdown" ||
+      column.type === "people"
+    ) {
+      const choices = mobileCustomChoices(column);
+      const selected = choices.find((choice) => choice.label === rawValue);
+      const options = choices.map((choice) => ({
+        value: choice.label,
+        label: choice.label,
+        color: choice.color,
+        textColor: choice.textColor ?? "#ffffff",
+      }));
+      return (
+        <MobileMondayField
+          key={column.id}
+          label={column.title}
+          variant="option"
+          empty={!rawValue}
+          style={{
+            backgroundColor: selected?.color ?? "#c4c4c4",
+            color: chipInk(selected?.color ?? "#c4c4c4", selected?.textColor),
+          }}
+          onClick={() =>
+            edit("custom", column.title, "option", rawValue, {
+              allowEmpty: true,
+              customColumn: column,
+              options,
+            })
+          }
+        >
+          {rawValue}
+        </MobileMondayField>
+      );
+    }
+
+    if (column.type === "checkbox") {
+      const checked = rawValue === "true";
+      return (
+        <MobileMondayField
+          key={column.id}
+          label={column.title}
+          onClick={() => {
+            void onBoardCellChange(column, !checked).catch((caught) =>
+              onNotify(
+                caught instanceof Error
+                  ? caught.message
+                  : "The checkbox could not be saved.",
+              ),
+            );
+          }}
+        >
+          {checked ? <Icon name="check" size={20} /> : ""}
+        </MobileMondayField>
+      );
+    }
+
+    if (column.type === "timeline") {
+      const timeline = mobileCustomTimeline(rawValue);
+      return (
+        <MobileMondayField
+          key={column.id}
+          label={column.title}
+          variant="timeline"
+          onClick={() =>
+            edit("custom", column.title, "timeline", JSON.stringify(timeline), {
+              allowEmpty: true,
+              customColumn: column,
+            })
+          }
+        >
+          {timeline.start && timeline.end
+            ? `${mondayDate(timeline.start)} – ${mondayDate(timeline.end)}`
+            : "–"}
+        </MobileMondayField>
+      );
+    }
+
+    const dateValue =
+      column.type === "date" ? mobileCustomDateValue(rawValue) : "";
+    const displayValue =
+      column.type === "date"
+        ? mondayDate(dateValue)
+        : column.type === "number" && rawValue
+          ? Number(rawValue).toLocaleString("en-GB")
+          : rawValue;
+    const kind: MobileRequestEditorKind =
+      column.type === "long_text"
+        ? "long_text"
+        : column.type === "number"
+          ? "number"
+          : column.type === "phone"
+            ? "phone"
+            : column.type === "date"
+              ? "date"
+              : "text";
+    return (
+      <MobileMondayField
+        key={column.id}
+        label={column.title}
+        variant={column.type === "link" ? "link" : column.type === "long_text" ? "long_text" : "plain"}
+        empty={!displayValue}
+        onClick={() =>
+          edit("custom", column.title, kind, dateValue || rawValue, {
+            allowEmpty: true,
+            customColumn: column,
+          })
+        }
+      >
+        {displayValue}
+      </MobileMondayField>
+    );
+  };
+
+  return (
+    <section
+      className={`mobile-monday-columns${visible ? "" : " is-tab-hidden"}`}
+      aria-label="Columns"
+    >
+      {!boardSnapshot && (
+        <div className="mobile-monday-columns__loading">Loading columns…</div>
+      )}
+      {columns.map((entry) =>
+        entry.kind === "system"
+          ? renderSystemColumn(entry)
+          : renderCustomColumn(entry),
+      )}
+      <button
+        className="mobile-monday-add-column"
+        type="button"
+        onClick={onAddColumn}
+      >
+        + Add Column
+      </button>
+    </section>
+  );
+}
+
+function MobileRequestEditor({
+  editor,
+  draft,
+  error,
+  saving,
+  onDraftChange,
+  onClose,
+  onSave,
+}: {
+  editor: MobileRequestFieldEditor;
+  draft: string;
+  error: string | null;
+  saving: boolean;
+  onDraftChange: (value: string) => void;
+  onClose: () => void;
+  onSave: (value?: string) => void;
+}) {
+  const options: MobileRequestEditorOption[] =
+    editor.options ??
+    (editor.optionColumn
+      ? publishedBoardOptions()
+          .filter(
+            (choice) =>
+              choice.columnKey === editor.optionColumn && choice.active,
+          )
+          .map((choice) => ({
+            value: choice.value,
+            label: choice.label,
+            color: choice.color,
+            textColor: choice.textColor,
+          }))
+      : []);
+  const isOption = editor.kind === "option";
+  const timelineDraft =
+    editor.kind === "timeline"
+      ? mobileCustomTimeline(draft)
+      : { start: "", end: "" };
+
+  return (
+    <div
+      className={`mobile-request-field-editor${
+        isOption ? " mobile-request-field-editor--option" : ""
+      }`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={editor.title}
+    >
+      <button
+        className="mobile-request-field-editor__backdrop"
+        type="button"
+        aria-label="Close editor"
+        onClick={onClose}
+      />
+      <section>
+        <header>
+          <button type="button" onClick={onClose} aria-label="Close editor">
+            <Icon name="close" size={23} />
+          </button>
+          <strong>{editor.title}</strong>
+          {!isOption && (
+            <button
+              className="mobile-request-field-editor__save"
+              type="button"
+              disabled={saving}
+              onClick={() => onSave()}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          )}
+        </header>
+
+        <div className="mobile-request-field-editor__body">
+          {isOption && (
+            <div className="mobile-request-field-editor__options">
+              {options.map((choice) => (
+                <button
+                  key={choice.value}
+                  type="button"
+                  className={choice.value === draft ? "is-selected" : ""}
+                  disabled={saving}
+                  style={{
+                    backgroundColor: choice.color,
+                    color: chipInk(choice.color, choice.textColor),
+                  }}
+                  onClick={() => onSave(choice.value)}
+                >
+                  {choice.label}
+                  {choice.value === draft && <Icon name="check" size={17} />}
+                </button>
+              ))}
+              <button
+                className="mobile-request-field-editor__manage"
+                type="button"
+                onClick={onClose}
+              >
+                <Icon name="wrench" size={16} />
+                Add / Edit labels
+              </button>
+            </div>
+          )}
+
+          {editor.kind === "long_text" && (
+            <textarea
+              rows={12}
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              aria-label={editor.title}
+            />
+          )}
+
+          {editor.kind === "text" && (
+            <textarea
+              rows={6}
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              aria-label={editor.title}
+            />
+          )}
+
+          {editor.kind === "number" && (
+            <input
+              type="number"
+              inputMode="decimal"
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              aria-label={editor.title}
+            />
+          )}
+
+          {editor.kind === "phone" && (
+            <input
+              type="tel"
+              inputMode="tel"
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              aria-label={editor.title}
+            />
+          )}
+
+          {editor.kind === "date" && (
+            <input
+              type="date"
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              aria-label={editor.title}
+            />
+          )}
+
+          {editor.kind === "timeline" && (
+            <div className="mobile-timeline-editor">
+              <label>
+                <span>Start date</span>
+                <input
+                  type="date"
+                  value={timelineDraft.start}
+                  onChange={(event) =>
+                    onDraftChange(
+                      JSON.stringify({
+                        ...timelineDraft,
+                        start: event.target.value,
+                      }),
+                    )
+                  }
+                />
+              </label>
+              <label>
+                <span>End date</span>
+                <input
+                  type="date"
+                  value={timelineDraft.end}
+                  onChange={(event) =>
+                    onDraftChange(
+                      JSON.stringify({
+                        ...timelineDraft,
+                        end: event.target.value,
+                      }),
+                    )
+                  }
+                />
+              </label>
+            </div>
+          )}
+
+          {error && (
+            <small className="mobile-request-field-editor__error">{error}</small>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RequestDrawer({
+  request,
+  boardSnapshot,
+  initialTab,
+  onClose,
+  onStatusChange,
+  onAddUpdate,
+  onFieldsChange,
+  onBoardCellChange,
+  onAddColumn,
+  onRequestChange,
+  onNotify,
+  currentUserName,
+}: {
+  request: MaintenanceRequest;
+  boardSnapshot: MaintenanceBoardSnapshot | null;
+  initialTab: RequestDrawerTab;
+  onClose: () => void;
+  onStatusChange: (stage: RequestStage) => void | Promise<void>;
+  /**
+   * A comment, optionally hung under another one and optionally carrying files.
+   *
+   * `parentId` is what makes a REPLY rather than a new top-level comment;
+   * `attachmentIds` are rows already written by `/api/files` that the comment
+   * adopts. Both are optional, so the two footer buttons that just want to say
+   * something still call this with one argument.
+   */
+  onAddUpdate: (
+    note: string,
+    options?: { parentId?: string | null; attachmentIds?: string[] },
+  ) => Promise<void>;
+  onFieldsChange: (
+    fields: Record<string, string | number | null>,
+  ) => Promise<MaintenanceRequest>;
+  onBoardCellChange: (
+    column: MaintenanceBoardColumn,
+    value: string | number | boolean | { start: string; end: string },
+  ) => Promise<string>;
+  onAddColumn: () => void;
+  onRequestChange: (request: MaintenanceRequest) => void;
+  onNotify: (message: string) => void;
+  /** Drawn on the reply composer's avatar. Null before the context arrives. */
+  currentUserName: string | null;
+}) {
+  /*
+   * The drawer only exists while it is open, so the lock is unconditional
+   * here: mounting takes it, unmounting gives it back.
+   */
+  useScrollLock(true);
+  /*
+   * The Updates panel's composer, so the two footer buttons can put the cursor
+   * in the box that is already on screen instead of revealing a second one.
+   *
+   * The drawer used to hold the textarea itself, along with the draft, the
+   * chosen files, the saving flag and a whole parallel set of reply state —
+   * nine `useState`s and two refs for one box. All of that is `UpdateThread`'s
+   * now, and what comes back up is this one handle. A ref rather than state:
+   * nothing here renders differently because the box exists, so storing it in
+   * state would re-render the entire drawer on mount for no visible reason.
+   */
+  const composerHandle = useRef<ComposerHandle | null>(null);
+  const setComposerHandle = useCallback((handle: ComposerHandle | null) => {
+    composerHandle.current = handle;
+  }, []);
+  // Relative comment times ("2mo") go stale silently; this ticks them.
+  const now = useCurrentTime();
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  /* Bumped when the evidence panel closes, so the before/after pair picks up
+     anything just uploaded rather than showing a stale pair. */
+  const [evidenceRefreshToken, setEvidenceRefreshToken] = useState(0);
+  const [evidenceKind, setEvidenceKind] = useState<AttachmentKind | "all">(
+    "all",
+  );
+  const [evidenceColumn, setEvidenceColumn] =
+    useState<MaintenanceBoardColumn | null>(null);
+  const [activeTab, setActiveTab] =
+    useState<RequestDrawerTab>(initialTab);
+  const [activities, setActivities] = useState<RequestActivityEntry[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
+  const [activitiesError, setActivitiesError] = useState<string | null>(null);
+  const [mobileEditor, setMobileEditor] =
+    useState<MobileRequestFieldEditor | null>(null);
+  const [mobileDraft, setMobileDraft] = useState("");
+  const [mobileSaving, setMobileSaving] = useState(false);
+  const [mobileEditorError, setMobileEditorError] = useState<string | null>(
+    null,
+  );
+  const loadActivities = useCallback(async () => {
+    setActivitiesLoading(true);
+    setActivitiesError(null);
+    try {
+      setActivities(await fetchRequestActivities(request.id));
+    } catch (caught) {
+      setActivitiesError(
+        caught instanceof Error
+          ? caught.message
+          : "The update history could not be loaded.",
+      );
+    } finally {
+      setActivitiesLoading(false);
+    }
+  }, [request.id]);
+  /*
+   * The thread comes from `item_updates`, not from the audit log.
+   *
+   * This used to filter `activities` for `request.note_added` rows, which meant
+   * the only comments it could ever show were the ones this app had written.
+   * monday's 218 comments and 47 replies live in `item_updates`, so the tab
+   * counted them correctly from `comment_count` and then rendered "No detailed
+   * updates have been added yet" — the number right, the thread empty, and the
+   * empty state explaining the absence as though it were expected.
+   *
+   * `activities` is still loaded and still drives the Activity Log tab. The two
+   * are different things: one is what people said, the other is what changed.
+   */
+  const [updates, setUpdates] = useState<RequestUpdate[]>([]);
+  const [updatesLoading, setUpdatesLoading] = useState(false);
+  /*
+   * The Updates section's OWN failure, and its own "I have an answer".
+   *
+   * Both states used to be borrowed from the Activity Log: the section drew
+   * `activitiesLoading` as "Loading updates…", `activitiesError` as "The update
+   * history could not be loaded" with a Try again that re-fetched ACTIVITIES,
+   * and — because the thread was gated only on `updates.length > 0` — rendered
+   * a fully loaded thread underneath that error box at the same time. Meanwhile
+   * a thread that genuinely failed was caught here, blanked to `[]`, and shown
+   * as "No detailed updates have been added yet": the same false reassurance
+   * this route's header comment says was removed.
+   */
+  const [updatesError, setUpdatesError] = useState<string | null>(null);
+  const [updatesLoaded, setUpdatesLoaded] = useState(false);
+
+  const loadUpdates = useCallback(async () => {
+    setUpdatesError(null);
+    try {
+      const response = await fetch(
+        `/api/updates?requestId=${encodeURIComponent(request.id)}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!response.ok) throw new Error("failed");
+      const payload = (await response.json()) as { updates?: RequestUpdate[] };
+      setUpdates(payload.updates ?? []);
+      setUpdatesLoaded(true);
+    } catch {
+      // A thread that will not load must not take the drawer with it; the
+      // Activity Log beside it still renders. It says so, though — an empty
+      // list and a failed fetch are not the same thing and must not read alike.
+      setUpdates([]);
+      setUpdatesLoaded(false);
+      setUpdatesError("The update thread could not be loaded.");
+    } finally {
+      setUpdatesLoading(false);
+    }
+  }, [request.id]);
+
+  useEffect(() => {
+    /*
+     * The loading flag is set inside the async body, not before it.
+     *
+     * Setting state synchronously in an effect triggers a cascading render, and
+     * the lint rule that catches it is right: the fetch below is what takes
+     * time, so the flag belongs with it. `active` guards the case where the
+     * drawer moves to another job before this one answers.
+     */
+    let active = true;
+    (async () => {
+      setUpdatesLoading(true);
+      await loadUpdates();
+      if (!active) return;
+    })();
+    return () => {
+      active = false;
+    };
+  }, [loadUpdates]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadInitialActivities() {
+      try {
+        const history = await fetchRequestActivities(request.id);
+        if (active) setActivities(history);
+      } catch (caught) {
+        if (!active) return;
+        setActivitiesError(
+          caught instanceof Error
+            ? caught.message
+            : "The update history could not be loaded.",
+        );
+      } finally {
+        if (active) setActivitiesLoading(false);
+      }
+    }
+    void loadInitialActivities();
+    return () => {
+      active = false;
+    };
+  }, [request.id]);
+
+  /*
+   * Everything in the thread, replies included.
+   *
+   * The tab used to read `request.commentCount` — the board row's snapshot,
+   * taken when the board was fetched — while the section header counted the
+   * thread it had just loaded. After a successful post the two read 5 and 6,
+   * and the difference persisted until the board refreshed. One number now,
+   * from the rows on screen, with the snapshot kept only for the moment before
+   * the thread has answered (or if it failed to).
+   */
+  const threadCount = updates.reduce(
+    (total, entry) => total + 1 + entry.replies.length,
+    0,
+  );
+  const commentCount = updatesLoaded ? threadCount : request.commentCount;
+
+  /*
+   * One writer for the composer and for every reply box.
+   *
+   * Files first, then the comment: `/api/updates` stamps `update_id` onto rows
+   * that already exist, so they have to exist. If the comment then fails the
+   * uploads remain on the job as general evidence — visible in the Files tab,
+   * attributable, deletable — rather than becoming rows nothing points at.
+   *
+   * `loadUpdates()` is what makes a comment appear. Without it the POST
+   * succeeded, the toast said "Comment added", the box cleared and the thread
+   * did not change: `loadUpdates` was only ever called by the mount effect, so
+   * the only way to see your own comment was to close the drawer and open it
+   * again. `loadActivities()` stays because the Activity Log is a second
+   * reader, not the same one.
+   */
+  const submitComment = useCallback(
+    async (body: string, parentId: string | null, files: File[]) => {
+      const attachmentIds: string[] = [];
+      for (const file of files) {
+        const uploaded = await uploadEvidenceFile({
+          file,
+          requestId: request.id,
+          kind: "general",
+        });
+        attachmentIds.push(uploaded.file.id);
+      }
+      await onAddUpdate(body, { parentId, attachmentIds });
+      await loadUpdates();
+      await loadActivities();
+    },
+    [request.id, onAddUpdate, loadUpdates, loadActivities],
+  );
+
+  /*
+   * A like is applied in place, not by re-fetching the thread.
+   *
+   * `loadUpdates()` is right for a comment — the server assigns the id and the
+   * timestamp, and the panel has to learn them. A like changes two numbers the
+   * server has just told us, and re-reading the whole thread for it would
+   * remount every card: an open `… See more`, a half-typed reply and the page a
+   * reader had scrolled to inside an embedded PDF would all be thrown away by a
+   * thumb. `likedBy` is adjusted here too, so the hover does not go on naming
+   * the old set until the next real reload.
+   */
+  const applyLike = useCallback(
+    (updateId: string, liked: boolean, likeCount: number) => {
+      const me = currentUserName?.trim() || "You";
+      const touch = <T extends { id: string; likedBy: string[] }>(entry: T): T =>
+        entry.id === updateId
+          ? {
+              ...entry,
+              likeCount,
+              likedByMe: liked,
+              likedBy: liked
+                ? entry.likedBy.includes(me)
+                  ? entry.likedBy
+                  : [...entry.likedBy, me]
+                : entry.likedBy.filter((name) => name !== me),
+            }
+          : entry;
+      setUpdates((current) =>
+        current.map((update) => ({
+          ...touch(update),
+          replies: update.replies.map(touch),
+        })),
+      );
+    },
+    [currentUserName],
+  );
+
+  const stageOrder: RequestStage[] = [
+    "Incoming",
+    "Booked",
+    "Attention",
+    "Completed",
+  ];
+  const currentIndex = stageOrder.indexOf(request.stage);
+
+  const openMobileEditor = (editor: MobileRequestFieldEditor) => {
+    setMobileDraft(editor.value);
+    setMobileEditorError(null);
+    setMobileEditor(editor);
+  };
+
+  const saveMobileEditor = async (optionValue?: string) => {
+    if (!mobileEditor || mobileSaving) return;
+    setMobileSaving(true);
+    setMobileEditorError(null);
+    try {
+      const rawValue = optionValue ?? mobileDraft;
+
+      if (mobileEditor.field === "board-group") {
+        const response = await fetch("/api/board", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "move_items",
+            requestIds: [request.id],
+            groupId: rawValue,
+          }),
+        });
+        const payload = (await response.json()) as {
+          requests?: MaintenanceRequest[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "The job could not be moved.");
+        }
+        if (payload.requests?.[0]) onRequestChange(payload.requests[0]);
+        window.dispatchEvent(new Event("maintsupp:refresh-board"));
+        setMobileEditor(null);
+        setMobileDraft("");
+        onNotify(`${request.id} moved.`);
+        return;
+      }
+
+      if (mobileEditor.customColumn) {
+        let boardValue: string | number | boolean | { start: string; end: string } =
+          rawValue.trim();
+        if (mobileEditor.kind === "number") {
+          boardValue = rawValue.trim()
+            ? Number(rawValue.replaceAll(",", ""))
+            : "";
+          if (
+            typeof boardValue === "number" &&
+            !Number.isFinite(boardValue)
+          ) {
+            throw new Error("Please enter a valid number.");
+          }
+        } else if (mobileEditor.kind === "timeline") {
+          const timeline = mobileCustomTimeline(rawValue);
+          if (timeline.start && timeline.end && timeline.end < timeline.start) {
+            throw new Error("The end date must be on or after the start date.");
+          }
+          boardValue = timeline;
+        }
+        await onBoardCellChange(mobileEditor.customColumn, boardValue);
+        setMobileEditor(null);
+        setMobileDraft("");
+        onNotify(`${mobileEditor.title} updated.`);
+        return;
+      }
+
+      let value: string | number | null = rawValue.trim();
+
+      if (mobileEditor.kind === "number") {
+        value = rawValue.trim() ? Number(rawValue.replaceAll(",", "")) : null;
+        if (typeof value === "number" && !Number.isFinite(value)) {
+          throw new Error("Please enter a valid number.");
+        }
+      } else if (mobileEditor.kind === "date") {
+        value = rawValue.trim()
+          ? new Date(`${rawValue}T12:00:00.000Z`).toISOString()
+          : null;
+      } else if (mobileEditor.field === "tier") {
+        value = Number(rawValue);
+      } else if (!rawValue.trim() && mobileEditor.allowEmpty) {
+        value = null;
+      }
+
+      const updated = await onFieldsChange({ [mobileEditor.field]: value });
+      onRequestChange(updated);
+      setMobileEditor(null);
+      setMobileDraft("");
+      onNotify(`${mobileEditor.title} updated.`);
+    } catch (caught) {
+      setMobileEditorError(
+        caught instanceof Error ? caught.message : "The field could not be saved.",
+      );
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="drawer-scrim"
+        type="button"
+        aria-label="Close request"
+        onClick={onClose}
+      />
+      <aside className="detail-drawer" aria-label={`${request.id} details`}>
+        <div className="detail-drawer__header">
+          <div>
+            <span>{request.id}</span>
+            <h2>
+              {request.source === "Manual" ? "Manual" : "Incoming form answer"}
+            </h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            <Icon name="close" size={20} />
+          </button>
+        </div>
+
+        <nav className="detail-drawer__tabs" aria-label="Item details sections">
+          <button
+            className={activeTab === "columns" ? "is-active" : ""}
+            type="button"
+            onClick={() => setActiveTab("columns")}
+          >
+            <Icon name="grid" size={15} />
+            Columns
+          </button>
+          <button
+            className={activeTab === "updates" ? "is-active" : ""}
+            type="button"
+            onClick={() => setActiveTab("updates")}
+          >
+            <Icon name="message" size={15} />
+            Updates / {commentCount}
+          </button>
+          <button
+            className={activeTab === "files" ? "is-active" : ""}
+            type="button"
+            onClick={() => setActiveTab("files")}
+          >
+            <Icon name="folder" size={15} />
+            Files
+          </button>
+          <button
+            className={activeTab === "activity" ? "is-active" : ""}
+            type="button"
+            onClick={() => setActiveTab("activity")}
+          >
+            <Icon name="activity" size={15} />
+            Activity Log
+          </button>
+          <button
+            className={activeTab === "link" ? "is-active" : ""}
+            type="button"
+            onClick={() => setActiveTab("link")}
+          >
+            <Icon name="paperclip" size={15} />
+            Contractor link
+          </button>
+        </nav>
+
+        <div className="detail-drawer__body">
+          <MobileMondayColumns
+            request={request}
+            boardSnapshot={boardSnapshot}
+            visible={activeTab === "columns"}
+            onEdit={openMobileEditor}
+            onOpenEvidence={(kind, column) => {
+              setEvidenceOpen(true);
+              setEvidenceKind(kind);
+              setEvidenceColumn(column ?? null);
+            }}
+            onBoardCellChange={onBoardCellChange}
+            onAddColumn={onAddColumn}
+            onNotify={onNotify}
+          />
+          <div
+            className={`drawer-status-line desktop-request-columns${
+              activeTab === "columns" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <span className={priorityClass(request.priority)}>
+              {request.priority}
+            </span>
+            <span className="status-chip">{request.status}</span>
+          </div>
+
+          <section
+            className={`drawer-section desktop-request-columns${
+              activeTab === "columns" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <span className="drawer-label">Progress</span>
+            <div className="request-progress">
+              {stageOrder.map((stage, index) => (
+                <button
+                  key={stage}
+                  type="button"
+                  className={
+                    index <= currentIndex || stage === request.stage
+                      ? "is-complete"
+                      : ""
+                  }
+                  onClick={() => onStatusChange(stage)}
+                >
+                  <span>
+                    {index < currentIndex ? (
+                      <Icon name="check" size={13} />
+                    ) : (
+                      index + 1
+                    )}
+                  </span>
+                  <small>{stageLabel(stage)}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section
+            className={`drawer-section desktop-request-columns${
+              activeTab === "columns" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <span className="drawer-label">Issue</span>
+            <p className="drawer-description">{request.description}</p>
+            <div className="detail-grid">
+              <DetailItem icon="map" label="Location" value={request.location} />
+              <DetailItem
+                icon="tool"
+                label="Engineer required"
+                value={request.engineer}
+              />
+              <DetailItem
+                icon="user"
+                label="Requested by"
+                value={request.requester}
+              />
+              <DetailItem
+                icon="calendar"
+                label="Date requested"
+                value={formatDate(request.requestedAt, true)}
+              />
+              <DetailItem
+                icon="clock"
+                label="Next update"
+                value={formatDate(request.nextUpdateAt, true)}
+              />
+              <DetailItem
+                icon="chart"
+                label="Cost of works"
+                value={formatMoney(request.cost)}
+              />
+            </div>
+          </section>
+
+          <section
+            className={`drawer-section desktop-request-columns${
+              activeTab === "columns" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <div className="drawer-section__title">
+              <span className="drawer-label">Assignment</span>
+              <span className="tiny-chip">Tier {request.tier}</span>
+            </div>
+            <div className="assignment-card">
+              <Avatar name={request.assignee ?? "Unassigned"} />
+              <span>
+                <small>MAINTSUPP owner</small>
+                <strong>{request.assignee ?? "Not assigned"}</strong>
+              </span>
+              <span>
+                <small>Contractor</small>
+                <strong>{request.contractor ?? "To be appointed"}</strong>
+              </span>
+            </div>
+          </section>
+
+          <section
+            className={`drawer-section${
+              activeTab === "files" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <div className="drawer-section__title">
+              <span className="drawer-label">Files &amp; evidence</span>
+              <span>{request.attachmentCount} files</span>
+            </div>
+            {/*
+              The pair, above the way in to everything else.
+              
+              The two picture columns have carried 1,149 fault photographs and
+              1,616 completion photographs since the monday import, and the only
+              way to compare them was to open the evidence panel, scroll,
+              remember, and scroll back. That comparison is what the pair exists
+              for — it is what an invoice is checked against.
+            */}
+            <BeforeAfter
+              requestId={request.id}
+              reference={request.id}
+              refreshToken={evidenceRefreshToken}
+            />
+            <button
+              className="drawer-file-row"
+              type="button"
+              onClick={() => {
+                setEvidenceKind("all");
+                setEvidenceOpen(true);
+              }}
+            >
+              <span>
+                <Icon name="folder" size={18} />
+              </span>
+              <div>
+                <strong>Request evidence</strong>
+                <small>
+                  Site photos, approvals, completion evidence and invoices
+                </small>
+              </div>
+              <Icon name="chevron" size={16} />
+            </button>
+          </section>
+
+          <section
+            className={`drawer-section${
+              activeTab === "updates" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <div className="drawer-section__title">
+              <span className="drawer-label">Update thread</span>
+              <span>{threadCount} shown</span>
+            </div>
+            {/*
+              THE PANEL IS `UpdateThread`, built against monday's own.
+
+              What stood here was ~250 lines of cards, a reply box and a
+              composer at the BOTTOM of the tab. The owner put the two panels
+              side by side and said ours did not have "the same look and tools
+              and features"; `db/monday-export/UPDATES-PANEL-CAPTURE.md` is the
+              capture that came out of that, and update-thread.tsx answers it
+              item by item — composer at the top, `11d` rather than "11 days
+              ago", Like, a Reply on every reply, rendered attachments, and
+              `… See more`.
+
+              It keeps its own three states, which is why none of them are
+              passed: a failed ACTIVITY fetch used to draw "The update history
+              could not be loaded" over a thread that had loaded perfectly well.
+              The fetching, the counts and the like bookkeeping stay here — the
+              drawer owns the data, the panel draws it.
+            */}
+            <UpdateThread
+              updates={updates}
+              loading={updatesLoading}
+              error={updatesError}
+              now={now}
+              currentUserName={currentUserName}
+              composerRef={setComposerHandle}
+              onReload={loadUpdates}
+              onSubmit={submitComment}
+              onLikeChange={applyLike}
+            />
+          </section>
+
+          <section
+            className={`drawer-section${
+              activeTab === "activity" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <div className="drawer-section__title">
+              <span className="drawer-label">Activity history</span>
+              <span>{activities.length} events</span>
+            </div>
+            {activitiesLoading && (
+              <div className="drawer-history-state">Loading activity…</div>
+            )}
+            {activitiesError && (
+              <div className="drawer-history-state drawer-history-state--error">
+                <span>{activitiesError}</span>
+                <button type="button" onClick={() => void loadActivities()}>
+                  Try again
+                </button>
+              </div>
+            )}
+            {!activitiesLoading &&
+              !activitiesError &&
+              activities.length === 0 && (
+                <div className="drawer-history-state">
+                  No activity has been recorded yet.
+                </div>
+              )}
+            {!activitiesLoading && !activitiesError && activities.length > 0 && (
+              <div className="activity-timeline">
+                {activities.map((entry, index) => (
+                  <div key={entry.id}>
+                    <span
+                      className={`activity-dot${
+                        index === 0 ? " activity-dot--teal" : ""
+                      }`}
+                    />
+                    <p>
+                      <strong>{activityActor(entry.actorEmail)}</strong>{" "}
+                      {activityDescription(entry)}
+                    </p>
+                    <small>{formatDate(entry.createdAt, true)}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section
+            className={`drawer-section${
+              activeTab === "link" ? "" : " is-tab-hidden"
+            }`}
+          >
+            <ContractorLinkPanel
+              requestId={request.id}
+              reference={request.id}
+              siteName={request.location ?? null}
+            />
+          </section>
+
+        </div>
+
+        <div
+          className={`detail-drawer__footer${
+            activeTab === "columns" ? " detail-drawer__footer--columns" : ""
+          }`}
+        >
+          <button
+            className="mobile-monday-update-button"
+            type="button"
+            onClick={() => {
+              setActiveTab("updates");
+              // The composer is on screen already; put the cursor in it rather
+              // than revealing a second copy of it. Queued, because on a phone
+              // this is the first render of the Updates tab and the box is
+              // mounting in the same commit as the tab switch.
+              window.setTimeout(() => composerHandle.current?.focus(), 0);
+            }}
+          >
+            <span>
+              <Icon name="plus" size={22} />
+            </span>
+            Write an update
+          </button>
+          <div className="detail-drawer__footer-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                setActiveTab("updates");
+                window.setTimeout(() => composerHandle.current?.focus(), 0);
+              }}
+            >
+              <Icon name="message" size={17} />
+              Add update
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() =>
+                onStatusChange(
+                  request.stage === "Incoming"
+                    ? "Booked"
+                    : request.stage === "Booked"
+                      ? "Attention"
+                      : "Completed",
+                )
+              }
+            >
+              Advance request
+              <Icon name="arrow" size={17} />
+            </button>
+          </div>
+        </div>
+      </aside>
+      {mobileEditor && (
+        <MobileRequestEditor
+          editor={mobileEditor}
+          draft={mobileDraft}
+          error={mobileEditorError}
+          saving={mobileSaving}
+          onDraftChange={setMobileDraft}
+          onClose={() => {
+            if (mobileSaving) return;
+            setMobileEditor(null);
+            setMobileEditorError(null);
+          }}
+          onSave={(value) => void saveMobileEditor(value)}
+        />
+      )}
+      {evidenceOpen && (
+        <EvidenceManager
+          request={request}
+          initialKind={evidenceKind}
+          columnId={evidenceColumn?.id}
+          columnTitle={evidenceColumn?.title}
+          onClose={() => {
+            setEvidenceOpen(false);
+            setEvidenceRefreshToken((token) => token + 1);
+            if (evidenceColumn) {
+              window.dispatchEvent(new Event("maintsupp:refresh-board"));
+            }
+            setEvidenceColumn(null);
+          }}
+          onFileCountChange={
+            evidenceColumn
+              ? () =>
+                  window.dispatchEvent(new Event("maintsupp:refresh-board"))
+              : undefined
+          }
+          onRequestChange={onRequestChange}
+          onNotify={onNotify}
+        />
+      )}
+    </>
+  );
+}
+
+function DetailItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="detail-item">
+      <span>
+        <Icon name={icon} size={16} />
+      </span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </div>
+    </div>
+  );
+}
+
+function StoreComplianceDrawer({
+  store,
+  onClose,
+}: {
+  store: StoreRecord;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <button
+        className="drawer-scrim"
+        type="button"
+        aria-label="Close site details"
+        onClick={onClose}
+      />
+      <aside className="detail-drawer">
+        <div className="detail-drawer__header">
+          <div>
+            <span>Compliance profile</span>
+            <h2>{store.name}</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            <Icon name="close" size={20} />
+          </button>
+        </div>
+        <div className="detail-drawer__body">
+          <div className="site-profile-banner">
+            <span>
+              <Icon name="store" size={21} />
+            </span>
+            <div>
+              <strong>{store.type}</strong>
+              <small>{store.address}</small>
+            </div>
+          </div>
+          <section className="drawer-section">
+            <div className="drawer-section__title">
+              <span className="drawer-label">Required documents</span>
+              <span>{store.compliance.length} types</span>
+            </div>
+            <div className="compliance-document-list">
+              {store.compliance.map((item) => (
+                <div key={item.kind}>
+                  <span className="compliance-doc-icon">
+                    <Icon name="document" size={18} />
+                  </span>
+                  <span>
+                    <strong>{item.kind}</strong>
+                    <small>
+                      {item.expiry
+                        ? `Expires ${formatDate(item.expiry)}`
+                        : item.state}
+                    </small>
+                  </span>
+                  <span className={complianceTone(item.state)}>
+                    <span />
+                    {item.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function FileDetailDrawer({
+  file,
+  onClose,
+}: {
+  file: FileRecord;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <button
+        className="drawer-scrim"
+        type="button"
+        aria-label="Close file details"
+        onClick={onClose}
+      />
+      <aside className="detail-drawer detail-drawer--file">
+        <div className="detail-drawer__header">
+          <div>
+            <span>{file.id}</span>
+            <h2>{file.name}</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            <Icon name="close" size={20} />
+          </button>
+        </div>
+        <div className="detail-drawer__body">
+          <div className="file-preview-placeholder">
+            <Icon name="document" size={38} />
+            <strong>{file.kind}</strong>
+            <span>{file.size}</span>
+          </div>
+          <section className="drawer-section">
+            <span className="drawer-label">File details</span>
+            <div className="detail-grid">
+              <DetailItem icon="store" label="Site" value={file.site} />
+              <DetailItem
+                icon="wrench"
+                label="Work order"
+                value={file.requestId ?? "Not linked"}
+              />
+              <DetailItem
+                icon="calendar"
+                label="Uploaded"
+                value={formatDate(file.uploadedAt, true)}
+              />
+              <DetailItem icon="shield" label="Status" value={file.status} />
+            </div>
+          </section>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+interface CreateRequestDraft {
+  location: string;
+  requester: string;
+  contact: string;
+  description: string;
+  category: string;
+  engineer: string;
+  priority: Priority;
+}
+
+function CreateRequestModal({
+  locations: siteLocations,
+  onClose,
+  onCreate,
+}: {
+  locations: string[];
+  onClose: () => void;
+  onCreate: (draft: CreateRequestDraft, files: File[]) => Promise<void>;
+}) {
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [draft, setDraft] = useState<CreateRequestDraft>({
+    location: "",
+    requester: "",
+    contact: "",
+    description: "",
+    category: "Lighting",
+    engineer: "Electrician",
+    priority: "Medium",
+  });
+  const firstField = useRef<HTMLSelectElement>(null);
+
+  useEffect(() => {
+    firstField.current?.focus();
+  }, []);
+
+  const update = (key: keyof CreateRequestDraft, value: string) =>
+    setDraft((current) => ({ ...current, [key]: value }));
+
+  const submit = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await onCreate(draft, attachments);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The request could not be saved.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-wrap" role="dialog" aria-modal="true">
+      <button
+        className="modal-scrim"
+        type="button"
+        aria-label="Close new request"
+        onClick={onClose}
+      />
+      <div className="request-modal">
+        <div className="request-modal__top">
+          <div>
+            <span className="modal-icon">
+              <Icon name="wrench" size={19} />
+            </span>
+            <div>
+              <span>New maintenance request</span>
+              <h2>{step === 1 ? "Site & issue" : "Triage details"}</h2>
+            </div>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <Icon name="close" size={20} />
+          </button>
+        </div>
+
+        <div className="modal-progress">
+          <span className="is-active">
+            <i>1</i>
+            Request
+          </span>
+          <b />
+          <span className={step === 2 ? "is-active" : ""}>
+            <i>2</i>
+            Triage
+          </span>
+        </div>
+
+        <div className="request-modal__body">
+          {step === 1 ? (
+            <>
+              <label className="form-field">
+                <span>Location</span>
+                <select
+                  ref={firstField}
+                  value={draft.location}
+                  onChange={(event) => update("location", event.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    Select a site
+                  </option>
+                  {siteLocations.map((location) => (
+                    <option key={location}>{location}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Requester name</span>
+                  <input
+                    value={draft.requester}
+                    placeholder="Full name"
+                    onChange={(event) => update("requester", event.target.value)}
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Contact number</span>
+                  <input
+                    value={draft.contact}
+                    placeholder="+44"
+                    onChange={(event) => update("contact", event.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="form-field">
+                <span>Description of works required</span>
+                <textarea
+                  value={draft.description}
+                  placeholder="Describe what is happening, where it is and any immediate risk…"
+                  rows={5}
+                  onChange={(event) =>
+                    update("description", event.target.value)
+                  }
+                />
+                <small>{draft.description.length}/800 characters</small>
+              </label>
+              <label className="file-drop">
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
+                  onChange={(event) =>
+                    setAttachments(Array.from(event.currentTarget.files ?? []))
+                  }
+                />
+                <span>
+                  <Icon name="upload" size={20} />
+                </span>
+                <strong>
+                  {attachments.length
+                    ? `${attachments.length} file${attachments.length > 1 ? "s" : ""} selected`
+                    : "Add photos, videos or documents"}
+                </strong>
+                <small>
+                  Files up to 25 MB; videos up to 90 MB each. Large videos upload in parts.
+                </small>
+              </label>
+            </>
+          ) : (
+            <>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Priority</span>
+                  <select
+                    value={draft.priority}
+                    onChange={(event) =>
+                      update("priority", event.target.value)
+                    }
+                  >
+                    <option>Urgent</option>
+                    <option>High</option>
+                    <option>Medium</option>
+                    <option>Low</option>
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span>Category</span>
+                  <select
+                    value={draft.category}
+                    onChange={(event) =>
+                      update("category", event.target.value)
+                    }
+                  >
+                    <option>Lighting</option>
+                    <option>Electrical</option>
+                    <option>Joinery</option>
+                    <option>Glass</option>
+                    <option>HVAC</option>
+                    <option>Plumbing</option>
+                    <option>CCTV</option>
+                    <option>Digital display</option>
+                    <option>Other</option>
+                  </select>
+                </label>
+              </div>
+              <label className="form-field">
+                <span>Engineer required</span>
+                <select
+                  value={draft.engineer}
+                  onChange={(event) => update("engineer", event.target.value)}
+                >
+                  <option>Electrician</option>
+                  <option>Handyman</option>
+                  <option>HVAC</option>
+                  <option>Plumber</option>
+                  <option>Specialist</option>
+                </select>
+              </label>
+              <div className="triage-preview">
+                <span>
+                  <Icon name="spark" size={18} />
+                </span>
+                <div>
+                  <strong>Routing preview</strong>
+                  <p>
+                    This request will enter <b>Incoming requests</b> with a{" "}
+                    <b>{draft.priority.toLowerCase()}</b> priority and will be
+                    visible to the operations team immediately.
+                  </p>
+                </div>
+              </div>
+              <div className="request-review">
+                <span>
+                  <small>Site</small>
+                  <strong>{draft.location}</strong>
+                </span>
+                <span>
+                  <small>Requested by</small>
+                  <strong>{draft.requester}</strong>
+                </span>
+                <span>
+                  <small>Evidence</small>
+                  <strong>{attachments.length} files</strong>
+                </span>
+              </div>
+            </>
+          )}
+
+          {error && (
+            <div className="form-error" role="alert">
+              <Icon name="alert" size={17} />
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="request-modal__footer">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => (step === 1 ? onClose() : setStep(1))}
+          >
+            {step === 1 ? "Cancel" : "Back"}
+          </button>
+          {step === 1 ? (
+            <button
+              className="primary-button"
+              type="button"
+              disabled={
+                !draft.location ||
+                !draft.requester.trim() ||
+                !draft.contact.trim() ||
+                draft.description.trim().length < 10
+              }
+              onClick={() => setStep(2)}
+            >
+              Continue
+              <Icon name="arrow" size={17} />
+            </button>
+          ) : (
+            <button
+              className="primary-button"
+              type="button"
+              disabled={loading}
+              onClick={submit}
+            >
+              {loading ? "Creating…" : "Create request"}
+              {!loading && <Icon name="check" size={17} />}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

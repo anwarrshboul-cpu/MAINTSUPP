@@ -1,0 +1,203 @@
+/* ── Board metrics ────────────────────────────────────────────────────────
+ *
+ * Matches the cell and icon geometry of the monday.com board being replaced,
+ * so someone moving between the two is not re-learning where things sit.
+ *
+ * COLOUR IS NOT COPIED. Every value below is a dimension. All colours come
+ * from the MAINTSUPP custom properties already defined in brand-overrides.css
+ * (--ink, --paper, --line, --teal, --muted). monday's blues and purples are
+ * deliberately absent.
+ *
+ * The board previously mixed 30px, 32px, 36px, 38px and 39px row heights and
+ * icons from 12px to 18px. A grid only reads as a grid when it is uniform.
+ */
+
+:root {
+  /* Vertical rhythm — monday's board grid */
+  --board-row-height: 36px;
+  --board-header-height: 36px;
+  --board-group-header-height: 40px;
+  --board-subitem-row-height: 32px;
+
+  /* Horizontal */
+  --board-cell-padding-x: 8px;
+  --board-checkbox-width: 32px;
+  --board-group-bar-width: 6px;
+
+  /* Column defaults, matching monday's per-type widths */
+  --board-col-name: 400px;
+  --board-col-status: 140px;
+  --board-col-date: 140px;
+  --board-col-person: 120px;
+  --board-col-number: 120px;
+  --board-col-text: 160px;
+  --board-col-timeline: 180px;
+  --board-col-file: 120px;
+  --board-col-min: 80px;
+
+  /* Icons — two sizes only */
+  --board-icon-cell: 16px;
+  --board-icon-toolbar: 20px;
+
+  --board-font-size: 14px;
+  --board-chip-radius: 4px;
+}
+
+/* Rows and headers ------------------------------------------------------- */
+
+.live-board-row,
+.live-board__row,
+.board-row {
+  height: var(--board-row-height);
+  min-height: var(--board-row-height);
+  font-size: var(--board-font-size);
+}
+
+.live-board-head,
+.live-board__head,
+.board-column-header {
+  height: var(--board-header-height);
+  min-height: var(--board-header-height);
+  font-size: 13px;
+}
+
+.live-board-group__header,
+.board-group__header {
+  min-height: var(--board-group-header-height);
+}
+
+/* Column header titles ----------------------------------------------------
+ *
+ * THE DEFECT: 20 of the 25 Store Documentation headers rendered as unreadable
+ * stubs at 1920px. "Fire Risk Assessment" got 66px of a 151px column and needed
+ * 131px. "PLI Document" got 46px of 131px. RAMS read "RA…" in a 121px column.
+ *
+ * THE CAUSE was not flex. `globals.css` positions the title ABSOLUTELY with
+ * `left: 34px; right: 34px` — "exact header centring" — so every column, at
+ * every width, hands 68px to two controls that occupy 45px of it and reserves
+ * the rest for nothing. Being out of flow, the `flex: 1 1 auto` declared on the
+ * same element never applied: a fixed remainder, exactly as reported. On top of
+ * the 16px of cell padding that is ~85px gone before a letter is drawn, which
+ * is most of a 120px column.
+ *
+ * THE FIX, in two parts:
+ *
+ *  1. The insets become what the controls actually occupy — the 20px type glyph
+ *     sits at 2–22px and the 25px menu button ends 2px from the right — instead
+ *     of a symmetric guess. Centring survives: the 5px asymmetry is invisible
+ *     next to the 30–100px of title it buys back.
+ *  2. A title that still does not fit wraps to a second line rather than being
+ *     ellipsed. Two lines at 1.2 fit the 37px header without moving it. This
+ *     only changes columns that were ALREADY truncating — `white-space: normal`
+ *     is a no-op on a title that fits — so the maintenance board's 25 headers
+ *     are untouched wherever they were legible, which is the risk here: the
+ *     same component draws both boards and the parity tests pin their order.
+ *
+ * The overflow menu is deliberately NOT hidden until hover. That was the other
+ * candidate fix and it costs a discoverable affordance for touch users, who
+ * have no hover, on the one control that renames, sorts and hides a column.
+ *
+ * This lives here rather than in globals.css because board-metrics is the last
+ * of the three dashboard stylesheets to load and is where the board's geometry
+ * is decided; globals keeps the rule it had, and this overrides the two
+ * dimensions that were wrong.
+ */
+.custom-column-header > strong {
+  right: 28px;
+  left: 23px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+}
+
+.live-board-subitem-row {
+  height: var(--board-subitem-row-height);
+  min-height: var(--board-subitem-row-height);
+}
+
+/* Cells ------------------------------------------------------------------ */
+
+.live-board-cell,
+.board-cell {
+  padding-inline: var(--board-cell-padding-x);
+  font-size: var(--board-font-size);
+  line-height: var(--board-row-height);
+}
+
+/* A status cell fills its cell edge to edge, as it does on monday. The colour
+   comes from the option row the admin configured, not from here. */
+.live-board-cell--status .board-chip,
+.board-cell--status .board-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: var(--board-chip-radius);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Icons ------------------------------------------------------------------ */
+
+/* Two sizes, applied by context rather than by editing 80 call sites. The
+   `size` prop still sets the SVG attributes; these rules make the rendered
+   size consistent. */
+.live-board-row svg,
+.board-row svg,
+.live-board-cell svg,
+.board-cell svg {
+  width: var(--board-icon-cell);
+  height: var(--board-icon-cell);
+  flex: 0 0 auto;
+}
+
+.live-board-toolbar svg,
+.board-toolbar svg,
+.board-header__actions svg {
+  width: var(--board-icon-toolbar);
+  height: var(--board-icon-toolbar);
+  flex: 0 0 auto;
+}
+
+/* Selection column ------------------------------------------------------- */
+
+.live-board-cell--select,
+.board-cell--select {
+  width: var(--board-checkbox-width);
+  min-width: var(--board-checkbox-width);
+  padding-inline: 0;
+}
+
+/* Group colour bar ------------------------------------------------------- */
+
+.live-board-group,
+.board-group {
+  border-left: var(--board-group-bar-width) solid var(--group-colour, var(--teal));
+}
+
+/* Mobile ------------------------------------------------------------------
+ *
+ * Below 768px the grid stops being a grid — Group E5 turns rows into cards.
+ * Fixed row heights would clip a wrapped card, so they are released here.
+ */
+@media (max-width: 767px) {
+  .live-board-row,
+  .live-board__row,
+  .board-row {
+    height: auto;
+    min-height: 44px; /* still a comfortable tap target */
+  }
+
+  .live-board-cell,
+  .board-cell {
+    line-height: 1.4;
+  }
+}

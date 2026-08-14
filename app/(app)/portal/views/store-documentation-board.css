@@ -1,0 +1,87 @@
+/*
+ * Store Documentation UK — the section's three view tabs.
+ *
+ * Deliberately small. The board, tracker and calendar each bring their own
+ * styling; this file only dresses the tab strip that switches between them,
+ * using the same tokens as the rest of the dashboard so it reads as one product
+ * rather than three bolted together.
+ */
+
+.store-documentation {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.store-documentation__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--canvas);
+  /* Narrow screens scroll the strip rather than wrapping it: a tablist that
+     reflows to two rows loses the left-to-right order arrow keys imply. */
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.store-documentation__tabs button {
+  flex: 0 0 auto;
+  /* 44px so the tabs stay usable on a touch screen. */
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.store-documentation__tabs button:hover {
+  color: var(--ink);
+  background: var(--line-soft);
+}
+
+/* `--control-own-fg` opts this out of the dark theme's blanket
+   `.portal-main button { color: var(--ink) }`, which outranks this rule and
+   repainted the label to near-white on its own teal ground, 2.19:1. */
+.store-documentation__tabs button.is-active {
+  --control-own-fg: var(--paper);
+  color: var(--paper);
+  background: var(--teal-600);
+}
+
+/* The selected tab must not rely on colour alone — it also carries weight and
+   a leading rule, so it survives greyscale and high-contrast modes. */
+.store-documentation__tabs button.is-active {
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--teal-700);
+}
+
+.store-documentation__tabs button:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 2px;
+}
+
+.store-documentation__panel:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .store-documentation__tabs button {
+    transition: none;
+  }
+}
+
+/* The raise control sits above the tab strip and right-aligns with it. */
+.store-documentation__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}

@@ -1,0 +1,628 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import type { AttachmentKind, MaintenanceRequest } from "../../../lib/types";
+import { ensureDatabase } from "../../../../db/init";
+import {
+  activityLog,
+  attachments,
+  maintenanceBoardColumns,
+  maintenanceRequests,
+} from "../../../../db/schema";
+import { boardKeyForRequest } from "../../../lib/board-registry";
+import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
+import {
+  recordTokenUse,
+  resolveJobToken,
+  type EvidenceKind,
+} from "../../../lib/job-tokens";
+
+const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
+const MAX_PART_SIZE = 5 * 1024 * 1024;
+const allowedKinds = new Set<AttachmentKind>([
+  "issue",
+  "completion",
+  "general",
+]);
+const allowedTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-m4v",
+  "video/x-matroska",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+  "application/zip",
+  "application/x-zip-compressed",
+]);
+const allowedExtensions = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "heic",
+  "heif",
+  "mp4",
+  "webm",
+  "mov",
+  "m4v",
+  "mkv",
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "txt",
+  "csv",
+  "zip",
+]);
+const videoExtensions = new Set(["mp4", "webm", "mov", "m4v", "mkv"]);
+
+function safeFileName(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+}
+
+function fileExtension(name: string) {
+  return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function isVideo(originalName: string, contentType: string) {
+  return (
+    contentType.startsWith("video/") ||
+    videoExtensions.has(fileExtension(originalName))
+  );
+}
+
+/**
+ * Whether this file may be stored at all.
+ *
+ * AND, not OR. This was `allowedTypes.has(type) || allowedExtensions.has(ext)`,
+ * and BOTH halves are supplied by the caller — so naming a file `poc.png` while
+ * declaring `Content-Type: text/html` satisfied the extension half and stored
+ * the HTML type, which `GET /api/files/[id]` then echoed back as the response
+ * type with `Content-Disposition: inline`. That is script execution on the
+ * application's own origin, and a contractor job link — no session at all — was
+ * enough to plant it.
+ *
+ * Requiring both closes it at the door: a declared type outside the list is
+ * refused however the file is named, and a name outside the list is refused
+ * however it is declared. SVG is absent from both lists on purpose, and the OR
+ * was quietly defeating that.
+ *
+ * The serving side is hardened independently in `files/[id]/route.ts` — a file
+ * stored before this change must not become executable just because it is old.
+ */
+function isAllowedFile(originalName: string, contentType: string) {
+  const declared = (contentType ?? "").trim();
+  const typeOk = declared ? allowedTypes.has(declared) : true;
+  return typeOk && allowedExtensions.has(fileExtension(originalName));
+}
+
+function attachmentPayload(row: typeof attachments.$inferSelect) {
+  return {
+    id: row.id,
+    requestId: row.requestId,
+    kind: row.kind,
+    boardColumnId: row.boardColumnId,
+    originalName: row.originalName,
+    contentType: row.contentType,
+    byteSize: row.byteSize,
+    createdAt: row.createdAt,
+    inlineUrl: `/api/files/${row.id}`,
+    downloadUrl: `/api/files/${row.id}?download=1`,
+  };
+}
+
+function requestPayload(
+  row: typeof maintenanceRequests.$inferSelect,
+): MaintenanceRequest {
+  const payload = { ...row } as Record<string, unknown>;
+  delete payload.publicUploadTokenHash;
+  delete payload.publicUploadTokenExpiresAt;
+  delete payload.createdByEmail;
+  delete payload.organisationId;
+  delete payload.legacyClientId;
+  delete payload.createdAt;
+  delete payload.updatedAt;
+  return payload as unknown as MaintenanceRequest;
+}
+
+async function bucket() {
+  const { env } = await import("cloudflare:workers");
+  const runtimeEnv = env as unknown as { BUCKET?: R2Bucket };
+  return runtimeEnv.BUCKET;
+}
+
+async function authorizeUpload(
+  request: Request,
+  requestId: string,
+  requestedKind: string,
+  uploadToken: string,
+  requestedColumnId: string,
+) {
+  await ensureDatabase();
+  const { actor, authenticated, db, orgId } = await scopedDb(request);
+  const kind = allowedKinds.has(requestedKind as AttachmentKind)
+    ? (requestedKind as AttachmentKind)
+    : null;
+  const boardColumnId = requestedColumnId.trim().slice(0, 100);
+  if (!requestId || !kind) {
+    return {
+      response: Response.json(
+        { error: "A work order and valid file section are required." },
+        { status: 400 },
+      ),
+    } as const;
+  }
+
+  // A binned job takes no uploads — see the same filter on the direct path.
+  const [workOrder] = await db
+    .select()
+    .from(maintenanceRequests)
+    .where(
+      and(
+        eq(maintenanceRequests.id, requestId),
+        eq(maintenanceRequests.organisationId, orgId),
+        isNull(maintenanceRequests.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!workOrder) {
+    return {
+      response: Response.json({ error: "Work order not found." }, { status: 404 }),
+    } as const;
+  }
+
+  /*
+   * The `uploadToken` this function has always taken was never read.
+   *
+   * It is declared in the signature, passed in from the POST body and the
+   * X-Upload-Token header, and `client-upload.ts` faithfully sends it — but
+   * nothing in the body referenced it, so authorisation was `scopedDb` alone,
+   * which never refuses. This is the path every file over 4 MB takes, so it was
+   * the wider of the two upload holes. Mirrors the single-shot route in
+   * ../route.ts: a contractor link must belong to this job and permit this kind
+   * of evidence, and an unauthenticated caller without one gets nothing.
+   */
+  if (!authenticated) {
+    const scopedToken = uploadToken ? await resolveJobToken(db, uploadToken) : null;
+    if (!scopedToken || scopedToken.requestId !== workOrder.id) {
+      return {
+        response: Response.json(
+          { error: "This link does not belong to that job." },
+          { status: 403 },
+        ),
+      } as const;
+    }
+    if (!scopedToken.allowedKinds.includes(kind as EvidenceKind)) {
+      return {
+        response: Response.json(
+          { error: `This link cannot upload ${kind} evidence.` },
+          { status: 403 },
+        ),
+      } as const;
+    }
+    await recordTokenUse(db, scopedToken.id);
+  }
+
+  if (boardColumnId) {
+    if (kind !== "general") {
+      return {
+        response: Response.json(
+          { error: "Custom file columns require the general file section." },
+          { status: 400 },
+        ),
+      } as const;
+    }
+    // Scoped to the work order's own board, not the literal "maintenance" —
+    // Store Documentation's twelve file columns live on another board and were
+    // refused outright. See `boardKeyForRequest`.
+    const boardKey = await boardKeyForRequest(db, orgId, workOrder.id);
+    const [column] = await db
+      .select({ id: maintenanceBoardColumns.id })
+      .from(maintenanceBoardColumns)
+      .where(
+        and(
+          eq(maintenanceBoardColumns.id, boardColumnId),
+          eq(maintenanceBoardColumns.boardId, boardKey),
+          eq(maintenanceBoardColumns.type, "files"),
+          eq(maintenanceBoardColumns.organisationId, orgId),
+        ),
+      )
+      .limit(1);
+    if (!column) {
+      return {
+        response: Response.json(
+          { error: "The file column no longer exists." },
+          { status: 404 },
+        ),
+      } as const;
+    }
+  }
+
+  return {
+    actor,
+    orgId,
+    kind,
+    workOrder,
+    db,
+    boardColumnId: boardColumnId || null,
+    actorEmail: actor.email,
+  } as const;
+}
+
+function validUploadKey(
+  key: string,
+  orgId: string,
+  requestId: string,
+  kind: AttachmentKind,
+) {
+  return (
+    key.startsWith(`${orgId}/maintenance/${requestId}/${kind}/`) &&
+    key.length < 512
+  );
+}
+
+async function completeMetadata(
+  objectKey: string,
+  requestId: string,
+  kind: AttachmentKind,
+  boardColumnId: string | null,
+) {
+  const storage = await bucket();
+  const head = await storage?.head(objectKey);
+  if (!head) return null;
+  const metadata = head.customMetadata ?? {};
+  if (
+    metadata.requestId !== requestId ||
+    metadata.kind !== kind ||
+    (metadata.boardColumnId || null) !== boardColumnId ||
+    !metadata.fileId ||
+    !metadata.originalName
+  ) {
+    return null;
+  }
+  return {
+    storage,
+    head,
+    metadata,
+    fileId: metadata.fileId,
+    originalName: metadata.originalName,
+    contentType: metadata.contentType || "application/octet-stream",
+  };
+}
+
+export async function POST(request: Request) {
+  try {
+    const payload = (await request.json()) as Record<string, unknown>;
+    const action = String(payload.action ?? "");
+    const requestId = String(payload.requestId ?? "").trim();
+    const requestedKind = String(payload.kind ?? "issue");
+    const uploadToken = String(payload.uploadToken ?? "").trim();
+    const requestedColumnId = String(payload.columnId ?? "").trim();
+    const authorization = await authorizeUpload(
+      request,
+      requestId,
+      requestedKind,
+      uploadToken,
+      requestedColumnId,
+    );
+    if ("response" in authorization) return authorization.response;
+    const { db, kind, workOrder, actorEmail, boardColumnId, orgId } = authorization;
+    const storage = await bucket();
+    if (!storage) {
+      return Response.json(
+        { error: "File storage is unavailable." },
+        { status: 503 },
+      );
+    }
+
+    if (action === "start") {
+      const originalName = String(payload.originalName ?? "").trim().slice(0, 255);
+      const contentType = String(
+        payload.contentType ?? "application/octet-stream",
+      ).trim();
+      const byteSize = Number(payload.byteSize);
+      if (
+        !originalName ||
+        !Number.isInteger(byteSize) ||
+        byteSize < 1 ||
+        !isAllowedFile(originalName, contentType)
+      ) {
+        return Response.json(
+          { error: "Choose a supported file to upload." },
+          { status: 415 },
+        );
+      }
+      const video = isVideo(originalName, contentType);
+      const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
+      if (byteSize > maxSize) {
+        return Response.json(
+          {
+            error: video
+              ? "Videos must be 90 MB or smaller."
+              : "Files must be 25 MB or smaller.",
+          },
+          { status: 413 },
+        );
+      }
+
+      const fileId = crypto.randomUUID();
+      const cleanName = safeFileName(originalName) || `upload-${fileId}`;
+      const key = `${orgId}/maintenance/${requestId}/${kind}/${fileId}-${cleanName}`;
+      const upload = await storage.createMultipartUpload(key, {
+        httpMetadata: {
+          contentType,
+          contentDisposition: `inline; filename="${cleanName}"`,
+        },
+        customMetadata: {
+          requestId,
+          organisationId: orgId,
+          kind,
+          ...(boardColumnId ? { boardColumnId } : {}),
+          fileId,
+          originalName,
+          contentType,
+          byteSize: String(byteSize),
+          uploadedBy: actorEmail,
+        },
+      });
+      return Response.json(
+        { key: upload.key, uploadId: upload.uploadId, fileId },
+        { status: 201 },
+      );
+    }
+
+    const key = String(payload.key ?? "");
+    const uploadId = String(payload.uploadId ?? "");
+    if (!key || !uploadId || !validUploadKey(key, orgId, requestId, kind)) {
+      return Response.json(
+        { error: "The upload session is invalid." },
+        { status: 400 },
+      );
+    }
+    const multipart = storage.resumeMultipartUpload(key, uploadId);
+
+    if (action === "abort") {
+      await multipart.abort();
+      return Response.json({ aborted: true });
+    }
+
+    if (action === "complete") {
+      const parts = Array.isArray(payload.parts)
+        ? payload.parts
+            .map((part) => {
+              const value = part as Record<string, unknown>;
+              return {
+                partNumber: Number(value.partNumber),
+                etag: String(value.etag ?? ""),
+              };
+            })
+            .filter(
+              (part) =>
+                Number.isInteger(part.partNumber) &&
+                part.partNumber > 0 &&
+                part.etag.length > 0,
+            )
+        : [];
+      if (!parts.length || parts.length > 100) {
+        return Response.json(
+          { error: "The uploaded file parts are incomplete." },
+          { status: 400 },
+        );
+      }
+      await multipart.complete(parts);
+      const completed = await completeMetadata(
+        key,
+        requestId,
+        kind,
+        boardColumnId,
+      );
+      if (!completed) {
+        await storage.delete(key);
+        return Response.json(
+          { error: "The completed file metadata is invalid." },
+          { status: 400 },
+        );
+      }
+      const byteSize = Number(completed.metadata.byteSize);
+      const video = isVideo(completed.originalName, completed.contentType);
+      const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
+      if (
+        !Number.isInteger(byteSize) ||
+        byteSize !== completed.head.size ||
+        byteSize > maxSize
+      ) {
+        await storage.delete(key);
+        return Response.json(
+          { error: "The completed file size could not be verified." },
+          { status: 400 },
+        );
+      }
+
+      const [existing] = await db
+        .select()
+        .from(attachments)
+        .where(
+          and(
+            eq(attachments.id, completed.fileId),
+            eq(attachments.objectKey, key),
+            eq(attachments.organisationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        return Response.json({
+          file: attachmentPayload(existing),
+          request: requestPayload(workOrder),
+        });
+      }
+
+      try {
+        const [created] = await db
+          .insert(attachments)
+          .values({
+            id: completed.fileId,
+            organisationId: orgId,
+            requestId,
+            siteId: workOrder.siteId,
+            kind,
+            boardColumnId,
+            objectKey: key,
+            originalName: completed.originalName,
+            contentType: completed.contentType,
+            byteSize,
+            uploadedByEmail: actorEmail,
+          })
+          .returning();
+
+        const [updatedRequest] = await db
+          .update(maintenanceRequests)
+          .set({
+            attachmentCount: sql`${maintenanceRequests.attachmentCount} + 1`,
+            issueAttachmentCount:
+              kind === "issue"
+                ? sql`${maintenanceRequests.issueAttachmentCount} + 1`
+                : maintenanceRequests.issueAttachmentCount,
+            completedAttachmentCount:
+              kind === "completion"
+                ? sql`${maintenanceRequests.completedAttachmentCount} + 1`
+                : maintenanceRequests.completedAttachmentCount,
+            generalAttachmentCount:
+              kind === "general"
+                ? sql`${maintenanceRequests.generalAttachmentCount} + 1`
+                : maintenanceRequests.generalAttachmentCount,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
+          .returning();
+
+        await db.insert(activityLog).values({
+          id: crypto.randomUUID(),
+          organisationId: orgId,
+          entityType: "maintenance_request",
+          entityId: requestId,
+          action: "request.file_uploaded",
+          actorEmail,
+          detail: JSON.stringify({
+            fileId: completed.fileId,
+            fileName: completed.originalName,
+            kind,
+            boardColumnId,
+            contentType: completed.contentType,
+            multipart: true,
+          }),
+        });
+        return Response.json(
+          {
+            file: attachmentPayload(created),
+            request: requestPayload(updatedRequest),
+          },
+          { status: 201 },
+        );
+      } catch (error) {
+    // A session that has ended is not an outage. See `anonymousRefusal`.
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+        await storage.delete(key);
+        throw error;
+      }
+    }
+
+    return Response.json({ error: "Unknown upload action." }, { status: 400 });
+  } catch (error) {
+    // A session that has ended is not an outage. See `anonymousRefusal`.
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    const detail =
+      process.env.NODE_ENV === "development" && error instanceof Error
+        ? ` ${error.message}`
+        : "";
+    return Response.json(
+      { error: `The video could not be uploaded.${detail}` },
+      { status: 503 },
+    );
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const requestId = request.headers.get("X-Upload-Request-Id")?.trim() ?? "";
+    const requestedKind = request.headers.get("X-Upload-Kind")?.trim() ?? "";
+    const uploadToken = request.headers.get("X-Upload-Token")?.trim() ?? "";
+    const requestedColumnId =
+      request.headers.get("X-Upload-Column-Id")?.trim() ?? "";
+    const key = request.headers.get("X-Upload-Key") ?? "";
+    const uploadId = request.headers.get("X-Upload-Id") ?? "";
+    const partNumber = Number(request.headers.get("X-Upload-Part"));
+    const authorization = await authorizeUpload(
+      request,
+      requestId,
+      requestedKind,
+      uploadToken,
+      requestedColumnId,
+    );
+    if ("response" in authorization) return authorization.response;
+    if (
+      !key ||
+      !uploadId ||
+      !Number.isInteger(partNumber) ||
+      partNumber < 1 ||
+      !validUploadKey(key, authorization.orgId, requestId, authorization.kind)
+    ) {
+      return Response.json(
+        { error: "The upload part is invalid." },
+        { status: 400 },
+      );
+    }
+
+    const bytes = await request.arrayBuffer();
+    if (bytes.byteLength < 1 || bytes.byteLength > MAX_PART_SIZE) {
+      return Response.json(
+        { error: "Each upload part must be 5 MB or smaller." },
+        { status: 413 },
+      );
+    }
+    const storage = await bucket();
+    if (!storage) {
+      return Response.json(
+        { error: "File storage is unavailable." },
+        { status: 503 },
+      );
+    }
+    const multipart = storage.resumeMultipartUpload(key, uploadId);
+    const part = await multipart.uploadPart(partNumber, bytes);
+    return Response.json({ part });
+  } catch (error) {
+    // A session that has ended is not an outage. See `anonymousRefusal`.
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    const detail =
+      process.env.NODE_ENV === "development" && error instanceof Error
+        ? ` ${error.message}`
+        : "";
+    return Response.json(
+      { error: `The video part could not be uploaded.${detail}` },
+      { status: 503 },
+    );
+  }
+}

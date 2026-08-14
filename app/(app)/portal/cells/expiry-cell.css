@@ -1,0 +1,214 @@
+/**
+ * Expiry cell — the nine certificate-expiry date columns on Store Documentation UK.
+ *
+ * Loaded by expiry-cell.tsx itself through a React 19 hoisted stylesheet link,
+ * so the cell carries its own styling and no existing stylesheet had to change.
+ *
+ * Accessibility notes, because this board decides whether a fire alarm
+ * certificate is legally in date:
+ *
+ * 1. Colour is never load-bearing. Every state also renders a glyph and a word
+ *    ("EXPIRED", "DUE SOON", "VALID", "NOT RECORDED"), so the cell survives
+ *    greyscale printing and every form of colour vision deficiency.
+ * 2. The text colour is always var(--ink), never the accent. The palette's
+ *    --red-600/--amber-600/--green-700 keep their light-theme values under the
+ *    dark override in globals.css, where they would sit at roughly 3:1 against
+ *    the dark paper — fine for a 3px rule or a glyph, too weak for a word you
+ *    have to read. The accent therefore colours the border, the leading rule
+ *    and the glyph only.
+ * 3. "Not recorded" is drawn dashed and muted so a missing certificate never
+ *    reads as a satisfied one. An empty compliance cell is a finding, not a
+ *    blank.
+ */
+
+.expiry-cell {
+  /* Neutral defaults — the state modifiers below override the three tokens. */
+  --expiry-accent: var(--muted-2);
+  --expiry-tint: var(--line-soft);
+  --expiry-edge: var(--line);
+  --expiry-edge-style: solid;
+
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.expiry-cell.is-expired,
+.expiry-cell-sheet.is-expired {
+  --expiry-accent: var(--red-600);
+  --expiry-tint: var(--red-100);
+  --expiry-edge: var(--red-600);
+  --expiry-edge-style: solid;
+}
+
+.expiry-cell.is-due-soon,
+.expiry-cell-sheet.is-due-soon {
+  --expiry-accent: var(--amber-600);
+  --expiry-tint: var(--amber-100);
+  --expiry-edge: var(--amber-600);
+  --expiry-edge-style: solid;
+}
+
+.expiry-cell.is-valid,
+.expiry-cell-sheet.is-valid {
+  --expiry-accent: var(--green-700);
+  --expiry-tint: var(--green-100);
+  --expiry-edge: var(--green-700);
+  --expiry-edge-style: solid;
+}
+
+.expiry-cell.is-not-recorded,
+.expiry-cell-sheet.is-not-recorded {
+  --expiry-accent: var(--muted-2);
+  --expiry-tint: transparent;
+  --expiry-edge: var(--muted-2);
+  --expiry-edge-style: dashed;
+}
+
+/* ── Trigger ──────────────────────────────────────────────────────────────── */
+
+.expiry-cell__trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  height: 39px;
+  padding: 0 8px;
+  border: 1px var(--expiry-edge-style) var(--expiry-edge);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--expiry-tint);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.expiry-cell__trigger:hover {
+  border-color: var(--expiry-accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.expiry-cell__trigger:focus-visible {
+  outline: 2px solid var(--teal-600);
+  outline-offset: 1px;
+}
+
+.expiry-cell__glyph {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  color: var(--expiry-accent);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.expiry-cell__body {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.expiry-cell__label {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.expiry-cell__date {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expiry-cell.is-not-recorded .expiry-cell__date {
+  color: var(--muted-2);
+  font-style: italic;
+}
+
+/* ── Inline editor ────────────────────────────────────────────────────────── */
+
+.expiry-cell__input {
+  width: 100%;
+  min-width: 0;
+  height: 39px;
+  padding: 0 6px;
+  border: 1px solid var(--teal-500);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.expiry-cell__input:focus {
+  box-shadow: 0 0 0 2px var(--teal-100);
+}
+
+/* ── Mobile sheet ─────────────────────────────────────────────────────────── */
+
+.expiry-cell-sheet__status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  border: 1px var(--expiry-edge-style) var(--expiry-edge);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--expiry-tint);
+  color: var(--ink);
+}
+
+.expiry-cell-sheet__status .expiry-cell__glyph {
+  width: 22px;
+  height: 22px;
+  font-size: 17px;
+}
+
+.expiry-cell-sheet__status-label {
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.expiry-cell-sheet__status-date {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── Print ────────────────────────────────────────────────────────────────── */
+
+/*
+ * Compliance packs get printed and filed. Tints are dropped and the glyph plus
+ * the state word carry the whole message in black and white.
+ */
+@media print {
+  .expiry-cell__trigger {
+    background: transparent;
+    border-color: var(--ink);
+    box-shadow: none;
+    color: var(--ink);
+  }
+
+  .expiry-cell__glyph,
+  .expiry-cell__date {
+    color: var(--ink);
+  }
+}

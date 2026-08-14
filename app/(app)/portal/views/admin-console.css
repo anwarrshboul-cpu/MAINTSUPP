@@ -1,0 +1,873 @@
+/*
+ * The three admin screens — users, permissions, client console.
+ *
+ * Deliberately small. Everything that already exists in the dashboard is reused
+ * by class rather than restyled here: `.section-stack`, `.section-header`,
+ * `.panel`, `.panel-heading`, `.data-table`, `.table-scroll`, `.site-stat-grid`,
+ * `.primary-button`, `.secondary-button`, `.eyebrow-chip`. This file only adds
+ * the things an admin screen needs that no other screen has — a permission
+ * matrix, a refusal panel, a person cell, a tenant card.
+ *
+ * Every colour is a token from globals.css, never a literal, so the dark theme
+ * comes for free and stays in step if the palette moves. The one exception is
+ * the avatar and tenant mark, whose colour is data (per person, per workspace)
+ * rather than styling, and is set inline from the row.
+ */
+
+.admin-console {
+  --admin-gap: 18px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar and fields                                                  */
+/* ------------------------------------------------------------------ */
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.admin-toolbar__spacer {
+  flex: 1 1 auto;
+}
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-field > span {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.admin-field > small {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.admin-field--grow {
+  flex: 1 1 240px;
+}
+
+.admin-field input,
+.admin-field select,
+.admin-field textarea {
+  /* 44px keeps every control usable on a touch screen. */
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+.admin-field textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.admin-field input:focus-visible,
+.admin-field select:focus-visible,
+.admin-field textarea:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 1px;
+}
+
+.admin-field input[readonly] {
+  color: var(--muted);
+  background: var(--canvas);
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Notices — the four states an admin screen actually has              */
+/* ------------------------------------------------------------------ */
+
+.admin-notice {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-notice strong {
+  display: block;
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.admin-notice p {
+  margin: 5px 0 0;
+  max-width: 78ch;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.admin-notice__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: var(--line-soft);
+  color: var(--muted);
+}
+
+/* A refusal is not an error and not an empty list. It gets its own weight so
+   nobody reads "you may not" as "there is nothing here". */
+.admin-notice--denied {
+  border-color: var(--orange-500);
+  background: var(--orange-100);
+}
+
+.admin-notice--denied .admin-notice__icon {
+  background: var(--orange-500);
+  color: #fff;
+}
+
+.admin-notice--error {
+  border-color: var(--red-600);
+  background: var(--red-100);
+}
+
+.admin-notice--error .admin-notice__icon {
+  background: var(--danger-solid);
+  color: var(--on-danger-solid);
+}
+
+.admin-notice--info .admin-notice__icon {
+  background: var(--teal-100);
+  color: var(--teal-600);
+}
+
+.admin-notice--empty {
+  margin: 18px;
+  border-style: dashed;
+  background: var(--canvas);
+}
+
+/* ------------------------------------------------------------------ */
+/* Flash strip                                                         */
+/* ------------------------------------------------------------------ */
+
+.admin-flash {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.admin-flash--ok {
+  border-color: var(--green-700);
+  background: var(--green-100);
+}
+
+/* A refused write carries the guard-rail's own sentence, so it is styled to be
+   read rather than dismissed. */
+.admin-flash--refused {
+  border-color: var(--orange-500);
+  background: var(--orange-100);
+}
+
+.admin-flash__close {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.admin-flash__close:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ------------------------------------------------------------------ */
+/* People table                                                        */
+/* ------------------------------------------------------------------ */
+
+.admin-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.admin-panel > .panel-heading {
+  padding: 18px 20px;
+}
+
+.admin-table td {
+  vertical-align: middle;
+}
+
+/*
+ * A deactivated user is still data somebody has to read.
+ *
+ * This was `opacity: 0.62`, and opacity is the one way of quietening a row
+ * that cannot be made accessible by tuning it: it fades the text AND the chip
+ * wash underneath it toward the page at the same rate, so the pair loses ratio
+ * however high the alpha goes — the role chip measured 3.64:1 even at 0.85,
+ * and its own text was at 2.80:1. Muting by COLOUR quietens the row just as
+ * clearly, leaves every chip at full strength, and the louder cues — the
+ * greyscaled avatar and the "Deactivated" status chip — were already there.
+ */
+.admin-row--off td {
+  color: var(--muted);
+}
+
+.admin-person {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-person > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.admin-person strong {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.admin-person small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.admin-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  /* The badge colour is data, so it must not be the only thing carrying
+     meaning; the name sits next to it in every case. */
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+}
+
+/* Greyscale alone says "inactive". The 0.7 on top of it faded the initials
+   into their own disc — 2.18:1 — for a cue that was already being made. */
+.admin-avatar--muted {
+  filter: grayscale(1);
+}
+
+.admin-you {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--teal-100);
+  color: var(--teal-600);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.admin-role-select {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.admin-role-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.admin-role-chip--super_admin {
+  background: var(--teal-100);
+  color: var(--teal-600);
+}
+
+.admin-role-chip--admin {
+  background: var(--amber-100);
+  color: var(--amber-600);
+}
+
+.admin-workspaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.admin-chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.admin-chip--current {
+  border-color: var(--teal-500);
+  background: var(--teal-100);
+  color: var(--teal-600);
+  font-weight: 600;
+}
+
+.admin-chip--empty {
+  border-style: dashed;
+}
+
+.admin-status {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.admin-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.admin-status--on {
+  color: var(--green-700);
+}
+
+.admin-status--off {
+  color: var(--muted-2);
+}
+
+.admin-subtle {
+  display: block;
+  color: var(--muted-2);
+  font-size: 0.74rem;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.admin-mini {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Capability matrix                                                   */
+/* ------------------------------------------------------------------ */
+
+.admin-matrix th,
+.admin-matrix td {
+  vertical-align: middle;
+}
+
+.admin-matrix__role {
+  width: 132px;
+  text-align: center;
+}
+
+.admin-matrix__role span {
+  display: block;
+  color: var(--ink);
+}
+
+.admin-matrix__role small {
+  display: block;
+  min-height: 1em;
+  color: var(--muted-2);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.admin-matrix__group th {
+  padding: 12px 16px;
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.admin-capability {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 46ch;
+}
+
+.admin-capability strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.admin-capability small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.admin-capability code {
+  color: var(--muted-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.admin-matrix__cell {
+  position: relative;
+  text-align: center;
+}
+
+.admin-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--paper);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.admin-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.admin-toggle:has(input:checked) {
+  border-color: var(--brand-solid);
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+}
+
+.admin-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 2px;
+}
+
+/* A cell that disagrees with the shipped default must be findable at a glance,
+   and not by colour alone — hence the corner marker as well as the tint. */
+.admin-toggle--changed {
+  position: relative;
+  box-shadow: 0 0 0 3px var(--amber-100);
+}
+
+.admin-toggle--changed::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--paper);
+  border-radius: 50%;
+  background: var(--amber-600);
+}
+
+/* A locked cell is disabled *because* the server refuses the write. The cursor
+   and the tooltip say which rule, so it never reads as a bug. */
+.admin-toggle--locked {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.admin-reset {
+  display: block;
+  margin: 4px auto 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--teal-600);
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-decoration: underline;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Client console                                                      */
+/* ------------------------------------------------------------------ */
+
+.admin-client-grid {
+  display: grid;
+  gap: var(--admin-gap);
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.admin-client {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-client--current {
+  border-color: var(--teal-500);
+  box-shadow: 0 0 0 1px var(--teal-500), var(--shadow-sm);
+}
+
+.admin-client header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-client header > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.admin-client h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.02rem;
+  line-height: 1.3;
+}
+
+.admin-client header small {
+  color: var(--muted-2);
+  font-size: 0.78rem;
+}
+
+.admin-client__mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  /*
+   * No colour here. The ground is the client's own brand colour, set inline
+   * from the record, so only the component can know what is legible on it —
+   * `chipInk()` measures and decides. A hard-coded #fff put the seeded teal at
+   * 2.59:1 and the blue at 3.99:1.
+   */
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.admin-plan {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-client__stats {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--line-soft);
+  grid-template-columns: repeat(5, 1fr);
+  overflow: hidden;
+}
+
+.admin-client__stats > div {
+  padding: 10px 6px;
+  background: var(--canvas);
+  text-align: center;
+}
+
+.admin-client__stats dt {
+  color: var(--muted-2);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-client__stats dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 1.08rem;
+  font-weight: 700;
+}
+
+.admin-client__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+}
+
+.admin-client footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.admin-client__activity {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.admin-client footer button {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs                                                             */
+/* ------------------------------------------------------------------ */
+
+.admin-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(7, 24, 38, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.admin-dialog {
+  width: min(520px, 100%);
+  max-height: min(86vh, 760px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+}
+
+.admin-dialog header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 22px 12px;
+}
+
+.admin-dialog header span {
+  color: var(--teal-600);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.admin-dialog header h2 {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 1.15rem;
+}
+
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 22px 22px;
+}
+
+.admin-form__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Narrow screens                                                      */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 720px) {
+  .admin-client__stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .admin-client footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-toggle {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Invitations                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Withdrawing an invitation is destructive in the way that matters — the link
+ * in somebody's inbox stops working — so the control says so before it is
+ * pressed, rather than only in the confirmation afterwards.
+ */
+.admin-mini--danger {
+  color: var(--red-600);
+}
+
+.admin-mini--danger:hover:not(:disabled) {
+  border-color: var(--red-600);
+  background: var(--red-100);
+}
+
+/* An expired invitation is a state, not a date. Reads as one. */
+.admin-status-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-status-chip--expired {
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+/*
+ * The invitation link. Given the weight of a panel rather than a toast because
+ * it is shown exactly once — only its hash is stored — and a message that
+ * fades after four seconds would take the workspace's only copy with it.
+ */
+.admin-invite-link {
+  border-color: var(--teal-600);
+}
+
+.admin-invite-link__note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  max-width: 62ch;
+}
+
+.admin-invite-link__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-invite-link__field {
+  flex: 1 1 320px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.84rem;
+  /* The link is long and the panel is not. Truncation beats a wrapped field
+     that pushes the copy button off a phone screen. */
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 560px) {
+  .admin-invite-link__row .primary-button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/*
+ * A capability the product does not read yet. Amber rather than red: it is not
+ * a fault, it is an honest gap, and the row still belongs in the matrix so the
+ * intended shape of the permission model stays visible.
+ */
+.admin-capability__pending {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--amber-100);
+  color: var(--amber-600);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}

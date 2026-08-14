@@ -1,0 +1,510 @@
+/*
+ * Styles for the board cells in this folder.
+ *
+ * A new stylesheet rather than an addition to globals.css because the existing
+ * board CSS has no vocabulary for this cell: `.sheet-file-cell` is a single
+ * button showing a count, and the monday behaviour being reproduced is a row of
+ * per-file chips with their own open and remove targets, a drop state and an
+ * upload progress bar. Everything below is scoped under `.file-cell`.
+ *
+ * Colour comes only from the custom properties defined in globals.css, so the
+ * cell follows the light and dark palettes without knowing which is active.
+ */
+
+.file-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 35px;
+  padding: 3px 5px;
+  border-radius: 6px;
+}
+
+.file-cell.is-dragging {
+  outline: 2px dashed var(--teal-500);
+  outline-offset: -3px;
+  background: var(--teal-100);
+}
+
+.file-cell.is-busy {
+  cursor: progress;
+}
+
+.file-cell__input,
+.file-cell__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ── Chips ───────────────────────────────────────────────────────────────── */
+
+.file-cell__chips {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.file-cell__chips::-webkit-scrollbar {
+  display: none;
+}
+
+.file-cell__chip {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.file-cell__chip-open,
+.file-cell__chip-remove,
+.file-cell__add,
+.file-cell__count,
+.file-cell__open,
+.file-cell__chip.is-overflow > button,
+.file-cell__error button {
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.file-cell__chip-open {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--line-soft);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.file-cell__chip-open:hover {
+  border-color: var(--teal-500);
+}
+
+/* One tone per document type. Word and PDF are the two that actually appear on
+   the Store Documentation board; the rest exist so an unexpected upload still
+   reads as a distinct thing rather than a mystery square. */
+.file-cell__chip.is-pdf .file-cell__chip-open {
+  border-color: var(--red-600);
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+.file-cell__chip.is-word .file-cell__chip-open {
+  border-color: var(--teal-600);
+  background: var(--teal-100);
+  color: var(--teal-700);
+}
+
+.file-cell__chip.is-sheet .file-cell__chip-open {
+  border-color: var(--green-700);
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.file-cell__chip.is-image .file-cell__chip-open {
+  border-color: var(--orange-600);
+  background: var(--orange-100);
+  color: var(--orange-600);
+}
+
+.file-cell__glyph {
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.file-cell__glyph b {
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.file-cell__chip.is-pdf .file-cell__glyph b {
+  font-size: 6px;
+}
+
+/* Remove sits on the chip's corner, monday-style, and is revealed on hover or
+   keyboard focus. It stays in the tab order at all times — a control that only
+   exists on hover is a control a keyboard user does not have. */
+.file-cell__chip-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  opacity: 0;
+  background: var(--paper);
+  color: var(--red-600);
+}
+
+.file-cell__chip:hover .file-cell__chip-remove,
+.file-cell__chip-remove:focus-visible,
+.file-cell__chip-remove:disabled {
+  opacity: 1;
+}
+
+.file-cell__chip-remove:hover {
+  border-color: var(--red-600);
+  background: var(--red-100);
+}
+
+.file-cell__chip-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.file-cell__spinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--line);
+  border-top-color: var(--red-600);
+  border-radius: 99px;
+  animation: file-cell-spin 700ms linear infinite;
+}
+
+@keyframes file-cell-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-cell__spinner {
+    animation-duration: 2400ms;
+  }
+
+  .file-cell__chip-open,
+  .file-cell__chip-remove,
+  .file-cell__add,
+  .file-cell__count {
+    transition: none;
+  }
+}
+
+.file-cell__chip.is-overflow > button,
+.file-cell__chip.is-overflow > span {
+  display: grid;
+  height: 22px;
+  min-width: 22px;
+  place-items: center;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.file-cell__chip.is-overflow > button:hover {
+  border-color: var(--teal-500);
+  color: var(--teal-600);
+}
+
+/* ── Empty state and add affordance ──────────────────────────────────────── */
+
+/* monday shows nothing until the pointer is over the cell. The button keeps its
+   box so the layout does not shift, and it becomes visible whenever the cell is
+   hovered or anything inside it holds focus. */
+.file-cell__add {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 1px dashed transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-2);
+  opacity: 0;
+}
+
+.file-cell:hover .file-cell__add,
+.file-cell:focus-within .file-cell__add,
+.file-cell.is-dragging .file-cell__add {
+  opacity: 1;
+}
+
+.file-cell__add:focus-visible {
+  opacity: 1;
+}
+
+.file-cell__add:hover {
+  border-color: var(--teal-500);
+  background: var(--teal-100);
+  color: var(--teal-600);
+}
+
+.file-cell__add:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.file-cell__add-mark {
+  display: grid;
+  place-items: center;
+}
+
+.file-cell__none {
+  color: var(--muted-2);
+  font-size: 7px;
+}
+
+/* ── Count summary (the RAMS column's `summary: "count"`) ────────────────── */
+
+.file-cell__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.file-cell.has-files .file-cell__count {
+  border-color: var(--teal-600);
+  background: var(--teal-100);
+  color: var(--teal-700);
+}
+
+.file-cell.is-empty .file-cell__count {
+  border-style: dashed;
+  border-color: transparent;
+  background: transparent;
+  opacity: 0;
+}
+
+.file-cell.is-empty:hover .file-cell__count,
+.file-cell.is-empty:focus-within .file-cell__count,
+.file-cell.is-empty .file-cell__count:focus-visible {
+  border-color: var(--line);
+  opacity: 1;
+}
+
+/* ── Mobile: the whole cell opens the evidence manager ───────────────────── */
+
+.file-cell__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.file-cell__open strong {
+  font-weight: 650;
+}
+
+.file-cell.is-mobile .file-cell__glyph {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--line-soft);
+  color: var(--muted);
+}
+
+.file-cell.is-mobile .file-cell__glyph.is-pdf {
+  border-color: var(--red-600);
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+.file-cell.is-mobile .file-cell__glyph.is-word {
+  border-color: var(--teal-600);
+  background: var(--teal-100);
+  color: var(--teal-700);
+}
+
+.file-cell.is-mobile .file-cell__glyph.is-sheet {
+  border-color: var(--green-700);
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.file-cell.is-mobile .file-cell__glyph.is-image {
+  border-color: var(--orange-600);
+  background: var(--orange-100);
+  color: var(--orange-600);
+}
+
+.file-cell.is-mobile .file-cell__chips {
+  gap: 4px;
+}
+
+/* ── Progress and errors ─────────────────────────────────────────────────── */
+
+.file-cell__progress {
+  position: absolute;
+  bottom: 1px;
+  left: 5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: calc(100% - 10px);
+}
+
+.file-cell__track {
+  flex: 1;
+  overflow: hidden;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--line);
+}
+
+.file-cell__track > i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--teal-500);
+  transition: width 140ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-cell__track > i {
+    transition: none;
+  }
+}
+
+.file-cell__progress small {
+  color: var(--muted);
+  font-size: 7px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The failure message is not a tooltip and not a toast: it stays in the cell,
+   above everything else, until it is read and dismissed. */
+.file-cell__error {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 3px);
+  left: 50%;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 7px;
+  transform: translateX(-50%);
+  border: 1px solid var(--red-600);
+  border-radius: 7px;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 9px;
+  line-height: 1.4;
+  text-align: left;
+  box-shadow: var(--shadow-md);
+}
+
+.file-cell__error > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.file-cell__error button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.file-cell__error button:hover {
+  background: var(--paper);
+}
+
+/* ── Focus and tap targets ───────────────────────────────────────────────── */
+
+.file-cell a:focus-visible,
+.file-cell button:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+/* On a touch screen every control gets a 44px hit area. The chip keeps its
+   drawn size and grows its target with a pseudo-element, so a row of documents
+   still looks like a row of documents. */
+@media (pointer: coarse) {
+  .file-cell {
+    min-height: 44px;
+    gap: 10px;
+  }
+
+  .file-cell__chips {
+    gap: 12px;
+  }
+
+  .file-cell__chip-open,
+  .file-cell__chip-remove,
+  .file-cell__add,
+  .file-cell__count,
+  .file-cell__chip.is-overflow > button,
+  .file-cell__error button {
+    position: relative;
+  }
+
+  .file-cell__chip-open::after,
+  .file-cell__chip-remove::after,
+  .file-cell__add::after,
+  .file-cell__count::after,
+  .file-cell__chip.is-overflow > button::after,
+  .file-cell__error button::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+
+  /* No hover on touch, so the add affordance and the remove control are always
+     visible rather than unreachable. */
+  .file-cell__add,
+  .file-cell__chip-remove,
+  .file-cell.is-empty .file-cell__count {
+    opacity: 1;
+  }
+
+  .file-cell.is-empty .file-cell__count {
+    border-color: var(--line);
+  }
+}

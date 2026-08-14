@@ -1,0 +1,410 @@
+/*
+ * The full-screen media viewer.
+ *
+ * Every selector here is prefixed `mv-` and every rule lives in this file. The
+ * old viewer's rules are spread across three separate blocks of globals.css —
+ * base, a dark-theme override, and two breakpoints — and globals.css is a
+ * 12,000-line file that four agents are editing this week. A new surface with
+ * its own vocabulary is the one kind of CSS that can safely be kept whole.
+ *
+ * The surface is dark in both themes on purpose. A lightbox is dark because
+ * the picture is the light; monday does not tint it with the workspace theme,
+ * and a photograph of a leaking pipe is not easier to read on white.
+ */
+
+.mv-root {
+  position: fixed;
+  z-index: var(--z-viewer, 700);
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overscroll-behavior: contain;
+  /* Opaque. At 0.96 the files panel behind it read through as ghost text over
+     the photograph, and even at 0.985 the panel's headings were still legible
+     against the black — a lightbox that shows you the thing you left is not
+     full-screen, it is a large modal. */
+  background: #04080b;
+  color: #f2f6f8;
+  font-family: "Segoe UI", var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  letter-spacing: normal;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The bars sit over the picture, not beside it: the photograph gets the
+   whole screen and the chrome floats, which is what makes a phone viewer
+   feel full-screen rather than boxed. */
+.mv-bar {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.mv-bar > * {
+  pointer-events: auto;
+}
+
+.mv-bar--top {
+  top: 0;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+    10px max(10px, env(safe-area-inset-left));
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.72),
+    rgba(0, 0, 0, 0)
+  );
+}
+
+.mv-bar--bottom {
+  bottom: 0;
+  justify-content: center;
+  padding: 12px max(10px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+}
+
+.mv-meta {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mv-meta strong {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Quietly, as the brief asks: the picture is the subject, the provenance is
+   a footnote. */
+.mv-meta small {
+  overflow: hidden;
+  color: rgba(233, 241, 245, 0.66);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mv-counter {
+  margin: 0;
+  padding: 0 10px;
+  color: rgba(233, 241, 245, 0.86);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * 44px is the touch minimum both Apple and WCAG 2.5.5 use, and it is what
+ * scripts/responsive-audit.mjs measures. The old viewer's controls were 42px
+ * and its arrows were 42x52 — under on the axis a thumb actually misses.
+ */
+.mv-button {
+  display: inline-grid;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 11px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f2f6f8;
+  cursor: pointer;
+  font: inherit;
+  gap: 7px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.mv-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.mv-button:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.mv-button:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.mv-button--solid {
+  grid-auto-flow: column;
+  background: #ffffff;
+  color: #0b1a24;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mv-button--danger:hover:not(:disabled) {
+  background: rgba(228, 74, 74, 0.9);
+}
+
+.mv-zoom {
+  min-width: 46px;
+  color: rgba(233, 241, 245, 0.78);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.mv-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* The browser must not claim the gestures: pinch, pan and swipe are all
+     handled here, and a native pinch-zoom of the whole page over the top of
+     them is the single worst thing a phone lightbox can do. */
+  touch-action: none;
+}
+
+.mv-track {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.mv-root.is-dragging .mv-track {
+  transition: none;
+}
+
+.mv-slide {
+  position: absolute;
+  top: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+}
+
+.mv-media {
+  position: relative;
+  display: grid;
+  max-width: 100%;
+  max-height: 100%;
+  place-items: center;
+  transition: transform 0.2s ease;
+  transform-origin: center center;
+}
+
+.mv-root.is-dragging .mv-media {
+  transition: none;
+}
+
+.mv-image {
+  display: block;
+  max-width: 100vw;
+  /* Fitted to the screen, minus the two floating bars, so a portrait photo is
+     never hidden under the toolbar. */
+  max-height: calc(100dvh - 150px);
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.mv-image--thumb {
+  /* The 1 KB derivative, blown up and blurred, standing in for the original
+     while it downloads. Better a soft picture than a black screen. */
+  filter: blur(9px);
+  transform: scale(1.02);
+}
+
+.mv-image--full {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.mv-image--full.is-loaded {
+  position: static;
+  opacity: 1;
+}
+
+.mv-image--thumb.is-hidden {
+  display: none;
+}
+
+.mv-video {
+  display: block;
+  max-width: 100vw;
+  max-height: calc(100dvh - 150px);
+  background: #000000;
+}
+
+.mv-spinner {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #ffffff;
+  animation: mv-spin 0.8s linear infinite;
+}
+
+@keyframes mv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mv-broken {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  padding: 26px;
+  color: rgba(240, 245, 248, 0.9);
+  text-align: center;
+}
+
+.mv-arrow {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.mv-arrow:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.mv-arrow:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.mv-arrow:disabled {
+  cursor: default;
+  opacity: 0.25;
+}
+
+.mv-arrow--previous {
+  left: 14px;
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.mv-arrow--next {
+  right: 14px;
+}
+
+/*
+ * On a phone the arrows go: the gesture IS the navigation, and two 48px discs
+ * over a 390px-wide photograph cover the thing you opened it to look at.
+ * They stay on desktop, where there is no swipe.
+ */
+@media (max-width: 760px) {
+  .mv-arrow {
+    display: none;
+  }
+
+  /*
+   * The filename gets its own row.
+   *
+   * Sharing 390px with the counter and the close button left it and the
+   * provenance line both ellipsised after about twenty characters — on this
+   * estate every photograph is called "WhatsApp Image 2026-07-02 at 3.35…",
+   * so the part that was cut was the only part that differed. Ordered second
+   * so the counter and the close button stay on the first row, where a thumb
+   * expects them.
+   */
+  .mv-bar--top {
+    flex-wrap: wrap;
+  }
+
+  .mv-meta {
+    order: 2;
+    flex-basis: 100%;
+  }
+
+  .mv-meta strong {
+    font-size: 13px;
+  }
+
+  /* Left of the close button and taking the slack, so the button stays in the
+     top-right corner where it was. */
+  .mv-counter {
+    flex: 1;
+    padding: 0 6px;
+    text-align: left;
+  }
+
+  .mv-bar--bottom {
+    gap: 6px;
+  }
+}
+
+/* A pointer that cannot hover is a finger: hide the hover-only affordances
+   rather than leaving them stuck in their hover state after a tap. */
+@media (hover: none) {
+  .mv-button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+/*
+ * Reduced motion.
+ *
+ * The paging slide, the cross-fade and the spinner are all decoration; the
+ * viewer works identically without them. Zoom and pan stay instant either
+ * way, which is the correct reading of the preference: it asks for less
+ * animation, not less function.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .mv-track,
+  .mv-media,
+  .mv-image--full,
+  .mv-button,
+  .mv-arrow {
+    transition: none;
+  }
+
+  .mv-spinner {
+    animation: none;
+    border-top-color: rgba(255, 255, 255, 0.7);
+  }
+}
+
+/*
+ * The comment thread on a phone.
+ *
+ * A block of rules stood here that pinned the drawer's composer to the BOTTOM
+ * of the panel on a 390px screen, because the composer was the last section
+ * inside the scrolling body: it opened below the fold, the thread scrolled it
+ * away, and the keyboard covered what was left.
+ *
+ * It is gone because the thing it propped up is gone. The Updates panel was
+ * rebuilt against monday's own — `update-thread.tsx` — and monday puts the
+ * composer at the TOP, which is the fix that block was approximating from CSS
+ * alone while it could not touch the markup. The panel carries its own narrow
+ * rules in update-thread.css.
+ *
+ * Every selector in the removed block named `.drawer-note-composer` or
+ * `.drawer-update-thread`, neither of which is rendered anywhere now, so it
+ * had stopped applying to anything before it was deleted.
+ */

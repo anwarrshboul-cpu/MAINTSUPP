@@ -1,0 +1,105 @@
+/* Sign-in form — Stage 20.
+   The page frame (.login-page, .login-card) already lives in globals.css and is
+   unchanged: this is only the form that now sits inside it.
+
+   Every colour here was a dark-page literal. That was invisible for as long as
+   the app painted dark whatever the visitor preferred; now that the theme is
+   decided before first paint and a light-preference visitor really is served a
+   light card, the label, the input, the note and the subtitle all needed to
+   follow it — they measured 1.98:1 on the light card. They go through the same
+   tokens as the rest of the product. */
+
+.login-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 26px;
+  text-align: left;
+}
+
+.login-field {
+  display: grid;
+  gap: 7px;
+}
+
+.login-field label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.login-field input {
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.login-field input:focus-visible {
+  border-color: var(--brand-bright);
+  outline: 2px solid rgba(18, 180, 168, 0.35);
+  outline-offset: 1px;
+}
+
+.login-field input:disabled {
+  opacity: 0.6;
+}
+
+.login-form__submit {
+  display: inline-flex;
+  min-height: 50px;
+  margin-top: 6px;
+  padding: 0 22px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--brand-bright);
+  border-radius: 10px;
+  background: var(--brand-bright);
+  color: var(--on-brand-bright);
+  font-size: 15px;
+  font-weight: 750;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.login-form__submit:hover:not(:disabled) { background: #22c9bd; }
+.login-form__submit:disabled { cursor: progress; opacity: 0.7; }
+
+/* One message region, always present in the DOM and announced when it fills.
+   A block that appears and disappears is skipped by most screen readers. */
+.login-form__error {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid rgba(218, 70, 70, 0.5);
+  border-radius: 9px;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Separated from the assurance list above by a rule, not just a gap: without
+   one it reads as a third assurance item rather than a different kind of
+   statement. */
+.login-form__note {
+  margin: 20px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.login-card__subtitle {
+  margin: 0 auto 4px;
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}

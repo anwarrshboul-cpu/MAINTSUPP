@@ -1,0 +1,6422 @@
+html { color-scheme: dark; }
+html[data-theme="light"] { color-scheme: light; }
+body {
+  /* Tokenised now that there is ONE dark palette. This literal previously had
+     to stay because `--canvas` meant #101820 on :root and #0b1218 on body, so
+     tokenising it restyled the dark product; both now resolve to #0b1218,
+     which is what dark has actually been rendering all along. */
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+h1, h2, h3, .brand-word { font-family: Manrope, Inter, ui-sans-serif, system-ui, sans-serif; }
+
+/* See the note in globals.css: content colours by default, rail colours in
+   the rail. This is the copy that wins. */
+.brand-lockup { color: var(--ink); }
+.brand-mark {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  gap: 0;
+  transform: none;
+}
+.brand-mark svg { width: 100%; height: 100%; }
+.brand-lockup--compact .brand-mark { width: 24px; height: 24px; }
+.brand-word { display: inline-flex; font-size: 19px; font-weight: 800; letter-spacing: -0.035em; }
+.brand-word > span { color: var(--ink); }
+.brand-word > strong { color: var(--accent-fg); font-weight: inherit; }
+.portal-sidebar .brand-lockup,
+.request-page__header .brand-lockup { color: var(--rail-fg); }
+.portal-sidebar .brand-word > span,
+.request-page__header .brand-word > span { color: var(--rail-fg); }
+.portal-sidebar .brand-word > strong,
+.request-page__header .brand-word > strong { color: var(--rail-accent); }
+
+/*
+ * THIS BLOCK IS A VERBATIM COPY of the command-centre block in globals.css,
+ * and because this file is the second stylesheet the app layout loads, THIS is
+ * the copy that wins. A colour fix applied to globals.css alone did nothing —
+ * which is why the same six values kept coming back after being "fixed".
+ *
+ * Both copies are now routed through the same tokens, so the cascade winner no
+ * longer decides the colour. If you change a colour here, change it there too,
+ * or better: change the token and neither file needs touching.
+ */
+.portal-sidebar { border-right-color: var(--rail-border); background: var(--rail-bg); }
+.portal-nav { gap: 2px; margin-top: 18px; overflow-y: auto; }
+.portal-nav button { min-height: 39px; color: var(--rail-fg-muted); font-size: 11px; }
+.portal-nav button.is-active { background: var(--rail-active-bg); box-shadow: inset 3px 0 0 var(--rail-accent); }
+.nav-count { background: var(--rail-count-bg); color: var(--rail-count-fg); }
+.sidebar-help__icon { background: var(--rail-bg-raised); color: var(--rail-accent); }
+.portal-topbar { border-bottom-color: var(--line); background: var(--paper); }
+.page-identity strong,
+.portal-content h1,
+.portal-content h2,
+.portal-content h3,
+.portal-content strong,
+.data-table td { color: var(--ink); }
+.portal-content p,
+.portal-content small { color: var(--muted); }
+.portal-content .eyebrow-chip { color: var(--accent-fg); }
+.panel,
+.metric-card,
+.site-stat-grid > div,
+.document-stat-grid > div,
+.calendar-day,
+.settings-card,
+.team-panel,
+.notification-panel,
+.notification-item,
+.notification-panel__header > button { border-color: var(--line); background: var(--surface-card); color: var(--ink); }
+.metric-card:hover { border-color: rgba(18, 180, 168, .65); }
+.metric-copy strong { color: var(--ink); }
+.metric-card::after { background: #5f7d8d; }
+.metric-card--teal::after { background: var(--brand-bright); }
+.metric-card--orange::after { background: #e7a126; }
+.metric-grid--six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.data-table th { border-bottom-color: var(--line); background: var(--surface-head); color: var(--table-head-fg); }
+.data-table td { border-bottom-color: var(--line-soft); }
+.data-table tbody tr:hover td { background: rgba(18, 180, 168, .055); }
+.workspace-toolbar,
+.panel-heading { border-color: var(--line-soft); }
+.search-field,
+.segmented-filter,
+.view-switch,
+.form-field input,
+.form-field select,
+.form-field textarea,
+.portal-shell input,
+.portal-shell select,
+.portal-shell textarea { border-color: var(--line-strong); background: var(--surface-sunken); color: var(--ink); }
+.search-field input { background: transparent; }
+.primary-button,
+.login-card__button { --control-own-fg: var(--on-brand-bright); border-color: var(--brand-bright); background: var(--brand-bright); color: var(--on-brand-bright); }
+.primary-button:hover,
+.login-card__button:hover { background: #22c9bd; }
+.secondary-button,
+.topbar-link,
+.icon-button { color: var(--control-fg); }
+.topbar-link:hover,
+.icon-button:hover { background: var(--surface-hover); color: var(--control-fg-strong); }
+.notification-item.is-unread { background: var(--surface-active); }
+.notification-item__open:hover,
+.notification-item__actions button:hover { background: var(--surface-hover); color: var(--control-fg-strong); }
+/* Dark gradient in BOTH themes, so its white heading is correct in both. */
+.overview-welcome { background: linear-gradient(120deg, #182830, #102c34 70%, #0b3b3b); }
+.overview-welcome h1 { color: #fff; }
+.section-header h1 { color: var(--ink); }
+.report-bars { display: grid; gap: 14px; padding: 22px; }
+.report-bars > div { display: grid; grid-template-columns: 180px minmax(160px, 1fr) 90px; gap: 14px; align-items: center; }
+.report-bars > div > span { color: var(--muted); font-size: 11px; }
+.report-bars > div > div { height: 9px; overflow: hidden; border-radius: 99px; background: var(--surface-sunken); }
+.report-bars i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0d958c, #12b4a8); }
+.report-bars strong { text-align: right; }
+
+.login-page {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 28px;
+  padding: 32px 20px;
+  /* The copy that WINS. This whole block is duplicated from globals.css, and
+     this file loads second — fixing the login card there alone changed
+     nothing on screen. */
+  background: radial-gradient(circle at 20% 10%, rgba(18, 180, 168, .15), transparent 30%), radial-gradient(circle at 85% 85%, rgba(18, 180, 168, .1), transparent 28%), var(--canvas);
+}
+.login-page__brand { position: absolute; top: 28px; left: 32px; }
+.login-card { width: min(100%, 480px); padding: 38px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-card); box-shadow: var(--shadow-lg); text-align: center; }
+.login-card__icon { display: grid; width: 52px; height: 52px; margin: 0 auto 18px; place-items: center; border-radius: 14px; background: var(--teal-100); color: var(--teal-700); }
+.login-card__eyebrow { margin: 0; color: var(--accent-fg); font-size: 11px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+.login-card h1 { margin: 10px 0 12px; color: var(--ink); font-size: clamp(30px, 5vw, 42px); line-height: 1.08; }
+.login-card > p:not(.login-card__eyebrow) { margin: 0 auto; color: var(--muted); line-height: 1.7; }
+.login-card__button { display: inline-flex; min-height: 50px; margin-top: 26px; padding: 0 22px; align-items: center; justify-content: center; gap: 10px; border: 1px solid var(--brand-bright); border-radius: 10px; font-weight: 750; }
+.login-card__assurance { display: grid; gap: 8px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); text-align: left; }
+.login-card__assurance span { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+.login-card__assurance svg { color: var(--accent-fg); }
+.login-card__back { display: inline-block; margin-top: 24px; color: var(--muted); font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
+.login-page__legal { max-width: 640px; color: var(--muted); text-align: center; }
+
+@media (max-width: 1180px) { .metric-grid--six { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .metric-grid--six { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-bars > div { grid-template-columns: 105px minmax(100px, 1fr) 70px; gap: 8px; }
+  .login-page__brand { position: static; }
+  .login-card { padding: 30px 22px; }
+}
+@media (max-width: 430px) { .metric-grid--six { grid-template-columns: 1fr; } }
+
+/* Complete dashboard contrast pass. This file loads after the original
+   dashboard stylesheet, so every legacy light surface is explicitly mapped
+   into the MAINTSUPP dark command-centre palette. */
+body[data-theme="dark"] .portal-shell,
+body[data-theme="dark"] .portal-main,
+body[data-theme="dark"] .portal-content {
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .panel,
+  .metric-card,
+  .compact-job-list > button,
+  .upcoming-list > button,
+  .maintenance-summary button,
+  .request-card,
+  .notification-panel,
+  .notification-item,
+  .site-stat-grid > div,
+  .compliance-stat-grid button,
+  .calendar-cell,
+  .document-stat-grid > div,
+  .document-grid > button,
+  .settings-card,
+  .detail-item,
+  .drawer-section,
+  .drawer-file-row,
+  .request-review,
+  .file-drop,
+  .triage-preview,
+  .evidence-card,
+  .evidence-card__preview,
+  .file-preview-placeholder,
+  .evidence-empty
+) {
+  border-color: #2b414b;
+  background: #182830;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .portal-topbar,
+  .notification-panel__header,
+  .live-board-toolbar,
+  .live-board-footer,
+  .panel-heading,
+  .workspace-toolbar,
+  .calendar-toolbar,
+  .settings-card__heading,
+  .detail-drawer__header,
+  .detail-drawer__tabs,
+  .detail-drawer__footer,
+  .request-modal__top,
+  .request-modal__footer,
+  .evidence-manager__header,
+  .evidence-manager__toolbar,
+  .column-settings-dialog > section > header,
+  .column-settings-dialog > section > footer,
+  .mobile-cell-sheet__panel > header,
+  .mobile-cell-sheet__panel > footer
+) {
+  border-color: #2b414b;
+  background: #14232c;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .live-board-panel,
+  .live-board-scroll,
+  .live-board-canvas,
+  .request-board,
+  .board-column__body,
+  .detail-drawer__body,
+  .request-modal__body,
+  .evidence-manager__content,
+  .column-settings-dialog__body,
+  .mobile-cell-sheet__body
+) {
+  border-color: #2b414b;
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .live-board-menu,
+  .sheet-group__menu,
+  .sheet-row-menu,
+  .custom-column-menu,
+  .column-picker,
+  .sheet-option-popover,
+  .sheet-timeline-popover,
+  .live-selection-bar,
+  .live-selection-move > div,
+  .detail-drawer,
+  .request-modal,
+  .evidence-manager__panel,
+  .evidence-card__menu,
+  .column-settings-dialog > section,
+  .mobile-cell-sheet__panel
+) {
+  border-color: #35505d;
+  background: #182830;
+  color: #edf4f6;
+  box-shadow: var(--shadow-lg);
+}
+
+body[data-theme="dark"] :is(
+  .search-field,
+  .select-control,
+  .segmented-filter,
+  .view-switch,
+  .panel-period,
+  .live-board-search,
+  .live-board-tool,
+  .column-picker > header label,
+  .sheet-group__header > input,
+  .sheet-inline-input,
+  .sheet-item-name-input,
+  .sheet-date-input,
+  .sheet-column--move select,
+  .form-field input,
+  .form-field select,
+  .form-field textarea,
+  .sla-settings input,
+  .mobile-sheet-search,
+  .mobile-text-editor input,
+  .mobile-text-editor textarea,
+  .mobile-date-editor input,
+  .mobile-timeline-editor input,
+  .mobile-option-manager input:not([type="color"])
+) {
+  border-color: #35505d;
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(input, textarea)::placeholder {
+  color: #81949f;
+  opacity: 1;
+}
+
+body[data-theme="dark"] select option {
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .data-table,
+  .data-table td,
+  .table-scroll,
+  .live-sheet,
+  .live-sheet td,
+  .live-sheet .sheet-column--name,
+  .live-sheet .sheet-check,
+  .sheet-add-row td,
+  .sheet-add-row__item,
+  .sheet-add-row__filler
+) {
+  border-color: #2b414b;
+  background: #182830 !important;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .data-table th,
+  .live-sheet th,
+  .live-sheet th.sheet-column--name,
+  .live-sheet thead .sheet-check,
+  .sheet-summary-row td,
+  .sheet-summary-spacer,
+  .calendar-weekday,
+  .board-column__heading
+) {
+  border-color: #2b414b;
+  background: #14232c !important;
+  color: #b9c8cf;
+}
+
+body[data-theme="dark"] :is(
+  .data-table tbody tr:hover td,
+  .compact-job-list > button:hover,
+  .upcoming-list > button:hover,
+  .document-grid > button:hover,
+  .calendar-cell:hover,
+  .notification-item__open:hover,
+  .sheet-group__menu button:hover,
+  .sheet-row-menu button:hover,
+  .sheet-row-menu label:hover,
+  .custom-column-menu > button:hover,
+  .column-picker button:hover,
+  .live-selection-bar > button:hover,
+  .live-selection-move button:hover,
+  .evidence-card__menu button:hover,
+  .evidence-card__menu a:hover
+) {
+  background: #203740 !important;
+  color: #fff;
+}
+
+body[data-theme="dark"] :is(
+  .section-header h1,
+  .panel-heading h2,
+  .page-identity strong,
+  .metric-copy strong,
+  .compact-job-list strong,
+  .upcoming-list strong,
+  .document-grid strong,
+  .settings-card h2,
+  .setting-row strong,
+  .detail-drawer h2,
+  .detail-drawer h3,
+  .request-modal h2,
+  .evidence-manager h2,
+  .column-settings-dialog h2,
+  .calendar-cell strong
+) {
+  color: #f4f8fa;
+}
+
+body[data-theme="dark"] :is(
+  .section-header p,
+  .panel-heading span,
+  .metric-copy small,
+  .metric-copy > span,
+  .compact-job-list small,
+  .upcoming-list small,
+  .document-grid small,
+  .setting-row small,
+  .detail-drawer small,
+  .request-modal small,
+  .evidence-manager small,
+  .calendar-cell small,
+  .table-primary span
+) {
+  color: #a7b6be;
+}
+
+body[data-theme="dark"] .calendar-cell.is-muted {
+  background: #14232c;
+  color: #81949f;
+}
+
+body[data-theme="dark"] .notification-item.is-unread,
+body[data-theme="dark"] .maintenance-summary button.is-active,
+body[data-theme="dark"] .segmented-filter button.is-active,
+body[data-theme="dark"] .view-switch button.is-active {
+  border-color: rgba(18, 180, 168, 0.55);
+  background: rgba(18, 180, 168, 0.14);
+  color: #6be0d7;
+}
+
+body[data-theme="dark"] .secondary-button,
+body[data-theme="dark"] .notification-panel__header > button,
+body[data-theme="dark"] .live-board-footer > button,
+body[data-theme="dark"] .column-settings-dialog__add button,
+body[data-theme="dark"] .column-settings-dialog > section > footer > button {
+  border-color: #35505d;
+  background: #20343e;
+  color: #dce7eb;
+}
+
+body[data-theme="dark"] .primary-button,
+body[data-theme="dark"] .topbar-create,
+body[data-theme="dark"] .login-card__button {
+  border-color: #12b4a8;
+  background: #12b4a8;
+  color: #06191a;
+}
+
+body[data-theme="dark"] .detail-drawer__footer--columns {
+  background: linear-gradient(to top, #101820 70%, rgba(16, 24, 32, 0.94));
+}
+
+@media (max-width: 760px) {
+  body[data-theme="dark"] :is(
+    .mobile-column-picker-layer .column-picker--mobile,
+    .mobile-request-field-editor > section,
+    .mobile-monday-field__value,
+    .mobile-monday-update-button,
+    .detail-drawer__tabs
+  ) {
+    border-color: #35505d;
+    background: #182830;
+    color: #edf4f6;
+  }
+
+  body[data-theme="dark"] .mobile-monday-update-button > span {
+    background: #20343e;
+    color: #6be0d7;
+  }
+}
+
+/* Jobs board regression fixes: keep the frozen selection gutter dark and
+   raise every in-cell editor above later groups in the sheet. */
+body[data-theme="dark"] .live-sheet .sheet-check::before {
+  border-color: #2b414b;
+  background: #101820;
+}
+
+body[data-theme="dark"] .live-sheet tbody tr:hover .sheet-check::before {
+  background: #203740;
+}
+
+body[data-theme="dark"] .live-sheet tbody tr.is-selected .sheet-check::before {
+  background: #17384c;
+}
+
+.sheet-group:has(
+  .sheet-option-popover,
+  .sheet-timeline-popover,
+  .sheet-file-hover
+) {
+  z-index: var(--z-dropdown) !important;
+}
+
+.sheet-group:has(.sheet-label-editor) {
+  z-index: calc(var(--z-dropdown) + 1) !important;
+}
+
+.sheet-option-popover:not(.sheet-label-editor) {
+  max-height: min(420px, calc(100vh - 120px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.live-board-scroll:has(.sheet-option-popover, .sheet-timeline-popover) {
+  scroll-padding: 24px 24px 320px;
+}
+
+body[data-theme="dark"] :is(
+  .sheet-option-grid > button.sheet-option-clear,
+  .sheet-label-editor__list button,
+  .sheet-label-editor__new button,
+  .sheet-custom-checkbox span,
+  .column-settings-dialog__hint,
+  .drawer-history-state,
+  .drawer-history-note,
+  .sheet-file-hover,
+  .evidence-viewer > section,
+  .evidence-viewer header
+) {
+  border-color: #35505d;
+  background: #182830;
+  color: #dce7eb;
+}
+
+body[data-theme="dark"] :is(
+  .sheet-label-editor input:not([type="color"]),
+  .column-settings-dialog__body > label > input:not([type="range"]),
+  .column-settings-dialog__choices > div > div > input:not([type="color"]),
+  .column-settings-dialog__add > input
+) {
+  border-color: #35505d;
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .sheet-label-editor header strong,
+  .column-settings-dialog__hint strong,
+  .sheet-file-hover strong
+) {
+  color: #f4f8fa;
+}
+
+body[data-theme="dark"] :is(
+  .sla-ring::before,
+  .compliance-donut::before
+) {
+  background: #182830;
+}
+
+body[data-theme="dark"] .sheet-summary-distribution > span {
+  background: #263c46;
+}
+
+body[data-theme="dark"] :is(
+  .sheet-row-menu select,
+  .group-creator > input
+) {
+  border-color: #35505d;
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] :is(
+  .sheet-add-row__item > button:hover,
+  .column-settings-dialog header > button:hover,
+  .column-settings-dialog__choices > div > div > button:hover,
+  .drawer-file-row:hover
+) {
+  background: #203740;
+  color: #fff;
+}
+
+body[data-theme="dark"] :is(
+  .evidence-viewer__previous,
+  .evidence-viewer__next
+) {
+  background: rgba(24, 40, 48, 0.94);
+  color: #edf4f6;
+}
+
+/* Readability and control consistency. Legacy dashboard rules used type as
+   small as 7px; these final declarations establish a practical minimum while
+   preserving the compact operational layout. */
+.portal-shell {
+  font-size: 13px;
+}
+
+.portal-shell :is(button, input, select, textarea) {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.portal-shell small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.portal-nav button {
+  min-height: 43px;
+  font-size: 13px;
+}
+
+.sidebar-section-label,
+.page-identity span,
+.eyebrow-chip {
+  font-size: 11px;
+}
+
+.page-identity strong {
+  font-size: 16px;
+}
+
+.section-header p,
+.overview-welcome p {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.primary-button,
+.secondary-button,
+.topbar-link,
+.search-field,
+.select-control,
+.segmented-filter,
+.view-switch,
+.workspace-toolbar button {
+  font-size: 13px;
+}
+
+.metric-copy small,
+.metric-copy > span,
+.site-stat-grid small,
+.document-stat-grid small,
+.panel-heading span,
+.panel-period {
+  font-size: 11px;
+}
+
+.metric-copy strong {
+  font-size: clamp(22px, 2vw, 30px);
+}
+
+.data-table th {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.data-table td,
+.table-primary strong,
+.table-primary span,
+.table-text-action,
+.type-chip,
+.role-chip,
+.last-active {
+  font-size: 13px;
+}
+
+.team-person strong,
+.document-grid strong,
+.calendar-event strong,
+.compact-job-list strong,
+.upcoming-list strong {
+  font-size: 13px;
+}
+
+.team-person small,
+.document-grid > button > span:not(.document-grid__icon),
+.document-grid small,
+.calendar-event small,
+.compact-job-list small,
+.upcoming-list small {
+  font-size: 11px;
+}
+
+.settings-card__heading h2 {
+  font-size: 16px;
+}
+
+.settings-card__heading p,
+.setting-row small {
+  font-size: 12px;
+}
+
+.setting-row strong,
+.sla-settings input {
+  font-size: 13px;
+}
+
+.form-field > span,
+.form-field :is(input, select, textarea),
+.request-modal__top span:not(.modal-icon),
+.request-review strong,
+.request-review small,
+.file-drop strong,
+.file-drop small,
+.form-error,
+.toast {
+  font-size: 12px;
+}
+
+.team-member-modal {
+  width: min(520px, 96vw);
+}
+
+.team-remove-button {
+  margin-right: auto;
+  color: #ff7185 !important;
+}
+
+.live-board-heading p {
+  font-size: 14px;
+}
+
+.live-board-heading .eyebrow-chip,
+.live-board-heading__meta > span,
+.live-board-heading__meta strong,
+.live-board-split > .primary-button,
+.live-board-search input,
+.live-board-tool,
+.live-board-footer > button,
+.live-board-footer > span {
+  font-size: 13px;
+}
+
+.live-sheet th,
+.live-sheet td,
+.sheet-item-name strong,
+.sheet-inline-value,
+.sheet-inline-input,
+.sheet-option-cell > button,
+.sheet-date-input,
+.custom-column-header > strong,
+.custom-column-menu > button,
+.column-picker > header input,
+.column-picker__body > section button strong,
+.column-picker__more {
+  font-size: 13px;
+}
+
+.sheet-item-name small,
+.sheet-comment,
+.sheet-timeline > button,
+.sheet-file-count,
+.custom-column-menu > small,
+.column-picker__body > section > small,
+.column-picker__body > section button small,
+.column-picker__empty,
+.sheet-summary-text,
+.sheet-summary-distribution small {
+  font-size: 11px;
+}
+
+.sheet-option-popover,
+.sheet-option-popover button,
+.sheet-option-popover input,
+.sheet-timeline-popover,
+.sheet-timeline-popover input,
+.sheet-label-editor,
+.sheet-label-editor button,
+.sheet-label-editor input,
+.sheet-row-menu,
+.sheet-row-menu button,
+.sheet-row-menu select,
+.sheet-group__menu,
+.sheet-group__menu button,
+.custom-column-menu,
+.column-settings-dialog,
+.column-settings-dialog button,
+.column-settings-dialog input {
+  font-size: 12px;
+}
+
+.live-selection-count,
+.live-selection-bar > strong {
+  font-size: 13px;
+}
+
+.live-selection-bar > button,
+.live-selection-move > button,
+.live-selection-move > div button {
+  min-width: 76px;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .portal-shell {
+    font-size: 14px;
+  }
+
+  .portal-shell :is(button, input, select, textarea),
+  .live-sheet th,
+  .live-sheet td {
+    font-size: 13px;
+  }
+
+  .team-list > div {
+    min-height: 76px;
+  }
+}
+
+/* Screenshot-matched analytics system shared by Overview, Jobs, Compliance
+   and Reports. All surfaces inherit the live MAINTSUPP data and dark palette. */
+.analytics-page {
+  gap: 14px;
+}
+
+.analytics-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.analytics-page-heading > div:first-child {
+  min-width: 210px;
+}
+
+.analytics-page-heading > div:first-child > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.analytics-page-heading h1 {
+  margin: 0;
+  color: #f5f8fa;
+  font-size: clamp(23px, 2.2vw, 31px);
+  letter-spacing: -.04em;
+}
+
+.analytics-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  min-width: 0;
+}
+
+/*
+ * THE HEADER SLOT.
+ *
+ * `display: contents` and not a box: the control portalled in here is one more
+ * chip in this row, and a wrapper would give it a box of its own that the flex
+ * row on desktop and the two-column grid on mobile would then have to lay out
+ * separately from the pickers it is meant to sit level with.
+ *
+ * The bar it carries — Reports' "Edit layout" plus its "n panels hidden" note —
+ * is added to the chip rule lists below by SELECTOR rather than by a copy of
+ * their declarations. A second set of paddings and borders here would be a
+ * second definition of what a control in this row looks like, and the two
+ * would drift the first time one of them was tuned.
+ */
+.analytics-toolbar__slot {
+  display: contents;
+}
+
+.analytics-toolbar > label,
+.analytics-toolbar > button,
+.analytics-toolbar > .analytics-toolbar__search,
+.analytics-toolbar .widget-bar--in-toolbar > button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  /* The period and portfolio pickers, and "Export spend". They were three
+     dark chips left sitting in a light toolbar — legible, but visibly not
+     part of the page they were on. */
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-head);
+  color: var(--ink);
+}
+
+.analytics-toolbar > label:focus-within,
+.analytics-toolbar > button:hover,
+.analytics-toolbar .widget-bar--in-toolbar > button:hover {
+  border-color: rgba(18, 180, 168, .72);
+  background: var(--surface-hover);
+  color: var(--control-fg-strong);
+}
+
+.analytics-toolbar select,
+.analytics-toolbar input {
+  min-width: 0;
+  border: 0 !important;
+  outline: 0;
+  background: transparent !important;
+  color: inherit !important;
+}
+
+.analytics-toolbar > label:first-of-type select {
+  min-width: 132px;
+  /*
+   * And a ceiling, because a <select> sizes itself to its longest OPTION.
+   * The portfolio picker lists every site on the board; once the maintenance
+   * board carried its real 744 jobs the longest entry took the control to
+   * 992px, which pushed the page 289px sideways at tablet widths. The closed
+   * control never needs more than this — the open menu is free to be wider.
+   */
+  max-width: 220px;
+}
+
+.analytics-toolbar > button,
+.analytics-toolbar .widget-bar--in-toolbar > button {
+  cursor: pointer;
+}
+
+/* The bar itself carries no chrome in the header — the chip is the button, and
+   the note beside it is the same quiet text it is under a dashboard. */
+.analytics-toolbar .widget-bar--in-toolbar {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+}
+
+.analytics-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.analytics-metric-grid--six {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+
+/*
+ * THE KPI TILE. This is the defect the owner reported on /dashboard/reports.
+ *
+ * The gradient was two dark literals with no light counterpart, so the tile
+ * stayed dark on a light page. The light skin, meanwhile, DID have a rule for
+ * the figure inside it, and duly repainted £33,580 to dark ink — on a dark
+ * card. Measured 1.02:1: not low contrast, invisible.
+ *
+ * The mechanism is worth naming, because it is the same one all over this
+ * sheet: `background-color` is transparent when a gradient is set, so the
+ * light skin's blanket panel fill never reached this card, while its text rule
+ * did. A gradient made of tokens cannot fall out of step that way — the tile
+ * keeps its depth in dark (the two stops are the values it already had) and
+ * becomes a paper card in light, with `--ink` correct on both.
+ */
+.analytics-metric {
+  --analytics-tone: var(--accent-fg);
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-height: 148px;
+  padding: 17px 16px 44px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(145deg, var(--surface-card-hi), var(--surface-card-lo));
+  color: var(--ink);
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .1);
+}
+
+button.analytics-metric {
+  cursor: pointer;
+}
+
+button.analytics-metric:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--analytics-tone) 65%, #35505d);
+}
+
+/*
+ * The tile's tone, which is TEXT as well as decoration: the caption under the
+ * figure, the icon and the sparkline all read it. These were six bright
+ * accents chosen against a dark tile, and once the tile follows the theme they
+ * have to as well — on the light tile they measured 1.88:1 (orange) to 3.35:1
+ * (purple). Each now points at the tint family that already carries a value
+ * for both themes, so a tone is legible on whichever tile it lands on.
+ */
+.analytics-metric--blue { --analytics-tone: var(--blue-600); }
+.analytics-metric--orange { --analytics-tone: var(--orange-600); }
+.analytics-metric--red { --analytics-tone: var(--red-600); }
+.analytics-metric--green { --analytics-tone: var(--green-700); }
+.analytics-metric--purple { --analytics-tone: var(--purple-600); }
+.analytics-metric--slate { --analytics-tone: var(--muted); }
+
+.analytics-metric__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--analytics-tone) 15%, transparent);
+  color: var(--analytics-tone);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--analytics-tone) 20%, transparent);
+}
+
+.analytics-metric__copy {
+  display: flex;
+  min-width: 0;
+  padding-left: 10px;
+  flex-direction: column;
+}
+
+.analytics-metric__copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.analytics-metric__copy strong {
+  margin-top: 3px;
+  /* The figure the owner could not read. White was correct on the dark tile
+     and invisible the moment the tile followed the page. */
+  color: var(--ink);
+  font-size: clamp(23px, 2.2vw, 31px);
+  line-height: 1.05;
+  letter-spacing: -.045em;
+}
+
+.analytics-metric__copy > span {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--analytics-tone);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * SIX ACROSS. Everything above was written for the four-up tile, which is 330px
+ * wide; six of these share the same column and are 178px, leaving 91px of text.
+ * Measured there: "Awaiting app…", "Closed in per…", four ellipsised captions,
+ * and a 31px figure that broke "64.8 hrs" onto a second line.
+ *
+ * `clamp(23px, 2.2vw, 31px)` is the mechanism. It reads the VIEWPORT, which
+ * knows nothing about how many tiles are sharing it, so at 1440 it takes its
+ * 31px ceiling in a column that fits 91px of it.
+ *
+ * THE HEIGHT IS STATED HERE, AND THAT IS THE LOAD-BEARING PART. The jobs strip
+ * trades this section's height for an equal bottom margin, and the document's
+ * height is the whole anti-oscillation proof — see the block below. While the
+ * tile was as tall as its text happened to come to, that was 167.89px BECAUSE
+ * the figure wrapped: unwrapping it dropped the section to 148px, took 20px out
+ * of the document, and the page no longer scrolled as far as the strip's tests
+ * park it. Stated, the tile is 168px whatever its words do — the content box is
+ * 105px and the worst case measured (two-line label, wrapped figure, clamped
+ * caption) is 95px, so the words can never move the page again.
+ */
+@media (min-width: 1381px) {
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric {
+    /* 34px of icon column and 13px of side padding rather than 44 and 16.
+       18px straight into the text column, which is the entire shortage. */
+    grid-template-columns: 34px minmax(0, 1fr);
+    min-height: 168px;
+    padding-right: 13px;
+    padding-left: 13px;
+  }
+
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric__icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric__copy {
+    padding-left: 8px;
+  }
+
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric__copy strong {
+    font-size: 26px;
+  }
+
+  /*
+   * Two lines each, and no ellipsis before them. `nowrap` + `text-overflow` is
+   * right in the collapsed strip, where a chip IS one line, and wrong on a card
+   * with 105px of content box — hence `:not(.is-collapsed)`, which leaves every
+   * rule the strip depends on exactly as it was. The clamp caps a future string
+   * at two lines rather than letting it grow the tile.
+   */
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric__copy small,
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric__copy > span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+
+  .analytics-metric-grid--six:not(.is-collapsed) .analytics-metric__copy > span {
+    line-height: 1.3;
+  }
+}
+
+.analytics-spark {
+  position: absolute;
+  right: 12px;
+  bottom: 9px;
+  left: 12px;
+  width: calc(100% - 24px);
+  height: 38px;
+  color: var(--analytics-tone);
+}
+
+.analytics-spark__area {
+  fill: color-mix(in srgb, currentColor 13%, transparent);
+}
+
+/* ---- Jobs: the collapsing sticky meter strip -----------------------------
+ *
+ * The six meters above the live job list used to leave the screen and stay
+ * gone. Measured at 1440x900: the page scrolls 480px, the grid is a nested
+ * scroller, and at the bottom of the page the cards sit 128px above the
+ * viewport with no way back except the outer scrollbar. At 390px the card list
+ * is 89,220px long and the meters are one screen in a hundred and seven.
+ *
+ * The section now sticks under the top bar and COLLAPSES there: same six
+ * cards, same six figures, same DOM — the strip is a restyling of the elements
+ * that were already on the page, not a second copy of them, so it can never
+ * come to show a different number from the cards it stands in for. What it
+ * drops is the sparkline and the caption; what it keeps is every figure.
+ *
+ * Nothing here is removed at any width, and the grid keeps its full height:
+ * the alternative that was tried — stopping the page scrolling so only the
+ * grid moves — left the grid 236px tall on a desktop, about six rows, because
+ * the furniture above it is 570px of a 900px screen.
+ */
+
+.portal-shell {
+  /* The line the strip pins to. Overwritten from the measured top bar height
+     by live-board.tsx, which also feeds the same number to the observer that
+     decides when to collapse; this is the value used before that runs and if
+     scripting never does. */
+  --jobs-rail-top: 71px;
+}
+
+.live-board-page {
+  --jobs-rail-h: 0px;
+  /*
+   * How far the board's OWN sticky bars step down to make room for the strip.
+   * Zero on a desktop, where the strip pins above them and nothing competes
+   * for the band; only the phone, which already stacks a board identity bar
+   * and a board toolbar under the page's top bar, has to move.
+   */
+  --jobs-stack-offset: 0px;
+}
+
+.live-board-page[data-jobs-rail="on"] {
+  --jobs-rail-h: 46px;
+}
+
+.live-job-metrics {
+  position: sticky;
+  /* Under the top bar's 35 — this passes beneath it, not over it. */
+  z-index: 32;
+  top: var(--jobs-rail-top);
+}
+
+/*
+ * A ground for the pinned section — and NOTHING that changes its size.
+ *
+ * Background, radius and shadow only: no padding and no border, because this
+ * class arrives the moment the section pins, and a border box that grew by even
+ * a pixel at that moment would be a layout change at exactly the point the
+ * whole mechanism is built to have none. Pinned without a ground, the board
+ * rows scrolling underneath showed through the gaps between the six cards.
+ */
+.live-job-metrics.is-stuck {
+  border-radius: 10px;
+  background: var(--surface-head);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .13);
+}
+
+/*
+ * `height` plus a bottom margin of exactly what the cards gave up.
+ *
+ * The section's OUTER height is identical in both states, so collapsing costs
+ * the document not one pixel and Chrome's scroll anchoring has nothing to
+ * correct. Letting it simply shrink was tried and measured: anchoring moved
+ * the scroll position by the 122px that disappeared, which took the trigger
+ * back across its own line, and the strip flipped on and off forever. See the
+ * note above `metersCollapsed` in live-board.tsx.
+ *
+ * `--jobs-rail-natural` is written by that file from the expanded section's own
+ * measured height, because the expanded height is 168px at 1440, two rows
+ * under 1380 and a scrolling strip under 760 — three numbers, and a fourth the
+ * next time the grid changes. The fallback is only ever used for the frames
+ * before the measurement lands.
+ */
+.live-job-metrics.is-collapsed {
+  display: flex;
+  height: var(--jobs-rail-h);
+  margin-bottom: calc(var(--jobs-rail-natural, 168px) - var(--jobs-rail-h));
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px 6px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  /* Opaque, and a tokenised surface: rows scroll underneath this. */
+  background: var(--surface-head);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .13);
+  scrollbar-width: none;
+}
+
+.live-job-metrics.is-collapsed::-webkit-scrollbar {
+  display: none;
+}
+
+.live-job-metrics.is-collapsed .analytics-metric {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-color: transparent;
+  border-radius: 7px;
+  background: none;
+  box-shadow: none;
+}
+
+.live-job-metrics.is-collapsed .analytics-metric__icon {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+}
+
+.live-job-metrics.is-collapsed .analytics-metric__copy {
+  align-items: baseline;
+  flex-direction: row;
+  gap: 6px;
+  padding-left: 0;
+}
+
+/*
+ * WHICH HALF GIVES WAY.
+ *
+ * Six chips share about 980px at 1440, so a chip has ~120px for a label and a
+ * figure and one of them has to shrink. The label does. Left to themselves both
+ * flex items shrank and the strip read "Closed in p… 6…" and "Avg SL… 64…." —
+ * the number, which is the entire reason the strip exists, ellipsised away
+ * while the caption kept two thirds of the width.
+ */
+.live-job-metrics.is-collapsed .analytics-metric__copy small {
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: 11.5px;
+}
+
+.live-job-metrics.is-collapsed .analytics-metric__copy strong {
+  margin-top: 0;
+  /* Never shrinks, never wraps: "64.8 hrs" used to break to a second line and
+     spill out of a 46px strip. A figure in a one-line bar is one line. */
+  flex: 0 0 auto;
+  font-size: 16px;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+}
+
+/* The two things the strip gives up. The caption is a sentence and the
+   sparkline is 38px of height; both are back the moment it expands. */
+.live-job-metrics.is-collapsed .analytics-metric__copy > span,
+.live-job-metrics.is-collapsed .analytics-spark {
+  display: none;
+}
+
+/*
+ * The one control the strip adds. It is in the DOM only while the section is
+ * stuck, so at the top of the page the grid is still the six cards it always
+ * was rather than six cards and an empty seventh cell.
+ */
+.live-job-metrics__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  grid-column: 1 / -1;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-head);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+/*
+ * Pinned but expanded: the reader has asked for the full cards back.
+ *
+ * The control goes OUT OF FLOW, just under them, for the same reason the
+ * collapse compensates its own height — a seventh grid row would make the
+ * section 48px taller than its unpinned self, which is a layout change at the
+ * one moment this mechanism cannot afford one. It draws over the board that is
+ * scrolling beneath the cards, which is where a pinned header's shadow already
+ * falls.
+ */
+.live-job-metrics.is-stuck:not(.is-collapsed) .live-job-metrics__toggle {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  margin-top: 6px;
+}
+
+.live-job-metrics__toggle:hover {
+  border-color: rgba(18, 180, 168, .72);
+  background: var(--surface-hover);
+  color: var(--control-fg-strong);
+}
+
+.live-job-metrics__toggle svg {
+  flex: 0 0 auto;
+  transform: rotate(-90deg);
+}
+
+.live-job-metrics.is-collapsed .live-job-metrics__toggle {
+  /* Pinned to the right edge of the strip: the chips scroll sideways under it
+     on a narrow screen and the way back to the detail must not scroll away
+     with them. */
+  position: sticky;
+  right: 0;
+  min-height: 0;
+  flex: 0 0 auto;
+  align-self: stretch;
+}
+
+.live-job-metrics.is-collapsed .live-job-metrics__toggle svg {
+  transform: rotate(90deg);
+}
+
+.analytics-spark__line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.analytics-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #263d48;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #14242d, #101b23);
+  color: #e9f0f3;
+}
+
+.analytics-panel > header {
+  display: flex;
+  min-height: 54px;
+  padding: 0 18px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #243944;
+}
+
+.analytics-panel > header h2 {
+  margin: 0;
+  color: #f5f8fa;
+  font-size: 17px;
+  letter-spacing: -.025em;
+}
+
+.analytics-panel > header > button,
+.analytics-panel > header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-fg);
+  font-size: 12px;
+}
+
+.analytics-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(360px, .85fr);
+  gap: 12px;
+}
+
+.analytics-bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, .7fr) minmax(300px, .85fr);
+  gap: 12px;
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.analytics-table th,
+.analytics-table td {
+  min-height: 43px;
+  padding: 11px 15px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.analytics-table th {
+  color: var(--table-head-fg);
+  font-weight: 600;
+}
+
+.analytics-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.analytics-table tbody tr.analytics-row {
+  cursor: pointer;
+}
+
+.analytics-table tbody tr:hover td,
+.analytics-table tbody tr:focus td {
+  background: #1a3039;
+  outline: 0;
+}
+
+.analytics-status {
+  display: inline-flex;
+  max-width: 170px;
+  min-height: 27px;
+  padding: 0 10px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(18, 180, 168, .48);
+  border-radius: 99px;
+  color: var(--accent-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analytics-empty {
+  height: 96px;
+  color: #81949f !important;
+  text-align: center !important;
+}
+
+.analytics-donut-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, .9fr) minmax(170px, 1fr);
+  gap: 22px;
+  align-items: center;
+  min-height: 260px;
+  padding: 22px;
+}
+
+.analytics-donut {
+  --donut-fill: conic-gradient(#12b4a8 0 100%);
+  position: relative;
+  display: grid;
+  width: min(100%, 232px);
+  aspect-ratio: 1;
+  margin: auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--donut-fill);
+}
+
+.analytics-donut::after {
+  position: absolute;
+  width: 68%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  /* The hole in the donut. A dark literal, so on a light page the figure
+     inside it — repainted to `--ink` by the light skin — sat on a dark disc.
+     The audit could not see it: the ring is a conic-gradient, which computed
+     style cannot sample, so the node was scored against the white card behind
+     it and passed. Found by looking at the screenshot. */
+  background: var(--surface-card);
+  box-shadow: inset 0 0 0 1px #263d48;
+  content: "";
+}
+
+.analytics-donut > span {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+.analytics-donut strong {
+  color: var(--ink);
+  font-size: clamp(27px, 3vw, 42px);
+  letter-spacing: -.05em;
+}
+
+.analytics-donut small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.analytics-donut--medium {
+  width: min(78%, 190px);
+}
+
+.analytics-legend {
+  display: grid;
+  gap: 13px;
+}
+
+.analytics-legend > span {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.analytics-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.analytics-legend small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.analytics-legend strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.analytics-spend-panel,
+.analytics-score-panel,
+.analytics-trades-panel {
+  min-height: 290px;
+}
+
+.analytics-score-panel {
+  display: flex;
+  padding: 0 0 16px;
+  flex-direction: column;
+  align-items: center;
+  background: linear-gradient(145deg, var(--surface-card-hi), var(--surface-card-lo));
+  text-align: center;
+}
+
+button.analytics-score-panel {
+  cursor: pointer;
+}
+
+.analytics-score-panel > header {
+  width: 100%;
+}
+
+.analytics-score-panel > span {
+  margin: 10px 16px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.analytics-score-panel > strong {
+  display: inline-flex;
+  margin-top: 11px;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-fg);
+  font-size: 12px;
+}
+
+.analytics-bars {
+  display: grid;
+  gap: 13px;
+  padding: 18px;
+}
+
+.analytics-bars > div,
+.analytics-bars > button {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(80px, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  min-height: 23px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.analytics-bars > button {
+  cursor: pointer;
+}
+
+.analytics-bars > button:hover > span {
+  color: var(--accent-fg);
+}
+
+.analytics-bars > :is(div, button) > span {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The unfilled part of each bar. A dark literal, so on a light card the track
+   read as a solid navy rule rather than as the empty half of a meter. */
+.analytics-bars > :is(div, button) > div {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--surface-sunken);
+}
+
+.analytics-bars i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.analytics-bars strong {
+  min-width: 32px;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: right;
+}
+
+.analytics-trend {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 9px;
+  min-height: 218px;
+  padding: 20px 16px 14px;
+}
+
+.analytics-trend__y {
+  display: flex;
+  padding-bottom: 23px;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.analytics-trend__plot {
+  min-width: 0;
+}
+
+.analytics-trend svg {
+  display: block;
+  width: 100%;
+  height: 178px;
+  overflow: visible;
+  border-bottom: 1px solid #2b414b;
+  background: repeating-linear-gradient(to bottom, transparent 0 58px, rgba(73, 99, 112, .18) 59px 60px);
+}
+
+.analytics-trend__area {
+  fill: rgba(18, 180, 168, .13);
+}
+
+.analytics-trend__line {
+  fill: none;
+  stroke: #12b4a8;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.analytics-trend circle {
+  fill: #e8ffff;
+  stroke: #12b4a8;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.analytics-trend__x {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.analytics-trend__x span {
+  text-align: center;
+}
+
+@media (max-width: 1380px) {
+  .analytics-page-heading--wide-controls {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .analytics-page-heading--wide-controls .analytics-toolbar {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .analytics-metric-grid--six {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .analytics-bottom-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .analytics-spend-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1040px) {
+  .analytics-page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .analytics-toolbar {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .analytics-overview-grid,
+  .analytics-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-spend-panel {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .analytics-page-heading h1 {
+    font-size: 25px;
+  }
+
+  .analytics-toolbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .analytics-toolbar > label,
+  .analytics-toolbar > button,
+  .analytics-toolbar > .analytics-toolbar__search,
+  .analytics-toolbar .widget-bar--in-toolbar > button {
+    width: 100%;
+  }
+
+  .analytics-toolbar > button:last-child {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+
+  /* Its own row on a phone: the label reads "Edit layout" plus, when panels are
+     hidden, a count, and half of a 390px screen is not enough for both. */
+  .analytics-toolbar .widget-bar--in-toolbar {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+
+  .analytics-metric-grid,
+  .analytics-metric-grid--six {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-metric {
+    min-height: 132px;
+    padding: 14px 12px 38px;
+  }
+
+  .analytics-metric__icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .analytics-metric__copy {
+    padding-left: 6px;
+  }
+
+  .analytics-metric__copy strong {
+    font-size: 23px;
+  }
+
+  .analytics-donut-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-bars > div,
+  .analytics-bars > button {
+    grid-template-columns: minmax(92px, 120px) 1fr auto;
+  }
+
+  .analytics-trend {
+    min-width: 620px;
+  }
+
+  .analytics-spend-panel {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .analytics-metric-grid,
+  .analytics-metric-grid--six {
+    grid-template-columns: 1fr;
+  }
+}
+
+.analytics-compliance-grid {
+  display: grid;
+  grid-template-columns: minmax(330px, .7fr) minmax(0, 1.3fr);
+  gap: 12px;
+}
+
+.mobile-board-table-label {
+  display: inline-flex;
+  min-height: 36px;
+  padding: 0 10px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #304752;
+  border-radius: 7px;
+  background: #17232c;
+  color: #c7d3da;
+  font-size: 12px;
+}
+
+.analytics-compliance-score__body {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, .8fr);
+  gap: 18px;
+  align-items: center;
+  min-height: 300px;
+  padding: 24px;
+}
+
+.analytics-compliance-score > p {
+  margin: 0 20px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.analytics-certificate-register .analytics-table td:nth-child(2),
+.analytics-certificate-register .analytics-table td:nth-child(3) {
+  min-width: 170px;
+}
+
+.analytics-panel-footer {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--accent-fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.analytics-panel-footer:hover {
+  background: #1a3039;
+  color: #71e0d8;
+}
+
+.analytics-expiry-types > header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analytics-expiry-types > header span,
+.analytics-report-trend > header span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.analytics-expiry-types .analytics-bars {
+  padding: 22px 24px;
+}
+
+.analytics-expiry-types .analytics-bars > div {
+  grid-template-columns: minmax(190px, 230px) minmax(140px, 1fr) 44px;
+}
+
+.analytics-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr);
+  gap: 12px;
+}
+
+.analytics-report-trend > header {
+  min-height: 82px;
+}
+
+.analytics-report-trend > header > div {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 14px;
+  align-items: baseline;
+}
+
+.analytics-report-trend > header h2 {
+  grid-column: 1 / -1;
+}
+
+.analytics-report-trend > header strong {
+  color: var(--ink);
+  font-size: 24px;
+  letter-spacing: -.04em;
+}
+
+.analytics-inline-select {
+  display: inline-flex;
+  min-height: 36px;
+  padding: 0 9px;
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface-head);
+}
+
+.analytics-inline-select select {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.analytics-top-sites .analytics-bars {
+  padding-top: 22px;
+}
+
+.analytics-top-sites .analytics-bars > button,
+.analytics-top-sites .analytics-bars > div {
+  grid-template-columns: minmax(135px, 170px) minmax(80px, 1fr) minmax(70px, auto);
+}
+
+.analytics-repeat-panel .analytics-table td,
+.analytics-repeat-panel .analytics-table th {
+  padding-right: 18px;
+  padding-left: 18px;
+}
+
+.analytics-frequency {
+  display: inline-flex;
+  min-height: 25px;
+  padding: 0 8px;
+  align-items: center;
+  border-radius: 5px;
+  background: #1b3540;
+  color: #c4d6de;
+  font-size: 11px;
+}
+
+@media (max-width: 1180px) {
+  .analytics-compliance-grid,
+  .analytics-report-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .analytics-compliance-score__body {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-expiry-types .analytics-bars > div {
+    grid-template-columns: minmax(130px, 170px) minmax(100px, 1fr) 36px;
+  }
+
+  .analytics-report-trend,
+  .analytics-repeat-panel,
+  .analytics-certificate-register {
+    overflow-x: auto;
+  }
+}
+
+/* Mobile command-centre pass. The legacy board had several phone-only grey,
+   black and violet rules; keep every mobile surface on the MAINTSUPP palette. */
+@media (max-width: 900px) {
+  .portal-sidebar {
+    width: min(86vw, 320px);
+    padding-bottom: max(15px, env(safe-area-inset-bottom));
+    border-right-color: var(--rail-border);
+    background: var(--rail-bg);
+    box-shadow: 18px 0 52px rgba(0, 0, 0, .42);
+  }
+
+  .portal-sidebar__brand {
+    height: 64px;
+  }
+
+  .portal-nav button {
+    min-height: 46px;
+    border-radius: 9px;
+    color: var(--rail-fg-muted);
+    font-size: 14px;
+  }
+
+  .portal-nav button.is-active {
+    background: var(--rail-active-bg);
+    color: var(--rail-active-fg);
+    box-shadow: inset 3px 0 0 var(--rail-accent);
+  }
+
+  .nav-scrim {
+    background: rgba(3, 10, 14, .72);
+    backdrop-filter: none;
+  }
+
+  .portal-topbar {
+    min-height: 64px;
+    padding: 0 14px;
+    border-bottom-color: var(--line);
+    background: var(--paper);
+    backdrop-filter: none;
+  }
+
+  .portal-content {
+    width: 100%;
+    padding: 18px 14px calc(38px + env(safe-area-inset-bottom));
+    background: var(--canvas);
+  }
+
+  .mobile-menu,
+  .topbar-actions > .icon-button {
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--surface-card);
+    color: var(--control-fg);
+  }
+
+  .page-identity strong {
+    color: var(--ink);
+    font-size: 15px;
+  }
+
+  .notification-panel {
+    right: 10px;
+    width: min(390px, calc(100vw - 20px));
+    max-height: calc(100dvh - 76px);
+    border-color: var(--line-strong);
+    background: var(--surface-card);
+  }
+
+  .analytics-page {
+    gap: 12px;
+  }
+
+  .analytics-page-heading {
+    gap: 13px;
+  }
+
+  .analytics-page-heading > div:first-child {
+    min-width: 0;
+  }
+
+  .analytics-panel,
+  .analytics-metric {
+    border-color: var(--line);
+    background: var(--surface-card);
+    box-shadow: none;
+  }
+
+  .analytics-panel {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 320px;
+  }
+}
+
+@media (max-width: 760px) {
+  .portal-shell {
+    --mobile-topbar-height: 64px;
+    /* The strip pins under the phone's top bar. live-board.tsx overwrites this
+       with the bar's measured height, which between 430px and 760px is 71px
+       while this token is 64px — a seven-pixel gap that predates the strip and
+       that a measured value simply does not have. */
+    --jobs-rail-top: var(--mobile-topbar-height);
+    background: var(--canvas);
+    color: var(--ink);
+    -webkit-tap-highlight-color: rgba(18, 180, 168, .18);
+  }
+
+  /*
+   * Taller on a phone than on a desktop, and deliberately so: the strip's
+   * "Show meter detail" button stretches to the strip's inner height, and 52px
+   * less its border and padding leaves 46px — clear of the 44px touch minimum.
+   * At the desktop's 46px it would have been a 36px target on the one device
+   * where that matters.
+   */
+  .live-board-page[data-jobs-rail="on"] {
+    --jobs-rail-h: 52px;
+    --jobs-stack-offset: var(--jobs-rail-h);
+  }
+
+  /* Pinned, but expanded back to the full cards. The bars below step down by
+     the cards' own height — the figure the strip already measures for its
+     margin — because the pinned thing is taller than the strip in this state
+     and treating it as unpinned drew the cards straight over the board bar. */
+  .live-board-page[data-jobs-rail="open"] {
+    --jobs-stack-offset: var(--jobs-rail-natural, 141px);
+  }
+
+  .live-job-metrics.is-collapsed {
+    gap: 3px;
+    padding: 2px 4px;
+    border-radius: 12px;
+  }
+
+  .live-job-metrics.is-collapsed .analytics-metric {
+    /* Sized, not shared. Six sixths of 390px is 65px a chip; these scroll
+       sideways inside the strip instead, with the toggle pinned past them. */
+    flex: 0 0 auto;
+    scroll-snap-align: none;
+  }
+
+  /*
+   * Expanded on a phone, the six cards are a horizontal scroller, so the way
+   * back to the strip is the last thing in it rather than a bar across it: an
+   * out-of-flow bar would scroll away with the cards, and `grid-column: 1 / -1`
+   * in a column-flow grid laid a 132px-tall button straight over them.
+   */
+  .live-job-metrics.is-stuck:not(.is-collapsed) .live-job-metrics__toggle {
+    position: sticky;
+    top: auto;
+    right: 0;
+    left: auto;
+    align-self: center;
+    justify-self: end;
+    grid-column: auto;
+    min-height: 46px;
+    max-height: 46px;
+    margin-top: 0;
+  }
+
+  /* The words go, the control does not: 171px of button is most of the room
+     the figures need on a 390px screen, and in both pinned states the cards
+     scroll sideways underneath it. `aria-label` carries the name. */
+  .live-job-metrics.is-stuck .live-job-metrics__toggle {
+    width: 46px;
+    padding: 0;
+  }
+
+  .live-job-metrics.is-stuck .live-job-metrics__toggle span {
+    display: none;
+  }
+
+  /*
+   * THE PHONE'S STICKY STACK, and why the board chrome has to move with it.
+   *
+   * `.board-chrome` pins at the top of the viewport — deliberately, so that its
+   * tab and view rows tuck up behind the page's top bar and only its bottom
+   * row, the board toolbar, stays on screen. That makes its visible bottom edge
+   * a fixed distance from the VIEWPORT, not from whatever is above it: add a
+   * layer to the stack and the toolbar does not move down, it gets covered.
+   * Measured with the strip in and `--jobs-stack-offset` still zero: the board
+   * identity bar ran to y182 while the toolbar stayed pinned at y163,
+   * overlapping it by 19px.
+   *
+   * The offset is applied to the chrome's own `top` where that rule lives,
+   * further down this file, so the whole run steps down together. `top` on a
+   * sticky box changes where it paints and nothing about the flow, so all
+   * three of these are free of the anchoring problem the section's height had.
+   */
+
+  .portal-shell :is(button, input, select, textarea) {
+    font-size: 14px;
+  }
+
+  .analytics-page-heading h1 {
+    color: var(--ink);
+    font-size: clamp(24px, 7vw, 29px);
+    line-height: 1.08;
+  }
+
+  .analytics-page-heading > div:first-child > span {
+    color: var(--muted);
+    font-size: 10px;
+  }
+
+  .analytics-toolbar {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .analytics-toolbar > label,
+  .analytics-toolbar > button,
+  .analytics-toolbar > .analytics-toolbar__search,
+  .analytics-toolbar .widget-bar--in-toolbar > button,
+  .analytics-inline-select {
+    min-width: 0;
+    min-height: 46px;
+    border-color: var(--line-strong);
+    background: var(--surface-card);
+    color: var(--ink);
+  }
+
+  .analytics-toolbar > .analytics-toolbar__search {
+    grid-column: 1 / -1;
+  }
+
+  .analytics-toolbar > label:first-of-type select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .analytics-toolbar > button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .analytics-metric-grid,
+  .analytics-metric-grid--six {
+    display: grid;
+    grid-template-columns: none;
+    grid-auto-columns: minmax(190px, 74vw);
+    grid-auto-flow: column;
+    gap: 10px;
+    padding: 1px 1px 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .analytics-metric-grid::-webkit-scrollbar,
+  .analytics-metric-grid--six::-webkit-scrollbar {
+    display: none;
+  }
+
+  .analytics-page-heading--wide-controls .analytics-toolbar > label:last-of-type {
+    grid-column: 1 / -1;
+  }
+
+  .analytics-metric {
+    min-height: 136px;
+    scroll-snap-align: start;
+    border-radius: 12px;
+    background: linear-gradient(145deg, var(--surface-card-hi), var(--surface-card-lo));
+  }
+
+  .analytics-metric__copy small {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .analytics-metric__copy > span {
+    font-size: 11px;
+  }
+
+  .analytics-panel {
+    border-radius: 12px;
+    background: var(--surface-card);
+  }
+
+  .analytics-panel > header {
+    min-height: 56px;
+    padding: 0 15px;
+    border-bottom-color: var(--line);
+    background: var(--surface-head);
+  }
+
+  .analytics-panel > header h2 {
+    font-size: 16px;
+  }
+
+  .analytics-panel > header > :is(button, span) {
+    color: var(--accent-fg);
+    font-size: 12px;
+  }
+
+  .table-scroll,
+  .analytics-certificate-register,
+  .analytics-repeat-panel {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) var(--surface-head);
+  }
+
+  .analytics-table {
+    min-width: 690px;
+    background: var(--surface-card);
+  }
+
+  .analytics-table th,
+  .analytics-table td {
+    min-height: 46px;
+    padding: 12px 13px;
+    border-bottom-color: var(--line);
+    background: var(--surface-card);
+    color: var(--ink);
+    font-size: 13px;
+  }
+
+  .analytics-table th {
+    background: var(--surface-head);
+    color: var(--table-head-fg);
+  }
+
+  .analytics-table--mobile-cards {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .analytics-table--mobile-cards thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .analytics-table--mobile-cards tbody {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .analytics-table--mobile-cards tr {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-head);
+  }
+
+  .analytics-table--mobile-cards td {
+    display: grid;
+    min-height: 44px;
+    grid-template-columns: minmax(88px, 34%) minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-card);
+    white-space: normal;
+  }
+
+  .analytics-table--mobile-cards td:last-child {
+    border-bottom: 0;
+  }
+
+  .analytics-table--mobile-cards td::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+    content: attr(data-label);
+  }
+
+  .analytics-table--mobile-cards td > :is(strong, span, button) {
+    min-width: 0;
+    justify-self: start;
+  }
+
+  .analytics-table--mobile-cards .analytics-empty {
+    display: block;
+    padding: 20px 12px;
+    text-align: center !important;
+  }
+
+  .analytics-table--mobile-cards .analytics-empty::before {
+    display: none;
+  }
+
+  .analytics-status {
+    min-height: 30px;
+    color: var(--accent-fg);
+  }
+
+  .analytics-donut-layout,
+  .analytics-compliance-score__body {
+    gap: 18px;
+    padding: 18px 15px;
+  }
+
+  .analytics-donut {
+    width: min(72vw, 218px);
+  }
+
+  .analytics-donut::after {
+    background: var(--surface-card);
+  }
+
+  .analytics-legend {
+    width: min(100%, 330px);
+    margin: 0 auto;
+  }
+
+  .analytics-bars {
+    gap: 15px;
+    padding: 17px 14px;
+  }
+
+  .analytics-bars > div,
+  .analytics-bars > button,
+  .analytics-top-sites .analytics-bars > button,
+  .analytics-top-sites .analytics-bars > div,
+  .analytics-expiry-types .analytics-bars > div {
+    grid-template-columns: minmax(94px, 118px) minmax(70px, 1fr) auto;
+    gap: 8px;
+  }
+
+  .analytics-bars > :is(div, button) > span,
+  .analytics-bars strong {
+    font-size: 11px;
+  }
+
+  .analytics-trend {
+    min-width: 0;
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 7px;
+    padding: 18px 12px 14px 8px;
+  }
+
+  .analytics-trend__x {
+    font-size: 9px;
+  }
+
+  .analytics-report-trend,
+  .analytics-repeat-panel,
+  .analytics-certificate-register,
+  .analytics-spend-panel {
+    overflow-x: hidden;
+  }
+
+  .analytics-report-trend > header {
+    min-height: 92px;
+    align-items: flex-start;
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
+
+  .analytics-report-trend > header > div {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-report-trend > header strong {
+    font-size: 22px;
+  }
+
+  .analytics-expiry-types .analytics-bars {
+    padding: 18px 14px;
+  }
+
+  .analytics-panel-footer {
+    min-height: 48px;
+    border-top-color: var(--line);
+    color: var(--accent-fg);
+  }
+
+  /* Jobs keeps the analytics summary, then gives the editable sheet a
+     full-width, touch-friendly workspace. */
+  .portal-content:has(.live-board-page) {
+    padding: 14px 0 0;
+  }
+
+  .live-board-page {
+    gap: 12px;
+  }
+
+  .live-jobs-analytics-heading,
+  .live-job-metrics {
+    margin-inline: 14px;
+  }
+
+  .live-board-panel {
+    min-height: 0;
+    border: 1px solid #2b414b;
+    border-radius: 14px 14px 0 0;
+    background: #101820;
+  }
+
+  .mobile-board-bar,
+  .live-board-toolbar,
+  .live-board-footer {
+    border-color: var(--line) !important;
+    background: var(--surface-head) !important;
+    color: var(--ink);
+  }
+
+  /*
+   * `+ var(--jobs-rail-h)` in the three offsets below is the collapsing meter
+   * strip joining the sticky stack on a phone.
+   *
+   * It is added to the declarations that were already here rather than
+   * restated in overriding rules: 62px and 124px appear once each, so the
+   * board bar, the toolbar and the grid's window cannot come to disagree about
+   * how tall the furniture above them is. The variable is 0px on every board
+   * and at every moment except while the maintenance strip is collapsed, so
+   * this is a no-op everywhere else.
+   */
+  .mobile-board-bar {
+    top: calc(var(--mobile-topbar-height) + var(--jobs-stack-offset, 0px));
+    min-height: 62px;
+  }
+
+  .mobile-board-bar > div > span:first-child {
+    background: var(--teal-100);
+    color: var(--teal-700);
+  }
+
+  .mobile-board-bar strong {
+    color: var(--ink);
+  }
+
+  .mobile-board-bar small {
+    color: var(--muted);
+  }
+
+  .mobile-board-table-label,
+  .mobile-board-bar > label,
+  .live-board-search,
+  .live-board-tool,
+  .live-board-footer > button {
+    min-height: 42px;
+    border-color: #35505d !important;
+    background: #182830 !important;
+    color: #dce7eb !important;
+  }
+
+  .live-board-toolbar {
+    top: calc(var(--mobile-topbar-height) + 62px + var(--jobs-stack-offset, 0px));
+  }
+
+  /* Deliberately NOT offset by --jobs-rail-h. This one is a HEIGHT, so moving
+     it would change the document's height and hand scroll anchoring exactly
+     the correction the strip was rebuilt to avoid. The grid loses the strip's
+     52px off the bottom of its window in the phone's table layout, which is a
+     page-scroll away; a page that fights the reader's scroll position is not. */
+  .live-board-scroll {
+    height: calc(100dvh - var(--mobile-topbar-height) - 124px);
+    min-height: 460px;
+    border-color: #2b414b;
+    background: #101820 !important;
+    scrollbar-color: #35505d #101820;
+  }
+
+  .live-board-canvas,
+  .sheet-group__header {
+    border-color: #2b414b !important;
+    background: #101820 !important;
+  }
+
+  body[data-theme="dark"] :is(
+    .live-sheet,
+    .live-sheet td,
+    .live-sheet .sheet-column--name,
+    .live-sheet .sheet-check,
+    .sheet-add-row td
+  ) {
+    border-color: #2b414b;
+    background: #182830 !important;
+    color: #e3ecef;
+  }
+
+  body[data-theme="dark"] :is(
+    .live-sheet th,
+    .live-sheet th.sheet-column--name,
+    .live-sheet thead .sheet-check
+  ) {
+    border-color: #2b414b;
+    background: #14232c !important;
+    color: #b9c8cf;
+  }
+
+  body[data-theme="dark"] .live-sheet .sheet-check::before {
+    border-color: #2b414b;
+    background: #101820;
+  }
+
+  /* Sheets, drawers and calendars use teal rather than legacy violet. */
+  body[data-theme="dark"] :is(
+    .mobile-cell-sheet__panel,
+    .mobile-request-field-editor > section,
+    .mobile-column-picker-layer .column-picker--mobile
+  ) {
+    border-color: #35505d;
+    background: #182830;
+    color: #edf4f6;
+  }
+
+  body[data-theme="dark"] :is(
+    .mobile-cell-sheet__panel > header,
+    .mobile-cell-sheet__panel > footer,
+    .mobile-request-field-editor > section > header,
+    .column-picker--mobile > .column-picker__mobile-header,
+    .detail-drawer__header,
+    .detail-drawer__footer,
+    .request-modal__top,
+    .request-modal__footer
+  ) {
+    border-color: #2b414b;
+    background: #14232c;
+    color: #edf4f6;
+  }
+
+  body[data-theme="dark"] :is(
+    .mobile-cell-sheet__body,
+    .mobile-request-field-editor__body,
+    .column-picker--mobile .column-picker__body,
+    .detail-drawer__body,
+    .request-modal__body
+  ) {
+    background: #101820;
+    color: #edf4f6;
+  }
+
+  body[data-theme="dark"] :is(
+    .mobile-cell-sheet__panel > footer > .primary-button,
+    .mobile-date-sheet__save,
+    .mobile-request-field-editor__save,
+    .mobile-monday-update-button
+  ) {
+    border-color: #12b4a8 !important;
+    background: #12b4a8 !important;
+    color: #06191a !important;
+  }
+
+  body[data-theme="dark"] .mobile-choice-list > button:is(:hover, .is-selected),
+  body[data-theme="dark"] .mobile-request-field-editor__options > button:is(:hover, .is-selected) {
+    border-color: rgba(18, 180, 168, .65);
+    background: rgba(18, 180, 168, .16);
+    color: #f4f8fa;
+  }
+
+  body[data-theme="dark"] :is(
+    .mobile-date-sheet__chip.is-date,
+    .mobile-date-sheet__chip.is-date > button,
+    .mobile-board-calendar__days > button.is-selected > span,
+    .mobile-board-calendar__days > button.is-range-start > span,
+    .mobile-board-calendar__days > button.is-range-end > span
+  ) {
+    background: #12b4a8 !important;
+    color: #06191a !important;
+  }
+
+  body[data-theme="dark"] .mobile-board-calendar__days > button.is-in-range::before {
+    background: rgba(18, 180, 168, .22) !important;
+  }
+
+  body[data-theme="dark"] :is(
+    .mobile-timeline-calendar__clear,
+    .mobile-date-sheet__clear,
+    .mobile-board-calendar__days > button.is-today:not(.is-selected) > span
+  ) {
+    color: #5ad4cb;
+  }
+
+  body[data-theme="dark"] .mobile-board-calendar__days > button.is-today:not(.is-selected) > span {
+    box-shadow: inset 0 0 0 1px #12b4a8;
+  }
+
+  body[data-theme="dark"] .detail-drawer__tabs {
+    background: #14232c;
+  }
+
+  body[data-theme="dark"] .detail-drawer__tabs > button.is-active {
+    border-color: #12b4a8;
+    background: rgba(18, 180, 168, .16);
+    color: #fff;
+    box-shadow: none;
+  }
+
+  .detail-drawer,
+  .request-modal,
+  .mobile-cell-sheet__panel,
+  .mobile-request-field-editor > section,
+  .evidence-manager__panel {
+    max-width: 100vw;
+    box-shadow: 0 -14px 40px rgba(0, 0, 0, .42);
+  }
+
+  body[data-theme="dark"] .evidence-mobile-actions,
+  body[data-theme="dark"] .evidence-mobile-actions > label {
+    border-color: #2b414b;
+    background: #182830;
+    color: #dce7eb;
+  }
+
+  body[data-theme="dark"] .evidence-mobile-actions > label > span {
+    background: rgba(18, 180, 168, .16);
+    color: #5ad4cb;
+  }
+
+  .topbar-create,
+  .primary-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  .portal-content {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .page-identity strong {
+    max-width: 150px;
+  }
+
+  .analytics-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .analytics-metric-grid,
+  .analytics-metric-grid--six {
+    grid-template-columns: none;
+    /*
+      Sized against the container, not the viewport. `calc(100vw - 56px)` ignored
+      the page's own padding and the 1px the scroller adds either side, so the
+      strip was ~3px wider than the space it sits in and the whole page picked up
+      a horizontal scroll at 390px. `100%` is the track width the grid already
+      has, so the card fits it exactly whatever the surrounding padding is.
+    */
+    grid-auto-columns: 100%;
+  }
+
+  .analytics-metric {
+    min-height: 132px;
+  }
+
+  .analytics-panel > header {
+    padding-inline: 13px;
+  }
+
+  .analytics-bars > div,
+  .analytics-bars > button,
+  .analytics-top-sites .analytics-bars > button,
+  .analytics-top-sites .analytics-bars > div,
+  .analytics-expiry-types .analytics-bars > div {
+    grid-template-columns: minmax(82px, 102px) minmax(60px, 1fr) auto;
+  }
+
+  .analytics-trend {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .analytics-trend__y,
+  .analytics-trend__x {
+    font-size: 8px;
+  }
+
+  .live-jobs-analytics-heading,
+  .live-job-metrics {
+    margin-inline: 12px;
+  }
+
+  .mobile-board-bar {
+    padding-inline: 10px;
+  }
+
+  .mobile-board-table-label {
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-shell *,
+  .portal-shell *::before,
+  .portal-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Public development role preview. The selector records who made each shared
+   test edit and prepares the interface for future enforced permissions. */
+.sidebar-profile {
+  grid-template-columns: 36px minmax(0, 1fr);
+}
+
+.sidebar-profile__copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.sidebar-profile__copy > label {
+  display: grid;
+  gap: 3px;
+}
+
+.sidebar-profile__copy > label > span {
+  color: var(--rail-fg-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.sidebar-profile__copy select {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--rail-control-border);
+  border-radius: 7px;
+  /* The Testing-access control. A <select> inherits nothing useful, so it
+     states its own rail ground and foreground — 9.2:1 — rather than relying
+     on `.portal-sidebar { color }` reaching it. */
+  background: var(--rail-control-bg);
+  color: var(--rail-accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-switcher__copy select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 3px 22px 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--rail-fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+}
+
+.workspace-switcher__copy select:focus-visible,
+.workspace-switcher__add:focus-visible {
+  outline: 2px solid var(--rail-accent);
+  outline-offset: 2px;
+}
+
+.workspace-switcher__add {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--rail-control-border);
+  border-radius: 8px;
+  background: var(--rail-bg-raised);
+  color: var(--rail-accent);
+  cursor: pointer;
+}
+
+.workspace-switcher__add:hover:not(:disabled) {
+  border-color: var(--rail-accent);
+  background: var(--rail-selected-bg);
+}
+
+/*
+ * Who you are reading the workspace as, and — for a super admin — every client
+ * there is. Sits directly under the workspace switcher, in the same palette, so
+ * it reads as part of the switcher rather than as a new panel.
+ */
+.workspace-identity {
+  display: grid;
+  gap: 2px;
+  margin: 0 16px 4px;
+  padding: 7px 9px;
+  border: 1px solid var(--rail-border);
+  border-radius: 8px;
+  background: var(--rail-bg-raised);
+}
+
+.workspace-identity__email {
+  overflow: hidden;
+  color: var(--rail-fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-identity__scope {
+  color: var(--rail-accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workspace-tenants {
+  display: grid;
+  gap: 3px;
+  margin: 0 16px 10px;
+}
+
+.workspace-tenants button {
+  display: grid;
+  gap: 1px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rail-fg-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workspace-tenants button:hover:not(:disabled) {
+  border-color: var(--rail-control-border);
+  background: var(--rail-bg-raised);
+}
+
+.workspace-tenants button.is-active {
+  border-color: var(--rail-accent);
+  background: var(--rail-selected-bg);
+}
+
+.workspace-tenants button:focus-visible {
+  outline: 2px solid var(--rail-accent);
+  outline-offset: 2px;
+}
+
+.workspace-tenants__name {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-tenants__count {
+  /* Was #7d95a0, which measured 4.23:1 on the selected chip in BOTH themes —
+     one of the two rail failures that survived making the rail dark. */
+  color: var(--rail-fg-muted);
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+/* Shared workspace editor and cross-dashboard data controls. */
+/* Was a dark chip with near-white text in BOTH themes — one of the islands
+   left sitting in the light topbar next to "Refresh". */
+.topbar-data-button {
+  min-height: 40px;
+  padding-inline: 13px;
+  border-color: var(--line-strong);
+  background: var(--surface-head);
+  color: var(--ink);
+}
+
+.topbar-data-button:hover:not(:disabled) {
+  border-color: var(--brand-bright);
+  color: var(--accent-fg);
+}
+
+.section-header__actions,
+/*
+ * Wraps, because a row of actions is wider than a phone.
+ *
+ * This row was introduced to stop "Raise a ticket" overlapping Edit and Close
+ * on the desktop sites table, and with the default `nowrap` it traded that for
+ * something worse: at 390px the cell offers 199px for 303px of buttons,
+ * nothing between it and the viewport scrolls, and "Close" simply was not on
+ * the screen — on all ten rows, in both themes.
+ *
+ * At 1440 the wrapper has 361px for 361px of content, so wrapping is a no-op
+ * there: measured identical before and after (row height 42, all three tops at
+ * 373). At 390 the row becomes two lines and every control is reachable.
+ *
+ * Worth knowing: `scripts/responsive-audit.mjs` cannot see this class of bug.
+ * It reports overflow as `documentElement.scrollWidth - clientWidth`, so a
+ * control sitting 67px past the right edge of a page that does not scroll
+ * scores a clean zero.
+ */
+.table-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+
+.workspace-manager-layer {
+  position: fixed;
+  z-index: 1300;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.workspace-manager-layer > .modal-scrim {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: rgba(3, 10, 14, .76);
+  backdrop-filter: blur(8px);
+}
+
+.workspace-manager {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(1180px, calc(100vw - 48px));
+  height: min(780px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid #35505d;
+  border-radius: 18px;
+  background: #101820;
+  color: #edf4f6;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, .55);
+}
+
+.workspace-manager__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  padding: 14px 18px 14px 20px;
+  border-bottom: 1px solid #2b414b;
+  background: #14232c;
+}
+
+.workspace-manager__header > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-manager__header > div > span {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(18, 180, 168, .16);
+  color: #5ad4cb;
+}
+
+.workspace-manager__header small,
+.workspace-record-editor header small {
+  display: block;
+  margin-bottom: 3px;
+  color: #7f97a2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.workspace-manager__header h2,
+.workspace-record-editor h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 20px;
+}
+
+.workspace-manager__tabs {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 9px 12px;
+  border-bottom: 1px solid #2b414b;
+  background: #101820;
+  scrollbar-width: none;
+}
+
+.workspace-manager__tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #91a5af;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-manager__tabs button:is(:hover, .is-active) {
+  border-color: rgba(18, 180, 168, .35);
+  background: rgba(18, 180, 168, .12);
+  color: #5ad4cb;
+}
+
+.workspace-manager__body {
+  display: grid;
+  min-height: 0;
+}
+
+.workspace-manager__body.has-editor {
+  grid-template-columns: minmax(320px, .92fr) minmax(420px, 1.08fr);
+}
+
+.workspace-manager__records,
+.workspace-record-editor {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-manager__records {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #101820;
+}
+
+.workspace-manager__body.has-editor .workspace-manager__records {
+  border-right: 1px solid #2b414b;
+}
+
+.workspace-manager__toolbar {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid #243944;
+}
+
+.workspace-manager__toolbar > label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #35505d;
+  border-radius: 9px;
+  background: #14232c;
+  color: #7f97a2;
+}
+
+.workspace-manager__toolbar input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #edf4f6;
+  font: inherit;
+  font-size: 13px;
+}
+
+.workspace-record-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.workspace-record-list > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #edf4f6;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-record-list > button:is(:hover, .is-active) {
+  border-color: #35505d;
+  background: #182830;
+}
+
+.workspace-record-list > button.is-active {
+  border-color: rgba(18, 180, 168, .46);
+  box-shadow: inset 3px 0 #12b4a8;
+}
+
+.workspace-record-list > button > span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.workspace-record-list strong {
+  overflow: hidden;
+  color: #f4f8fa;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-record-list small {
+  overflow: hidden;
+  color: #91a5af;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-record-list__empty {
+  display: grid;
+  min-height: 240px;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  color: #7f97a2;
+  text-align: center;
+}
+
+.workspace-record-list__empty strong { color: #dce7eb; }
+
+.workspace-record-editor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: #14232c;
+}
+
+.workspace-record-editor > header,
+.workspace-record-editor > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 15px 18px;
+  border-bottom: 1px solid #2b414b;
+}
+
+.workspace-record-editor > footer {
+  justify-content: flex-end;
+  border-top: 1px solid #2b414b;
+  border-bottom: 0;
+}
+
+.workspace-record-editor__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.workspace-record-editor__fields .form-field:has(textarea),
+.workspace-record-editor__fields .workspace-checkbox {
+  grid-column: 1 / -1;
+}
+
+.workspace-record-editor :is(input, select, textarea) {
+  border-color: #35505d;
+  background: #101820;
+  color: #edf4f6;
+}
+
+.workspace-record-editor .form-field > span {
+  color: #b9c8cf;
+  font-weight: 700;
+}
+
+body[data-theme="dark"] .role-chip {
+  border: 1px solid rgba(18, 180, 168, .34);
+  background: rgba(18, 180, 168, .13);
+  color: #5ad4cb;
+}
+
+.workspace-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid #35505d;
+  border-radius: 9px;
+  background: #101820;
+}
+
+.workspace-checkbox > span { display: grid; gap: 3px; }
+.workspace-checkbox strong { color: #edf4f6; font-size: 12px; }
+.workspace-checkbox small { color: #7f97a2; font-size: 10px; }
+.workspace-checkbox input { width: 20px; height: 20px; accent-color: #12b4a8; }
+
+.workspace-archive-button {
+  margin-right: auto;
+  border-color: rgba(226, 68, 92, .45);
+  color: #ff899d;
+}
+
+.planned-register-panel {
+  overflow: hidden;
+}
+
+.planned-register-panel__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.planned-register-panel__heading > div { display: grid; gap: 3px; }
+.planned-register-panel__heading span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.planned-register-panel__heading strong { color: var(--ink); font-size: 14px; }
+.planned-register-panel__heading button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; --control-own-fg: var(--accent-fg); color: var(--accent-fg); font: inherit; font-size: 12px; cursor: pointer; }
+
+.planned-register-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.planned-register-list > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 82px;
+  padding: 12px 14px;
+  border: 0;
+  /* A dark card on a light page: the job title on it measured 1.03:1, the
+     worst text left in the product after the board was fixed. */
+  --control-own-fg: var(--ink);
+  background: var(--surface-head);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.planned-register-list > button:hover { background: var(--surface-hover); }
+.planned-register-list > button > span:nth-child(2) { display: grid; min-width: 0; gap: 4px; }
+.planned-register-list > button > span:nth-child(2) strong,
+.planned-register-list > button > span:nth-child(2) small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planned-register-list > button > span:nth-child(2) strong { font-size: 12px; }
+.planned-register-list > button > span:nth-child(2) small { color: var(--muted); font-size: 10px; }
+
+.planned-register-date {
+  display: grid;
+  width: 42px;
+  height: 48px;
+  place-content: center;
+  justify-items: center;
+  border-radius: 9px;
+  background: var(--teal-100);
+  color: var(--teal-700);
+}
+
+.planned-register-date strong { font-size: 17px; line-height: 1; }
+.planned-register-date small { font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.planned-register-empty { grid-column: 1 / -1; padding: 22px; background: var(--surface-head); color: var(--muted); text-align: center; }
+
+/* Quietened by colour rather than by opacity: at .58 the text inside
+   composited to 2.59:1, and fading a chip's ink and its wash together loses
+   contrast at any alpha. See the note on `.admin-row--off td`. */
+.team-list > div.is-inactive { color: var(--muted); }
+
+@media (max-width: 1080px) {
+  .topbar-data-button > span { display: none; }
+  .topbar-data-button { width: 40px; padding: 0; justify-content: center; }
+  .planned-register-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .workspace-manager-layer { padding: 0; }
+  .workspace-manager { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
+  .workspace-manager__header { min-height: 66px; padding: 10px 12px; }
+  .workspace-manager__header h2 { font-size: 17px; }
+  .workspace-manager__header > div > span { width: 36px; height: 36px; }
+  .workspace-manager__tabs { padding: 7px 8px; }
+  .workspace-manager__tabs button { min-height: 36px; padding: 7px 9px; }
+  .workspace-manager__body.has-editor { grid-template-columns: 1fr; }
+  .workspace-manager__body.has-editor .workspace-manager__records { display: none; }
+  .workspace-record-editor__fields { grid-template-columns: 1fr; padding: 14px; }
+  .workspace-record-editor__fields .form-field { grid-column: 1; }
+  .workspace-record-editor > footer { padding: 11px; }
+  .workspace-record-editor > footer .secondary-button:not(.workspace-archive-button) { display: none; }
+  .section-header__actions { width: 100%; align-items: stretch; }
+  .section-header__actions > button { flex: 1; justify-content: center; }
+  .planned-register-list { grid-template-columns: 1fr; }
+  .planned-register-panel__heading { align-items: flex-start; }
+  .planned-register-panel__heading button { min-height: 32px; }
+  .topbar-data-button { display: none; }
+}
+
+/* ── Board chrome (Stage 5, AA1–AA7) ──────────────────────────────────────
+   Three stacked rows above the grid: header, view tabs, toolbar.
+   Mobile-first; breakpoints 640/768/1024 only. */
+
+.board-chrome {
+  position: sticky;
+  /*
+   * Zero, plus however far the jobs board's sticky stack has been pushed down.
+   *
+   * `--jobs-stack-offset` is 0px on every board and at every width except a
+   * phone showing the collapsed meter strip, so this reads `top: 0` — which is
+   * what it has always been, and deliberately: these rows tuck up behind the
+   * page's top bar so that only the toolbar underneath them stays on screen.
+   * That is exactly why the variable is needed. Because the chrome's visible
+   * bottom edge is measured from the VIEWPORT, a bar added above it does not
+   * push it down, it covers it — measured at 390px, the toolbar stayed pinned
+   * at y163 while the bar above it ran to y182.
+   */
+  top: var(--jobs-stack-offset, 0px);
+  z-index: 5;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  margin: -4px 0 0;
+  padding: 0;
+}
+
+/*
+ * The horizontal bleed, from the first breakpoint up.
+ *
+ * It is cosmetic: it lets the sticky chrome meet the edges of its padded
+ * container instead of floating inside it. Below 640px the container has less
+ * padding than the 4px it pulls, so the negative margins made the box
+ * `100% + 8px` and pushed it 3px past the viewport — giving the whole page a
+ * horizontal scrollbar on the one screen where a stray sideways drag is most
+ * likely. Written mobile-first, per the 640/768/1024 standard this file keeps,
+ * so the narrow case is the base rule rather than an exception to it.
+ *
+ * Applied from 768 rather than 640: the container only gains enough horizontal
+ * padding to absorb the bleed at the middle breakpoint, so starting at 640 left
+ * the same 3px overflow one size further up.
+ */
+@media (min-width: 768px) {
+  .board-chrome {
+    margin-inline: -4px;
+    padding-inline: 4px;
+  }
+}
+
+.board-chrome.is-collapsed .board-header,
+.board-chrome.is-collapsed .board-views {
+  display: none;
+}
+
+/* Row 1 — header */
+.board-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 4px 8px;
+}
+
+.board-header__title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.board-header__title h2 {
+  margin: 0;
+  font-size: 19px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board-header__caret,
+.board-header__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.board-header__action:hover,
+.board-header__caret:hover {
+  background: var(--line-soft);
+  color: var(--ink);
+}
+
+.board-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  overflow-x: auto;
+}
+
+.board-header__count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.board-header__invite {
+  min-height: 44px;
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.board-header__invite:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* Row 2 — view tabs */
+.board-views {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-views__tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.board-views__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.board-views__tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+.board-views__tab > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.board-views__tab.is-active > button {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--teal);
+}
+
+.board-views__tab.is-unbuilt > button {
+  opacity: 0.7;
+}
+
+.board-views__tab input {
+  min-width: 110px;
+  padding: 2px 4px;
+  border: 1px solid var(--teal);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 16px; /* stops iOS zooming on focus */
+}
+
+.board-views__soon {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.board-views__tab-menu {
+  min-width: 32px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.board-views__trailing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.board-views__overflow > button,
+.board-views__add > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.board-views__overflow,
+.board-views__add {
+  position: relative;
+}
+
+.board-views__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-dropdown);
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+
+.board-views__menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.board-views__menu button:hover:not(:disabled) {
+  background: var(--line-soft);
+}
+
+.board-views__menu button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.board-views__menu .is-destructive:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+  color: var(--orange);
+}
+
+/* Row 3 */
+.board-chrome__toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.board-chrome__toolbar > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.board-chrome__collapse {
+  min-width: 44px;
+  min-height: 44px;
+  align-self: center;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.board-chrome.is-collapsed .board-chrome__collapse {
+  transform: rotate(180deg);
+}
+
+.board-chrome__error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  font-size: 14px;
+}
+
+.board-chrome__error button {
+  margin-left: auto;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.board-chrome__placeholder {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--teal);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--teal) 8%, transparent);
+  font-size: 14px;
+}
+
+@media (max-width: 767px) {
+  .board-header__actions .board-header__action span:not(.sr-only) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-chrome__collapse {
+    transition: none;
+  }
+}
+
+/* ── Board view renderers (Stage 6, P3/P4/P6/P7/P8/P9) ──────────────────── */
+
+.board-chrome__pane {
+  padding: 16px 4px 4px;
+}
+
+.view-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* Kanban — P3 */
+.kanban {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.kanban__column {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+}
+
+.kanban__column.is-over {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 8%, var(--canvas));
+}
+
+.kanban__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kanban__head em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kanban__chip,
+.kanban__pill {
+  display: inline-flex;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kanban__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.kanban__card > button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kanban__card > button:hover {
+  border-color: var(--teal);
+}
+
+.kanban__ref,
+.kanban__muted {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.kanban__meta,
+.kanban__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kanban__foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Calendar — P4 */
+.calendar-view__head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.calendar-view__head button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.calendar-view__head button:first-child svg {
+  transform: rotate(90deg);
+}
+
+.calendar-view__head button:last-child svg {
+  transform: rotate(-90deg);
+}
+
+.calendar-view__weekdays,
+.calendar-view__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.calendar-view__weekdays span {
+  padding: 4px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.calendar-view__cell {
+  min-height: 88px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.calendar-view__cell.is-blank {
+  background: transparent;
+  border-color: transparent;
+}
+
+.calendar-view__day {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.calendar-view__item {
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-view__more,
+.calendar-view__hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.calendar-view__hint {
+  margin-top: 10px;
+}
+
+/* Gallery — P7 */
+.gallery-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.gallery-view__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gallery-view__thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  background: var(--line-soft);
+  color: var(--muted);
+}
+
+.gallery-view__thumb em {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.gallery-view__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.gallery-view__label span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Reports — P8 */
+.reports-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.reports-view__card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.reports-view__card span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reports-view__card strong {
+  font-size: 24px;
+}
+
+/* Dashboard insight panels */
+.insight-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  /*
+    A grid item's default `min-width: auto` refuses to shrink below its content,
+    so a panel holding a wide table stretched its whole column and the page
+    scrolled sideways on a phone — 386px of overflow on Reports. `0` lets the
+    panel take the track width and hands the scrolling to `.insight-table-wrap`,
+    which is the one element that should scroll.
+  */
+  min-width: 0;
+}
+
+.insight-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.insight-panel__head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.insight-panel__head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.insight-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  /* The wash and the ink on it are a pair, and were tuned apart: monday's
+     #e2445c is a chip GROUND, and used as text on its own 14% tint it read
+     3.35:1 in light and 3.34:1 in dark. */
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.insight-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.insight-empty strong {
+  color: inherit;
+  font-size: 14px;
+}
+
+.insight-empty span {
+  max-width: 42ch;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Bars — thin marks, rounded data-end, hairline track */
+.insight-bar,
+.insight-meter__track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.insight-bar--slim {
+  height: 6px;
+}
+
+.insight-bar > i,
+.insight-meter__track > i {
+  display: block;
+  height: 100%;
+  border-radius: 0 999px 999px 0;
+  transition: width 220ms ease;
+}
+
+.insight-ageing {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.insight-ageing__row,
+.insight-sla__row {
+  display: grid;
+  grid-template-columns: minmax(96px, 150px) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.insight-ageing__row > span,
+.insight-sla__row > span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insight-ageing__row > strong,
+.insight-sla__row > strong {
+  min-width: 52px;
+  font-size: 13px;
+  text-align: right;
+}
+
+/* SLA */
+.insight-sla {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.insight-meter {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.insight-meter > strong {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.insight-meter > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.insight-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.insight-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.insight-facts dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+}
+
+.insight-sla__split {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.insight-sla__split h4,
+.insight-list h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Columns — vertical bars for month series */
+.insight-columns {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+  height: 168px;
+}
+
+.insight-columns__slot {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 5px;
+  height: 100%;
+  min-width: 0;
+}
+
+.insight-columns__value {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.insight-columns__track {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  /* A 2px gap in the surface colour separates the segments of a stack. */
+  gap: 2px;
+  align-self: end;
+  width: min(24px, 100%);
+  height: 100%;
+  margin: 0 auto;
+}
+
+.insight-columns__track > i {
+  display: block;
+  width: 100%;
+  border-radius: 0;
+  transition: height 220ms ease;
+}
+
+.insight-columns__track > i:last-child {
+  border-radius: 4px 4px 0 0;
+}
+
+.insight-columns--stacked .insight-columns__track > i:first-child {
+  border-radius: 0;
+}
+
+.insight-columns__label {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.insight-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.insight-note i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.insight-note i:not(:first-child) {
+  margin-left: 10px;
+}
+
+/* Lists */
+.insight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.insight-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.insight-list button[disabled] {
+  cursor: default;
+}
+
+.insight-list button:not([disabled]):hover {
+  border-color: var(--teal-600);
+}
+
+.insight-list button span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.insight-list button strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insight-list button small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.insight-list button em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+/* Tables */
+.insight-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The table may exceed the wrap — that is what the wrap is for — but it must
+   not force the wrap itself wider. */
+.insight-table-wrap > table {
+  min-width: max-content;
+}
+
+.insight-table,
+.insight-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.insight-table th,
+.insight-matrix th {
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.insight-table td,
+.insight-matrix td {
+  padding: 8px 10px;
+  /* Hairline, solid, recessive — never dashed. */
+  border-top: 1px solid var(--line-soft);
+  white-space: nowrap;
+}
+
+.insight-table td:first-child {
+  width: 40%;
+  min-width: 150px;
+  white-space: normal;
+}
+
+.insight-table__bar {
+  height: 6px;
+  margin-bottom: 5px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.insight-table__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 0 999px 999px 0;
+}
+
+.insight-table--split td span {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.insight-table--split td em {
+  color: var(--red-600);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.insight-matrix th[scope="row"] {
+  max-width: 170px;
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.insight-matrix td {
+  text-align: right;
+}
+
+.insight-matrix__cell {
+  display: inline-block;
+  min-width: 62px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+/* A panel that needs the whole row — a six-month matrix does not fit a third. */
+.insight-grid__wide {
+  display: grid;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .insight-panel {
+    padding: 15px;
+  }
+
+  .insight-ageing__row,
+  .insight-sla__row {
+    grid-template-columns: minmax(84px, 110px) 1fr auto;
+    gap: 9px;
+  }
+
+  .insight-columns {
+    height: 148px;
+  }
+
+  .insight-meter > strong {
+    font-size: 22px;
+  }
+}
+
+/* Fix Tracker — monday's Maintenance Engineer Dashboard */
+.fix-tracker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fix-tracker__head h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.fix-tracker__tabs {
+  display: flex;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fix-tracker__tabs button {
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.fix-tracker__tabs button.is-active {
+  border-bottom-color: var(--teal-600);
+  color: inherit;
+  font-weight: 600;
+}
+
+.fix-tracker__filters {
+  display: grid;
+  grid-template-columns: 1fr minmax(160px, 220px);
+  gap: 12px;
+}
+
+.fix-tracker__search,
+.fix-tracker__location {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--muted);
+}
+
+.fix-tracker__search input,
+.fix-tracker__location select {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+
+.fix-tracker__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.fix-tracker__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fix-tracker__card:hover {
+  border-color: var(--teal-600);
+}
+
+.fix-tracker__card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fix-tracker__card-head strong {
+  font-size: 15px;
+}
+
+.fix-tracker__card em,
+.fix-tracker__facts em {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fix-tracker__card-location {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fix-tracker__card-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.fix-tracker__card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Detail panel */
+.fix-tracker__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+}
+
+/*
+  The scrim is pinned below the panel here rather than the panel being raised
+  above it. `.modal-scrim` is redefined three times across the stylesheets — 90,
+  then 0, then 500 — so any fixed number chosen for the panel is a guess about
+  which of those wins. Scoping the scrim inside this overlay settles it: 0 and 1
+  cannot be outbid, and the dialog stops rendering behind its own backdrop.
+*/
+.fix-tracker__overlay .modal-scrim {
+  z-index: 0;
+}
+
+.fix-tracker__panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: min(620px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+}
+
+.fix-tracker__panel header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.fix-tracker__panel header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.fix-tracker__panel h4 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.fix-tracker__panel small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fix-tracker__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.fix-tracker__facts dt {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fix-tracker__facts dd {
+  margin: 0;
+  font-size: 14px;
+}
+
+.fix-tracker__block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fix-tracker__block h5 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.fix-tracker__description {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--line-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fix-tracker__gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.fix-tracker__gallery img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.fix-tracker__empty,
+.fix-tracker__notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fix-tracker__block input[type="date"],
+.fix-tracker__block input[type="file"],
+.fix-tracker__block textarea {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.fix-tracker__row {
+  display: flex;
+  gap: 10px;
+}
+
+.fix-tracker__row input {
+  flex: 1;
+}
+
+.fix-tracker__block .primary-button {
+  align-self: flex-start;
+}
+
+.fix-tracker__panel footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .fix-tracker__filters,
+  .fix-tracker__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .fix-tracker__overlay {
+    padding: 12px;
+  }
+}
+
+/* Monday board import */
+.monday-import {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.monday-import__intro h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.monday-import__intro p {
+  margin: 6px 0 0;
+  max-width: 60ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.monday-import__controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.monday-import__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.monday-import__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 13px;
+}
+
+.monday-import__done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.monday-import__done div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.monday-import__done span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.monday-import__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.monday-import__stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.monday-import__stats strong {
+  font-size: 24px;
+}
+
+.monday-import__stats span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monday-import__stats .is-warning strong {
+  color: #f0a91f;
+}
+
+.monday-import__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.monday-import__preview section h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.monday-import__preview section p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.monday-import__preview ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.monday-import__sample {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.monday-import__sample th,
+.monday-import__sample td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+}
+
+.monday-import__sample th {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monday-import__sample tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 768px) {
+  .monday-import__controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Subitems — monday column `subitems`, child board 1164003119 */
+.sheet-subitems {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sheet-subitems svg {
+  transition: transform 120ms ease;
+}
+
+.sheet-subitems.is-open svg {
+  transform: rotate(90deg);
+}
+
+.sheet-subitems:hover {
+  border-color: var(--teal-600);
+  color: inherit;
+}
+
+.sheet-subitem-row > td {
+  padding: 0;
+  background: var(--line-soft);
+}
+
+/*
+ * Pinned to the left of the scroller.
+ *
+ * The row spans all 25 columns, so its cell is as wide as the board — around
+ * 4,600px. Left in normal flow the panel sat at the far left of that cell,
+ * which is off-screen whenever the board is scrolled right, and the expanded
+ * row showed as a tall empty band. Sticky keeps it against the viewport edge,
+ * which is where monday draws it.
+ */
+.sheet-subitem-panel {
+  position: sticky;
+  left: 0;
+  width: min(760px, 100vw - 320px);
+  padding: 8px 8px 8px 44px;
+}
+
+@media (max-width: 1024px) {
+  .sheet-subitem-panel {
+    width: min(760px, 100vw - 24px);
+  }
+}
+
+.sheet-subitem-table {
+  width: 100%;
+  max-width: 760px;
+  border-collapse: collapse;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.sheet-subitem-table th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.sheet-subitem-table td {
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.sheet-subitem-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.sheet-subitem-table td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+}
+
+.sheet-subitem-add input {
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+}
+
+.sheet-subitem-add input:focus-visible {
+  outline: 0;
+  color: inherit;
+}
+
+@media (max-width: 768px) {
+  .sheet-subitem-panel {
+    padding: 8px;
+  }
+
+  .sheet-subitem-table {
+    max-width: none;
+  }
+}
+
+/* Form — monday view 646339 */
+.form-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 620px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.form-view__head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.form-view__head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-view__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.form-view__field > span {
+  font-weight: 600;
+}
+
+.form-view__field em {
+  color: var(--red-600);
+  font-style: normal;
+}
+
+.form-view__field small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.form-view__field input,
+.form-view__field select,
+.form-view__field textarea {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-view__field textarea {
+  resize: vertical;
+}
+
+.form-view__field input:focus-visible,
+.form-view__field select:focus-visible,
+.form-view__field textarea:focus-visible {
+  outline: 2px solid var(--teal-600);
+  outline-offset: 1px;
+}
+
+.form-view__error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 13px;
+}
+
+.form-view__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.form-view__actions button,
+.form-view--done button {
+  padding: 9px 18px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  /* A FILL, not an ink. `--teal-600` is the ink that goes ON a teal wash and
+     is lightened in dark so it can be read there; used as a ground it took
+     the white label down to 2.5:1. `--brand-solid` is the ground token, and
+     it carries its own foreground. */
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-view__actions button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.form-view--done {
+  align-items: center;
+  text-align: center;
+}
+
+.form-view--done h3 {
+  margin: 0;
+}
+
+.form-view--done p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .form-view {
+    max-width: none;
+    padding: 16px;
+  }
+}
+
+/* Chart — P6 */
+.chart-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.chart-view__controls label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chart-view__controls select,
+.filter-builder select,
+.filter-builder input {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 16px;
+  background: var(--paper);
+}
+
+.chart-view__bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chart-view__bars li {
+  display: grid;
+  grid-template-columns: minmax(90px, 150px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.chart-view__label {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chart-view__track {
+  height: 20px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.chart-view__bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.chart-view__value {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Filter builder — P9 */
+.filter-builder {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.filter-builder__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.filter-builder__conjunction {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.filter-builder__head > button {
+  margin-left: auto;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.filter-builder__rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-builder__rules li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.filter-builder__rules li > button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.filter-builder__empty {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.filter-builder__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.filter-builder__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.filter-builder__clear {
+  color: var(--orange);
+}
+
+@media (min-width: 768px) {
+  .filter-builder__rules li {
+    flex-wrap: nowrap;
+  }
+}
+
+/* ── Contractor link panel (Stage 10, Z11) ──────────────────────────────── */
+
+.link-panel__intro h3 { margin: 0 0 6px; font-size: 16px; }
+
+.link-panel__error {
+  margin: 12px 0;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  font-size: 14px;
+}
+
+.link-panel__completion,
+.link-panel__blocked,
+.link-panel__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.link-panel__completion {
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
+}
+
+.link-panel__blocked,
+.link-panel__warning {
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+}
+
+.link-panel__completion p,
+.link-panel__blocked p { margin: 6px 0 0; font-style: italic; }
+
+.link-panel__pending {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.link-panel__pending h4,
+.link-panel__history h4 { margin: 0 0 10px; font-size: 14px; }
+
+.link-panel__pending ul,
+.link-panel__history ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.link-panel__pending li,
+.link-panel__history li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font-size: 14px;
+}
+
+.link-panel__pending-name,
+.link-panel__label {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.link-panel__pending-name em,
+.link-panel__label em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.link-panel__pending button,
+.link-panel__history button {
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.link-panel__pending .is-destructive:hover,
+.link-panel__history .is-destructive:hover { border-color: var(--orange); color: var(--orange); }
+
+.link-panel__state {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.link-panel__history li.is-opened .link-panel__state { background: color-mix(in srgb, var(--teal) 20%, transparent); }
+.link-panel__history li.is-sent .link-panel__state { background: color-mix(in srgb, var(--orange) 18%, transparent); }
+.link-panel__history li.is-revoked,
+.link-panel__history li.is-expired { opacity: 0.6; }
+
+.link-panel__create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.link-panel__create label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 180px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.link-panel__create input,
+.link-panel__create select,
+.link-panel__issued input {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  /* 16px minimum — iOS zooms on focus below this and does not zoom back. */
+  font-size: 16px;
+  background: var(--paper);
+}
+
+.link-panel__issued { margin: 16px 0; }
+.link-panel__issued input { width: 100%; font-family: ui-monospace, monospace; font-size: 14px; }
+
+.link-panel__share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 8px;
+}
+
+.link-panel__share a,
+.link-panel__share button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 11px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.link-panel__whatsapp {
+  border-color: #25d366 !important;
+  background: #25d366 !important;
+  color: #05341a !important;
+}
+
+.link-panel__history { margin-top: 20px; }
+
+/* ==========================================================================
+   LIGHT THEME
+   --------------------------------------------------------------------------
+   The palette tokens in globals.css flip on their own, but most of this
+   product was written after the dark redesign and names its colours literally:
+   `background: #101820`, `color: #edf4f6`, `color: #fff`. Those rules are
+   unscoped, so they are the base — which means "not dark" was never light, it
+   was dark-with-literals, and a white canvas left white text on it.
+
+   158 rules already carry `[data-theme="dark"]`; this is the matching side.
+   It corrects surfaces and text, and deliberately does NOT touch white text
+   that sits on a brand-coloured ground (primary buttons, status chips, the
+   group bars) — that text is correct in both themes.
+   ========================================================================== */
+
+body[data-theme="light"] {
+  color-scheme: light;
+  /* The base `body` rule keeps its literal #101820 so the dark product is
+     untouched; the light ground is applied here instead. */
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* ---- Shell ------------------------------------------------------------- */
+
+body[data-theme="light"] :is(.portal-shell, .portal-main, .portal-content) {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/*
+ * THE RAIL IS NOT REPAINTED IN LIGHT. Four rules used to live here — a white
+ * sidebar ground, a muted nav label, a hover and a light active chip — and
+ * they were the direct cause of the worst contrast in the product.
+ *
+ * Everything inside the rail is a dark-ground colour: `.portal-sidebar` also
+ * carries `color: white` (globals.css), and the sidebar customisation editor
+ * in sidebar-nav.css has 34 colour declarations and not one theme rule. Making
+ * only the GROUND light left every one of those untouched, so "Need a hand?",
+ * "MAINTSUPP Owner" and "Super Admin" rendered white on white at exactly
+ * 1.00:1, with ten more labels between 1.49:1 and 4.14:1.
+ *
+ * Deleting these rules is the fix, not an omission: the rail now takes its
+ * always-dark `--rail-*` tokens in both themes, which is what the owner asked
+ * for and what every colour inside it was already designed against.
+ */
+
+body[data-theme="light"] :is(.portal-topbar, .topbar, .topbar-actions) {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body[data-theme="light"] :is(.topbar-link:hover, .icon-button:hover) {
+  background: var(--line-soft);
+  color: var(--ink);
+}
+
+/* ---- Type -------------------------------------------------------------- */
+
+body[data-theme="light"]
+  :is(.page-identity strong, .portal-content :is(h1, h2, h3, h4, h5, h6)) {
+  color: var(--ink);
+}
+
+body[data-theme="light"] :is(.section-header h1, .metric-copy strong) {
+  color: var(--ink);
+}
+
+body[data-theme="light"] :is(.analytics-metric__copy strong, .analytics-donut strong) {
+  color: var(--ink);
+}
+
+/* .overview-welcome keeps its dark gradient in both themes, so the white
+   heading on it stays white and is excluded above. */
+
+/* ---- Panels and cards --------------------------------------------------- */
+
+body[data-theme="light"]
+  :is(.metric-card, .analytics-panel, .insight-panel, .data-table,
+      .notification-panel, .notification-item, .detail-drawer,
+      .workspace-manager, .planned-register-panel) {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body[data-theme="light"] .data-table td {
+  color: var(--ink);
+}
+
+/* ---- Form controls ------------------------------------------------------ */
+
+/*
+ * `.portal-main`, not `.portal-shell`. The shell is the rail PLUS the content
+ * area, so scoping this to the shell reached the two <select>s in the rail —
+ * the workspace picker and Testing access — and painted them white-on-dark
+ * ground in light mode. The rail is chrome and keeps its own always-dark
+ * tokens; the light skin belongs to the content area. Every drawer, modal and
+ * toast in the portal renders inside `.portal-main`, so nothing else moves.
+ */
+body[data-theme="light"]
+  :is(.portal-main, .workspace-manager, .workspace-record-editor)
+  :is(input, select, textarea) {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body[data-theme="light"] :is(input, textarea)::placeholder {
+  color: var(--muted-2);
+}
+
+body[data-theme="light"] :is(.search-field, .segmented-filter, .view-switch) {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* ---- The board ---------------------------------------------------------- */
+
+body[data-theme="light"] :is(.live-board-panel, .live-board-page) {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+body[data-theme="light"]
+  :is(.live-board-toolbar, .live-board-footer, .mobile-board-bar) {
+  border-color: var(--line) !important;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body[data-theme="light"] .mobile-board-bar strong {
+  color: var(--ink);
+}
+
+/* Column titles and their type glyphs — the row that read as blank on white. */
+body[data-theme="light"]
+  :is(.custom-column-header, .custom-column-header > strong,
+      .custom-column-header > span, .sheet-header, .sheet-header th) {
+  color: var(--ink);
+}
+
+body[data-theme="light"] .custom-column-header > button {
+  color: var(--muted);
+}
+
+/* Item names, inline editors and summary cells. */
+body[data-theme="light"]
+  :is(.sheet-item-name strong, .sheet-inline-value, .sheet-inline-input,
+      .sheet-date-input, .sheet-option-cell > button, .sheet-summary-cell,
+      .sheet-group__header, .sheet-group__header strong) {
+  color: var(--ink);
+}
+
+/* `.sheet-timeline > button` used to be in this list. It is a control with its
+   own coloured ground, and a theme rule reaching in to recolour its label is
+   what put white — then `--muted`, then `--ink` — on a fixed grey pill. It owns
+   a token pair now (globals.css, `--chip-neutral-*`), so the skin leaves it
+   alone. */
+body[data-theme="light"]
+  :is(.sheet-item-name small, .sheet-comment, .sheet-file-count) {
+  color: var(--muted);
+}
+
+body[data-theme="light"] :is(.sheet-table td, .sheet-table th) {
+  border-color: var(--line-soft);
+}
+
+body[data-theme="light"] :is(.sheet-row, .live-board-row, .sheet-table tbody tr) {
+  background: var(--paper);
+}
+
+body[data-theme="light"] :is(.sheet-row:hover, .live-board-row:hover) {
+  background: var(--line-soft);
+}
+
+/* Menus, pickers and popovers float above the canvas, so they take paper. */
+body[data-theme="light"]
+  :is(.sheet-row-menu, .sheet-group__menu, .custom-column-menu,
+      .column-picker, .sheet-label-editor, .live-board-menu) {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* ---- Workspace and register lists --------------------------------------- */
+
+body[data-theme="light"]
+  :is(.workspace-record-list > button, .workspace-record-list strong,
+      .workspace-checkbox strong, .workspace-manager__header h2,
+      .workspace-record-editor h3, .planned-register-list > button,
+      .planned-register-panel__heading strong) {
+  color: var(--ink);
+}
+
+/* `.workspace-switcher__copy select` was in that list and has been taken out:
+   it is the client picker INSIDE the rail, and dark ink on the rail's dark
+   ground is 1.4:1. It reads --rail-fg with the rest of the rail. */
+
+/* ---- Login -------------------------------------------------------------- */
+
+body[data-theme="light"] .login-page {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(18, 180, 168, 0.1), transparent 30%),
+    var(--canvas);
+}
+
+body[data-theme="light"] :is(.login-card, .login-card h1) {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* ---- Touch targets ------------------------------------------------------ */
+
+/*
+ * The dashboard chrome, brought up to the 44px touch minimum on phones.
+ *
+ * Measured with scripts/responsive-audit.mjs at 390px: the sidebar close was
+ * 36px, the workspace picker 30px, the theme picker 28px, the "add workspace"
+ * button 32px, the account trigger 32px and the topbar icons 36px. Every one is
+ * a control someone has to hit with a thumb while standing in a shop, and 44px
+ * is the figure both Apple's guidance and WCAG 2.5.5 use.
+ *
+ * Applied at 768px and below only, so nothing about the desktop layout moves.
+ * Sizing is `min-height` plus `min-width` rather than a fixed height, so a
+ * control that is already larger keeps its size and nothing is made smaller.
+ *
+ * DELIBERATELY NOT INCLUDED: the board grid's own cells and row buttons. They
+ * are a data grid — monday's own rows are around 36px — and inflating them to
+ * 44px would halve how many jobs fit on a screen. The board scrolls in both
+ * axes on a phone and its rows are hit targets for opening a row, not the
+ * primary navigation. That trade is the board's density, which was not in
+ * scope to change.
+ *
+ * The marketing pages are also excluded on purpose: they were verified
+ * byte-identical to the original archive and are not to be touched. Their
+ * header and footer links measure 20-33px and are reported rather than fixed.
+ */
+@media (max-width: 768px) {
+  /*
+   * HEIGHT ONLY. Adding `min-width: 44px` here was tried and reverted: the
+   * topbar holds six of these side by side, and eight extra pixels each pushed
+   * the shell 6px past the viewport on twelve routes — trading a touch problem
+   * for the horizontal scrollbar this project spent two earlier stages
+   * removing. Height is also the axis a thumb actually misses on a row of
+   * icons, because they are already spaced apart horizontally.
+   */
+  .portal-shell :is(
+    .icon-button,
+    .sidebar-close,
+    .mobile-menu,
+    .workspace-switcher__add,
+    .account-menu__trigger
+  ) {
+    min-height: 44px;
+  }
+
+  /*
+   * The <select>s in the topbar and the toolbar. A select cannot be padded
+   * into shape the way a button can — its height comes from the control — so
+   * the minimum is set directly.
+   */
+  .portal-shell select {
+    min-height: 44px;
+  }
+
+  /*
+   * ...and the container that floor broke.
+   *
+   * `.workspace-switcher` (globals.css) is `min-height: 55px`, sized back when
+   * its <select> was an 11px control about 30px tall. The 44px floor above
+   * raised the select without resizing the box around it, so the switcher's
+   * content became ~79px inside a 55px container.
+   *
+   * That alone would only have overflowed. What made it a dead tap target is
+   * that `.portal-sidebar` is a `position: fixed; top: 0; bottom: 0` flex
+   * column — a fixed 844px of height on an iPhone 14 — and every child is a
+   * shrinkable flex item. With the drawer open the column wanted more height
+   * than it had, so the switcher was crushed to exactly its 55px floor while
+   * its select kept the full 44px, spilling 15px past the switcher's bottom
+   * edge and under `.workspace-identity`, which paints over it. Hit-testing
+   * down the select's centre line returned `.workspace-identity` for the
+   * bottom 15px: 29px of a 44px control was tappable, and a thumb aiming at
+   * the middle of "Sunnamusk UK" landed on the email line instead. This is the
+   * control the owner uses to move between Sunnamusk UK and Demo Client Ltd.
+   *
+   * `flex-shrink: 0` is the actual fix — it stops the column stealing height
+   * from the switcher, so the box sizes to its content. The `min-height` is
+   * raised in step so the floor can no longer be smaller than what it holds:
+   * 44px select + 8px top and bottom padding + the ~16px "Workspace" label and
+   * its 2px gap. `.workspace-switcher__add` (32px base, same 44px floor) sits
+   * in the same grid row and is fixed by the same resize.
+   */
+  .workspace-switcher {
+    flex-shrink: 0;
+    min-height: 78px;
+  }
+
+  /*
+   * And the reason it could be crushed at all.
+   *
+   * At 844px the drawer only just fits, so nothing visibly failed until a
+   * child grew. On a shorter phone — iPhone SE is 667px — the same silent
+   * squashing hits whatever is least rigid. A column that cannot fit its
+   * contents should scroll, not compress them.
+   */
+  .portal-sidebar {
+    overflow-y: auto;
+  }
+
+  /*
+   * Panel header actions ("View all", "Show summary") and the wordmark.
+   *
+   * These are text buttons that inherit their height from the line box — 18px
+   * for the panel actions, 35px for the logo link. They are scoped to the panel
+   * header and the shell chrome rather than raised globally, because a blanket
+   * rule would also inflate every button inside the board grid and halve how
+   * many rows fit on a phone.
+   */
+  .portal-shell :is(.analytics-panel, .insight-panel, .portal-panel) > header button,
+  .portal-sidebar__brand > a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /*
+   * Record-table actions and form buttons.
+   *
+   * `.table-text-action` measured 21px — it is the "View"/"Edit" affordance on
+   * every row of the units, compliance and documents registers, and at 21px it
+   * sits directly above and below its neighbours in the same column. These are
+   * named classes belonging to the table and form furniture, which is why they
+   * can be raised without touching the board grid: the grid's cells carry no
+   * class from this list.
+   */
+  .portal-shell :is(.table-text-action, .primary-button, .secondary-button) {
+    min-height: 44px;
+  }
+}
+
+/* ---- Refresh and last-updated ------------------------------------------ */
+
+/*
+ * The timestamp beside the refresh button.
+ *
+ * Quiet by design: it answers "how old is this" for someone who goes looking,
+ * and must not compete with the figures themselves. `font-variant-numeric:
+ * tabular-nums` stops the topbar shifting sideways as the minute changes.
+ */
+.topbar-updated {
+  font-size: 12px;
+  color: var(--muted, #9baeb9);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Below 1024px the topbar is already tight and the button carries the same
+ * meaning on its own, so the text is dropped rather than allowed to wrap the
+ * row onto two lines.
+ */
+@media (max-width: 1024px) {
+  .topbar-updated {
+    display: none;
+  }
+}
+
+/* ---- Spend against budget ---------------------------------------------- */
+
+/*
+ * monday's battery widget: one bar per row, the number on the bar.
+ *
+ * The percentage sits inside the track rather than in a legend, because the
+ * question a battery answers is "how full" and making the eye travel to a key
+ * to find out defeats it.
+ */
+.budget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.budget-row__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 5px;
+  font-size: 13.5px;
+}
+
+.budget-row__head span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The portfolio total is the summary, so it is separated from the sites it
+   summarises rather than sitting in the same list as an equal. */
+.budget-row--total {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line, #22313a);
+}
+
+.budget-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--sunk, rgba(148, 173, 190, 0.16));
+  overflow: hidden;
+}
+
+.budget-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  border-radius: 4px;
+  /* Width is set inline from the percentage; capped at 100% so an over-budget
+     site fills the track rather than bursting it. */
+  transition: width 200ms ease;
+}
+
+.budget-bar span {
+  position: relative;
+  margin-left: 9px;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Three states, and they are about the budget, not the brand — so they use the
+   semantic colours rather than the accent. */
+.budget-bar--within i { background: rgba(46, 125, 91, 0.55); }
+.budget-bar--close i { background: rgba(176, 116, 31, 0.6); }
+.budget-bar--over i { background: rgba(179, 69, 63, 0.62); }
+
+.budget-bar--none {
+  justify-content: center;
+}
+
+.budget-bar--none span {
+  margin-left: 0;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.budget-note {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* On a phone the figures wrap under the name rather than being squeezed
+   against it, which is what made them unreadable at 390px. 640px is one of the
+   five breakpoints this project agreed in Stage 5; a test enforces the list, so
+   a one-off width here would be a sixth convention nobody else follows. */
+@media (max-width: 640px) {
+  .budget-row__head {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+/* ---- Dashboard layout editor ------------------------------------------- */
+
+.widget-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.widget-bar__note {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.widget-editor {
+  padding: 16px 18px;
+  margin: 0 0 16px;
+}
+
+.widget-editor__hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 62ch;
+}
+
+.widget-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.widget-editor__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft, rgba(148, 173, 190, 0.14));
+}
+
+.widget-editor__list li:last-child {
+  border-bottom: 0;
+}
+
+.widget-editor__list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  /* The whole row is the target, not just the 13px box — this list is used on
+     a phone and a checkbox alone is well under the touch minimum. */
+  flex: 1;
+  min-height: 44px;
+}
+
+.widget-editor__moves {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.widget-editor__moves button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line, rgba(148, 173, 190, 0.28));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.widget-editor__moves button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* The chevron glyph points right; these are up and down. */
+.widget-editor__moves button:first-child svg {
+  transform: rotate(-90deg);
+}
+
+.widget-editor__moves button:last-child svg {
+  transform: rotate(90deg);
+}
+
+.widget-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.widget-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 28px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ---- Mobile fixes found by the responsive audit ------------------------- */
+
+/*
+ * A grid cell must be allowed to be narrower than its content.
+ *
+ * `.insight-grid__cell` was introduced with the arrangeable dashboard and had
+ * no rule at all, so it kept `min-width: auto` and its min-content width forced
+ * the 1fr track to 428px inside a 366px grid. On a phone the Reports panel ran
+ * 50px past the screen with every money value — £9,104, £6,723 — cut off
+ * mid-glyph, and no ancestor scrolled, so there was no way to reach them.
+ *
+ * `documentElement.scrollWidth` reports 0 for this, which is why the responsive
+ * harness called the page clean. The identical fix already exists one level up
+ * on `.insight-panel` and `.insight-grid__wide`, both with comments describing
+ * this exact failure; the new cell simply never got it.
+ */
+.insight-grid__cell {
+  min-width: 0;
+}
+
+/*
+ * The board toolbar's person and priority filters collapsed to 14px.
+ *
+ * `label.live-board-tool { min-width: 0 }` was added to cure a 289px overflow
+ * from `min-width: max-content`, which it did — but it left no floor, so inside
+ * the squeezed flex row these two shrank to their icon and became unhittable.
+ * 44px is the touch minimum, and it is a floor rather than a width, so the
+ * overflow fix still holds.
+ */
+@media (max-width: 768px) {
+  label.live-board-tool {
+    min-width: 44px;
+  }
+}
+
+/* ---- Contractor contact details ---------------------------------------- */
+
+/*
+ * Phone and email as tap targets, stacked rather than run together.
+ *
+ * Both columns have been on the `contractors` table since Stage 0 and nothing
+ * rendered either. On a phone — where this register is actually used — a
+ * number you cannot tap is a number you have to memorise and retype.
+ */
+.contractor-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.contractor-contact__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  /* `--accent` is not a token this product declares, so this always fell
+     through to the literal: #12b4a8 on white, 2.40:1 on every contractor row. */
+  color: var(--accent-fg);
+  text-decoration: none;
+  /* 44px is the touch minimum, and this is one of the most likely things to be
+     tapped on a phone in a shop. */
+  min-height: 44px;
+  font-variant-numeric: tabular-nums;
+}
+
+.contractor-contact__link:hover,
+.contractor-contact__link:focus-visible {
+  text-decoration: underline;
+}
+
+/* Most rows carry no phone yet. Saying so beats an empty cell, which reads as
+   a rendering fault rather than as missing data. */
+.contractor-contact__none {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---- Comment threads --------------------------------------------------- */
+
+/*
+ * These rules are gone, with the markup they were written for.
+ *
+ * They painted the drawer's inline comment cards: a dark-theme body colour
+ * (`.drawer-update-card > p` is `#40545f` in globals.css, a slate chosen for a
+ * white card, and it was inherited-proof at that specificity, so all 218
+ * imported comments were dark grey on dark grey), the indented reply well, and
+ * the attachment chips.
+ *
+ * The panel was rebuilt against monday's own and its cards are `.update-card`
+ * now, painted from tokens in update-thread.css — which is why every fix listed
+ * above is still in force and none of it is here. Attachments in particular are
+ * no longer chips at all: monday RENDERS the file under the link, and so does
+ * the panel.
+ */
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ * The reporting period control (Stage 23)
+ *
+ * The period `<select>` and its argument fields sit inside `.analytics-toolbar`
+ * as direct `<label>` children, so they inherit the chip — the 42px height, the
+ * border, the dark ground — from the rules already written up at line 795. Only
+ * what is genuinely new is below.
+ */
+
+/*
+ * A ceiling on the period select, for the same reason the portfolio select has
+ * one at line 825: a `<select>` sizes itself to its longest OPTION, and this
+ * one's is "Quote Received (waiting for Approval)"-length prose such as
+ * "A custom range…". Without a cap the closed control grew to the width of the
+ * menu and pushed the export button off the row. `:first-of-type` cannot be
+ * reused here — that selector belongs to the portfolio filter.
+ */
+.analytics-toolbar > label.analytics-period select {
+  min-width: 124px;
+  max-width: 210px;
+}
+
+.analytics-toolbar > label.analytics-period--argument {
+  padding: 0 10px;
+}
+
+.analytics-toolbar > label.analytics-period--argument input {
+  min-width: 108px;
+  max-width: 148px;
+  font-size: 13px;
+}
+
+/*
+ * REMOVED, deliberately, and this note is the receipt.
+ *
+ * This used to pin `color-scheme: dark` on the toolbar's date, month and
+ * number inputs, because the chip they sit in was a hard-coded `#111d25` in
+ * both themes and the native calendar glyph — which takes its colour from
+ * `color-scheme` — went dark-on-dark and disappeared when the document was
+ * light. It was the right fix for that chip.
+ *
+ * The chip is now `--surface-head`, so it is pale in light and dark in dark,
+ * and the glyph is correct in both by simply inheriting the document's scheme.
+ * Pinning it now would reintroduce the bug in the opposite direction: a light
+ * glyph on a pale chip. The rule is gone rather than inverted; the browser
+ * already knows the answer.
+ */
+
+/*
+ * A custom range puts five controls in this row where there used to be three.
+ * The existing wrap rules only start at 1040px, so between 1040px and the width
+ * at which five chips genuinely fit, the row overflowed its heading. Wrapping
+ * is inert while there is room, so this is safe for the toolbars that still
+ * carry three.
+ */
+.analytics-toolbar {
+  flex-wrap: wrap;
+}
+
+/*
+ * The window in words, under the page heading.
+ *
+ * "Last quarter" does not tell anyone which three months they are reading, and
+ * every figure on the screen depends on the answer — so the caption prints the
+ * resolved dates and the number of work orders inside them. An empty period is
+ * a full-width sentence rather than a row of zeroes.
+ */
+.analytics-period-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+  color: #8fa4ae;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.analytics-period-caption svg {
+  flex: none;
+  color: var(--accent-fg);
+}
+
+.analytics-period-caption strong {
+  color: var(--ink);
+  font-weight: 620;
+}
+
+.analytics-period-caption span::before {
+  margin-right: 8px;
+  content: "·";
+}
+
+.analytics-period-caption--unset {
+  color: #f0a91f;
+}
+
+.analytics-period-caption--unset svg {
+  color: #f0a91f;
+}
+
+/*
+ * The sort control on "Top sites by spend" and the panel header that carries
+ * it. The header was `<h2>` plus one link; it now holds a select as well, so it
+ * needs to be allowed to wrap before it pushes the panel sideways on a phone.
+ */
+.analytics-top-sites > header {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analytics-top-sites > header .analytics-inline-select {
+  margin-left: auto;
+}
+
+/*
+ * 767px, not the 760px the analytics rules further up this file use. Everything
+ * below the Stage 5 board-chrome banner is held to the agreed breakpoint set —
+ * 640 / 767 / 768 / 1024 / 1280 — by tests/stage-five-board-chrome.test.mjs and
+ * tests/stage-six-views.test.mjs, which read from that banner to the end of the
+ * file. The seven pixels make no difference to what this rule does; the shared
+ * breakpoint vocabulary does.
+ */
+@media (max-width: 767px) {
+  .analytics-top-sites > header .analytics-inline-select,
+  .analytics-report-trend > header .analytics-inline-select {
+    margin-left: 0;
+    min-height: 44px;
+  }
+
+  /*
+   * The toolbar is a two-column grid at this width. A custom range's two date
+   * fields pair up naturally; the caption belongs across the whole row.
+   */
+  .analytics-period-caption {
+    font-size: 12px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* D — 44px on a phone, where a finger is the pointer                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The board's own controls, not its cells.
+ *
+ * A dense grid is the point of a board, and forcing 44px onto 24,000 cells
+ * would turn the job list into a scroll no coordinator would use — monday's
+ * cells are 36px for the same reason. What has to be reachable with a thumb is
+ * the CHROME: the toolbar buttons, the search field, the group and column
+ * menus. Those were 42px, 34px and 27px, all short of the 44px target on a
+ * phone and all of them things an engineer standing in a shop actually presses.
+ */
+@media (max-width: 767px) {
+  .live-board-tool,
+  .live-board-toolbar button,
+  .live-board-toolbar input[type="search"],
+  .live-board-toolbar input[type="text"] {
+    min-height: 44px;
+  }
+
+  .sheet-group__more,
+  .custom-column-header__more {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /*
+   * The group name is a 16.8px hit area because the label is small text on a
+   * dense row. Padding it out rather than growing the font keeps the row
+   * height the board depends on while giving the collapse toggle a target.
+   */
+  .sheet-group__name {
+    min-height: 44px;
+    padding-block: 12px;
+  }
+
+  /* The Planned register link, and the two search fields on the registers. */
+  .planned-register-panel__heading button,
+  .workspace-toolbar input,
+  .search-field input {
+    min-height: 44px;
+  }
+}
+
+/*
+ * ===========================================================================
+ * NO TEXT-ENTRY CONTROL UNDER 16px ON A PHONE
+ * ===========================================================================
+ *
+ * WHAT WAS WRONG: iOS Safari zooms the whole page in when you focus an input
+ * whose font-size is under 16px, and it does not zoom back out. Every field a
+ * reader on a phone actually types into was under that line:
+ *
+ *   /request                 all six fields at 12px (and only 41px tall)
+ *   create-request modal     14px — site, name, +44 phone, description
+ *   job drawer -> Updates    the update composer at 14px
+ *   dashboard chrome         Colour theme / Portfolio / Date range at 14px
+ *   workspace switcher       the client <select> at 11px
+ *
+ * So the engineer standing in a shop taps "Description", the page jumps to
+ * ~150% and stays there, and the rest of the form is now off the side of the
+ * screen. This is the single most-reported iOS form defect there is, and the
+ * whole of it is a number.
+ *
+ * The offenders are `.portal-shell :is(button, input, select, textarea)` at
+ * 13px near the top of this file, the two copies of that rule inside the
+ * `max-width: 760px` blocks (13px, then 14px), `.form-field :is(...)` at 12px,
+ * and `.form-field input` at 10px in globals.css. Rather than chase each one
+ * to a different number, this is one floor at the end of the cascade.
+ *
+ * WHY IT IS SAFE FOR THE BOARD: the worry with a blanket 16px is the sheet,
+ * whose density this project has twice refused to trade away. It does not
+ * apply. Measured on /dashboard/jobs at 390px, every form control inside
+ * `.live-sheet` is either a checkbox (814 of them — font-size does not size a
+ * checkbox) or a zero-height select behind the custom cell UI (776). The
+ * board's visible cells are divs and buttons, and none of them is touched
+ * here. Row height on the board is unchanged.
+ *
+ * `button` is deliberately NOT in the selector: a button cannot be typed into,
+ * so it never triggers the zoom, and inflating every button to 16px is exactly
+ * the change that would cost the board its density.
+ */
+/*
+ * ON THE SELECTOR: it is deliberately specific enough to win from here.
+ *
+ * The obvious `.portal-shell :is(input, select, textarea)` was tried first and
+ * is not enough. It scores 0-1-1, which only ties the rules it has to beat —
+ * `.form-field :is(...)`, `.account-field input` — and ties are settled by
+ * order. The per-view stylesheets (`views/account-views.css` and friends) are
+ * imported from their components rather than linked from the layout, so they
+ * land AFTER this file and won every tie: /dashboard/account still measured
+ * 13px across all nine of its fields with the simple rule in place.
+ *
+ * `:root` plus the two `:not([type=...])` clauses scores 0-3-1, which clears
+ * every competing rule in the project without depending on load order at all.
+ * The type exclusions are doing real work as well as carrying specificity: a
+ * checkbox or radio cannot be typed into and is not sized by its font, and 814
+ * checkboxes on the jobs board should not be swept up in a typography rule.
+ */
+@media (max-width: 768px) {
+  :root :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+    font-size: 16px;
+  }
+
+  /*
+   * The /request fields measured 41px. They are the public form — the one a
+   * shop manager fills in on their own phone with no account and no training
+   * — and 41px is under the 44px this project uses everywhere else.
+   */
+  .form-field :is(input, select),
+  .file-drop {
+    min-height: 44px;
+  }
+}

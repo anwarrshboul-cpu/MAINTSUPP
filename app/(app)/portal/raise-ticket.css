@@ -1,0 +1,300 @@
+/*
+ * "Raise a ticket" — the shared control and its dialog.
+ *
+ * Scoped to `.raise-ticket*` so it can be dropped into a site header, an asset
+ * row, a contractor card or a compliance cell without any of them needing to
+ * know it is there. The dialog reuses the portal's existing `.modal-wrap`,
+ * `.modal-scrim`, `.form-field`, `.primary-button` and `.secondary-button`
+ * rather than restating them, so it inherits the dark theme in
+ * `brand-overrides.css` for free.
+ *
+ * The 44px floor is on every control, not only on the buttons: a 32px-tall
+ * `<select>` is exactly as hard to hit on a phone as a 32px button, and this
+ * control exists to be used from the shop floor.
+ */
+
+.raise-ticket-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /*
+   * `width`/`height` are reset because the `quiet` variant maps onto
+   * `.icon-button`, which is a fixed 36x36 square sized for a bare glyph. This
+   * control ALWAYS renders a label beside its icon, so inheriting that square
+   * clipped the words and painted them underneath the surrounding row — the
+   * defect reported on the sites table. Sizing from content here means no
+   * caller can reintroduce it by picking the wrong variant.
+   */
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  padding: 0 15px;
+  white-space: nowrap;
+}
+
+.raise-ticket-button svg {
+  flex: 0 0 auto;
+}
+
+/* Above the drawers (100) and level with the portal's other modals (120). */
+.raise-ticket-layer {
+  z-index: 130;
+}
+
+.raise-ticket {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(560px, 96vw);
+  max-height: calc(100vh - 44px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line, #d8e0e5);
+  border-radius: 15px;
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-lg, 0 24px 60px rgba(5, 19, 29, 0.28));
+}
+
+.raise-ticket__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line, #d8e0e5);
+}
+
+.raise-ticket__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.raise-ticket__heading > span {
+  display: block;
+  color: var(--muted, #6b8290);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.raise-ticket__heading h2 {
+  margin: 2px 0 0;
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.raise-ticket__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -8px -6px 0 0;
+}
+
+.raise-ticket__body {
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+/* What the ticket is being attached to, said before anything is typed. */
+.raise-ticket__attaching {
+  padding: 11px 13px;
+  border: 1px solid var(--line-soft, #e4eaee);
+  border-radius: 11px;
+  background: var(--surface-muted, rgba(18, 180, 168, 0.06));
+}
+
+.raise-ticket__attaching-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted, #6b8290);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.raise-ticket__attaching ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.raise-ticket__attaching li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--line, #d8e0e5);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  font-size: 13px;
+}
+
+.raise-ticket__attaching li b {
+  color: var(--muted, #6b8290);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.raise-ticket__attaching li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.raise-ticket__attaching small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted, #6b8290);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.raise-ticket .form-field {
+  display: grid;
+  gap: 5px;
+}
+
+.raise-ticket .form-field > span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.raise-ticket .form-field > span em {
+  color: var(--muted, #6b8290);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.raise-ticket .form-field small {
+  color: var(--muted, #6b8290);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* The 44px floor. Applies to selects and the textarea, not only to buttons. */
+.raise-ticket .form-field :is(input, select) {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line, #d8e0e5);
+  border-radius: 9px;
+  font-size: 15px;
+}
+
+.raise-ticket .form-field textarea {
+  min-height: 88px;
+  padding: 11px 12px;
+  border: 1px solid var(--line, #d8e0e5);
+  border-radius: 9px;
+  font-size: 15px;
+  resize: vertical;
+}
+
+.raise-ticket__grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.raise-ticket__destination {
+  margin: 0;
+  color: var(--muted, #6b8290);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.raise-ticket__footer {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line, #d8e0e5);
+}
+
+/*
+ * The refusal, in the server's own words.
+ *
+ * `role="alert"` on the element, and enough contrast to be readable against the
+ * dark theme — a permission refusal that is styled as a whisper gets missed and
+ * reported as "the button does nothing".
+ */
+.raise-ticket__error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(214, 69, 69, 0.45);
+  border-radius: 9px;
+  background: rgba(214, 69, 69, 0.1);
+  color: #d64545;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.raise-ticket__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.raise-ticket__actions button {
+  min-height: 44px;
+  padding: 0 17px;
+}
+
+/*
+ * 390px — an iPhone 14 held in one hand on a shop floor.
+ *
+ * The dialog becomes a bottom sheet rather than a shrunken card: full width,
+ * anchored to the bottom, so the fields and the "Raise ticket" button are
+ * inside thumb reach instead of centred in the middle of the screen. The
+ * two-column row collapses, and the actions go full-width and stack the primary
+ * one last so it sits closest to the thumb.
+ */
+@media (max-width: 430px) {
+  .raise-ticket-layer {
+    padding: 0;
+    place-items: end stretch;
+  }
+
+  .raise-ticket {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .raise-ticket__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .raise-ticket__actions {
+    flex-direction: column-reverse;
+  }
+
+  .raise-ticket__actions button {
+    width: 100%;
+  }
+
+  .raise-ticket-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .raise-ticket {
+    animation: raise-ticket-in 160ms ease-out;
+  }
+}
+
+@keyframes raise-ticket-in {
+  from {
+    transform: translateY(10px) scale(0.99);
+    opacity: 0;
+  }
+}

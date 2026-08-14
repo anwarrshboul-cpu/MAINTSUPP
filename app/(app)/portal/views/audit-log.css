@@ -1,0 +1,436 @@
+/* ── Audit log — /dashboard/audit ──────────────────────────────────────────
+ *
+ * A reading surface, not a working one. Nothing here is an affordance to
+ * change anything: the only buttons filter, page and expand. Colours come from
+ * the MAINTSUPP tokens in globals.css so the page follows the workspace theme,
+ * and the action chip's hue is always paired with the verb spelled out, so a
+ * colour-blind reader loses nothing.
+ */
+
+/* The page shell for /dashboard/audit. Kept with the view for the same reason
+   the teams shell is: one screen uses it, so one screen should download it. */
+.audit-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 22px 60px;
+}
+
+.audit-page__crumbs {
+  margin-bottom: 14px;
+  font-size: 12.5px;
+}
+
+.audit-page__crumbs a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.audit-page__crumbs a:hover {
+  color: var(--teal-600);
+}
+
+.audit {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.audit__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.audit__head h2 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+}
+
+.audit__head p {
+  max-width: 74ch;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.audit__count {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.audit__error {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--danger-solid);
+  border-radius: 10px;
+  background: var(--paper);
+  font-size: 13px;
+  /* An error message on `--paper`: #ff9a9a was 2.1:1 on a white card. */
+  color: var(--red-600);
+}
+
+.audit__loading {
+  margin: 0;
+  padding: 40px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ── Filters ─────────────────────────────────────────────────────────────── */
+
+.audit__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.audit__filter {
+  display: flex;
+  flex: 1 1 170px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.audit__filter input,
+.audit__filter select {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.audit__clear,
+.audit__expand,
+.audit__pager button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.audit__clear:hover,
+.audit__expand:hover,
+.audit__pager button:hover:not(:disabled) {
+  border-color: var(--teal-600);
+  color: var(--teal-600);
+}
+
+.audit__pager button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+:where(.audit button, .audit input, .audit select):focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 2px;
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+
+.audit__table-wrap {
+  /* The table is wide and must scroll inside its own box rather than pushing
+     the page sideways. */
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  scrollbar-width: thin;
+}
+
+.audit__table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.audit__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
+
+.audit__table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+
+.audit__table tbody tr:hover td {
+  background: rgba(18, 180, 168, 0.05);
+}
+
+.audit__table tbody tr.is-open td {
+  border-bottom-color: transparent;
+  background: rgba(18, 180, 168, 0.07);
+}
+
+.audit__when {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.audit__actor,
+.audit__where {
+  display: table-cell;
+}
+
+.audit__actor span,
+.audit__where span {
+  display: block;
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit__actor em,
+.audit__where em {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.audit__where em code {
+  /* An opaque id is easier to match against a URL or a row when it keeps the
+     case it was written in. */
+  display: block;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.audit__summary {
+  min-width: 24ch;
+  line-height: 1.45;
+}
+
+.audit__none {
+  color: var(--muted-2);
+}
+
+.audit__col-detail {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ── Action chips ────────────────────────────────────────────────────────── */
+
+.audit__chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--canvas);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/*
+ * Family tints. Decoration only — the verb is written on the chip.
+ *
+ * Every one of these was a bright ink chosen against the dark page, sitting on
+ * a chip whose ground is `--canvas`. On the light canvas they measured 2.03:1
+ * (session, 46 nodes), 1.86:1 (user/role, 44) and 3.23:1 (team). They are the
+ * tint families now, so each ink moves with the theme while the chip keeps the
+ * colour-coding it exists for.
+ */
+.audit__chip--session {
+  border-color: rgba(62, 143, 216, 0.5);
+  color: var(--blue-600);
+}
+
+.audit__chip--user,
+.audit__chip--role,
+.audit__chip--permission {
+  border-color: rgba(238, 171, 37, 0.5);
+  color: var(--amber-600);
+}
+
+.audit__chip--team {
+  border-color: rgba(18, 180, 168, 0.5);
+  color: var(--teal-600);
+}
+
+.audit__chip--board,
+.audit__chip--data {
+  border-color: rgba(218, 70, 70, 0.55);
+  color: var(--red-600);
+}
+
+/* ── Expanded detail ─────────────────────────────────────────────────────── */
+
+.audit__detail-row td {
+  padding: 0 12px 14px;
+  background: rgba(18, 180, 168, 0.07);
+}
+
+.audit__change {
+  width: 100%;
+  max-width: 720px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.audit__change th,
+.audit__change td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.audit__change thead th {
+  position: static;
+  background: transparent;
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.audit__change tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* Before and after are told apart by a leading rule and a word in the header,
+   not by colour alone. */
+.audit__before {
+  border-left: 3px solid rgba(218, 70, 70, 0.6);
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: rgba(218, 70, 70, 0.5);
+}
+
+.audit__after {
+  border-left: 3px solid rgba(56, 190, 123, 0.7);
+  color: var(--ink);
+}
+
+.audit__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 10px 0 0;
+}
+
+.audit__facts dt {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.audit__facts dd {
+  margin: 2px 0 0;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.audit__origin {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
+/* ── Empty state and pager ───────────────────────────────────────────────── */
+
+.audit__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 48px 20px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--muted);
+  text-align: center;
+}
+
+.audit__empty h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.audit__empty p {
+  max-width: 58ch;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.audit__pager {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  color: var(--muted);
+}

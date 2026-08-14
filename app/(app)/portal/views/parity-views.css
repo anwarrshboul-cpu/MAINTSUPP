@@ -1,0 +1,472 @@
+/* ── monday view parity — Results, Form Response Viewer, Table, Build Vibe ──
+ *
+ * Four panels added to the maintenance board chrome so its tab strip matches
+ * monday board 1139774521. Nothing here restyles an existing surface: every
+ * rule is scoped to one of the four new panels or to the tab glyphs monday
+ * draws beside Form, Fix Tracker and Build Vibe view.
+ *
+ * Every colour is a MAINTSUPP custom property from globals.css, so the panels
+ * follow the light and dark themes without knowing which one they are in. The
+ * spacing, radii and 44px touch targets follow the board view renderers already
+ * in brand-overrides.css, because these tabs sit in the same pane.
+ */
+
+/* ── Tab glyphs ───────────────────────────────────────────────────────────
+ *
+ * monday decorates two kinds of tab: the pinned Form carries a pin, and a tab
+ * served by a monday app (Fix Tracker, Build Vibe view) carries an app glyph
+ * INSTEAD of a view icon — the tab is not a view type, so it does not get one.
+ * The distinction is worth keeping because it tells an admin which tabs would
+ * disappear if the app were uninstalled.
+ */
+
+.board-views__glyph {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+}
+
+.board-views__tab.is-active .board-views__glyph {
+  color: var(--teal-600);
+}
+
+/* ── Results — monday view 646340 ────────────────────────────────────────── */
+
+.form-results {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--ink);
+}
+
+.form-results__head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.form-results__head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-results__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.form-results__totals li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.form-results__totals span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-results__totals strong {
+  font-size: 20px;
+}
+
+.form-results__questions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: question;
+}
+
+.form-results__question {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.form-results__question > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.form-results__question h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* The asterisk marks a question monday makes mandatory. */
+.form-results__question h4 em {
+  margin-left: 4px;
+  color: var(--orange-600);
+  font-style: normal;
+}
+
+.form-results__question > header span {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-results__scope {
+  margin: -4px 0 0;
+  max-width: 80ch;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-results__note,
+.form-results__free {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-results__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.form-results__bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(60px, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.form-results__answer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-results__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.form-results__bar i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 999px;
+  background: var(--teal-600);
+}
+
+.form-results__count {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.form-results__count em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.form-results__tail {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Form Response Viewer — monday view 646341 ───────────────────────────── */
+
+.form-responses {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--ink);
+}
+
+.form-responses__count {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-responses__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.form-responses__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.form-responses__card > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+}
+
+.form-responses__card > header span {
+  color: var(--muted);
+}
+
+.form-responses__card dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.form-responses__card dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.form-responses__card dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.form-responses__long {
+  white-space: pre-wrap;
+}
+
+.form-responses__files {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.form-responses__card > button,
+.form-responses__more {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--teal-600);
+  cursor: pointer;
+}
+
+.form-responses__card > button:hover,
+.form-responses__more:hover {
+  background: var(--teal-100);
+}
+
+/* ── Table — monday view 9116879 ─────────────────────────────────────────── */
+
+.flat-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.flat-table__hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 25 columns will not fit any screen. The table scrolls inside its own box so
+   the page body never does. */
+.flat-table__scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  -webkit-overflow-scrolling: touch;
+}
+
+.flat-table table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-size: 13px;
+}
+
+.flat-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--canvas);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.flat-table thead button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.flat-table thead button:hover {
+  color: var(--ink);
+}
+
+.flat-table th[aria-sort]:not([aria-sort="none"]) button {
+  color: var(--teal-600);
+}
+
+.flat-table thead em {
+  font-size: 9px;
+  font-style: normal;
+}
+
+.flat-table tbody td {
+  max-width: 280px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flat-table tbody tr:hover td {
+  background: var(--line-soft);
+}
+
+.flat-table tbody button {
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--teal-600);
+  cursor: pointer;
+}
+
+/* ── Build Vibe view — monday view 45948434 ──────────────────────────────── */
+
+.vibe-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--ink);
+}
+
+.vibe-view__head {
+  padding: 14px 16px;
+  border-left: 3px solid var(--teal-600);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--teal-100);
+}
+
+.vibe-view__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--teal-700);
+}
+
+.vibe-view__head h3 {
+  margin: 8px 0 0;
+  font-size: 17px;
+}
+
+.vibe-view__head p {
+  margin: 6px 0 0;
+  max-width: 68ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.vibe-view__figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vibe-view__figures li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.vibe-view__figures span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.vibe-view__figures strong {
+  font-size: 20px;
+}
+
+.vibe-view__foot {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+@media (max-width: 767px) {
+  .form-responses__list {
+    grid-template-columns: 1fr;
+  }
+
+  .flat-table tbody td {
+    max-width: 200px;
+  }
+}

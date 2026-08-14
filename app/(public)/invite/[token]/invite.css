@@ -1,0 +1,192 @@
+/* Invitation page — Stage 20.
+   Self-contained, like the contractor job link next door and for the same
+   reason: the public layout loads no shared stylesheet, and pulling the
+   dashboard's 254KB onto a page whose whole job is one form would be absurd.
+   The palette is copied from the MAINTSUPP dark system so the page is
+   recognisably part of the product rather than a generic form. */
+
+.invite {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 22px;
+  padding: 32px 20px;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(18, 180, 168, 0.15), transparent 30%),
+    radial-gradient(circle at 85% 85%, rgba(18, 180, 168, 0.1), transparent 28%),
+    #101820;
+  color: #f4f8fa;
+  font: 15px/1.6 Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.invite__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+.invite__brand strong { color: #12b4a8; font-weight: inherit; }
+
+.invite__card {
+  width: min(100%, 480px);
+  padding: 36px;
+  border: 1px solid #2a424d;
+  border-radius: 20px;
+  background: rgba(24, 40, 48, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+}
+
+.invite__eyebrow {
+  margin: 0;
+  color: #5ad4cb;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.invite__card h1 {
+  margin: 10px 0 12px;
+  color: #fff;
+  font-size: 27px;
+  line-height: 1.18;
+  font-family: Manrope, Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.invite__lede {
+  margin: 0 0 20px;
+  color: #a9bbc4;
+}
+
+.invite__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 16px;
+  margin: 0 0 22px;
+  padding: 15px 16px;
+  border: 1px solid #2b414b;
+  border-radius: 12px;
+  background: rgba(16, 24, 32, 0.6);
+  font-size: 13px;
+}
+.invite__facts dt { color: #81949f; }
+.invite__facts dd { margin: 0; color: #edf4f6; font-weight: 600; }
+
+.invite__role {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(18, 180, 168, 0.16);
+  color: #64d8d0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.invite__form { display: grid; gap: 15px; }
+
+.invite__field { display: grid; gap: 7px; }
+
+.invite__field label {
+  color: #a9bbc4;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/*
+ * 16px, not 15px. This stylesheet also dresses /reset, which @imports it.
+ *
+ * These fields were 15px — one pixel under the size at which iOS Safari zooms
+ * the page on focus and does not zoom back. The boxes themselves were already
+ * a comfortable 46px, so the defect was invisible to anything measuring hit
+ * areas: it only shows when a thumb lands in the field and the page jumps.
+ * Both of these pages are reached by someone who was handed a link and is
+ * setting a password, usually on a phone, usually once.
+ */
+.invite__field input {
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid #35505d;
+  border-radius: 10px;
+  background: #101820;
+  color: #edf4f6;
+  font-size: 16px;
+  font-family: inherit;
+}
+
+.invite__field input:focus-visible {
+  border-color: #12b4a8;
+  outline: 2px solid rgba(18, 180, 168, 0.35);
+  outline-offset: 1px;
+}
+
+.invite__field input:disabled { opacity: 0.6; }
+
+.invite__hint { color: #718690; font-size: 12px; }
+
+.invite__submit {
+  display: inline-flex;
+  min-height: 50px;
+  margin-top: 4px;
+  padding: 0 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #12b4a8;
+  border-radius: 10px;
+  background: #12b4a8;
+  color: #06191a;
+  font-size: 15px;
+  font-weight: 750;
+  font-family: inherit;
+  cursor: pointer;
+}
+.invite__submit:hover:not(:disabled) { background: #22c9bd; }
+.invite__submit:disabled { cursor: progress; opacity: 0.7; }
+
+.invite__error {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid rgba(218, 70, 70, 0.5);
+  border-radius: 9px;
+  background: rgba(218, 70, 70, 0.12);
+  color: #ffbcb6;
+  font-size: 13px;
+}
+
+/* The fail-closed screen: an expired, used, withdrawn or unknown token. */
+.invite__card--closed { text-align: center; }
+.invite__card--closed .invite__icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 18px;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(218, 70, 70, 0.15);
+  color: #ff9f97;
+}
+
+.invite__link {
+  display: inline-block;
+  margin-top: 20px;
+  color: #64d8d0;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.invite__legal {
+  max-width: 460px;
+  color: #718690;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .invite__card { padding: 26px 20px; }
+}

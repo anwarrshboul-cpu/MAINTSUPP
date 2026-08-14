@@ -1,0 +1,15 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", args:["--no-sandbox"] });
+const p = await (await b.newContext({viewport:{width:1500,height:1050}})).newPage();
+const errs=[]; p.on("pageerror",e=>errs.push(String(e))); p.on("console",m=>{if(m.type()==="error")errs.push(m.text())});
+await p.goto("http://localhost:5173/dashboard/jobs", { waitUntil:"networkidle" });
+await p.waitForTimeout(7000);
+await p.locator("button", { hasText: "Manage data" }).first().click({ timeout: 20000 });
+await p.waitForTimeout(2000);
+console.log("tabs:", JSON.stringify(await p.locator('[role="tab"]').allTextContents()));
+await p.locator('[role="tab"]', { hasText: "Import" }).click();
+await p.waitForTimeout(1500);
+console.log("panel present:", await p.locator(".monday-import").count());
+console.log("buttons:", JSON.stringify(await p.locator(".monday-import button").allTextContents()));
+await p.screenshot({ path:"/home/claude/shots-imp/import-empty.png" });
+await b.close();

@@ -1,0 +1,61 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# monday API pull — regenerate with db/monday-export/pull-monday-api.mjs.
+# The JSON carries hour-long signed S3 URLs and the assets are 3.4 GB of
+# photographs; neither belongs in git. The board captures that ARE ground truth
+# (MAINTENANCE-MONDAY-CAPTURE.md, store-documentation.json) stay committed.
+/db/monday-export/api-pull/
+/db/monday-export/assets/
+
+# vercel
+.vercel
+
+# typescript
+next-env.d.ts
+/dist/
+/.wrangler/
+/.sites-runtime/
+/outputs/
+/work/
+
+# ── Not published ──────────────────────────────────────────────────────────
+# This repository is public. The files below hold the client's live data —
+# 57 users, 380 sessions, 775 jobs, real store addresses, contact numbers and
+# out-of-hours access notes — or the monday captures they were built from.
+# They stay on the operator's machine and in the private working branch.
+/db/backups/
+/db/monday-export/*.csv
+/db/monday-export/*.json
+/db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md
+/db/monday-export/NEXT-SESSION.md
+/db/monday-export/UPDATES-PANEL-CAPTURE.md

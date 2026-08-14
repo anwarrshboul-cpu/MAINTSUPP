@@ -1,0 +1,375 @@
+/*
+ * Stage 20 — sidebar customisation chrome.
+ *
+ * Everything here is *additive*. The pill shape, the 26px icon well, the 42px
+ * row, the teal active rail and the label spacing all still come from
+ * `globals.css`; this file only adds the controls that appear once you press
+ * "Customise sidebar", plus the two states a nav row can now be in (hidden,
+ * and hidden-but-current). The sidebar has to look exactly as it always did
+ * until somebody starts editing it, so nothing below changes a resting row.
+ *
+ * COLOURS COME FROM THE RAIL TOKENS. This file used to hold 34 colour
+ * declarations and not one theme rule, every one of them a dark-ground
+ * literal — so when light mode repainted the rail white, every control in
+ * here stayed dark-on-light or white-on-white and the editor became unusable.
+ * The rail is now dark in both themes by token (--rail-* on the bare :root in
+ * globals.css), and this file reads those tokens, which means it cannot drift
+ * from the rail it sits in and needs no [data-theme] rule of its own.
+ */
+
+/* A row is a positioning context for the drop indicator and the hover actions.
+   `display: contents` would be neater but breaks the drag hit area. */
+.nav-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+}
+
+.nav-row > button {
+  width: 100%;
+}
+
+.nav-group {
+  display: contents;
+}
+
+/* ── editing ────────────────────────────────────────────────────────────── */
+
+/*
+ * The controls overlay the row rather than sharing its width.
+ *
+ * Laying them out in a second grid column reserved their width permanently,
+ * which truncated the longer labels ("Store D…", "Contra…") the moment you
+ * entered edit mode — the sidebar visibly changed shape just for being
+ * editable. Overlaid and revealed on hover or focus, every label keeps its
+ * full width and nothing moves.
+ */
+.nav-row--editing {
+  grid-template-columns: 1fr;
+  border-radius: 8px;
+  cursor: grab;
+}
+
+.nav-row--editing:hover {
+  background: var(--rail-hover-bg);
+}
+
+.nav-row--editing > button {
+  pointer-events: auto;
+}
+
+.nav-row.is-dragging {
+  opacity: 0.4;
+}
+
+.nav-row.is-drop-before::before,
+.nav-row.is-drop-after::after {
+  position: absolute;
+  right: 6px;
+  left: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--rail-accent);
+  content: "";
+}
+
+.nav-row.is-drop-before::before {
+  top: -1px;
+}
+
+.nav-row.is-drop-after::after {
+  bottom: -1px;
+}
+
+/* A hidden item, shown only inside the editor. Legible but obviously off. */
+.portal-nav .nav-row--editing button.is-hidden {
+  opacity: 0.42;
+}
+
+.portal-nav .nav-row--editing button.is-hidden .nav-row__label {
+  text-decoration: line-through;
+  text-decoration-color: var(--rail-fg-faint);
+}
+
+/*
+ * Hidden, but it is the page you are on.
+ *
+ * Rather than leave you looking at a screen with no matching nav item — the
+ * "where am I" failure — the item comes back for as long as you are on it, in
+ * a dimmed outline that says it is not really in your sidebar.
+ */
+.portal-nav button.is-transient {
+  border: 1px dashed var(--rail-control-border);
+  opacity: 0.82;
+}
+
+.nav-row__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── per-row controls ───────────────────────────────────────────────────── */
+
+.nav-row-actions {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  display: flex;
+  gap: 1px;
+  align-items: center;
+  padding: 2px 3px;
+  border-radius: 7px;
+  background: var(--rail-bg-raised);
+  box-shadow: 0 0 0 1px var(--rail-card-border);
+  opacity: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.nav-row-actions--group {
+  position: static;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.nav-row--editing:hover .nav-row-actions,
+.nav-row--editing:focus-within .nav-row-actions,
+.nav-label--editing:hover .nav-row-actions,
+.nav-label--editing:focus-within .nav-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-row-actions button {
+  display: grid !important;
+  place-items: center;
+  width: 21px;
+  min-height: 21px !important;
+  height: 21px;
+  padding: 0 !important;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--rail-fg-muted);
+  cursor: pointer;
+}
+
+.nav-row-actions button:hover:not(:disabled) {
+  background: var(--rail-hover-bg);
+  color: var(--rail-fg);
+}
+
+.nav-row-actions button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.nav-row-actions button.is-locked {
+  color: var(--rail-accent);
+}
+
+.nav-caret--up {
+  transform: rotate(-90deg);
+}
+
+.nav-caret--down {
+  transform: rotate(90deg);
+}
+
+/* ── headings ───────────────────────────────────────────────────────────── */
+
+.nav-label--editing {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 6px;
+  outline-offset: 2px;
+  cursor: grab;
+}
+
+.nav-label--editing:hover {
+  background: var(--rail-hover-bg);
+}
+
+.nav-label.is-drop-target {
+  box-shadow: inset 0 2px 0 var(--rail-accent);
+}
+
+.nav-label__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── inline rename ──────────────────────────────────────────────────────── */
+
+.nav-rename {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--rail-accent);
+  border-radius: 6px;
+  background: var(--rail-control-bg);
+  color: var(--rail-fg);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nav-rename--item {
+  min-height: 38px;
+  margin-left: 37px;
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* ── badges ─────────────────────────────────────────────────────────────── */
+
+.nav-new {
+  padding: 2px 5px;
+  border-radius: 99px;
+  background: var(--rail-active-bg);
+  color: var(--rail-active-fg);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nav-lock {
+  display: grid;
+  place-items: center;
+  color: var(--rail-fg-muted);
+}
+
+/* ── editor tray ────────────────────────────────────────────────────────── */
+
+.nav-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 10px;
+  /* --line-soft is #eaf0f3 in light: a near-white hairline across a dark rail. */
+  border-top: 1px solid var(--rail-border);
+}
+
+.nav-editor__empty {
+  margin: 0;
+  padding: 0 11px;
+  color: var(--rail-fg-muted);
+  font-size: 10px;
+}
+
+.nav-editor__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.nav-chip {
+  display: inline-flex !important;
+  gap: 4px;
+  align-items: center;
+  min-height: 25px !important;
+  padding: 0 8px !important;
+  border: 1px dashed var(--rail-control-border) !important;
+  border-radius: 99px !important;
+  background: transparent;
+  color: var(--rail-fg-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.nav-chip:hover {
+  border-color: var(--rail-accent) !important;
+  color: var(--rail-fg);
+}
+
+.nav-editor__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.portal-nav .nav-editor__tool {
+  display: flex !important;
+  grid-template-columns: none;
+  gap: 7px;
+  align-items: center;
+  min-height: 30px !important;
+  color: var(--rail-fg-muted);
+  font-size: 10px;
+}
+
+.nav-editor__scope {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--rail-accent);
+  border-radius: 8px;
+  background: var(--rail-active-bg);
+  color: var(--rail-fg);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-editor__scope input {
+  margin-top: 1px;
+  accent-color: var(--rail-accent);
+}
+
+.nav-editor__scope small {
+  display: block;
+  margin-top: 3px;
+  color: var(--rail-fg-muted);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.nav-editor__hint {
+  margin: 0;
+  padding: 0 11px 2px;
+  color: var(--rail-fg-muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+/* ── the toggle ─────────────────────────────────────────────────────────── */
+
+.portal-nav .nav-customise {
+  margin-top: 10px;
+  color: var(--rail-fg-muted);
+  font-size: 10px;
+}
+
+.portal-nav .nav-customise.is-active {
+  background: var(--rail-active-bg);
+  color: var(--rail-active-fg);
+}
+
+/* The live region carries the outcome of a keyboard reorder to a screen
+   reader. Clipped rather than `display: none`, which is not announced. */
+.nav-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

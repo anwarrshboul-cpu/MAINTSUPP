@@ -1,0 +1,408 @@
+/* ── Fix Tracker — the Maintenance Engineer Dashboard ─────────────────────────
+ *
+ * Split out of brand-overrides.css rather than appended to it. That file is
+ * 5,500 lines shared by every dashboard surface and is edited by several people
+ * at once; this view now carries a dozen elements of its own, and the pattern
+ * for a view that does is already established next door — parity-views.css,
+ * store-expiry-calendar.css, admin-console.css are all imported by the
+ * component that needs them.
+ *
+ * The original Fix Tracker block STAYS in brand-overrides.css untouched. It
+ * still styles the shell, the tabs, the filters, the panel and the gallery, and
+ * a test in stage-sixteen asserts the scrim rule lives there. What is here is
+ * what is new, plus the handful of rules that have to win over it — and those
+ * are written one level more specific (`.fix-tracker .fix-tracker__tabs button`
+ * against `.fix-tracker__tabs button`) because brand-overrides.css arrives as
+ * its own <link> from app/(app)/layout.tsx while this file is bundled with the
+ * client chunk, and nothing guarantees which of the two lands second.
+ *
+ * Every colour is a token from globals.css, so the dark theme the dashboard
+ * runs in is inherited rather than restated.
+ */
+
+.fix-tracker {
+  /*
+   * The alarm colour, scoped to this view.
+   *
+   * `--red-600` is #c83e3e in both themes — globals.css does not restate it for
+   * dark — and on the dark --paper (#182830) that is roughly 3.5:1, under the
+   * 4.5:1 small text needs. The overdue flag is the one thing on this screen
+   * that must not be missed, so dark gets a lighter red for the text while the
+   * shared --red-100 wash carries the fill in both.
+   */
+  --fix-alarm: var(--red-600);
+  --fix-alarm-soft: var(--red-100);
+  --fix-warn: var(--amber-600);
+}
+
+:root:not([data-theme="light"]) .fix-tracker {
+  --fix-alarm: #ff8079;
+  --fix-warn: #e8b13c;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────
+ *
+ * 44px minimum: this is used on a phone in a shop and the tabs were 39px.
+ * The count rides in the tab because the tabs and the board's groups are meant
+ * to agree — a Jobs Booked tab reading 672 against a Jobs Booked group of 9 is
+ * the bug that was invisible for want of a number here.
+ */
+.fix-tracker .fix-tracker__tabs {
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.fix-tracker .fix-tracker__tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 2px;
+}
+
+.fix-tracker__tab-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fix-tracker .fix-tracker__tabs button.is-active .fix-tracker__tab-count {
+  background: var(--teal-100);
+  color: var(--teal-600);
+}
+
+/* ── Filters ──────────────────────────────────────────────────────────────
+ *
+ * Three controls now, so the two-column grid in brand-overrides.css is
+ * restated. The controls themselves are stretched to the row rather than the
+ * row alone being made 44px tall: the audit measures the <input> and the
+ * <select>, and a 21px input centred inside a 44px box is still a 21px target.
+ */
+.fix-tracker .fix-tracker__filters {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 210px) minmax(150px, 210px);
+}
+
+.fix-tracker .fix-tracker__search,
+.fix-tracker .fix-tracker__location,
+.fix-tracker .fix-tracker__sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--muted);
+}
+
+.fix-tracker .fix-tracker__search input,
+.fix-tracker .fix-tracker__location select,
+.fix-tracker .fix-tracker__sort select {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────
+ *
+ * `min(280px, 100%)` rather than a flat 280px: the pane is narrower than the
+ * viewport once the sidebar and its padding are taken out, and a 280px track
+ * inside a 260px box is a horizontal scrollbar on a phone.
+ */
+.fix-tracker .fix-tracker__cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+}
+
+.fix-tracker .fix-tracker__card {
+  /*
+   * A <button> does not inherit colour, it takes the UA's `buttontext`, so
+   * every rule in this card was relying on whatever the browser's dark mode
+   * happened to pick. Stated once, here.
+   */
+  color: var(--ink);
+  gap: 9px;
+}
+
+.fix-tracker .fix-tracker__card.is-overdue {
+  border-color: color-mix(in srgb, var(--fix-alarm) 55%, var(--line));
+}
+
+/*
+ * The description, promoted to the headline.
+ *
+ * It was 13px --muted under a 15px full-contrast `item.title`, and on this
+ * estate `title` is monday's Name column, which the import filled with the row
+ * SOURCE — 421 rows reading "Incoming form answer", 168 reading "Manual". The
+ * card's biggest word was the same word forty times down the grid.
+ */
+.fix-tracker__card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* ── Age and due date ─────────────────────────────────────────────────────── */
+.fix-tracker__card-timing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.fix-tracker__age,
+.fix-tracker__due {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+/* Open, no due date, over a month old — 197 jobs on this board. Not an alarm,
+   but not the same as a job raised yesterday either. */
+.fix-tracker__age.is-stale {
+  color: var(--fix-warn);
+}
+
+.fix-tracker__due.is-overdue {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fix-alarm-soft);
+  color: var(--fix-alarm);
+  font-weight: 600;
+}
+
+/* ── Photographs on the card ──────────────────────────────────────────────── */
+.fix-tracker__card-photos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fix-tracker__photo-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fix-tracker__photo-strip {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fix-tracker__photo-strip img {
+  flex: 0 0 auto;
+  width: 50px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--line-soft);
+  object-fit: cover;
+}
+
+.fix-tracker__photo-more {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── Card footer ──────────────────────────────────────────────────────────
+ *
+ * The source label survives here. It is genuine information — a portal
+ * submission is not the same as something typed in by hand — it is simply the
+ * least urgent thing on the card, so it is a tag at the bottom rather than the
+ * headline at the top.
+ */
+.fix-tracker .fix-tracker__card-foot {
+  align-items: center;
+  justify-content: flex-start;
+  /* Pinned to the bottom so cards sharing a grid row line their status chips
+     up, however tall their descriptions ran. */
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+/* `margin-left: auto` rather than `space-between`, so that when the row wraps
+   the date drops to its own line still right-aligned instead of swapping
+   places with the chip. */
+.fix-tracker__card-requested {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.fix-tracker__card-source {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--line-soft);
+  color: var(--muted-2);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ── Panel ────────────────────────────────────────────────────────────────── */
+.fix-tracker__flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-100);
+  color: var(--fix-warn);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fix-tracker__flag.is-overdue {
+  background: var(--fix-alarm-soft);
+  color: var(--fix-alarm);
+}
+
+.fix-tracker__fact-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+
+.fix-tracker__fact-note.is-overdue {
+  color: var(--fix-alarm);
+  font-weight: 600;
+}
+
+.fix-tracker__block-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fix-tracker__files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fix-tracker__files a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: inherit;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Touch targets inside the panel.
+ *
+ * Measured at 390px: the close button was 36px, the completion-date input
+ * 39.5px. Both are thumb targets on a phone standing in a shop.
+ */
+.fix-tracker__panel .icon-button,
+.fix-tracker__panel .primary-button,
+.fix-tracker__panel .secondary-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.fix-tracker__panel input[type="date"],
+.fix-tracker__panel input[type="file"],
+.fix-tracker__panel textarea,
+.fix-tracker__panel select {
+  min-height: 44px;
+}
+
+.fix-tracker__panel .fix-tracker__gallery a {
+  display: block;
+  min-height: 44px;
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────
+ *
+ * 640px is where brand-overrides.css already folds the filters and the fact
+ * grid to one column; this restates it for the three-control filter row and
+ * tightens the card for a 390px shop phone. Nothing here introduces a fixed
+ * width, so the pane cannot outgrow the viewport.
+ */
+@media (max-width: 640px) {
+  .fix-tracker .fix-tracker__filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fix-tracker .fix-tracker__tabs {
+    gap: 10px;
+  }
+
+  .fix-tracker .fix-tracker__tabs button {
+    font-size: 13px;
+  }
+
+  .fix-tracker__card-title {
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+  }
+
+  .fix-tracker__card-requested {
+    /* At 358px of card the chip alone can fill the row; let the date take the
+       next line from the left rather than hang off the right edge. */
+    margin-left: 0;
+  }
+}
+
+/*
+ * The gallery tiles became buttons when they started opening the viewer rather
+ * than a browser tab. A button carries a border, padding and a background that
+ * an anchor does not, and all three showed as a grey frame around every photo.
+ */
+.fix-tracker__gallery button {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  color: inherit;
+}

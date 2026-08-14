@@ -1,0 +1,13 @@
+/*
+ * The reset page's stylesheet, which is the invitation page's stylesheet.
+ *
+ * `@import` rather than a copy: the two pages are the same page doing the same
+ * job for the same reader — somebody holding a link they were handed — and two
+ * copies would drift until the two links looked like they came from different
+ * products.
+ *
+ * It lives here, one level up from `[token]/`, because Vite reads `[` and `]`
+ * as glob syntax: an import that crosses `invite/[token]/` from another route
+ * does not resolve.
+ */
+@import "../invite/[token]/invite.css";

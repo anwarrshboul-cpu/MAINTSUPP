@@ -1,0 +1,740 @@
+/*
+ * The account screens' skin.
+ *
+ * Same palette as the dashboard, so walking out of the portal into these pages
+ * does not feel like leaving the product. Nothing here restyles a shared
+ * class; every selector is `.account-*` and scoped to this area.
+ *
+ * IT USED TO SAY THAT AND MEAN THE LITERALS: #101820 canvas, #182830 surfaces,
+ * #263a44 rules, #12b4a8 accent, written out 76 times with no theme rule
+ * anywhere in the file. Paired with `account-shell.tsx` pinning
+ * `body.dataset.theme = "dark"` on mount, that made the account area a
+ * permanently dark island — an explicit Light choice was discarded here and
+ * nowhere else in the product. The pin is gone, so these had to become the
+ * tokens they were always describing; "the same palette as the dashboard" is
+ * now true by construction rather than by copying.
+ *
+ * The two theme swatches near the foot of this file keep their literals on
+ * purpose. They are a PICTURE of each theme, so they must not follow it.
+ */
+
+.account-page {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100dvh;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* ── Top bar ────────────────────────────────────────────────────────────── */
+
+.account-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar, 300);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  backdrop-filter: blur(8px);
+}
+
+.account-topbar__brand {
+  display: inline-flex;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+
+.account-topbar__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--control-fg);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.account-topbar__back > svg {
+  transform: rotate(180deg);
+}
+
+.account-topbar__back:hover {
+  border-color: var(--brand-bright);
+  color: var(--ink);
+}
+
+.account-topbar__spacer {
+  flex: 1 1 auto;
+}
+
+/* ── Rail and main column ───────────────────────────────────────────────── */
+
+.account-body {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  align-items: start;
+  gap: 0;
+}
+
+.account-rail {
+  position: sticky;
+  top: 61px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 20px 12px 40px;
+  border-right: 1px solid var(--line);
+  max-height: calc(100dvh - 61px);
+  overflow-y: auto;
+}
+
+.account-rail > div {
+  display: grid;
+  gap: 1px;
+}
+
+.account-rail h2 {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.account-rail a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--control-fg);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.account-rail a > svg {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+}
+
+.account-rail a:hover {
+  background: var(--surface-card);
+  color: var(--ink);
+}
+
+.account-rail a.is-active {
+  background: var(--surface-active);
+  box-shadow: inset 3px 0 0 #12b4a8;
+  color: var(--ink);
+}
+
+.account-rail a.is-active > svg {
+  color: var(--accent-fg);
+}
+
+.account-main {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 26px clamp(18px, 4vw, 40px) 60px;
+  max-width: 940px;
+}
+
+/* ── Headings and cards ─────────────────────────────────────────────────── */
+
+.account-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.account-heading__eyebrow {
+  display: block;
+  color: var(--accent-fg);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.account-heading h1 {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: clamp(23px, 3vw, 29px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.account-heading p {
+  margin: 8px 0 0;
+  max-width: 66ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.account-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 13px);
+  background: var(--surface-card);
+}
+
+.account-card--notice {
+  border-color: rgba(240, 139, 35, 0.4);
+  background: linear-gradient(180deg, var(--orange-100), var(--surface-card) 60%);
+}
+
+.account-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.account-card__head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.account-card__head p {
+  margin: 5px 0 0;
+  max-width: 72ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.account-card__aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-note {
+  margin: 0;
+  max-width: 78ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.account-note + .account-note {
+  margin-top: -4px;
+}
+
+.account-card a,
+.account-note a {
+  color: var(--accent-fg);
+}
+
+.account-card code,
+.account-note code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  color: var(--accent-fg);
+  font-size: 11.5px;
+}
+
+.account-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* ── States ─────────────────────────────────────────────────────────────── */
+
+.account-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 30px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-head);
+  text-align: center;
+}
+
+.account-empty > svg { color: var(--muted); }
+.account-empty strong { color: var(--ink); font-size: 13.5px; }
+
+.account-empty p {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.account-loading {
+  margin: 0;
+  padding: 22px 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.account-error {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(218, 70, 70, 0.5);
+  border-radius: 10px;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 12.5px;
+}
+
+.account-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.account-status--on {
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.account-status--off {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.account-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.account-tag--on { background: rgba(18, 180, 168, 0.2); color: #7fe6dd; }
+.account-tag--off { background: rgba(218, 70, 70, 0.16); color: #f0a5a5; }
+
+/* ── Stats, lists, tables, definitions ──────────────────────────────────── */
+
+.account-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.account-stats > div {
+  display: grid;
+  gap: 3px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-head);
+}
+
+.account-stats strong {
+  color: var(--ink);
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.account-stats span { color: #8d9aa7; font-size: 11.5px; }
+.account-stats small { color: #6f8894; font-size: 10.5px; }
+
+.account-list {
+  display: grid;
+  gap: 8px;
+}
+
+.account-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-head);
+}
+
+.account-list__row.is-current {
+  border-color: rgba(18, 180, 168, 0.5);
+}
+
+.account-list__row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.account-list__row strong { color: #f4f8fa; font-size: 13px; }
+
+.account-list__row span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.account-list__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.account-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.account-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.account-table th {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-head);
+  color: var(--table-head-fg);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.account-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  vertical-align: top;
+}
+
+.account-table tbody tr:last-child td { border-bottom: 0; }
+
+.account-table td small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.account-table--shortcuts td:first-child {
+  width: 210px;
+  white-space: nowrap;
+}
+
+.account-table kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-align: center;
+}
+
+.account-table em {
+  padding: 0 5px;
+  color: var(--muted-2);
+  font-style: normal;
+}
+
+.account-definitions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 22px;
+  margin: 0;
+}
+
+.account-definitions > div { display: grid; gap: 4px; }
+
+.account-definitions dt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.account-definitions dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.account-definitions dd a { color: #64d8d0; }
+
+/* ── Forms ──────────────────────────────────────────────────────────────── */
+
+.account-form { display: grid; gap: 14px; }
+
+.account-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+/*
+ * `align-content: start` matters here. The fields sit in an auto-fit grid, so a
+ * row is as tall as its tallest field; without this a field with no hint under
+ * it stretches its own rows to fill that height and its input drifts down out
+ * of line with its neighbours.
+ */
+.account-field { display: grid; align-content: start; gap: 6px; }
+
+.account-field > span {
+  color: var(--table-head-fg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.account-field > small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.account-field input,
+.account-field select,
+.account-field textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.account-field input:focus,
+.account-field select:focus,
+.account-field textarea:focus {
+  border-color: var(--brand-bright);
+  outline: none;
+}
+
+.account-field input:disabled,
+.account-field select:disabled,
+.account-field textarea:disabled {
+  opacity: 0.6;
+}
+
+.account-form__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.account-swatches {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.account-swatches legend {
+  padding: 0;
+  color: var(--table-head-fg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.account-swatches > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.account-swatches button {
+  width: 30px;
+  height: 30px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.account-swatches button.is-active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px #182830, 0 0 0 4px #12b4a8;
+}
+
+.account-swatches__clear {
+  width: auto !important;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 99px !important;
+  background: transparent;
+  color: var(--control-fg);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.account-swatches__clear.is-active {
+  border-color: var(--brand-bright) !important;
+  color: var(--accent-fg);
+  box-shadow: none !important;
+}
+
+/* ── Plan pill and theme picker ─────────────────────────────────────────── */
+
+.account-plan-pill {
+  padding: 6px 14px;
+  border: 1px solid rgba(18, 180, 168, 0.45);
+  border-radius: 99px;
+  background: var(--teal-100);
+  color: var(--accent-fg);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.account-themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.account-theme {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-head);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-theme strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.account-theme small { color: #8d9aa7; font-size: 11.5px; line-height: 1.5; }
+
+.account-theme.is-active {
+  border-color: var(--brand-bright);
+  box-shadow: inset 0 0 0 1px rgba(18, 180, 168, 0.5);
+}
+
+.account-theme.is-unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.account-theme__swatch {
+  height: 46px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+/* Deliberate literals: these two are previews OF the themes, shown side by
+   side in the picker, so each must keep painting its own theme whichever one
+   is currently applied. Tokenising them would make both swatches identical. */
+.account-theme__swatch--dark {
+  background: linear-gradient(140deg, #101820 0 55%, #182830 55% 100%);
+}
+
+.account-theme__swatch--light {
+  background: linear-gradient(140deg, #f4f7f8 0 55%, #ffffff 55% 100%);
+}
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+
+.account-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: var(--z-toast, 800);
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+/* ── Narrow screens ─────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .account-body { grid-template-columns: minmax(0, 1fr); }
+
+  .account-rail {
+    position: static;
+    max-height: none;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-content: start;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .account-rail > div { grid-auto-flow: column; grid-auto-columns: max-content; }
+  .account-rail h2 { display: none; }
+  .account-rail a { white-space: nowrap; }
+  .account-topbar__back span { display: none; }
+}
