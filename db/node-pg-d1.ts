@@ -1,0 +1,903 @@
+/**
+ * A D1 database that is really the `portal` schema on Supabase Postgres.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this exists
+ * ---------------------------------------------------------------------------
+ * `db/node-d1.ts` already moved this application off Cloudflare and onto Node,
+ * by answering the D1 interface out of a SQLite file. That shim needed no SQL
+ * translation and no type conversion, because D1 *is* SQLite: the same bytes,
+ * the same dialect, the same loose typing.
+ *
+ * This file makes the same trade against a different engine. The legacy data is
+ * already in Supabase — 48 tables, 30,265 rows in schema `portal`, loaded and
+ * verified by `migration/legacy-to-postgres/` — and the goal is to serve the
+ * unchanged legacy portal from it. Not one line of `app/**` may move, so
+ * everything that differs between SQLite and Postgres has to be absorbed by two
+ * files: `db/sqlite-to-postgres.ts` for the statements, and this one for the
+ * connection, the parameters and the values that come back.
+ *
+ * ---------------------------------------------------------------------------
+ * Sync vs async: what actually changed, and what did not
+ * ---------------------------------------------------------------------------
+ * `node:sqlite` is synchronous; Postgres is a socket. That sounds like the
+ * central problem of this port and it is very nearly a non-problem, because
+ * D1's own contract is already asynchronous: `all()`, `first()`, `run()`,
+ * `raw()`, `batch()` and `exec()` all return promises, and drizzle's d1 driver
+ * awaits every one of them. `db/node-d1.ts` returned already-resolved promises
+ * around synchronous work; this file returns promises that are actually
+ * pending. No caller can tell.
+ *
+ * Three real consequences, all of them handled below:
+ *
+ *  1. `prepare()` must stay SYNCHRONOUS — drizzle calls it inline in
+ *     `prepareQuery()` and never awaits it. So translation cannot happen there
+ *     if it ever needs to await anything, and it is done at execution time
+ *     instead. That also preserves the laziness `db/init.ts` depends on: D1
+ *     compiles nothing at prepare time, so a batch may legally contain
+ *     `CREATE TABLE units` followed by `CREATE INDEX … ON units`.
+ *
+ *  2. `raw()` no longer needs the "set a mode on the shared compiled statement,
+ *     unset it in a finally" dance that `node-d1.ts` documents. Row-array shape
+ *     is a property of the postgres.js call, not of a cached statement, so
+ *     concurrency cannot interleave two callers into each other's mode.
+ *
+ *  3. `batch()` must run on ONE connection or it is not a transaction at all.
+ *     A pool would happily send `BEGIN` down one socket and the batch's inserts
+ *     down another — a bug that does not fail, it just silently stops being
+ *     atomic. Hence `max: 1` (see `connection()`), plus `sql.begin()`.
+ *
+ * ---------------------------------------------------------------------------
+ * The `public` schema is not ours
+ * ---------------------------------------------------------------------------
+ * The same Supabase project holds the LIVE Phase 2 application in `public` — 23
+ * tables, 791 rows in `jobs` — which has nothing to do with the legacy portal
+ * and must never be touched by it. The connection therefore pins
+ * `search_path = portal, pg_catalog` as a STARTUP parameter, so every
+ * unqualified name in all 238 raw statements and everything drizzle emits
+ * resolves inside `portal`, and an unqualified `CREATE TABLE` from
+ * `db/init.ts`'s bootstrap cannot land in `public`.
+ *
+ * A startup parameter rather than a `SET` after connecting, deliberately: the
+ * pooler can drop an idle session at any time, postgres.js reconnects silently,
+ * and a `SET` issued once would be gone. The startup packet is re-sent on every
+ * reconnect, so the guarantee survives the thing most likely to break it.
+ */
+
+/*
+ * The `.ts` on this specifier is not a typo and not a style choice. Node
+ * resolves ESM specifiers literally, so `tests/node-pg-d1.test.mjs` — which
+ * imports this module directly, the way `tests/node-r2.test.mjs` imports
+ * `node-r2.ts` — cannot load a translator imported without its extension. The
+ * cost is one `tsc --noEmit` complaint (TS5097, "enable
+ * allowImportingTsExtensions"), which this repo's tsconfig does not enable and
+ * which is not part of any build, lint or test script; the same tsconfig
+ * already records that the other half of this repository runs on Node's native
+ * TypeScript with explicit `.ts` specifiers. Vite resolves it either way.
+ */
+import {
+  BOOLEAN_COLUMNS,
+  translateSql,
+  type TranslateOptions,
+} from "./sqlite-to-postgres.ts";
+
+/* ----------------------------------------------------------------- node -- */
+
+interface NodeProcessLike {
+  cwd?: () => string;
+  env?: Record<string, string | undefined>;
+  getBuiltinModule?: (name: string) => unknown;
+}
+
+function nodeProcess(): NodeProcessLike {
+  const runtime = (globalThis as { process?: NodeProcessLike }).process;
+  if (typeof runtime?.getBuiltinModule !== "function") {
+    throw new Error(
+      "The Postgres D1 adapter needs a Node runtime with " +
+        "process.getBuiltinModule (Node 22.3+). This build is running " +
+        "somewhere else.",
+    );
+  }
+  return runtime;
+}
+
+/**
+ * `postgres` (postgres.js) loaded without an import statement, for the same
+ * reason `db/node-d1.ts` reaches for `node:sqlite` through
+ * `process.getBuiltinModule` — and with one extra precaution that was NOT
+ * optional.
+ *
+ * This module is pulled into the server bundle by a `resolve.alias` on
+ * `cloudflare:workers`, and that bundle is produced by a build configured for
+ * workerd. That matters more than it sounds: postgres.js publishes four builds
+ * in its `exports` map, and the `workerd` condition selects `cf/src/index.js`,
+ * whose socket layer is `await import('cloudflare:sockets')`.
+ *
+ * The first version of this function called `require("postgres")` with a
+ * literal specifier, and the bundler followed it — a literal `require` is a
+ * static dependency to a bundler regardless of where the `require` function
+ * came from. The workerd build landed in `dist/server/index.js`, and every
+ * query in the portal failed at runtime with
+ *
+ *   ERR_UNSUPPORTED_ESM_URL_SCHEME: Received protocol 'cloudflare:'
+ *
+ * which names neither postgres.js nor the condition that chose it. The
+ * specifier is therefore assembled from `PG_D1_DRIVER` or a constant, so the
+ * call is opaque to static analysis and Node resolves it at first query, from
+ * the ordinary `node_modules`, under the ordinary `node`/`require` conditions —
+ * which is the CommonJS build that actually speaks TCP.
+ */
+type PostgresFactory = (url: string, options: Record<string, unknown>) => Sql;
+
+const POSTGRES_DRIVER = "postgres";
+
+function postgresModule(): PostgresFactory {
+  const runtime = nodeProcess();
+  const moduleApi = runtime.getBuiltinModule!.call(runtime, "node:module") as {
+    createRequire: (path: string) => (id: string) => unknown;
+  };
+  const path = runtime.getBuiltinModule!.call(runtime, "node:path") as {
+    join: (...parts: string[]) => string;
+  };
+  const load = moduleApi.createRequire(
+    path.join(runtime.cwd?.() ?? ".", "node-pg-d1.cjs"),
+  );
+  const specifier = runtime.env?.["PG_D1_DRIVER"] || POSTGRES_DRIVER;
+  const loaded = load(specifier) as PostgresFactory | { default: PostgresFactory };
+  return typeof loaded === "function" ? loaded : loaded.default;
+}
+
+/* ------------------------------------------------------ postgres.js types -- */
+
+interface PostgresColumn {
+  name: string;
+  type: number;
+}
+
+interface PostgresResult extends Array<unknown> {
+  columns?: PostgresColumn[];
+  count?: number;
+  command?: string;
+}
+
+interface Sql {
+  unsafe(sql: string, params?: unknown[]): PostgresQuery;
+  begin<T>(run: (tx: Sql) => Promise<T>): Promise<T>;
+  end(options?: { timeout?: number }): Promise<void>;
+}
+
+interface PostgresQuery extends Promise<PostgresResult> {
+  values(): Promise<PostgresResult>;
+  simple(): PostgresQuery;
+}
+
+/* -------------------------------------------------------- the connection -- */
+
+/**
+ * Where the legacy portal's Postgres lives.
+ *
+ * `PG_D1_URL` wins over `DATABASE_URL` so that a deployment running both halves
+ * of this repo — the Phase 2 API also reads `DATABASE_URL` — can point the
+ * legacy portal somewhere else without disturbing it.
+ */
+function resolveDatabaseUrl(): string {
+  const env = nodeProcess().env ?? {};
+  const url = env["PG_D1_URL"] || env["DATABASE_URL"];
+  if (!url) {
+    throw new Error(
+      "PG_D1=1 selects the Postgres D1 adapter, but neither PG_D1_URL nor " +
+        "DATABASE_URL is set. Point one at the Supabase session pooler " +
+        "(port 5432) holding the `portal` schema.",
+    );
+  }
+  if (/:6543\//.test(url)) {
+    /*
+     * Not fatal, because a URL is the operator's decision, but loud: port 6543
+     * is Supabase's TRANSACTION pooler, which hands out a different backend per
+     * statement. `batch()` below opens a real transaction and the bootstrap in
+     * `db/init.ts` runs hundreds of statements through it — see the note in
+     * `packages/db/src/client.ts` about this workload deadlocking there.
+     */
+    console.warn(
+      "[node-pg-d1] the connection string uses port 6543 (transaction " +
+        "pooler). This adapter expects the session pooler on 5432.",
+    );
+  }
+  return url;
+}
+
+/**
+ * The schema this adapter is allowed to see.
+ *
+ * `public` is absent on purpose and that absence is the safety property: the
+ * live Phase 2 application's 23 tables are there, and an unqualified name that
+ * fails to resolve in `portal` must be an error rather than a quiet hit on
+ * somebody else's `jobs` table.
+ */
+const SEARCH_PATH = "portal, pg_catalog";
+
+/* --------------------------------------------------------------- values -- */
+
+/**
+ * Converts a bound parameter into the one shape that survives the round trip:
+ * text, with the type left for Postgres to decide.
+ *
+ * The reason this works — and the reason `PG_TYPES` below has to exist — is a
+ * detail of how postgres.js sends a parameterised query, and it is worth
+ * stating because it is not what the documentation suggests and it cost an
+ * afternoon to find:
+ *
+ *   1. Values are collected and each is given a type OID by `inferType()`. A
+ *      string or a number gets OID 0, "unspecified"; a JS `Date` gets
+ *      `timestamptz`; `true` gets `boolean`.
+ *   2. Because the query has parameters, postgres.js sets `describeFirst` and
+ *      sends only Parse + Describe. Postgres replies with a ParameterDescription
+ *      naming the type it INFERRED for every unspecified parameter — `boolean`
+ *      for `WHERE active = $1`, `date` for `WHERE due_at = $1`.
+ *   3. Only then does postgres.js Bind — and it serialises each value with the
+ *      serialiser registered for the type Postgres just named.
+ *
+ * So the parameter is typed by the column, exactly as a SQLite-shaped caller
+ * needs. But it is serialised by a function that expects a JS-native value of
+ * that type, and postgres.js's built-in `boolean` serialiser is literally
+ * `x === true ? 't' : 'f'`. Hand it the string `"1"` that
+ * `INSERT … (active) VALUES (?)` binds and it sends `f`, and every flag the
+ * portal writes is silently false. Not an error — the wrong answer, which is
+ * why `PG_TYPES` replaces that serialiser rather than this function trying to
+ * guess which parameters are boolean.
+ *
+ * Everything here therefore becomes a string, which is what SQLite's own type
+ * affinity does to a bound value anyway, and `PG_TYPES` makes sure the three
+ * types where "a string" and "what postgres.js expects" disagree are handled.
+ * The object case throws for the same reason it throws in `node-d1.ts`: an
+ * accidental object parameter must be an error and not a silently wrong query.
+ */
+function toBoundValue(value: unknown, index: number): string | null | Uint8Array {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "boolean") return value ? "1" : "0";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "bigint") return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  throw new TypeError(
+    `D1_ERROR: parameter ${index + 1} is a ${typeof value} that Postgres ` +
+      "cannot bind. Serialise it before binding.",
+  );
+}
+
+/** SQLite's spellings of true, plus Postgres' own, all of which mean 1. */
+const TRUTHY = new Set(["1", "t", "true", "y", "yes", "on"]);
+const FALSY = new Set(["0", "f", "false", "n", "no", "off"]);
+
+/**
+ * The three serialisers where postgres.js's JS-native assumption and this
+ * application's SQLite-shaped values disagree.
+ *
+ * These are merged over postgres.js's defaults, keyed by type OID, and are
+ * chosen at Bind time using the type Postgres inferred for the parameter — see
+ * `toBoundValue()` for why that is the interesting moment.
+ *
+ *  - `bool` is the one that matters. The default sends `f` for anything that is
+ *    not the JS literal `true`, so every `VALUES (?, …, 1)` in the app would
+ *    write false. This accepts what SQLite accepts, and REFUSES anything else
+ *    rather than defaulting to false — a flag written from an unparseable value
+ *    is a data corruption that no test would notice.
+ *
+ *  - `date` (which covers `date`, `timestamp` and `timestamptz`) defaults to
+ *    `new Date(x).toISOString()`, and that reparse is a bug waiting to happen:
+ *    JavaScript reads `2026-08-07 09:33:46` — the format 35,847 legacy rows
+ *    were written in — as LOCAL time, so a server outside UTC would shift every
+ *    timestamp it round-tripped. Passing the string through hands the parsing
+ *    to Postgres, which reads it as UTC because the session is pinned to UTC,
+ *    which is what SQLite's `CURRENT_TIMESTAMP` always meant.
+ *
+ *  - `json` defaults to `JSON.stringify`, which would double-encode the JSON
+ *    this application stores as text. `portal` has no json columns today; this
+ *    is here so that adding one does not corrupt it.
+ */
+const PG_TYPES = {
+  bool: {
+    to: 16,
+    from: [16],
+    serialize: (value: unknown) => {
+      if (value === true) return "t";
+      if (value === false) return "f";
+      const text = String(value).toLowerCase();
+      if (TRUTHY.has(text)) return "t";
+      if (FALSY.has(text)) return "f";
+      throw new TypeError(
+        `D1_ERROR: ${JSON.stringify(value)} was bound to a boolean column and ` +
+          "is neither true nor false.",
+      );
+    },
+    parse: (value: string) => value === "t",
+  },
+  date: {
+    to: 1184,
+    from: [1082, 1114, 1184],
+    serialize: (value: unknown) =>
+      value instanceof Date ? value.toISOString() : String(value),
+    parse: (value: string) => new Date(value),
+  },
+  json: {
+    to: 114,
+    from: [114, 3802],
+    serialize: (value: unknown) =>
+      typeof value === "string" ? value : JSON.stringify(value),
+    parse: (value: string) => value,
+  },
+} as const;
+
+/**
+ * Postgres type OIDs, from `pg_type`. Only the ones `portal` can produce.
+ *
+ * The schema is 430 `text`, 111 `timestamptz`, 27 `boolean`, 27 `integer`, 12
+ * `date`, 8 `bigint` and 6 `double precision` columns; `int8` and `numeric` are
+ * here because `count(*)` and `sum()` produce them regardless of what the
+ * columns hold.
+ */
+const OID = {
+  BOOL: 16,
+  BYTEA: 17,
+  INT8: 20,
+  JSON: 114,
+  DATE: 1082,
+  TIMESTAMP: 1114,
+  TIMESTAMPTZ: 1184,
+  NUMERIC: 1700,
+  JSONB: 3802,
+} as const;
+
+/**
+ * Converts one Postgres value back into the shape the legacy application has
+ * always been handed.
+ *
+ * This is the half of the port that `migration/legacy-to-postgres/README.md`
+ * flagged as "the largest single piece of work and the most likely source of
+ * subtle UI bugs" — every consumer of a timestamp or a flag would need
+ * checking. It needs checking in exactly one place instead, because the
+ * migration typed the columns properly and the application did not change:
+ *
+ *  - `boolean` → 1/0. `db/schema.ts` declares all 27 of these as
+ *    `integer({ mode: "boolean" })`, and drizzle's mapper is literally
+ *    `Number(value) === 1`; hand it `true` and every flag in the portal reads
+ *    false. Raw callers compare against 1 directly.
+ *
+ *  - `timestamptz` → ISO-8601 with `Z`. The legacy column held three formats at
+ *    once (see the migration's decision 1); ISO is one of them, it is
+ *    unambiguous, `new Date()` parses it, and — unlike the space-separated form
+ *    — sorting it as text agrees with sorting it as an instant.
+ *
+ *  - `date` → `YYYY-MM-DD`, with no time and no zone. These 12 columns are
+ *    `<input type="date">` fields (`due_at`, `completed_at`, `expiry_date`, …)
+ *    and the whole reason the migration typed them `date` rather than
+ *    `timestamptz` was to stop a timezone turning "the 7th" into "the 6th".
+ *    Formatting through UTC parts keeps that promise: postgres.js parses a bare
+ *    date into UTC midnight, so the UTC parts are the original characters.
+ *
+ *  - `int8`/`numeric` → number. postgres.js returns both as strings, so
+ *    `count(*)` would otherwise come back as `"776"` and every
+ *    `total > 0 ? … : …` in the app would still be true but every
+ *    `total + 1` would be `"7761"`. Values beyond `Number.MAX_SAFE_INTEGER`
+ *    keep the string, because a wrong number is worse than an unexpected type.
+ *
+ *  - `json`/`jsonb` → text. The legacy app stores JSON in `text` columns and
+ *    calls `JSON.parse` itself; `portal` has no json columns today, so this is
+ *    only here so that adding one does not hand a route an object it will try
+ *    to parse.
+ */
+function fromPostgresValue(value: unknown, oid: number): unknown {
+  if (value === null || value === undefined) return null;
+
+  switch (oid) {
+    case OID.BOOL:
+      return value === true || value === "t" || value === 1 ? 1 : 0;
+    case OID.DATE: {
+      const date = value instanceof Date ? value : new Date(String(value));
+      const year = String(date.getUTCFullYear()).padStart(4, "0");
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+    case OID.TIMESTAMP:
+    case OID.TIMESTAMPTZ: {
+      const date = value instanceof Date ? value : new Date(String(value));
+      return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+    }
+    case OID.INT8:
+    case OID.NUMERIC: {
+      const asNumber = Number(value);
+      if (!Number.isFinite(asNumber)) return value;
+      if (oid === OID.INT8 && !Number.isSafeInteger(asNumber)) return value;
+      return asNumber;
+    }
+    case OID.JSON:
+    case OID.JSONB:
+      return typeof value === "string" ? value : JSON.stringify(value);
+    case OID.BYTEA:
+      return value;
+    default:
+      return value;
+  }
+}
+
+/* ------------------------------------------------------------- the shim -- */
+
+interface D1Meta {
+  duration: number;
+  size_after: number;
+  rows_read: number;
+  rows_written: number;
+  last_row_id: number;
+  changed_db: boolean;
+  changes: number;
+  served_by: string;
+}
+
+interface D1Result<T = Record<string, unknown>> {
+  results: T[];
+  success: true;
+  meta: D1Meta;
+}
+
+/**
+ * The same deliberate deviations `db/node-d1.ts` lists, plus one of this
+ * engine's own: `last_row_id` is always 0. Postgres has no rowid and no
+ * `last_insert_rowid()`, every legacy primary key is an application-generated
+ * text id (migration decision 10), and no caller in this repo reads the field —
+ * checked. `meta.changes` is real, because `consumeReset()` and the invitation
+ * claim in `app/api/auth/` decide whether a single-use token was won or lost by
+ * reading it.
+ */
+function meta(overrides: Partial<D1Meta>): D1Meta {
+  return {
+    duration: 0,
+    size_after: 0,
+    rows_read: 0,
+    rows_written: 0,
+    last_row_id: 0,
+    changed_db: false,
+    changes: 0,
+    served_by: "node-postgres",
+    ...overrides,
+  };
+}
+
+/** Statements whose `count` from Postgres means "rows affected", not "rows". */
+const WRITE_COMMANDS = new Set(["INSERT", "UPDATE", "DELETE", "MERGE"]);
+
+/**
+ * A translated statement plus the rows it produced, in both shapes.
+ *
+ * One execution path for `all()`, `first()`, `run()` and `raw()`, built on
+ * postgres.js's `.values()` — which returns row ARRAYS and the column
+ * descriptors together. Object rows are assembled here rather than by
+ * postgres.js, because the type conversion above is per column OID and the
+ * descriptors are the only place the OIDs exist.
+ */
+interface Executed {
+  columns: PostgresColumn[];
+  rows: unknown[][];
+  command: string;
+  count: number;
+}
+
+/**
+ * Translation is expensive relative to a query and every statement in this
+ * application repeats: `db/init.ts` issues several hundred per boot and the
+ * board reads the same dozen statements thousands of times. Bounded for the
+ * same reason `node-d1.ts` bounds its compiled-statement cache — a long-lived
+ * container must not accumulate an entry for every one-off DDL string.
+ */
+const TRANSLATION_CACHE_LIMIT = 512;
+
+class NodePgConnection {
+  readonly url: string;
+  private sql: Sql | null = null;
+  private readonly translations = new Map<string, string>();
+  private primaryKeys: ReadonlyMap<string, readonly string[]> | null = null;
+
+  constructor(url: string) {
+    this.url = url;
+  }
+
+  /**
+   * One connection, not a pool.
+   *
+   * `max: 1` is not a resource decision, it is the transaction decision from
+   * the header: drizzle's d1 driver implements `transaction()` by sending a
+   * bare `begin` as its own statement, and `batch()` below opens a real one, so
+   * a second socket would put half the work outside the transaction. One
+   * connection also matches what a D1 binding is, which is what every caller in
+   * this repo was written against.
+   *
+   * `prepare: false` because the connection may be a pooler, where a named
+   * prepared statement can outlive the backend it was created on.
+   */
+  connection(): Sql {
+    if (this.sql) return this.sql;
+    const postgres = postgresModule();
+    this.sql = postgres(this.url, {
+      max: 1,
+      prepare: false,
+      types: PG_TYPES,
+      connection: {
+        search_path: SEARCH_PATH,
+        /*
+         * SQLite's `CURRENT_TIMESTAMP` is UTC and the 111 migrated timestamp
+         * columns were loaded on that basis, so the session must not inherit a
+         * host's local zone: `2026-08-07 09:33:46` written by the app has to
+         * mean the same instant it has always meant.
+         */
+        TimeZone: "UTC",
+        application_name: "maintsupp-legacy-portal",
+      },
+      // The bootstrap's DDL raises "already exists, skipping" notices by the
+      // hundred on every boot. They are the expected outcome, not news.
+      onnotice: () => {},
+    });
+    return this.sql;
+  }
+
+  translate(sql: string, options: TranslateOptions): string {
+    const cached = this.translations.get(sql);
+    if (cached !== undefined) {
+      // Re-insert so Map insertion order is a least-recently-used order.
+      this.translations.delete(sql);
+      this.translations.set(sql, cached);
+      return cached;
+    }
+    const translated = translateSql(sql, options);
+    this.translations.set(sql, translated);
+    if (this.translations.size > TRANSLATION_CACHE_LIMIT) {
+      const oldest = this.translations.keys().next();
+      if (!oldest.done) this.translations.delete(oldest.value);
+    }
+    return translated;
+  }
+
+  /**
+   * Primary keys per table, read once, and only when something needs them.
+   *
+   * Only `INSERT OR REPLACE` does — it becomes `ON CONFLICT (…) DO UPDATE` and
+   * Postgres insists on a conflict target. This codebase contains none, so this
+   * query is never run in practice; it exists so that the first one written
+   * works instead of failing with a translator error.
+   */
+  async primaryKeyMap(): Promise<ReadonlyMap<string, readonly string[]>> {
+    if (this.primaryKeys) return this.primaryKeys;
+    const rows = (await this.connection().unsafe(
+      `SELECT c.relname::text AS table_name,
+              a.attname::text AS column_name,
+              array_position(i.indkey::int2[], a.attnum) AS ordinal
+         FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)
+        WHERE i.indisprimary AND n.nspname = 'portal'
+        ORDER BY 1, 3`,
+    )) as Array<{ table_name: string; column_name: string }>;
+
+    const map = new Map<string, string[]>();
+    for (const row of rows) {
+      const existing = map.get(row.table_name);
+      if (existing) existing.push(row.column_name);
+      else map.set(row.table_name, [row.column_name]);
+    }
+    this.primaryKeys = map;
+    return map;
+  }
+
+  /** Translation options, resolved lazily so the common path stays cheap. */
+  async optionsFor(sql: string): Promise<TranslateOptions> {
+    if (!/\bINSERT\s+OR\s+REPLACE\b/i.test(sql)) return {};
+    return { primaryKeys: await this.primaryKeyMap() };
+  }
+
+  async close(): Promise<void> {
+    if (!this.sql) return;
+    const sql = this.sql;
+    this.sql = null;
+    await sql.end({ timeout: 5 });
+  }
+}
+
+/*
+ * Fields are declared and assigned rather than written as TypeScript parameter
+ * properties, so that `node --test tests/node-pg-d1.test.mjs` can import this
+ * file directly: Node's built-in type stripping rewrites nothing, and a
+ * parameter property is a construct with runtime behaviour rather than a type
+ * annotation. The tests import the real module for the same reason
+ * `tests/node-r2.test.mjs` does — a re-implementation would be testing itself.
+ */
+class NodePgPreparedStatement {
+  private readonly connection: NodePgConnection;
+  private readonly sql: string;
+  private readonly params: Array<string | null | Uint8Array>;
+
+  constructor(
+    connection: NodePgConnection,
+    sql: string,
+    params: Array<string | null | Uint8Array>,
+  ) {
+    this.connection = connection;
+    this.sql = sql;
+    this.params = params;
+  }
+
+  /**
+   * Returns a NEW statement, for the reason `db/node-d1.ts` spells out: drizzle
+   * prepares once and binds per execution, so mutating `this` would leak one
+   * request's parameters into the next. It matters more here than it did there,
+   * because here two requests really can be in flight at the same time.
+   */
+  bind(...values: unknown[]): NodePgPreparedStatement {
+    return new NodePgPreparedStatement(
+      this.connection,
+      this.sql,
+      values.map(toBoundValue),
+    );
+  }
+
+  async all<T = Record<string, unknown>>(): Promise<D1Result<T>> {
+    const started = performance.now();
+    const executed = await this.execute();
+    const rows = objectRows(executed);
+    return {
+      results: rows as T[],
+      success: true,
+      meta: meta({
+        duration: performance.now() - started,
+        rows_read: rows.length,
+        ...writeMeta(executed),
+      }),
+    };
+  }
+
+  async first<T = Record<string, unknown>>(column?: string): Promise<T | null> {
+    const executed = await this.execute();
+    const rows = objectRows(executed);
+    const row = rows[0];
+    if (!row) return null;
+    if (column === undefined) return row as T;
+    return (row[column] ?? null) as T;
+  }
+
+  async run<T = Record<string, unknown>>(): Promise<D1Result<T>> {
+    const started = performance.now();
+    const executed = await this.execute();
+    const written = writeMeta(executed);
+    return {
+      results: [],
+      success: true,
+      meta: meta({ duration: performance.now() - started, ...written }),
+    };
+  }
+
+  /**
+   * Rows as arrays, which is how drizzle reads every SELECT it maps onto a
+   * schema (`values()` in its d1 session calls this).
+   */
+  async raw<T = unknown[]>(options?: { columnNames?: boolean }): Promise<T[]> {
+    const executed = await this.execute();
+    const rows = executed.rows.map((row) =>
+      row.map((value, index) =>
+        fromPostgresValue(value, executed.columns[index]?.type ?? 0),
+      ),
+    ) as T[];
+    if (options?.columnNames) {
+      const names = executed.columns.map((column) => column.name);
+      return [names as unknown as T, ...rows];
+    }
+    return rows;
+  }
+
+  /** @internal — used by `batch()` to run this statement inside its transaction. */
+  async executeOn(sql: Sql): Promise<Executed> {
+    return this.execute(sql);
+  }
+
+  /**
+   * Translate, send, and restate any failure the way D1 does.
+   *
+   * The `D1_ERROR:` prefix is what the Workers runtime puts in front of a query
+   * failure, so an error surfacing in a log on Node reads the same as it would
+   * on Cloudflare. The TRANSLATED statement is attached rather than the
+   * original, because that is the text Postgres objected to — with the original
+   * in hand and no translation, "column active is of type boolean" names a
+   * query that does not exist.
+   */
+  private async execute(on?: Sql): Promise<Executed> {
+    const options = await this.connection.optionsFor(this.sql);
+    /*
+     * Translation is inside the try, not before it. A statement this translator
+     * refuses — a `PRAGMA` it does not know, a `strftime` — throws here, and
+     * that is exactly the failure a porter needs to see; leaving it outside
+     * would route the most informative error in the file around the logging.
+     */
+    let translated = this.sql;
+    const sql = on ?? this.connection.connection();
+    try {
+      translated = this.connection.translate(this.sql, options);
+      const result = await sql.unsafe(translated, this.params).values();
+      return {
+        columns: result.columns ?? [],
+        rows: result as unknown as unknown[][],
+        command: result.command ?? "",
+        count: result.count ?? 0,
+      };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      /*
+       * Every route in this application wraps its work in a `catch` that
+       * answers "temporarily unavailable" and throws the cause away — sensible
+       * for one failed query, useless while porting, when the first question is
+       * always WHICH statement Postgres refused and what it looked like after
+       * translation. `PG_D1_DEBUG=1` puts that on stderr; off, this stays as
+       * quiet as the SQLite shim.
+       */
+      if (nodeProcess().env?.["PG_D1_DEBUG"] === "1") {
+        console.error(
+          `[node-pg-d1] ${message}\n  original:   ${this.sql.trim()}\n` +
+            `  translated: ${translated.trim()}\n  params:     ${JSON.stringify(this.params)}`,
+        );
+      }
+      throw new Error(
+        `D1_ERROR: ${message.replace(/^D1_ERROR:\s*/, "")}: ${translated.trim()}`,
+        { cause },
+      );
+    }
+  }
+}
+
+/** Row arrays plus column descriptors, as the plain objects D1 returns. */
+function objectRows(executed: Executed): Array<Record<string, unknown>> {
+  return executed.rows.map((row) => {
+    const object: Record<string, unknown> = {};
+    for (let i = 0; i < executed.columns.length; i += 1) {
+      const column = executed.columns[i];
+      object[column.name] = fromPostgresValue(row[i], column.type);
+    }
+    return object;
+  });
+}
+
+/**
+ * `changes` only for statements that changed something.
+ *
+ * postgres.js reports `count` for a SELECT too — it is the row count — and D1
+ * reports 0 changes for a read. The two callers that read `meta.changes`
+ * (`reset-tokens.ts`, the invitation claim) both run UPDATEs whose whole
+ * purpose is to find out whether a single-use token was won, so reporting a
+ * SELECT's row count here would hand the same token to two requests.
+ */
+function writeMeta(executed: Executed): Partial<D1Meta> {
+  if (!WRITE_COMMANDS.has(executed.command)) return {};
+  const changes = executed.count;
+  return { changes, changed_db: changes > 0, rows_written: changes };
+}
+
+class NodePgDatabase {
+  private readonly connection: NodePgConnection;
+
+  constructor(url: string) {
+    this.connection = new NodePgConnection(url);
+  }
+
+  /** Host and database only — the password must never reach a log line. */
+  get describe(): string {
+    try {
+      const parsed = new URL(this.connection.url);
+      return `${parsed.host}${parsed.pathname} (search_path=${SEARCH_PATH})`;
+    } catch {
+      return `(unparseable connection string) (search_path=${SEARCH_PATH})`;
+    }
+  }
+
+  prepare(sql: string): NodePgPreparedStatement {
+    return new NodePgPreparedStatement(this.connection, sql, []);
+  }
+
+  /**
+   * Every statement in one transaction, which is D1's contract for `batch()`
+   * and the reason `db/init.ts` uses it for the schema bootstrap.
+   *
+   * `sql.begin()` rather than a raw `BEGIN` string, because postgres.js reserves
+   * a connection for the callback — and with `max: 1` that is the only
+   * connection, so nothing else in the process can interleave a statement into
+   * the middle of the batch. That interleaving is possible here and was not on
+   * `node-d1.ts`, where `node:sqlite` is synchronous and no other task can run
+   * between two statements.
+   *
+   * Postgres has no need for `node-d1.ts`'s SAVEPOINT branch: nothing in this
+   * repo calls `db.transaction()`, and if it did, postgres.js's own `begin()`
+   * nests as a savepoint automatically.
+   */
+  async batch<T = Record<string, unknown>>(
+    statements: NodePgPreparedStatement[],
+  ): Promise<Array<D1Result<T>>> {
+    const started = performance.now();
+    return this.connection.connection().begin(async (tx) => {
+      const results: Array<D1Result<T>> = [];
+      for (const statement of statements) {
+        const executed = await statement.executeOn(tx);
+        const rows = objectRows(executed);
+        results.push({
+          results: rows as T[],
+          success: true,
+          meta: meta({
+            duration: performance.now() - started,
+            rows_read: rows.length,
+            ...writeMeta(executed),
+          }),
+        });
+      }
+      return results;
+    });
+  }
+
+  /**
+   * D1's multi-statement escape hatch, on Postgres' simple query protocol —
+   * which is the only one that accepts several statements in one message.
+   * Nothing in this application calls it; drizzle and `db/init.ts` both use
+   * `batch()`.
+   */
+  async exec(sql: string): Promise<{ count: number; duration: number }> {
+    const started = performance.now();
+    const translated = translateSql(sql);
+    await this.connection.connection().unsafe(translated).simple();
+    const count = sql
+      .split(";")
+      .filter((statement) => statement.trim().length > 0).length;
+    return { count, duration: performance.now() - started };
+  }
+
+  /**
+   * Not implemented, and left absent rather than faked, exactly as in
+   * `db/node-d1.ts`: `dump()` returns a serialised copy of a D1 database, and a
+   * stub returning an empty buffer would be a backup that silently held nothing.
+   */
+  async dump(): Promise<ArrayBuffer> {
+    throw new Error("dump() is not supported by the Postgres D1 adapter.");
+  }
+
+  /** For tests and for a clean shutdown; the app never closes its binding. */
+  async close(): Promise<void> {
+    await this.connection.close();
+  }
+}
+
+/**
+ * The process-wide database.
+ *
+ * Lazy for the same reason `node-d1.ts` is lazy: a deployment with no
+ * `DATABASE_URL` should fail on its first query with the message from
+ * `resolveDatabaseUrl()`, not crash at import time with a stack trace from
+ * inside a bundle.
+ */
+let database: NodePgDatabase | null = null;
+
+export function nodePgD1Database(): NodePgDatabase {
+  if (database) return database;
+  try {
+    database = new NodePgDatabase(resolveDatabaseUrl());
+  } catch (error) {
+    // Logged here because nobody downstream will: every route catches and
+    // answers "temporarily unavailable", throwing the cause away.
+    console.error("[node-pg-d1] cannot configure the Postgres binding:", error);
+    throw error;
+  }
+  console.log(`[node-pg-d1] serving ${database.describe}`);
+  return database;
+}
+
+/** @internal — a standalone binding for tests, with no process-wide state. */
+export function createPgD1Database(url?: string): NodePgDatabase {
+  return new NodePgDatabase(url ?? resolveDatabaseUrl());
+}
+
+export { BOOLEAN_COLUMNS };
+export type { D1Result, NodePgDatabase };

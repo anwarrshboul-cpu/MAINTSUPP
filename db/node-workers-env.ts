@@ -26,17 +26,43 @@
  * certificate the portal holds.
  */
 import { nodeD1Database } from "./node-d1";
+import { nodePgD1Database } from "./node-pg-d1";
 import { createR2Bucket } from "./node-r2";
+
+/**
+ * Which database `env.DB` is.
+ *
+ * `PG_D1=1` swaps the SQLite file for the Supabase `portal` schema through
+ * `db/node-pg-d1.ts`. Absent — which is every existing deployment — nothing
+ * about the SQLite path changes, including this module's import graph:
+ * `node-pg-d1.ts` pulls `postgres` in through `createRequire` at first query,
+ * so a SQLite deployment never loads it.
+ *
+ * An explicit opt-in and NOT "DATABASE_URL is set", for the same reason
+ * `D1_NODE_SHIM` is explicit in `vite.config.ts`: `DATABASE_URL` in this repo
+ * belongs to the Phase 2 stack in `apps/` and `packages/`, which reads it from
+ * the same `.dev.vars`. Auto-switching on its presence would mean that running
+ * the legacy portal in a shell that had sourced those variables silently
+ * repointed it at another database — a change of data source that nothing in
+ * the UI would show.
+ */
+function usePostgres(): boolean {
+  return (
+    (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process?.env?.["PG_D1"] === "1"
+  );
+}
 
 export const env: Record<string, unknown> = {
   /**
-   * Lazy, because the SQLite file is resolved and opened on first touch. A
+   * Lazy, because the database is resolved and opened on first touch. A
    * module-level open would run during the server bundle's import, before any
-   * request, and a missing volume would present as an unexplained boot crash
-   * instead of a database error naming `D1_SQLITE_PATH`.
+   * request, and a missing volume — or a missing `DATABASE_URL` — would present
+   * as an unexplained boot crash instead of an error naming `D1_SQLITE_PATH` or
+   * `PG_D1_URL`.
    */
   get DB() {
-    return nodeD1Database();
+    return usePostgres() ? nodePgD1Database() : nodeD1Database();
   },
 
   /**
