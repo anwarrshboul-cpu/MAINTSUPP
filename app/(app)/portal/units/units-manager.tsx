@@ -274,7 +274,10 @@ export function UnitsManager({
     <section className="section-stack">
       <header className="section-header">
         <div>
-          <h2>Units and assets</h2>
+          {/* An `<h1>` for the same reason as the site register's — this page
+              carried no heading of any level above 2, so it had no name of its
+              own once the topbar stopped supplying one below 768px. */}
+          <h1>Units and assets</h1>
           <p className="drawer-label">Equipment on site, with its warranty and service record.</p>
         </div>
         <div className="section-header__actions">

@@ -31,6 +31,7 @@ import {
   AccountDevelopersPanel,
   AccountIntegrationsPanel,
 } from "./account-platform";
+import { useScrollOverflow } from "./scroll-affordance";
 import {
   AccountBetaPanel,
   AccountHelpPanel,
@@ -57,6 +58,13 @@ export function AccountShell({ panel }: { panel: string }) {
   const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /*
+   * Below 900px the rail stops being a column and becomes a sideways strip of
+   * twelve destinations, of which a phone shows three. See
+   * scroll-affordance.ts — the state is measured, so the fade cannot claim
+   * there is more to see once there is not.
+   */
+  const railRef = useScrollOverflow<HTMLElement>();
 
   /*
    * The account screens live outside the portal, which used to be the only
@@ -177,7 +185,7 @@ export function AccountShell({ panel }: { panel: string }) {
       </header>
 
       <div className="account-body">
-        <nav className="account-rail" aria-label="Account settings">
+        <nav className="account-rail" aria-label="Account settings" ref={railRef}>
           {groups.map((group) => (
             <div key={group}>
               <h2>{group}</h2>

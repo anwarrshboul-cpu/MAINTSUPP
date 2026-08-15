@@ -1,0 +1,117 @@
+/*
+ * The visible half of `scroll-affordance.ts` — see that file for what the two
+ * strips were doing wrong and why the state is measured rather than assumed.
+ *
+ * A MASK rather than a gradient overlay, and that is the load-bearing choice.
+ * An overlay has to be painted in the strip's own background colour to look
+ * like a fade, and the board strip sits on `--paper` while the account rail
+ * sits on the page ground: two colours, both of which move between the light
+ * and dark themes, and either would have been one more place in this codebase
+ * where a colour is restated and can drift. A mask fades the CONTENT to
+ * transparent, so it is right on any ground in either theme without naming one.
+ *
+ * It also costs no elements. Both strips are flex/grid children whose sizing
+ * their parents own, and an absolutely-positioned overlay needs a positioned
+ * wrapper around the scroller — the change this file exists to avoid. Nothing
+ * here adds a box, so nothing here can add horizontal overflow; verified at
+ * 320, 390, 414 and 768.
+ *
+ * Masking does not affect layout, hit-testing or focus. A tab reached by
+ * keyboard is scrolled into view by the browser, which fires the `scroll`
+ * listener, which moves the fade off it — so the affordance can never sit over
+ * the thing a keyboard user is looking at.
+ *
+ * The selector names both strips rather than matching `[data-overflow]` on its
+ * own. A bare attribute selector is a global rule in a codebase with three
+ * stylesheets and a documented history of accidental cross-file matches, and
+ * `data-overflow` is a plausible enough name for somebody to reach for again.
+ */
+
+.board-views__tabs,
+.account-rail {
+  /*
+   * A mask repaints on every scroll frame. Promoting the strip once is cheaper
+   * than the browser deciding to per frame, and it costs nothing when no mask
+   * is applied.
+   */
+  will-change: mask-image;
+}
+
+/*
+ * 36px is wide enough to read as "there is more" at arm's length and narrow
+ * enough that the tab under it is still legible — at 320px the board strip is
+ * 218px wide, so a wider fade would be eating a fifth of the visible tabs.
+ */
+:is(.board-views__tabs, .account-rail)[data-overflow="end"] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+}
+
+:is(.board-views__tabs, .account-rail)[data-overflow="start"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 36px);
+  mask-image: linear-gradient(to right, transparent, #000 36px);
+}
+
+:is(.board-views__tabs, .account-rail)[data-overflow="both"] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 36px,
+    #000 calc(100% - 36px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 36px,
+    #000 calc(100% - 36px),
+    transparent
+  );
+}
+
+/*
+ * The board strip's forward control — see the note beside it in
+ * board-chrome.tsx for why that strip needs one and the account rail does not.
+ *
+ * Shown by an adjacent-sibling selector off the scroller's own attribute, so
+ * the button's visibility is driven by the same measured state as the fade and
+ * costs no React render. It is 44px because it is a thing a thumb has to hit,
+ * and it disappears — not greys out — at the far end of the scroll, because a
+ * dead control that stays on screen is the thing the reader has to test to
+ * learn is dead.
+ */
+.board-views__forward {
+  display: none;
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.board-views__forward:hover {
+  color: var(--ink);
+}
+
+.board-views__tabs[data-overflow="end"] + .board-views__forward,
+.board-views__tabs[data-overflow="both"] + .board-views__forward {
+  display: inline-flex;
+}
+
+/*
+ * `data-overflow="none"` is left with no rule at all rather than given
+ * `mask-image: none`. The attribute is the only thing that can turn a fade on,
+ * so a strip that fits carries no mask — and a strip scrolled to its far end
+ * loses its end fade the moment the measurement says so.
+ *
+ * The account rail is a VERTICAL list above 900px — `overflow-y: auto`, no
+ * horizontal scroll — and only becomes a sideways strip below it. The hook
+ * reports `none` at those widths because the strip genuinely fits its
+ * horizontal axis, so no media-query guard is needed here; this note exists so
+ * the next reader does not add one looking for a bug that is not there.
+ */

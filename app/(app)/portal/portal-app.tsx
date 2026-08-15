@@ -832,6 +832,30 @@ export default function PortalApp({
    */
   useScrollLock(mobileNavOpen);
   useScrollLock(showCreateRequest);
+  /*
+   * Whether the topbar is on a phone, and therefore whether `.page-identity`
+   * ships at all. See the block that renders it for the reasoning; this is
+   * `matchMedia` rather than a CSS rule because the point is not to hide the
+   * title but not to have one.
+   *
+   * 768 is the dashboard's own phone breakpoint, matched to the touch-target
+   * block in brand-overrides.css so the title leaves exactly when the controls
+   * grow into the space it was holding.
+   *
+   * The first paint renders it and the effect removes it, which is the same
+   * shape as `isMobile` in live-board.tsx and for the same reason: this is a
+   * client component that is still server-rendered, and a server has no
+   * viewport to ask. The cost is one relayout of a row that is already
+   * relaying out as the board's data arrives.
+   */
+  const [narrowTopbar, setNarrowTopbar] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 768px)");
+    const sync = () => setNarrowTopbar(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationStates, setNotificationStates] = useState<
     Record<string, NotificationState>
@@ -1816,14 +1840,42 @@ export default function PortalApp({
             <Icon name="menu" size={21} />
           </button>
 
-          <div className="page-identity">
-            <span>{meta.eyebrow}</span>
-            <strong>
-              {activeSection === "overview"
-                ? `${meta.title}, ${displayUserName.split(" ")[0]}`
-                : meta.title}
-            </strong>
-          </div>
+          {/*
+            The page's name, on anything wider than a phone.
+
+            On a phone it is not rendered, and that is the whole fix. It was
+            42px wide at 320px and 77px at 390px — "Live job list" arriving as
+            "Co…" — because it is `flex: 0 1 auto; min-width: 0` in a row that
+            now holds six 44px controls, so it absorbed every pixel the touch
+            targets took. A truncated title is worse than no title: it occupies
+            110-150px of the one row a contractor navigates from, and says
+            nothing.
+
+            Nothing becomes unreachable, because the screen below states its own
+            name in an `<h1>` on every route — but that was NOT true when this
+            was written. Three routes had no `<h1>` at any width: /sites and
+            /units set their page title as an `<h2>`, and /store-documentation
+            put its only heading inside `.live-board-heading`, which globals.css
+            takes to `display: none` at 760px for the board's vertical room. All
+            three are fixed in their own components rather than papered over
+            here; a page with no heading is a defect whatever the topbar does.
+
+            `display: none` in CSS was the alternative and is not the same
+            thing. It would still ship the string, still put it in the document
+            for anything reading the DOM, and still leave the next person to
+            measure this row wondering why an element that is not on screen is
+            in the markup.
+          */}
+          {!narrowTopbar && (
+            <div className="page-identity">
+              <span>{meta.eyebrow}</span>
+              <strong>
+                {activeSection === "overview"
+                  ? `${meta.title}, ${displayUserName.split(" ")[0]}`
+                  : meta.title}
+              </strong>
+            </div>
+          )}
 
           <div className="topbar-actions">
             <ThemeToggle />

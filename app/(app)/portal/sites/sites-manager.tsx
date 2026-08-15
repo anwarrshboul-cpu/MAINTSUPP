@@ -141,7 +141,15 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
     <section className="section-stack">
       <header className="section-header">
         <div>
-          <h2>Sites</h2>
+          {/*
+            An `<h1>`, like every other register in this shell. It was an `<h2>`
+            and there was no `<h1>` anywhere on the page at any width, so with
+            the topbar title gone below 768px this screen would have had no
+            name at all. `.section-header h1` is the styled selector the other
+            registers use, so this reads as they do rather than as a heading
+            somebody made bigger.
+          */}
+          <h1>Sites</h1>
           <p className="drawer-label">
             One register shared by jobs, compliance and assets. There is no upper limit.
           </p>

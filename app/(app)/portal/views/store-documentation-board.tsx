@@ -128,6 +128,21 @@ export function StoreDocumentationBoard({
   return (
     <div className="store-documentation">
       {/*
+        The section's own name, because until now it had none of its own.
+
+        The board supplies an `<h1>` inside `.live-board-heading`, but only on
+        the Main table tab and only above 760px — globals.css hides that whole
+        block below it to give the grid the phone's vertical room. So the
+        Compliance Tracker and Calendar tabs had no heading at ANY width, and
+        the table tab had none on a phone; the topbar's `.page-identity` was
+        the only thing naming the screen, and that no longer ships below 768px.
+
+        One heading covers all three tabs at all widths, and the stylesheet
+        stands it down on the one tab-and-width combination where the board is
+        already saying it.
+      */}
+      <h1 className="store-documentation__title">Store Documentation UK</h1>
+      {/*
         Outside the tab strip, so it stays put as the tabs change: a missing
         certificate is noticed on the grid, in the tracker and on the calendar
         alike, and it is the same ticket from all three.

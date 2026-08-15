@@ -13,6 +13,57 @@
   gap: 18px;
 }
 
+/*
+ * The section heading — see the note beside it in store-documentation-board.tsx
+ * for why the section needed one of its own.
+ *
+ * Sized to `.section-header h1`, the heading every other register in this shell
+ * uses, so a reader moving between /dashboard/sites and here does not meet two
+ * different ideas of a page title. The margin is zero because `.store-documentation`
+ * is a flex column with its own 18px gap.
+ */
+.store-documentation__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 27px;
+  font-weight: 680;
+  letter-spacing: -0.055em;
+}
+
+@media (max-width: 760px) {
+  /* Matched to the board's own phone heading size in globals.css, for the same
+     reason: 27px of title above a grid is a third of the rows on a phone. */
+  .store-documentation__title {
+    font-size: 22px;
+    line-height: 1.15;
+  }
+
+  /*
+   * ...and the gutter the board takes away. On a phone `.portal-content` drops
+   * its side padding to nothing whenever a `.live-board-page` is inside it, so
+   * the grid can bleed to both edges — which put this heading's first letter
+   * hard against the left of the screen. The gutter is given back to the prose
+   * only, and only on the tab that causes it: 14px is where `.section-header
+   * h1` sits on every other register at this width.
+   */
+  .store-documentation:has(.live-board-page) .store-documentation__title {
+    padding-inline: 14px;
+  }
+}
+
+/*
+ * Above 760px the Main table tab draws `.live-board-heading`, which carries an
+ * `<h1>` with the same string plus the board's eyebrow, blurb and item count.
+ * Two headings would be a duplicate and a second `<h1>`, so this one stands
+ * down for exactly that case — the `:has()` is what identifies it, because the
+ * board is only mounted on that tab.
+ */
+@media (min-width: 761px) {
+  .store-documentation:has(.live-board-heading) .store-documentation__title {
+    display: none;
+  }
+}
+
 .store-documentation__tabs {
   display: flex;
   gap: 4px;

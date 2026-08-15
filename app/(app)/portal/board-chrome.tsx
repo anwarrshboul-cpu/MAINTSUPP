@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchLandingView, rememberLandingView } from "./board-view-memory";
 import { iconFor, TabGlyph } from "./board-tab-glyph";
 import { Icon, type IconName } from "../../components";
@@ -13,6 +13,7 @@ import {
 } from "./views/board-views";
 import { ChartView } from "./views/chart-and-filters";
 import { FixTrackerView } from "./views/fix-tracker";
+import { useScrollOverflow } from "./views/scroll-affordance";
 import {
   BuildVibeView,
   FlatTableView,
@@ -112,7 +113,12 @@ export default function BoardChrome({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const tabsRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * The strip holds eleven tabs and a phone shows two of them. The hook writes
+   * `data-overflow` from measured scroll state, so the fade at the strip's edge
+   * appears only while there is something past it — views/scroll-affordance.ts.
+   */
+  const tabsRef = useScrollOverflow<HTMLDivElement>();
 
   useEffect(() => {
     if (boardId !== "maintenance") return;
@@ -249,9 +255,27 @@ export default function BoardChrome({
             <span>Automate</span>
             <em className="board-header__count">{automationCount}</em>
           </button>
-          <button type="button" className="board-header__action">
+          {/*
+            Named by `aria-label`, like the two icon-only buttons below it, and
+            NOT by a visually-hidden span.
+
+            Every off-screen-text recipe — this codebase already ships two, the
+            Tailwind `.sr-only` this used and the `.visually-hidden` used
+            twenty-odd times elsewhere — works by putting a real string in a
+            1x1 box with `overflow: hidden`. That is 93px of clipped text at
+            390px as far as any clipping audit is concerned, and it was the only
+            such report on the board that was not a genuine truncation, so it
+            cost a reader of that report a look every time.
+
+            An `aria-label` carries the same accessible name with no text node
+            to clip, which is why the siblings were already written this way.
+          */}
+          <button
+            type="button"
+            className="board-header__action"
+            aria-label="Board updates"
+          >
             <Icon name="updates" size={16} />
-            <span className="sr-only">Board updates</span>
           </button>
           <button type="button" className="board-header__invite">Invite</button>
           <button type="button" className="board-header__action" aria-label="Share board">
@@ -357,6 +381,46 @@ export default function BoardChrome({
             );
           })}
         </div>
+
+        {/*
+          A forward control, because on THIS strip the fade alone was not
+          enough.
+
+          The fade works by dissolving whatever is under it, and at scroll
+          position zero — the state every reader meets first — a tab boundary
+          lands near the strip's right edge, so at 320px there was nothing
+          under the fade but the active tab's underline and two menu dots. The
+          account rail does not have this problem: its twelve destinations are
+          evenly dense, so the fade always cuts through a label.
+
+          It is the NEXT SIBLING of the scroller, which is what lets CSS show
+          and hide it straight off the scroller's own `data-overflow` — no
+          state, so a scroll does not re-render this component or the whole
+          view pane under it. See views/scroll-affordance.css.
+
+          One direction, not two. Two 44px controls would take 88px out of a
+          218px strip at 320px; forward is the direction the reader cannot
+          currently see, and once they have scrolled, the fade on the left tells
+          them where they came from.
+        */}
+        <button
+          type="button"
+          className="board-views__forward"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={() => {
+            const strip = tabsRef.current;
+            if (!strip) return;
+            strip.scrollBy({
+              left: strip.clientWidth * 0.8,
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                ? "auto"
+                : "smooth",
+            });
+          }}
+        >
+          <Icon name="chevron" size={16} />
+        </button>
 
         <div className="board-views__trailing">
           {overflowTabs.length > 0 && (
