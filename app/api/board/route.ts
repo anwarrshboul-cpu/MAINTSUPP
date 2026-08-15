@@ -529,16 +529,39 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
 
   await seedRequestsIfEmpty(db, orgId);
 
-  for (const item of defaultBoardOptions) {
-    await db
-      .insert(maintenanceBoardOptions)
-      .values({
-        id: tenantSeedId(`option-${item.columnKey}-${item.position}`, orgId),
-        organisationId: orgId,
-        boardId: boardId,
-        ...item,
-      })
-      .onConflictDoNothing();
+  /*
+   * The seeding below runs on every board load, and after the first one it has
+   * nothing left to do: every insert is `onConflictDoNothing` against a row
+   * that already exists. Measured against Postgres, those no-ops were 97 of the
+   * 152 statements a single `/api/board` request issued, and most of its time —
+   * a round trip each, paid on every load by every user, for ever.
+   *
+   * Counting first turns 97 statements into 1. It is a count rather than a
+   * process-level memo because a memo cannot see a row deleted by someone else,
+   * and this seeding is what repairs that: if an option is removed the count
+   * falls short and the loop runs again. Cheap, and still self-healing.
+   */
+  const seededOptions = await db
+    .select({ id: maintenanceBoardOptions.id })
+    .from(maintenanceBoardOptions)
+    .where(
+      and(
+        eq(maintenanceBoardOptions.boardId, boardId),
+        eq(maintenanceBoardOptions.organisationId, orgId),
+      ),
+    );
+  if (seededOptions.length < defaultBoardOptions.length) {
+    for (const item of defaultBoardOptions) {
+      await db
+        .insert(maintenanceBoardOptions)
+        .values({
+          id: tenantSeedId(`option-${item.columnKey}-${item.position}`, orgId),
+          organisationId: orgId,
+          boardId: boardId,
+          ...item,
+        })
+        .onConflictDoNothing();
+    }
   }
 
   const existingColumns = await db
@@ -565,22 +588,26 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
         );
     }
   }
-  for (const [position, column] of systemBoardColumns.entries()) {
-    await db
-      .insert(maintenanceBoardColumns)
-      .values({
-        id: tenantSeedId(`column-system-${column.key}`, orgId),
-        organisationId: orgId,
-        boardId: boardId,
-        key: column.key,
-        title: column.title,
-        type: column.type,
-        position: position * 1000,
-        width: column.width,
-        settings: JSON.stringify({ wrap: false }),
-        system: true,
-      })
-      .onConflictDoNothing();
+  // Same reasoning as the options above, but free: `existingColumns` has
+  // already been read, so the count costs no extra round trip.
+  if (existingColumns.filter((column) => column.system).length < systemBoardColumns.length) {
+    for (const [position, column] of systemBoardColumns.entries()) {
+      await db
+        .insert(maintenanceBoardColumns)
+        .values({
+          id: tenantSeedId(`column-system-${column.key}`, orgId),
+          organisationId: orgId,
+          boardId: boardId,
+          key: column.key,
+          title: column.title,
+          type: column.type,
+          position: position * 1000,
+          width: column.width,
+          settings: JSON.stringify({ wrap: false }),
+          system: true,
+        })
+        .onConflictDoNothing();
+    }
   }
 
   const groups = await db
