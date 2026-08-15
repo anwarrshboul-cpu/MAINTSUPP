@@ -645,20 +645,42 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
         isNull(maintenanceRequests.deletedAt),
       ),
     );
+  /*
+   * READ EVERY BOARD'S PLACEMENTS, NOT JUST THIS ONE'S.
+   *
+   * `maintenance_group_items.request_id` is the PRIMARY KEY, so a work order
+   * holds ONE placement across the whole workspace — which board it sits on is
+   * a property of that single row, not a per-board fact. Asking "is this
+   * request placed?" with a `board_id` filter therefore asks a narrower
+   * question than the key answers.
+   *
+   * That mismatch had a cost. `requests` below is every live work order in the
+   * organisation — there is no board column on `maintenance_requests` to filter
+   * it by; placement is what decides the board (see `boardKeyForRequest`). So
+   * loading the maintenance board found the 31 Store Documentation rows
+   * apparently unplaced, and issued 31 INSERTs that every one conflicted on the
+   * request_id key and were discarded by `onConflictDoNothing`. Correctly
+   * discarded — filing sd-001 onto the maintenance board would be wrong — but
+   * re-attempted on every board load by every user, for ever: 31 of the 82
+   * statements a warm `/api/board` request issued, doing nothing.
+   *
+   * Reading placements board-wide makes the question match the key. Position
+   * accounting stays per-board, because that is genuinely a per-board fact.
+   */
   const placements = await db
-    .select()
+    .select({
+      requestId: maintenanceGroupItems.requestId,
+      boardId: maintenanceGroupItems.boardId,
+      groupId: maintenanceGroupItems.groupId,
+      position: maintenanceGroupItems.position,
+    })
     .from(maintenanceGroupItems)
-    .where(
-      and(
-        eq(maintenanceGroupItems.boardId, boardId),
-        eq(maintenanceGroupItems.organisationId, orgId),
-      ),
-    );
+    .where(eq(maintenanceGroupItems.organisationId, orgId));
   const placed = new Set(placements.map((item) => item.requestId));
   const nextPosition = new Map<string, number>();
   for (const group of groups) {
     const current = placements
-      .filter((item) => item.groupId === group.id)
+      .filter((item) => item.boardId === boardId && item.groupId === group.id)
       .reduce((highest, item) => Math.max(highest, item.position), -1);
     nextPosition.set(group.id, current + 1);
   }

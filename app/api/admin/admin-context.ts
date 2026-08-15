@@ -23,7 +23,7 @@ import {
   resolvePermissions,
   type PermissionSubject,
 } from "../../lib/permissions";
-import { scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
+import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
 // The same three-role normaliser the invitation path uses; it is the only
 // exported one, and using a second would be a second definition of "admin".
@@ -249,8 +249,18 @@ export function optional(value: unknown, max = 200) {
  *
  * Detail only in development: a stack trace on a production admin screen tells
  * an attacker the schema.
+ *
+ * The ended-session check comes first, and belongs HERE rather than in each
+ * route, because `adminContext` resolves tenancy through `scopedDb` — so an
+ * expired cookie arrives at every admin catch as a thrown
+ * `AnonymousAccessError` and was being dressed up as an outage: "The permission
+ * change could not be saved", 503, to someone who only had to sign in again.
+ * Every admin route already funnels into this one function, so one check makes
+ * all of them agree with the rest of the API. See `anonymousRefusal`.
  */
 export function adminError(error: unknown, fallback: string) {
+  const refusal = anonymousRefusal(error);
+  if (refusal) return refusal;
   const message = error instanceof Error ? error.message : "Unexpected error";
   return Response.json(
     {

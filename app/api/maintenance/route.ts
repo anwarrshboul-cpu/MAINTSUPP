@@ -237,12 +237,33 @@ export async function POST(request: Request) {
     }
 
     await seedMaintenanceIfEmpty(db, orgId);
+    /*
+     * Only the `MN-1234` ids are numbered, and only they may be cast.
+     *
+     * Without the filter this casts the tail of EVERY id in the workspace. Two
+     * other shapes exist — `req_<uuid>` from the import and `sd-001` from the
+     * documentation board — and `cast('_6204b0…' as integer)` is not an error
+     * in SQLite, which quietly yields 0. Postgres refuses it outright with
+     * `invalid input syntax for type integer`, the route's catch answers "The
+     * maintenance database is being prepared", and raising a job becomes
+     * impossible with nothing naming the reason.
+     *
+     * So this was already wrong on SQLite — 776 rows contributing 0 to a MAX —
+     * and merely survived because the wrong answer and the right one agreed
+     * while no numbered id existed. `like` is one of the few predicates both
+     * dialects spell identically.
+     */
     const [latest] = await db
       .select({
         maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
       })
       .from(maintenanceRequests)
-      .where(eq(maintenanceRequests.organisationId, orgId));
+      .where(
+        and(
+          eq(maintenanceRequests.organisationId, orgId),
+          sql`${maintenanceRequests.id} like 'MN-%'`,
+        ),
+      );
     const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
     // Monday's form asks for "Date Requested" and makes it mandatory, so an
     // answer is honoured when given. Anything unparseable falls back to now

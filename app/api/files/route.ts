@@ -155,7 +155,33 @@ async function sha256(value: string) {
     .join("");
 }
 
+function unavailable(error?: unknown) {
+  // A session that has ended is not an outage: 503 tells a browser to retry
+  // something no amount of retrying will fix, and blames the workspace for
+  // what a person fixes by signing in. See `anonymousRefusal`.
+  const refusal = anonymousRefusal(error);
+  if (refusal) return refusal;
+  return Response.json(
+    { error: "The file list is temporarily unavailable." },
+    { status: 503 },
+  );
+}
+
 export async function GET(request: Request) {
+  try {
+    return await listFiles(request);
+  } catch (error) {
+    /*
+     * This handler had no catch at all, so `scopedDb` refusing an anonymous
+     * caller escaped as an unhandled throw and the framework answered 500 with
+     * an empty body — an outage where every sibling route says "sign in", and a
+     * stack trace in the log for a request that was correctly refused.
+     */
+    return unavailable(error);
+  }
+}
+
+async function listFiles(request: Request) {
   const search = new URL(request.url).searchParams;
   const requestId = search.get("requestId")?.trim();
   const requestedKind = search.get("kind")?.trim() as AttachmentKind | undefined;

@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import { dashboardLayouts } from "../../../db/schema";
-import { scopedDb } from "../../lib/tenant-db";
+import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { can, resolvePermissions } from "../../lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +57,35 @@ function newId() {
   return `dash_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
+function unavailable(error?: unknown) {
+  // A session that has ended is not an outage: 503 tells a browser to retry
+  // something no amount of retrying will fix, and blames the workspace for
+  // what a person fixes by signing in. See `anonymousRefusal`.
+  const refusal = anonymousRefusal(error);
+  if (refusal) return refusal;
+  return Response.json(
+    { error: "The dashboard layout is temporarily unavailable." },
+    { status: 503 },
+  );
+}
+
+/*
+ * None of the three handlers below had a catch, so `scopedDb` refusing an
+ * anonymous caller escaped as an unhandled throw and the framework answered 500
+ * with an empty body — an outage where every sibling route says "sign in", and
+ * a stack trace in the log for a request that was correctly refused. Each is
+ * wrapped rather than sharing one entry point because they take different
+ * verbs and bodies; the refusal is what has to be common, and it is.
+ */
 export async function GET(request: Request) {
+  try {
+    return await readLayout(request);
+  } catch (error) {
+    return unavailable(error);
+  }
+}
+
+async function readLayout(request: Request) {
   await ensureDatabase();
   const { db, orgId, session } = await scopedDb(request);
   const surface = surfaceFrom(new URL(request.url).searchParams.get("surface"));
@@ -97,6 +125,14 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  try {
+    return await saveLayout(request);
+  } catch (error) {
+    return unavailable(error);
+  }
+}
+
+async function saveLayout(request: Request) {
   await ensureDatabase();
   const { db, orgId, session, actor } = await scopedDb(request);
 
@@ -181,6 +217,14 @@ export async function PUT(request: Request) {
 
 /** Drops the caller's own arrangement, falling back to the workspace default. */
 export async function DELETE(request: Request) {
+  try {
+    return await resetLayout(request);
+  } catch (error) {
+    return unavailable(error);
+  }
+}
+
+async function resetLayout(request: Request) {
   await ensureDatabase();
   const { db, orgId, session } = await scopedDb(request);
   const surface = surfaceFrom(new URL(request.url).searchParams.get("surface"));
