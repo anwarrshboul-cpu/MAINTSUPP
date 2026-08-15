@@ -736,6 +736,20 @@ export function navFor(actor: Actor): NavItem[] {
   if (actor.role === "contractor") {
     items.push({ href: "/portal/my-jobs", label: "My jobs" });
   }
+  /*
+   * The Overview goes FIRST for the roles that get it, ahead of the board.
+   *
+   * It is the picture of the portfolio — counts, spend, compliance, the jobs
+   * that have waited longest — and it is what somebody opening the portal to
+   * find out how things are going is actually asking for. The board answers a
+   * different question ("where is this one job"), and it stays one tap away.
+   * It follows the same line as Summary and Analytics rather than a permission:
+   * `/analytics/overview` refuses nobody signed in, because every figure it
+   * returns is an aggregate of the rows that caller's scope already allows.
+   */
+  if (isStaff(actor.role) || actor.role === "client_admin") {
+    items.push({ href: "/portal/overview", label: "Overview" });
+  }
   items.push({ href: "/portal/dashboard", label: "Board" });
   if (canTriage(actor)) items.push({ href: "/portal/requests", label: "Requests" });
   if (canDecideQuotes(actor)) items.push({ href: "/portal/quotes", label: "Quotes" });

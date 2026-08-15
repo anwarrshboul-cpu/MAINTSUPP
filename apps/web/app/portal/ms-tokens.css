@@ -1,0 +1,110 @@
+/* MAINTSUPP — the legacy dashboard's dark palette, imported under a namespace.
+
+   =========================================================================
+   TWO RULES GOVERN THIS FILE, AND BOTH EXIST BECAUSE OF A COLLISION THAT
+   WOULD OTHERWISE BE SILENT.
+   =========================================================================
+
+   RULE 1 — THE DARK BLOCK IS SCOPED, NOT GLOBAL.
+
+   In the legacy app the equivalent block is UNCONDITIONAL: it lands on
+   `:root:not([data-theme="light"])` with `html { color-scheme: dark }` beside
+   it, because every screen that app serves is a signed-in dashboard. This app
+   is not that. It also serves the public marketing site and the public share
+   page at /job/[token], and both are deliberately LIGHT — a contractor opens a
+   share link from WhatsApp and gets a white page on purpose.
+
+   So the tokens land on `.ms-dash`, a wrapper the dashboard route puts around
+   its own content, and nowhere else. `color-scheme` is declared there too so
+   that scrollbars and any native control inside the dashboard are dark
+   without telling the whole document it is a dark page.
+
+   RULE 2 — EVERY TOKEN IS `--ms-*`.
+
+   Four names collide between the two apps with DIFFERENT values: --ink,
+   --muted, --line and --line-strong are all defined by this app's globals.css
+   (light: #10201f, #5c6b6f, #dfe5e7, #c6d0d3) and all defined again by the
+   legacy palette (dark: #e7eef3, #9baeb9, #2a3943, #35505d). Because CSS
+   custom properties inherit, importing the legacy names into a wrapper would
+   repaint every `.p-*` and `.chip` inside it — and, worse, would look correct
+   at a glance while quietly breaking the contrast pairings globals.css tunes.
+   Namespacing makes the two sets unable to see each other.
+
+   The values below are the ones the legacy dark product actually renders
+   today, taken from the dark block of `app/globals.css` and the analytics
+   rules in `app/brand-overrides.css` in the repository root. */
+
+.ms-dash {
+  /* Native chrome inside the dashboard — scrollbars, date pickers — matches
+     the surface it is drawn on. Scoped here rather than on <html>, which is
+     the whole point of this file. */
+  color-scheme: dark;
+
+  /* Grounds. `--ms-canvas` is the page behind the cards; the three card
+     surfaces are the gradient stops the legacy KPI tile and panels use. */
+  --ms-canvas: #0b1218;
+  --ms-surface-card: #182830;
+  --ms-surface-card-hi: #14242d;
+  --ms-surface-card-lo: #101b23;
+  --ms-surface-sunken: #101820;
+  --ms-surface-head: #14232c;
+  --ms-surface-hover: #203740;
+
+  /* Ink. `--ms-ink-strong` is the near-white the legacy reserves for headings
+     and figures; `--ms-ink` is body text on a card. */
+  --ms-ink: #e7eef3;
+  --ms-ink-strong: #f5f8fa;
+  --ms-muted: #9baeb9;
+  --ms-table-head-fg: #91a5af;
+  --ms-accent-fg: #5fd6cd;
+
+  /* Rules. Three weights, because the legacy draws card edges, panel headers
+     and control borders at three different strengths. */
+  --ms-line: #2a3943;
+  --ms-line-panel: #263d48;
+  --ms-line-strong: #35505d;
+
+  /* Brand. These three are the same in both legacy themes — they are grounds
+     that carry their own foreground, so they do not move with the skin. */
+  --ms-brand-bright: #12b4a8;
+  --ms-brand-solid: #0b7a72;
+  --ms-danger-solid: #c73535;
+
+  /*
+   * The categorical chart palette, in its DARK values.
+   *
+   * Each of these is the "ink" half of a tint pair in the legacy palette, and
+   * the pairs must move together per theme: the dark block there once restated
+   * the washes and left the inks at their light values, which put every status
+   * chip in the product between 2.75:1 and 2.85:1. Only the inks are needed
+   * here — nothing in this dashboard paints a tint wash — but they are the
+   * dark halves, and using the light ones on this canvas would repeat exactly
+   * that failure.
+   */
+  --ms-blue-600: #7db4ea;
+  --ms-orange-600: #e57b51;
+  --ms-red-600: #d97a7a;
+  --ms-green-700: #63ab92;
+  --ms-purple-600: #c39ae8;
+
+  /* Chart furniture that is not a palette entry: the axis rule, the faint
+     horizontal grid, the marker at each plotted point, and the ring a donut
+     draws when every segment is zero. */
+  --ms-axis: #2b414b;
+  --ms-grid: rgba(73, 99, 112, 0.18);
+  --ms-plot-dot: #e8ffff;
+  --ms-donut-empty: #29404d;
+  --ms-row-hover: #1a3039;
+  --ms-empty-fg: #81949f;
+
+  /*
+   * Radii. The legacy design system runs on 8 / 13 / 20px — but its chart
+   * cards are a literal 10px, which is neither. That is not a slip worth
+   * "fixing" during a port: 10px is what the screenshots the owner signed off
+   * actually show, so it is named here rather than silently rounded to 8.
+   */
+  --ms-radius-sm: 8px;
+  --ms-radius-card: 10px;
+  --ms-radius-md: 13px;
+  --ms-radius-lg: 20px;
+}

@@ -1,0 +1,728 @@
+/* MAINTSUPP — the legacy dashboard's analytics surface, ported.
+
+   Every rule here is derived from the `.analytics-*` block of the legacy app's
+   `app/brand-overrides.css`, renamed to `ms-` and repainted from the `--ms-*`
+   tokens in ms-tokens.css. The renaming is not cosmetic: this app's portal.css
+   owns the `p-` prefix and its own light palette, and a stylesheet that shares
+   neither a class prefix nor a token namespace with it cannot repaint it by
+   accident.
+
+   The legacy sheet carries a light skin for these components as well, because
+   that app has a theme toggle. This one does not: the dashboard is dark and
+   only dark, so the light half is left behind rather than ported as dead
+   rules that nothing can ever select. */
+
+/* -------------------------------------------------------- the dark shell -- */
+
+/*
+ * THE ONE ELEMENT THAT CARRIES THE THEME.
+ *
+ * The negative margins are the padding `.p-main` sets, cancelled — so the dark
+ * canvas reaches the edges of the shell's content column instead of floating
+ * as a dark rectangle inside a light one, and below 1120px it goes edge to
+ * edge. The padding is then re-stated inside, so the content sits exactly
+ * where it would have without the bleed.
+ *
+ * `background` is explicit and non-negotiable. A transparent wrapper would
+ * inherit `--bg` from the light shell and put light-theme paper behind
+ * dark-theme ink.
+ */
+.ms-dash {
+  margin: -16px -14px calc(-40px - env(safe-area-inset-bottom));
+  padding: 18px 14px calc(40px + env(safe-area-inset-bottom));
+  background: var(--ms-canvas);
+  color: var(--ms-ink);
+}
+
+.ms-dash-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.ms-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.ms-heading > div:first-child {
+  min-width: 210px;
+}
+
+.ms-heading > div:first-child > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ms-muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ms-heading h1 {
+  margin: 0;
+  color: var(--ms-ink-strong);
+  font-size: clamp(23px, 2.2vw, 31px);
+  letter-spacing: -0.04em;
+}
+
+/* When the API generated the figures. A dashboard with no timestamp is one
+   nobody can tell is stale. */
+.ms-stamp {
+  margin: 0;
+  color: var(--ms-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------- KPI tiles -- */
+
+/*
+ * FOUR ACROSS, and four is the number the base grid was written for.
+ *
+ * The legacy screen runs a `--six` variant with a whole media-query block
+ * tuning the icon column, the padding and the figure size to survive at 178px
+ * per tile. Phase 2 has four figures it can honestly show — see the page
+ * component for what the other two were and why they are not here — so the
+ * six-up variant and its tuning are not ported. If a fifth and sixth figure
+ * ever become real, that block is what to bring across.
+ */
+.ms-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ms-metric {
+  --ms-tone: var(--ms-accent-fg);
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-height: 148px;
+  padding: 17px 16px 44px;
+  overflow: hidden;
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-radius-card);
+  /*
+   * A gradient, not a flat fill. Two stops of the same family give the tile a
+   * shallow depth the flat card does not have, and it is the treatment the
+   * signed-off screenshots show.
+   */
+  background: linear-gradient(145deg, var(--ms-surface-card-hi), var(--ms-surface-card-lo));
+  color: var(--ms-ink);
+  text-align: left;
+  text-decoration: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+/* The bottom 44px of padding is the sparkline's strip. A tile with no history
+   to draw does not need it — see `AnalyticsMetricCard`, which omits the line
+   rather than drawing a flat baseline under a live figure. */
+.ms-metric--flat {
+  min-height: 118px;
+  padding-bottom: 17px;
+}
+
+a.ms-metric:hover,
+a.ms-metric:focus-visible {
+  border-color: color-mix(in srgb, var(--ms-tone) 65%, var(--ms-line-strong));
+  outline: 0;
+}
+
+a.ms-metric:focus-visible {
+  box-shadow: 0 0 0 2px var(--ms-accent-fg);
+}
+
+/*
+ * The tile's tone, which is TEXT as well as decoration: the caption under the
+ * figure, the icon and the sparkline all read it. Each points at the dark half
+ * of a tint pair rather than at a bright accent picked by eye, because these
+ * are foregrounds on a dark card and have to clear contrast as such.
+ */
+.ms-metric--blue { --ms-tone: var(--ms-blue-600); }
+.ms-metric--orange { --ms-tone: var(--ms-orange-600); }
+.ms-metric--red { --ms-tone: var(--ms-red-600); }
+.ms-metric--green { --ms-tone: var(--ms-green-700); }
+.ms-metric--purple { --ms-tone: var(--ms-purple-600); }
+.ms-metric--slate { --ms-tone: var(--ms-muted); }
+
+.ms-metric__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ms-tone) 15%, transparent);
+  color: var(--ms-tone);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ms-tone) 20%, transparent);
+}
+
+.ms-metric__copy {
+  display: flex;
+  min-width: 0;
+  padding-left: 10px;
+  flex-direction: column;
+}
+
+.ms-metric__copy small {
+  overflow: hidden;
+  color: var(--ms-muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-metric__copy strong {
+  margin-top: 3px;
+  color: var(--ms-ink);
+  font-size: clamp(23px, 2.2vw, 31px);
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+}
+
+.ms-metric__copy > span {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--ms-tone);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-spark {
+  position: absolute;
+  right: 12px;
+  bottom: 9px;
+  left: 12px;
+  width: calc(100% - 24px);
+  height: 38px;
+  color: var(--ms-tone);
+}
+
+.ms-spark__area {
+  fill: color-mix(in srgb, currentColor 13%, transparent);
+}
+
+.ms-spark__line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  /* The viewBox is stretched by `preserveAspectRatio="none"`, which would
+     stretch the stroke with it. This keeps the line 2.2px at every width. */
+  vector-effect: non-scaling-stroke;
+}
+
+/* ---------------------------------------------------------------- panels -- */
+
+.ms-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ms-line-panel);
+  border-radius: var(--ms-radius-card);
+  background: linear-gradient(145deg, var(--ms-surface-card-hi), var(--ms-surface-card-lo));
+  color: var(--ms-ink);
+}
+
+.ms-panel > header {
+  display: flex;
+  min-height: 54px;
+  padding: 0 18px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--ms-line);
+}
+
+.ms-panel > header h2 {
+  margin: 0;
+  color: var(--ms-ink-strong);
+  font-size: 17px;
+  letter-spacing: -0.025em;
+}
+
+.ms-panel > header a,
+.ms-panel > header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ms-accent-fg);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ms-panel > header a:hover {
+  text-decoration: underline;
+}
+
+/* A panel's footnote. Every figure on this page has a definition, and a
+   definition that is not on the page is one nobody can reconcile with an
+   invoice. */
+.ms-note {
+  margin: 0;
+  padding: 12px 18px 16px;
+  color: var(--ms-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ms-note--page {
+  padding: 0;
+}
+
+.ms-empty {
+  margin: 0;
+  padding: 34px 18px;
+  color: var(--ms-empty-fg);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* --------------------------------------------------------------- layouts -- */
+
+/* Spend | compliance score | the third breakdown. */
+.ms-bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.7fr) minmax(300px, 0.85fr);
+  gap: 12px;
+}
+
+/* The attention table, which needs the width, beside the status donut. */
+.ms-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr);
+  gap: 12px;
+}
+
+.ms-spend-panel,
+.ms-score-panel,
+.ms-mix-panel {
+  min-height: 290px;
+}
+
+/* ------------------------------------------------------------------ donut -- */
+
+.ms-donut-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.9fr) minmax(170px, 1fr);
+  gap: 22px;
+  align-items: center;
+  min-height: 260px;
+  padding: 22px;
+}
+
+.ms-donut {
+  --ms-donut-fill: conic-gradient(var(--ms-brand-bright) 0 100%);
+  position: relative;
+  display: grid;
+  width: min(100%, 232px);
+  aspect-ratio: 1;
+  margin: auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ms-donut-fill);
+}
+
+/* The hole. In the legacy sheet this was a dark literal, which is how the
+   light skin ended up drawing dark-on-dark text on a light page — the ring is
+   a conic-gradient and computed style cannot sample it, so the contrast audit
+   scored the figure against the white card behind it and passed. */
+.ms-donut::after {
+  position: absolute;
+  width: 68%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--ms-surface-card);
+  box-shadow: inset 0 0 0 1px var(--ms-line-panel);
+  content: "";
+}
+
+.ms-donut > span {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+.ms-donut strong {
+  color: var(--ms-ink);
+  font-size: clamp(27px, 3vw, 42px);
+  letter-spacing: -0.05em;
+}
+
+.ms-donut small {
+  color: var(--ms-muted);
+  font-size: 12px;
+}
+
+.ms-donut--medium {
+  width: min(78%, 190px);
+}
+
+.ms-legend {
+  display: grid;
+  gap: 13px;
+}
+
+.ms-legend > span {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.ms-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.ms-legend small {
+  color: var(--ms-muted);
+  font-size: 12px;
+}
+
+.ms-legend strong {
+  color: var(--ms-ink);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------- compliance score -- */
+
+.ms-score-panel {
+  display: flex;
+  padding: 0 0 16px;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.ms-score-panel > header {
+  width: 100%;
+}
+
+.ms-score-panel .ms-donut {
+  margin-top: 18px;
+}
+
+.ms-score-panel > span {
+  margin: 10px 16px 0;
+  color: var(--ms-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ms-score-panel > a {
+  display: inline-flex;
+  margin-top: 11px;
+  align-items: center;
+  gap: 5px;
+  color: var(--ms-accent-fg);
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.ms-score-panel > a:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------- bars -- */
+
+.ms-bars {
+  display: grid;
+  gap: 13px;
+  padding: 18px;
+}
+
+.ms-bars > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(80px, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  min-height: 23px;
+  color: var(--ms-ink);
+  text-align: left;
+}
+
+.ms-bars > div > span {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The unfilled part of each bar. A token rather than a dark literal: on a
+   light card the literal read as a solid navy rule rather than as the empty
+   half of a meter. */
+.ms-bars > div > div {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--ms-surface-sunken);
+}
+
+.ms-bars i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.ms-bars strong {
+  min-width: 32px;
+  color: var(--ms-ink);
+  font-size: 12px;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------ trend chart -- */
+
+.ms-trend {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 9px;
+  min-height: 218px;
+  padding: 20px 16px 14px;
+}
+
+.ms-trend__y {
+  display: flex;
+  padding-bottom: 23px;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--ms-muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.ms-trend__plot {
+  min-width: 0;
+}
+
+.ms-trend svg {
+  display: block;
+  width: 100%;
+  height: 178px;
+  /* The plotted line can sit on the very top of the viewBox; without this its
+     stroke is clipped in half. */
+  overflow: visible;
+  border-bottom: 1px solid var(--ms-axis);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 58px,
+    var(--ms-grid) 59px 60px
+  );
+}
+
+.ms-trend__area {
+  fill: color-mix(in srgb, var(--ms-brand-bright) 13%, transparent);
+}
+
+.ms-trend__line {
+  fill: none;
+  stroke: var(--ms-brand-bright);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.ms-trend circle {
+  fill: var(--ms-plot-dot);
+  stroke: var(--ms-brand-bright);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.ms-trend__x {
+  display: grid;
+  margin-top: 8px;
+  color: var(--ms-muted);
+  font-size: 10px;
+}
+
+.ms-trend__x span {
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ table -- */
+
+/* The table scrolls inside its own box; the page never does. */
+.ms-tablewrap {
+  overflow-x: auto;
+}
+
+.ms-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ms-table th,
+.ms-table td {
+  padding: 11px 15px;
+  border-bottom: 1px solid var(--ms-line);
+  color: var(--ms-ink);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ms-table th {
+  color: var(--ms-table-head-fg);
+  font-weight: 600;
+}
+
+.ms-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ms-table tbody tr:hover td {
+  background: var(--ms-row-hover);
+}
+
+.ms-table a {
+  color: var(--ms-ink);
+  text-decoration: none;
+}
+
+.ms-table a:hover {
+  color: var(--ms-accent-fg);
+  text-decoration: underline;
+}
+
+.ms-table .ms-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ms-ref {
+  color: var(--ms-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+/*
+ * A chip. The WORD is always rendered inside it — colour never carries a
+ * meaning on its own, because a reader who cannot tell amber from red must
+ * still be able to tell an urgent job from a low one.
+ */
+.ms-chip {
+  display: inline-flex;
+  min-height: 24px;
+  padding: 0 10px;
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.ms-chip--urgent { color: var(--ms-red-600); }
+.ms-chip--medium { color: var(--ms-orange-600); }
+.ms-chip--low { color: var(--ms-muted); }
+
+.ms-status {
+  display: inline-flex;
+  max-width: 170px;
+  min-height: 27px;
+  padding: 0 10px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ms-brand-bright) 48%, transparent);
+  border-radius: 99px;
+  color: var(--ms-accent-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- responsive -- */
+
+@media (max-width: 1380px) {
+  .ms-bottom-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Spend is the widest of the three and the one that suffers first, so it
+     takes the whole row rather than half of one. */
+  .ms-spend-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1040px) {
+  .ms-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ms-stamp {
+    text-align: left;
+  }
+
+  .ms-overview-grid,
+  .ms-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ms-spend-panel {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .ms-heading h1 {
+    font-size: 25px;
+  }
+
+  .ms-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ms-metric {
+    min-height: 132px;
+    padding: 14px 12px 38px;
+  }
+
+  .ms-metric--flat {
+    min-height: 104px;
+    padding-bottom: 14px;
+  }
+
+  .ms-metric__icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .ms-metric__copy {
+    padding-left: 6px;
+  }
+
+  .ms-metric__copy strong {
+    font-size: 23px;
+  }
+
+  .ms-donut-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ms-bars > div {
+    grid-template-columns: minmax(92px, 120px) 1fr auto;
+  }
+
+  /* Below this the six months collide into each other. The panel scrolls
+     sideways inside itself instead — the page still does not. */
+  .ms-trend {
+    min-width: 620px;
+  }
+
+  .ms-spend-panel {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .ms-metric-grid {
+    grid-template-columns: 1fr;
+  }
+}
