@@ -28,6 +28,7 @@
 import { nodeD1Database } from "./node-d1";
 import { nodePgD1Database } from "./node-pg-d1";
 import { createR2Bucket } from "./node-r2";
+import { createS3BucketFromEnv } from "./r2-over-s3";
 
 /**
  * Which database `env.DB` is.
@@ -66,11 +67,24 @@ export const env: Record<string, unknown> = {
   },
 
   /**
-   * Not lazy, unlike `DB`: the factory opens nothing and touches no disk until
-   * a request actually reads or writes an object, so there is no boot-time cost
-   * to pay and nothing to defer.
+   * Supabase Storage when it is configured, a directory when it is not.
+   *
+   * `createS3BucketFromEnv()` returns null unless all four of S3_ENDPOINT,
+   * S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are set — all four or
+   * none, because a half-configured bucket that quietly falls back to the
+   * filesystem writes a deployment's photographs onto a disk that is about to
+   * be replaced, and nobody finds out until the container is.
+   *
+   * The order matters on a host with no persistent disk. Vercel's filesystem is
+   * read-only apart from a scratch directory that is not shared between
+   * invocations, so the directory driver there can only fail — cleanly, with
+   * "File bytes are unavailable", rather than by pretending to have stored
+   * something. Setting the four variables is what makes uploads work at all.
+   *
+   * Neither factory opens anything or touches disk until a request actually
+   * reads or writes an object, so there is nothing to defer and no boot cost.
    */
-  BUCKET: createR2Bucket(),
+  BUCKET: createS3BucketFromEnv() ?? createR2Bucket(),
 };
 
 /**

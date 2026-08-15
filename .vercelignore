@@ -13,6 +13,10 @@
 node_modules
 dist
 build
+# The legacy portal's Build Output API staging root. Deployed from inside
+# itself with `vercel deploy --prebuilt`, never as part of this project's
+# upload — it is a second copy of dist/ plus a linked project of its own.
+vercel/.deploy
 .next
 apps/web/.next
 *.tsbuildinfo
