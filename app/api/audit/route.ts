@@ -44,20 +44,44 @@ function unavailable(error?: unknown) {
 }
 
 /**
+ * Whether `env.DB` is Postgres rather than SQLite.
+ *
+ * The same source runs against both — `db/node-workers-env.ts` chooses on
+ * `PG_D1`, so this reads the one flag that decides it. It is a runtime read
+ * rather than a build-time constant because the two builds are identical; only
+ * the deployment's environment differs.
+ */
+function usingPostgres(): boolean {
+  return (
+    (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process?.env?.["PG_D1"] === "1"
+  );
+}
+
+/**
  * `created_at`, in one comparable shape.
  *
- * Two writers stamp this column and they disagree about the separator: a row
- * inserted with an explicit `toISOString()` reads "2026-08-07T14:35:37.123Z",
- * one left to the column's `CURRENT_TIMESTAMP` default reads
- * "2026-08-07 14:35:37". Compared as text, 'T' sorts *after* a space, so every
- * ISO row would sort above every default row whatever their dates — the log
- * would silently stop being in time order.
+ * On SQLite two writers stamp this column and they disagree about the
+ * separator: a row inserted with an explicit `toISOString()` reads
+ * "2026-08-07T14:35:37.123Z", one left to the column's `CURRENT_TIMESTAMP`
+ * default reads "2026-08-07 14:35:37". Compared as text, 'T' sorts *after* a
+ * space, so every ISO row would sort above every default row whatever their
+ * dates — the log would silently stop being in time order. Replacing the
+ * separator makes the two forms comparable: the shorter string is then a
+ * prefix of the longer, which is what a lexicographic comparison needs. Both
+ * forms are UTC, so nothing else has to be reconciled.
  *
- * Replacing the separator makes the two forms comparable: the shorter string
- * is then a prefix of the longer, which is exactly what a lexicographic
- * comparison needs. Both forms are UTC, so nothing else has to be reconciled.
+ * On Postgres the problem does not exist and the fix is actively harmful. The
+ * migration retyped this column to `timestamptz`, so it already sorts
+ * chronologically, and `replace()` has no overload for it: the query fails
+ * with `function replace(timestamp with time zone, unknown, unknown) does not
+ * exist`, the route's catch-all turns that into a 503, and the audit log
+ * becomes permanently unreadable while it keeps accumulating rows. This is not
+ * hypothetical — it is what the deployment did until this branch was added.
  */
-const COMPARABLE_CREATED_AT = sql`replace(${auditEvents.createdAt}, 'T', ' ')`;
+const COMPARABLE_CREATED_AT = usingPostgres()
+  ? sql`${auditEvents.createdAt}`
+  : sql`replace(${auditEvents.createdAt}, 'T', ' ')`;
 
 /**
  * A date filter, widened to cover the whole day and in the comparable shape.
