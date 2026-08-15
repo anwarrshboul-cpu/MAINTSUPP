@@ -85,58 +85,24 @@ UPDATE `maintenance_board_columns` SET `organisation_id` = 'org_0000000000000000
 UPDATE `maintenance_board_cells` SET `organisation_id` = 'org_000000000000000000000001' WHERE `organisation_id` IS NULL;
 --> statement-breakpoint
 
-UPDATE `maintenance_requests` SET `requester` = 'Sample Manager A' WHERE `requester` = 'Valentina Colangelo';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `requester` = 'Sample Manager B' WHERE `requester` = 'Maria Ramos';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `requester` = 'Sample Manager C' WHERE `requester` = 'Qasim Malik';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `requester` = 'Sample Manager D' WHERE `requester` = 'Joseph Cole';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `requester` = 'Sample Manager E' WHERE `requester` = 'Laura Fox';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `requester` = 'Sample Manager F' WHERE `requester` = 'Amrik Sahota';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `assignee` = 'Sample Coordinator A' WHERE `assignee` = 'Alex Morgan';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `assignee` = 'Sample Coordinator B' WHERE `assignee` = 'Amelia Shah';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900000' WHERE `contact` = '+44 7700 900148';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900001' WHERE `contact` = '+44 7700 900147';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900002' WHERE `contact` = '+44 7700 900146';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900003' WHERE `contact` = '+44 7700 900145';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900004' WHERE `contact` = '+44 7700 900142';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900005' WHERE `contact` = '+44 7700 900141';
---> statement-breakpoint
-UPDATE `maintenance_requests` SET `contact` = '+44 7700 900006' WHERE `contact` = '+44 7700 900140';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager A' WHERE `manager` = 'Valentina Colangelo';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager B' WHERE `manager` = 'Maria Ramos';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager C' WHERE `manager` = 'Qasim Malik';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager D' WHERE `manager` = 'Joseph Cole';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager E' WHERE `manager` = 'Laura Fox';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager F' WHERE `manager` = 'Amrik Sahota';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager G' WHERE `manager` = 'Nadia Ahmed';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager H' WHERE `manager` = 'Emily Stone';
---> statement-breakpoint
-UPDATE `sites` SET `manager` = 'Sample Manager I' WHERE `manager` = 'Mali Patel';
---> statement-breakpoint
-UPDATE `users` SET `full_name` = 'Sample Admin', `email` = 'sample-admin@maintsupp.local' WHERE `email` = 'alex@maintsupp.com';
---> statement-breakpoint
-UPDATE `users` SET `full_name` = 'Sample Client User', `email` = 'sample-client@maintsupp.local' WHERE `email` = 'maria@sunnamusk.com';
---> statement-breakpoint
+-- Twenty-six anonymisation statements were removed from this migration.
+--
+-- They replaced real people with placeholders, and did it by naming those
+-- people in their WHERE clauses — so a migration written to remove personal
+-- data from the database published it in the repository instead. This
+-- repository is public.
+--
+-- Removing them costs nothing, because they never did anything: the live
+-- database still holds the original values in all fourteen matching rows and
+-- not one placeholder, so the statements had already been overtaken by a
+-- later re-import by the time anyone relied on them.
+--
+-- Anonymisation belongs in a script run against a copy, not in version
+-- control. If you need it, write it to read the names from an ignored file.
+--
+-- Note that editing this file does not unpublish anything: the original text
+-- remains in this repository history and in every existing clone. Removing
+-- it there needs a history rewrite, or the repository made private.
 
 CREATE INDEX `sites_organisation_idx` ON `sites` (`organisation_id`);
 --> statement-breakpoint
