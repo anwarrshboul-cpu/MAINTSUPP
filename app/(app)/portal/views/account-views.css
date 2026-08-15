@@ -738,3 +738,121 @@
   .account-rail a { white-space: nowrap; }
   .account-topbar__back span { display: none; }
 }
+
+/* ── Phones ─────────────────────────────────────────────────────────────── */
+
+/*
+ * The account screens are their own shell.
+ *
+ * `.account-page` is not inside `.portal-shell`, so the 44px touch-target
+ * block in brand-overrides.css — which is scoped to the dashboard shell —
+ * never reached anything on this route. Measured at 390px, every control in
+ * the account header and rail was under the minimum:
+ *
+ *   .account-topbar__brand         150x30
+ *   .account-topbar__back           42x32   (label already hidden below 900px)
+ *   .account-menu__trigger          32x32
+ *   .account-rail a                  ~x34   — the nine section tabs
+ *   .account-swatches button        30x30   — the avatar colours
+ *   .account-swatches__clear        67x30
+ *
+ * ...and the type under it: the eyebrow at 10px, the session table's headings
+ * and the definition list's terms at 10.5px.
+ *
+ * Held at 768px to match the dashboard's own breakpoint, not at the 900px the
+ * rail re-flows at: between the two the layout is a tablet with room, and
+ * inflating it there would only push content down.
+ */
+@media (max-width: 768px) {
+  .account-topbar__brand,
+  .account-topbar__back,
+  .account-topbar .account-menu__trigger {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .account-topbar__back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /*
+   * ...and the room the two extra pixels a side cost.
+   *
+   * `.account-topbar` is a flex row of 22px side padding and three 18px gaps
+   * around a 150px wordmark, which is 322px of min-content — /dashboard/account
+   * was already 2px past a 320px viewport before this block, and raising the
+   * back arrow to 44 and the avatar to 44 took it to 336. None of the three
+   * items can shrink: the wordmark is a lockup and the other two are now at
+   * their floor.
+   *
+   * So the furniture pays instead. 14px of padding and 10px gaps leave 296px
+   * of content in 320px of viewport — the first time this route has fitted an
+   * iPhone SE rather than overflowing it by a hair nobody chased.
+   */
+  .account-topbar {
+    padding-inline: 14px;
+    gap: 10px;
+  }
+
+  /*
+   * The rail is a horizontally scrolling strip of tabs at this width. A short
+   * tab ("Trash") was 77px wide and 34px tall; only the height was ever the
+   * problem, because a strip that scrolls is forgiving sideways and not
+   * vertically.
+   */
+  .account-rail a {
+    min-height: 44px;
+  }
+
+  .account-swatches button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .account-swatches__clear {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .account-heading__eyebrow {
+    font-size: 12px;
+  }
+
+  .account-table th,
+  .account-definitions dt {
+    font-size: 12px;
+  }
+
+  /*
+   * The session table is already inside `.account-table-wrap`, which scrolls;
+   * this stops the wrap itself being the thing that widens the page. At 320px
+   * `.account-page` measured 2px past the viewport, and a grid container with
+   * no `min-width: 0` is the usual cause — a track's automatic minimum is its
+   * content, so a wide table pushes the column out rather than scrolling in
+   * it.
+   */
+  .account-body,
+  .account-body > * {
+    min-width: 0;
+  }
+}
+
+/*
+ * The two controls the re-measure caught after the block above.
+ *
+ * `.account-field select` is the time-zone picker at 40px — it is a <select>,
+ * so its height comes from the control and padding alone does not raise it —
+ * and `.secondary-button` inside a card ("Change password", "Sign out
+ * everywhere") measured 42px. Both are one action each, not repeated, so a
+ * 44px floor costs nothing but the two pixels.
+ */
+@media (max-width: 768px) {
+  .account-field select,
+  .account-field input,
+  .account-card .secondary-button,
+  .account-card .primary-button {
+    min-height: 44px;
+  }
+}

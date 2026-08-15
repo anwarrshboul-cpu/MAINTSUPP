@@ -6420,3 +6420,578 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
     min-height: 44px;
   }
 }
+
+/* ---- Phone, stage 15 ----------------------------------------------------
+ *
+ * Measured, not guessed. A CDP audit of every dashboard route at 320, 390,
+ * 414 and 768 (signed in as the owner, against the real Supabase data) turned
+ * up three classes of defect the earlier touch-target pass did not reach.
+ * Each block below names the number it was fixing.
+ *
+ * The audience is the reason: coordinators are at a desk, but contractors are
+ * on a phone in a shop doorway with one thumb free. Every fix here is on the
+ * chrome and the registers they touch. NOTHING here changes the board grid's
+ * own rows — that trade was settled in the touch-target block above and is
+ * still the right one.
+ */
+
+/*
+ * 1 — HORIZONTAL PAGE OVERFLOW ON THE STAT STRIPS.
+ *
+ * `/dashboard/contractors` scrolled sideways by 79px at 320 and
+ * `/dashboard/admin` by 25px, and the offender on both was the same grid:
+ * `.site-stat-grid` is `1fr 1fr` below 650px, and `1fr` floors at the track's
+ * min-content. Each tile is `38px icon | label | figure` with 15px of padding
+ * and two 11px gaps, so its min-content is ~164px; two of those plus the gap
+ * is 339px inside a 296px column, and the difference became a scrollbar on
+ * the whole document.
+ *
+ * `auto-fit` with a capped floor is the fix, and it is a better rule than the
+ * fixed count it replaces: `min(100%, 168px)` can never demand more than the
+ * container has, so the grid drops to one column exactly when two stop
+ * fitting rather than at a width someone guessed. Measured after: 2 columns
+ * at 390 and 414 (unchanged, 177px and 189px tracks), 1 column at 320.
+ *
+ * Held at 560px rather than 768px on purpose — above it the existing 2- and
+ * 4-column rules already fit, and widening the range would re-flow the tablet
+ * layout for no defect.
+ */
+@media (max-width: 560px) {
+  .site-stat-grid,
+  .compliance-stat-grid,
+  .document-stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 168px), 1fr));
+  }
+}
+
+/*
+ * 2 — THE TOPBAR, AT A FULL 44px IN BOTH AXES.
+ *
+ * The touch-target block above says min-width was tried and reverted because
+ * it pushed the shell past the viewport on twelve routes. It did — but it was
+ * applied to `.portal-shell .icon-button`, which is every icon button in the
+ * app including the ones packed into board and register toolbars. Scoped to
+ * the five controls that actually live in the topbar, the width is there:
+ *
+ *   390px: 14 + [44] + 10 + title + 2 + [44 6 44 6 44 6 44] + 14
+ *
+ * `.page-identity` is `flex: 0 1 auto; min-width: 0`, so the title absorbs
+ * the 40px this costs — 150px before, ~110px after. That is a real loss and
+ * it is the right trade: the topbar title is a duplicate. Every dashboard
+ * route renders the same string as an `<h1>` immediately below it ("Live job
+ * list", "Documents & evidence"), so nothing becomes unreachable, while the
+ * theme picker stops being a 28px target for a thumb.
+ *
+ * Measured after: page overflow stayed at 0 on every route at 320, 390, 414
+ * and 768.
+ */
+@media (max-width: 768px) {
+  .portal-topbar > .icon-button,
+  .portal-topbar .theme-toggle,
+  .portal-topbar .theme-toggle select,
+  .portal-topbar .notification-wrap > .icon-button,
+  .portal-topbar .topbar-create,
+  .portal-topbar .account-menu__trigger {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /*
+   * The theme picker is a <label> wrapping a <select>; the label carries the
+   * 28x28 box and the select is stretched over it. Both are named above, and
+   * the label needs the grid it already has to fill the new width.
+   */
+  .portal-topbar .theme-toggle {
+    justify-items: center;
+  }
+
+  /*
+   * The drawer's own close button and the workspace "+", same reasoning. They
+   * are in the sidebar rather than the topbar, where there is 320px of room
+   * and nothing to trade against.
+   */
+  .portal-sidebar .sidebar-close,
+  .portal-sidebar .workspace-switcher__add {
+    min-width: 44px;
+  }
+}
+
+/*
+ * 3 — THE DRAWER'S TYPOGRAPHY.
+ *
+ * The off-canvas sidebar is the only way to change screen on a phone, and it
+ * was set in type sized for a 260px desktop rail read at arm's length:
+ * group headings and unread counts at 8px, the workspace scope at 9px, the
+ * tenant counts at 9.5px, destination labels at 11px. 8px is not a small
+ * label, it is an unreadable one — 975 sub-12px runs were counted across the
+ * dashboard at 390 and the great majority were in here.
+ *
+ * Sizes are raised to a 11px floor for the quiet furniture and 13px for the
+ * destinations themselves. The drawer is 320px wide and every label already
+ * ellipsises, so nothing wraps or overflows; `.nav-count` keeps its pill by
+ * growing the pill, not the row.
+ *
+ * Specificity is `.portal-shell` + the original selector rather than a bare
+ * override, because `sidebar-nav.css` is imported from its component and can
+ * land after this file — a tie here would be settled by load order, which is
+ * exactly the failure the input-font-size note at the top of this file
+ * describes.
+ */
+@media (max-width: 768px) {
+  .portal-shell .portal-nav button {
+    font-size: 13px;
+  }
+
+  .portal-shell .nav-label,
+  .portal-shell .nav-label__text {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+
+  .portal-shell .nav-count {
+    min-width: 24px;
+    height: 22px;
+    font-size: 11px;
+  }
+
+  .portal-shell .workspace-identity__email {
+    font-size: 12px;
+  }
+
+  .portal-shell .workspace-identity__scope {
+    font-size: 11px;
+  }
+
+  .portal-shell .workspace-tenants__name {
+    font-size: 13px;
+  }
+
+  .portal-shell .workspace-tenants__count {
+    font-size: 11.5px;
+  }
+}
+
+/*
+ * 4 — THE BOARD'S HEADER STRIP.
+ *
+ * Not the grid. These are the board's chrome — the collapse caret, "Integrate",
+ * "Board updates", the view-tab overflow menu — and below 767px their labels
+ * are already hidden, leaving a 20px icon in 10px of padding: 40px wide,
+ * 38px for the tab menu. Four of them sit in a row that scrolls, so a miss
+ * scrolls the strip instead of pressing the button.
+ *
+ * Widening the padding rather than setting a width keeps the icon centred and
+ * leaves the desktop, where the labels are visible, untouched.
+ */
+@media (max-width: 767px) {
+  .board-header__caret,
+  .board-header__action {
+    min-width: 44px;
+    padding-inline: 12px;
+    justify-content: center;
+  }
+
+  .board-views__tab-menu {
+    min-width: 44px;
+  }
+}
+
+/*
+ * 5 — THE REGISTERS.
+ *
+ * The screens a contractor is sent to: documents and evidence, the compliance
+ * certificate list, the settings that decide their SLA. Each had a control
+ * under the minimum in one axis.
+ *
+ *   .view-switch button          30x30  — grid/list toggle, documents
+ *   .file-name-cell              h 29   — the file's own name, the way you open it
+ *   .icon-button.table-open      w 29   — the open-in-panel affordance on every row
+ *   .analytics-toolbar__search   h 24   — the certificate search box
+ *   .sla-settings input          h 38
+ *   .setting-row, .settings-evidence__list label  h 36
+ *   .admin-toggle                30x30  — 55 permission checkboxes on one screen
+ *
+ * `.admin-toggle` is the label, which is the honest measurement: its input is
+ * a 1x1 visually-hidden box and the whole label is what a tap activates.
+ */
+@media (max-width: 768px) {
+  .view-switch button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .portal-shell .file-name-cell {
+    min-height: 44px;
+  }
+
+  .portal-shell .icon-button.table-open {
+    min-width: 44px;
+  }
+
+  .analytics-toolbar__search input,
+  .sla-settings input {
+    min-height: 44px;
+  }
+
+  .portal-shell .setting-row,
+  .portal-shell .settings-evidence__list label,
+  .portal-shell .admin-toggle {
+    min-height: 44px;
+  }
+
+  .portal-shell .admin-toggle {
+    min-width: 44px;
+  }
+}
+
+/*
+ * 6 — THE PUBLIC REQUEST FORM.
+ *
+ * /request is the screen a shop manager reaches from a QR code with no
+ * account, so it gets read once, quickly, on whatever phone is in the pocket.
+ * Its step numbers were 7px, the supporting copy 8px and the step names 9px.
+ * The wordmark that returns to the site was a 36px target.
+ *
+ * Scoped to `.request-page` so the marketing pages — verified byte-identical
+ * to the design archive and explicitly out of scope — are not touched.
+ */
+@media (max-width: 768px) {
+  .request-page__header > a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  /*
+   * Sizes are named one at a time rather than swept with a floor expression.
+   * `font-size: max(1em, 12px)` was written here first and is a trap: `1em`
+   * resolves against the PARENT, so a 10px `<strong>` inside a 16px block
+   * does not get raised to 12px, it gets raised to 16px. Every value below is
+   * the measured original moved up to at least 12px and no further.
+   */
+  .request-page__header > span {
+    font-size: 12px;
+  }
+
+  .request-page .public-kicker,
+  .request-page .public-request-card__heading > span {
+    font-size: 12px;
+  }
+
+  .request-support-card strong {
+    font-size: 12.5px;
+  }
+
+  .request-support-card p,
+  .request-page .public-request-card__heading > p {
+    font-size: 12px;
+  }
+
+  .request-page__intro ol li {
+    font-size: 12.5px;
+  }
+
+  /* The step number inside its circle. 7px originally; the circle is sized in
+     px rather than em so it does not grow with this. */
+  .request-page__intro ol li > span {
+    font-size: 12px;
+  }
+}
+
+/*
+ * 7 — WHAT THE FIRST PASS MISSED.
+ *
+ * Re-measuring after blocks 1-6 left 32 controls under the minimum at 390px,
+ * down from 468. These are the rest of them, each named with what it measured.
+ * The remainder after this block are the board grid's own cells, which stay
+ * as they are for the density reason set out further up this file.
+ */
+@media (max-width: 768px) {
+  /*
+   * The board's second theme picker — the dark square in the board header
+   * strip, distinct from the one in the topbar. 38x44.
+   */
+  .board-theme-picker,
+  .board-theme-picker select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /*
+   * The caret that opens "New item"'s other options, 29x42, and the button
+   * that adds a group at the foot of the board, 149x42. Board chrome, not
+   * board rows: neither is repeated per job, so neither costs any density.
+   */
+  .live-board-split > button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .live-board-footer > button {
+    min-height: 44px;
+  }
+
+  /* Previous/next month on the planned-works calendar, 36x44. */
+  .calendar-toolbar .icon-button {
+    min-width: 44px;
+  }
+
+  /*
+   * "View" on every row of the compliance, units and documents registers. The
+   * touch block above gave it a 44px height; at 34px wide it was still a miss
+   * in the other axis, and it is the only way into a certificate.
+   */
+  .portal-shell .table-text-action {
+    min-width: 44px;
+  }
+
+  /*
+   * The spend-by-site bars on /dashboard/reports are buttons — each one opens
+   * that site — and they were 23px tall stacked directly on each other.
+   */
+  .analytics-bars > button {
+    min-height: 44px;
+  }
+
+  /* "View all" in a panel header: 43.3x44, one pixel short in width. */
+  .portal-shell :is(.analytics-panel, .insight-panel, .portal-panel) > header button {
+    min-width: 44px;
+  }
+}
+
+/*
+ * 8 — THE LAST OF THE UNREADABLE TYPE.
+ *
+ * Block 3 put an 11px floor under the drawer. Re-measuring showed two things
+ * it did not reach — the help card at the foot of the drawer (8px and 9px)
+ * and the profile row above it (10px) — and that 11px was a floor chosen to
+ * be safe rather than one chosen to be readable.
+ *
+ * 12px is the line, and it is drawn around the drawer and its furniture only:
+ * these are the strings someone has to read to work out where they are and
+ * how to leave. The 11px captions in the main content (`.analytics-metric`'s
+ * sub-labels, the page eyebrows) are deliberately NOT swept up — they sit
+ * next to the figure they describe, they are not load-bearing on their own,
+ * and raising them re-flows grids that currently fit.
+ */
+@media (max-width: 768px) {
+  .portal-shell :is(
+    .nav-label,
+    .nav-label__text,
+    .nav-count,
+    .workspace-switcher__copy small,
+    .workspace-identity__scope,
+    .workspace-tenants__count
+  ) {
+    font-size: 12px;
+  }
+
+  .portal-shell .sidebar-help :is(strong, span, p) {
+    font-size: 12px;
+  }
+
+  .portal-shell .sidebar-profile__copy :is(strong, span) {
+    font-size: 12px;
+  }
+
+  .portal-shell .avatar {
+    font-size: 12px;
+  }
+
+  /* The live/stale pill beside the topbar actions, 9px. */
+  .portal-topbar .data-indicator {
+    font-size: 12px;
+  }
+}
+
+/*
+ * 9 — THE BOARD TOOLBAR AT 768, WHICH BLOCK 7 BROKE.
+ *
+ * Widening the "New item" split caret from 29px to 44px added 15px to a row
+ * that was already within 8px of the edge, and /dashboard/jobs started
+ * scrolling sideways at 768 — the one width where it had not before.
+ *
+ * The caret is not the bug. `.live-board-toolbar` is given `overflow-x: auto`
+ * in globals.css at 760px and below, so on a phone the row scrolls inside
+ * itself and the page does not; between 761 and 768 it has no such rule, and
+ * a toolbar that is 761px of content in a 738px column simply pushes the
+ * document out. Any future control added to that row would have done the same
+ * thing.
+ *
+ * So the scroll is extended to cover the gap rather than the caret shrunk
+ * back. The `:has(.live-board-menu)` guard is copied verbatim from the rule
+ * it extends and is doing real work: a scroll container clips its children,
+ * and without the exception an open toolbar dropdown is cut off at the
+ * toolbar's own edge.
+ */
+@media (min-width: 761px) and (max-width: 768px) {
+  .live-board-toolbar {
+    flex-wrap: nowrap;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .live-board-toolbar:not(:has(.live-board-menu)) {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .live-board-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * 10 — THE STATUS CHIPS, WHICH ARE THE POINT OF THE SCREEN.
+ *
+ * Block 8 drew the 12px line around the drawer and deliberately left the
+ * 11px captions in the main content alone. It also left, unintentionally, a
+ * set of 7px to 10px strings that are not captions at all — they are the
+ * answer a contractor opened the page for:
+ *
+ *   .status-chip           7px   "Scheduled" — planned works register
+ *   .compliance-pill       7px   "Missing" / "Compliant" — certificate list
+ *   .file-status           7px   "Current" — evidence register
+ *   .priority              8px   "Urgent" / "Medium" / "Low"
+ *   .calendar-weekday      8px   "Mon"
+ *   .calendar-cell > span  8px   the date numbers on the planned calendar
+ *   .calendar-legend span  8px   what the calendar's colours mean
+ *   .file-name-cell strong 9px   the file's own name
+ *   .planned-register-date small  9px  the month
+ *
+ * 7px is not small type, it is a smudge. A chip that says whether a
+ * certificate is missing, set two sizes below the row it labels, is the one
+ * string on that screen somebody drove to a site to read.
+ *
+ * Chips grow their pill and the tables they sit in already scroll inside
+ * `.table-scroll`, so nothing here can widen the page — verified at 320.
+ * `.calendar-panel` likewise scrolls below 650px.
+ */
+@media (max-width: 768px) {
+  .portal-shell :is(
+    .status-chip,
+    .compliance-pill,
+    .file-status,
+    .priority
+  ) {
+    font-size: 12px;
+  }
+
+  .portal-shell :is(
+    .calendar-weekday,
+    .calendar-legend span,
+    .calendar-cell > span
+  ) {
+    font-size: 12px;
+  }
+
+  .portal-shell .file-name-cell strong,
+  .portal-shell .planned-register-date small,
+  .portal-shell .planned-register-list small {
+    font-size: 12px;
+  }
+
+  /* Page eyebrows ("Live maintenance workspace") and the board group's own
+     item count, both 10px. */
+  .portal-shell .analytics-page-heading > div > span,
+  .portal-shell .planned-register-panel__heading > div > span,
+  .portal-shell .sheet-group__header > span {
+    font-size: 12px;
+  }
+}
+
+/*
+ * 11 — TWO CONTROLS THE THIRD RE-MEASURE STILL HAD UNDER THE LINE.
+ *
+ * `.team-list` rows carry a 36px-wide "Manage" button — ten of them on
+ * /dashboard/team, one per person, and the only way into a member's record.
+ *
+ * The split caret is the more interesting of the two. Block 7 gave it
+ * `min-height: 44px` and it kept measuring 42, because globals.css sets a
+ * height on `.live-board-split > button:nth-child(2)` — 0-3-1 against this
+ * file's 0-1-1, so being the later stylesheet did not help. The selector is
+ * matched here rather than the value raised, because a tie this file loses is
+ * a tie no amount of ordering fixes.
+ */
+@media (max-width: 768px) {
+  .portal-shell .team-list .icon-button {
+    min-width: 44px;
+  }
+
+  .live-board-split > .primary-button,
+  .live-board-split > button:nth-child(2) {
+    min-height: 44px;
+  }
+}
+
+/*
+ * 12 — THE LAST THINGS UNDER 11px.
+ *
+ * Two kinds, and they are treated differently on purpose.
+ *
+ * `.panel-heading`'s eyebrow ("Sunnamusk UK", 8px) is prose in a heading and
+ * goes to 12px like every other label above.
+ *
+ * The trend chart's axis ticks are not prose. `.analytics-trend__y` is a
+ * gutter sized in px for the 8px type it was drawn with, and the x row is a
+ * strip under the plot: pushing either to 12px re-sizes the chart rather than
+ * the text in it. 11px is where they stop being a smudge and the plot still
+ * fits — verified at 320, where the panel neither overflows nor clips. They
+ * are the one place in this file that stops short of 12px, and they are
+ * listed in the handover as still-short rather than quietly counted as done.
+ */
+@media (max-width: 768px) {
+  .portal-shell .panel-heading > div > span {
+    font-size: 12px;
+  }
+
+  .portal-shell .analytics-trend__y > span,
+  .portal-shell .analytics-trend__x > span {
+    font-size: 11px;
+  }
+}
+
+/*
+ * 13 — TWO NAMES SET SMALLER THAN THEIR OWN LABELS.
+ *
+ * `.site-name-cell strong` is 9px, and it is the CONTRACTOR'S NAME on the
+ * contractor register — the identifying string in the row, set two sizes
+ * under the column heading above it. `.file-name-cell strong` shares the
+ * declaration in globals.css and was raised in block 10; this is its twin,
+ * missed because the two are only siblings in the source, not in the audit.
+ *
+ * `.planned-register-list`'s subtitle ("Aldgate · One-off") is 10px and says
+ * which site a planned visit is at. Both selectors below are written to match
+ * the rule they override — `> span:nth-child(2) small` is 0-2-2, and the
+ * shorter form loses to it.
+ */
+@media (max-width: 768px) {
+  .portal-shell .site-name-cell strong {
+    font-size: 12px;
+  }
+
+  .planned-register-list > button > span:nth-child(2) small {
+    font-size: 12px;
+  }
+}
+
+/*
+ * 14 — A STATUS THAT SAID "BLOCKED - AWAITING RESPO".
+ *
+ * `.analytics-status` is capped at `max-width: 170px` with an ellipsis. On a
+ * desktop that keeps a column tidy; on a phone it cuts the longest and most
+ * important value the column carries — "Blocked - Awaiting Response", the one
+ * state that means somebody has to do something — 28px short of readable.
+ *
+ * The cap is lifted rather than the text wrapped. The chip lives in
+ * `.analytics-table` inside `.table-scroll`, which already scrolls
+ * horizontally, so a wider chip widens the scroll and not the page; verified
+ * at 320, where the document still measures zero overflow. Wrapping was the
+ * alternative and it breaks the pill: a two-line chip with a 99px radius is
+ * a lozenge, not a status.
+ */
+@media (max-width: 768px) {
+  .analytics-status {
+    max-width: none;
+  }
+}

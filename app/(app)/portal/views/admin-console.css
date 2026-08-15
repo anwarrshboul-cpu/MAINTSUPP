@@ -871,3 +871,61 @@
   text-transform: uppercase;
   vertical-align: middle;
 }
+
+/* ── Phones ─────────────────────────────────────────────────────────────── */
+
+/*
+ * `.admin-client-grid` is `repeat(auto-fill, minmax(320px, 1fr))`, and a bare
+ * `320px` in `minmax` is a floor the track cannot go under — auto-fill drops
+ * to one column at narrow widths but that one column is still 320px wide. At
+ * a 320px viewport the console's column is 296px, so /dashboard/admin/clients
+ * pushed the whole document 12px sideways the moment a client card rendered.
+ *
+ * `min(100%, 320px)` keeps the 320px preference everywhere it fits and lets
+ * the track collapse to the container below that. Nothing changes at any
+ * width where the cards already fitted.
+ */
+.admin-client-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+
+/*
+ * The permission matrix's toggles.
+ *
+ * The <input> inside `.admin-toggle` is a 1x1 visually-hidden box, so the
+ * label is the tap target and the label measured 30x30 — fifty-five of them
+ * in a grid on /dashboard/admin/roles, which is the densest field of small
+ * targets in the product. The 44px floor is set here as well as in
+ * brand-overrides.css because this file is imported from its component and
+ * lands after the layout's stylesheets, where it would otherwise win the tie.
+ */
+@media (max-width: 768px) {
+  .admin-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/*
+ * The console's `rem`-sized labels, which land between 10.5px and 11.5px and
+ * so slipped under the phone pass in brand-overrides.css — that file works in
+ * px and could not name them.
+ *
+ *   .admin-you                  0.66rem  10.56px  "you", beside your own row
+ *   .admin-client__stats dt     0.68rem  10.88px  "People", "Sites", "Jobs"
+ *   .admin-capability__pending  0.70rem  11.20px  "Not enforced yet"
+ *   .admin-plan                 0.72rem  11.52px  the workspace's plan
+ *   .admin-subtle               0.72rem  11.52px  "6 days ago"
+ *
+ * Phones only. On a desktop these sit beside a figure at arm's length and are
+ * doing what small type is for.
+ */
+@media (max-width: 768px) {
+  .admin-you,
+  .admin-client__stats dt,
+  .admin-capability__pending,
+  .admin-plan,
+  .admin-subtle {
+    font-size: 12px;
+  }
+}

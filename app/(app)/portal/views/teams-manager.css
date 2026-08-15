@@ -565,3 +565,65 @@
   border-style: dashed;
   opacity: 0.7;
 }
+
+/* ── Phones ─────────────────────────────────────────────────────────────── */
+
+/*
+ * Teams is its own shell too — `.teams-page`, not `.portal-shell` — so the
+ * dashboard's 44px block never applied here either. Measured at 390px:
+ *
+ *   .teams-page__crumbs a    79x15   — the only way back to the dashboard
+ *   .teams__toggle          160x36
+ *   .teams__field input     220x36
+ *   .teams__primary         126x36
+ *   .teams__swatch           26x26   — nine of them, 6px apart
+ *   .teams__colour-input     34x30
+ *
+ * The crumb is the worst of them by a distance: a 15px-tall link is the exit
+ * from this screen, and at 15px a thumb aimed at it lands on the heading.
+ */
+@media (max-width: 768px) {
+  .teams-page__crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .teams__toggle,
+  .teams__primary,
+  .teams__field input {
+    min-height: 44px;
+  }
+
+  /*
+   * The swatches become real 44px circles rather than 26px ones with an
+   * invisible box around them.
+   *
+   * A transparent hit area was tried first and is worse than it looks here:
+   * the row's gap is 6px, so expanding nine 26px dots by 9px a side overlaps
+   * every neighbour by 12px, and a tap in the seam silently belongs to
+   * whichever sibling paints last. Real circles have no seam. Nine of them do
+   * not fit on one 390px line, but `.teams__swatches` already carries
+   * `flex-wrap: wrap`, so they flow onto a second row — which is what a
+   * colour picker looks like on a phone anyway.
+   */
+  .teams__swatch {
+    width: 44px;
+    height: 44px;
+  }
+
+  .teams__colour-input {
+    width: 44px;
+    height: 44px;
+  }
+
+  .teams__avatar {
+    font-size: 12px;
+  }
+
+  .teams__person-email,
+  .teams__person-none,
+  .teams__chip {
+    font-size: 12px;
+  }
+}

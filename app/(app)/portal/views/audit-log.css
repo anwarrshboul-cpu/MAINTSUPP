@@ -434,3 +434,62 @@
   font-size: 12.5px;
   color: var(--muted);
 }
+
+/* ── Phones ─────────────────────────────────────────────────────────────── */
+
+/*
+ * The third shell outside `.portal-shell`, and the same consequence: nothing
+ * in the dashboard's 44px block reaches this route. Measured at 390px:
+ *
+ *   .audit-page__crumbs a    79x15   — the way back to the dashboard
+ *   .audit__filter select   316x36   — the workspace and action filters
+ *   .audit__filter input    316x36
+ *   .audit__expand           58x32   — "Show", the only way to read an entry
+ *   .audit__pager button     64x32   — Older / Newer
+ *
+ * `.audit__expand` is on every row of a long list, directly above and below
+ * its neighbours, which is the arrangement a 32px target fails at worst.
+ */
+@media (max-width: 768px) {
+  .audit-page__crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .audit__filter input,
+  .audit__filter select,
+  .audit__expand,
+  .audit__pager button {
+    min-height: 44px;
+  }
+
+  .audit__expand,
+  .audit__pager button {
+    min-width: 44px;
+  }
+}
+
+/*
+ * And the table's own type, which the phone pass left at 10-10.5px: the
+ * column headings, the italic qualifier in the actor and target cells, and
+ * the record id in `<code>`. The id is the string someone reads OUT to
+ * somebody else over the phone, so 10px is exactly the wrong size for it.
+ *
+ * `.audit__table` sits in a scrolling wrapper, so widening its columns moves
+ * the scroll, not the page.
+ */
+/*
+ * Written first as `.audit__table th` / `.audit__where code` and it did
+ * nothing: the rules being raised are `.audit__table thead th` and
+ * `.audit__where em code`, both 0-1-2 against a 0-1-1 that being later in the
+ * file cannot rescue. Each selector below is the one it overrides.
+ */
+@media (max-width: 768px) {
+  .audit__table thead th,
+  .audit__actor em,
+  .audit__where em,
+  .audit__where em code {
+    font-size: 12px;
+  }
+}
