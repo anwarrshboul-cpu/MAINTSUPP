@@ -63,12 +63,114 @@ test("an escaped quote does not end the literal early", () => {
   );
 });
 
-test("numbered and named placeholders are refused rather than renumbered", () => {
-  assert.throws(() => translateSql("SELECT * FROM t WHERE a = ?1"), /\?1/);
+test("named placeholders are refused rather than renumbered", () => {
   assert.throws(
     () => translateSql("SELECT * FROM t WHERE a = :name"),
     /named parameters/,
   );
+  assert.throws(
+    () => translateSql("SELECT * FROM t WHERE a = @name"),
+    /named parameters/,
+  );
+});
+
+/* --------------------------------------------- numbered placeholders (?NNN) */
+
+/*
+ * SECURITY REGRESSION — refusing `?NNN` disabled brute-force protection.
+ *
+ * `recordSignInFailure()` in `app/lib/auth-session.ts` is the only writer of
+ * `sign_in_failures`, it is written with numbered parameters because its CASE
+ * arms reuse `?2`, `?3` and `?4`, and its `.run()` ends in `.catch(() => {})`
+ * so that a throttling write cannot take sign-in down. The translator threw on
+ * `?1`; the catch swallowed it; the table was never written; `signInRetryAfter()`
+ * returned 0 for ever; and the 429 branch in `app/api/auth/login/route.ts` was
+ * unreachable code. Confirmed in production: ten consecutive failed sign-ins
+ * all answered 401 and `portal.sign_in_failures` did not grow.
+ *
+ * The two statements below are those call sites verbatim.
+ */
+
+test("?NNN maps to $NNN, and a repeated index stays one parameter", () => {
+  // app/lib/auth-session.ts — the DELETE in the prune branch, verbatim.
+  assert.equal(
+    squash(
+      translateSql(
+        "DELETE FROM sign_in_failures WHERE blocked_until < ?1 AND ?1 - first_at > ?2",
+      ),
+    ),
+    "DELETE FROM sign_in_failures WHERE blocked_until < $1 AND $1 - first_at > $2",
+  );
+});
+
+test("?NNN out of order keeps its own numbering, not the order it appears in", () => {
+  // The distinction that matters: positional `?` would renumber these 1,2,3.
+  assert.equal(
+    squash(translateSql("SELECT * FROM t WHERE a = ?3 AND b = ?1 AND c = ?2")),
+    "SELECT * FROM t WHERE a = $3 AND b = $1 AND c = $2",
+  );
+});
+
+test("?NNN inside a string literal is not a placeholder", () => {
+  assert.equal(
+    squash(translateSql("SELECT '?1 is literal' AS x FROM t WHERE a = ?1")),
+    "SELECT '?1 is literal' AS x FROM t WHERE a = $1",
+  );
+  assert.equal(
+    squash(translateSql("SELECT 1 -- ?9 in a comment\nWHERE x = ?1")),
+    "SELECT 1 -- ?9 in a comment WHERE x = $1",
+  );
+});
+
+test("a two-digit index is read whole, not as ?1 followed by a 0", () => {
+  assert.equal(
+    squash(translateSql("SELECT * FROM t WHERE a = ?10 AND b = ?2")),
+    "SELECT * FROM t WHERE a = $10 AND b = $2",
+  );
+});
+
+test("the sign_in_failures upsert translates whole, with ?2 reused five times", () => {
+  // app/lib/auth-session.ts:296 — verbatim.
+  const sql = `INSERT INTO sign_in_failures (key, count, first_at, blocked_until)
+       VALUES (?1, 1, ?2, 0)
+       ON CONFLICT(key) DO UPDATE SET
+         count = CASE
+           WHEN ?2 - sign_in_failures.first_at > ?3 THEN 1
+           WHEN sign_in_failures.count + 1 >= ?4 THEN 0
+           ELSE sign_in_failures.count + 1
+         END,
+         first_at = CASE
+           WHEN ?2 - sign_in_failures.first_at > ?3 THEN ?2
+           WHEN sign_in_failures.count + 1 >= ?4 THEN ?2
+           ELSE sign_in_failures.first_at
+         END,
+         blocked_until = CASE
+           WHEN ?2 - sign_in_failures.first_at > ?3 THEN 0
+           WHEN sign_in_failures.count + 1 >= ?4 THEN ?2 + ?5
+           ELSE sign_in_failures.blocked_until
+         END`;
+  const out = squash(translateSql(sql));
+
+  assert.doesNotMatch(out, /\?/, "a placeholder was left untranslated");
+  assert.match(out, /VALUES \(\$1, 1, \$2, 0\)/);
+  assert.match(out, /WHEN \$2 - sign_in_failures\.first_at > \$3 THEN 1/);
+  assert.match(out, /WHEN sign_in_failures\.count \+ 1 >= \$4 THEN \$2 \+ \$5/);
+  // Five distinct parameters, matching .bind(key, now, WINDOW, MAX, LOCKOUT).
+  assert.deepEqual(
+    [...new Set(out.match(/\$\d+/g))].sort(),
+    ["$1", "$2", "$3", "$4", "$5"],
+  );
+});
+
+test("mixing bare ? with numbered ?N is refused, because SQLite's rule surprises", () => {
+  assert.throws(
+    () => translateSql("SELECT * FROM t WHERE a = ? AND b = ?2"),
+    /mixes bare \? with numbered/,
+  );
+});
+
+test("?0 is refused rather than renumbered, since SQLite counts from 1", () => {
+  assert.throws(() => translateSql("SELECT * FROM t WHERE a = ?0"), /\?0/);
 });
 
 test("a cast this translator emits is not mistaken for a named parameter", () => {
@@ -229,6 +331,40 @@ test("a qualified boolean column is matched too, and a non-boolean is not", () =
   );
 });
 
+/*
+ * REGRESSION — a quoted boolean column was never rewritten.
+ *
+ * The rule's pattern carried an optional `"` around the identifier, which
+ * could not fire: `maskNonCode` blanks a quoted identifier along with its
+ * quotes, so the pattern was looking for a `"` that the mask had already
+ * removed. `"active" = 1` therefore reached Postgres untouched and failed with
+ * "operator does not exist: boolean = integer". No caller writes this shape
+ * today, and it fails loudly rather than silently, but the pattern claimed to
+ * handle it and did not.
+ */
+test("a quoted boolean column is rewritten, qualified or not", () => {
+  assert.equal(
+    squash(translateSql('SELECT * FROM users WHERE "active" = 1')),
+    'SELECT * FROM users WHERE "active" = true',
+  );
+  assert.equal(
+    squash(translateSql('SELECT * FROM users WHERE "users"."active" = 0')),
+    'SELECT * FROM users WHERE "users"."active" = false',
+  );
+  assert.equal(
+    squash(translateSql('SELECT * FROM users WHERE users."active" IS 1')),
+    'SELECT * FROM users WHERE users."active" IS true',
+  );
+});
+
+test("a quoted NON-boolean column is still left alone", () => {
+  // `position` orders; rewriting it to `true` would be a silent data bug.
+  assert.equal(
+    squash(translateSql('SELECT * FROM option_values WHERE "position" = 1')),
+    'SELECT * FROM option_values WHERE "position" = 1',
+  );
+});
+
 test("a 0/1 inside a string literal is never a boolean", () => {
   const sql = "UPDATE users SET full_name = 'active = 1' WHERE active = 1";
   assert.equal(
@@ -354,6 +490,88 @@ test("ifnull, instr and group_concat are translated", () => {
     squash(translateSql("SELECT group_concat(name, '; ') FROM t")),
     "SELECT string_agg((name)::text, '; ') FROM t",
   );
+});
+
+/*
+ * REGRESSION — /api/audit answered 503 on every request against Postgres.
+ *
+ * `app/api/audit/route.ts:60` builds its sort key as
+ * `sql\`replace(${auditEvents.createdAt}, 'T', ' ')\``, which reached Postgres
+ * untranslated and failed with
+ *
+ *   function replace(timestamp with time zone, unknown, unknown) does not exist
+ *
+ * because `portal.audit_events.created_at` is a real `timestamptz` and Postgres
+ * publishes only `replace(text, text, text)`. The statement below is that call
+ * site verbatim, down to drizzle's quoting.
+ */
+test("replace() casts its arguments, so a typed column reaches a text function", () => {
+  assert.equal(
+    squash(
+      translateSql(
+        'SELECT "id" FROM "audit_events" ' +
+          'ORDER BY replace("audit_events"."created_at", \'T\', \' \') DESC',
+      ),
+    ),
+    'SELECT "id" FROM "audit_events" ' +
+      'ORDER BY replace(("audit_events"."created_at")::timestamp::text, (\'T\')::text, (\' \')::text) DESC',
+  );
+});
+
+test("replace() on a placeholder casts it too, and numbering still runs left to right", () => {
+  assert.equal(
+    squash(translateSql("SELECT replace(created_at, ?, ?) FROM t WHERE id = ?")),
+    "SELECT replace((created_at)::timestamp::text, ($1)::text, ($2)::text) FROM t WHERE id = $3",
+  );
+});
+
+test("replace() nested in another call keeps its parentheses balanced", () => {
+  assert.equal(
+    squash(
+      translateSql("SELECT lower(replace(coalesce(a, b), 'T', ' ')) FROM t"),
+    ),
+    "SELECT lower(replace((coalesce(a, b))::text, ('T')::text, (' ')::text)) FROM t",
+  );
+});
+
+/*
+ * REGRESSION — the first version of the replace() rule took the whole database
+ * bootstrap down.
+ *
+ * It emitted one edit spanning each entire `replace(…)` call, which is correct
+ * for a call that stands alone and impossible for `db/init.ts`'s slug
+ * backfill: three calls nested inside one another produce three nested edits,
+ * and `applyEdits` refuses those as overlapping — so every boot failed with
+ * "overlapping rewrites at 38" before a single table was touched. This is that
+ * statement verbatim.
+ */
+test("nested replace() calls are all cast, without the edits colliding", () => {
+  assert.equal(
+    squash(
+      translateSql(
+        "UPDATE sites SET slug = " +
+          "lower(replace(replace(replace(name, ' ', '-'), '/', '-'), '.', '')) " +
+          "WHERE slug IS NULL",
+      ),
+    ),
+    "UPDATE sites SET slug = lower(replace((replace((replace((name)::text, " +
+      "(' ')::text, ('-')::text))::text, ('/')::text, ('-')::text))::text, " +
+      "('.')::text, ('')::text)) WHERE slug IS NULL",
+  );
+});
+
+/*
+ * `INSERT OR REPLACE` is a statement keyword, not the three-argument function,
+ * and rewriting it would corrupt the conflict clause that
+ * `rewriteInsertConflictClause` produces from it.
+ */
+test("the REPLACE of INSERT OR REPLACE is not mistaken for the function", () => {
+  const translated = translateSql(
+    "INSERT OR REPLACE INTO sessions (id, token_hash) VALUES (?, ?)",
+    { primaryKeys: new Map([["sessions", ["id"]]]) },
+  );
+  assert.match(translated, /ON CONFLICT \("id"\) DO UPDATE/i);
+  assert.doesNotMatch(translated, /::text/);
 });
 
 test("functions with no equivalent are refused by name", () => {

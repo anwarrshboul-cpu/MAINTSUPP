@@ -309,6 +309,69 @@ test("the per-table boolean map matches the live schema exactly", options, async
   assert.deepEqual(fromDatabase, BOOLEAN_COLUMNS);
 });
 
+test("the timestamp column name set matches the live schema exactly", options, async () => {
+  /*
+   * The set is keyed by NAME, which is only sound because no timestamp column
+   * name is reused for a column of another type. Both halves are checked here:
+   * the set agrees with the schema, and the schema still has that property. If
+   * a migration ever adds a text column called `created_at`, this fails —
+   * which is the moment to notice, rather than when `replace()` translates a
+   * `::timestamp` cast onto a string and a route starts throwing.
+   */
+  const { TIMESTAMP_COLUMN_NAMES } = await import("../db/sqlite-to-postgres.ts");
+  const live = await db()
+    .prepare(
+      `SELECT DISTINCT column_name FROM information_schema.columns
+        WHERE table_schema = 'portal'
+          AND data_type IN ('timestamp with time zone', 'timestamp without time zone')
+        ORDER BY column_name`,
+    )
+    .all();
+  assert.deepEqual(
+    live.results.map((row) => row.column_name),
+    [...TIMESTAMP_COLUMN_NAMES].sort(),
+  );
+
+  const collisions = await db()
+    .prepare(
+      `SELECT DISTINCT column_name FROM information_schema.columns
+        WHERE table_schema = 'portal'
+          AND data_type NOT IN ('timestamp with time zone', 'timestamp without time zone')
+          AND column_name IN (
+            SELECT column_name FROM information_schema.columns
+             WHERE table_schema = 'portal'
+               AND data_type IN ('timestamp with time zone', 'timestamp without time zone'))`,
+    )
+    .all();
+  assert.deepEqual(collisions.results, [], "a timestamp column name is reused for another type");
+});
+
+test("replace() on a timestamp column orders by instant, to the millisecond", options, async () => {
+  /*
+   * REGRESSION, and the reason `replace()` casts through `::timestamp` rather
+   * than straight to text. /api/audit sorts on this expression, and
+   * `timestamptz::text` renders "+00" exactly where the fractional seconds go —
+   * '+' sorts below '.', so a row stamped on a whole second sorted ABOVE one
+   * stamped later in the same second. Both forms are in `audit_events`: the
+   * migrated rows are whole seconds, everything since carries milliseconds.
+   */
+  const rows = await db()
+    .prepare(
+      `SELECT created_at FROM audit_events
+        ORDER BY replace(created_at, 'T', ' ') DESC, id DESC
+        LIMIT 200`,
+    )
+    .all();
+
+  const times = rows.results.map((row) => Date.parse(row.created_at));
+  for (let i = 1; i < times.length; i += 1) {
+    assert.ok(
+      times[i - 1] >= times[i],
+      `audit rows out of time order at ${i}: ${rows.results[i - 1].created_at} then ${rows.results[i].created_at}`,
+    );
+  }
+});
+
 /* ------------------------------------------------------------- the writes */
 
 test("insert, update and delete a scratch session row", options, async () => {
@@ -398,6 +461,123 @@ test("batch() returns one result per statement, in order", options, async () => 
   ]);
   assert.equal(results.length, 2);
   assert.equal(results[1].results[0].n, 20);
+});
+
+/* ------------------------------------------------- the connection strategy */
+
+/*
+ * The adapter ran on `max: 1` — one socket, every query serialised — because
+ * that was thought to be what kept `batch()` atomic. It is not: `batch()` now
+ * RESERVES a connection out of a pool and drives BEGIN/COMMIT on it by hand.
+ * The four tests below are the ones that would have caught the change going
+ * wrong, and each names the property it is defending rather than the mechanism.
+ */
+
+test("ordinary queries run concurrently, so one slow read cannot block another", options, async () => {
+  /*
+   * `pg_sleep` rather than a real slow query, because the point is scheduling
+   * and not the planner. Four half-second sleeps on a serialising connection
+   * take at least two seconds; on a pool of four they take about half of one.
+   * The threshold is deliberately loose — this asserts "not serialised", which
+   * is a 4x gap, not a latency budget that a busy CI box could fail.
+   */
+  const started = Date.now();
+  await Promise.all(
+    Array.from({ length: 4 }, () =>
+      db().prepare("SELECT pg_sleep(0.5) AS slept").first(),
+    ),
+  );
+  const elapsed = Date.now() - started;
+  assert.ok(
+    elapsed < 1500,
+    `four concurrent 0.5s queries took ${elapsed}ms, which is serialised, not pooled`,
+  );
+});
+
+test("batch() stays atomic while other queries are in flight against the pool", options, async () => {
+  /*
+   * The failure this defends against does not throw and does not log: with the
+   * transaction on a shared socket, an interleaved statement lands INSIDE it
+   * and is rolled back with it — or the batch's own writes escape. So the batch
+   * is made to fail on its last statement while independent reads run beside
+   * it, and both halves are then checked: the batch left nothing behind, and
+   * the concurrent reads all answered.
+   */
+  const id = `pgd1_pool_${Date.now()}`;
+  const user = await db().prepare("SELECT id FROM users ORDER BY id LIMIT 1").first();
+  const now = new Date().toISOString();
+
+  const noise = Array.from({ length: 6 }, () =>
+    db().prepare("SELECT count(*) AS n FROM sites").first(),
+  );
+  const batch = db()
+    .batch([
+      db()
+        .prepare(
+          `INSERT INTO sessions (id, user_id, token_hash, issued_at, expires_at)
+             VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(id, user.id, `hash-${id}`, now, now),
+      db().prepare("INSERT INTO sessions (id, no_such_column) VALUES (?, 1)").bind(id),
+    ])
+    .then(
+      () => "resolved",
+      () => "rejected",
+    );
+
+  const [outcome, ...reads] = await Promise.all([batch, ...noise]);
+  assert.equal(outcome, "rejected");
+  for (const read of reads) assert.ok(read.n > 0, "a concurrent read was lost");
+
+  const survivor = await db().prepare("SELECT id FROM sessions WHERE id = ?").bind(id).first();
+  assert.equal(survivor, null, "the rolled-back insert survived the batch");
+});
+
+test("a rolled-back batch does not poison the connection it borrowed", options, async () => {
+  /*
+   * A reserved connection goes back into the pool when the batch releases it.
+   * If the ROLLBACK were skipped it would return with a transaction still open
+   * and in the aborted state, and the NEXT request to draw that connection
+   * would fail with "current transaction is aborted" — a failure that appears
+   * in a different request from the one that caused it, which is the worst
+   * shape a bug can have. Enough queries follow to draw every pooled
+   * connection at least once.
+   */
+  const before = await db().prepare("SELECT count(*) AS n FROM sites").first();
+  await assert.rejects(() =>
+    db().batch([db().prepare("SELECT no_such_column FROM sites")]),
+  );
+  const after = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      db().prepare("SELECT count(*) AS n FROM sites").first(),
+    ),
+  );
+  // Compared against the count taken before, not a literal: the assertion is
+  // "every connection still answers, and answers the same thing", which is
+  // what a poisoned connection would break. Hard-coding the number would make
+  // this test fail for the unrelated reason that somebody added a site.
+  for (const row of after) assert.equal(row.n, before.n);
+});
+
+test("prepared statements are reused without changing what a repeat returns", options, async () => {
+  /*
+   * Naming a prepared statement means the second execution skips the Describe
+   * round trip and BINDS against types cached from the first — which is the
+   * whole performance argument, and also the way to get a wrong answer if the
+   * cached types were ever applied to a different statement. Running the same
+   * shape with different bindings, and a boolean among them, is what would
+   * expose that: the boolean serialiser is chosen from the cached type.
+   */
+  const statement = () =>
+    db().prepare("SELECT id, active FROM maintenance_board_options WHERE active = ? LIMIT ?");
+
+  const first = await statement().bind(1, 3).all();
+  const second = await statement().bind(1, 3).all();
+  assert.deepEqual(first.results, second.results);
+  for (const row of first.results) assert.equal(row.active, 1);
+
+  const inactive = await statement().bind(0, 3).all();
+  for (const row of inactive.results) assert.equal(row.active, 0);
 });
 
 test("close the connection", options, async () => {

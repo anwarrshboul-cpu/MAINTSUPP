@@ -43,9 +43,13 @@
  *     concurrency cannot interleave two callers into each other's mode.
  *
  *  3. `batch()` must run on ONE connection or it is not a transaction at all.
- *     A pool would happily send `BEGIN` down one socket and the batch's inserts
- *     down another — a bug that does not fail, it just silently stops being
- *     atomic. Hence `max: 1` (see `connection()`), plus `sql.begin()`.
+ *     A pool would happily send a bare `BEGIN` down one socket and the batch's
+ *     inserts down another — a bug that does not fail, it just silently stops
+ *     being atomic. This ran on a single connection for that reason, and now
+ *     runs on a pool with the batch's connection RESERVED out of it: see
+ *     `connection()` for why one connection was costing every parameterised
+ *     statement a second round trip, and `batch()` for the two independent
+ *     mechanisms that keep the transaction on one socket.
  *
  * ---------------------------------------------------------------------------
  * The `public` schema is not ours
@@ -161,9 +165,18 @@ interface PostgresResult extends Array<unknown> {
 }
 
 interface Sql {
-  unsafe(sql: string, params?: unknown[]): PostgresQuery;
+  unsafe(
+    sql: string,
+    params?: unknown[],
+    options?: { prepare?: boolean },
+  ): PostgresQuery;
   begin<T>(run: (tx: Sql) => Promise<T>): Promise<T>;
+  reserve?(): Promise<ReservedSql>;
   end(options?: { timeout?: number }): Promise<void>;
+}
+
+interface ReservedSql extends Sql {
+  release(): void;
 }
 
 interface PostgresQuery extends Promise<PostgresResult> {
@@ -215,6 +228,20 @@ function resolveDatabaseUrl(): string {
  * somebody else's `jobs` table.
  */
 const SEARCH_PATH = "portal, pg_catalog";
+
+/**
+ * Whether postgres.js may give its prepared statements names.
+ *
+ * Off for the transaction pooler, where a name can outlive the backend that
+ * parsed it, and off on request — `PG_D1_PREPARE=0` is the escape hatch for an
+ * operator who puts something else in front of Postgres. On otherwise, for the
+ * round-trip reason set out on `connection()`.
+ */
+function usePreparedStatements(url: string): boolean {
+  const env = nodeProcess().env ?? {};
+  if (env["PG_D1_PREPARE"] === "0") return false;
+  return !/:6543\//.test(url);
+}
 
 /* --------------------------------------------------------------- values -- */
 
@@ -424,6 +451,85 @@ function fromPostgresValue(value: unknown, oid: number): unknown {
   }
 }
 
+/* --------------------------------------------------------------- trace -- */
+
+/**
+ * Per-statement timing, off unless `PG_D1_TRACE=1`.
+ *
+ * This exists because the first question anyone asks about this adapter — "why
+ * is /api/board three seconds against Supabase and 0.29s against SQLite?" — is
+ * unanswerable from outside it. Postgres' own `pg_stat_statements` reports
+ * execution time on the server, which for this workload is the small half; the
+ * interesting number is how many statements a request issues and what each one
+ * cost end to end, round trip included. Nothing above this file can count that.
+ *
+ * The output is one line per statement plus a per-request-ish summary flushed
+ * on demand, and it is deliberately written to stderr rather than accumulated:
+ * a trace that grows an array is a memory leak waiting for somebody to leave
+ * the flag on in production.
+ */
+interface TraceTotals {
+  statements: number;
+  totalMs: number;
+  byStatement: Map<string, { count: number; ms: number }>;
+}
+
+let traceTotals: TraceTotals | null = null;
+
+function traceEnabled(): boolean {
+  return nodeProcess().env?.["PG_D1_TRACE"] === "1";
+}
+
+/** The statement, flattened and clipped, as a grouping key a human can read. */
+function traceKey(sql: string): string {
+  return sql.trim().replace(/\s+/g, " ").slice(0, 110);
+}
+
+function recordTrace(sql: string, ms: number): void {
+  if (!traceTotals) {
+    traceTotals = { statements: 0, totalMs: 0, byStatement: new Map() };
+  }
+  traceTotals.statements += 1;
+  traceTotals.totalMs += ms;
+  const key = traceKey(sql);
+  const entry = traceTotals.byStatement.get(key);
+  if (entry) {
+    entry.count += 1;
+    entry.ms += ms;
+  } else {
+    traceTotals.byStatement.set(key, { count: 1, ms });
+  }
+  console.error(`[pg-d1-trace] ${ms.toFixed(1)}ms  ${key}`);
+}
+
+/**
+ * @internal — the totals since the last reset, for a measurement harness.
+ *
+ * Exported rather than printed on a timer because the only useful boundary is
+ * "one HTTP request", which this file cannot see. A caller that can — a test,
+ * or a debug route — resets before and reads after.
+ */
+export function pgD1TraceSnapshot(): {
+  statements: number;
+  totalMs: number;
+  top: Array<{ sql: string; count: number; ms: number }>;
+} {
+  const totals = traceTotals ?? {
+    statements: 0,
+    totalMs: 0,
+    byStatement: new Map(),
+  };
+  const top = [...totals.byStatement.entries()]
+    .map(([sql, value]) => ({ sql, count: value.count, ms: value.ms }))
+    .sort((a, b) => b.ms - a.ms);
+  return { statements: totals.statements, totalMs: totals.totalMs, top };
+}
+
+/** @internal — starts a fresh measurement window. */
+export function pgD1TraceReset(): void {
+  traceTotals = null;
+}
+
 /* ------------------------------------------------------------- the shim -- */
 
 interface D1Meta {
@@ -494,35 +600,96 @@ interface Executed {
  */
 const TRANSLATION_CACHE_LIMIT = 512;
 
+/**
+ * How many sockets the adapter may open.
+ *
+ * Four, and the number is bounded from above by the pooler rather than chosen
+ * for throughput. Supabase's session-mode pooler enforces a per-project client
+ * limit — this project's is 15, and exceeding it is not a queue, it is a
+ * connection REFUSED at startup:
+ *
+ *   PostgresError: (EMAXCONNSESSION) max clients reached in session mode -
+ *   max clients are limited to pool_size: 15
+ *
+ * which was hit during this adapter's own testing, with two app processes at
+ * eight each. Four leaves room for a rolling deploy where two instances overlap
+ * (8), a `psql`, and the Phase 2 stack in `apps/` — which shares this database
+ * and this pooler. `PG_D1_POOL` raises it for a deployment that knows its own
+ * budget; raising it past the project's `pool_size` trades a slow portal for a
+ * portal that cannot connect at all.
+ */
+const DEFAULT_POOL_SIZE = 4;
+
+function positiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 class NodePgConnection {
   readonly url: string;
   private sql: Sql | null = null;
   private readonly translations = new Map<string, string>();
   private primaryKeys: ReadonlyMap<string, readonly string[]> | null = null;
 
+  /**
+   * Passed to every `unsafe()` call, so the prepared-statement decision is made
+   * once here rather than being re-derived at each of the four call sites.
+   */
+  readonly queryOptions: { prepare: boolean };
+
   constructor(url: string) {
     this.url = url;
+    this.queryOptions = { prepare: usePreparedStatements(url) };
   }
 
   /**
-   * One connection, not a pool.
+   * A small pool, and named prepared statements. Both were `1` and `false`, and
+   * both were changed on the strength of a measurement rather than a preference
+   * — the numbers are in the block comment below because the reasoning is not
+   * recoverable from the code.
    *
-   * `max: 1` is not a resource decision, it is the transaction decision from
-   * the header: drizzle's d1 driver implements `transaction()` by sending a
-   * bare `begin` as its own statement, and `batch()` below opens a real one, so
-   * a second socket would put half the work outside the transaction. One
-   * connection also matches what a D1 binding is, which is what every caller in
-   * this repo was written against.
+   * WHY THE POOL IS SAFE, which is the question `max: 1` was answering.
    *
-   * `prepare: false` because the connection may be a pooler, where a named
-   * prepared statement can outlive the backend it was created on.
+   * The original note said a pool "would happily send `BEGIN` down one socket
+   * and the batch's inserts down another". That is true of a bare `BEGIN`
+   * string sent through the pool handle — which is how drizzle's d1 driver
+   * implements `transaction()` — and it is NOT true of `sql.begin()`, which is
+   * what `batch()` uses. postgres.js's `begin()` captures the connection its
+   * `begin` executed on (`onexecute`) and binds the callback's handle to that
+   * one connection, so every statement in the batch provably shares a socket
+   * with its `BEGIN` and `COMMIT` no matter how large the pool is. Nothing in
+   * `app/**` or `db/**` calls `db.transaction()` — checked — so the unsafe
+   * shape has no caller; `batchConnection()` below reserves a connection anyway
+   * so that the guarantee does not rest on that remaining true.
+   *
+   * WHY PREPARED STATEMENTS ARE SAFE HERE, which is what `prepare: false` was
+   * answering. The concern is real but belongs to Supabase's TRANSACTION pooler
+   * on 6543, which hands out a different backend per statement and where a
+   * named statement can therefore outlive the backend that parsed it. This
+   * adapter requires the SESSION pooler on 5432 — `resolveDatabaseUrl()` warns
+   * about 6543 already — and a session-mode pooler pins one backend for the
+   * life of the client connection. postgres.js also clears its statement cache
+   * in `connected()`, so a silent reconnect re-parses rather than referring to
+   * a name the new backend never saw. `PG_D1_PREPARE=0` turns it off, and 6543
+   * turns it off automatically.
+   *
+   * WHAT IT BUYS. With `prepare: false` and any bound parameter, postgres.js
+   * sets `describeFirst`: it sends Parse+Describe, WAITS for Postgres to name
+   * the parameter types, and only then sends Bind+Execute. That is two round
+   * trips for every parameterised statement. Measured against this Supabase
+   * pooler from a developer machine: 6.7 ms for an unparameterised statement,
+   * 19.0 ms for a parameterised one — 2.8x, and this application's statements
+   * are almost all parameterised. Naming the statement makes `describeFirst`
+   * false from the second execution onwards, which is where the repetition in
+   * `db/init.ts` and the board's seeding loops actually live.
    */
   connection(): Sql {
     if (this.sql) return this.sql;
     const postgres = postgresModule();
+    const env = nodeProcess().env ?? {};
     this.sql = postgres(this.url, {
-      max: 1,
-      prepare: false,
+      max: positiveInteger(env["PG_D1_POOL"], DEFAULT_POOL_SIZE),
+      prepare: this.queryOptions.prepare,
       types: PG_TYPES,
       connection: {
         search_path: SEARCH_PATH,
@@ -533,6 +700,19 @@ class NodePgConnection {
          * mean the same instant it has always meant.
          */
         TimeZone: "UTC",
+        /*
+         * Pinned for the same class of reason as `TimeZone`, and for one
+         * concrete caller: `sqlite-to-postgres.ts` translates SQLite's
+         * `replace(X, …)` — which /api/audit uses on `created_at` — into a
+         * `::text` cast, and the text form of a timestamp is whatever DateStyle
+         * says it is. `ISO` gives "2026-08-07 14:35:37.123+00", which sorts as
+         * text in the same order it sorts as an instant; `SQL` or `German`
+         * would give "07/08/2026 …" and "07.08.2026 …", which do not. It is the
+         * Postgres default, so this changes nothing today — it stops a role or
+         * database `SET` somebody adds later from silently reordering an audit
+         * log.
+         */
+        DateStyle: "ISO, MDY",
         application_name: "maintsupp-legacy-portal",
       },
       // The bootstrap's DDL raises "already exists, skipping" notices by the
@@ -595,6 +775,29 @@ class NodePgConnection {
   async optionsFor(sql: string): Promise<TranslateOptions> {
     if (!/\bINSERT\s+OR\s+REPLACE\b/i.test(sql)) return {};
     return { primaryKeys: await this.primaryKeyMap() };
+  }
+
+  /**
+   * A connection nothing else can be scheduled onto, for the duration of a
+   * `batch()`.
+   *
+   * With the connection reserved out of the pool there is no arrangement of
+   * pool state under which another request's statement can be dispatched onto
+   * the socket carrying an open transaction. `batch()` explains why that is
+   * worth taking a connection out of circulation for.
+   *
+   * A capability check rather than a version test, and `null` rather than a
+   * silent fallback to the pool handle: on a postgres.js without `reserve()`
+   * the caller must take the `sql.begin()` path instead, which is correct for a
+   * different reason. Handing back the pool handle here would look like it had
+   * worked and would open the transaction on whichever connection happened to
+   * be free — the one shape this method exists to prevent.
+   */
+  async batchConnection(): Promise<{ sql: Sql; release: () => void } | null> {
+    const pool = this.connection();
+    if (typeof pool.reserve !== "function") return null;
+    const reserved = await pool.reserve();
+    return { sql: reserved, release: () => reserved.release() };
   }
 
   async close(): Promise<void> {
@@ -720,9 +923,14 @@ class NodePgPreparedStatement {
      */
     let translated = this.sql;
     const sql = on ?? this.connection.connection();
+    const tracing = traceEnabled();
+    const startedAt = tracing ? performance.now() : 0;
     try {
       translated = this.connection.translate(this.sql, options);
-      const result = await sql.unsafe(translated, this.params).values();
+      const result = await sql
+        .unsafe(translated, this.params, this.connection.queryOptions)
+        .values();
+      if (tracing) recordTrace(translated, performance.now() - startedAt);
       return {
         columns: result.columns ?? [],
         rows: result as unknown as unknown[][],
@@ -805,22 +1013,43 @@ class NodePgDatabase {
    * Every statement in one transaction, which is D1's contract for `batch()`
    * and the reason `db/init.ts` uses it for the schema bootstrap.
    *
-   * `sql.begin()` rather than a raw `BEGIN` string, because postgres.js reserves
-   * a connection for the callback — and with `max: 1` that is the only
-   * connection, so nothing else in the process can interleave a statement into
-   * the middle of the batch. That interleaving is possible here and was not on
-   * `node-d1.ts`, where `node:sqlite` is synchronous and no other task can run
-   * between two statements.
+   * The connection is RESERVED out of the pool and the transaction is opened on
+   * it by hand, rather than through postgres.js's `sql.begin()`.
    *
-   * Postgres has no need for `node-d1.ts`'s SAVEPOINT branch: nothing in this
-   * repo calls `db.transaction()`, and if it did, postgres.js's own `begin()`
-   * nests as a savepoint automatically.
+   * `sql.begin()` would also be correct — it captures the connection its
+   * `begin` executed on and binds the callback's handle to that one connection,
+   * so it is atomic at any pool size, and this adapter used it while it ran on
+   * a single connection. It is not used now for a blunt reason: `reserve()`
+   * returns a handle carrying `unsafe` and nothing else — no `begin` — so the
+   * two cannot be combined, and reservation is the stronger of the two. A
+   * reserved connection is OUT of the pool for the duration: there is no state
+   * postgres.js could reach in which another request's statement is dispatched
+   * onto a socket with an open transaction on it. `sql.begin()` on the pool
+   * handle gives that guarantee through an internal detail; this gives it
+   * structurally.
+   *
+   * That matters more than it looks, because the failure mode is not an error.
+   * A batch that loses atomicity still returns success — `db/init.ts` runs the
+   * entire schema bootstrap through here — so the guarantee has to be one that
+   * cannot quietly stop holding.
+   *
+   * ROLLBACK is not optional and not best-effort: a reserved connection returns
+   * to the pool when released, and returning one with an open transaction on it
+   * would hand the next request a session that silently discards its writes.
+   * Hence the `catch` that rolls back before rethrowing, and the `finally` that
+   * releases whatever happened.
+   *
+   * There is no SAVEPOINT branch, unlike `db/node-d1.ts`. It would be dead
+   * code: nothing in this repo calls `db.transaction()` — checked — and a
+   * nested `batch()` is impossible by construction, because each one reserves
+   * its own connection and therefore cannot be inside another's transaction.
    */
   async batch<T = Record<string, unknown>>(
     statements: NodePgPreparedStatement[],
   ): Promise<Array<D1Result<T>>> {
     const started = performance.now();
-    return this.connection.connection().begin(async (tx) => {
+
+    const run = async (tx: Sql): Promise<Array<D1Result<T>>> => {
       const results: Array<D1Result<T>> = [];
       for (const statement of statements) {
         const executed = await statement.executeOn(tx);
@@ -836,7 +1065,31 @@ class NodePgDatabase {
         });
       }
       return results;
-    });
+    };
+
+    const reserved = await this.connection.batchConnection();
+    if (!reserved) return this.connection.connection().begin(run);
+
+    const { sql, release } = reserved;
+    try {
+      await sql.unsafe("BEGIN");
+      try {
+        const results = await run(sql);
+        await sql.unsafe("COMMIT");
+        return results;
+      } catch (cause) {
+        /*
+         * Swallowed deliberately, and only here. If the ROLLBACK itself fails
+         * the connection is already unusable — postgres.js will reconnect it —
+         * and reporting that instead of the statement that actually failed
+         * would replace the useful error with a symptom of it.
+         */
+        await sql.unsafe("ROLLBACK").catch(() => {});
+        throw cause;
+      }
+    } finally {
+      release();
+    }
   }
 
   /**

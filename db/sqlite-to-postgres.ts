@@ -272,6 +272,79 @@ export const BOOLEAN_COLUMN_NAMES: ReadonlySet<string> = new Set(
   Object.values(BOOLEAN_COLUMNS).flat(),
 );
 
+/* ----------------------------------------------------- timestamp columns -- */
+
+/**
+ * Every column name in `portal` that the migration typed as a timestamp.
+ *
+ * Read out of the live schema, the same way `BOOLEAN_COLUMNS` was:
+ *
+ *   select distinct column_name from information_schema.columns
+ *   where table_schema = 'portal'
+ *     and data_type in ('timestamp with time zone', 'timestamp without time zone');
+ *
+ * By NAME rather than by table, which `BOOLEAN_COLUMNS` deliberately is not,
+ * and the difference is justified by a property that was checked rather than
+ * assumed: not one of these 32 names is used for a non-timestamp column
+ * anywhere in the 48 tables. The same query intersected against every other
+ * data type returns nothing. A name-keyed set is therefore exact here, while
+ * for booleans it would not have been — which is why that one is per table.
+ *
+ * The one consumer is `replace()` in `rewriteFunctions`. See it for what goes
+ * wrong without this.
+ */
+export const TIMESTAMP_COLUMN_NAMES: ReadonlySet<string> = new Set([
+  "accepted_at",
+  "approved_at",
+  "archived_at",
+  "completion_requested_at",
+  "completion_signed_at",
+  "created_at",
+  "deactivated_at",
+  "deleted_at",
+  "delivered_at",
+  "edited_at",
+  "expires_at",
+  "first_opened_at",
+  "issued_at",
+  "last_alert_at",
+  "last_completed_at",
+  "last_login_at",
+  "last_seen_at",
+  "last_used_at",
+  "next_due_at",
+  "notified_at",
+  "paid_at",
+  "password_updated_at",
+  "performed_at",
+  "public_upload_token_expires_at",
+  "read_at",
+  "requested_at",
+  "resolved_at",
+  "reviewed_at",
+  "revoked_at",
+  "submitted_at",
+  "updated_at",
+  "used_at",
+]);
+
+/**
+ * Whether an expression is a bare reference to a timestamp column.
+ *
+ * Bare meaning an identifier, optionally qualified and optionally quoted:
+ * `created_at`, `"created_at"`, `"audit_events"."created_at"`. Anything with a
+ * function call, an operator or a literal in it is not claimed — the point is
+ * to be certain, and a wrong answer here produces a cast that fails at runtime.
+ */
+function isTimestampColumn(expression: string): boolean {
+  const match = /^(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+")\s*\.\s*(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+")$|^(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+")$/.exec(
+    expression.trim(),
+  );
+  if (!match) return false;
+  const last = expression.trim().split(".").pop() ?? "";
+  return TIMESTAMP_COLUMN_NAMES.has(last.trim().replace(/^"|"$/g, ""));
+}
+
 /* ---------------------------------------------------------- the rewrites -- */
 
 export interface TranslateOptions {
@@ -554,6 +627,101 @@ function rewriteFunctions(sql: string): string {
       text: "strpos(",
     });
   }
+  /*
+   * `replace(X, Y, Z)` gets its arguments cast to text.
+   *
+   * SQLite has no static types, so `replace()` coerces whatever it is handed;
+   * Postgres publishes exactly one overload, `replace(text, text, text)`, and
+   * will not implicitly cast to text from anything. The two disagree the moment
+   * the migration gives a column a real type, and the failure is not subtle:
+   *
+   *   app/api/audit/route.ts:60
+   *     sql`replace(${auditEvents.createdAt}, 'T', ' ')`
+   *   → ERROR: function replace(timestamp with time zone, unknown, unknown)
+   *     does not exist
+   *
+   * which took /api/audit down with a 503 on every request, GET and filtered
+   * alike. The route is doing something reasonable: `created_at` used to hold
+   * BOTH "2026-08-07T14:35:37.123Z" and "2026-08-07 14:35:37" depending on
+   * which writer stamped it, and normalising the separator is what made the two
+   * comparable as text — the same problem `rewriteDatetime` above exists for.
+   *
+   * As with `datetime()`, the translation is a no-op on the data it now meets:
+   * `portal.audit_events.created_at` is `timestamptz`, so it contains no 'T' to
+   * replace, and its `::text` form under `DateStyle=ISO` and `TimeZone=UTC` —
+   * both pinned by the adapter's startup packet — is
+   * "2026-08-07 14:35:37.123+00". That is fixed width, zero padded and on a
+   * constant offset, so ordering it as text agrees with ordering it as an
+   * instant, which is the property the route wanted. It also compares correctly
+   * against the "YYYY-MM-DD HH:MM:SS" day bounds the same route builds, because
+   * those are a prefix of it.
+   *
+   * All three arguments, not just the first. The first is the one that breaks
+   * today, but an untyped parameter in the second or third position resolves to
+   * `text` only by luck of Postgres' overload resolution having a single
+   * candidate; making it explicit costs nothing and this file's job is to
+   * remove that class of surprise.
+   *
+   * NOTE what is deliberately NOT rewritten. `lower()` and `substr()` have the
+   * same shape of problem in principle, and the codebase was checked: every
+   * call site passes a text column (`users.email`, `maintenance_requests.id`,
+   * `coalesce(blocked_reason, '')`). Casting them anyway would be speculative
+   * churn in a file where every rule is supposed to name the statement that
+   * forced it.
+   */
+  for (const match of mask.matchAll(/\breplace\s*\(/gi)) {
+    const open = match.index + match[0].length - 1;
+    const close = matchParen(mask, open);
+    const args = splitTopLevel(mask, open + 1, close);
+    if (args.length !== 3) continue;
+    /*
+     * Each argument is wrapped by two ZERO-LENGTH insertions rather than by one
+     * edit replacing the whole `replace(…)` call, and that is not a style
+     * choice — `db/init.ts` contains
+     *
+     *   UPDATE sites SET slug =
+     *     lower(replace(replace(replace(name, ' ', '-'), '/', '-'), '.', ''))
+     *
+     * and three whole-call edits nest inside one another, which `applyEdits`
+     * correctly refuses as overlapping. Insertions at the argument boundaries
+     * cannot overlap however deep the nesting goes: an inner call's own
+     * boundaries lie strictly inside its parent's argument, never on it. The
+     * emitted text is identical either way.
+     */
+    for (const arg of args) {
+      const range = tighten(sql, arg);
+      /*
+       * A timestamp column goes through `::timestamp` on the way to text, and
+       * that middle step is the difference between an audit log in time order
+       * and one that is nearly in time order.
+       *
+       * `timestamptz::text` renders the zone: "2026-08-14 11:28:12+00". The
+       * offset is always "+00" here because the session is pinned to UTC, so it
+       * carries no information — but it is not harmless, because it lands
+       * exactly where the fractional seconds would be, and '+' (0x2B) sorts
+       * BELOW '.' (0x2E). So a row stamped on a whole second sorts under one
+       * stamped 578 ms later in the same second, and /api/audit — which orders
+       * by this expression descending — showed the older row first. The legacy
+       * SQLite text got this right by accident: "…11:28:12" is a prefix of
+       * "…11:28:12.578Z", and a prefix sorts first.
+       *
+       * Dropping to `timestamp` drops the offset and restores the prefix
+       * relationship: "2026-08-14 11:28:12" against "2026-08-14 11:28:12.578".
+       * Same instants, same order as SQLite gave, and still comparable against
+       * the "YYYY-MM-DD HH:MM:SS" day bounds the route builds.
+       *
+       * Only for a BARE column reference of a known timestamp name. An
+       * expression this cannot identify keeps the plain `::text`, which is
+       * always valid; guessing wrong in the other direction would be a cast
+       * that throws at runtime.
+       */
+      const expression = sql.slice(range.start, range.end);
+      const cast = isTimestampColumn(expression) ? ")::timestamp::text" : ")::text";
+      edits.push({ start: range.start, end: range.start, text: "(" });
+      edits.push({ start: range.end, end: range.end, text: cast });
+    }
+  }
+
   for (const match of mask.matchAll(/\bgroup_concat\s*\(/gi)) {
     const open = match.index + match[0].length - 1;
     const close = matchParen(mask, open);
@@ -937,11 +1105,40 @@ function topLevelFrom(mask: string, start: number): number {
 function rewriteBooleanComparisons(sql: string): string {
   const mask = maskNonCode(sql);
   const edits: Edit[] = [];
-  const pattern =
-    /(?:"?[A-Za-z_][A-Za-z0-9_]*"?\.)?"?([A-Za-z_][A-Za-z0-9_]*)"?\s*(=|<>|!=|IS\s+NOT|IS)\s*([01])(?![0-9.])/gi;
+
+  /*
+   * A column reference is a bare identifier OR a run of NULs.
+   *
+   * The `"?…"?` this pattern used to carry could never match, and the reason is
+   * worth stating because it is the sort of bug that reads as working code:
+   * `maskNonCode` BLANKS quoted identifiers, quotes included, so by the time
+   * the pattern runs `"active" = 1` is `\0\0\0\0\0\0\0\0 = 1` and there is no
+   * `"` left for the regex to find, nor any name. Every quoted boolean
+   * comparison was therefore passed through untranslated and reached Postgres
+   * as `"active" = 1`, which fails with "operator does not exist: boolean =
+   * integer".
+   *
+   * Nothing in this repo emits that shape today — drizzle builds its boolean
+   * comparisons through its own parameter binding, and the raw sites do not
+   * quote — and it fails loudly rather than silently, which is why it stayed
+   * unnoticed. It is fixed here because the mask's defining property makes it
+   * nearly free: the mask is the same LENGTH as the source, so a match against
+   * the mask carries offsets that index the original, and the name can simply
+   * be read back out of `sql` at those offsets.
+   */
+  const IDENTIFIER = `(?:[A-Za-z_][A-Za-z0-9_]*|${NUL}+)`;
+  const pattern = new RegExp(
+    `(?:${IDENTIFIER}\\s*\\.\\s*)?(${IDENTIFIER})\\s*(=|<>|!=|IS\\s+NOT|IS)\\s*([01])(?![0-9.])`,
+    "gid",
+  );
 
   for (const match of mask.matchAll(pattern)) {
-    if (!BOOLEAN_COLUMN_NAMES.has(match[1].toLowerCase())) continue;
+    const columnRange = match.indices?.[1];
+    if (!columnRange) continue;
+    // Read the name from the ORIGINAL text, because the mask may have blanked
+    // it. `"active"` comes back with its quotes, which are stripped here.
+    const name = sql.slice(columnRange[0], columnRange[1]).replace(/^"|"$/g, "");
+    if (!BOOLEAN_COLUMN_NAMES.has(name.toLowerCase())) continue;
     const literalStart = match.index + match[0].length - match[3].length;
     edits.push({
       start: literalStart,
@@ -961,25 +1158,77 @@ function rewriteBooleanComparisons(sql: string): string {
  * one-based, matching both D1's `bind(...)` order and Postgres' parameter
  * numbering, so the adapter passes the bound array straight through.
  *
- * SQLite's other placeholder forms (`?3`, `:name`, `@name`, `$name`) are
- * refused. D1 documents `?` and `?NNN`; this application uses only `?`, and
- * `?NNN` re-uses one parameter across several positions, which changes what the
- * bound array means. Silently renumbering it would bind the wrong values.
+ * `?NNN` — SQLite's numbered form, which D1 also documents — becomes `$NNN`.
+ * The two dialects agree exactly here: both index the parameter list from 1,
+ * both allow an index to repeat, and both allow indexes out of order. So the
+ * translation is `?N` → `$N` rather than "the next ordinal", and a repeated
+ * `?1` stays one parameter rather than becoming two.
+ *
+ * That branch used to be a `throw`, and the throw was a security defect rather
+ * than a limitation — see the comment on it for what it disabled and for how
+ * long nobody could tell.
+ *
+ * The named forms (`:name`, `@name`, `$name`) are still refused: nothing emits
+ * them, and they would need a name→position map this signature does not carry.
+ * So is a statement that MIXES `?` with `?N`, which SQLite defines but defines
+ * surprisingly.
  */
 function rewritePlaceholders(sql: string): string {
   const mask = maskNonCode(sql);
   const edits: Edit[] = [];
   let ordinal = 0;
+  let sawPositional = false;
+  let sawNumbered = false;
 
   for (let i = 0; i < mask.length; i += 1) {
     const char = mask[i];
     if (char === "?") {
-      if (/[0-9]/.test(mask[i + 1] ?? "")) {
-        throw new Error(
-          `sqlite-to-postgres: numbered placeholder ?${mask[i + 1]} is not ` +
-            `translated. Statement: ${sql.trim()}`,
-        );
+      /*
+       * `?NNN` — SQLite's NUMBERED parameter, and the reason this branch is no
+       * longer a `throw`.
+       *
+       * Refusing it took the portal's brute-force protection off the air, in
+       * production, silently. `recordSignInFailure()` in
+       * `app/lib/auth-session.ts` writes its counter with a single
+       * `INSERT … ON CONFLICT DO UPDATE` whose CASE arms refer to `?2`, `?3`
+       * and `?4` several times each — that repetition is precisely why it is
+       * written with numbered parameters and not bare `?`. This translator
+       * threw on the first `?1`; the caller ends in `.catch(() => {})`, on the
+       * deliberate principle that a throttling write must not take sign-in
+       * down with it; so every failed sign-in went uncounted,
+       * `sign_in_failures` stayed empty, `signInRetryAfter()` kept returning 0,
+       * and the 429 branch in `app/api/auth/login/route.ts` became unreachable.
+       * No error surfaced anywhere. 143 accounts carry passwords.
+       *
+       * The translation is direct and needs nothing from the binding layer:
+       * SQLite's `?N` and Postgres' `$N` are both 1-BASED INDEXES INTO THE
+       * PARAMETER LIST, both may repeat, and both may appear out of order. So
+       * `?N` becomes `$N` — not the next ordinal — and a repeated `?1` becomes
+       * a repeated `$1`, which refers to the same parameter and consumes one
+       * slot rather than two. `bind()` in the adapter already lays its values
+       * out positionally, so `.bind(key, now, WINDOW, MAX, LOCKOUT)` lines up
+       * with `?1..?5` with no change.
+       */
+      const digits = /^[0-9]+/.exec(mask.slice(i + 1))?.[0];
+      if (digits) {
+        const index = Number(digits);
+        if (index === 0) {
+          /*
+           * `?0` is not a parameter in SQLite either — numbering starts at 1 —
+           * and `$0` is not one in Postgres. Silently renumbering it would
+           * shift every binding by one.
+           */
+          throw new Error(
+            "sqlite-to-postgres: ?0 is not a valid parameter index; SQLite " +
+              `numbers from 1. Statement: ${sql.trim()}`,
+          );
+        }
+        sawNumbered = true;
+        edits.push({ start: i, end: i + 1 + digits.length, text: `$${index}` });
+        i += digits.length;
+        continue;
       }
+      sawPositional = true;
       ordinal += 1;
       edits.push({ start: i, end: i + 1, text: `$${ordinal}` });
       continue;
@@ -995,6 +1244,26 @@ function rewritePlaceholders(sql: string): string {
           `Statement: ${sql.trim()}`,
       );
     }
+  }
+
+  /*
+   * Mixing the two forms stays an error, and loudly.
+   *
+   * SQLite does accept `SELECT ?, ?2` — the bare `?` takes "one more than the
+   * largest index assigned so far", which means the meaning of a bare `?`
+   * depends on every numbered parameter to its LEFT. Nothing in this repo
+   * writes that, no reader would predict it, and the ordinal counter above
+   * does not implement it. Translating it as though the two numbering schemes
+   * were independent would produce a statement that binds the wrong values —
+   * which is the failure this whole file exists to prevent, and far worse than
+   * a refusal that names the statement.
+   */
+  if (sawPositional && sawNumbered) {
+    throw new Error(
+      "sqlite-to-postgres: a statement mixes bare ? with numbered ?N " +
+        "parameters. SQLite numbers the bare ones from the highest index used " +
+        `so far, which this does not translate. Statement: ${sql.trim()}`,
+    );
   }
 
   return applyEdits(sql, edits);
