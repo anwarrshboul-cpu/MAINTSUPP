@@ -280,6 +280,29 @@ export function Portal() {
             </p>
           </div>
         </div>
+        {/*
+          The same eleven explanations, as a list, for phones.
+
+          The overlay above positions its buttons as percentages of the
+          screenshot, so at 320px they measure 41x31 — under the 44px touch
+          minimum, and impossible to grow: six of them sit 42px apart with a
+          1.4px gap between neighbours. Rather than ship a tap target a thumb
+          cannot hit, `marketing.css` hides the overlay below 760px and shows
+          this instead, where the copy needs no tap at all.
+
+          `hidden={!isOverview}` mirrors the overlay: these labels describe the
+          overview screenshot specifically, so they go away with it when
+          another tab is selected. No extra bytes — SPOTS is already in the
+          bundle to render the tips.
+        */}
+        <dl className="spotlist" hidden={!isOverview}>
+          {SPOTS.map((spot) => (
+            <div key={spot.t}>
+              <dt>{spot.t}</dt>
+              <dd>{spot.b}</dd>
+            </div>
+          ))}
+        </dl>
         {/* The six things a client opens it to see. Written as a plain list
             rather than another set of cards — the dashboard above is the
             illustration, and a second illustration of the same thing is what

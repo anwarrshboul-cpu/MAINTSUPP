@@ -896,3 +896,21 @@
   width: 100%;
   margin-top: 10px;
 }
+
+/* ------------------------------------------------------- phone type floor -- */
+
+/* Two labels sat at 11px on every signed-in screen.
+
+   `.p-badge` is the role the viewer is acting in — the one piece of the header
+   that tells a client admin they are not seeing what an owner sees, and the
+   thing the 320px block above already went to some trouble to keep on screen.
+   `.p-source` says where a setting came from. Both are uppercase with letter
+   spacing, which reads smaller still than the number suggests.
+
+   12px is the floor the rest of this sheet already keeps (`.p-count`,
+   `.p-stat dt`, `.p-table th` are all 12px); these two were the exceptions.
+   Stated after the originals so source order carries them. */
+.p-badge,
+.p-source {
+  font-size: 12px;
+}

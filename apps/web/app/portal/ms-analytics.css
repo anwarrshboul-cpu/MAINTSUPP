@@ -726,3 +726,93 @@ a.ms-metric:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Phone ergonomics ─────────────────────────────────────────────────────
+   Measured in real headless Chrome at 320 / 390 / 414 / 768.
+
+   `/portal/overview` is the newest screen here and the only signed-in one that
+   still carried tap targets under the 44px minimum: ten of them at 320px. The
+   portal's own sheet has fixed this class of bug twice already — see the
+   `.p-table a` and `.p-jobhead a` rules in portal.css and the comments on them
+   — but those rules select the `p-` prefix, and this screen is the `ms-` one.
+   A stylesheet deliberately namespaced away from portal.css does not inherit
+   portal.css's fixes, which is exactly why it was the screen still broken.
+
+   Nothing is hidden and no figure is dropped: these rules make the rows taller
+   and the labels bigger. */
+
+/* The link out of an attention-table row — the only route from this screen
+   into the job it names. It measured 181x15: text with no box, inheriting the
+   cell's line height and nothing else. Identical treatment to `.p-table a`. */
+.ms-table a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* "View all" and "View compliance", the two panel links. 62x19 and 121x19.
+   `width: fit-content` on the score panel's link keeps the hit area on the
+   words rather than stretching it across a centred column, where it would
+   swallow taps meant for the donut above it. */
+.ms-panel > header a,
+.ms-score-panel > a {
+  min-height: 44px;
+}
+
+.ms-score-panel > a {
+  width: fit-content;
+}
+
+/* Text under 12px.
+   The chart axes were 10px, which is decoration-sized type carrying real
+   numbers — the y-axis is the only place the spend scale is written down.
+   The reference, the priority chip and the score caption were 11px. */
+.ms-trend__y,
+.ms-trend__x,
+.ms-metric__copy > span {
+  font-size: 12px;
+}
+
+.ms-ref,
+.ms-chip,
+.ms-score-panel > span,
+.ms-heading > div:first-child > span {
+  font-size: 12px;
+}
+
+/* ── The KPI tiles were CUTTING A MONEY FIGURE IN HALF at 768px ───────────
+   `.ms-metric-grid` is four across, and the block above only drops it to two
+   below 760px. At 768 — an iPad in portrait, and the widest phone in this
+   audit's set — four tiles share 768px, so each is 174px wide and the figure
+   inside gets 88px. "Cost of works, 6 months" measured £32,021.14 at 111px in
+   that 88px box, and `.ms-metric` sets `overflow: hidden`, so the tile
+   silently rendered a truncated amount of money with no ellipsis and no
+   scrollbar to say anything was missing. A wrong number a reader cannot tell
+   is wrong is the worst failure on this screen.
+
+   The figure cannot shrink its way out: `clamp(23px, 2.2vw, 31px)` is already
+   pinned to its 23px floor at this width. So the grid breaks earlier instead.
+
+   1040px is not a new number: it is the breakpoint the block above already
+   uses to call this layout narrow, where `.ms-overview-grid` and
+   `.ms-bottom-grid` both drop to a single column. Four tiles surviving past a
+   width at which every panel below them has already given up was the
+   inconsistency that produced the bug. At 1024 the same figure had 152px for a
+   152px string — fitting exactly, which is one six-figure client away from
+   clipping again. Two across gives it ~500px.
+
+   Both breakpoints are restated here, narrowest last, because the `480px`
+   single-column rule above comes EARLIER in the file: without repeating it, a
+   320px phone would match the 1040px rule declared later and go back to two
+   columns. */
+@media (max-width: 1040px) {
+  .ms-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .ms-metric-grid {
+    grid-template-columns: 1fr;
+  }
+}

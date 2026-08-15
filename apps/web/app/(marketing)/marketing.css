@@ -1462,3 +1462,169 @@ img,svg,table{max-width:100%}
    the original's `background-size:cover` framing exactly. */
 .ph picture { position: absolute; inset: 0; display: block; }
 img.ph__img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ── Phone ergonomics ─────────────────────────────────────────────────────
+   Measured in real headless Chrome at 320 / 390 / 414 / 768, not eyeballed.
+
+   The pages already never scroll sideways — that part was got right and the
+   test suite has asserted it since it was written. What had never been
+   measured is the other half of "usable on a phone": how big the things you
+   TAP are, and how small the text gets.
+
+   At 320px the marketing pages carried 39 controls under 44x44 and eight
+   pieces of text under 12px. The single biggest group was the footer, which
+   on a phone IS the site navigation — the header nav collapses into a burger
+   above 1120px only, so below that every section link a visitor can reach
+   without scrolling back up lives in the footer, at 26px tall.
+
+   These rules come last in the file on purpose: they are the same specificity
+   as the declarations they correct, so source order is what decides. Declared
+   any earlier they lose. */
+
+/* Footer links: the phone's primary navigation.
+   Applied below 780px, which is exactly where `.ftr__grid` collapses to one
+   column — above it the columns are a desktop layout driven by a mouse. */
+@media (max-width: 779px) {
+  /* `min-width` as well as `min-height`: "FAQs" and "Terms" are short enough
+     that they measured 34px and 41px WIDE once the height was fixed, and a
+     target is only as big as its narrower side. */
+  .ftr a,
+  .ftr span.li { min-height: 44px; min-width: 44px; }
+  /* The gap was tuned for 26px rows; at 44px the rows carry their own
+     separation and the extra gap only makes the footer longer to scroll. */
+  .ftr ul { gap: 0; }
+  .ftr__social a { width: 44px; height: 44px; }
+}
+
+/* The utility strip above the header — "Portal Login" and the phone number.
+   `min-height:38px` on the row plus `padding:6px 0` on the link measured 33px. */
+.utility a { min-height: 44px; }
+
+/* The wordmark is a link home, on every page, in both the header and the
+   footer. It measured 38px tall in both. */
+.logo { min-height: 44px; }
+
+/* `.btn--sm` is the cookie banner's Accept / Reject pair and the workflow
+   walkthrough's Previous / Next. Both measured 40px. The cookie buttons are
+   the ones that matter: refusing non-essential cookies must not be the harder
+   of the two things to tap. */
+.btn--sm { min-height: 44px; }
+
+/* Two-pixel shortfalls on the segmented controls: the "Without / With
+   Maintsupp" comparison toggle and the pricing band picker are both
+   `.switcher button`, declared at `min-height:42px`. */
+.switcher button { min-height: 44px; }
+
+/* The consent tickbox on the enquiry form.
+   Ticking it is what makes the form submittable, and the LABEL is the target —
+   the 19px box is only part of it. On a wide screen the label's text fits on
+   one line, so the whole activation area collapsed to 22px tall; the narrower
+   the screen the more the text wraps and the taller it accidentally got, which
+   is why this is the one target that fails at 768 and passes at 320. Stated as
+   a floor so the wrapped case is unaffected. */
+.consent { min-height: 44px; }
+
+/* ── The 12px type floor ──────────────────────────────────────────────────
+   The `max-width:620px` block above already states this intent — "nothing
+   meaningful drops below 12px on a phone" — but two things defeated it.
+
+   First, several of its values are rem figures that still land under 12px at
+   the 16px root: .74rem is 11.84px, .72rem is 11.52px, .71rem is 11.36px.
+   .75rem is exactly 12px, so that is the floor.
+
+   Second, it only applies below 620px, and the BASE declarations for these
+   selectors are themselves under 12px — so at 768, a tablet held in the hand,
+   every one of them came back: .qj__note at 11.68px, .pkg__flag at 11.2px,
+   the screenshot's address bar at 11.52px and its "Sample data" badge at
+   10.56px. So these are stated unconditionally rather than inside a phone
+   query.
+
+   They sit at the end of the file deliberately. A media query adds no
+   specificity, so a plain rule declared later beats an earlier one inside
+   `@media` — which is what lets four lines here correct declarations spread
+   across three separate breakpoint blocks above. */
+.ftr h3 { font-size: .75rem; }
+.wf__meta dt { font-size: .75rem; }
+.pkg__per { font-size: .78rem; }
+.kpi__lab,
+.kpi__meta { font-size: .78rem; }
+.pkg__flag { font-size: .75rem; }
+.qj__note { font-size: .78rem; }
+.upload__btn { font-size: .78rem; }
+
+/* The fake browser chrome on the dashboard screenshot. 9.6px on a phone is not
+   small type, it is unreadable type — and "Sample data" is the label that
+   stops a visitor reading the mock figures as a real client's. */
+.dashshot__url { font-size: .75rem; }
+.dashshot__tag { font-size: .75rem; }
+.dashhint { font-size: .78rem; }
+
+/* The wordmark's micro-tagline, at .52rem — 8.32px, the smallest text on the
+   site by some distance, and unreadable at any hand-held size.
+
+   It is already dropped below 360px, which is the design conceding the point;
+   this extends that to every width where the header is compressed, i.e. up to
+   the 1120px breakpoint at which the full nav appears and the desktop lockup
+   is what the design intends. It is not information anyone loses: the same
+   words are the page's own <h1> subject, and the wordmark beside it stays.
+   Raising the size instead would set a 24-character line at .22em tracking
+   under a 1.26rem wordmark, which is a broken lockup rather than a fixed one. */
+@media (max-width: 1119px) {
+  .logo__text em { display: none; }
+}
+
+/* ── The dashboard hotspots, on a phone ───────────────────────────────────
+   Eleven buttons overlaid on the screenshot at percentage positions. At 320px
+   the image is 283px wide, so the top row measures 41x31 and its last button
+   26x31 — and they cannot simply be grown: the six of them sit 42px apart
+   with a 1.4px gap, and the row below starts 2.3px under them. There is no
+   room on a scaled-down screenshot for a 44px target.
+
+   So on a phone the overlay steps aside and the same eleven labels render as
+   a plain list underneath, where they are readable without a tap at all. That
+   REVEALS the copy rather than hiding it — until now it was behind a tap on a
+   41x31 target that a thumb cannot reliably hit — and it costs no extra
+   payload, because the strings were already in the bundle to feed the tips.
+
+   Above 760px the overlay is unchanged: it is a mouse-driven hover affordance
+   and it works. */
+.spotlist { display: none; }
+
+@media (max-width: 760px) {
+  .hotspots,
+  .dashhint { display: none; }
+
+  .spotlist {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0 0;
+    padding: 0;
+  }
+
+  .spotlist > div {
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--cloud);
+  }
+
+  .spotlist dt {
+    margin-bottom: 3px;
+    color: var(--navy);
+    font-size: .84rem;
+    font-weight: 700;
+  }
+
+  .spotlist dd {
+    margin: 0;
+    color: #3A4C5C;
+    font-size: .82rem;
+    line-height: 1.45;
+  }
+
+  /* An author `display:grid` beats the UA sheet's `[hidden]{display:none}`, so
+     the attribute has to be restated here or the list stays up when another
+     tab is chosen. Same reason `.dashshot[hidden]` and `.dashhint[hidden]`
+     exist above. */
+  .spotlist[hidden] { display: none; }
+}
