@@ -27,7 +27,6 @@ import type {
   BoardOptionColumn,
   MaintenanceBoardCell,
   MaintenanceBoardColumn,
-  MaintenanceBoardFileCount,
   MaintenanceBoardFilePreview,
   MaintenanceGroup,
   MaintenanceGroupItem,
@@ -57,14 +56,16 @@ import {
   type BoardDisplayColumn,
   type BoardDragItem,
   type BoardDropTarget,
+  type BoardResponse,
   type ColumnKey,
   type ColumnTypeDefinition,
+  type CompactBoardResponse,
   type EditableFields,
   type MaintenanceBoardSnapshot,
   type MaintenanceBoardSnapshotColumn,
   type Option,
-  columnLabels,
   columnTypeDefinitions,
+  decodeBoardResponse,
   editableFallbackOptions,
   fallbackGroups,
   fallbackSystemColumns,
@@ -83,7 +84,6 @@ import {
   customCellDisplay,
   findChoice,
   serializeCustomCellValue,
-  dateInputValue,
   shouldCenterBoardCell,
   displayedBoardColumnWidth,
   compactNumber,
@@ -710,18 +710,17 @@ export function LiveMaintenanceBoard({
     let active = true;
     async function loadBoard() {
       try {
-        const response = await fetch(boardUrl("/api/board", boardId), {
+        // `compact=1` — this grid holds its own rows (the `requests` prop), so
+        // the flag drops the payload's `requests` key, 756 KB parsed and thrown
+        // away on every load, and asks for the interned encoding board-model.ts's
+        // `decodeBoardResponse` reads.
+        const response = await fetch(boardUrl("/api/board?compact=1", boardId), {
           headers: { Accept: "application/json" },
         });
         if (!response.ok) return;
-        const payload = (await response.json()) as {
-          groups?: MaintenanceGroup[];
-          items?: MaintenanceGroupItem[];
-          options?: BoardColumnOption[];
-          columns?: MaintenanceBoardColumn[];
-          cells?: MaintenanceBoardCell[];
-          fileCounts?: MaintenanceBoardFileCount[];
-        };
+        const payload = decodeBoardResponse(
+          (await response.json()) as CompactBoardResponse & BoardResponse,
+        );
         if (!active) return;
         if (payload.groups?.length) setGroups(payload.groups);
         if (payload.items) setItems(payload.items);
@@ -849,12 +848,22 @@ export function LiveMaintenanceBoard({
    * Gated on the snapshot having arrived, or a still-loading board would blank.
    * `setItems` is updated synchronously on create, before the row is announced,
    * so a new row is never briefly filtered out.
+   *
+   * WHY THE `loadingBoard` ARM. `requests` lands before placements do, and
+   * `!placementsLoaded` used to let every row through in between: all 776
+   * requests — Store Documentation's 31 stores included — built under fallback
+   * groups and four fallback columns, 2.9s of main-thread work in Chrome, first
+   * painted at 2,094ms when the real payload had arrived at 1,899ms, then thrown
+   * away. So hold the rows while the request is in flight; the heading already
+   * says "Syncing board". The failure case this really protects is kept:
+   * `loadingBoard` is cleared in that handler's `finally`, so a not-ok board
+   * response still shows every row.
    */
   const scopedRequests = useMemo(
     () =>
       requests.filter(
         (request) =>
-          (!placementsLoaded || placement.has(request.id)) &&
+          (placementsLoaded ? placement.has(request.id) : !loadingBoard) &&
           (portfolio === "all" ||
             request.siteId === portfolio ||
             request.location === portfolio) &&
@@ -867,6 +876,7 @@ export function LiveMaintenanceBoard({
     [
       analyticsNow,
       analyticsPeriod,
+      loadingBoard,
       placement,
       placementsLoaded,
       portfolio,

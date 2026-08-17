@@ -513,7 +513,29 @@ async function seedRequestsIfEmpty(db: BoardDb, orgId: string) {
   }
 }
 
-async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
+/*
+ * What `ensureBoardState` already read, handed to `boardPayload` so it need not
+ * ask twice.
+ *
+ * Seeding reads the board's columns and its groups to decide what is missing;
+ * the payload then read both again, in queries word-for-word identical to the
+ * ones seeding had just run — two extra round trips (~45ms against Supabase) for
+ * rows already in memory. This carries them across.
+ *
+ * `null` means "do not reuse these": either seeding wrote something that makes
+ * its own copy stale, or it took the Store Documentation path and never read
+ * them. The payload then falls back to querying, which is what it always did.
+ */
+type BoardStateCache = {
+  groups: Array<typeof maintenanceGroups.$inferSelect>;
+  columns: Array<typeof maintenanceBoardColumns.$inferSelect>;
+} | null;
+
+async function ensureBoardState(
+  db: BoardDb,
+  orgId: string,
+  boardId: BoardId,
+): Promise<BoardStateCache> {
   await ensureDatabase();
 
   // The Store Documentation board carries its own columns, groups and options
@@ -524,7 +546,7 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
     // while this route holds a Drizzle handle. Reaching for D1 directly here is
     // cheaper than reshaping a seeder that init.ts also calls.
     await seedStoreDocumentationBoard(await getD1(), orgId);
-    return;
+    return null;
   }
 
   await seedRequestsIfEmpty(db, orgId);
@@ -574,8 +596,10 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
       ),
     )
     .orderBy(asc(maintenanceBoardColumns.position));
+  let columnsRewritten = false;
   if (!existingColumns.some((column) => column.system)) {
     const customColumns = existingColumns.filter((column) => !column.system);
+    columnsRewritten = customColumns.length > 0;
     for (const [index, column] of customColumns.entries()) {
       await db
         .update(maintenanceBoardColumns)
@@ -588,10 +612,33 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
         );
     }
   }
-  // Same reasoning as the options above, but free: `existingColumns` has
-  // already been read, so the count costs no extra round trip.
-  if (existingColumns.filter((column) => column.system).length < systemBoardColumns.length) {
+  /*
+   * ASK BY KEY, NOT BY THE `system` FLAG.
+   *
+   * The guard here counted `existingColumns.filter(c => c.system)` and reseeded
+   * whenever that was short of `systemBoardColumns.length`. On the live board it
+   * is permanently short: `seedBoardStructure` in db/init.ts had already written
+   * all 26 columns under ids of the form `seed-<org>-maintenance-<key>`, and it
+   * flags only four of them `system` (name, status, subitems, move). So the
+   * count read 4 < 26 on every single load and ran the loop — 26 INSERTs whose
+   * every row conflicted on `maintenance_board_columns_key_idx` and was
+   * discarded. Measured against Supabase: 26 of the 51 statements a warm
+   * `GET /api/board` issued, and ~630ms of its ~1.9s of SQL, achieving nothing.
+   *
+   * `key` is the right question because `key` is what the unique index is on —
+   * (organisation_id, board_id, key). A column present under that index is a
+   * column this seeder cannot insert, whatever its `system` flag says. The loop
+   * is still self-healing: delete a column and its key goes missing, so the next
+   * load puts it back. It just no longer asks 26 times a load for columns that
+   * are already there.
+   */
+  const existingColumnKeys = new Set(existingColumns.map((column) => column.key));
+  const missingSystemColumns = systemBoardColumns.filter(
+    (column) => !existingColumnKeys.has(column.key),
+  );
+  if (missingSystemColumns.length) {
     for (const [position, column] of systemBoardColumns.entries()) {
+      if (existingColumnKeys.has(column.key)) continue;
       await db
         .insert(maintenanceBoardColumns)
         .values({
@@ -704,17 +751,31 @@ async function ensureBoardState(db: BoardDb, orgId: string, boardId: BoardId) {
       .onConflictDoNothing();
   }
 
-  return db;
+  // Only when seeding left both untouched. A rewritten position or a freshly
+  // inserted column makes the copy above stale, and a stale column list is a
+  // board drawn with the wrong headers.
+  return columnsRewritten || missingSystemColumns.length
+    ? null
+    : { groups, columns: existingColumns };
 }
 
-async function boardPayload(db: BoardDb, orgId: string, boardId: BoardId) {
-  await ensureBoardState(db, orgId, boardId);
-  const groups = await db
-    .select()
-    .from(maintenanceGroups)
-    .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
+async function boardPayload(
+  db: BoardDb,
+  orgId: string,
+  boardId: BoardId,
+  // Named `include` rather than `options`, which in this function already means
+  // the board's status and dropdown choices.
+  include: { requests: boolean } = { requests: true },
+) {
+  const seeded = await ensureBoardState(db, orgId, boardId);
+  const groups =
+    seeded?.groups ??
+    (await db
+      .select()
+      .from(maintenanceGroups)
+      .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
             isNull(maintenanceGroups.deletedAt),))
-    .orderBy(asc(maintenanceGroups.position));
+      .orderBy(asc(maintenanceGroups.position)));
   const items = await db
     .select()
     .from(maintenanceGroupItems)
@@ -728,11 +789,13 @@ async function boardPayload(db: BoardDb, orgId: string, boardId: BoardId) {
       asc(maintenanceBoardOptions.columnKey),
       asc(maintenanceBoardOptions.position),
     );
-  const columnRows = await db
-    .select()
-    .from(maintenanceBoardColumns)
-    .where(and(eq(maintenanceBoardColumns.boardId, boardId), eq(maintenanceBoardColumns.organisationId, orgId)))
-    .orderBy(asc(maintenanceBoardColumns.position));
+  const columnRows =
+    seeded?.columns ??
+    (await db
+      .select()
+      .from(maintenanceBoardColumns)
+      .where(and(eq(maintenanceBoardColumns.boardId, boardId), eq(maintenanceBoardColumns.organisationId, orgId)))
+      .orderBy(asc(maintenanceBoardColumns.position)));
   const cells = await db
     .select({
       requestId: maintenanceBoardCells.requestId,
@@ -795,7 +858,25 @@ async function boardPayload(db: BoardDb, orgId: string, boardId: BoardId) {
           inArray(attachments.boardColumnId, chunk),
         ),
       )
-      .orderBy(asc(attachments.createdAt)),
+      /*
+       * `id` IS THE TIEBREAK, AND IT IS NOT DECORATION.
+       *
+       * `created_at` is stored to the second, and the monday import wrote whole
+       * cells inside one second — `2026-08-08T09:18:17.000Z` covers four files
+       * on the same row. `ORDER BY created_at` alone therefore leaves Postgres
+       * free to return those four in any order it likes, and it does: measured
+       * across two runs of the same build in different processes, 332 of the
+       * 1,007 file cells came back with a different preview, and 107 of them
+       * with a different SET of files — the four thumbnails a cell draws were
+       * an arbitrary four of the six or eight it holds, re-drawn differently on
+       * every load.
+       *
+       * Ordering by (created_at, id) does not change what any cell contains or
+       * how many files it reports. It fixes which four the preview shows, so a
+       * board drawn twice draws the same thumbnails, and so a payload can be
+       * compared before and after a change at all.
+       */
+      .orderBy(asc(attachments.createdAt), asc(attachments.id)),
   );
 
   const grouped = new Map<
@@ -852,18 +933,35 @@ async function boardPayload(db: BoardDb, orgId: string, boardId: BoardId) {
    * query that fetches the rows, not have to reason about a join two functions
    * away.
    */
-  const requestRows = await selectInChunks(placedIds, (chunk) =>
-    db
-      .select()
-      .from(maintenanceRequests)
-      .where(
-        and(
-          eq(maintenanceRequests.organisationId, orgId),
-          inArray(maintenanceRequests.id, chunk),
-          isNull(maintenanceRequests.deletedAt),
-        ),
-      ),
-  );
+  /*
+   * NOT ASKED FOR AT ALL WHEN THE CALLER ALREADY HAS THE ROWS.
+   *
+   * `live-board.tsx` — the grid on the Jobs tab — never reads `requests` from
+   * this payload. It is handed its rows as a prop: the portal loads them from
+   * `/api/maintenance`, and Store Documentation loads them itself and passes
+   * them down. The only reader of this key is
+   * `views/store-documentation-board.tsx`, which fetches this route directly for
+   * its Compliance Tracker and Calendar tabs.
+   *
+   * So on the maintenance board it was 745 rows, 756 KB of JSON and nine chunked
+   * SELECTs (~240ms against Supabase) that were parsed and thrown away. The grid
+   * asks with `?compact=1`, which says "I have the rows"; every other caller is
+   * untouched and still gets them.
+   */
+  const requestRows = include.requests
+    ? await selectInChunks(placedIds, (chunk) =>
+        db
+          .select()
+          .from(maintenanceRequests)
+          .where(
+            and(
+              eq(maintenanceRequests.organisationId, orgId),
+              inArray(maintenanceRequests.id, chunk),
+              isNull(maintenanceRequests.deletedAt),
+            ),
+          ),
+      )
+    : [];
 
   /*
    * The one compliance fact the board cannot hold.
@@ -897,6 +995,112 @@ async function boardPayload(db: BoardDb, orgId: string, boardId: BoardId) {
   };
 }
 
+type BoardPayload = Awaited<ReturnType<typeof boardPayload>>;
+
+/**
+ * The same board, with the repeated identifiers sent once.
+ *
+ * WHY THIS EXISTS. The board's three big lists — `cells`, `fileCounts`,
+ * `items` — are mostly not data. Measured on the live maintenance board:
+ * `cells` was 8,565 rows at 187 bytes each, of which 55 bytes were the column
+ * id (`seed-org_000000000000000000000001-maintenance-issuePictures`, 57
+ * characters, one of only 26 distinct values), 38 were the request id, and 36
+ * were the property names `requestId`/`columnId`/`value` repeated 8,565 times.
+ * The median cell VALUE is ten characters. So 1,568 KB of `cells` carried about
+ * 90 KB of board content, and `items` repeated `organisationId`,
+ * `legacyClientId` and `boardId` — three constants — on all 745 rows.
+ *
+ * WHAT IT DOES. Every repeated identifier becomes an index into a table sent
+ * once, and every row becomes a positional array instead of an object. Nothing
+ * is dropped or rounded: `decodeCompactBoard` in live-board.tsx rebuilds the
+ * exact objects the legacy shape sent, which is why the two can be compared row
+ * for row.
+ *
+ * WHY IT IS OPT-IN. `views/store-documentation-model.ts` reads this route's
+ * legacy shape directly, and it is not part of this change. A caller that does
+ * not ask for `?compact=1` gets byte-identical JSON to before.
+ *
+ * The index tables are built from what the payload actually references rather
+ * than from `columns` and `groups` alone: a cell whose column has been deleted,
+ * or a placement in a group that has been binned, still has to survive the round
+ * trip. Both exist on the live board today.
+ */
+function compactBoard(payload: BoardPayload) {
+  const table = () => {
+    const ids: string[] = [];
+    const index = new Map<string, number>();
+    return {
+      ids,
+      ref(id: string) {
+        let at = index.get(id);
+        if (at === undefined) {
+          at = ids.length;
+          ids.push(id);
+          index.set(id, at);
+        }
+        return at;
+      },
+    };
+  };
+
+  const columnTable = table();
+  // Seeded in `columns` order so a column index is also its position in the
+  // grid, which makes the encoding readable when someone dumps the JSON.
+  for (const column of payload.columns) columnTable.ref(column.id);
+  const rowTable = table();
+  const groupTable = table();
+  for (const group of payload.groups) groupTable.ref(group.id);
+  const mimeTable = table();
+
+  return {
+    /*
+     * The version marker. A client that finds no `compact` key is looking at
+     * the legacy shape and must not try to decode it — which is what happens if
+     * a cached older response is replayed against newer client code.
+     */
+    compact: 1 as const,
+    groups: payload.groups,
+    options: payload.options,
+    columns: payload.columns,
+    notRequired: payload.notRequired,
+    /*
+     * The index tables. These are the SAME array objects the `ref` calls below
+     * push onto, so they are complete by the time this object is serialised
+     * even though they appear before the lists that fill them.
+     */
+    columnIds: columnTable.ids,
+    groupIds: groupTable.ids,
+    mimeTypes: mimeTable.ids,
+    rowIds: rowTable.ids,
+    items: payload.items.map(
+      (item) =>
+        [rowTable.ref(item.requestId), groupTable.ref(item.groupId), item.position] as const,
+    ),
+    cells: payload.cells.map(
+      (cell) =>
+        [rowTable.ref(cell.requestId), columnTable.ref(cell.columnId), cell.value] as const,
+    ),
+    fileCounts: payload.fileCounts.map(
+      (entry) =>
+        [
+          rowTable.ref(entry.requestId),
+          columnTable.ref(entry.columnId),
+          entry.count,
+          entry.preview.map(
+            (file) =>
+              [
+                file.id,
+                mimeTable.ref(file.contentType),
+                file.originalName,
+                file.byteSize,
+                file.createdAt,
+              ] as const,
+          ),
+        ] as const,
+    ),
+  };
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
@@ -913,7 +1117,16 @@ export async function GET(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
-    return Response.json(await boardPayload(db, orgId, boardIdFrom(request)));
+    /*
+     * `?compact=1` means "I am the grid": send the interned encoding and skip
+     * the rows, which this caller already holds. Everything else — including
+     * anything hitting the URL by hand — gets exactly what it got before.
+     */
+    const compact = new URL(request.url).searchParams.get("compact") === "1";
+    const payload = await boardPayload(db, orgId, boardIdFrom(request), {
+      requests: !compact,
+    });
+    return Response.json(compact ? compactBoard(payload) : payload);
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
