@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
@@ -304,7 +304,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     plannedRows,
     userRows,
     settingsRows,
-    requestRows,
+    openJobRows,
+    contractorJobRows,
     activities,
     register,
   ] = await Promise.all([
@@ -314,26 +315,86 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     db.select().from(plannedMaintenance).where(eq(plannedMaintenance.organisationId, orgId)).orderBy(plannedMaintenance.nextDueAt),
     db.select().from(users).where(eq(users.organisationId, orgId)).orderBy(users.fullName),
     db.select().from(workspaceSettings).where(eq(workspaceSettings.organisationId, orgId)).limit(1),
-    // Stage 23 — feeds the open-jobs-per-site tally. Binned jobs are not open.
+    /*
+     * ── Two tallies, not the whole job table ────────────────────────────────
+     *
+     * This was `db.select().from(maintenanceRequests)` — every column of every
+     * live job in the workspace, 776 rows and ~950KB out of Postgres — read so
+     * that the fourteen lines below it could produce one count per site and
+     * four numbers per contractor. The rows were then discarded; they never
+     * reached the browser, which is why this route's RESPONSE is 146KB and its
+     * cost looked unexplained from the outside.
+     *
+     * Measured with `PG_D1_TRACE=1` against Supabase: that select was the
+     * slowest statement in the request at 512ms of a 798ms total, and the
+     * request is on the Dashboard Overview's critical path — the compliance
+     * donut, the compliance percentage and "Active units" all wait for it.
+     * Postgres answers the same question with two GROUP BYs over an index in a
+     * fraction of that, and the aggregates are ~40 rows rather than 776.
+     *
+     * The grouping is on the WHOLE stored value in both queries, and that is
+     * deliberate. This board carries eleven monday status strings — "Waiting
+     * for parts", "Quote Received (waiting for Approval)" — and an earlier
+     * attempt to match them by substring swallowed 54 of 59 open jobs. Nothing
+     * here matches a prefix, a substring or a pattern: `stage` is compared with
+     * `=` and `<>` against the exact values the loop used, and `contractor` is
+     * grouped by identity, exactly as `request.contractor === contractor.name`
+     * compared it.
+     *
+     * Stage 23 — binned jobs are not open, so both keep the `deletedAt` filter.
+     */
     db
-      .select()
+      .select({ siteId: maintenanceRequests.siteId, open: count() })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.organisationId, orgId),
+          isNull(maintenanceRequests.deletedAt),
+          ne(maintenanceRequests.stage, "Completed"),
+        ),
+      )
+      .groupBy(maintenanceRequests.siteId),
+    /*
+     * `case when … then 1 else 0 end` and `coalesce`, rather than Postgres'
+     * `count(*) filter (where …)`: this application also runs on SQLite when
+     * `PG_D1` is unset, `db/sqlite-to-postgres.ts` translates one dialect into
+     * the other, and FILTER is not in the SQLite subset it accepts. Both
+     * constructs here are spelled identically by both engines, as is the
+     * `<>` inequality.
+     */
+    db
+      .select({
+        contractor: maintenanceRequests.contractor,
+        assigned: count(),
+        completed: sql<number>`sum(case when ${maintenanceRequests.stage} = ${"Completed"} then 1 else 0 end)`,
+        urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and ${maintenanceRequests.stage} <> ${"Completed"} then 1 else 0 end)`,
+        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+      })
       .from(maintenanceRequests)
       .where(
         and(
           eq(maintenanceRequests.organisationId, orgId),
           isNull(maintenanceRequests.deletedAt),
         ),
-      ),
+      )
+      .groupBy(maintenanceRequests.contractor),
     db.select().from(activityLog).where(eq(activityLog.organisationId, orgId)).orderBy(desc(activityLog.createdAt)).limit(60),
     readComplianceRegister(db, orgId),
   ]);
 
-  const openJobsBySite = new Map<string, number>();
-  for (const request of requestRows) {
-    if (request.stage !== "Completed") {
-      openJobsBySite.set(request.siteId, (openJobsBySite.get(request.siteId) ?? 0) + 1);
-    }
-  }
+  const openJobsBySite = new Map<string, number>(
+    openJobRows.map((row) => [row.siteId, Number(row.open)]),
+  );
+  /*
+   * Keyed by the contractor name exactly as stored on the job. Jobs with no
+   * contractor group under `null`, which no contractor's name can equal — the
+   * same rows the old `request.contractor === contractor.name` filter dropped.
+   */
+  const jobsByContractor = new Map(
+    contractorJobRows
+      .filter((row): row is typeof row & { contractor: string } => row.contractor !== null)
+      .map((row) => [row.contractor, row]),
+  );
   const siteNameById = new Map(siteRows.map((site) => [site.id, site.name]));
   const contractorNameById = new Map(contractorRows.map((item) => [item.id, item.name]));
 
@@ -393,7 +454,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
   });
 
   const contractorsPayload: WorkspaceContractor[] = contractorRows.map((contractor) => {
-    const assigned = requestRows.filter((request) => request.contractor === contractor.name);
+    // No jobs carrying this name is a real answer — zeroes, not an absent row.
+    const tally = jobsByContractor.get(contractor.name);
     return {
       id: contractor.id,
       name: contractor.name,
@@ -406,10 +468,10 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       availability: contractor.availability,
       rating: contractor.rating,
       active: contractor.active,
-      assignedJobs: assigned.length,
-      completedJobs: assigned.filter((request) => request.stage === "Completed").length,
-      urgentJobs: assigned.filter((request) => request.priority === "Urgent" && request.stage !== "Completed").length,
-      spend: assigned.reduce((sum, request) => sum + (request.cost ?? 0), 0),
+      assignedJobs: Number(tally?.assigned ?? 0),
+      completedJobs: Number(tally?.completed ?? 0),
+      urgentJobs: Number(tally?.urgent ?? 0),
+      spend: Number(tally?.spend ?? 0),
     };
   });
 

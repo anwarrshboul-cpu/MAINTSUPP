@@ -172,3 +172,51 @@ test("the direct upload threshold stays under the form-parsing limit", async () 
     `DIRECT_UPLOAD_LIMIT is ${limit}; it must stay below the 1 MiB form-parsing ceiling`,
   );
 });
+
+/**
+ * The multipart chunk is pinned from both sides, and this test is the guard on
+ * the obvious-looking change that would break production quietly.
+ *
+ * Below 5 MiB, S3 and R2 reject every part but the last with `EntityTooSmall`
+ * at CompleteMultipartUpload. Above 5 MiB, the route rejects the part itself.
+ * Only one number satisfies both, so the constant is not a preference and must
+ * not be "tuned" to fit a platform proxy — see the block comment on it. The
+ * filesystem driver in db/node-r2.ts imposes no minimum, so a wrong value here
+ * passes every local test and fails only where `S3_*` is configured.
+ */
+test("the multipart chunk is the one size the route and the bucket both allow", async () => {
+  const evaluate = (source, name) => {
+    const match = new RegExp(`const ${name} = ([^;]+);`).exec(source);
+    assert.ok(match, `${name} must be declared`);
+    return Function(`"use strict"; return (${match[1]});`)();
+  };
+
+  const client = await read("app/lib/client-upload.ts");
+  const route = await read("app/api/files/multipart/route.ts");
+
+  const minimum = evaluate(client, "STORAGE_MINIMUM_PART_SIZE");
+  assert.equal(minimum, 5 * 1024 * 1024, "S3/R2 refuse a non-final part below this");
+
+  const routeMaximum = evaluate(route, "MAX_PART_SIZE");
+  assert.equal(
+    routeMaximum,
+    minimum,
+    "the route's ceiling and the bucket's floor are the same number; a chunk " +
+      "between them does not exist",
+  );
+
+  assert.match(
+    client,
+    /const MULTIPART_CHUNK_SIZE = STORAGE_MINIMUM_PART_SIZE;/,
+    "the chunk must be derived from the storage minimum, not re-typed",
+  );
+
+  // A part that is refused before it reaches the app must not claim the upload
+  // is about to be retried in smaller parts — there is no smaller path left.
+  assert.match(client, /function partUploadError\(/);
+  assert.match(
+    client,
+    /readApi<MultipartPartResponse>\(\s*response,\s*partUploadError,\s*\)/,
+    "the part PUT must report its own 413, not the direct path's",
+  );
+});

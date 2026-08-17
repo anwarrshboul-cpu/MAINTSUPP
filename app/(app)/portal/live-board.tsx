@@ -17,6 +17,11 @@ import BoardChrome, { type BoardView } from "./board-chrome";
 import { viewReplacesGrid } from "./board-view-pane";
 import BoardColumnSummary from "./board-column-summary";
 import { boardIdentity } from "./board-identity";
+import { DEFERRED_GROUP_CLASS, deferredGroupHeight } from "./board-visibility";
+import {
+  ColumnSettingsDialog,
+  columnSettingsActionLabel,
+} from "./board-column-settings";
 import { chipStyle } from "./chip-ink";
 import { Icon } from "../../components";
 import { publishBoardOptions } from "../../lib/board-option-registry";
@@ -29,7 +34,6 @@ import type {
   BoardOptionColumn,
   MaintenanceBoardCell,
   MaintenanceBoardColumn,
-  MaintenanceBoardFileCount,
   MaintenanceBoardFilePreview,
   MaintenanceGroup,
   MaintenanceGroupItem,
@@ -59,14 +63,16 @@ import {
   type BoardDisplayColumn,
   type BoardDragItem,
   type BoardDropTarget,
+  type BoardResponse,
   type ColumnKey,
   type ColumnTypeDefinition,
+  type CompactBoardResponse,
   type EditableFields,
   type MaintenanceBoardSnapshot,
   type MaintenanceBoardSnapshotColumn,
   type Option,
-  columnLabels,
   columnTypeDefinitions,
+  decodeBoardResponse,
   editableFallbackOptions,
   fallbackGroups,
   fallbackSystemColumns,
@@ -85,7 +91,6 @@ import {
   customCellDisplay,
   findChoice,
   serializeCustomCellValue,
-  dateInputValue,
   shouldCenterBoardCell,
   displayedBoardColumnWidth,
   compactNumber,
@@ -461,18 +466,17 @@ export function LiveMaintenanceBoard({
     let active = true;
     async function loadBoard() {
       try {
-        const response = await fetch(boardUrl("/api/board", boardId), {
+        // `compact=1` — this grid holds its own rows (the `requests` prop), so
+        // the flag drops the payload's `requests` key, 756 KB parsed and thrown
+        // away on every load, and asks for the interned encoding board-model.ts's
+        // `decodeBoardResponse` reads.
+        const response = await fetch(boardUrl("/api/board?compact=1", boardId), {
           headers: { Accept: "application/json" },
         });
         if (!response.ok) return;
-        const payload = (await response.json()) as {
-          groups?: MaintenanceGroup[];
-          items?: MaintenanceGroupItem[];
-          options?: BoardColumnOption[];
-          columns?: MaintenanceBoardColumn[];
-          cells?: MaintenanceBoardCell[];
-          fileCounts?: MaintenanceBoardFileCount[];
-        };
+        const payload = decodeBoardResponse(
+          (await response.json()) as CompactBoardResponse & BoardResponse,
+        );
         if (!active) return;
         if (payload.groups?.length) setGroups(payload.groups);
         if (payload.items) setItems(payload.items);
@@ -600,12 +604,22 @@ export function LiveMaintenanceBoard({
    * Gated on the snapshot having arrived, or a still-loading board would blank.
    * `setItems` is updated synchronously on create, before the row is announced,
    * so a new row is never briefly filtered out.
+   *
+   * WHY THE `loadingBoard` ARM. `requests` lands before placements do, and
+   * `!placementsLoaded` used to let every row through in between: all 776
+   * requests — Store Documentation's 31 stores included — built under fallback
+   * groups and four fallback columns, 2.9s of main-thread work in Chrome, first
+   * painted at 2,094ms when the real payload had arrived at 1,899ms, then thrown
+   * away. So hold the rows while the request is in flight; the heading already
+   * says "Syncing board". The failure case this really protects is kept:
+   * `loadingBoard` is cleared in that handler's `finally`, so a not-ok board
+   * response still shows every row.
    */
   const scopedRequests = useMemo(
     () =>
       requests.filter(
         (request) =>
-          (!placementsLoaded || placement.has(request.id)) &&
+          (placementsLoaded ? placement.has(request.id) : !loadingBoard) &&
           (portfolio === "all" ||
             request.siteId === portfolio ||
             request.location === portfolio) &&
@@ -618,6 +632,7 @@ export function LiveMaintenanceBoard({
     [
       analyticsNow,
       analyticsPeriod,
+      loadingBoard,
       placement,
       placementsLoaded,
       portfolio,
@@ -2929,15 +2944,18 @@ export function LiveMaintenanceBoard({
               return (
                 <section
                   className={`sheet-group${
-                    isDropTarget ? " is-drop-target" : ""
-                  }${
+                    isCollapsed ? "" : ` ${DEFERRED_GROUP_CLASS}`
+                  }${isDropTarget ? " is-drop-target" : ""}${
                     isDropTarget && dropTarget?.beforeRequestId === null
                       ? " is-drop-at-end"
                       : ""
                   }`}
                   key={group.id}
                   data-board-group-id={group.id}
-                  style={{ "--group-color": group.color } as CSSProperties}
+                  style={{
+                    "--group-color": group.color,
+                    "--group-height": `${deferredGroupHeight(rows.length)}px`,
+                  } as CSSProperties}
                 >
                   <header className="sheet-group__header">
                     <button
@@ -4024,256 +4042,6 @@ function ColumnResizeHandle({
       title="Resize column"
       onPointerDown={startResize}
     />
-  );
-}
-
-function columnSettingsActionLabel(type: BoardColumnType) {
-  if (type === "status" || type === "dropdown") return "Edit labels";
-  if (type === "people") return "Edit people";
-  if (type === "date") return "Date settings";
-  if (type === "timeline") return "Timeline settings";
-  if (type === "number") return "Number settings";
-  if (type === "files") return "File settings";
-  if (type === "checkbox") return "Checkbox settings";
-  if (type === "long_text") return "Long text settings";
-  if (type === "email") return "Email settings";
-  if (type === "phone") return "Phone settings";
-  if (type === "link") return "Link settings";
-  return "Text settings";
-}
-
-function ColumnSettingsDialog({
-  column,
-  onClose,
-  onSave,
-}: {
-  column: MaintenanceBoardColumn;
-  onClose: () => void;
-  onSave: (changes: {
-    title?: string;
-    settings?: BoardColumnSettings;
-    width?: number;
-  }) => Promise<void>;
-}) {
-  const definition =
-    columnTypeDefinitions.find((item) => item.type === column.type) ??
-    columnTypeDefinitions[2];
-  const choiceKey =
-    column.type === "people"
-      ? "people"
-      : column.type === "status" || column.type === "dropdown"
-        ? "choices"
-        : null;
-  const [title, setTitle] = useState(column.title);
-  const [width, setWidth] = useState(column.width);
-  const [choices, setChoices] = useState<BoardColumnChoice[]>(
-    choiceList(column),
-  );
-  const [newChoice, setNewChoice] = useState("");
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
-
-  const addChoice = () => {
-    const label = newChoice.trim();
-    if (!label) return;
-    const idBase = label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    setChoices((current) => [
-      ...current,
-      {
-        id: `${idBase || "choice"}-${crypto.randomUUID()}`,
-        label,
-        color: groupColors[current.length % groupColors.length],
-      },
-    ]);
-    setNewChoice("");
-  };
-
-  const submit = async () => {
-    const nextTitle = title.trim();
-    if (nextTitle.length < 1 || savingSettings) return;
-    setSavingSettings(true);
-    setError(null);
-    try {
-      const settings = choiceKey
-        ? {
-            ...column.settings,
-            [choiceKey]: choices,
-          }
-        : column.settings;
-      await onSave({ title: nextTitle, width, settings });
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The column settings could not be saved.",
-      );
-      setSavingSettings(false);
-    }
-  };
-
-  return (
-    <div
-      className="column-settings-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${column.title} settings`}
-    >
-      <button
-        className="column-settings-dialog__scrim"
-        type="button"
-        aria-label="Close column settings"
-        onClick={onClose}
-      />
-      <section>
-        <header>
-          <div>
-            <span style={{ background: definition.color }}>
-              <Icon name={definition.icon} size={17} />
-            </span>
-            <div>
-              <strong>{columnSettingsActionLabel(column.type)}</strong>
-              <small>{definition.description}</small>
-            </div>
-          </div>
-          <button type="button" aria-label="Close" onClick={onClose}>
-            <Icon name="close" size={18} />
-          </button>
-        </header>
-        <div className="column-settings-dialog__body">
-          <label>
-            <span>Column name</span>
-            <input
-              autoFocus
-              value={title}
-              maxLength={80}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>
-              Column width <strong>{width}px</strong>
-            </span>
-            <input
-              type="range"
-              min="90"
-              max="600"
-              step="5"
-              value={width}
-              onChange={(event) => setWidth(Number(event.target.value))}
-            />
-          </label>
-          {choiceKey ? (
-            <div className="column-settings-dialog__choices">
-              <span>
-                {column.type === "people" ? "People" : "Labels"}
-                <small>Change the name or colour used in this column.</small>
-              </span>
-              <div>
-                {choices.map((choice) => (
-                  <div key={choice.id}>
-                    <input
-                      type="color"
-                      value={choice.color}
-                      aria-label={`Color for ${choice.label}`}
-                      onChange={(event) =>
-                        setChoices((current) =>
-                          current.map((item) =>
-                            item.id === choice.id
-                              ? { ...item, color: event.target.value }
-                              : item,
-                          ),
-                        )
-                      }
-                    />
-                    <input
-                      value={choice.label}
-                      aria-label={`Name for ${choice.label}`}
-                      onChange={(event) =>
-                        setChoices((current) =>
-                          current.map((item) =>
-                            item.id === choice.id
-                              ? { ...item, label: event.target.value }
-                              : item,
-                          ),
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      aria-label={`Delete ${choice.label}`}
-                      disabled={choices.length <= 1}
-                      onClick={() =>
-                        setChoices((current) =>
-                          current.filter((item) => item.id !== choice.id),
-                        )
-                      }
-                    >
-                      <Icon name="close" size={15} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="column-settings-dialog__add">
-                <input
-                  value={newChoice}
-                  placeholder={
-                    column.type === "people" ? "Add a person" : "Add a label"
-                  }
-                  onChange={(event) => setNewChoice(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      addChoice();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={!newChoice.trim()}
-                  onClick={addChoice}
-                >
-                  <Icon name="plus" size={15} />
-                  Add
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="column-settings-dialog__hint">
-              <Icon name={definition.icon} size={20} />
-              <div>
-                <strong>{definition.label} behaviour is active</strong>
-                <span>{definition.description}. Adjust the width above to fit the board.</span>
-              </div>
-            </div>
-          )}
-          {error && <p className="column-settings-dialog__error">{error}</p>}
-        </div>
-        <footer>
-          <button type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={!title.trim() || savingSettings}
-            onClick={submit}
-          >
-            {savingSettings ? "Saving…" : "Save settings"}
-          </button>
-        </footer>
-      </section>
-    </div>
   );
 }
 

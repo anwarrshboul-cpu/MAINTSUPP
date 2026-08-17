@@ -10,9 +10,12 @@ const read = (file) => readFile(path.join(root, file), "utf8");
 const CAPTURE = "db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md";
 const ROUTE = "app/api/board/views/route.ts";
 const CHROME = "app/(app)/portal/board-chrome.tsx";
-// The chrome is the three sticky rows; the pane it opens below them is where a
-// view type actually renders. They split when the pane stopped being drawn over
-// the grid and became a section of its own.
+/*
+ * The chrome's view dispatch, which moved out of `board-chrome.tsx` when that
+ * file hit its 500-line limit for the second time — the same split, for the
+ * same reason, that took the tab glyphs to `board-tab-glyph.tsx` in Stage 23.
+ * Which pane a view type renders is unchanged; only the file is.
+ */
 const PANE = "app/(app)/portal/board-view-pane.tsx";
 const TAB_GLYPH = "app/(app)/portal/board-tab-glyph.tsx";
 const VIEWS = "app/(app)/portal/views/parity-views.tsx";

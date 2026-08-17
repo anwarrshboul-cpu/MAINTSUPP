@@ -92,13 +92,33 @@ async function seedMaintenanceIfEmpty(
   orgId: string,
 ) {
   await ensureDatabase();
+  /*
+   * The two free refusals come first, and that is the whole change.
+   *
+   * These three guards were in the opposite order, so every read of this route
+   * paid a `count(*)` over `maintenance_requests` before discovering that it
+   * was never allowed to seed anything. `sampleSeedingAllowed()` is
+   * `NODE_ENV !== "production"`, so on the deployed portal the count was
+   * ALWAYS wasted; on a workspace with 776 jobs it is wasted everywhere,
+   * because a count that has to come back zero to matter cannot come back zero
+   * once a single job exists.
+   *
+   * Measured against Supabase (`PG_D1_TRACE=1`), that count is one of six
+   * statements a `GET /api/maintenance` issues and cost 19–61ms of the
+   * request's 250–640ms — paid on every dashboard load and every board load,
+   * for an outcome fixed before the query was sent.
+   *
+   * Nothing about WHEN seeding happens changes: the count still runs, and
+   * still decides, in the one case where it can decide anything — a
+   * development database whose primary organisation is empty.
+   */
+  if (orgId !== PRIMARY_ORGANISATION_ID) return;
+  if (!sampleSeedingAllowed()) return;
   const [result] = await db
     .select({ value: count() })
     .from(maintenanceRequests)
     .where(eq(maintenanceRequests.organisationId, orgId));
   if (result.value > 0) return;
-  if (orgId !== PRIMARY_ORGANISATION_ID) return;
-  if (!sampleSeedingAllowed()) return;
 
   // D1 keeps a conservative bound-variable limit. Seed one work order per
   // statement so first-run initialization stays inside that limit.

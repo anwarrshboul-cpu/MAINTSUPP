@@ -130,14 +130,24 @@ test("all five renderers exist and are wired to the chrome", async () => {
   assert.match(chart, /export function ChartView/);
   assert.match(chart, /export function FilterBuilder/);
 
-  const chrome = await read("app/(app)/portal/board-view-pane.tsx");
+  /*
+   * `board-view-pane.tsx`, not `board-chrome.tsx`. The pane moved out when the
+   * chrome hit its 500-line limit again — the same move, for the same reason,
+   * that Stage 23 made for the tab glyphs. What renders for a view type and
+   * when is unchanged, so the assertion follows it rather than relaxes.
+   */
+  const pane = await read("app/(app)/portal/board-view-pane.tsx");
   for (const type of ["kanban", "calendar", "chart", "gallery", "reports"]) {
     assert.match(
-      chrome,
+      pane,
       new RegExp(`activeView\\.type === "${type}"`),
       `the ${type} tab must render its pane`,
     );
   }
+
+  // And the chrome still renders it, or the file above would be dead code.
+  const chrome = await read("app/(app)/portal/board-chrome.tsx");
+  assert.match(chrome, /<BoardViewPane\b/);
 });
 
 test("view types report their real build state", async () => {
@@ -196,9 +206,8 @@ test("no fixed tenant identifier in the stage 6 files", async () => {
 test("the Form tab renders the monday form, not an empty pane", async () => {
   // The pane had no branch for `type === "form"` and its placeholder branch
   // explicitly excluded form views, so selecting the Form tab switched to a
-  // pane that rendered nothing at all. The branches moved out of
-  // `board-chrome.tsx` into `board-view-pane.tsx` when the pane became a
-  // section of its own; this reads the same code in its new home.
+  // pane that rendered nothing at all. It lived in `board-chrome.tsx` when
+  // that was written and is now `board-view-pane.tsx`; the branch is the same.
   const pane = await read("app/(app)/portal/board-view-pane.tsx");
   assert.match(pane, /activeView\.type === "form" && <FormView/);
   assert.ok(

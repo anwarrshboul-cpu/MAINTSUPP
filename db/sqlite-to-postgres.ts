@@ -722,6 +722,35 @@ function rewriteFunctions(sql: string): string {
     }
   }
 
+  /*
+   * Two-argument `max`/`min` become `greatest`/`least`.
+   *
+   * SQLite spells the scalar and the aggregate with the same word and tells
+   * them apart by arity: `max(a)` folds a column, `max(a, b)` picks the larger
+   * of two values. Postgres gives the scalar its own name, so the arity is what
+   * has to be counted here — rewriting on the name alone would turn every
+   * aggregate `max(created_at)` into `greatest(created_at)`, which is a
+   * different query that still runs.
+   *
+   * This is not theoretical. `app/api/files/[id]/route.ts:300-311` decrements
+   * four attachment counters with `max(count - 1, 0)`, so on Postgres every
+   * attachment deletion answered 500 with
+   * `function max(integer, integer) does not exist` — and did so AFTER the
+   * object and its row were already gone, leaving the counters permanently one
+   * too high while the user was told the delete had failed.
+   */
+  for (const match of mask.matchAll(/\b(max|min)\s*\(/gi)) {
+    const open = match.index + match[0].length - 1;
+    const close = matchParen(mask, open);
+    if (splitTopLevel(mask, open + 1, close).length < 2) continue;
+    const scalar = match[1].toLowerCase() === "max" ? "greatest" : "least";
+    edits.push({
+      start: match.index,
+      end: match.index + match[1].length,
+      text: scalar,
+    });
+  }
+
   for (const match of mask.matchAll(/\bgroup_concat\s*\(/gi)) {
     const open = match.index + match[0].length - 1;
     const close = matchParen(mask, open);

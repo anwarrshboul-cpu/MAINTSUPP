@@ -1,25 +1,28 @@
 "use client";
 
 /**
- * What a view tab actually shows — everything except Main table.
+ * Which component draws the selected view.
  *
- * Extracted from `board-chrome.tsx`, which `stage-eight-board-split` holds to
- * 500 lines and which was within seven of it. Eleven of its imports existed
- * only to be named once each in one switch-shaped block, so moving the block
- * takes the imports with it and leaves the chrome as what its own header
- * comment says it is: three stacked rows and the state behind them.
+ * This is one `switch` written as JSX, and it lives apart from `board-chrome`
+ * because it is the part of the chrome that GROWS. The chrome's own job — fetch
+ * the saved views, keep the tab strip, remember where a reader lands — is
+ * finished and stable at around 480 lines. The pane gained four view types in
+ * Stage 19 alone, and every one of them added a branch here and an import at
+ * the top of the file. That is what pushed `board-chrome.tsx` over its 500-line
+ * limit, and leaving the two together would push it over again on the next view.
  *
- * IT RENDERS AS A SIBLING OF `.board-chrome`, NOT INSIDE IT.
+ * The split is the same one Stage 23 made when the tab glyphs moved to
+ * `board-tab-glyph.tsx` for exactly this reason: the assertions that used to
+ * read `board-chrome.tsx` now read this file, because what is rendered and when
+ * has not changed at all — only which file it is written in.
  *
- * The chrome is `position: sticky; top: 0`, which is right for three short rows
- * that should tuck under the top bar and stay there. A form is not three short
- * rows. A sticky box taller than the viewport pins its top at the offset and
- * takes its overflowing bottom with it, so the last fields of the request form
- * and the last row of Fix Tracker cards sat below the fold with no scroll
- * position that could reach them. Out here the pane is ordinary flow content
- * and scrolls like anything else, while the rows above it keep sticking.
+ * It also stops the chrome importing all eleven view modules. `board-chrome` is
+ * rendered on every board; the eight heavy view components underneath are only
+ * reachable once somebody picks a non-table tab.
  */
 
+import type { BoardView } from "./board-chrome";
+import { Icon } from "../../components";
 import {
   CalendarView,
   FormView,
@@ -35,18 +38,30 @@ import {
   FormResponsesView,
   FormResultsView,
 } from "./views/parity-views";
-import { Icon } from "../../components";
-import type { BoardView } from "./board-chrome";
 import type { BoardItem } from "./views/view-model";
+
+type Props = {
+  /** The selected view. The caller has already excluded `type === "table"`. */
+  activeView: BoardView;
+  /** Items already filtered by the table's own controls. */
+  items: BoardItem[];
+  /** Option label to colour, so chips match the table. */
+  palette: Record<string, string>;
+  onOpenItem?: (item: BoardItem) => void;
+  onMoveItem?: (itemId: string, value: string) => void;
+  /** Fired after the Form tab creates a job, so the table can pick it up. */
+  onFormSubmitted?: () => void;
+};
 
 /**
  * Whether opening this tab means the grid goes away — A VIEW TAB IS A SECTION,
  * NOT A BANNER OVER THE GRID.
  *
- * Every tab used to render its view into the pane and leave the whole table
- * mounted underneath, so Form and Fix Tracker were drawn ON TOP OF the board
- * rather than instead of it. Two things went wrong with that, and both are what
- * a reader sees rather than a tidiness argument:
+ * Splitting the pane out of the chrome, above, moved where these branches are
+ * WRITTEN. This answers the separate question of what else is on screen while
+ * one of them renders, and until it existed the answer was "the whole table,
+ * underneath". Form and Fix Tracker were drawn ON TOP OF the board rather than
+ * instead of it, and two things followed that a reader sees:
  *
  *   • `.live-board-footer` — the "Add new group" bar — is
  *     `position: absolute; bottom: 0; z-index: 12`, pinned to the bottom of the
@@ -58,8 +73,9 @@ import type { BoardItem } from "./views/view-model";
  *     the end of the view, through a table nobody had asked to see.
  *
  * An UNBUILT view is the one exception and keeps the grid, because its pane is
- * only a "not built yet" note — which says in as many words that the table below
- * is still the live board. Hiding it would leave that tab showing nothing at all.
+ * only the "not built yet" note below — which says in as many words that the
+ * table below is still the live board. Hiding it would leave that tab showing
+ * nothing at all.
  *
  * `live-board.tsx` calls this with the view `BoardChrome` reports up, and uses
  * the answer to drop the grid, the footer, the mobile cards and the group
@@ -76,14 +92,7 @@ export default function BoardViewPane({
   onOpenItem,
   onMoveItem,
   onFormSubmitted,
-}: {
-  activeView: BoardView;
-  items: BoardItem[];
-  palette: Record<string, string>;
-  onOpenItem?: (item: BoardItem) => void;
-  onMoveItem?: (itemId: string, value: string) => void;
-  onFormSubmitted?: () => void;
-}) {
+}: Props) {
   return (
     <div className="board-chrome__pane">
       {/*

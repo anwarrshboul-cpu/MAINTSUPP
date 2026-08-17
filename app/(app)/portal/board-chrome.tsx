@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import BoardHeader from "./board-header";
 import { fetchLandingView, rememberLandingView } from "./board-view-memory";
 import { iconFor, TabGlyph } from "./board-tab-glyph";
-import { Icon, type IconName } from "../../components";
+import { Icon } from "../../components";
 import BoardViewPane from "./board-view-pane";
 import { useScrollOverflow } from "./views/scroll-affordance";
 import { BoardViewsScroll, useDismissOnOutside } from "./board-views-controls";
@@ -424,8 +424,11 @@ export default function BoardChrome({
       </div>
     </div>
 
-      {/* The active view's own section, deliberately outside the sticky chrome
-          above — see the header comment in `board-view-pane.tsx`. */}
+      {/* ── The selected view's pane — see board-view-pane.tsx ─────────
+          Rendered as a SIBLING of the chrome, not a child of it. The chrome is
+          `position: sticky`, which is right for three short rows and wrong for
+          a form: a sticky box taller than the viewport takes its overflowing
+          bottom with it, and no scroll position can reach the end. */}
       {activeView && activeView.type !== "table" && (
         <BoardViewPane
           activeView={activeView}
