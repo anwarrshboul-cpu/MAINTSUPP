@@ -19,6 +19,7 @@ import {
   UNRECORDED_TRADE,
   complianceTrend,
   tradeBreakdown,
+  tradeLabel,
 } from "../app/(app)/portal/views/overview-series.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -148,6 +149,71 @@ test("jobs with no trade recorded are named, not left as a blank bar", () => {
   assert.equal(rows[0].label, UNRECORDED_TRADE);
   assert.equal(unrecorded.color, "#6f8190");
   assert.notEqual(rows.find((row) => row.label === "Electrician").color, "#6f8190");
+});
+
+/*
+ * The live workspace's own numbers, so a regression is visible as the figure an
+ * owner actually reads rather than as a fixture. The seven values and their
+ * counts are `SELECT engineer, count(*) FROM portal.maintenance_requests GROUP
+ * BY engineer` on 2026-08-17: 776 rows, none deleted, which is the exact set the
+ * Overview scopes to on "All records" with every site selected.
+ */
+const LIVE_ENGINEER_COUNTS = [
+  ["Handyman", 445],
+  ["Electrician", 279],
+  ["", 36],
+  ["Other", 9],
+  ["Plummer", 4],
+  ["[object Object]", 2],
+  ["General", 1],
+];
+
+test("a stringified object is not a trade, and does not become a bar", () => {
+  // The value in the column, not an object: the importer stringified it long
+  // before this panel sees it. See UNUSABLE_TRADE_VALUES.
+  assert.equal(tradeLabel("[object Object]"), UNRECORDED_TRADE);
+  assert.equal(tradeLabel("[OBJECT OBJECT]"), UNRECORDED_TRADE);
+  assert.equal(tradeLabel("undefined"), UNRECORDED_TRADE);
+  assert.equal(tradeLabel("null"), UNRECORDED_TRADE);
+  // A live object would have thrown on `.trim()` before; it must not now, and
+  // it must not be captioned with its own stringification either.
+  assert.equal(tradeLabel({ index: 5 }), UNRECORDED_TRADE);
+  assert.equal(tradeLabel(undefined), UNRECORDED_TRADE);
+  // Real trades are untouched — including ones that merely contain the word.
+  assert.equal(tradeLabel(" Electrician "), "Electrician");
+  assert.equal(tradeLabel("Object handling"), "Object handling");
+});
+
+test("the live trade bars move exactly two jobs, and account for all 776", () => {
+  const requests = LIVE_ENGINEER_COUNTS.flatMap(([engineer, n]) =>
+    Array.from({ length: n }, () => ({ engineer })),
+  );
+  assert.equal(requests.length, 776);
+
+  const rows = tradeBreakdown(requests);
+  const by = new Map(rows.map((row) => [row.label, row.value]));
+
+  // No bar may be captioned with the wreckage of a value.
+  assert.ok(!by.has("[object Object]"), "[object Object] must not be a bar");
+
+  // The named trades are untouched, to the job. This is the assertion that
+  // stops a future "cleanup" quietly rebucketing the owner's figures.
+  assert.equal(by.get("Handyman"), 445);
+  assert.equal(by.get("Electrician"), 279);
+  assert.equal(by.get("Other"), 9);
+  assert.equal(by.get("Plummer"), 4);
+
+  // The 36 blanks plus those two, and nothing else.
+  assert.equal(by.get(UNRECORDED_TRADE), 38);
+
+  // Every job is in a bar now: dropping the bogus bar frees the sixth slot for
+  // the one "General" job the six-bar cap had been cutting off, so the panel
+  // accounts for 776 of 776 where it used to account for 775.
+  assert.equal(rows.length, 6);
+  assert.equal(
+    rows.reduce((sum, row) => sum + row.value, 0),
+    776,
+  );
 });
 
 test("trade breakdown keeps the six-bar cap and the existing palette", async () => {

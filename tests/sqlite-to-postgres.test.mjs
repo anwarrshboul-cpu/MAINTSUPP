@@ -646,3 +646,51 @@ test("drizzle's own on conflict clause is not touched", () => {
     'insert into "sessions" ("id", "token_hash") values ($1, $2) on conflict do nothing',
   );
 });
+
+/*
+ * SQLite spells the scalar and the aggregate with the same word and tells them
+ * apart by arity. Postgres gives the scalar its own name, so arity is what has
+ * to be counted: rewriting on the name alone turns every aggregate
+ * `max(created_at)` into `greatest(created_at)` — a different query that still
+ * runs, which is the worst kind of wrong.
+ */
+test("two-argument max and min become greatest and least", () => {
+  // The real call site: app/api/files/[id]/route.ts decrements four attachment
+  // counters this way, and on Postgres every attachment deletion answered 500
+  // AFTER the object was already gone.
+  assert.equal(
+    translateSql("update maintenance_requests set attachment_count = max(attachment_count - 1, 0)"),
+    "update maintenance_requests set attachment_count = greatest(attachment_count - 1, 0)",
+  );
+  assert.equal(translateSql("select min(a, b) from t"), "select least(a, b) from t");
+});
+
+test("single-argument max and min stay aggregates", () => {
+  assert.equal(
+    translateSql("select max(created_at) from audit_events"),
+    "select max(created_at) from audit_events",
+  );
+  assert.equal(
+    translateSql("select min(position) from maintenance_groups"),
+    "select min(position) from maintenance_groups",
+  );
+  // A comma nested inside an argument is not a top-level comma.
+  assert.equal(
+    translateSql("select max(cast(substr(id, 4) as integer)) from t"),
+    "select max(cast(substr(id, 4) as integer)) from t",
+  );
+});
+
+test("an aggregate nested inside a scalar max is left alone", () => {
+  assert.equal(
+    translateSql("select max(count(x), 0) from t"),
+    "select greatest(count(x), 0) from t",
+  );
+});
+
+test("max inside a string literal is not rewritten", () => {
+  assert.equal(
+    translateSql("select max(a, b) from t where note = 'max(a, b) is fine'"),
+    "select greatest(a, b) from t where note = 'max(a, b) is fine'",
+  );
+});

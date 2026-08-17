@@ -6452,11 +6452,29 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
  * fitting rather than at a width someone guessed. Measured after: 2 columns
  * at 390 and 414 (unchanged, 177px and 189px tracks), 1 column at 320.
  *
- * Held at 560px rather than 768px on purpose — above it the existing 2- and
- * 4-column rules already fit, and widening the range would re-flow the tablet
- * layout for no defect.
+ * The boundary was 560px, and 560px is not one of this project's breakpoints.
+ * `tests/stage-five-board-chrome.test.mjs` and `tests/stage-six-views.test.mjs`
+ * both walk every `@media (…width: Npx)` from their section marker to the end
+ * of this file and require N to be one of 640, 767, 768, 1024 or 1280, and this
+ * rule was failing both of them. The list is not decoration: this file already
+ * carries nine different widths above the marker (430, 480, 760, 900, 1040,
+ * 1080, 1180, 1380, 1381), which is precisely the sprawl the check exists to
+ * stop spreading.
+ *
+ * Moved to 640px rather than argued for, because 640 is on the list and the
+ * range only widens: 640 > 560, so every width that had the fix still has it,
+ * and the fix cannot regress at the widths it was written for. `auto-fit` with
+ * a floor of `min(100%, 168px)` can never demand more width than its container
+ * has, so extending it upwards cannot reintroduce the overflow it removed.
+ *
+ * The one consequence, stated rather than glossed: between 561 and 640 the
+ * three strips now fit THREE tiles per row instead of the two the 650px rule in
+ * globals.css gives them. Both fit. At 640 the container is 616px, so the
+ * tracks are 184px against a 164px min-content; at 561 they are 172px, still
+ * clear. Nothing overflows at any width — checked at 320, 390, 414, 560, 600,
+ * 640 and 768 — and the 2-column and 4-column layouts above 640 are untouched.
  */
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .site-stat-grid,
   .compliance-stat-grid,
   .document-stat-grid {
@@ -6823,8 +6841,20 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
  * it extends and is doing real work: a scroll container clips its children,
  * and without the exception an open toolbar dropdown is cut off at the
  * toolbar's own edge.
+ *
+ * This was `(min-width: 761px) and (max-width: 768px)` — the gap and nothing
+ * else — and 761 is not one of the agreed breakpoints, so it failed the same
+ * two tests as the stat-grid rule above. It is now the plain 768px query, which
+ * is the same rule over a wider range and NOT a behaviour change: the 760-and-
+ * below block in globals.css already gives `.live-board-toolbar` this
+ * exact set — `flex-wrap: nowrap`, `overscroll-behavior-x: contain`,
+ * `scrollbar-width: none`, the `:not(:has(.live-board-menu))` overflow pair and
+ * the hidden webkit scrollbar — so below 761 every declaration here restates a
+ * value the toolbar already has. The lower bound was expressing "globals covers
+ * this part", not a different layout; saying it as a range bought nothing and
+ * cost a breakpoint.
  */
-@media (min-width: 761px) and (max-width: 768px) {
+@media (max-width: 768px) {
   .live-board-toolbar {
     flex-wrap: nowrap;
     overscroll-behavior-x: contain;

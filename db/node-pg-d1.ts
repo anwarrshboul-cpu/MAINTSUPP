@@ -620,9 +620,141 @@ const TRANSLATION_CACHE_LIMIT = 512;
  */
 const DEFAULT_POOL_SIZE = 4;
 
+/**
+ * The same number on a host that runs many copies of this process at once.
+ *
+ * `DEFAULT_POOL_SIZE` is a per-PROCESS figure that was budgeted against a fixed
+ * number of processes, and on Railway that arithmetic holds: `railway.json` sets
+ * `numReplicas: 1`, so the portal is one process and costs 4. The portal is also
+ * deployed on Vercel, where the unit is a function instance, each instance gets
+ * its own module scope and therefore its own pool, and the platform decides how
+ * many instances exist. Four per instance is not a budget of four, it is four
+ * times a number nobody in this repository controls: three warm instances is 12
+ * on its own, and the Phase 2 API in `apps/` — same database, same pooler — is
+ * already holding up to 10 of the project's 15.
+ *
+ * Two, there, for a reason rather than as a round-down. A function instance is
+ * serving a small number of concurrent requests by construction, so the pool is
+ * not what limits its throughput; and when the pool IS the limit, postgres.js
+ * QUEUES the extra query on an existing socket instead of opening another. That
+ * is backpressure inside the process, which is the well-behaved failure — the
+ * request waits. Exceeding the pooler's client limit is the badly-behaved one:
+ * the pooler refuses the connection outright and the route answers 500.
+ *
+ * Not one. `db/init.ts` runs its whole schema bootstrap through `batch()`, which
+ * RESERVES a connection out of the pool for the duration; with `max: 1` every
+ * other query on a cold start would queue behind the entire bootstrap, and
+ * `primaryKeyMap()` — which a `batch()` containing `INSERT OR REPLACE` would
+ * reach for on the pool handle while that batch holds the reservation — would
+ * have nothing left to run on. Two keeps a socket free of both.
+ *
+ * `VERCEL` is set to "1" on every Vercel runtime, build and deployment; it is
+ * their own marker and not a value this repo has to set. `PG_D1_POOL` overrides
+ * either default for a deployment that knows its own instance count.
+ */
+const VERCEL_POOL_SIZE = 2;
+
 function positiveInteger(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * The pool ceiling for the host this process is running on.
+ *
+ * Stated as a function rather than a constant so the reasoning above stays
+ * attached to the choice, and so a test can exercise both branches.
+ */
+function defaultPoolSize(env: Record<string, string | undefined>): number {
+  return env["VERCEL"] ? VERCEL_POOL_SIZE : DEFAULT_POOL_SIZE;
+}
+
+/**
+ * How many times a statement may wait for the pooler to have room, and for how
+ * long.
+ *
+ * Four attempts and roughly 50/150/350 ms of sleeping between them, so the
+ * worst case a caller can experience is its own latency plus about 0.55 s, and
+ * a request that would have been a 500 becomes a request that was slow. Beyond
+ * that the honest answer is the error: a pooler that has been full for half a
+ * second is not momentarily busy, it is oversubscribed, and hiding that behind
+ * a thirty-second retry would turn a visible outage into an invisible one.
+ *
+ * Jittered, because the whole point is that several processes are colliding on
+ * one 15-client budget. Un-jittered backoff makes them collide again, in step,
+ * at the same three moments.
+ */
+const POOLER_RETRY_DELAYS_MS = [50, 150, 350];
+
+function retryDelays(
+  env: Record<string, string | undefined>,
+): readonly number[] {
+  // `PG_D1_POOL_RETRIES=0` turns it off for an operator who would rather see
+  // the refusal than wait for it.
+  const raw = env["PG_D1_POOL_RETRIES"];
+  if (raw === undefined) return POOLER_RETRY_DELAYS_MS;
+  const count = Number(raw);
+  if (!Number.isInteger(count) || count < 0) return POOLER_RETRY_DELAYS_MS;
+  return POOLER_RETRY_DELAYS_MS.slice(0, count);
+}
+
+/**
+ * Whether this failure is the pooler saying "not right now".
+ *
+ * Deliberately narrow, and matched on the marker in the MESSAGE rather than on
+ * the SQLSTATE. Reproduced against the real project by opening clients until it
+ * refused — the sixteenth — and the error is:
+ *
+ *   PostgresError { name: "PostgresError", code: "XX000",
+ *     message: "(EMAXCONNSESSION) max clients reached in session mode -
+ *               max clients are limited to pool_size: 15" }
+ *
+ * `XX000` is `internal_error`, the code Postgres and everything wearing its
+ * wire protocol reach for when nothing more specific fits, so retrying on the
+ * code would retry genuine server faults as well. `EMAXCONNSESSION` is
+ * supavisor's own marker and means one specific thing.
+ *
+ * WHY RETRYING THIS IS SAFE EVEN FOR A WRITE, which is the question any retry
+ * has to answer. The refusal is issued during the client STARTUP exchange,
+ * before postgres.js has sent a Parse or a Bind: there is no connection, so
+ * there is no backend, so the statement provably did not run. Nothing can be
+ * executed twice by retrying it. That is why this predicate must not be widened
+ * to cover, say, `CONNECTION_CLOSED` — a socket that dropped mid-statement has
+ * no such guarantee, and an INSERT retried through one is a duplicate row.
+ */
+function isPoolerAtCapacity(error: unknown): boolean {
+  const message = (error as { message?: unknown } | null)?.message;
+  return (
+    typeof message === "string" &&
+    /EMAXCONNSESSION|max clients reached in session mode/i.test(message)
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Runs `attempt`, giving the pooler a moment and trying again if it refused the
+ * connection for want of room.
+ *
+ * Only `isPoolerAtCapacity` is retried. Every other failure — a syntax error, a
+ * constraint violation, a dropped socket — is rethrown on the first attempt,
+ * unchanged and undelayed, because none of them get better by being repeated
+ * and a retried constraint violation is just a slower one.
+ */
+async function withPoolerRetry<T>(attempt: () => Promise<T>): Promise<T> {
+  const delays = retryDelays(nodeProcess().env ?? {});
+  for (let index = 0; ; index += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (index >= delays.length || !isPoolerAtCapacity(error)) throw error;
+      const base = delays[index];
+      // ±25%, so two processes backing off together stop being in step.
+      await sleep(Math.round(base * (0.75 + Math.random() * 0.5)));
+    }
+  }
 }
 
 class NodePgConnection {
@@ -688,7 +820,7 @@ class NodePgConnection {
     const postgres = postgresModule();
     const env = nodeProcess().env ?? {};
     this.sql = postgres(this.url, {
-      max: positiveInteger(env["PG_D1_POOL"], DEFAULT_POOL_SIZE),
+      max: positiveInteger(env["PG_D1_POOL"], defaultPoolSize(env)),
       prepare: this.queryOptions.prepare,
       types: PG_TYPES,
       connection: {
@@ -796,7 +928,16 @@ class NodePgConnection {
   async batchConnection(): Promise<{ sql: Sql; release: () => void } | null> {
     const pool = this.connection();
     if (typeof pool.reserve !== "function") return null;
-    const reserved = await pool.reserve();
+    /*
+     * The one place a `batch()` can be refused by the pooler, and therefore the
+     * only place it is worth retrying one: `reserve()` may have to open a socket
+     * to hand back, and no statement of the batch has been sent yet, so waiting
+     * and asking again cannot repeat any work. Every statement after this runs
+     * on the connection this call returns. `db/init.ts` boots the whole schema
+     * through here, so a portal starting up while the pooler is briefly full
+     * used to fail its bootstrap rather than wait 50 ms for room.
+     */
+    const reserved = await withPoolerRetry(() => pool.reserve!());
     return { sql: reserved, release: () => reserved.release() };
   }
 
@@ -927,9 +1068,21 @@ class NodePgPreparedStatement {
     const startedAt = tracing ? performance.now() : 0;
     try {
       translated = this.connection.translate(this.sql, options);
-      const result = await sql
-        .unsafe(translated, this.params, this.connection.queryOptions)
-        .values();
+      /*
+       * The retry wraps the pool handle only. `on` is the connection `batch()`
+       * RESERVED, and it is already open — the pooler cannot refuse it for want
+       * of room, because the room was taken at `reserve()` and is still held.
+       * More importantly a retry there would be wrong even if it could fire:
+       * inside a transaction, re-running one statement of a batch would append
+       * it to a transaction whose earlier statements have already been applied.
+       * The reservation itself is retried instead, in `batchConnection()`,
+       * where nothing has been executed yet.
+       */
+      const send = () =>
+        sql
+          .unsafe(translated, this.params, this.connection.queryOptions)
+          .values();
+      const result = on ? await send() : await withPoolerRetry(send);
       if (tracing) recordTrace(translated, performance.now() - startedAt);
       return {
         columns: result.columns ?? [],

@@ -81,6 +81,73 @@ export function complianceTrend(
  */
 export const UNRECORDED_TRADE = "Trade not recorded";
 
+/**
+ * The strings that are the wreckage of a value rather than a value.
+ *
+ * "[object Object]" was appearing on the Overview as a trade — a labelled bar,
+ * in the palette, counted alongside "Electrician" — and it is not a trade, it
+ * is what `String(x)` prints when `x` is a plain object. The object never
+ * reaches this function: by the time the panel reads it, `engineer` is a `text`
+ * column in `portal.maintenance_requests` holding those exact sixteen
+ * characters, so nothing here can look inside it. What can be established is
+ * where it came from and what it stood for, and both are on record.
+ *
+ * The two rows are `external_id` 1637964658 and 1670571226, `source = "monday
+ * import"`. On the monday board, "Engineer Required" is the status column
+ * `single_select`, and the API returns a status cell as a pair: `text`, the
+ * label, and `value`, a JSON object `{"index":…,"post_id":…,"changed_at":…}`.
+ * Exactly two of the board's 744 items have `text: null` with `value` present,
+ * and they are those two — the legacy importer fell through the empty `text` to
+ * the parsed `value` and stringified the object. The same fault, from the same
+ * fallback, put "[object Object]" into `priority` on 22 rows (there are
+ * likewise exactly 22 items with a blank `text` on the Priority status column)
+ * and into `category` on 1. Three columns, 25 rows, one line of legacy code.
+ *
+ * So what did it MEAN? `index: 5` on a four-label column. `engineer_required`
+ * in db/monday-board-spec.ts declares four labels at indices 0-3, and the note
+ * on `priority` in that same file records what index 5 is: monday's blank "no
+ * value" chip, which monday itself hides from the dropdown and renders as an
+ * empty cell. The source value was an unset column. "Trade not recorded" is
+ * therefore not a shrug at an unreadable string — it is the correct reading of
+ * what the board actually held, and it puts these two jobs in the bucket monday
+ * would have put them in.
+ *
+ * `"undefined"` and `"null"` are here for the same reason and not because they
+ * have been seen: they are the other two things a template literal or a bare
+ * `String()` produces from an absent value, and a bar captioned "undefined"
+ * would be the identical defect wearing a different word.
+ *
+ * Matched case-insensitively, since `String(Object.create(null))` and a
+ * hand-typed variant differ only in case. Compare `chipLabel` in
+ * ../fix-tracker.tsx, which makes the same judgement for the job card's
+ * priority chip; the two are deliberately separate because they answer
+ * differently — that one omits the chip, this one must still count the job.
+ */
+const UNUSABLE_TRADE_VALUES = new Set([
+  "[object object]",
+  "undefined",
+  "null",
+]);
+
+/**
+ * The bar's caption for one job.
+ *
+ * Non-strings are folded in rather than trusted, and that is a real repair, not
+ * belt-and-braces: the previous expression was `request.engineer?.trim()`, and
+ * `?.` guards `null` and `undefined` only. Had the field ever arrived holding a
+ * live object — which is precisely what the importer was mishandling upstream —
+ * `.trim` would have been `undefined` and the whole Overview would have thrown
+ * on render rather than drawn one wrong bar.
+ */
+export function tradeLabel(value: unknown): string {
+  if (typeof value !== "string") return UNRECORDED_TRADE;
+  const text = value.trim();
+  if (!text || UNUSABLE_TRADE_VALUES.has(text.toLowerCase())) {
+    return UNRECORDED_TRADE;
+  }
+  return text;
+}
+
 export type TradeRow = { label: string; value: number; color: string };
 
 /**
@@ -91,6 +158,12 @@ export type TradeRow = { label: string; value: number; color: string };
  * muted slate rather than taking a turn in the rotation — it is the absence of
  * a trade, and giving it the same confident teal as "Electrician" would read as
  * one more category.
+ *
+ * `tradeLabel` decides what each job is called; see the note above it for why
+ * two of this workspace's 776 jobs move out of a bar of their own and into the
+ * unrecorded bucket. No other job changes bucket: every remaining value in the
+ * column is an ordinary label that trims to itself, so the totals below are the
+ * same arithmetic on the same rows.
  */
 export function tradeBreakdown(
   requests: MaintenanceRequest[],
@@ -99,7 +172,7 @@ export function tradeBreakdown(
   const palette = ["#12b4a8", "#f26a21", "#f0a91f", "#5c82af", "#6f8190"];
   const counts = new Map<string, number>();
   for (const request of requests) {
-    const label = request.engineer?.trim() || UNRECORDED_TRADE;
+    const label = tradeLabel(request.engineer);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
   return Array.from(counts)
