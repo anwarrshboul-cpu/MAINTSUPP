@@ -1,0 +1,82 @@
+/*
+ * Off-screen groups cost as much as on-screen ones, and the board has 38.
+ *
+ * Measured on /dashboard/jobs at 1440px, 745 rows across 38 groups: the browser
+ * builds 101,516 elements and then pays for all of them. Of the 5,512ms of
+ * main-thread task time between navigation and the board appearing, 2,285ms is
+ * style recalculation and 777ms is layout — 55% of the total, and none of it is
+ * React. A scroll from top to bottom cost a further 5,219ms of task time of
+ * which only 146ms was script: the rest was painting rows nobody was looking at.
+ *
+ * `content-visibility: auto` is the whole fix. The browser skips style, layout
+ * and paint for a subtree it judges off-screen, and does the work when the
+ * subtree comes near the viewport. It is preferred here over a JS windowing
+ * component for four reasons that matter more than the code size:
+ *
+ *   1. Find-in-page still works. Chrome searches inside skipped subtrees and
+ *      expands them on a hit. A windowed list that only mounts visible rows
+ *      makes Cmd-F silently miss 700 of 745 rows, and there is no way to fix
+ *      that from application code.
+ *   2. Tab order, focus and scroll anchoring are unchanged, because every row
+ *      is still in the DOM and still in document order.
+ *   3. It cannot cause the scroll to jump. `contain-intrinsic-size` below is
+ *      derived from the row count against measured geometry and is exact, and
+ *      the `auto` keyword makes the browser substitute the real size once a
+ *      group has been rendered once. Windowing with estimated row heights is
+ *      the failure mode the brief specifically warns about.
+ *   4. Selection, drag-and-drop, group collapse and cell editing keep working
+ *      untouched, because nothing about the React tree changes.
+ *
+ * WHY THE ESCAPE HATCH BELOW EXISTS. `content-visibility: auto` also applies
+ * `contain: layout style paint` while the element is on screen, and paint
+ * containment clips to the group's box AND makes the group a containing block
+ * for `position: fixed` descendants. Every popover on this board is an absolute
+ * or fixed child of a cell, a row or a column header, so without this rule a
+ * status dropdown on a group's last row would be sliced off at the group's
+ * bottom edge and the column settings modal — `position: fixed; inset: 0` —
+ * would be trapped inside a group instead of covering the viewport.
+ *
+ * The selector list is the set of board popovers that can paint outside their
+ * group: the four the stylesheet already raises z-index for in the
+ * `.sheet-group:has(...)` rule further down globals.css, plus the three cell
+ * popovers and the column settings modal. A group with one of these open is by
+ * definition on screen, so dropping containment for it costs nothing — the
+ * group is already laid out, and size containment is not in effect for a
+ * rendered element.
+ */
+
+.sheet-group.is-deferred {
+  content-visibility: auto;
+
+  /*
+   * Height is exact. Measured across all 38 groups, every group satisfies
+   * height = 43 (group header) + 38 (column header) + rows * 40 + 40 (the
+   * add-item row), with a residual of exactly 0 and no variance — the board
+   * uses `table-layout: fixed` and a fixed `height` on every th and td, so a
+   * row cannot grow. `board-visibility.ts` computes it and passes it in.
+   *
+   * Width is deliberately 0 rather than a guess. `.sheet-group` is
+   * `width: max-content; min-width: 100%`, so a skipped group falls back to
+   * the full width of `.live-board-canvas`, which the on-screen groups size
+   * correctly — there is always at least one. A fixed width guess here would
+   * be wrong the moment a column is resized and would invent horizontal
+   * scroll. The `auto` keyword on both axes means that once a group has been
+   * rendered the browser uses its real last-rendered size and ignores these
+   * fallbacks entirely.
+   */
+  contain-intrinsic-width: auto 0px;
+  contain-intrinsic-height: auto var(--group-height, 121px);
+}
+
+.sheet-group.is-deferred:has(
+    .sheet-group__menu,
+    .sheet-row-menu,
+    .custom-column-menu,
+    .column-picker,
+    .column-settings-dialog,
+    .sheet-option-popover,
+    .sheet-timeline-popover,
+    .sheet-file-hover
+  ) {
+  content-visibility: visible;
+}

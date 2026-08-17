@@ -3,23 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchLandingView, rememberLandingView } from "./board-view-memory";
 import { iconFor, TabGlyph } from "./board-tab-glyph";
-import { Icon, type IconName } from "../../components";
-import {
-  CalendarView,
-  FormView,
-  GalleryView,
-  KanbanView,
-  ReportsView,
-} from "./views/board-views";
-import { ChartView } from "./views/chart-and-filters";
-import { FixTrackerView } from "./views/fix-tracker";
+import { Icon } from "../../components";
+import BoardViewPane from "./board-view-pane";
 import { useScrollOverflow } from "./views/scroll-affordance";
-import {
-  BuildVibeView,
-  FlatTableView,
-  FormResponsesView,
-  FormResultsView,
-} from "./views/parity-views";
 import type { BoardItem } from "./views/view-model";
 
 export type BoardView = {
@@ -482,57 +468,16 @@ export default function BoardChrome({
         </button>
       </div>
 
+      {/* ── The selected view's pane — see board-view-pane.tsx ───────── */}
       {activeView && activeView.type !== "table" && (
-        <div className="board-chrome__pane">
-          {/*
-            The Fix Tracker is monday's engineer app, not a kanban. It is keyed
-            off the view's own key rather than its type, because an admin can
-            add further kanban views and those should stay kanbans.
-          */}
-          {activeView.type === "kanban" && activeView.key === "fix-tracker" && (
-            <FixTrackerView items={items} palette={palette} onChanged={onFormSubmitted} />
-          )}
-          {activeView.type === "kanban" && activeView.key !== "fix-tracker" && (
-            <KanbanView
-              items={items}
-              palette={palette}
-              onOpen={onOpenItem}
-              onMove={onMoveItem}
-            />
-          )}
-          {activeView.type === "calendar" && (
-            <CalendarView items={items} palette={palette} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "chart" && <ChartView items={items} palette={palette} />}
-          {activeView.type === "gallery" && (
-            <GalleryView items={items} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "reports" && <ReportsView items={items} />}
-          {activeView.type === "form" && <FormView onSubmitted={onFormSubmitted} />}
-          {/*
-            monday's four other tabs. `flat-table` is monday's second table view
-            (9116879) and is deliberately group-free — that is the whole
-            difference from Main table, so it renders in the pane rather than
-            replacing the grid below.
-          */}
-          {activeView.type === "form-results" && <FormResultsView items={items} />}
-          {activeView.type === "form-responses" && (
-            <FormResponsesView items={items} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "flat-table" && (
-            <FlatTableView items={items} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "vibe" && <BuildVibeView items={items} />}
-          {!activeView.built && (
-            <p className="board-chrome__placeholder">
-              <Icon name="alert" size={16} />
-              <span>
-                <strong>{activeView.name}</strong> is not built yet. The table below is
-                still the live board.
-              </span>
-            </p>
-          )}
-        </div>
+        <BoardViewPane
+          activeView={activeView}
+          items={items}
+          palette={palette}
+          onOpenItem={onOpenItem}
+          onMoveItem={onMoveItem}
+          onFormSubmitted={onFormSubmitted}
+        />
       )}
     </div>
   );

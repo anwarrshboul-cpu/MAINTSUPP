@@ -367,10 +367,11 @@ test("a write here reaches the board, even though nobody passes onChanged", asyn
     "the event this view fires must still be one the board listens for",
   );
 
-  // And the reason it is needed: board-chrome hands `onChanged` straight from
-  // `onFormSubmitted`, which live-board does not supply.
-  const chrome = await read("app/(app)/portal/board-chrome.tsx");
-  assert.match(chrome, /<FixTrackerView items=\{items\} palette=\{palette\} onChanged=\{onFormSubmitted\}/);
+  // And the reason it is needed: the view pane hands `onChanged` straight from
+  // `onFormSubmitted`, which live-board does not supply. The pane was part of
+  // `board-chrome.tsx` when this was written and is now `board-view-pane.tsx`.
+  const pane = await read("app/(app)/portal/board-view-pane.tsx");
+  assert.match(pane, /<FixTrackerView items=\{items\} palette=\{palette\} onChanged=\{onFormSubmitted\}/);
 });
 
 test("the view's stylesheet is its own file, and brand-overrides keeps the original block", async () => {
