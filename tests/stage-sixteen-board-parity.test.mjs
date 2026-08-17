@@ -89,10 +89,10 @@ test("re-parenting cannot corrupt the item tree", async () => {
 });
 
 test("Fix Tracker is the engineer dashboard, not a kanban", async () => {
-  const chrome = await read("app/(app)/portal/board-chrome.tsx");
+  const pane = await read("app/(app)/portal/board-view-pane.tsx");
   // Keyed on the view's key, so an admin's own kanban views stay kanbans.
-  assert.match(chrome, /activeView\.key === "fix-tracker" && \(\s*<FixTrackerView/);
-  assert.match(chrome, /activeView\.key !== "fix-tracker" && \(\s*<KanbanView/);
+  assert.match(pane, /activeView\.key === "fix-tracker" && \(\s*<FixTrackerView/);
+  assert.match(pane, /activeView\.key !== "fix-tracker" && \(\s*<KanbanView/);
 
   const view = await read("app/(app)/portal/views/fix-tracker.tsx");
   assert.match(view, /Maintenance Engineer Dashboard/);

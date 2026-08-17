@@ -104,6 +104,45 @@
 }
 
 /*
+ * The back control, mirroring the forward one.
+ *
+ * It sits BEFORE the scroller, and CSS has no previous-sibling combinator, so
+ * this reads forward from the button with `:has(+ …)` instead of backward from
+ * the strip. Same measured attribute, same no-React-render property. `:has()`
+ * is already relied on elsewhere in these stylesheets (`.live-board-toolbar
+ * :has(.live-board-menu)`), so this adds no new support assumption.
+ *
+ * It rotates the shared chevron rather than asking for a second glyph — the
+ * icon set has one chevron and it points right.
+ */
+.board-views__back {
+  display: none;
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.board-views__back > svg {
+  transform: rotate(180deg);
+}
+
+.board-views__back:hover {
+  color: var(--ink);
+}
+
+.board-views__back:has(+ .board-views__tabs[data-overflow="start"]),
+.board-views__back:has(+ .board-views__tabs[data-overflow="both"]) {
+  display: inline-flex;
+}
+
+/*
  * `data-overflow="none"` is left with no rule at all rather than given
  * `mask-image: none`. The attribute is the only thing that can turn a fade on,
  * so a strip that fits carries no mask — and a strip scrolled to its far end

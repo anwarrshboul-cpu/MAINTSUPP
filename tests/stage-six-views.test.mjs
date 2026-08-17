@@ -130,7 +130,7 @@ test("all five renderers exist and are wired to the chrome", async () => {
   assert.match(chart, /export function ChartView/);
   assert.match(chart, /export function FilterBuilder/);
 
-  const chrome = await read("app/(app)/portal/board-chrome.tsx");
+  const chrome = await read("app/(app)/portal/board-view-pane.tsx");
   for (const type of ["kanban", "calendar", "chart", "gallery", "reports"]) {
     assert.match(
       chrome,
@@ -194,20 +194,22 @@ test("no fixed tenant identifier in the stage 6 files", async () => {
 });
 
 test("the Form tab renders the monday form, not an empty pane", async () => {
-  // `board-chrome` had no branch for `type === "form"` and its placeholder
-  // branch explicitly excluded form views, so selecting the Form tab switched
-  // to a pane that rendered nothing at all.
-  const chrome = await read("app/(app)/portal/board-chrome.tsx");
-  assert.match(chrome, /activeView\.type === "form" && <FormView/);
+  // The pane had no branch for `type === "form"` and its placeholder branch
+  // explicitly excluded form views, so selecting the Form tab switched to a
+  // pane that rendered nothing at all. The branches moved out of
+  // `board-chrome.tsx` into `board-view-pane.tsx` when the pane became a
+  // section of its own; this reads the same code in its new home.
+  const pane = await read("app/(app)/portal/board-view-pane.tsx");
+  assert.match(pane, /activeView\.type === "form" && <FormView/);
   assert.ok(
-    !/!activeView\.built && activeView\.type !== "form"/.test(chrome),
+    !/!activeView\.built && activeView\.type !== "form"/.test(pane),
     "the form view must no longer be excluded from the rendered pane",
   );
 
   // Every view type the tab strip can seed must have somewhere to render.
   for (const type of ["kanban", "calendar", "chart", "gallery", "reports", "form"]) {
     assert.match(
-      chrome,
+      pane,
       new RegExp(`activeView\\.type === "${type}"`),
       `${type} views must be rendered`,
     );

@@ -83,6 +83,7 @@ export function SidebarNav({
   activeSection,
   onSelect,
   badges,
+  badgeDescriptions,
   onNotify,
 }: {
   /** What the app can actually navigate to, in built-in order. */
@@ -91,6 +92,19 @@ export function SidebarNav({
   onSelect: (key: string) => void;
   /** Counts drawn as a pill, keyed by section. */
   badges?: Record<string, number>;
+  /**
+   * What each badge counts, keyed the same way — "urgent jobs", not "unread".
+   *
+   * A bare red bubble on a nav item is the same shape the notification bell
+   * uses, so it reads as an unread count, and it was being reported as a
+   * notification badge that would not clear. It never could: `maintenance`
+   * carries the number of open Urgent jobs, and marking notifications read has
+   * nothing to do with it. The number is right; only its silence was wrong.
+   *
+   * Optional, so a caller that adds a badge without a description still gets a
+   * badge rather than a crash — it just stays as mute as this one was.
+   */
+  badgeDescriptions?: Record<string, string>;
   onNotify?: (message: string) => void;
 }) {
   const [arrangement, setArrangement] = useState<Arrangement>(EMPTY);
@@ -627,6 +641,7 @@ export function SidebarNav({
               {shown.map((item) => {
                 const transient = item.hidden && !editing;
                 const count = badges?.[item.key] ?? 0;
+                const countLabel = badgeDescriptions?.[item.key];
                 const isDrop = dropHint?.key === item.key;
                 return (
                   <div
@@ -714,7 +729,13 @@ export function SidebarNav({
                           </span>
                         )}
                         {!editing && count > 0 && (
-                          <span className="nav-count">{count}</span>
+                          <span
+                            className="nav-count"
+                            title={countLabel ? count + " " + countLabel : undefined}
+                            aria-label={countLabel ? count + " " + countLabel : undefined}
+                          >
+                            {count}
+                          </span>
                         )}
                       </button>
                     )}

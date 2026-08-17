@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RaiseTicketButton } from "../raise-ticket";
 import "./store-documentation-board.css";
-import type { MaintenanceRequest } from "../../../lib/types";
+import type { MaintenanceRequest, RequestDrawerTab } from "../../../lib/types";
 import { LiveMaintenanceBoard } from "../live-board";
 import {
   StoreComplianceTracker,
@@ -43,9 +43,21 @@ type TabKey = (typeof TABS)[number]["key"];
 export function StoreDocumentationBoard({
   onNotify,
   onOpenApps,
+  onOpenRequest,
 }: {
   onNotify: (message: string) => void;
   onOpenApps: () => void;
+  /**
+   * Opens a store in the request drawer, on the tab the caller asks for.
+   *
+   * Required, not optional. This board handed `LiveMaintenanceBoard` an empty
+   * `() => {}` for it, and `LiveMaintenanceBoard` routes BOTH the item-name
+   * click and the updates bubble through that one prop — so on Store
+   * Documentation the updates icon was drawn on every row, counted its updates
+   * correctly, and did nothing at all when pressed. Same component, same icon,
+   * same handler, one board wired and the other not.
+   */
+  onOpenRequest: (request: MaintenanceRequest, tab?: RequestDrawerTab) => void;
 }) {
   const [tab, setTab] = useState<TabKey>("table");
   /*
@@ -215,7 +227,7 @@ export function StoreDocumentationBoard({
             boardId={BOARD_ID}
             requests={stores}
             onCreateDetailed={() => onNotify("Add stores by importing the monday export.")}
-            onOpenRequest={() => {}}
+            onOpenRequest={onOpenRequest}
             onRequestChange={() => void load()}
             onRequestCreated={() => void load()}
             onRequestsDeleted={() => void load()}

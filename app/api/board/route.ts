@@ -828,6 +828,75 @@ async function boardPayload(db: BoardDb, orgId: string, boardId: BoardId) {
       });
     }
   }
+  /*
+   * THE TWO PICTURE COLUMNS ARE DEFINED BY EVIDENCE KIND, NOT BY COLUMN ID.
+   *
+   * Everything above keys on `board_column_id`, which is right for a file
+   * column an admin added: you drop a file into a cell and the cell remembers
+   * which one. "Pictures of Maintenance Issue" and "Picture of completed works"
+   * do not work that way. They are the two ends of the evidence flow, and every
+   * path that files evidence tags it with a KIND and leaves the column null —
+   * the request form's `uploadEvidenceFile({ kind: "issue" })`, the contractor's
+   * job link, the Fix Tracker's completion upload, the evidence manager. The
+   * cells agree: `systemCell` opens them with `onOpenFiles("issue")` and
+   * `onOpenFiles("completion")`, never by column.
+   *
+   * So the count and the cell disagreed. A job raised through the form with two
+   * photographs showed "2 photos" on its Fix Tracker card, opened to two
+   * photographs from the grid — and the grid cell itself read "Add", because
+   * `board_column_id IS NULL` on all nine attachments in this workspace.
+   *
+   * Kind-filed evidence is therefore gathered separately and filed under the
+   * matching column, so the number on the cell is the number behind it. Only
+   * `boardColumnId IS NULL` rows are read here: an attachment that names a
+   * column has already been counted above, and must not be counted twice.
+   */
+  const kindColumns = new Map(
+    columnRows
+      .filter((column) => column.key === "issuePictures" || column.key === "completedPictures")
+      .map((column) => [column.key === "issuePictures" ? "issue" : "completion", column.id]),
+  );
+  if (kindColumns.size) {
+    const kindRows = await db
+      .select({
+        id: attachments.id,
+        requestId: attachments.requestId,
+        kind: attachments.kind,
+        contentType: attachments.contentType,
+        originalName: attachments.originalName,
+        byteSize: attachments.byteSize,
+        createdAt: attachments.createdAt,
+      })
+      .from(attachments)
+      .where(
+        and(
+          eq(attachments.organisationId, orgId),
+          isNull(attachments.boardColumnId),
+          inArray(attachments.kind, [...kindColumns.keys()]),
+        ),
+      )
+      .orderBy(asc(attachments.createdAt));
+    for (const row of kindRows) {
+      const columnId = kindColumns.get(row.kind);
+      if (!row.requestId || !columnId) continue;
+      const key = `${row.requestId}::${columnId}`;
+      let entry = grouped.get(key);
+      if (!entry) {
+        entry = { requestId: row.requestId, columnId, count: 0, preview: [] };
+        grouped.set(key, entry);
+      }
+      entry.count += 1;
+      if (entry.preview.length < 4) {
+        entry.preview.push({
+          id: row.id,
+          contentType: row.contentType,
+          originalName: row.originalName,
+          byteSize: row.byteSize,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+  }
   const fileCounts = [...grouped.values()];
   /*
    * The rows themselves.

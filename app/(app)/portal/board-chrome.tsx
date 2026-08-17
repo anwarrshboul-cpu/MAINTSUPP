@@ -1,25 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import BoardHeader from "./board-header";
 import { fetchLandingView, rememberLandingView } from "./board-view-memory";
 import { iconFor, TabGlyph } from "./board-tab-glyph";
 import { Icon, type IconName } from "../../components";
-import {
-  CalendarView,
-  FormView,
-  GalleryView,
-  KanbanView,
-  ReportsView,
-} from "./views/board-views";
-import { ChartView } from "./views/chart-and-filters";
-import { FixTrackerView } from "./views/fix-tracker";
+import BoardViewPane from "./board-view-pane";
 import { useScrollOverflow } from "./views/scroll-affordance";
-import {
-  BuildVibeView,
-  FlatTableView,
-  FormResponsesView,
-  FormResultsView,
-} from "./views/parity-views";
+import { BoardViewsScroll, useDismissOnOutside } from "./board-views-controls";
 import type { BoardItem } from "./views/view-model";
 
 export type BoardView = {
@@ -113,6 +101,17 @@ export default function BoardChrome({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renaming, setRenaming] = useState(false);
+
+  // One closer for all three strip menus — "All", "+" and a tab's own "…".
+  // See `useDismissOnOutside` for why the strip needed this at all, and the
+  // `data-board-popover` markers below for what counts as "inside".
+  const closeStripMenus = useCallback(() => {
+    setOverflowOpen(false);
+    setAddOpen(false);
+    setMenuFor(null);
+  }, []);
+  useDismissOnOutside(closeStripMenus);
+
   /*
    * The strip holds eleven tabs and a phone shows two of them. The hook writes
    * `data-overflow` from measured scroll state, so the fade at the strip's edge
@@ -235,57 +234,13 @@ export default function BoardChrome({
   const overflowTabs = views.length > 6 ? views : [];
 
   return (
+    <>
     <div className={`board-chrome${collapsed ? " is-collapsed" : ""}`}>
       {/* ── Row 1 — board header (AA1) ───────────────────────────────── */}
-      <header className="board-header">
-        <div className="board-header__title">
-          <h2>{boardName ?? board?.name ?? "Board"}</h2>
-          <button type="button" className="board-header__caret" aria-label="Board menu">
-            <Icon name="chevron" size={16} />
-          </button>
-        </div>
-
-        <div className="board-header__actions">
-          <button type="button" className="board-header__action">
-            <Icon name="spark" size={16} />
-            <span>Integrate</span>
-          </button>
-          <button type="button" className="board-header__action">
-            <Icon name="activity" size={16} />
-            <span>Automate</span>
-            <em className="board-header__count">{automationCount}</em>
-          </button>
-          {/*
-            Named by `aria-label`, like the two icon-only buttons below it, and
-            NOT by a visually-hidden span.
-
-            Every off-screen-text recipe — this codebase already ships two, the
-            Tailwind `.sr-only` this used and the `.visually-hidden` used
-            twenty-odd times elsewhere — works by putting a real string in a
-            1x1 box with `overflow: hidden`. That is 93px of clipped text at
-            390px as far as any clipping audit is concerned, and it was the only
-            such report on the board that was not a genuine truncation, so it
-            cost a reader of that report a look every time.
-
-            An `aria-label` carries the same accessible name with no text node
-            to clip, which is why the siblings were already written this way.
-          */}
-          <button
-            type="button"
-            className="board-header__action"
-            aria-label="Board updates"
-          >
-            <Icon name="updates" size={16} />
-          </button>
-          <button type="button" className="board-header__invite">Invite</button>
-          <button type="button" className="board-header__action" aria-label="Share board">
-            <Icon name="paperclip" size={16} />
-          </button>
-          <button type="button" className="board-header__action" aria-label="More board actions">
-            <Icon name="more" size={16} />
-          </button>
-        </div>
-      </header>
+      <BoardHeader
+        boardName={boardName ?? board?.name ?? "Board"}
+        automationCount={automationCount}
+      />
 
       {error && (
         <p className="board-chrome__error" role="alert">
@@ -297,6 +252,8 @@ export default function BoardChrome({
       {/* ── Row 2 — view tabs (AA3–AA6) ──────────────────────────────── */}
       {boardId === "maintenance" && (
       <nav className="board-views" aria-label="Board views">
+        <BoardViewsScroll direction="back" stripRef={tabsRef} />
+
         <div className="board-views__tabs" ref={tabsRef}>
           {visibleTabs.map((view) => {
             const isActive = view.key === activeKey;
@@ -304,6 +261,7 @@ export default function BoardChrome({
               <div
                 key={view.id}
                 className={`board-views__tab${isActive ? " is-active" : ""}${view.built ? "" : " is-unbuilt"}`}
+                data-board-popover
               >
                 <button
                   type="button"
@@ -337,7 +295,11 @@ export default function BoardChrome({
                     type="button"
                     className="board-views__tab-menu"
                     aria-label={`Options for ${view.name}`}
-                    onClick={() => setMenuFor(menuFor === view.id ? null : view.id)}
+                    onClick={() => {
+                      setMenuFor(menuFor === view.id ? null : view.id);
+                      setOverflowOpen(false);
+                      setAddOpen(false);
+                    }}
                   >
                     <Icon name="more" size={14} />
                   </button>
@@ -382,50 +344,21 @@ export default function BoardChrome({
           })}
         </div>
 
-        {/*
-          A forward control, because on THIS strip the fade alone was not
-          enough.
-
-          The fade works by dissolving whatever is under it, and at scroll
-          position zero — the state every reader meets first — a tab boundary
-          lands near the strip's right edge, so at 320px there was nothing
-          under the fade but the active tab's underline and two menu dots. The
-          account rail does not have this problem: its twelve destinations are
-          evenly dense, so the fade always cuts through a label.
-
-          It is the NEXT SIBLING of the scroller, which is what lets CSS show
-          and hide it straight off the scroller's own `data-overflow` — no
-          state, so a scroll does not re-render this component or the whole
-          view pane under it. See views/scroll-affordance.css.
-
-          One direction, not two. Two 44px controls would take 88px out of a
-          218px strip at 320px; forward is the direction the reader cannot
-          currently see, and once they have scrolled, the fade on the left tells
-          them where they came from.
-        */}
-        <button
-          type="button"
-          className="board-views__forward"
-          aria-hidden="true"
-          tabIndex={-1}
-          onClick={() => {
-            const strip = tabsRef.current;
-            if (!strip) return;
-            strip.scrollBy({
-              left: strip.clientWidth * 0.8,
-              behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                ? "auto"
-                : "smooth",
-            });
-          }}
-        >
-          <Icon name="chevron" size={16} />
-        </button>
+        <BoardViewsScroll direction="forward" stripRef={tabsRef} />
 
         <div className="board-views__trailing">
           {overflowTabs.length > 0 && (
-            <div className="board-views__overflow">
-              <button type="button" onClick={() => setOverflowOpen(!overflowOpen)}>
+            <div className="board-views__overflow" data-board-popover>
+              <button
+                type="button"
+                onClick={() => {
+                  setOverflowOpen(!overflowOpen);
+                  // One menu at a time, as monday does — otherwise "All" and
+                  // "+" can both be open and overlapping.
+                  setAddOpen(false);
+                  setMenuFor(null);
+                }}
+              >
                 All <Icon name="chevron" size={14} />
               </button>
               {overflowOpen && (
@@ -448,8 +381,16 @@ export default function BoardChrome({
             </div>
           )}
 
-          <div className="board-views__add">
-            <button type="button" onClick={() => setAddOpen(!addOpen)} aria-label="Add a view">
+          <div className="board-views__add" data-board-popover>
+            <button
+              type="button"
+              onClick={() => {
+                setAddOpen(!addOpen);
+                setOverflowOpen(false);
+                setMenuFor(null);
+              }}
+              aria-label="Add a view"
+            >
               <Icon name="plus" size={16} />
             </button>
             {addOpen && (
@@ -481,59 +422,20 @@ export default function BoardChrome({
           <Icon name="chevron" size={16} />
         </button>
       </div>
-
-      {activeView && activeView.type !== "table" && (
-        <div className="board-chrome__pane">
-          {/*
-            The Fix Tracker is monday's engineer app, not a kanban. It is keyed
-            off the view's own key rather than its type, because an admin can
-            add further kanban views and those should stay kanbans.
-          */}
-          {activeView.type === "kanban" && activeView.key === "fix-tracker" && (
-            <FixTrackerView items={items} palette={palette} onChanged={onFormSubmitted} />
-          )}
-          {activeView.type === "kanban" && activeView.key !== "fix-tracker" && (
-            <KanbanView
-              items={items}
-              palette={palette}
-              onOpen={onOpenItem}
-              onMove={onMoveItem}
-            />
-          )}
-          {activeView.type === "calendar" && (
-            <CalendarView items={items} palette={palette} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "chart" && <ChartView items={items} palette={palette} />}
-          {activeView.type === "gallery" && (
-            <GalleryView items={items} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "reports" && <ReportsView items={items} />}
-          {activeView.type === "form" && <FormView onSubmitted={onFormSubmitted} />}
-          {/*
-            monday's four other tabs. `flat-table` is monday's second table view
-            (9116879) and is deliberately group-free — that is the whole
-            difference from Main table, so it renders in the pane rather than
-            replacing the grid below.
-          */}
-          {activeView.type === "form-results" && <FormResultsView items={items} />}
-          {activeView.type === "form-responses" && (
-            <FormResponsesView items={items} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "flat-table" && (
-            <FlatTableView items={items} onOpen={onOpenItem} />
-          )}
-          {activeView.type === "vibe" && <BuildVibeView items={items} />}
-          {!activeView.built && (
-            <p className="board-chrome__placeholder">
-              <Icon name="alert" size={16} />
-              <span>
-                <strong>{activeView.name}</strong> is not built yet. The table below is
-                still the live board.
-              </span>
-            </p>
-          )}
-        </div>
-      )}
     </div>
+
+      {/* The active view's own section, deliberately outside the sticky chrome
+          above — see the header comment in `board-view-pane.tsx`. */}
+      {activeView && activeView.type !== "table" && (
+        <BoardViewPane
+          activeView={activeView}
+          items={items}
+          palette={palette}
+          onOpenItem={onOpenItem}
+          onMoveItem={onMoveItem}
+          onFormSubmitted={onFormSubmitted}
+        />
+      )}
+    </>
   );
 }

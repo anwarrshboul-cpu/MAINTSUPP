@@ -10,6 +10,10 @@ const read = (file) => readFile(path.join(root, file), "utf8");
 const CAPTURE = "db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md";
 const ROUTE = "app/api/board/views/route.ts";
 const CHROME = "app/(app)/portal/board-chrome.tsx";
+// The chrome is the three sticky rows; the pane it opens below them is where a
+// view type actually renders. They split when the pane stopped being drawn over
+// the grid and became a section of its own.
+const PANE = "app/(app)/portal/board-view-pane.tsx";
 const TAB_GLYPH = "app/(app)/portal/board-tab-glyph.tsx";
 const VIEWS = "app/(app)/portal/views/parity-views.tsx";
 const VIEWS_CSS = "app/(app)/portal/views/parity-views.css";
@@ -105,11 +109,11 @@ test("the pinned form and the two monday apps carry their own glyph", async () =
 
 test("every seeded view type has somewhere to render", async () => {
   const seeded = await seededViews();
-  const chrome = await read(CHROME);
+  const pane = await read(PANE);
   for (const view of seeded) {
     if (view.type === "table") continue; // the grid below the chrome is the table
     assert.match(
-      chrome,
+      pane,
       new RegExp(`activeView\\.type === "${view.type}"`),
       `${view.name} (${view.type}) must render a pane`,
     );

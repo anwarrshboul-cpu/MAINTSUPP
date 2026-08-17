@@ -107,7 +107,7 @@ test("the views route is organisation-scoped and degrades gracefully", async () 
 
 test("board chrome is wired into the live board", async () => {
   const board = await read("app/(app)/portal/live-board.tsx");
-  assert.match(board, /import BoardChrome from "\.\/board-chrome"/);
+  assert.match(board, /import BoardChrome(, \{[^}]*\})? from "\.\/board-chrome"/);
   assert.match(board, /<BoardChrome/);
   assert.match(board, /<\/BoardChrome>/, "the wrapper must be closed");
 
