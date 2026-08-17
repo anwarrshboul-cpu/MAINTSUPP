@@ -13,6 +13,7 @@ import {
   maintenanceRequests,
 } from "../../../db/schema";
 import { boardKeyForRequest } from "../../lib/board-registry";
+import { demoIdentityAllowed } from "../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
@@ -238,6 +239,24 @@ export async function POST(request: Request) {
      */
     const scope = await scopedDb(request, { allowAnonymous: true });
     const { actor, authenticated, db } = scope;
+    /*
+     * Somebody operating the dashboard, as opposed to a contractor holding a
+     * link.
+     *
+     * `authenticated` alone was wrong here, and it is why uploading from the
+     * board failed with "This upload link has expired. Submit a new request."
+     * The role switcher in the sidebar — "Preview User / TESTING ACCESS" — is a
+     * demo identity, and a demo identity is deliberately NOT `authenticated`.
+     * So every branch below read a signed-in coordinator as an anonymous
+     * stranger, looked for the job link they do not have, and refused them.
+     *
+     * `scopedDbWithCapability` already draws the line in exactly this place and
+     * for exactly this reason; this only says the same thing on the upload
+     * path. `demoIdentityAllowed()` is `NODE_ENV !== "production"`, so in
+     * production this is identical to the check it replaces and no stranger
+     * gains anything.
+     */
+    const isOperator = authenticated || demoIdentityAllowed();
     let orgId = scope.orgId;
     const form = await request.formData();
     const file = form.get("file");
@@ -294,7 +313,7 @@ export async function POST(request: Request) {
       * session-backed caller keeps the tenant their membership resolved.
       */
     let scopedToken: Awaited<ReturnType<typeof resolveJobToken>> = null;
-    if (!authenticated && uploadToken) {
+    if (!isOperator && uploadToken) {
       scopedToken = await resolveJobToken(db, uploadToken);
       if (scopedToken) orgId = scopedToken.organisationId;
     }
@@ -365,7 +384,7 @@ export async function POST(request: Request) {
     // let any reporter link write completion evidence. A contractor link is a
     // different grant, so it is checked first and separately.
     /*
-     * `!authenticated`, not `!actor`.
+     * `!isOperator`, not `!actor`.
      *
      * `getWorkspaceActor` never fails — it returns a preview identity when
      * there is no session — so `actor` is always truthy and `!actor` was always
@@ -374,7 +393,7 @@ export async function POST(request: Request) {
      * token's hash and expiry, and the "issue evidence only" rule. The route
      * accepted an `uploadToken` form field and ignored it entirely.
      */
-    if (!authenticated && uploadToken) {
+    if (!isOperator && uploadToken) {
       if (scopedToken && scopedToken.requestId !== workOrder.id) {
         return Response.json(
           { error: "This link does not belong to that job." },
@@ -394,7 +413,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!authenticated && !scopedToken) {
+    if (!isOperator && !scopedToken) {
       const validUntil = workOrder.publicUploadTokenExpiresAt
         ? new Date(workOrder.publicUploadTokenExpiresAt).getTime()
         : 0;

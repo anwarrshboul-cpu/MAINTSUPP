@@ -50,6 +50,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../../../components";
 import { chipStyle as sharedChipStyle } from "../chip-ink";
 import { uploadEvidenceFile } from "../../../lib/client-upload";
@@ -939,7 +940,24 @@ function FixTrackerDetail({
     }
   };
 
-  return (
+  /*
+   * Rendered into `document.body`, not where it sits in the tree.
+   *
+   * `z-index: var(--z-sheet)` is 510 and the job cards behind it are 32, so on
+   * paper this panel could not lose — and it did, every time. The overlay is a
+   * descendant of `.board-chrome`, which is `position: sticky; z-index: 5`, and
+   * that CREATES A STACKING CONTEXT: 510 is then only a rank among the chrome's
+   * own children, and the whole chrome — panel included — is painted at 5,
+   * underneath the metrics strip. Measured, not guessed: overlay z=510 inside
+   * an ancestor at z=5, strip at z=32.
+   *
+   * Raising the number would not have helped, and neither would lowering the
+   * strip; any fix that leaves the panel inside the chrome is one sticky
+   * ancestor away from breaking again. A portal removes it from that context
+   * altogether, which is what `MobileCellSheet` already does for the same
+   * reason.
+   */
+  return createPortal(
     <div className="fix-tracker__overlay" role="presentation">
       <button
         className="modal-scrim"
@@ -1186,7 +1204,8 @@ function FixTrackerDetail({
           </button>
         </footer>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

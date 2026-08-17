@@ -2465,9 +2465,9 @@ button.analytics-score-panel {
 
   .live-board-panel {
     min-height: 0;
-    border: 1px solid #2b414b;
+    border: 1px solid var(--line);
     border-radius: 14px 14px 0 0;
-    background: #101820;
+    background: var(--surface-sunken);
   }
 
   .mobile-board-bar,
@@ -2513,9 +2513,9 @@ button.analytics-score-panel {
   .live-board-tool,
   .live-board-footer > button {
     min-height: 42px;
-    border-color: #35505d !important;
-    background: #182830 !important;
-    color: #dce7eb !important;
+    border-color: var(--line-strong) !important;
+    background: var(--surface-card) !important;
+    color: var(--ink) !important;
   }
 
   .live-board-toolbar {
@@ -2530,15 +2530,31 @@ button.analytics-score-panel {
   .live-board-scroll {
     height: calc(100dvh - var(--mobile-topbar-height) - 124px);
     min-height: 460px;
-    border-color: #2b414b;
-    background: #101820 !important;
-    scrollbar-color: #35505d #101820;
+    border-color: var(--line);
+    background: var(--surface-sunken) !important;
+    scrollbar-color: var(--line-strong) var(--surface-sunken);
   }
 
+  /*
+   * The board's own grounds on a phone, in whichever theme is on.
+   *
+   * These four blocks — the panel, the toolbar controls, the scroller and this
+   * one — still carried literal dark hex while the rules immediately above them
+   * (`.mobile-board-bar`, `.live-board-toolbar`, `.live-board-footer`) had
+   * already been moved onto tokens. Half-migrated, and the half left behind was
+   * the half you see: `.sheet-group__header` was `#101820 !important` in BOTH
+   * themes, so on a light-theme phone every group bar — "Incoming requests
+   * 5 items", "recently 0 items" — was a near-black strip carrying text painted
+   * in the light theme's dark ink. Unreadable, and only on the phone, which is
+   * why the desktop board looked fine.
+   *
+   * Same substitution as everywhere else: each token's DARK value is the
+   * literal it replaced, so the dark phone board is unchanged.
+   */
   .live-board-canvas,
   .sheet-group__header {
-    border-color: #2b414b !important;
-    background: #101820 !important;
+    border-color: var(--line) !important;
+    background: var(--surface-sunken) !important;
   }
 
   body[data-theme="dark"] :is(
@@ -2963,6 +2979,26 @@ button.analytics-score-panel {
   gap: 9px;
 }
 
+/*
+ * THE WORKSPACE MANAGER, IN WHICHEVER THEME IS ON.
+ *
+ * This whole component was written in literal dark hex — `#101820` grounds,
+ * `#14232c` heads, `#edf4f6` text, thirty-odd declarations of it — from when
+ * the product was dark-only. The rest of the app moved onto tokens and this did
+ * not, so in the light theme "Manage data" opened as a dark slab whose text had
+ * gone light-theme dark: "Manage dashboard data" measured 1.03:1 against its own
+ * header and every site name in the list 1.15:1. Invisible, both.
+ *
+ * Every literal below is now the token whose DARK value is the literal it
+ * replaced — `#101820` is `--surface-sunken`, `#14232c` is `--surface-head`,
+ * `#35505d` is `--line-strong`, and so on. So the dark presentation this was
+ * drawn for is unchanged, and the light theme finally gets a light modal
+ * instead of a dark one with invisible writing on it.
+ *
+ * `#12b4a8` stays literal on purpose: it is the brand teal, the same in both
+ * themes, and it is an accent rule and an `accent-color`, not a ground or a
+ * foreground.
+ */
 .workspace-manager-layer {
   position: fixed;
   z-index: 1300;
@@ -2988,10 +3024,10 @@ button.analytics-score-panel {
   width: min(1180px, calc(100vw - 48px));
   height: min(780px, calc(100vh - 48px));
   overflow: hidden;
-  border: 1px solid #35505d;
+  border: 1px solid var(--line-strong);
   border-radius: 18px;
-  background: #101820;
-  color: #edf4f6;
+  background: var(--surface-sunken);
+  color: var(--ink);
   box-shadow: 0 32px 90px rgba(0, 0, 0, .55);
 }
 
@@ -3001,8 +3037,8 @@ button.analytics-score-panel {
   justify-content: space-between;
   min-height: 76px;
   padding: 14px 18px 14px 20px;
-  border-bottom: 1px solid #2b414b;
-  background: #14232c;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-head);
 }
 
 .workspace-manager__header > div {
@@ -3018,14 +3054,14 @@ button.analytics-score-panel {
   place-items: center;
   border-radius: 11px;
   background: rgba(18, 180, 168, .16);
-  color: #5ad4cb;
+  color: var(--accent-fg);
 }
 
 .workspace-manager__header small,
 .workspace-record-editor header small {
   display: block;
   margin-bottom: 3px;
-  color: #7f97a2;
+  color: var(--muted-2);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: .1em;
@@ -3035,7 +3071,7 @@ button.analytics-score-panel {
 .workspace-manager__header h2,
 .workspace-record-editor h3 {
   margin: 0;
-  color: #fff;
+  color: var(--ink);
   font-size: 20px;
 }
 
@@ -3045,8 +3081,8 @@ button.analytics-score-panel {
   min-width: 0;
   overflow-x: auto;
   padding: 9px 12px;
-  border-bottom: 1px solid #2b414b;
-  background: #101820;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
   scrollbar-width: none;
 }
 
@@ -3059,7 +3095,7 @@ button.analytics-score-panel {
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #91a5af;
+  color: var(--muted);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -3070,7 +3106,7 @@ button.analytics-score-panel {
 .workspace-manager__tabs button:is(:hover, .is-active) {
   border-color: rgba(18, 180, 168, .35);
   background: rgba(18, 180, 168, .12);
-  color: #5ad4cb;
+  color: var(--accent-fg);
 }
 
 .workspace-manager__body {
@@ -3091,18 +3127,18 @@ button.analytics-score-panel {
 .workspace-manager__records {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: #101820;
+  background: var(--surface-sunken);
 }
 
 .workspace-manager__body.has-editor .workspace-manager__records {
-  border-right: 1px solid #2b414b;
+  border-right: 1px solid var(--line);
 }
 
 .workspace-manager__toolbar {
   display: flex;
   gap: 10px;
   padding: 14px;
-  border-bottom: 1px solid #243944;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .workspace-manager__toolbar > label {
@@ -3113,10 +3149,10 @@ button.analytics-score-panel {
   min-width: 0;
   min-height: 42px;
   padding: 0 12px;
-  border: 1px solid #35505d;
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
-  background: #14232c;
-  color: #7f97a2;
+  background: var(--surface-head);
+  color: var(--muted-2);
 }
 
 .workspace-manager__toolbar input {
@@ -3124,7 +3160,7 @@ button.analytics-score-panel {
   border: 0;
   outline: 0;
   background: transparent;
-  color: #edf4f6;
+  color: var(--ink);
   font: inherit;
   font-size: 13px;
 }
@@ -3145,14 +3181,14 @@ button.analytics-score-panel {
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
-  color: #edf4f6;
+  color: var(--ink);
   text-align: left;
   cursor: pointer;
 }
 
 .workspace-record-list > button:is(:hover, .is-active) {
-  border-color: #35505d;
-  background: #182830;
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
 }
 
 .workspace-record-list > button.is-active {
@@ -3168,7 +3204,7 @@ button.analytics-score-panel {
 
 .workspace-record-list strong {
   overflow: hidden;
-  color: #f4f8fa;
+  color: var(--ink);
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3176,7 +3212,7 @@ button.analytics-score-panel {
 
 .workspace-record-list small {
   overflow: hidden;
-  color: #91a5af;
+  color: var(--muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3188,16 +3224,16 @@ button.analytics-score-panel {
   place-content: center;
   justify-items: center;
   gap: 7px;
-  color: #7f97a2;
+  color: var(--muted-2);
   text-align: center;
 }
 
-.workspace-record-list__empty strong { color: #dce7eb; }
+.workspace-record-list__empty strong { color: var(--ink); }
 
 .workspace-record-editor {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  background: #14232c;
+  background: var(--surface-head);
 }
 
 .workspace-record-editor > header,
@@ -3207,12 +3243,12 @@ button.analytics-score-panel {
   justify-content: space-between;
   gap: 10px;
   padding: 15px 18px;
-  border-bottom: 1px solid #2b414b;
+  border-bottom: 1px solid var(--line);
 }
 
 .workspace-record-editor > footer {
   justify-content: flex-end;
-  border-top: 1px solid #2b414b;
+  border-top: 1px solid var(--line);
   border-bottom: 0;
 }
 
@@ -3232,20 +3268,20 @@ button.analytics-score-panel {
 }
 
 .workspace-record-editor :is(input, select, textarea) {
-  border-color: #35505d;
-  background: #101820;
-  color: #edf4f6;
+  border-color: var(--line-strong);
+  background: var(--surface-sunken);
+  color: var(--ink);
 }
 
 .workspace-record-editor .form-field > span {
-  color: #b9c8cf;
+  color: var(--muted);
   font-weight: 700;
 }
 
 body[data-theme="dark"] .role-chip {
   border: 1px solid rgba(18, 180, 168, .34);
   background: rgba(18, 180, 168, .13);
-  color: #5ad4cb;
+  color: var(--accent-fg);
 }
 
 .workspace-checkbox {
@@ -3255,20 +3291,20 @@ body[data-theme="dark"] .role-chip {
   gap: 16px;
   min-height: 58px;
   padding: 10px 12px;
-  border: 1px solid #35505d;
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
-  background: #101820;
+  background: var(--surface-sunken);
 }
 
 .workspace-checkbox > span { display: grid; gap: 3px; }
-.workspace-checkbox strong { color: #edf4f6; font-size: 12px; }
-.workspace-checkbox small { color: #7f97a2; font-size: 10px; }
+.workspace-checkbox strong { color: var(--ink); font-size: 12px; }
+.workspace-checkbox small { color: var(--muted-2); font-size: 10px; }
 .workspace-checkbox input { width: 20px; height: 20px; accent-color: #12b4a8; }
 
 .workspace-archive-button {
   margin-right: auto;
   border-color: rgba(226, 68, 92, .45);
-  color: #ff899d;
+  color: var(--red-600);
 }
 
 .planned-register-panel {
@@ -5118,6 +5154,12 @@ body[data-theme="dark"] .role-chip {
      the white label down to 2.5:1. `--brand-solid` is the ground token, and
      it carries its own foreground. */
   background: var(--brand-solid);
+  /* The opt-out documented beside `.portal-main button` in globals.css. Without
+     it the dark theme's blanket control rule wins on specificity and repaints
+     this label to `--ink` — #e7eef3 on the teal ground is 4.43:1, just under
+     the 4.5:1 this size needs, on the Submit button of the request form. The
+     ground is this control's own, so it declares its own foreground. */
+  --control-own-fg: var(--on-brand-solid);
   color: var(--on-brand-solid);
   font: inherit;
   font-weight: 600;

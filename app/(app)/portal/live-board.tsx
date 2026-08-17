@@ -13,7 +13,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import BoardChrome from "./board-chrome";
+import BoardChrome, { type BoardView } from "./board-chrome";
+import { viewReplacesGrid } from "./board-view-pane";
+import BoardColumnSummary from "./board-column-summary";
 import { boardIdentity } from "./board-identity";
 import { DEFERRED_GROUP_CLASS, deferredGroupHeight } from "./board-visibility";
 import {
@@ -95,6 +97,7 @@ import {
   dateRangeSummary,
   filledSummary,
 } from "./board-format";
+import { useBoardMenuFit } from "./board-menu-fit";
 import {
   MobileBoardContext,
   MobileCellSheet,
@@ -116,271 +119,6 @@ export type {
   MaintenanceBoardSnapshotColumn,
 } from "./board-model";
 
-function BoardColumnSummary({
-  entry,
-  rows,
-  optionSets,
-  assigneeOptions,
-  customCells,
-  customFileCounts,
-}: {
-  entry: BoardDisplayColumn;
-  rows: MaintenanceRequest[];
-  optionSets: Record<BoardOptionColumn, Option[]>;
-  assigneeOptions: Option[];
-  customCells: Record<string, string>;
-  customFileCounts: Record<string, number>;
-}) {
-  const column = entry.column;
-  const mobile = useContext(MobileBoardContext);
-  const displayedWidth = displayedBoardColumnWidth(column, mobile);
-  const style: CSSProperties = {
-    width: displayedWidth,
-    minWidth: displayedWidth,
-    maxWidth: displayedWidth,
-  };
-  const className = `sheet-summary-cell sheet-summary-cell--${column.type}`;
-
-  if (entry.kind === "custom") {
-    const values = rows.map(
-      (request) =>
-        customCells[customCellKey(request.id, column.id)] ?? "",
-    );
-    if (column.type === "files") {
-      const total = rows.reduce(
-        (sum, request) =>
-          sum +
-          (customFileCounts[customCellKey(request.id, column.id)] ?? 0),
-        0,
-      );
-      return (
-        <td className={className} style={style}>
-          <span className="sheet-summary-text">{total} files</span>
-        </td>
-      );
-    }
-    if (column.type === "number") {
-      const total = values.reduce((sum, value) => {
-        const number = Number(value.replaceAll(",", ""));
-        return Number.isFinite(number) ? sum + number : sum;
-      }, 0);
-      return (
-        <td className={className} style={style}>
-          <span className="sheet-summary-text">Total {compactNumber(total)}</span>
-        </td>
-      );
-    }
-    if (column.type === "date") {
-      return (
-        <td className={className} style={style}>
-          <span className="sheet-summary-text">{dateRangeSummary(values)}</span>
-        </td>
-      );
-    }
-    if (column.type === "timeline") {
-      const dates = values.flatMap((value) => {
-        try {
-          const timeline = JSON.parse(value) as {
-            start?: string;
-            end?: string;
-          };
-          return [timeline.start, timeline.end];
-        } catch {
-          return [];
-        }
-      });
-      return (
-        <td className={className} style={style}>
-          <span className="sheet-summary-text">{dateRangeSummary(dates)}</span>
-        </td>
-      );
-    }
-    if (column.type === "checkbox") {
-      const checked = values.filter((value) => value === "true").length;
-      return (
-        <td className={className} style={style}>
-          <span className="sheet-summary-text">
-            {checked} / {rows.length} checked
-          </span>
-        </td>
-      );
-    }
-    if (
-      column.type === "status" ||
-      column.type === "dropdown" ||
-      column.type === "people"
-    ) {
-      const choices = choiceList(column).map((choice) => ({
-        value: choice.id,
-        label: choice.label,
-        color: choice.color,
-      }));
-      return (
-        <td className={className} style={style}>
-          <SummaryDistribution values={values} options={choices} />
-        </td>
-      );
-    }
-    return (
-      <td className={className} style={style}>
-        <span className="sheet-summary-text">{filledSummary(values)}</span>
-      </td>
-    );
-  }
-
-  const key = entry.key;
-  if (
-    key === "tier" ||
-    key === "engineer" ||
-    key === "priority" ||
-    key === "label" ||
-    key === "status"
-  ) {
-    const optionKey = key as BoardOptionColumn;
-    const values = rows.map((request) => {
-      if (key === "tier") return String(request.tier);
-      if (key === "engineer") return request.engineer;
-      if (key === "priority") return request.priority;
-      if (key === "label") return request.category;
-      return request.status;
-    });
-    return (
-      <td className={className} style={style}>
-        <SummaryDistribution values={values} options={optionSets[optionKey]} />
-      </td>
-    );
-  }
-  if (key === "assignee" || key === "approvedBy") {
-    const values = rows.map((request) =>
-      key === "assignee"
-        ? request.assignee ?? ""
-        : request.approvedBy ?? "",
-    );
-    return (
-      <td className={className} style={style}>
-        <SummaryDistribution values={values} options={assigneeOptions} />
-      </td>
-    );
-  }
-  if (key === "storeLocation") {
-    const locationOptions = Array.from(
-      new Set(rows.map((request) => request.location).filter(Boolean)),
-    ).map((value, index) => ({
-      value,
-      color: groupColors[index % groupColors.length],
-    }));
-    return (
-      <td className={className} style={style}>
-        <SummaryDistribution
-          values={rows.map((request) => request.location)}
-          options={locationOptions}
-        />
-      </td>
-    );
-  }
-  if (key === "move") {
-    return (
-      <td className={className} style={style}>
-        <span className="sheet-summary-text">
-          {rows.length} {rows.length === 1 ? "item" : "items"}
-        </span>
-      </td>
-    );
-  }
-  if (key === "requested" || key === "completed" || key === "nextUpdate") {
-    const values = rows.map((request) =>
-      key === "requested"
-        ? request.requestedAt
-        : key === "completed"
-          ? request.completedAt
-          : request.nextUpdateAt,
-    );
-    return (
-      <td className={className} style={style}>
-        <span className="sheet-summary-text">{dateRangeSummary(values)}</span>
-      </td>
-    );
-  }
-  if (key === "timeline") {
-    return (
-      <td className={className} style={style}>
-        <span className="sheet-summary-text">
-          {dateRangeSummary(
-            rows.flatMap((request) => [request.requestedAt, request.dueAt]),
-          )}
-        </span>
-      </td>
-    );
-  }
-  if (
-    key === "issuePictures" ||
-    key === "completedPictures" ||
-    key === "files"
-  ) {
-    const total = rows.reduce((sum, request) => {
-      if (key === "issuePictures") {
-        return (
-          sum +
-          (request.issueAttachmentCount ??
-            Math.max(
-              request.attachmentCount -
-                (request.completedAttachmentCount ?? 0) -
-                (request.generalAttachmentCount ?? 0),
-              0,
-            ))
-        );
-      }
-      if (key === "completedPictures") {
-        return sum + (request.completedAttachmentCount ?? 0);
-      }
-      return sum + request.attachmentCount;
-    }, 0);
-    return (
-      <td className={className} style={style}>
-        <span className="sheet-summary-text">{total} files</span>
-      </td>
-    );
-  }
-  if (key === "cost") {
-    const total = rows.reduce((sum, request) => sum + (request.cost ?? 0), 0);
-    const formatted = new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: "GBP",
-      maximumFractionDigits: 2,
-    }).format(total);
-    return (
-      <td className={className} style={style}>
-        <span className="sheet-summary-text">Total {formatted}</span>
-      </td>
-    );
-  }
-
-  const values = rows.map((request) => {
-    switch (key) {
-      case "location":
-        return request.location;
-      case "description":
-        return request.description;
-      case "contractor":
-        return request.contractor;
-      case "requester":
-        return request.requester;
-      case "invoice":
-        return request.invoice;
-      case "number":
-        return request.contact;
-      case "formView":
-        return request.formUrl;
-      default:
-        return request.title;
-    }
-  });
-  return (
-    <td className={className} style={style}>
-      <span className="sheet-summary-text">{filledSummary(values)}</span>
-    </td>
-  );
-}
 
 /** Width a collapsed column narrows to — wide enough to click, too narrow to read. */
 const COLLAPSED_COLUMN_WIDTH = 44;
@@ -465,6 +203,13 @@ export function LiveMaintenanceBoard({
     fallbackSystemColumns,
   );
   const [customCells, setCustomCells] = useState<Record<string, string>>({});
+  /*
+   * Which view tab is open, reported up by `BoardChrome`. `null` on every board
+   * but maintenance, which is the only one that shows the tab strip.
+   */
+  const [activeBoardView, setActiveBoardView] = useState<BoardView | null>(null);
+  // Whether that tab is a section of its own — see `viewReplacesGrid`.
+  const gridReplaced = viewReplacesGrid(activeBoardView);
   const [customFileCounts, setCustomFileCounts] = useState<
     Record<string, number>
   >({});
@@ -540,6 +285,9 @@ export function LiveMaintenanceBoard({
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [actionsOpen, setActionsOpen] = useState(false);
   const [hideOpen, setHideOpen] = useState(false);
+  // The columns panel hangs off a toolbar button, and the toolbar scrolls
+  // sideways on a phone — see `useBoardMenuFit` for what that did to it.
+  const hideMenuRef = useBoardMenuFit(hideOpen);
   const [columnPickerGroupId, setColumnPickerGroupId] = useState<string | null>(
     null,
   );
@@ -567,6 +315,9 @@ export function LiveMaintenanceBoard({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rowMenuId, setRowMenuId] = useState<string | null>(null);
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
+  // Only one group menu is ever open, so one ref serves whichever group opened
+  // it. See `useBoardMenuFit` for why the menus need measuring at all.
+  const groupMenuRef = useBoardMenuFit(groupMenuId !== null);
   const [selectionMoveOpen, setSelectionMoveOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2843,6 +2594,7 @@ export function LiveMaintenanceBoard({
           onFormSubmitted={() =>
             window.dispatchEvent(new Event("maintsupp:refresh-board"))
           }
+          onViewChange={setActiveBoardView}
           items={scopedRequests as never}
           palette={viewPalette}
           onOpenItem={(item) => {
@@ -3019,7 +2771,7 @@ export function LiveMaintenanceBoard({
               Hide
             </button>
             {hideOpen && (
-              <div className="live-board-menu column-menu">
+              <div className="live-board-menu column-menu" ref={hideMenuRef}>
                 <strong>Visible columns</strong>
                 {allBoardColumns.map((entry) => {
                   const key =
@@ -3092,7 +2844,7 @@ export function LiveMaintenanceBoard({
         </div>
         </BoardChrome>
 
-        {showGroupCreator && !isStoreDocumentation && (
+        {showGroupCreator && !isStoreDocumentation && !gridReplaced && (
           <div className="group-creator">
             <div>
               <span>Create a new group</span>
@@ -3139,7 +2891,7 @@ export function LiveMaintenanceBoard({
           </div>
         )}
 
-        {isMobile && (
+        {isMobile && !gridReplaced && (
           <BoardMobileSection
             layout={mobileLayout}
             onChooseLayout={chooseMobileLayout}
@@ -3178,8 +2930,10 @@ export function LiveMaintenanceBoard({
           // The grid stays mounted and measurable; a phone showing cards simply
           // does not draw it. `hidden` rather than unmounting keeps column
           // widths, scroll position and the drag machinery intact for the
-          // switch back.
-          hidden={isMobile && mobileLayout === "cards"}
+          // switch back — which is why a non-table view tab hides it the same
+          // way rather than unmounting it: switching back to Main table must
+          // land on the board you left, not on a rebuilt one.
+          hidden={(isMobile && mobileLayout === "cards") || gridReplaced}
         >
           <div className="live-board-canvas">
             {displayGroups.map(({ group, synthetic }) => {
@@ -3283,7 +3037,7 @@ export function LiveMaintenanceBoard({
                         <Icon name="more" size={17} />
                       </button>
                       {groupMenuId === group.id && (
-                        <div className="sheet-group__menu">
+                        <div className="sheet-group__menu" ref={groupMenuRef}>
                           <button
                             type="button"
                             onClick={() => {
@@ -3839,6 +3593,13 @@ export function LiveMaintenanceBoard({
           </div>
         </div>
 
+        {/*
+          Conditionally rendered rather than given `hidden` like the grid above:
+          `.live-board-footer` carries `display: flex` from a class rule, which
+          outranks the user agent's `[hidden] { display: none }`, so the
+          attribute alone would leave the bar exactly where it was.
+        */}
+        {!gridReplaced && (
         <div className="live-board-footer">
           <button type="button" onClick={openGroupCreator}>
             <Icon name="plus" size={16} />
@@ -3849,6 +3610,7 @@ export function LiveMaintenanceBoard({
             items
           </span>
         </div>
+        )}
       </section>
       {selectedIds.size > 0 && (
         <div className="live-selection-bar" role="toolbar" aria-label="Selected item actions">
@@ -5131,6 +4893,9 @@ function BoardRow({
 }) {
   const mobile = useContext(MobileBoardContext);
   const suppressRowClickRef = useRef(false);
+  // A row near the bottom of the screen has no room to open a 376px menu
+  // downward. See `useBoardMenuFit`.
+  const rowMenuRef = useBoardMenuFit(menuOpen);
   // Move column: 38 groups x 744 rows = 28,272 <option>s. Build them on focus.
   const [moveListOpen, setMoveListOpen] = useState(false);
   const columnStyle = (column: MaintenanceBoardColumn): CSSProperties => {
@@ -5630,7 +5395,7 @@ function BoardRow({
           onChange={(event) => onSelected(event.target.checked)}
         />
         {menuOpen && (
-          <div className="sheet-row-menu" data-board-drag-ignore>
+          <div className="sheet-row-menu" data-board-drag-ignore ref={rowMenuRef}>
             <button type="button" onClick={onOpen}>
               <Icon name="document" size={15} />
               Open item

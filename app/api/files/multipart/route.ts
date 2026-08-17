@@ -8,6 +8,7 @@ import {
   maintenanceRequests,
 } from "../../../../db/schema";
 import { boardKeyForRequest } from "../../../lib/board-registry";
+import { demoIdentityAllowed } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 import {
   recordTokenUse,
@@ -160,7 +161,30 @@ async function authorizeUpload(
   requestedColumnId: string,
 ) {
   await ensureDatabase();
-  const { actor, authenticated, db, orgId } = await scopedDb(request);
+  /*
+   * `allowAnonymous`, because a contractor on a job link has no session and the
+   * token below is what proves them.
+   *
+   * Without it `scopedDb` threw before the token was ever looked at, so a
+   * contractor could upload a 200 KB photograph through the direct route and
+   * nothing at all over 900 KB — every real phone picture — and the refusal
+   * they got was "sign in", which is not something a job link can do.
+   */
+  const scope = await scopedDb(request, { allowAnonymous: true });
+  const { actor, authenticated, db } = scope;
+  let orgId = scope.orgId;
+  /*
+   * See the matching note in `../route.ts`. A demo identity — the sidebar's
+   * "Preview User / TESTING ACCESS" switcher — is deliberately not
+   * `authenticated`, and this route read that as "anonymous stranger with no
+   * job link" and answered "This link does not belong to that job."
+   *
+   * This is the path every file over 900 KB takes, so it is the one a real
+   * photograph or video actually hits: a phone picture is 2–5 MB. That is why
+   * uploading images and videos failed from the board while a small test file
+   * went through — they are different routes.
+   */
+  const isOperator = authenticated || demoIdentityAllowed();
   const kind = allowedKinds.has(requestedKind as AttachmentKind)
     ? (requestedKind as AttachmentKind)
     : null;
@@ -172,6 +196,27 @@ async function authorizeUpload(
         { status: 400 },
       ),
     } as const;
+  }
+
+  /*
+   * THE TOKEN IS RESOLVED BEFORE THE JOB IS LOOKED UP, because it decides which
+   * tenant we are in. This is the same ordering `../route.ts` uses, and for the
+   * same reason.
+   *
+   * An anonymous caller's ambient `orgId` is always the PRIMARY organisation.
+   * Looking the job up with that and checking the token afterwards would mean
+   * the only thing standing between a second tenant's link and the first
+   * tenant's job is the two ids happening not to collide — and they are not
+   * guaranteed not to, because `/api/maintenance` mints `MN-<n>` per
+   * organisation, so two tenants onboarded through the public form hold
+   * identical ids. Taking the organisation from the token removes the
+   * coincidence. A session-backed caller keeps the tenant their membership
+   * resolved.
+   */
+  let scopedToken: Awaited<ReturnType<typeof resolveJobToken>> = null;
+  if (!isOperator && uploadToken) {
+    scopedToken = await resolveJobToken(db, uploadToken);
+    if (scopedToken) orgId = scopedToken.organisationId;
   }
 
   // A binned job takes no uploads — see the same filter on the direct path.
@@ -193,19 +238,27 @@ async function authorizeUpload(
   }
 
   /*
-   * The `uploadToken` this function has always taken was never read.
+   * What the link is allowed to do, now that we know whose it is.
    *
-   * It is declared in the signature, passed in from the POST body and the
-   * X-Upload-Token header, and `client-upload.ts` faithfully sends it — but
-   * nothing in the body referenced it, so authorisation was `scopedDb` alone,
-   * which never refuses. This is the path every file over 4 MB takes, so it was
-   * the wider of the two upload holes. Mirrors the single-shot route in
-   * ../route.ts: a contractor link must belong to this job and permit this kind
-   * of evidence, and an unauthenticated caller without one gets nothing.
+   * The token was resolved above because it chooses the tenant; this is the
+   * authorisation half — it must belong to THIS job, and it must permit this
+   * kind of evidence. An unauthenticated caller without one gets nothing.
+   *
+   * (The `uploadToken` argument spent a long time being accepted and never
+   * read: declared in the signature, sent faithfully by `client-upload.ts` from
+   * both the POST body and the `X-Upload-Token` header, and referenced by
+   * nothing — so authorisation on the path every large file takes was
+   * `scopedDb` alone, which never refuses.)
    */
-  if (!authenticated) {
-    const scopedToken = uploadToken ? await resolveJobToken(db, uploadToken) : null;
-    if (!scopedToken || scopedToken.requestId !== workOrder.id) {
+  if (!isOperator) {
+    if (
+      !scopedToken ||
+      scopedToken.requestId !== workOrder.id ||
+      // Belt and braces, as on the direct route: the lookup above already used
+      // the token's organisation, so this cannot fail — it is here so that a
+      // future change to either side cannot quietly separate them.
+      scopedToken.organisationId !== workOrder.organisationId
+    ) {
       return {
         response: Response.json(
           { error: "This link does not belong to that job." },

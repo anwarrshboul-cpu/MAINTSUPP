@@ -1768,6 +1768,7 @@ export default function PortalApp({
           activeSection={activeSection}
           onSelect={(key) => setSection(key)}
           badges={{ maintenance: urgentCount }}
+          badgeDescriptions={{ maintenance: "urgent jobs open" }}
           onNotify={setToast}
         />
 
@@ -2135,6 +2136,10 @@ export default function PortalApp({
             <StoreDocumentationBoard
               onNotify={setToast}
               onOpenApps={() => setSection("settings")}
+              /* `openRequest` only sets the drawer's record and tab — it does
+                 not navigate — so a store opens over this section rather than
+                 bouncing the reader to the maintenance board. */
+              onOpenRequest={openRequest}
             />
           )}
           {activeSurface === "units" && (

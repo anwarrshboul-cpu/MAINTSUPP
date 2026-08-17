@@ -53,6 +53,38 @@ type Props = {
   onFormSubmitted?: () => void;
 };
 
+/**
+ * Whether opening this tab means the grid goes away — A VIEW TAB IS A SECTION,
+ * NOT A BANNER OVER THE GRID.
+ *
+ * Splitting the pane out of the chrome, above, moved where these branches are
+ * WRITTEN. This answers the separate question of what else is on screen while
+ * one of them renders, and until it existed the answer was "the whole table,
+ * underneath". Form and Fix Tracker were drawn ON TOP OF the board rather than
+ * instead of it, and two things followed that a reader sees:
+ *
+ *   • `.live-board-footer` — the "Add new group" bar — is
+ *     `position: absolute; bottom: 0; z-index: 12`, pinned to the bottom of the
+ *     board section, while `.board-chrome` above it is `z-index: 5`. So the
+ *     footer painted OVER the bottom of whatever the pane was showing: the last
+ *     field of the request form and the last row of Fix Tracker cards were cut
+ *     off by a bar belonging to a table that was not on screen.
+ *   • the grid kept its scroll height, so the page went on scrolling long past
+ *     the end of the view, through a table nobody had asked to see.
+ *
+ * An UNBUILT view is the one exception and keeps the grid, because its pane is
+ * only the "not built yet" note below — which says in as many words that the
+ * table below is still the live board. Hiding it would leave that tab showing
+ * nothing at all.
+ *
+ * `live-board.tsx` calls this with the view `BoardChrome` reports up, and uses
+ * the answer to drop the grid, the footer, the mobile cards and the group
+ * creator together.
+ */
+export function viewReplacesGrid(view: BoardView | null) {
+  return Boolean(view && view.type !== "table" && view.built);
+}
+
 export default function BoardViewPane({
   activeView,
   items,

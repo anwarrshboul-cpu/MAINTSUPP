@@ -25,7 +25,21 @@ type FieldDefinition = {
 // Sites and units moved to their own modules in Stage 2. They are deliberately
 // absent here: two editors writing one table with different field sets meant
 // whichever screen an admin happened to open decided what got saved.
+/*
+ * Sites and Units were missing from this list, and everything else in the file
+ * already supported them: `emptyDefaults`, `fieldsFor`, `recordsFor`,
+ * `recordTitle` and `recordToEditor` all have a `site` and a `unit` branch.
+ *
+ * Only the tab strip did not, and the manager opens on `site` by default —
+ * `openWorkspaceManager` falls back to it for any surface without a mapping,
+ * which is every surface the Jobs board is on. So "Manage data" opened showing
+ * the site list with no tab selected, no way to get back to it after clicking
+ * another tab, and a search box reading "Search undefined…" because
+ * `tabs.find(...)` had nothing to find.
+ */
 const tabs: Array<{ key: ManagerTab; label: string; icon: IconName }> = [
+  { key: "site", label: "Sites", icon: "building" },
+  { key: "unit", label: "Units", icon: "grid" },
   { key: "compliance", label: "Compliance", icon: "shield" },
   { key: "contractor", label: "Contractors", icon: "users" },
   { key: "planned", label: "Planned", icon: "calendar" },
@@ -222,6 +236,7 @@ export function WorkspaceDataManager({
   }, [query, tab, workspace]);
   const readOnlyTab = tab === "activity" || tab === "import";
   const fields = readOnlyTab ? [] : fieldsFor(tab, workspace);
+  const activeTabLabel = tabs.find((item) => item.key === tab)?.label ?? "records";
 
   const startNew = () => {
     if (readOnlyTab) return;
@@ -261,7 +276,13 @@ export function WorkspaceDataManager({
           ) : (
           <div className="workspace-manager__records">
             <div className="workspace-manager__toolbar">
-              <label><Icon name="search" size={17} /><input type="search" aria-label={`Search ${tab}`} placeholder={`Search ${tabs.find((item) => item.key === tab)?.label.toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+              {/*
+                `?? "records"`, so an unlisted tab can never put the word
+                "undefined" in front of somebody again. The missing tabs above
+                are the real fix; this is the guard that keeps the next one from
+                showing.
+              */}
+              <label><Icon name="search" size={17} /><input type="search" aria-label={`Search ${activeTabLabel}`} placeholder={`Search ${activeTabLabel.toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
               {!readOnlyTab && <button className="primary-button" type="button" onClick={startNew}><Icon name="plus" size={17} />New</button>}
             </div>
             <div className="workspace-record-list">

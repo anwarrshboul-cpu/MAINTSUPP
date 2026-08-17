@@ -58,11 +58,21 @@ test("the grid is still there, and the way back is above the fold", async () => 
   const list = await read(LIST);
 
   // `hidden`, not unmounted: column widths, scroll position and the drag
-  // machinery survive the switch.
-  assert.match(board, /hidden=\{isMobile && mobileLayout === "cards"\}/);
+  // machinery survive the switch. The second clause is the other thing that
+  // hides the grid — a view tab that is a section of its own — and it hides it
+  // the same way, and for the same reason.
+  assert.match(
+    board,
+    /hidden=\{\(isMobile && mobileLayout === "cards"\) \|\| gridReplaced\}/,
+  );
+  assert.doesNotMatch(
+    board,
+    /\{!gridReplaced && \(\s*\n\s*<div\s*\n\s*className="live-board-scroll"/,
+    "the grid must be hidden rather than unmounted, whatever the reason",
+  );
   // Desktop must never see either the cards or the switch — the whole section
   // is behind one `isMobile`.
-  assert.match(board, /\{isMobile && \(\s*\n\s*<BoardMobileSection/);
+  assert.match(board, /\{isMobile && !gridReplaced && \(\s*\n\s*<BoardMobileSection/);
 
   // The switch itself lives beside the list it switches; `live-board.tsx` is
   // held to 6,000 lines, and the two are one decision.

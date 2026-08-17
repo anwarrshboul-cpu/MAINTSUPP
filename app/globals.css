@@ -1430,7 +1430,7 @@ a {
 
 .icon-button:hover {
   border-color: var(--line);
-  background: #f4f7f8;
+  background: var(--surface-hover);
   color: var(--ink);
 }
 
@@ -3048,7 +3048,7 @@ a {
   flex-direction: column;
   gap: 5px;
   padding: 24px;
-  color: #657984;
+  color: var(--muted);
   text-align: center;
 }
 
@@ -4016,7 +4016,7 @@ a {
   grid-template-columns: repeat(4, minmax(245px, 1fr));
   gap: 0;
   overflow-x: auto;
-  background: #f4f7f8;
+  background: var(--canvas);
 }
 
 .board-column {
@@ -4443,7 +4443,7 @@ label.live-board-tool {
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #425866;
+  color: var(--muted);
   font-size: 9px;
   text-align: left;
 }
@@ -4483,12 +4483,16 @@ label.live-board-tool {
   min-height: 31px;
   padding: 0 7px;
   border-radius: 6px;
-  color: #566b77;
+  color: var(--muted);
   font-size: 8px;
 }
 
+/* This hover was `#f4f7f8`, the LIGHT canvas, on a menu whose own ground is
+   `--surface-card` — #182830 in dark. Hovering a column name there painted a
+   near-white strip under `--muted` dark ink: 2.13:1, and the only reason it
+   went unreported for so long is that it needs a pointer resting on the row. */
 .column-menu label:hover {
-  background: #f4f7f8;
+  background: var(--surface-hover);
 }
 
 .column-menu input {
@@ -4730,7 +4734,7 @@ label.live-board-tool {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #425866;
+  color: var(--muted);
   font-size: 8px;
   text-align: left;
 }
@@ -4743,7 +4747,7 @@ label.live-board-tool {
 }
 
 .sheet-row-menu .is-danger {
-  color: #d63f56;
+  color: var(--red-600);
 }
 
 .sheet-row-menu label {
@@ -4764,7 +4768,7 @@ label.live-board-tool {
   border: 1px solid var(--line);
   border-radius: 5px;
   background: white;
-  color: #425866;
+  color: var(--muted);
   font-size: 8px;
 }
 
@@ -5082,7 +5086,7 @@ th.sheet-column--name {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #425866;
+  color: var(--muted);
   font-size: 8px;
   text-align: left;
 }
@@ -5524,10 +5528,27 @@ th.sheet-column--name {
   height: auto;
 }
 
+/*
+ * "Today", "In 3 days", "Overdue by 13 days" — the hint under the date.
+ *
+ * WAS 7px OF #8a9aa4, which is 2.9:1 on the light board and fails 4.5:1. It was
+ * also the one secondary label the sheet's type pass missed: `.sheet-comment`,
+ * `.sheet-file-count` and `.sheet-item-name small` all went to 11px further
+ * down this file, and the date input above this line went to 13px, while this
+ * stayed at the 7px it was drafted with.
+ *
+ * It went unnoticed because the three date columns were rendering nothing at
+ * all — they were seeded as custom columns and looked their values up in
+ * `maintenance_board_cells`, which is empty (see `seedBoardStructure`). Fixing
+ * that put 238 of these on screen at once.
+ *
+ * `--muted` measures 6.6:1 light and 6.8:1 dark, and is what every other
+ * secondary label on the sheet already uses.
+ */
 .sheet-date__relative {
   pointer-events: none;
-  color: #8a9aa4;
-  font-size: 7px;
+  color: var(--muted);
+  font-size: 11px;
   line-height: 1;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -5649,7 +5670,7 @@ th.sheet-column--name {
 }
 
 .sheet-file-cell.has-files {
-  color: #6161df;
+  color: var(--purple-600);
   font-weight: 650;
 }
 
@@ -5814,14 +5835,18 @@ th.sheet-column--name {
   font-size: 7px;
 }
 
+/* The dark theme repaints this hover to #203740 with `!important` in
+   brand-overrides.css, alongside the row and column menus — so this rule only
+   ever paints the light theme. It reads from the token anyway: `--surface-hover`
+   IS that pair, and leaving the literal here is how the two drift. */
 .live-selection-bar > button:hover,
 .live-selection-move > button:hover {
-  background: #f4f7f8;
+  background: var(--surface-hover);
   color: var(--navy-950);
 }
 
 .live-selection-bar > button.is-danger {
-  color: #d83e55;
+  color: var(--red-600);
 }
 
 .live-selection-move {
@@ -5952,7 +5977,7 @@ th.sheet-column--name {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f4f7f8;
+  background: var(--canvas);
 }
 
 .segmented-filter button {
@@ -9203,8 +9228,50 @@ th.sheet-column--name {
 .sheet-group__menu,
 .sheet-row-menu {
   width: 252px;
-  max-height: min(560px, calc(100vh - 150px));
+  /*
+   * `useBoardMenuFit` measures the room actually left around the trigger and
+   * sets `--board-menu-max-height`. The fallback is the old fixed cap, so a
+   * menu still behaves if it renders before the hook has measured.
+   */
+  max-height: var(--board-menu-max-height, min(560px, calc(100vh - 150px)));
   overflow-y: auto;
+}
+
+/*
+ * Opened upward, because there was no room below the trigger. Set by
+ * `useBoardMenuFit`; see the hook for why flipping beats scrolling the page.
+ */
+.sheet-group__menu.is-flipped,
+.sheet-row-menu.is-flipped {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+/* Same, for the toolbar menus, which hang 7px below their button. */
+.live-board-menu.is-flipped {
+  top: auto;
+  bottom: calc(100% + 7px);
+}
+
+/*
+ * The columns panel keeps its own 390px ceiling and additionally accepts the
+ * measured one, so a short screen gets a panel that fits and scrolls rather
+ * than one running off the bottom.
+ */
+.column-menu {
+  max-height: min(390px, var(--board-menu-max-height, 390px));
+}
+
+/*
+ * Nudged sideways to stay on screen. Also set by `useBoardMenuFit`, and 0 until
+ * it measures, so a menu whose trigger is comfortably inside the viewport is
+ * untouched. The board toolbar scrolls horizontally on a phone, which is how a
+ * menu anchored to a toolbar button ends up anchored off the side of the screen.
+ */
+.sheet-group__menu,
+.sheet-row-menu,
+.live-board-menu {
+  transform: translateX(var(--board-menu-shift-x, 0px));
 }
 
 .sheet-group__menu button,
@@ -9220,7 +9287,7 @@ th.sheet-column--name {
 }
 
 .sheet-group__menu .is-danger {
-  color: #d83e55;
+  color: var(--red-600);
 }
 
 .sheet-group__colors {
@@ -9232,7 +9299,7 @@ th.sheet-column--name {
 }
 
 .sheet-group__colors > span {
-  color: #687a84;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -9597,7 +9664,7 @@ th.sheet-column--name {
 }
 
 .column-settings-dialog__error {
-  color: #d83e55;
+  color: var(--red-600);
 }
 
 .column-settings-dialog > section > footer {

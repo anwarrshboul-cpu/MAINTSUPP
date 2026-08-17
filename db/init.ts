@@ -1717,6 +1717,41 @@ export async function seedBoardStructure(
   for (const [position, column] of columnsToSeed.entries()) {
     const settings = maintenanceColumnSettings(column.type, column.optionSetKey);
 
+    /*
+     * EVERY COLUMN ON THIS BOARD IS `system`, AND `column.system` IS NOT THAT
+     * FLAG.
+     *
+     * `system` on the stored row answers one question: is this column backed by
+     * a field on `maintenance_requests`, or by a row in
+     * `maintenance_board_cells`? The board reads it that way in three places —
+     * `live-board.tsx` splits the payload into `systemColumns` (rendered by
+     * `systemCell`, from the request record) and `customColumns` (rendered from
+     * `customCells`); `board-model.ts` builds `fallbackSystemColumns` with all
+     * 26 marked `system: true`; and the board route refuses to delete a system
+     * column, because there are no cell rows to delete and the field would
+     * survive with nothing to show it.
+     *
+     * Every one of the 26 maintenance columns is request-backed — `systemCell`
+     * has a case for all 26 keys — so all 26 must be seeded `system = 1`. This
+     * bound `column.system` instead, which is the SPEC's flag and means
+     * something else entirely: monday's own system columns, which on this board
+     * are just Name, Status and Subitems. Four columns were seeded system, so
+     * `live-board` filed the other 22 as custom and looked them up in
+     * `maintenance_board_cells` — a table that holds two rows for this whole
+     * workspace. Location, Description, Tier Level, Engineer Required, Priority,
+     * Contractor, Assigned To and every date and money column rendered "Add
+     * value" on every row of a board whose request rows were fully populated,
+     * and their group summaries read "0 filled".
+     *
+     * It also cost a write. `ensureBoardState` in the board route re-inserts all
+     * 26 as `system: true` whenever it counts fewer system columns than the spec
+     * has, which was every load; each one conflicted on
+     * `maintenance_board_columns_org_key_idx` and was discarded.
+     *
+     * Store Documentation is seeded by `seed-store-documentation.ts`, which
+     * keeps `column.system` because that board genuinely is cell-backed: only
+     * Name comes off the request. This function only ever runs for maintenance.
+     */
     await d1
       .prepare(
         `INSERT OR IGNORE INTO maintenance_board_columns
@@ -1734,7 +1769,7 @@ export async function seedBoardStructure(
         position,
         column.width,
         settings,
-        column.system ? 1 : 0,
+        1,
         column.required ? 1 : 0,
         column.summary ?? null,
         column.optionSetKey ?? null,
@@ -1760,6 +1795,28 @@ export async function seedBoardStructure(
         .bind(settings, organisationId, boardKey, column.key)
         .run();
     }
+
+    /*
+     * Same shape as the settings backfill above, and for the same reason: an
+     * INSERT OR IGNORE cannot correct a row that already exists, so a board
+     * seeded before the fix above keeps `system = 0` on 22 columns and keeps
+     * rendering them empty for ever.
+     *
+     * Keyed on `column_key` against the spec's own list, so only the columns
+     * this function seeds are touched. A column an admin added through the board
+     * UI is not in `columnsToSeed`, never matches, and stays `system = 0` —
+     * which is correct: those genuinely are cell-backed, and flipping one would
+     * both blank it and make it undeletable.
+     */
+    await d1
+      .prepare(
+        `UPDATE maintenance_board_columns
+            SET system = 1
+          WHERE organisation_id = ? AND board_id = ? AND column_key = ?
+            AND system = 0`,
+      )
+      .bind(organisationId, boardKey, column.key)
+      .run();
   }
 
   for (const [position, group] of seedGroups.entries()) {

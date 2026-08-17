@@ -400,7 +400,19 @@
   flex: 1 1 320px;
 }
 
-.account-list__row strong { color: #f4f8fa; font-size: 13px; }
+/*
+ * `var(--ink)`, not a literal.
+ *
+ * This was `#f4f8fa` — a near-white picked when the product was dark-only. The
+ * row behind it is `var(--surface-head)`, which in the light theme is `#eef3f5`,
+ * so every title in the list rendered at a contrast ratio of 1.05:1: white on
+ * white. "Frequently asked questions", "Terms of service" and eleven others
+ * were legible only by dragging a cursor over them to invert the selection.
+ *
+ * `--ink` is #e7eef3 in the dark theme, within a hair of the literal it
+ * replaces, so the dark presentation this was drawn for is unchanged.
+ */
+.account-list__row strong { color: var(--ink); font-size: 13px; }
 
 .account-list__row span {
   color: var(--muted);
@@ -508,7 +520,13 @@
   line-height: 1.6;
 }
 
-.account-definitions dd a { color: #64d8d0; }
+/*
+ * Same story as `.account-list__row strong`: `#64d8d0` is the dark theme's
+ * bright teal, and these contact links sit on a white card in the light theme
+ * at 1.71:1. `--accent-fg` is #5fd6cd dark (so the dark look is kept) and
+ * #0a6f68 light, which is a link somebody can actually read.
+ */
+.account-definitions dd a { color: var(--accent-fg); }
 
 /* ── Forms ──────────────────────────────────────────────────────────────── */
 
