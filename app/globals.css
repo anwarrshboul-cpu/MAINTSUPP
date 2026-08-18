@@ -3931,15 +3931,27 @@ a {
   font-size: 7px;
 }
 
+/*
+ * The neutral status pill on Sites and Units & Assets.
+ *
+ * All three colours were literals with no theme override, so the pill kept a
+ * near-white ground and mid-grey ink in dark mode: #536874 on #f8fafb is fine
+ * on a light page and becomes a pale rectangle floating on a dark one, with
+ * the surrounding row painted from tokens around it.
+ *
+ * The chip-neutral pair is exactly this component's ground/ink and is retuned
+ * TOGETHER per theme (7.4:1 light, 7.9:1 dark) — the pairing note in the
+ * palette explains why the two halves must move together.
+ */
 .status-chip {
   display: inline-flex;
   align-items: center;
   min-height: 21px;
   padding: 0 8px;
-  border: 1px solid #dbe4e8;
+  border: 1px solid var(--line);
   border-radius: 99px;
-  background: #f8fafb;
-  color: #536874;
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
   font-size: 7px;
   font-weight: 650;
 }
@@ -13155,7 +13167,13 @@ body[data-theme="dark"] {
   flex-direction: column;
   gap: 0.125rem;
   padding: 0.75rem;
-  background: var(--card, #182830);
+  /*
+   * `--card` is not a token this palette defines — it never has been — so this
+   * ALWAYS fell through to the literal, painting a dark card on the light
+   * Documents and Activity panels of a site. `--surface-card` is the real
+   * token and is defined in both themes.
+   */
+  background: var(--surface-card);
   border-radius: 0.5rem;
 }
 

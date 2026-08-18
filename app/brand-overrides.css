@@ -1400,9 +1400,22 @@ button.analytics-metric:hover {
   cursor: pointer;
 }
 
+/*
+ * The hovered / focused row on Compliance, Sites and Units & Assets.
+ *
+ * Was a hard-coded `#1a3039` — a dark navy, declared outside any theme block
+ * and with no light counterpart anywhere. In dark it looked deliberate. In
+ * LIGHT it painted a near-black band under `--ink` (#132537) text, about
+ * 1.06:1: the row a reader hovered, or tabbed onto, became unreadable. `:focus`
+ * is what made it stick, so it read as a selected row rather than a glitch.
+ *
+ * `--surface-hover` is the token that already means "this row is under the
+ * pointer" everywhere else, and it is defined in BOTH themes — which is the
+ * whole reason the bug could not have happened had it been used here.
+ */
 .analytics-table tbody tr:hover td,
 .analytics-table tbody tr:focus td {
-  background: #1a3039;
+  background: var(--surface-hover);
   outline: 0;
 }
 
@@ -1420,9 +1433,22 @@ button.analytics-metric:hover {
   white-space: nowrap;
 }
 
+/*
+ * Every empty and loading state on those same three screens — "Loading sites…",
+ * "No records", "Nothing to show".
+ *
+ * `#81949f` is a mid grey chosen against a dark ground; on the light canvas it
+ * measures about 2.7:1, under the 4.5:1 floor for normal text. It is also the
+ * FIRST thing a reader sees on a slow load, so the worst-contrast text on the
+ * screen was the text most likely to be read.
+ *
+ * `--muted` is the ink ladder's "secondary text" step and is tuned per theme
+ * against the canvas it lands on. The `!important` is kept because the rule it
+ * overrides is itself `!important`.
+ */
 .analytics-empty {
   height: 96px;
-  color: #81949f !important;
+  color: var(--muted) !important;
   text-align: center !important;
 }
 
@@ -5949,7 +5975,8 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
   align-items: center;
   height: 22px;
   border-radius: 4px;
-  background: var(--sunk, rgba(148, 173, 190, 0.16));
+  /* `--sunk` is not a defined token, so this always used the literal. */
+  background: var(--surface-sunken);
   overflow: hidden;
 }
 

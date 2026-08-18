@@ -60,22 +60,6 @@ type Payload =
   | { state: "login-required"; title: string }
   | { state: "unavailable"; reason: string; title: string; message: string };
 
-/**
- * Which of our submit fields a monday question id maps to.
- *
- * Keyed by the question ID rather than by its title, so renaming "Manager" in
- * the Design panel does not silently stop the answer reaching `requester`.
- */
-const FIELD_BY_QUESTION: Record<string, string> = {
-  single_selecty9rcyhe: "location",
-  short_text64: "requester",
-  numbertb4g1z46: "contact",
-  date: "requestedAt",
-  single_select: "engineer",
-  short_text: "description",
-  status: "priority",
-};
-
 export default function PublicForm({ token }: { token: string }) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [failed, setFailed] = useState(false);
@@ -127,17 +111,18 @@ export default function PublicForm({ token }: { token: string }) {
     setError(null);
     setState("sending");
 
-    const body: Record<string, string> = {};
-    for (const question of payload.form.questions) {
-      const field = FIELD_BY_QUESTION[question.id];
-      if (field) body[field] = answers[question.id] ?? "";
-    }
-
+    /*
+     * Every answer is posted, keyed by question id, and the server decides what
+     * each one means. The browser used to translate to a fixed seven-field
+     * shape, which silently dropped answers to the other twelve questions —
+     * so un-hiding a question in the builder produced a field that a submitter
+     * filled in and nothing ever stored.
+     */
     try {
       const response = await fetch(`/api/forms/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ answers }),
       });
       const result = (await response.json()) as { request?: { id: string }; error?: string };
       if (!response.ok || !result.request) {

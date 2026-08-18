@@ -106,7 +106,13 @@ function matrixPayload(context: AdminContext, overrides: RoleOverrides) {
       CAPABILITIES.map((capability) => ({
         role,
         capability,
-        reason: roleCapabilityWriteRefusal(context.actor.role, role, capability, false),
+        reason: roleCapabilityWriteRefusal(
+          context.actor.role,
+          role,
+          capability,
+          false,
+          effectiveCapabilities(context.actor.role, overrides[context.actor.role]),
+        ),
       })).filter((cell) => cell.reason),
     ),
   };
@@ -160,6 +166,25 @@ export async function PUT(request: Request) {
       return Response.json({ error: "Too many changes in one request." }, { status: 400 });
     }
 
+    /*
+     * The stored overrides, read ONCE and before validation.
+     *
+     * Needed up here because the "you cannot grant what you do not hold" rule
+     * is measured against what the actor's role EFFECTIVELY holds in this
+     * workspace, which is defaults merged with these rows — not against the
+     * shipped defaults. Reading it before the loop also means every change in
+     * a batch is judged against the same snapshot rather than against the
+     * partial effect of its predecessors.
+     */
+    const overridesBefore = await loadRoleOverrides(
+      context.db,
+      context.targetOrganisationId,
+    );
+    const actorHolds = effectiveCapabilities(
+      context.actor.role,
+      overridesBefore[context.actor.role],
+    );
+
     // Validate every change before writing any of them, so a refusal in the
     // middle of a batch cannot leave the matrix half-applied.
     const changes: Array<{
@@ -185,11 +210,19 @@ export async function PUT(request: Request) {
           ? null
           : Boolean(change.allowed);
 
+      /*
+       * The actor's EFFECTIVE capabilities, not their role's shipped defaults.
+       * Without this the "you cannot grant what you do not hold" rule measures
+       * against the defaults, and every override that narrows the actor's own
+       * role can be written straight back by the actor. See the note on the
+       * `actorHolds` parameter.
+       */
       const refusal = roleCapabilityWriteRefusal(
         context.actor.role,
         change.role,
         change.capability,
         allowed,
+        actorHolds,
       );
       if (refusal) {
         return Response.json(

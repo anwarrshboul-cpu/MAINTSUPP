@@ -4,10 +4,13 @@ import { getDb } from "../../../../../db";
 import {
   activityLog,
   formConfigurations,
+  maintenanceBoardCells,
+  maintenanceBoardColumns,
   maintenanceRequests,
   sites,
 } from "../../../../../db/schema";
 import {
+  LOCATION_QUESTION_ID,
   formAvailability,
   isUnlocked,
   loadFormByToken,
@@ -88,18 +91,68 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       return failure("This form is password protected.", 401);
     }
 
-    const payload = (await request.json()) as Record<string, unknown>;
-    const location = trimString(payload.location, 120);
-    const requester = trimString(payload.requester, 120);
-    const contact = trimString(payload.contact, 80);
-    const description = trimString(payload.description, 800);
-    const priority = trimString(payload.priority, 80) || "Medium";
-    const engineer = trimString(payload.engineer, 80);
+    /*
+     * ANSWERS ARRIVE KEYED BY QUESTION ID, and the server decides what each one
+     * means. The browser used to post a fixed seven-field object, which had two
+     * consequences worth spelling out because both were silent:
+     *
+     *   · An answer to any of the other twelve questions was dropped on the
+     *     floor. The Edit panel invites an operator to un-hide "Cost of Works"
+     *     or "Approved by"; a submitter would then fill the field in and the
+     *     value would never leave the browser.
+     *   · `required` could only ever be checked for the four fields the shape
+     *     happened to carry.
+     *
+     * Keying by question id means the set of questions is DATA, so un-hiding a
+     * question makes its answer arrive without anybody editing this route.
+     */
+    const body = (await request.json()) as { answers?: Record<string, unknown> };
+    const answers = (body.answers ?? {}) as Record<string, unknown>;
+    const answerFor = (id: string, max = 400) => trimString(answers[id], max);
 
-    if (!location || !requester || !contact || description.length < 10) {
-      return failure(
-        "Location, manager, contact details and a clear description are required.",
-      );
+    /*
+     * Which questions were actually ASKED. A hidden question is not asked, and
+     * a conditional one is only asked when its trigger matched — validating
+     * either would refuse a submission over a field the submitter never saw.
+     * This mirrors the filter the public renderer applies.
+     */
+    const asked = record.config.questions.filter((question) => {
+      if (!question.visible || question.type === "PAGE_BLOCK") return false;
+      if (!question.showIf) return true;
+      return question.showIf.equals.includes(answerFor(question.showIf.questionId));
+    });
+
+    /*
+     * Required, enforced HERE and not only by the `required` attribute in the
+     * markup. The submit is a plain JSON fetch, so the browser's validation is
+     * advisory at best — anything that posts directly bypasses it entirely.
+     * The first unanswered question is named, because "something is missing" on
+     * a nine-question form is not an error message.
+     */
+    const missing = asked.find((question) => question.required && !answerFor(question.id));
+    if (missing) {
+      return failure(`${missing.title} is required.`);
+    }
+
+    /* The questions that map onto first-class columns of a work order. */
+    const location = answerFor(LOCATION_QUESTION_ID, 120);
+    const requester = answerFor("short_text64", 120);
+    const contact = answerFor("numbertb4g1z46", 80);
+    const description = answerFor("short_text", 800);
+    const priority = answerFor("status", 80) || "Medium";
+    const engineer = answerFor("single_select", 80);
+    const requestedAnswer = answerFor("date", 32);
+
+    /*
+     * A floor on the description that `required` alone cannot express: a job
+     * nobody can act on is worse than no job. Only applied when the question is
+     * actually being asked.
+     */
+    if (asked.some((question) => question.id === "short_text") && description.length < 10) {
+      return failure("Please describe the work needed in a little more detail.");
+    }
+    if (!location || !requester || !contact) {
+      return failure("Location, manager and contact details are required.");
     }
 
     /*
@@ -128,8 +181,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       );
     const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
 
-    const submittedDate = trimString(payload.requestedAt, 32);
-    const parsedDate = submittedDate ? new Date(submittedDate) : null;
+    const parsedDate = requestedAnswer ? new Date(requestedAnswer) : null;
     const requestedAt =
       parsedDate && !Number.isNaN(parsedDate.getTime())
         ? parsedDate.toISOString()
@@ -193,6 +245,51 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       actorEmail: null,
       detail: JSON.stringify({ source: "Shared form", form: record.id, priority, location }),
     });
+
+    /*
+     * ANSWERS THAT ARE NOT FIRST-CLASS COLUMNS OF A WORK ORDER.
+     *
+     * A question id here IS a monday column id — that is how the configuration
+     * was captured — and `maintenance_board_cells` is keyed by (request,
+     * column). So an answer to "Cost of Works" or "Approved by" has a proper
+     * home, and un-hiding one of the ten hidden questions now produces a value
+     * that lands in the right column instead of being discarded in the browser.
+     *
+     * Only columns the board actually has are written: `column_id` is a foreign
+     * key, and a question whose column was deleted must not take the whole
+     * submission down with it. Anything unmatched is skipped silently — the job
+     * itself is already saved and is worth more than the extra field.
+     */
+    const handled = new Set([
+      LOCATION_QUESTION_ID,
+      "short_text64",
+      "numbertb4g1z46",
+      "short_text",
+      "single_select",
+      "status",
+      "date",
+    ]);
+    const extras = asked.filter(
+      (question) => !handled.has(question.id) && answerFor(question.id),
+    );
+    if (extras.length) {
+      const columns = await db
+        .select({ id: maintenanceBoardColumns.id })
+        .from(maintenanceBoardColumns)
+        .where(eq(maintenanceBoardColumns.organisationId, record.organisationId));
+      const known = new Set(columns.map((column) => column.id));
+      for (const question of extras) {
+        if (!known.has(question.id)) continue;
+        await db.insert(maintenanceBoardCells).values({
+          id: crypto.randomUUID(),
+          organisationId: record.organisationId,
+          boardId: "maintenance",
+          requestId: id,
+          columnId: question.id,
+          value: answerFor(question.id, 800),
+        });
+      }
+    }
 
     /*
      * Counted only after the row exists. Incrementing first would let a
