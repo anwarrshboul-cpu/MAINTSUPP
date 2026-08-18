@@ -977,6 +977,100 @@ export const boardViews = sqliteTable(
 );
 
 
+/**
+ * The editable form configuration behind a Form view — the form builder's store.
+ *
+ * WHY A TABLE RATHER THAN `board_views.settings`
+ *
+ * A Form view already has a `settings` JSON blob, and putting the form config
+ * there was the obvious first move. It is wrong for three reasons that only
+ * show up once the form is SHARED:
+ *
+ *  1. `share_token` has to be unique and indexed. It is the primary lookup key
+ *     for every public request, and you cannot index inside a JSON blob — every
+ *     hit on a public form would table-scan `board_views`.
+ *  2. The public form is read by anonymous visitors. Keeping it in its own table
+ *     means the public reader never touches the row that carries a view's
+ *     filters, sorts and column layout, so there is no way to leak them.
+ *  3. `password_hash` must never reach the browser. A column can be omitted from
+ *     a SELECT; a key buried in a JSON blob has to be stripped by hand on every
+ *     read path, and the one place somebody forgets is the leak.
+ *
+ * `config` holds the parts with no query obligations — questions, appearance,
+ * the feature toggles — seeded from `maintenanceFormConfiguration`. The columns
+ * beside it are the fields something actually filters, joins or counts on.
+ */
+export const formConfigurations = sqliteTable(
+  "form_configurations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    boardId: text("board_id").notNull().default("maintenance"),
+    /** Which Form view this belongs to — `board_views.key`. */
+    viewKey: text("view_key").notNull().default("form"),
+
+    /* ---- Identity, denormalised out of `config` so lists need no JSON parse. */
+    title: text("title").notNull(),
+    description: text("description"),
+
+    /*
+     * The public link. Unguessable and unique; this is what /f/:token resolves.
+     * Stored in the clear on purpose — unlike a session token it is a locator,
+     * not a credential, and monday's own form URLs work the same way. What
+     * protects a form is `active`, `require_login` and `password_hash`.
+     */
+    shareToken: text("share_token").notNull(),
+
+    /*
+     * The "Shorten URL" alias — monday serves these from wkf.ms, we serve both
+     * from /f/. Twelve hex characters rather than sixty-four: a short link is
+     * pasted into a WhatsApp message and read off a phone, and 48 bits is still
+     * far past guessing for a form whose whole purpose is to be handed out.
+     *
+     * It is a SECOND locator for the same form, not a replacement. Both resolve,
+     * so turning the toggle off does not break links already sent.
+     */
+    shortToken: text("short_token"),
+
+    /*
+     * "Deactivate form". A deactivated form still resolves — the public page
+     * answers "this form is no longer accepting responses" rather than 404, so
+     * somebody following an old link learns why instead of thinking it broke.
+     */
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+
+    /* ---- Access control. Columns, not JSON — see the note above. ---------- */
+    requireLogin: integer("require_login", { mode: "boolean" }).notNull().default(false),
+    /** Salted hash. NULL means no password. The plaintext is never stored. */
+    passwordHash: text("password_hash"),
+
+    /*
+     * Response limit and close date. Both are enforced server-side on submit;
+     * a disabled limit is NULL rather than 0, because 0 is a real limit that
+     * means "accept nothing".
+     */
+    responseLimit: integer("response_limit"),
+    closeAt: text("close_at"),
+    /** Incremented per accepted submission, so the limit needs no COUNT(*). */
+    responseCount: integer("response_count").notNull().default(0),
+
+    /** Questions, appearance and the remaining feature flags, as JSON. */
+    config: text("config").notNull().default("{}"),
+
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("form_configurations_token_idx").on(table.shareToken),
+    uniqueIndex("form_configurations_view_idx").on(
+      table.organisationId,
+      table.boardId,
+      table.viewKey,
+    ),
+  ],
+);
+
+
 /** Delivery record for every notification — Stage 7, item J6. */
 export const notificationLog = sqliteTable(
   "notification_log",

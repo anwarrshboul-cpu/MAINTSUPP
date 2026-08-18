@@ -183,6 +183,9 @@ export const ICON_NAMES = [
   "home",
   "image",
   "inbox",
+  /* Two added with the form builder's Share dialog, for the same reason as the
+     three above: this list and `IconName` are asserted to be the same set. */
+  "link",
   "list",
   "map",
   "menu",
@@ -195,6 +198,7 @@ export const ICON_NAMES = [
   "reply",
   "search",
   "settings",
+  "share",
   "shield",
   "spark",
   "store",

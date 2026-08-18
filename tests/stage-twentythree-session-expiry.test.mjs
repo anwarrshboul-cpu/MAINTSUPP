@@ -31,6 +31,19 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const PUBLIC_ROUTES = new Set([
   "app/api/leads/route.ts",
   "app/api/job-link/[token]/route.ts",
+  /*
+   * The shared form link, on the same footing as the contractor job link above:
+   * the share token IS the authorisation, and the person holding it is a store
+   * manager with no account. Answering "your session expired, sign in" to
+   * somebody who never had a session would be wrong advice, so these two are
+   * exempt from the sign-out branch rather than pretending to implement it.
+   *
+   * The one place they DO mention signing in is the optional "Require sign-in"
+   * setting, which answers 401 with that instruction because there the advice
+   * is correct — it is a deliberate per-form choice, not an expired session.
+   */
+  "app/api/forms/[token]/route.ts",
+  "app/api/forms/[token]/submit/route.ts",
 ]);
 
 async function routeFiles(dir = "app/api", found = []) {

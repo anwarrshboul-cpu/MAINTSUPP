@@ -1,0 +1,969 @@
+/*
+ * The form builder — monday's Form-tab chrome.
+ *
+ * EVERY COLOUR HERE IS A TOKEN. Not one literal hex, on purpose: the palette in
+ * globals.css is tuned so each foreground clears WCAG AA against the surface it
+ * is painted on in BOTH themes, and tests/stage-twentysix-contrast.test.mjs
+ * recomputes those ratios from that file. A literal introduced here would be
+ * invisible to that test and would be the one pairing nobody had measured.
+ *
+ * The only exception is the accent the operator picks in the Design panel,
+ * which arrives as an inline custom property on the public form, not here.
+ */
+
+.form-builder {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ── The toolbar ───────────────────────────────────────────────────────────
+ *
+ * DESKTOP ONLY. This is the whole of the "no editing on mobile" requirement:
+ * one `display: none`, which removes the toolbar from the accessibility tree as
+ * well as from the page, so a phone screen reader does not announce an Edit
+ * button that is not there. `visibility: hidden` would leave it focusable and a
+ * JavaScript width check would be a hydration mismatch — see the note in
+ * form-builder.tsx.
+ *
+ * The stage below is unaffected, so a phone still gets the live form, and the
+ * shared /f/:token link is a different route entirely and is never hidden.
+ */
+.form-builder__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-head);
+  min-width: 0;
+}
+
+.form-builder__title,
+.form-builder__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.form-builder__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-builder__back,
+.form-builder__preview {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--control-fg);
+  font-size: 13px;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+/* The back arrow points the way it travels. */
+.form-builder__back svg {
+  transform: rotate(180deg);
+}
+
+.form-builder__preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-builder__back:hover,
+.form-builder__preview:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-builder__preview.is-active {
+  background: var(--surface-active);
+  color: var(--accent-fg);
+  border-color: var(--line-strong);
+}
+
+/* The Edit / Design / Settings segmented control. */
+.form-builder__modes {
+  display: inline-flex;
+  margin-inline-start: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-card);
+}
+
+.form-builder__modes button {
+  border: 0;
+  background: none;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--control-fg);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.form-builder__modes button + button {
+  border-inline-start: 1px solid var(--line);
+}
+
+.form-builder__modes button:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-builder__modes button.is-active {
+  background: var(--surface-active);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.form-builder__share {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.form-builder__sharebtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.form-builder__sharebtn:hover {
+  background: var(--accent-fg);
+}
+
+.form-builder__copy {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--control-fg);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.form-builder__copy:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-builder__banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: var(--amber-100);
+  color: var(--amber-600);
+  border-bottom: 1px solid var(--line);
+}
+
+.form-builder__banner--error {
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+.form-builder__stage {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* ── Edit: the Content rail and the canvas ─────────────────────────────── */
+
+.form-edit {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.form-edit__content {
+  position: sticky;
+  top: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  padding: 10px;
+  min-width: 0;
+}
+
+.form-edit__content header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.form-edit__content header svg {
+  transform: rotate(90deg);
+}
+
+.form-edit__page {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-edit__content ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.form-edit__content li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.form-edit__content li.is-hidden {
+  color: var(--muted-2);
+}
+
+.form-edit__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/*
+ * The type glyph. monday colours these per column type; the tints come from
+ * the shared wash/ink pairs, which are redefined together per theme, so each
+ * stays legible in dark without a second palette here.
+ */
+.form-edit__glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.form-edit__glyph--select { background: var(--green-100); color: var(--green-700); }
+.form-edit__glyph--text { background: var(--blue-100); color: var(--blue-600); }
+.form-edit__glyph--number { background: var(--purple-100); color: var(--purple-600); }
+.form-edit__glyph--date { background: var(--purple-100); color: var(--purple-600); }
+.form-edit__glyph--file { background: var(--red-100); color: var(--red-600); }
+.form-edit__glyph--people { background: var(--teal-100); color: var(--teal-700); }
+.form-edit__glyph--subitems { background: var(--amber-100); color: var(--amber-600); }
+
+.form-edit__canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-width: 720px;
+}
+
+.form-edit__card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.form-edit__card.is-hidden {
+  background: var(--surface-card-lo);
+  border-style: dashed;
+}
+
+.form-edit__card--head h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--ink);
+}
+
+.form-edit__card--head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-edit__cardhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.form-edit__cardhead strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.form-edit__cardhead em {
+  color: var(--red-600);
+  font-style: normal;
+}
+
+.form-edit__cardtools {
+  display: inline-flex;
+  gap: 2px;
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+
+.form-edit__cardtools button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-card);
+  color: var(--control-fg);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.form-edit__cardtools button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-edit__cardtools button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* One chevron glyph, rotated, rather than two icons. */
+.form-edit__cardtools button svg {
+  transform: rotate(-90deg);
+}
+
+.form-edit__cardtools button.is-down svg {
+  transform: rotate(90deg);
+}
+
+.form-edit__help {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-edit__cardfoot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.form-edit__cardfoot label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+}
+
+.form-edit__count {
+  color: var(--muted-2);
+}
+
+.form-edit__card--submit {
+  text-align: center;
+}
+
+.form-edit__card--submit span {
+  display: inline-block;
+  border-radius: var(--radius-sm);
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  padding: 8px 24px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Design and Settings panels ────────────────────────────────────────── */
+
+.form-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-width: 720px;
+  min-width: 0;
+}
+
+.form-panel__section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  overflow: hidden;
+}
+
+.form-panel__section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface-head);
+  border-bottom: 1px solid var(--line);
+}
+
+.form-panel__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.form-panel__row + .form-panel__row,
+.form-panel__field + .form-panel__row,
+.form-panel__row + .form-panel__field,
+.form-panel__field + .form-panel__field,
+.form-panel__static {
+  border-top: 1px solid var(--line-soft);
+}
+
+.form-panel__row div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.form-panel__row strong,
+.form-panel__static strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.form-panel__row span,
+.form-panel__static span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-panel__note {
+  color: var(--amber-600);
+}
+
+.form-panel__badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--blue-100);
+  color: var(--blue-600);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.form-panel__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+
+.form-panel__row--stack > .form-panel__row {
+  padding: 12px 14px;
+}
+
+.form-panel__inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.form-panel__inline input {
+  width: 110px;
+}
+
+.form-panel__inline--wide input {
+  width: min(340px, 100%);
+}
+
+.form-panel__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.form-panel__field--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.form-panel__field > span {
+  font-weight: 600;
+}
+
+.form-panel__field input[type="text"],
+.form-panel__field input[type="url"],
+.form-panel__field select,
+.form-panel__inline input {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.form-panel__field input[type="color"] {
+  width: 46px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.form-panel__choices {
+  display: flex;
+  gap: 6px;
+  padding: 12px 14px;
+  flex-wrap: wrap;
+}
+
+.form-panel__choices button {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--control-fg);
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.form-panel__choices button:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-panel__choices button.is-active {
+  background: var(--surface-active);
+  border-color: var(--accent-fg);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.form-panel__link {
+  align-self: flex-start;
+  margin: 0 14px 10px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent-fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.form-panel__static {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+/* ── The switch ────────────────────────────────────────────────────────────
+ *
+ * A real checkbox, restyled. It keeps focus, space-to-toggle and the correct
+ * role for free — a div with a click handler has none of those and is the most
+ * common way a settings panel becomes keyboard-inaccessible.
+ */
+.form-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--chip-neutral-bg);
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 120ms ease;
+}
+
+.form-switch::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--paper);
+  transition: transform 120ms ease;
+}
+
+.form-switch:checked {
+  background: var(--brand-solid);
+  border-color: var(--brand-solid);
+}
+
+.form-switch:checked::after {
+  transform: translateX(16px);
+}
+
+.form-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-switch:focus-visible,
+.form-panel__choices button:focus-visible,
+.form-builder__modes button:focus-visible,
+.form-edit__cardtools button:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+/* ── Share dialog ──────────────────────────────────────────────────────── */
+
+.form-share__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(7, 24, 38, 0.55);
+}
+
+.form-share {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: var(--radius);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+}
+
+.form-share__close {
+  position: absolute;
+  inset-block-start: 12px;
+  inset-inline-end: 12px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--control-fg);
+  cursor: pointer;
+}
+
+.form-share__close:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-share h2 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--ink);
+}
+
+.form-share__lede {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-share__link {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  min-width: 0;
+}
+
+.form-share__link input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--ink);
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-share__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-share__copy:hover {
+  background: var(--accent-fg);
+}
+
+.form-share__settings {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.form-share__settings h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface-head);
+  border-bottom: 1px solid var(--line);
+}
+
+.form-share__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.form-share__row + .form-share__row {
+  border-top: 1px solid var(--line-soft);
+}
+
+.form-share__row div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.form-share__row strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.form-share__row span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-share__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+
+.form-share__row--stack > .form-share__row {
+  padding: 12px 14px;
+}
+
+.form-share__password {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 12px;
+  min-width: 0;
+}
+
+.form-share__password input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-share__password button {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.form-share__row--access {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line-soft);
+  flex-wrap: wrap;
+}
+
+.form-share__danger,
+.form-share__revive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-share__danger {
+  color: var(--red-600);
+}
+
+.form-share__revive {
+  color: var(--accent-fg);
+}
+
+.form-share__danger:disabled,
+.form-share__revive:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Narrow ────────────────────────────────────────────────────────────────
+ *
+ * 767px is the app's phone boundary and is one of the five widths the parity
+ * tests permit. Below it the builder is gone entirely and the Content rail
+ * with it, so the canvas is a single column and nothing scrolls sideways.
+ */
+@media (max-width: 767px) {
+  .form-builder__bar {
+    display: none;
+  }
+
+  .form-edit {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
+  }
+
+  .form-edit__content {
+    display: none;
+  }
+
+  .form-panel {
+    padding: 12px;
+  }
+
+  .form-share {
+    padding: 16px;
+  }
+
+  .form-share__link {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-builder__back,
+  .form-builder__preview,
+  .form-builder__modes button,
+  .form-builder__sharebtn,
+  .form-builder__copy,
+  .form-panel__choices button,
+  .form-edit__cardtools button,
+  .form-switch,
+  .form-switch::after {
+    transition: none;
+  }
+}
