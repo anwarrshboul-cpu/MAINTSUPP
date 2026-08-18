@@ -1,6 +1,6 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { formConfigurations } from "../../../../db/schema";
+import { formConfigurations, maintenanceGroups } from "../../../../db/schema";
 import {
   formPasswordProblem,
   generateShareToken,
@@ -96,7 +96,25 @@ export async function GET(request: Request) {
     const { db, orgId } = await scopedDb(request);
     const record = await loadForm(db, orgId);
     if (!record) return failure("This board has no form.", 404);
-    return Response.json({ form: serialiseForm(request, record) });
+
+    /*
+     * The board's real groups, so "Group for answers" can offer what exists
+     * rather than a fixed label. Sent with the form because the panel is
+     * useless without them and a second request would mean a paint where the
+     * selector is empty.
+     */
+    const groups = await db
+      .select({ id: maintenanceGroups.id, name: maintenanceGroups.name })
+      .from(maintenanceGroups)
+      .where(
+        and(
+          eq(maintenanceGroups.organisationId, orgId),
+          eq(maintenanceGroups.boardId, record.boardId),
+        ),
+      )
+      .orderBy(maintenanceGroups.position);
+
+    return Response.json({ form: serialiseForm(request, record), groups });
   } catch (error) {
     return unavailable(error);
   }

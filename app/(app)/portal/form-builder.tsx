@@ -39,6 +39,7 @@ import "./form-builder.css";
  */
 export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void }) {
   const [form, setForm] = useState<BuilderForm | null>(null);
+  const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
   const [mode, setMode] = useState<BuilderMode>("view");
   const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -49,9 +50,16 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
     let active = true;
     fetch("/api/board/form", { headers: { Accept: "application/json" } })
       .then(async (response) => {
-        const payload = (await response.json()) as { form?: BuilderForm; error?: string };
+        const payload = (await response.json()) as {
+          form?: BuilderForm;
+          groups?: Array<{ id: string; name: string }>;
+          error?: string;
+        };
         if (!response.ok || !payload.form) throw new Error(payload.error || "Unavailable");
-        if (active) setForm(payload.form);
+        if (active) {
+          setForm(payload.form);
+          setGroups(payload.groups ?? []);
+        }
       })
       .catch(() => {
         /*
@@ -205,8 +213,47 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
       <div className="form-builder__stage" data-mode={mode}>
         {mode === "edit" && <FormEditPanel form={form} patch={patch} busy={busy} />}
         {mode === "design" && <FormDesignPanel form={form} patch={patch} busy={busy} />}
-        {mode === "settings" && <FormSettingsPanel form={form} patch={patch} busy={busy} />}
-        {(mode === "view" || mode === "preview") && <FormView onSubmitted={onSubmitted} />}
+        {mode === "settings" && (
+          <FormSettingsPanel form={form} patch={patch} busy={busy} groups={groups} />
+        )}
+        {mode === "view" && <FormView onSubmitted={onSubmitted} />}
+        {mode === "preview" && (
+          /*
+           * PREVIEW IS THE PUBLIC FORM, not a second rendering of it.
+           *
+           * It used to render `FormView` — a different component, with its own
+           * nine hard-coded fields — so pressing Preview told an operator
+           * nothing about what they had just changed: none of the accent, font,
+           * text size, alignment, logo, progress bar, question order,
+           * hidden/required state or submit-button text appeared, and the two
+           * had already drifted apart in ways nobody would notice until a
+           * submitter complained.
+           *
+           * Framing the real route removes the possibility of drift rather than
+           * fixing this instance of it: there is exactly one renderer, and the
+           * preview is a submitter's view of it, gates included. If the form is
+           * deactivated or password-protected the preview says so — which is
+           * the truth about what the link currently does.
+           *
+           * `sandbox` keeps it inert: same-origin so it can read its own API,
+           * scripts so React runs, forms so the layout is honest — but no
+           * top-navigation, so a configured redirect cannot walk the operator
+           * out of the builder.
+           */
+          <div className="form-builder__preview-frame">
+            <iframe
+              key={form.presentedUrl}
+              src={form.presentedUrl}
+              title={`Preview of ${form.title}`}
+              sandbox="allow-same-origin allow-scripts allow-forms"
+            />
+            <p className="form-builder__preview-note">
+              <Icon name="alert" size={14} />
+              This is the live shared form. Anything submitted here creates a real
+              request.
+            </p>
+          </div>
+        )}
       </div>
 
       {sharing && (

@@ -233,6 +233,22 @@ export type PublicQuestion = {
   required: boolean;
   options: Array<{ label: string; value: string }> | null;
   showIf: { questionId: string; equals: string[] } | null;
+  /**
+   * The question settings the RENDERER needs, resolved to concrete values.
+   *
+   * Resolved here rather than shipped raw so the browser never has to know
+   * monday's defaults — an absent `display` becomes "Dropdown", an absent
+   * `optionsOrder` becomes "Custom", and the renderer just does what it is
+   * told. `defaultAnswer` is folded together with "today as default" into one
+   * `prefill` string for the same reason: the renderer should not have to know
+   * that a date question expresses its default differently from a text one.
+   */
+  settings: {
+    display: "Dropdown" | "Vertical" | "Horizontal";
+    includeTime: boolean;
+    /** The value the field opens with, already computed. Empty means none. */
+    prefill: string;
+  };
 };
 
 export type PublicForm = {
@@ -281,6 +297,59 @@ export type PublicForm = {
  */
 export const LOCATION_QUESTION_ID = "single_selecty9rcyhe";
 
+/**
+ * The options in the order the form should offer them.
+ *
+ * "Custom" is monday's word for "the order they are stored in" and is the
+ * default, so this is a no-op unless somebody chose alphabetical. Sorted with
+ * `en-GB` collation rather than by code point, so accented store names land
+ * where a reader expects rather than after Z.
+ */
+function orderOptions(
+  options: Array<{ label: string; value: string }> | null,
+  order: "Custom" | "Alphabetical",
+) {
+  if (!options || order !== "Alphabetical") return options;
+  return [...options].sort((left, right) => left.label.localeCompare(right.label, "en-GB"));
+}
+
+/**
+ * What the field opens with.
+ *
+ * "Today as default" is computed HERE, on the server, and this is the whole
+ * reason it is not left to the browser: a date rendered from the visitor's
+ * clock and a date validated against the server's can disagree by a day either
+ * side of midnight, which is exactly the timezone day-shift bug the setting is
+ * supposed to avoid. One clock decides.
+ *
+ * `defaultCurrentDate` wins over `defaultAnswer` for a date question, because a
+ * form configured with both is asking for today and the fixed date is stale
+ * configuration.
+ */
+function resolvePrefill(question: FormQuestion, now: Date) {
+  const settings = question.settings;
+  if (!settings) return "";
+
+  if ((question.type === "Date" || question.type === "DateRange") && settings.defaultCurrentDate) {
+    /*
+     * Rendered as the value an `<input type="date">` expects. `toISOString`
+     * would be UTC and would show yesterday to anyone west of Greenwich in the
+     * evening, so the parts are read in the server's own zone instead.
+     */
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    if (settings.includeTime) {
+      const hour = String(now.getHours()).padStart(2, "0");
+      const minute = String(now.getMinutes()).padStart(2, "0");
+      return `${year}-${month}-${day}T${hour}:${minute}`;
+    }
+    return `${year}-${month}-${day}`;
+  }
+
+  return typeof settings.defaultAnswer === "string" ? settings.defaultAnswer : "";
+}
+
 export function publicForm(
   record: FormRecord,
   /**
@@ -302,6 +371,8 @@ export function publicForm(
    * has, and this is what we can accept.
    */
   optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
+  /* Injected so "today as default" is one clock's answer — see resolvePrefill. */
+  now: Date = new Date(),
 ): PublicForm {
   const { config } = record;
   const byId = new Map(config.questions.map((question) => [question.id, question]));
@@ -324,13 +395,20 @@ export function publicForm(
       title: question.title,
       description: question.description,
       required: question.required,
-      options:
+      options: orderOptions(
         optionOverrides[question.id] ??
-        question.options
-          ?.filter((option) => option.visible && option.active)
-          .map((option) => ({ label: option.label, value: option.value })) ??
-        null,
+          question.options
+            ?.filter((option) => option.visible && option.active)
+            .map((option) => ({ label: option.label, value: option.value })) ??
+          null,
+        question.settings?.optionsOrder ?? "Custom",
+      ),
       showIf: question.showIf,
+      settings: {
+        display: question.settings?.display ?? "Dropdown",
+        includeTime: question.settings?.includeTime === true,
+        prefill: resolvePrefill(question, now),
+      },
     }));
 
   return {

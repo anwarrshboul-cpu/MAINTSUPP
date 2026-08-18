@@ -392,6 +392,57 @@
   color: var(--muted);
 }
 
+/* Question settings — the per-question controls inside a canvas card. */
+.form-edit__settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.form-edit__settings:empty {
+  display: none;
+  border-top: 0;
+}
+
+.form-edit__settings > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.form-edit__setting > span {
+  color: var(--muted);
+}
+
+.form-edit__setting select,
+.form-edit__setting input {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 4px 7px;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.form-edit__setting--wide {
+  flex: 1 1 260px;
+}
+
+.form-edit__setting--wide input {
+  flex: 1 1 auto;
+  width: 100%;
+}
+
 .form-edit__cardfoot {
   display: flex;
   align-items: center;
@@ -427,6 +478,33 @@
   padding: 8px 24px;
   font-size: 13px;
   font-weight: 600;
+}
+
+/* Preview — the real public form, framed. */
+.form-builder__preview-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.form-builder__preview-frame iframe {
+  width: 100%;
+  /* Tall enough for the whole form; the frame scrolls its own overflow. */
+  min-height: 70vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.form-builder__preview-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--amber-600);
 }
 
 /* ── Design and Settings panels ────────────────────────────────────────── */

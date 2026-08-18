@@ -5,6 +5,7 @@ import {
   activityLog,
   formConfigurations,
   maintenanceBoardCells,
+  maintenanceGroups,
   maintenanceBoardColumns,
   maintenanceRequests,
   sites,
@@ -53,6 +54,14 @@ function failure(message: string, status = 400) {
 
 function trimString(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+/** Matches the digest `/api/files` computes when it verifies an upload token. */
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
@@ -129,9 +138,35 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * The first unanswered question is named, because "something is missing" on
      * a nine-question form is not an error message.
      */
-    const missing = asked.find((question) => question.required && !answerFor(question.id));
+    /*
+     * A File question is answered by an UPLOAD, which cannot be in this JSON —
+     * the files are attached after the work order exists, because /api/files
+     * files them against a request id. So the browser declares how many it is
+     * about to send, and a required File question is satisfied by a non-zero
+     * declaration rather than by a string.
+     *
+     * What that does and does not buy, stated plainly: it stops the ordinary
+     * "I did not attach anything" case server-side, before a job is created,
+     * which is the case the setting exists for. It is NOT proof that files
+     * arrive — a hostile client could declare a count and upload nothing, and
+     * the authenticated path through /api/maintenance has exactly the same
+     * property. What binds the real files to this job is the single-use upload
+     * token issued below, not the count.
+     */
+    const declaredFiles = Number((body as { fileCount?: unknown }).fileCount ?? 0);
+    const fileCount = Number.isFinite(declaredFiles) ? Math.max(0, declaredFiles) : 0;
+
+    const missing = asked.find((question) => {
+      if (!question.required) return false;
+      if (question.type === "File") return fileCount < 1;
+      return !answerFor(question.id);
+    });
     if (missing) {
-      return failure(`${missing.title} is required.`);
+      return failure(
+        missing.type === "File"
+          ? `${missing.title} is required — please attach at least one photograph or video.`
+          : `${missing.title} is required.`,
+      );
     }
 
     /* The questions that map onto first-class columns of a work order. */
@@ -190,6 +225,60 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     const dueHours = priority === "Urgent" ? 4 : priority === "Medium" ? 72 : 120;
     const dueAt = new Date(Date.now() + dueHours * 60 * 60 * 1000).toISOString();
 
+    /*
+     * The single-use grant that lets an anonymous submitter attach the files
+     * they were just told were mandatory.
+     *
+     * Only minted when the form actually asks for files, so a form with no File
+     * question issues no upload capability at all. `/api/files` already knows
+     * how to accept it — it hashes what it is given and compares against
+     * `public_upload_token_hash` on the work order, with the expiry checked
+     * alongside — so nothing new is trusted here; this is the missing half of a
+     * handshake the file route was already written for.
+     *
+     * Thirty minutes: long enough to push a few phone videos over a shop's
+     * wifi, short enough that a token captured from a browser history is dead
+     * before it is useful. Only the HASH is stored, so a dump of the table
+     * cannot be turned back into a working upload grant.
+     */
+    /*
+     * WHERE THE ANSWER LANDS — the "Group for answers" setting, honoured.
+     *
+     * `stage` is what decides a job's group on this board, and this route used
+     * to hard-code "Incoming" regardless of what the panel said. So an operator
+     * could pick a group, see it saved, and every submission would still arrive
+     * somewhere else.
+     *
+     * The configured group is resolved to its `stage_key`, scoped to the form's
+     * own organisation so a stored id from another workspace resolves to
+     * nothing rather than to that workspace's group. Anything unresolvable —
+     * no setting, a deleted group, a group with no stage — falls back to
+     * "Incoming", which is the board's top group and the safe default: a job in
+     * the wrong group is recoverable, a job that failed to save is not.
+     */
+    let targetStage = "Incoming";
+    const configuredGroupId = record.config.features.board?.itemGroupId;
+    if (configuredGroupId) {
+      const [group] = await db
+        .select({ stageKey: maintenanceGroups.stageKey })
+        .from(maintenanceGroups)
+        .where(
+          and(
+            eq(maintenanceGroups.id, String(configuredGroupId)),
+            eq(maintenanceGroups.organisationId, record.organisationId),
+          ),
+        )
+        .limit(1);
+      if (group?.stageKey) targetStage = group.stageKey;
+    }
+
+    const wantsFiles = asked.some((question) => question.type === "File");
+    const uploadToken = wantsFiles ? crypto.randomUUID().replace(/-/g, "") : null;
+    const uploadTokenHash = uploadToken ? await sha256(uploadToken) : null;
+    const uploadTokenExpiresAt = uploadToken
+      ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
+      : null;
+
     const [created] = await db
       .insert(maintenanceRequests)
       .values({
@@ -215,10 +304,10 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         engineer: engineer || "Other",
         tier: priority === "Urgent" ? 1 : priority === "Medium" ? 2 : 3,
         priority,
-        stage: "Incoming",
         status: "Pending Approval",
         contractor: null,
         assignee: null,
+        stage: targetStage,
         requestedAt,
         dueAt,
         completedAt: null,
@@ -228,8 +317,8 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         issueAttachmentCount: 0,
         completedAttachmentCount: 0,
         generalAttachmentCount: 0,
-        publicUploadTokenHash: null,
-        publicUploadTokenExpiresAt: null,
+        publicUploadTokenHash: uploadTokenHash,
+        publicUploadTokenExpiresAt: uploadTokenExpiresAt,
         commentCount: 0,
         /* Nobody signed in, so nobody is credited. */
         createdByEmail: null,
@@ -300,7 +389,14 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       .set({ responseCount: sql`${formConfigurations.responseCount} + 1` })
       .where(eq(formConfigurations.id, record.id));
 
-    return Response.json({ request: { id: created?.id ?? id } }, { status: 201 });
+    /*
+     * The plaintext token is returned exactly once, here, and never stored or
+     * logged. The browser uses it immediately for the uploads and then drops it.
+     */
+    return Response.json(
+      { request: { id: created?.id ?? id }, uploadToken },
+      { status: 201 },
+    );
   } catch {
     return Response.json({ error: "Your request could not be submitted." }, { status: 503 });
   }

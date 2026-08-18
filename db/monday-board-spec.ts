@@ -818,6 +818,33 @@ export type FormQuestionOption = {
   active: boolean;
 };
 
+/**
+ * The per-question settings monday exposes under "Question settings".
+ *
+ * Every field is optional and every reader defaults it, so a question stored
+ * before this type existed is valid and behaves exactly as it did — which is
+ * what lets this be added without migrating the stored `config` blob.
+ *
+ * Deliberately a subset of monday's. These are the ones that change what a
+ * SUBMITTER sees or answers, which is the parity that matters here. Omitted on
+ * purpose: `labelLimitCount` (multi-select only, and we have no multi-select),
+ * `locationAutofilled` (no Location type), `prefixAutofilled` (no Phone type),
+ * `skipValidation` (no Link type) — all four belong to question types this
+ * product does not have, so adding the controls would mean adding dead ones.
+ */
+export type FormQuestionSettings = {
+  /** Value the field opens with. The submitter can still change it. */
+  defaultAnswer?: string | null;
+  /** Date questions: open on today's date. */
+  defaultCurrentDate?: boolean;
+  /** Date questions: ask for a time as well as a day. */
+  includeTime?: boolean;
+  /** Single-select: a dropdown, or the options laid out in full. */
+  display?: "Dropdown" | "Vertical" | "Horizontal";
+  /** Single-select: the order options are offered in. */
+  optionsOrder?: "Custom" | "Alphabetical";
+};
+
 export type FormQuestion = {
   id: string;
   /** monday's own question type, kept verbatim so parity is checkable. */
@@ -839,6 +866,8 @@ export type FormQuestion = {
   options: FormQuestionOption[] | null;
   /** Set when the question only appears in answer to another one. */
   showIf: { questionId: string; equals: string[] } | null;
+  /** Optional; absent means "monday's defaults for this type". */
+  settings?: FormQuestionSettings;
 };
 
 export const maintenanceFormConfiguration = {

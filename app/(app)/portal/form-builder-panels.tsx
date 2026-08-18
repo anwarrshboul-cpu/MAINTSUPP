@@ -26,6 +26,8 @@ type PanelProps = {
   form: BuilderForm;
   patch: (patch: Record<string, unknown>) => void;
   busy: boolean;
+  /** The board's real groups, for "Group for answers". */
+  groups?: Array<{ id: string; name: string }>;
 };
 
 /* ── A few shared controls ───────────────────────────────────────────────── */
@@ -120,6 +122,22 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
     patch({ order: [...pageBlocks, ...order] });
   }
 
+  /**
+   * Merge one question's settings.
+   *
+   * Merged rather than replaced so setting "include time" cannot wipe "today
+   * as default" that was set a moment earlier — each control owns one key.
+   */
+  function setSetting(id: string, changes: Record<string, unknown>) {
+    patch({
+      questions: form.config.questions.map((question) =>
+        question.id === id
+          ? { ...question, settings: { ...(question.settings ?? {}), ...changes } }
+          : question,
+      ),
+    });
+  }
+
   function update(id: string, changes: Record<string, unknown>) {
     patch({
       questions: form.config.questions.map((question) =>
@@ -210,6 +228,94 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
               {question.description && (
                 <p className="form-edit__help">{question.description}</p>
               )}
+
+              {/*
+                QUESTION SETTINGS — monday's per-question panel, inline.
+                Every control here changes what a submitter sees, and each one
+                is rendered only for the question types it means anything for:
+                a "today as default" switch on a text question would be a
+                control that does nothing, which is the thing being fixed.
+              */}
+              <div className="form-edit__settings">
+                {(question.type === "Date" || question.type === "DateRange") && (
+                  <>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={question.settings?.defaultCurrentDate === true}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, { defaultCurrentDate: event.target.checked })
+                        }
+                      />
+                      Today as default
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={question.settings?.includeTime === true}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, { includeTime: event.target.checked })
+                        }
+                      />
+                      Include time
+                    </label>
+                  </>
+                )}
+
+                {question.type === "SingleSelect" && (
+                  <>
+                    <label className="form-edit__setting">
+                      <span>Display</span>
+                      <select
+                        value={question.settings?.display ?? "Dropdown"}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, {
+                            display: event.target.value as "Dropdown" | "Vertical" | "Horizontal",
+                          })
+                        }
+                      >
+                        <option value="Dropdown">Show options in a dropdown</option>
+                        <option value="Vertical">List the options</option>
+                        <option value="Horizontal">List the options side by side</option>
+                      </select>
+                    </label>
+                    <label className="form-edit__setting">
+                      <span>Options order</span>
+                      <select
+                        value={question.settings?.optionsOrder ?? "Custom"}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, {
+                            optionsOrder: event.target.value as "Custom" | "Alphabetical",
+                          })
+                        }
+                      >
+                        <option value="Custom">Custom</option>
+                        <option value="Alphabetical">Alphabetical</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+
+                {(question.type === "ShortText" || question.type === "LongText") && (
+                  <label className="form-edit__setting form-edit__setting--wide">
+                    <span>Pre-fill value</span>
+                    <input
+                      type="text"
+                      value={question.settings?.defaultAnswer ?? ""}
+                      placeholder="Leave empty for none"
+                      maxLength={200}
+                      disabled={busy || !question.visible}
+                      onChange={(event) =>
+                        setSetting(question.id, { defaultAnswer: event.target.value || null })
+                      }
+                    />
+                  </label>
+                )}
+              </div>
 
               <div className="form-edit__cardfoot">
                 <label>
@@ -444,7 +550,7 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
 
 /* ── Settings ────────────────────────────────────────────────────────────── */
 
-export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
+export function FormSettingsPanel({ form, patch, busy, groups = [] }: PanelProps) {
   const { features } = form.config;
 
   function setFeatures(changes: Record<string, unknown>) {
@@ -647,12 +753,31 @@ export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
             setFeatures({ board: { ...features.board, allowCreatingItems: next } })
           }
         />
-        <p className="form-panel__static">
-          <strong>Group for answers</strong>
-          <span>
-            New answers go to <em>Incoming requests</em>, the board&rsquo;s top group.
-          </span>
-        </p>
+        {/*
+          A real selector. This was a paragraph asserting that answers go to
+          "Incoming requests" — which was true only because the submit route
+          hard-coded it and never read the setting at all.
+        */}
+        <label className="form-panel__field">
+          <span>Group for answers</span>
+          <select
+            value={features.board.itemGroupId ?? ""}
+            disabled={busy || !groups.length}
+            onChange={(event) =>
+              setFeatures({
+                board: { ...features.board, itemGroupId: event.target.value || null },
+              })
+            }
+          >
+            {/* Empty means "the board's top group" — the documented default. */}
+            <option value="">Incoming requests (default)</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </Section>
     </div>
   );
