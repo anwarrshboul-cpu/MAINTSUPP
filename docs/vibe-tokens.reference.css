@@ -1,0 +1,307 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * VIBE DESIGN TOKENS — REFERENCE ONLY. NOT LOADED. DO NOT IMPORT THIS FILE.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * WHAT THIS IS
+ *
+ * monday.com's UI is built on Vibe, their open-source design system. Vibe
+ * publishes its design tokens as real CSS custom properties, so the numbers
+ * below are not measured off a screenshot — they are the values monday's own
+ * components resolve at runtime.
+ *
+ * WHY IT EXISTS
+ *
+ * MAINTSUPP reproduces monday's board. The DATA side of that parity is exact:
+ * columns, status labels, status hex colours, groups and forms all come from
+ * monday's API. The VISUAL side was not. Spacing, row heights, radii, shadows
+ * and — most of all — every animation were inferred by eye and corrected
+ * against screenshots. Screenshots recover geometry reasonably well. They
+ * recover MOTION not at all: you cannot read a duration or an easing curve off
+ * a still image, which is why app/globals.css currently animates with a dozen
+ * unrelated durations (120/130/140/150/160/170/180/200/220ms) and, apart from a
+ * single hand-written curve in media-viewer.css, no easing function other than
+ * the CSS `ease` default. Those numbers were guesses. The ones below are facts.
+ *
+ * This file is a REFERENCE, not a replacement. It is deliberately inert:
+ * nothing imports it, and it defines no selector that could win a cascade. Its
+ * job is to be the thing you check a value against before changing one, and to
+ * record where that value came from so the next person does not have to redo
+ * this archaeology.
+ *
+ * PROVENANCE — where these came from, exactly
+ *
+ *   Package  @vibe/core, version 4.5.8 (npm `latest` at time of capture)
+ *   File     dist/tokens/tokens.css
+ *            — this is precisely what `import "@vibe/core/tokens"` resolves to;
+ *              confirmed by reading the package's own `exports` map, which
+ *              declares "./tokens" => "./dist/tokens/tokens.css". The path was
+ *              resolved from the manifest rather than assumed.
+ *   URL      https://cdn.jsdelivr.net/npm/@vibe/core@4.5.8/dist/tokens/tokens.css
+ *   Captured 2026-08-18
+ *
+ * The shipped file is minified onto one line. Every value below was parsed out
+ * of it programmatically, not retyped, then cross-checked against the
+ * UNMINIFIED sources in the sibling package @vibe/style@4.1.0 — src/motion.scss,
+ * src/spacing.scss, src/border-radius.scss — which are the human-authored
+ * originals of the same tokens and which agree with the built file exactly.
+ * Two independent published artefacts, same numbers.
+ *
+ * WHAT IS OMITTED, AND WHY
+ *
+ * Vibe's tokens.css defines 332 custom properties. 151 of them are colours.
+ * NONE of those colours are reproduced here. MAINTSUPP's palette is tuned for
+ * WCAG AA in both themes and is verified at zero contrast failures by
+ * tests/stage-twentysix-contrast.test.mjs; importing monday's colour ramp would
+ * undo that work for no parity gain the product actually needs. What is kept
+ * below is the non-colour, structural half — the half that was guessed.
+ *
+ * The values here (8px, cubic-bezier(0, 0, 0.35, 1), 400) are facts about a
+ * published interface, quoted for comparison. This is not a copy of Vibe's
+ * stylesheet: the colour system, the component rules and the theme machinery
+ * that make up the bulk of that package are not here.
+ *
+ * ─── HOW TO READ THE `--vibe-` PREFIX ──────────────────────────────────────
+ *
+ * Vibe's real token names are given in the trailing comment on each line. The
+ * declarations themselves are prefixed `--vibe-` purely so that if this file is
+ * ever imported BY ACCIDENT it cannot collide with, or quietly redefine, a
+ * MAINTSUPP token or a genuine Vibe token. Quote the real name, not the
+ * prefixed one, when talking to anyone outside this repo.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * 1. MOTION — the section this file was really written for
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Vibe splits duration into two intents, and the split is the useful part:
+ *
+ *   PRODUCTIVE (70/100/150ms) — feedback on something the user just did. A
+ *   hover, a press, a checkbox, a cell focus ring. Short enough to read as
+ *   "the UI kept up" rather than as an animation. monday uses these for
+ *   basically everything on a board row, which is the densest, most repeated
+ *   surface in the product — a 200ms hover repeated down 36px rows feels
+ *   sluggish in a way a single 200ms hover does not.
+ *
+ *   EXPRESSIVE (250/400ms) — something entering or leaving that the user
+ *   should notice and track: a dialog, a drawer, a toast, a panel expanding.
+ *   Long enough to show direction and origin.
+ *
+ * The four curves are NOT interchangeable, and this is the distinction our CSS
+ * currently has no expression of at all:
+ *
+ *   enter      (0, 0, 0.35, 1)   decelerate — starts at full speed, eases to
+ *                                rest. For things ARRIVING. The eye tracks the
+ *                                landing, so the end is what needs softening.
+ *   exit       (0.4, 0, 1, 1)    accelerate — eases in, leaves at full speed.
+ *                                For things LEAVING. Nobody needs to watch a
+ *                                dismissal decelerate; getting out of the way
+ *                                quickly is the courtesy.
+ *   transition (0.4, 0, 0.2, 1)  standard ease-in-out, for a change BETWEEN
+ *                                two on-screen states (colour, size, position)
+ *                                where nothing enters or leaves.
+ *   emphasize  (0, 0, 0.2, 1.4)  overshoots past the target (y > 1) and settles
+ *                                back. Deliberate attention-drawing only — a
+ *                                success tick, a newly created row. Applying it
+ *                                to routine hovers would make the board twitch.
+ */
+:root {
+  --vibe-motion-productive-short: 70ms;    /* --motion-productive-short  */
+  --vibe-motion-productive-medium: 100ms;  /* --motion-productive-medium */
+  --vibe-motion-productive-long: 150ms;    /* --motion-productive-long   */
+  --vibe-motion-expressive-short: 250ms;   /* --motion-expressive-short  */
+  --vibe-motion-expressive-long: 400ms;    /* --motion-expressive-long   */
+
+  --vibe-motion-timing-enter: cubic-bezier(0, 0, 0.35, 1);       /* --motion-timing-enter      */
+  --vibe-motion-timing-exit: cubic-bezier(0.4, 0, 1, 1);         /* --motion-timing-exit       */
+  --vibe-motion-timing-transition: cubic-bezier(0.4, 0, 0.2, 1); /* --motion-timing-transition */
+  --vibe-motion-timing-emphasize: cubic-bezier(0, 0, 0.2, 1.4);  /* --motion-timing-emphasize  */
+
+  /* Vibe aliases its expand/collapse animation to the enter curve rather than
+     giving it a value of its own — worth knowing, because it means group
+     expand on a monday board is the DECELERATE curve, not ease-in-out. */
+  --vibe-expand-animation-timing: var(--vibe-motion-timing-enter); /* --expand-animation-timing */
+}
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * 2. SPACING
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * A 4px base, doubling loosely: 2, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80.
+ * Note what is ABSENT — there is no 6, 10, 14, 18, 28, 36. A value like 13px or
+ * 18px is off-scale by construction, not by accident.
+ *
+ * The token name IS the pixel value, so there is no size-name indirection to
+ * learn (no "sm/md/lg" layer). MAINTSUPP has no spacing scale at all today —
+ * padding and gap values are written as literals throughout — so this is a
+ * scale to measure against, not one we currently have a counterpart for.
+ */
+:root {
+  --vibe-space-2: 2px;    /* --space-2  */
+  --vibe-space-4: 4px;    /* --space-4  */
+  --vibe-space-8: 8px;    /* --space-8  */
+  --vibe-space-12: 12px;  /* --space-12 */
+  --vibe-space-16: 16px;  /* --space-16 */
+  --vibe-space-20: 20px;  /* --space-20 */
+  --vibe-space-24: 24px;  /* --space-24 */
+  --vibe-space-32: 32px;  /* --space-32 */
+  --vibe-space-40: 40px;  /* --space-40 */
+  --vibe-space-48: 48px;  /* --space-48 */
+  --vibe-space-64: 64px;  /* --space-64 */
+  --vibe-space-80: 80px;  /* --space-80 */
+}
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * 3. BORDER RADIUS AND BORDER
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Four steps, and only three of them are named. 12px exists as a raw value but
+ * has no semantic alias — Vibe's own components reach for small/medium/big.
+ *
+ * The ceiling is the interesting fact: monday's largest radius is 16px. There
+ * is nothing above it, so any surface of ours rounder than 16px is rounder than
+ * anything monday draws.
+ */
+:root {
+  --vibe-border-radius-4: 4px;    /* --border-radius-4  */
+  --vibe-border-radius-8: 8px;    /* --border-radius-8  */
+  --vibe-border-radius-12: 12px;  /* --border-radius-12 */
+  --vibe-border-radius-16: 16px;  /* --border-radius-16 */
+
+  --vibe-border-radius-small: 4px;   /* --border-radius-small  → --border-radius-4  */
+  --vibe-border-radius-medium: 8px;  /* --border-radius-medium → --border-radius-8  */
+  --vibe-border-radius-big: 16px;    /* --border-radius-big    → --border-radius-16 */
+
+  --vibe-border-width: 1px;      /* --border-width */
+  --vibe-border-style: solid;    /* --border-style */
+}
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * 4. ELEVATION / SHADOWS
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Four steps. Vibe restates all four per theme, changing only the shadow
+ * COLOUR, never its geometry — the same offsets and blurs are used in light and
+ * dark, but dark leans on a near-black navy at higher alpha rather than
+ * increasing the spread. That is the transferable idea here even if the exact
+ * rgba values are not: elevation geometry is theme-invariant.
+ *
+ * A note for anyone grepping Vibe's file: `--box-shadow-mediun` [sic] is a real
+ * published token, a misspelling kept alongside the correct `--box-shadow-medium`
+ * presumably for back-compat. It is not reproduced here; do not adopt it.
+ */
+:root {
+  /* Light theme — Vibe's `.light-app-theme, :root` block */
+  --vibe-box-shadow-xs: 0px 4px 6px -4px rgba(0, 0, 0, 0.1);   /* --box-shadow-xs     */
+  --vibe-box-shadow-small: 0px 4px 8px rgba(0, 0, 0, 0.2);     /* --box-shadow-small  */
+  --vibe-box-shadow-medium: 0px 6px 20px rgba(0, 0, 0, 0.2);   /* --box-shadow-medium */
+  --vibe-box-shadow-large: 0px 15px 50px rgba(0, 0, 0, 0.3);   /* --box-shadow-large  */
+
+  /* Dark theme — Vibe's `.dark-app-theme` block. Same geometry, navy-black at
+     a flat 0.5 alpha across all four steps. */
+  --vibe-box-shadow-xs-dark: 0px 4px 6px -4px rgba(9, 11, 25, 0.5);
+  --vibe-box-shadow-small-dark: 0px 4px 8px rgba(9, 11, 25, 0.5);
+  --vibe-box-shadow-medium-dark: 0px 6px 20px rgba(9, 11, 25, 0.5);
+  --vibe-box-shadow-large-dark: 0px 15px 50px rgba(9, 11, 25, 0.5);
+}
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * 5. TYPOGRAPHY
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Two things to notice before using any of this.
+ *
+ * FIRST, Vibe ships two overlapping type systems in the same file. The older
+ * numbered ladder (--font-size-10 … -60) has collisions and oddities baked in
+ * for back-compat: sizes 10 and 20 are BOTH 14px, and line-heights 20, 30 and
+ * 40 are all 24px. The newer named ladder (--font-h1-* / --font-text1-3-*) is
+ * clean, self-consistent, and is what to compare against. Both are recorded
+ * below because both are live, but prefer the named one.
+ *
+ * SECOND, the two ladders DISAGREE. Old --font-size-h1 is 30px/42px; new
+ * --font-h1-bold is 32px/40px. Old h3 is 24px; new h3 is 18px. They are not
+ * two spellings of one scale. Do not mix them.
+ *
+ * The board-relevant row is `text2` — 14px/20px — which is the size monday
+ * renders board cell text at, and which MAINTSUPP already matches at 14px.
+ */
+:root {
+  /* Font stacks. MAINTSUPP deliberately does NOT use these — see the mapping
+     doc; Inter/Manrope is a brand decision, not a parity defect. Recorded so
+     that "what font is monday actually in" has a documented answer: Figtree for
+     body, Poppins for headings. */
+  --vibe-font-family: Figtree, Roboto, "Noto Sans Hebrew", "Noto Kufi Arabic", "Noto Sans JP", sans-serif;        /* --font-family       */
+  --vibe-title-font-family: Poppins, Roboto, "Noto Sans Hebrew", "Noto Kufi Arabic", "Noto Sans JP", sans-serif;  /* --title-font-family */
+
+  /* Weights. Note the ceiling: Vibe's named --font-weight-bold is 500, not 700.
+     monday's "bold" in the token layer is what most systems call medium. The
+     newer composite tokens below break this rule and use real 600/700, which is
+     the clearest sign the numbered ladder is the legacy one. */
+  --vibe-font-weight-very-light: 200;  /* --font-weight-very-light */
+  --vibe-font-weight-light: 300;       /* --font-weight-light      */
+  --vibe-font-weight-normal: 400;      /* --font-weight-normal     */
+  --vibe-font-weight-bold: 500;        /* --font-weight-bold       */
+
+  /* ---- Named ladder (preferred). Values are `weight size/line-height`. ---- */
+  --vibe-font-h1-bold: 700 32px/40px;    /* --font-h1-bold    */
+  --vibe-font-h1-medium: 600 32px/40px;  /* --font-h1-medium  */
+  --vibe-font-h1-normal: 500 32px/40px;  /* --font-h1-normal  */
+  --vibe-font-h1-light: 300 32px/40px;   /* --font-h1-light   */
+  --vibe-font-h2-bold: 700 24px/30px;    /* --font-h2-bold    */
+  --vibe-font-h2-medium: 600 24px/30px;  /* --font-h2-medium  */
+  --vibe-font-h2-normal: 500 24px/30px;  /* --font-h2-normal  */
+  --vibe-font-h2-light: 300 24px/30px;   /* --font-h2-light   */
+  --vibe-font-h3-bold: 700 18px/24px;    /* --font-h3-bold    */
+  --vibe-font-h3-medium: 600 18px/24px;  /* --font-h3-medium  */
+  --vibe-font-h3-normal: 500 18px/24px;  /* --font-h3-normal  */
+  --vibe-font-h3-light: 300 18px/24px;   /* --font-h3-light   */
+  --vibe-font-text1-bold: 700 16px/22px;    /* --font-text1-bold   */
+  --vibe-font-text1-medium: 600 16px/22px;  /* --font-text1-medium */
+  --vibe-font-text1-normal: 400 16px/22px;  /* --font-text1-normal */
+  --vibe-font-text2-bold: 700 14px/20px;    /* --font-text2-bold   ← board cells */
+  --vibe-font-text2-medium: 600 14px/20px;  /* --font-text2-medium */
+  --vibe-font-text2-normal: 400 14px/20px;  /* --font-text2-normal */
+  --vibe-font-text3-bold: 700 12px/16px;    /* --font-text3-bold   */
+  --vibe-font-text3-medium: 600 12px/16px;  /* --font-text3-medium */
+  --vibe-font-text3-normal: 400 12px/16px;  /* --font-text3-normal */
+
+  /* ---- Numbered ladder (legacy, collisions intact — see note above). ---- */
+  --vibe-font-size-10: 14px;   /* --font-size-10, line-height 18px */
+  --vibe-font-size-20: 14px;   /* --font-size-20, line-height 24px */
+  --vibe-font-size-30: 16px;   /* --font-size-30, line-height 24px */
+  --vibe-font-size-40: 18px;   /* --font-size-40, line-height 24px */
+  --vibe-font-size-50: 24px;   /* --font-size-50, line-height 32px */
+  --vibe-font-size-60: 30px;   /* --font-size-60, line-height 42px */
+
+  /* Letter-spacing exists ONLY for headings, and only negative. Body text is
+     tracked at 0 — there is no --letter-spacing for text1/2/3 at all. */
+  --vibe-letter-spacing-h1: -0.5px;  /* --letter-spacing-h1-{bold,normal,light} */
+  --vibe-letter-spacing-h2: -0.1px;  /* --letter-spacing-h2-{bold,normal,light} */
+  --vibe-letter-spacing-h3: -0.1px;  /* --letter-spacing-h3-{bold,normal,light} */
+}
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * 6. Z-INDEX / LAYERING — VIBE PUBLISHES NONE
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * This is a finding, not an omission on our part. It was checked, not assumed:
+ *
+ *   · All 332 custom properties in @vibe/core@4.5.8/dist/tokens/tokens.css were
+ *     enumerated and grouped by prefix. There is no `--z-*` group, and a direct
+ *     search for any property name containing "z-index" or "zindex" returns
+ *     nothing.
+ *   · The sibling package @vibe/style@4.1.0 — which carries the SCSS sources,
+ *     mixins and theme files — was searched the same way. Also nothing.
+ *
+ * Vibe manages layering inside its React components (portals, and a
+ * `stackingContext`-style prop on its dialog/popover primitives) rather than
+ * exposing a public scale. There is therefore NO external value to check our
+ * --z-sticky … --z-toast ladder against, and no parity argument for changing
+ * it. Ours stays as the single source of truth for layering in this app.
+ */

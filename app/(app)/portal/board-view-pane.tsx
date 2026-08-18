@@ -25,11 +25,11 @@ import type { BoardView } from "./board-chrome";
 import { Icon } from "../../components";
 import {
   CalendarView,
-  FormView,
   GalleryView,
   KanbanView,
   ReportsView,
 } from "./views/board-views";
+import FormBuilder from "./form-builder";
 import { ChartView } from "./views/chart-and-filters";
 import { FixTrackerView } from "./views/fix-tracker";
 import {
@@ -119,7 +119,13 @@ export default function BoardViewPane({
         <GalleryView items={items} onOpen={onOpenItem} />
       )}
       {activeView.type === "reports" && <ReportsView items={items} />}
-      {activeView.type === "form" && <FormView onSubmitted={onFormSubmitted} />}
+      {/*
+        The Form tab is the live form wrapped in monday's builder chrome. The
+        builder draws `FormView` itself for the view and preview modes, so the
+        questions are unchanged — what is added is the toolbar above them, and
+        that toolbar is hidden below 768px so a phone gets the form alone.
+      */}
+      {activeView.type === "form" && <FormBuilder onSubmitted={onFormSubmitted} />}
       {/*
         monday's four other tabs. `flat-table` is monday's second table view
         (9116879) and is deliberately group-free — that is the whole

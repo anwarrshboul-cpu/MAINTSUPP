@@ -751,3 +751,510 @@ export const maintenanceFormSpec = {
     { key: "priority", label: "Status", type: "select", required: true },
   ],
 } as const;
+
+
+/* ── The WorkForms configuration in full — monday form 11280606 ───────────── */
+
+/**
+ * THE COMPLETE form configuration, read back from monday's API rather than
+ * inferred from a screenshot.
+ *
+ * WHY THIS EXISTS ALONGSIDE `maintenanceFormSpec` ABOVE, RATHER THAN REPLACING IT
+ *
+ * They answer different questions and both are load-bearing:
+ *
+ *   · `maintenanceFormSpec` is the DISTILLED form — the nine questions this
+ *     product actually asks, in our own vocabulary (`storeLocation`, `priority`),
+ *     keyed the way `FormResultsView` reads answers back off a job. It is the
+ *     contract between the form and the rest of the app.
+ *   · `maintenanceFormConfiguration` (below) is monday's form AS CONFIGURED —
+ *     all nineteen questions including the ten hidden ones, every feature flag,
+ *     and the whole appearance block. It is the seed for the editable,
+ *     DB-backed form config that the form builder writes to.
+ *
+ * Collapsing them would lose information in both directions. The distilled spec
+ * has no notion of a hidden "Cost of Works" question; the full config has no
+ * notion of our `storeLocation` key. So the builder edits a copy of THIS, and
+ * the distilled spec stays the app's stable internal contract.
+ *
+ * PROVENANCE
+ *
+ *   Board    Maintenance, 1139774521 (read-only reference)
+ *   View     646339 "Form" (FormBoardView)
+ *   Form     id 11280606 (its share token is deliberately not recorded — see
+ *            the note on the `monday` field below)
+ *   Read     2026-08-18, via the monday API. Nothing was written to the board.
+ *
+ * TWO THINGS THE API REVEALED THAT THE SCREENSHOTS COULD NOT
+ *
+ *  1. `order` below is monday's own `sortedQuestionsList`, which is NOT the
+ *     order the questions come back in. The page block leads, then the nine
+ *     visible questions, then the ten hidden ones. Rendering the questions
+ *     array as-returned would put "Status" in the wrong place.
+ *
+ *  2. "Handyman Required" (`short_text3`) is configured on the VIEW — it holds
+ *     conditional rule 8874e83b-03e1-0324-f6a1-51fedafadfec, which fires when
+ *     Engineer Required is answered "0" (Handyman) — but it is ABSENT from
+ *     `sortedQuestionsList`, so monday's live form does not render it. Our
+ *     distilled spec does render it, deliberately: the follow-up detail is the
+ *     point of asking, and it is appended to the description on submit. That is
+ *     a considered divergence, recorded here so nobody "fixes" it later.
+ *
+ * The stale `closeDate.date` of 2023-10-13 is real, and is left exactly as read.
+ * The feature is disabled, so the date is inert — it is the residue of a close
+ * date somebody set three years ago and then switched off.
+ *
+ * The logo is deliberately NOT monday's Cloudinary URL. The original
+ * (res.cloudinary.com/monday-platform-eu/…/1695317103408_2a981549-….jpg) is
+ * recorded here for reference only; hotlinking another platform's CDN from our
+ * own public form would be fragile and would leak a monday URL to every
+ * submitter. `logo.url: null` means "draw the app's own BrandMark", and the
+ * Design panel accepts a replacement.
+ */
+export type FormQuestionOption = {
+  label: string;
+  value: string;
+  visible: boolean;
+  active: boolean;
+};
+
+export type FormQuestion = {
+  id: string;
+  /** monday's own question type, kept verbatim so parity is checkable. */
+  type:
+    | "PAGE_BLOCK"
+    | "SingleSelect"
+    | "ShortText"
+    | "LongText"
+    | "Number"
+    | "Date"
+    | "DateRange"
+    | "File"
+    | "People"
+    | "Subitems";
+  title: string;
+  description: string | null;
+  visible: boolean;
+  required: boolean;
+  options: FormQuestionOption[] | null;
+  /** Set when the question only appears in answer to another one. */
+  showIf: { questionId: string; equals: string[] } | null;
+};
+
+export const maintenanceFormConfiguration = {
+  /*
+   * WHAT IS DELIBERATELY NOT RECORDED HERE
+   *
+   * monday's own form token and its wkf.ms short link are omitted, and this
+   * repository being PUBLIC is the whole reason.
+   *
+   * That pair is a live, working submission endpoint into the client's real
+   * Maintenance board — the one with 753 jobs on it. The form is configured as
+   * "public and available to anyone with the link", so the link is not secret,
+   * but it is unlisted, and committing it here would take it from unlisted to
+   * indexed and hand anyone a way to post junk onto a production board.
+   *
+   * The board and view ids stay because they identify WHICH configuration this
+   * is, they are already committed across this codebase, and neither of them
+   * can be submitted to. The form id is likewise inert without the token.
+   *
+   * To re-read the live configuration, fetch the form token from the board's
+   * Form view URL in monday and pass it to the API. It is intentionally a step
+   * somebody has to take deliberately.
+   */
+  monday: {
+    formId: 11280606,
+    boardId: "1139774521",
+    viewId: "646339",
+  },
+  title: "Maintenance Request",
+  description: "Please fill up 1 form for each repair requested",
+  active: true,
+  type: "standard",
+  isAnonymous: false,
+
+  /** monday's `sortedQuestionsList` — the order the form is actually drawn in. */
+  order: [
+    "page_block__classic_default",
+    "single_selecty9rcyhe",
+    "short_text64",
+    "numbertb4g1z46",
+    "date",
+    "single_select",
+    "short_text",
+    "upload_file",
+    "status",
+    "status1",
+    "person",
+    "dup__of_upload_pictures_of_work_needed",
+    "numbers",
+    "text",
+    "timeline",
+    "date_mkmts6wz",
+    "date2",
+    "subitems",
+    "text6",
+  ],
+
+  questions: [
+    {
+      id: "page_block__classic_default",
+      type: "PAGE_BLOCK",
+      title: "Page",
+      description: "",
+      visible: true,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "single_selecty9rcyhe",
+      type: "SingleSelect",
+      title: "Location",
+      description: null,
+      visible: true,
+      required: true,
+      /*
+       * The 21 live stores. Note the gap at value 5 — a store was deleted and
+       * monday does not renumber, so the values are not a 0..20 range. Anything
+       * matching on index rather than on `value` would mis-map every store from
+       * Brighton onwards.
+       */
+      options: [
+        { label: "Birmingham – Bullring", value: "0", visible: true, active: true },
+        { label: "Solihull – Touchwood", value: "1", visible: true, active: true },
+        { label: "Westfield – White City", value: "2", visible: true, active: true },
+        { label: "Aldgate – Whitechapel Road", value: "3", visible: true, active: true },
+        { label: "Brent Cross – Shopping Centre", value: "4", visible: true, active: true },
+        { label: "Brighton – Churchill Square", value: "6", visible: true, active: true },
+        { label: "Bristol – Cabot Circus", value: "7", visible: true, active: true },
+        { label: "Cardiff – Grand Arcade", value: "8", visible: true, active: true },
+        { label: "Dudley – Merry Hill", value: "9", visible: true, active: true },
+        { label: "Glasgow – Silverburn", value: "10", visible: true, active: true },
+        { label: "Greenhithe – Bluewater", value: "11", visible: true, active: true },
+        { label: "Manchester – Arndale", value: "12", visible: true, active: true },
+        { label: "Manchester – Trafford Centre", value: "13", visible: true, active: true },
+        { label: "Milton Keynes – The Centre", value: "14", visible: true, active: true },
+        { label: "Nottingham – Victoria Centre", value: "15", visible: true, active: true },
+        { label: "Reading – The Oracle", value: "16", visible: true, active: true },
+        { label: "Sheffield – Meadow Hall", value: "17", visible: true, active: true },
+        { label: "Southall – The Broadway", value: "18", visible: true, active: true },
+        { label: "Watford – Atria", value: "19", visible: true, active: true },
+        { label: "Westfield – Stratford", value: "101", visible: true, active: true },
+        { label: "Wood Green – High Road", value: "102", visible: true, active: true },
+      ],
+      showIf: null,
+    },
+    {
+      id: "short_text64",
+      type: "ShortText",
+      title: "Manager",
+      description: null,
+      visible: true,
+      required: true,
+      options: null,
+      showIf: null,
+    },
+    {
+      /*
+       * A Number on monday, not a phone field — WorkForms has no telephone type.
+       * Our own form uses `inputMode="tel"`, which is a better keyboard on a
+       * phone and still accepts the same answers.
+       */
+      id: "numbertb4g1z46",
+      type: "Number",
+      title: "Contact number",
+      description: null,
+      visible: true,
+      required: true,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "date",
+      type: "Date",
+      title: "Date Requested",
+      description: null,
+      visible: true,
+      required: true,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "single_select",
+      type: "SingleSelect",
+      title: "Engineer Required",
+      description: null,
+      visible: true,
+      required: true,
+      /* "Plummer" is monday's spelling and is left as configured. */
+      options: [
+        { label: "Plummer", value: "2", visible: true, active: true },
+        { label: "Electrician", value: "1", visible: true, active: true },
+        { label: "Handyman", value: "0", visible: true, active: true },
+        { label: "Other", value: "3", visible: true, active: true },
+      ],
+      showIf: null,
+    },
+    {
+      /*
+       * A ShortText on monday despite being the long free-text answer. The
+       * description carries HTML because WorkForms stores rich text; it is
+       * rendered as plain text here rather than injected as markup.
+       */
+      id: "short_text",
+      type: "ShortText",
+      title: "Description of Works to be done",
+      description:
+        "Please submit only one issue or request per ticket. Do not combine or mention more than one issue in a single request.",
+      visible: true,
+      required: true,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "upload_file",
+      type: "File",
+      title: "Pictures of Maintenance Issue",
+      description:
+        "Please note you must upload pictures and videos of issues. Any request without clear pictures and videos will be declined.",
+      visible: true,
+      required: true,
+      options: null,
+      showIf: null,
+    },
+    {
+      /*
+       * The PRIORITY column, titled "Status" on the form. The blank fourth
+       * option is real — an unnamed purple label somebody created on the board.
+       */
+      id: "status",
+      type: "SingleSelect",
+      title: "Status",
+      description: null,
+      visible: true,
+      required: true,
+      options: [
+        { label: "Medium", value: "0", visible: true, active: true },
+        { label: "", value: "4", visible: true, active: true },
+        { label: "Low", value: "1", visible: true, active: true },
+        { label: "Urgent", value: "2", visible: true, active: true },
+      ],
+      showIf: null,
+    },
+    {
+      /*
+       * The workflow status — 23 labels, hidden on the form because a submitter
+       * has no business setting it. Kept so the builder can show it as a hidden
+       * question, exactly as monday's Edit panel does.
+       */
+      id: "status1",
+      type: "SingleSelect",
+      title: "Status",
+      description: null,
+      visible: false,
+      required: false,
+      options: [
+        { label: "Pending Approval", value: "12", visible: true, active: true },
+        { label: "Pending Scheduling", value: "0", visible: true, active: true },
+        { label: "Job Scheduled", value: "8", visible: true, active: true },
+        { label: "Job In Progress", value: "7", visible: true, active: true },
+        { label: "Job Completed", value: "1", visible: true, active: true },
+        { label: "Blocked - Awaiting Response", value: "2", visible: true, active: true },
+        { label: "Awaiting Landlord Approval", value: "5", visible: true, active: true },
+        { label: "Waiting for parts", value: "6", visible: true, active: true },
+        { label: "Health And Safety Hold", value: "9", visible: true, active: true },
+        { label: "Waiting for payment", value: "10", visible: true, active: true },
+        { label: "Waiting for decisions", value: "11", visible: true, active: true },
+        { label: "Awaiting Access", value: "13", visible: true, active: true },
+        { label: "Escalated", value: "14", visible: true, active: true },
+        { label: "Major works", value: "4", visible: true, active: true },
+        { label: "Third Party Delay", value: "15", visible: true, active: true },
+        { label: "Quote requested", value: "16", visible: true, active: true },
+        {
+          label: "Quote Received (waiting for Approval)",
+          value: "3",
+          visible: true,
+          active: true,
+        },
+        { label: "Quote approved", value: "17", visible: true, active: true },
+        { label: "Quote rejected", value: "18", visible: true, active: true },
+        { label: "Deposit Invoice Received", value: "19", visible: true, active: true },
+        { label: "Deposit Invoice Paid", value: "102", visible: true, active: true },
+        { label: "Completion Invoice Received", value: "103", visible: true, active: true },
+        { label: "Completion Invoice Paid", value: "104", visible: true, active: true },
+      ],
+      showIf: null,
+    },
+    {
+      id: "person",
+      type: "People",
+      title: "Assigned To",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "dup__of_upload_pictures_of_work_needed",
+      type: "File",
+      title: "Picture of completed works",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "numbers",
+      type: "Number",
+      title: "Cost of Works",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "text",
+      type: "ShortText",
+      title: "Approved by",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "timeline",
+      type: "DateRange",
+      title: "Timeline",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "date_mkmts6wz",
+      type: "Date",
+      title: "Next Update",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "date2",
+      type: "Date",
+      title: "Date Completed",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "subitems",
+      type: "Subitems",
+      title: "Subitems",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+    {
+      id: "text6",
+      type: "ShortText",
+      title: "Invoice",
+      description: null,
+      visible: false,
+      required: false,
+      options: null,
+      showIf: null,
+    },
+  ] satisfies FormQuestion[],
+
+  /**
+   * The Settings panel, one field per toggle. Every value is as monday has it
+   * today, so a fresh database starts where the real form stands.
+   */
+  features: {
+    /** "Require login to monday.com" — internal-only forms. */
+    isInternal: true,
+    reCaptchaChallenge: false,
+    /*
+     * Enabled, but monday's own wkf.ms address is not carried — see the note
+     * above. It would be dead data anyway: `presentedShareUrl` builds the short
+     * link from THIS deployment's own `short_token` and never reads this field.
+     */
+    shortenedLink: { enabled: true, url: null as string | null },
+    password: { enabled: false },
+    /** "Save as draft". */
+    draftSubmission: { enabled: false },
+    requireLogin: { enabled: false, redirectToLogin: false },
+    responseLimit: { enabled: false, limit: null as number | null },
+    /** Disabled, but the date it was last set to survives. See the note above. */
+    closeDate: { enabled: false, date: "2023-10-13" as string | null },
+    /** The Welcome page — off, so the form opens straight on question one. */
+    preSubmissionView: {
+      enabled: false,
+      title: null as string | null,
+      description: null as string | null,
+      startButton: { text: null as string | null },
+    },
+    afterSubmissionView: {
+      title: null as string | null,
+      description: null as string | null,
+      redirectAfterSubmission: { enabled: false, redirectUrl: null as string | null },
+      /** "Submit multiple forms" — the "Submit another response" button. */
+      allowResubmit: true,
+      showSuccessImage: true,
+      allowEditSubmission: false,
+      /** "Response viewing". */
+      allowViewSubmission: true,
+    },
+    board: {
+      /** null means the board's top group — "Incoming requests". */
+      itemGroupId: null as string | null,
+      includeNameQuestion: false,
+      includeUpdateQuestion: false,
+      syncQuestionAndColumnsTitles: false,
+      /** "Allow creating items via form". */
+      allowCreatingItems: true,
+    },
+    aiTranslate: { enabled: false },
+  },
+
+  /** The Design panel. */
+  appearance: {
+    /** "monday.com Branding", inverted: monday stores hide, the toggle shows. */
+    hideBranding: true,
+    showProgressBar: false,
+    primaryColor: null as string | null,
+    layout: {
+      type: "CARD" as "CARD" | "CLASSIC",
+      alignment: "Center" as "Left" | "Center" | "Right",
+      direction: "LtR" as "LtR" | "RtL",
+    },
+    background: { type: "None" as "None" | "Color" | "Image", value: null as string | null },
+    text: {
+      font: "Poppins",
+      color: null as string | null,
+      size: "Medium" as "Small" | "Medium" | "Large",
+    },
+    logo: {
+      position: "Auto" as "Auto" | "Left" | "Center" | "Right",
+      /** null draws the app's own BrandMark — see the note above. */
+      url: null as string | null,
+      size: "Medium" as "Small" | "Medium" | "Large",
+    },
+    submitButton: { text: null as string | null },
+  },
+
+  accessibility: { language: "English (English)", logoAltText: null as string | null },
+  tags: [] as string[],
+};

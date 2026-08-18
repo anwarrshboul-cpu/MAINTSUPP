@@ -1,0 +1,299 @@
+/*
+ * The shared form page — what somebody sees when they open a /f/:token link.
+ *
+ * SELF-CONTAINED ON PURPOSE. This route is in the (public) group and is opened
+ * by people with no account, frequently on a phone, and it must not depend on
+ * the portal's stylesheets loading. So it defines its own small palette on
+ * `.pf` rather than reaching for the app tokens — and it defines it in BOTH
+ * themes, because a visitor's device decides the theme and there is no
+ * data-theme attribute out here to switch on.
+ *
+ * The four `--pf-*` values below are the DEFAULTS. The Design panel overrides
+ * them per form as inline custom properties on the same element, which is why
+ * they are custom properties rather than plain declarations.
+ *
+ * Contrast: --pf-ink on --pf-card is 15.9:1 light and 14.2:1 dark; --pf-muted
+ * on --pf-card is 6.2:1 and 6.4:1. Both clear AA for normal text with room to
+ * spare, which matters because an operator can tint the accent but not these.
+ */
+
+.pf {
+  --pf-canvas: #f4f7f8;
+  --pf-card: #ffffff;
+  --pf-ink: #132537;
+  --pf-muted: #4e5f6f;
+  --pf-line: #dce4e9;
+  --pf-accent: #0b7a72;
+  --pf-on-accent: #ffffff;
+  --pf-danger: #bc3a3a;
+  --pf-font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  min-height: 100vh;
+  margin: 0;
+  padding: 24px 16px 40px;
+  background: var(--pf-canvas);
+  color: var(--pf-ink);
+  font-family: var(--pf-font);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/*
+ * The dark skin. No `data-theme` here — a public page has no theme switch, so
+ * the device's own preference is the only signal, and every value the light
+ * block sets is restated rather than only some of them. A half-restated
+ * palette is what puts ink at 1.03:1 on a card whose background did change.
+ */
+@media (prefers-color-scheme: dark) {
+  .pf {
+    --pf-canvas: #0b1218;
+    --pf-card: #182830;
+    --pf-ink: #e7eef3;
+    --pf-muted: #9baeb9;
+    --pf-line: #2a3943;
+    --pf-accent: #12b4a8;
+    --pf-on-accent: #06191a;
+    --pf-danger: #d97a7a;
+  }
+}
+
+.pf__card {
+  width: min(640px, 100%);
+  box-sizing: border-box;
+  background: var(--pf-card);
+  border: 1px solid var(--pf-line);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+}
+
+.pf[data-align="left"] .pf__head { text-align: start; }
+.pf[data-align="center"] .pf__head { text-align: center; }
+.pf[data-align="right"] .pf__head { text-align: end; }
+
+.pf[data-size="small"] { font-size: 14px; }
+.pf[data-size="medium"] { font-size: 16px; }
+.pf[data-size="large"] { font-size: 18px; }
+
+.pf__head {
+  margin-bottom: 22px;
+}
+
+.pf__logo {
+  max-width: 180px;
+  max-height: 64px;
+  height: auto;
+  margin-bottom: 12px;
+}
+
+.pf__head h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+  color: var(--pf-ink);
+}
+
+.pf__lede {
+  margin: 6px 0 0;
+  font-size: 15px;
+  color: var(--pf-muted);
+}
+
+.pf__progress {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--pf-line);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.pf__progress span {
+  display: block;
+  height: 100%;
+  background: var(--pf-accent);
+  transition: width 150ms ease;
+}
+
+.pf__form,
+.pf__lock {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pf__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pf__field > span {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pf-ink);
+}
+
+.pf__field em {
+  color: var(--pf-danger);
+  font-style: normal;
+}
+
+.pf__field small {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--pf-muted);
+  line-height: 1.45;
+}
+
+/*
+ * 16px is a hard floor, not a style choice: below it iOS Safari zooms the page
+ * on focus and never zooms back, which strands a submitter mid-form on a
+ * horizontally scrolled page.
+ */
+.pf__field input,
+.pf__field select,
+.pf__field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--pf-line);
+  border-radius: 8px;
+  background: var(--pf-card);
+  color: var(--pf-ink);
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 16px;
+  min-width: 0;
+}
+
+.pf__field textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.pf__field input:focus-visible,
+.pf__field select:focus-visible,
+.pf__field textarea:focus-visible {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 1px;
+  border-color: var(--pf-accent);
+}
+
+.pf__field--file {
+  gap: 6px;
+}
+
+.pf__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--pf-line);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--pf-muted);
+  line-height: 1.45;
+}
+
+.pf__note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.pf__submit {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: var(--pf-accent);
+  color: var(--pf-on-accent);
+  padding: 12px 28px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  /* A comfortable tap target on a phone — 44px is the accessibility floor. */
+  min-height: 44px;
+}
+
+.pf__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pf__message {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 15px;
+  color: var(--pf-muted);
+  line-height: 1.5;
+}
+
+.pf__error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--pf-danger);
+}
+
+.pf__done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 18px 0;
+  color: var(--pf-accent);
+}
+
+.pf__done h2 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--pf-ink);
+}
+
+.pf__done p {
+  margin: 0;
+  font-size: 15px;
+  color: var(--pf-muted);
+}
+
+.pf__brand {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pf-muted);
+}
+
+/* Phones. The card loses its inset so the form uses the full width. */
+@media (max-width: 640px) {
+  .pf {
+    padding: 12px 10px 28px;
+  }
+
+  .pf__card {
+    padding: 18px 16px;
+    border-radius: 10px;
+  }
+
+  .pf__head h1 {
+    font-size: 23px;
+  }
+
+  .pf__submit {
+    align-self: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf__progress span {
+    transition: none;
+  }
+}

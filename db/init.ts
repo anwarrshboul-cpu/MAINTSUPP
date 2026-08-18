@@ -2,7 +2,7 @@ import { seedColumns, seedGroups, seedUiColumns } from "./seed-board-structure";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
 import { getD1 } from ".";
 import { defaultBoardOptions } from "./seed-options";
-import { maintenanceOptions } from "./monday-board-spec";
+import { maintenanceFormConfiguration, maintenanceOptions } from "./monday-board-spec";
 import type { BoardOptionColumn } from "../app/lib/types";
 
 const PRIMARY_ORGANISATION_ID = "org_000000000000000000000001";
@@ -73,6 +73,7 @@ async function initialize() {
     if (row.id) await seedStoreDocumentationBoard(d1, row.id);
   }
   await ensureStageFiveBoardViews(d1);
+  await ensureFormBuilder(d1);
   await ensureStageSevenNotifications(d1);
   await renameComplianceKinds(d1);
   await ensureStageNineContractorLinks(d1);
@@ -1977,6 +1978,132 @@ async function ensureStageFiveBoardViews(d1: D1DatabaseLike) {
        )`,
     )
     .run();
+}
+
+/**
+ * The form builder's store — `form_configurations`, plus one seeded row per
+ * organisation.
+ *
+ * Additive and idempotent like every other shim here, and seeded rather than
+ * left empty for a specific reason: an empty table would mean the Form tab
+ * opens on a form with no questions until somebody presses a button. The seed
+ * is `maintenanceFormConfiguration`, read from monday's API, so a fresh
+ * database starts with the real form — nineteen questions, the ten hidden ones
+ * included, and the feature and appearance settings as the live form has them.
+ *
+ * THE SEED RUNS ONCE PER ORGANISATION AND NEVER AGAIN. `INSERT OR IGNORE` is
+ * doing real work here, and it is the same idiom the board-structure seed uses
+ * for the same reason: this function is on the boot path of every request, so
+ * an unguarded insert would either throw on the unique index or, worse,
+ * silently reset an edited form back to monday's values on the next cold start.
+ * The uniqueness of (organisation_id, board_id, view_key) is what makes the
+ * IGNORE mean "this organisation already has its form" — once a row exists it
+ * is the operator's, and this code stops touching it.
+ *
+ * The share token is generated per organisation rather than copied from
+ * monday's. Reusing monday's would point our public route at an identifier
+ * that belongs to somebody else's system, and two organisations would collide
+ * on the unique index.
+ */
+async function ensureFormBuilder(d1: D1DatabaseLike) {
+  await d1
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS form_configurations (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL,
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         view_key TEXT NOT NULL DEFAULT 'form',
+         title TEXT NOT NULL,
+         description TEXT,
+         share_token TEXT NOT NULL,
+         short_token TEXT,
+         active INTEGER NOT NULL DEFAULT 1,
+         require_login INTEGER NOT NULL DEFAULT 0,
+         password_hash TEXT,
+         response_limit INTEGER,
+         close_at TEXT,
+         response_count INTEGER NOT NULL DEFAULT 0,
+         config TEXT NOT NULL DEFAULT '{}',
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    )
+    .run();
+
+  /*
+   * The indexes are separate statements because the table may already exist
+   * from an earlier boot that predates them — `CREATE TABLE IF NOT EXISTS`
+   * would skip inline constraints in that case and the uniqueness that the
+   * public lookup depends on would quietly not be there.
+   */
+  await d1
+    .prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS form_configurations_token_idx
+         ON form_configurations (share_token)`,
+    )
+    .run();
+  /*
+   * A table created before `short_token` existed needs the column adding, and
+   * `addColumn` is the guarded way to do it — see its own note on why an
+   * unguarded ALTER takes the whole bootstrap down on the second boot.
+   */
+  await addColumn(d1, "form_configurations", "short_token", "TEXT");
+  await d1
+    .prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS form_configurations_short_token_idx
+         ON form_configurations (short_token)`,
+    )
+    .run();
+  await d1
+    .prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS form_configurations_view_idx
+         ON form_configurations (organisation_id, board_id, view_key)`,
+    )
+    .run();
+
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+
+  /*
+   * `config` carries everything the builder edits that nothing needs to query.
+   * The access-control fields are deliberately NOT duplicated in here — they
+   * live in their own columns, and a second copy would be a second answer to
+   * "is this form password protected".
+   */
+  const config = JSON.stringify({
+    order: maintenanceFormConfiguration.order,
+    questions: maintenanceFormConfiguration.questions,
+    features: maintenanceFormConfiguration.features,
+    appearance: maintenanceFormConfiguration.appearance,
+    accessibility: maintenanceFormConfiguration.accessibility,
+    tags: maintenanceFormConfiguration.tags,
+  });
+
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    const id = `form_${row.id.slice(-12)}_maintenance`;
+    const token = crypto.randomUUID().replace(/-/g, "");
+    /* The short alias: the first twelve hex characters of a second UUID. */
+    const shortToken = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+    await d1
+      .prepare(
+        `INSERT OR IGNORE INTO form_configurations
+           (id, organisation_id, board_id, view_key, title, description,
+            share_token, short_token, config)
+         VALUES (?, ?, 'maintenance', 'form', ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        row.id,
+        maintenanceFormConfiguration.title,
+        maintenanceFormConfiguration.description,
+        token,
+        shortToken,
+        config,
+      )
+      .run();
+  }
 }
 
 /**

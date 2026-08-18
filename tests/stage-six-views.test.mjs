@@ -209,7 +209,21 @@ test("the Form tab renders the monday form, not an empty pane", async () => {
   // pane that rendered nothing at all. It lived in `board-chrome.tsx` when
   // that was written and is now `board-view-pane.tsx`; the branch is the same.
   const pane = await read("app/(app)/portal/board-view-pane.tsx");
-  assert.match(pane, /activeView\.type === "form" && <FormView/);
+  /*
+   * The branch now renders `FormBuilder`, which is monday's builder chrome —
+   * the Back / Preview / Edit / Design / Settings strip and the Share button —
+   * wrapped around the same `FormView` the pane used to render directly.
+   *
+   * So this follows the indirection rather than relaxing to match it. The
+   * guarantee the test exists for is "the Form tab shows the real form, not an
+   * empty pane", and that now takes two hops: the pane must reach the builder,
+   * and the builder must reach the form. Asserting only the first hop would let
+   * a builder that renders nothing pass the test that was written to catch
+   * exactly that.
+   */
+  assert.match(pane, /activeView\.type === "form" && <FormBuilder/);
+  const builder = await read("app/(app)/portal/form-builder.tsx");
+  assert.match(builder, /<FormView onSubmitted=\{onSubmitted\} \/>/);
   assert.ok(
     !/!activeView\.built && activeView\.type !== "form"/.test(pane),
     "the form view must no longer be excluded from the rendered pane",
