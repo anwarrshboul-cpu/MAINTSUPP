@@ -59,6 +59,8 @@ type JobPayload = {
     canComment: boolean;
     canRequestCompletion: boolean;
   };
+  /** "viewer" is the Fix Tracker's read-only ticket link. */
+  audience?: string;
   expiresAt: string;
 };
 
@@ -288,6 +290,16 @@ export default function ContractorJobView({ token }: { token: string }) {
   const due = formatDate(job.dueAt);
   const reportedDone = formatDate(job.completionRequestedAt);
   const expires = formatDate(data.expiresAt);
+  /*
+   * The Fix Tracker's Copy Link mints a "viewer" token: a read-only ticket.
+   * Belt and braces with the grant itself — the scope carries no upload slots
+   * and no write rights, and /api/job-link refuses every POST from it — but
+   * drawing upload fields that can only fail would be showing controls that
+   * lie, so none of the action sections render at all.
+   */
+  const readOnly =
+    data.audience === "viewer" ||
+    (uploadSlots.length === 0 && !permissions.canComment && !permissions.canRequestCompletion);
 
   return (
     <main className="job-link">
@@ -393,10 +405,22 @@ export default function ContractorJobView({ token }: { token: string }) {
       )}
 
       {completionPhotos.length > 0 && (
-        <PhotoCard title="Photos you have sent" photos={completionPhotos} />
+        <PhotoCard
+          /* A viewer did not send these; a contractor did. Say which is true. */
+          title={readOnly ? "Photos of the completed work" : "Photos you have sent"}
+          photos={completionPhotos}
+        />
       )}
 
-      {submitted ? (
+      {readOnly ? (
+        <section className="job-link__card">
+          <h2>View only</h2>
+          <p>
+            This link shows the job&apos;s status and photographs. It cannot upload,
+            comment or mark work complete.
+          </p>
+        </section>
+      ) : submitted ? (
         <section className="job-link__card job-link__card--done">
           <h2>Sent</h2>
           <p>{submitted}</p>

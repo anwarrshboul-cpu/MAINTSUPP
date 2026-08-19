@@ -823,6 +823,8 @@ function FixTrackerDetail({
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  /** The minted public ticket URL, cached for this panel opening. */
+  const [publicLink, setPublicLink] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const timing = timingOf(item, todayUtc());
   const priority = chipLabel(item.priority);
@@ -856,14 +858,49 @@ function FixTrackerDetail({
   );
   const otherFiles = files.filter((file) => !inGallery.has(file.id));
 
+  /*
+   * Copy Link copies a PUBLIC, READ-ONLY ticket URL.
+   *
+   * It used to copy `?item=<id>` on the portal's own address — a link that
+   * asked whoever received it to sign in, which is exactly what sharing a
+   * ticket with a store manager or a landlord must not do. It now mints a
+   * "viewer" token on the same infrastructure the contractor links use
+   * (/j/:token): no login, no upload, no comment, no completion — the grant
+   * itself carries no write rights and the API refuses every POST from it.
+   * The registered whitelist still applies: cost, invoices and approvals are
+   * never in the payload.
+   *
+   * Minted once per panel opening and cached, so pressing Copy twice does not
+   * fill the links table with one-use tokens.
+   */
   const copyLink = async () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("item", item.id);
+    setNotice(null);
     try {
-      await navigator.clipboard.writeText(url.toString());
-      setNotice("Link copied.");
-    } catch {
-      setNotice("The link could not be copied.");
+      let url = publicLink;
+      if (!url) {
+        const response = await fetch("/api/board/links", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestId: item.id,
+            audience: "viewer",
+            label: "Fix Tracker share link",
+            expiryDays: 30,
+          }),
+        });
+        const payload = (await response.json()) as { url?: string; error?: string };
+        if (!response.ok || !payload.url) {
+          throw new Error(payload.error || "The share link could not be created.");
+        }
+        url = payload.url;
+        setPublicLink(url);
+      }
+      await navigator.clipboard.writeText(url);
+      setNotice("Public read-only link copied — it opens without a login.");
+    } catch (caught) {
+      setNotice(
+        caught instanceof Error ? caught.message : "The link could not be copied.",
+      );
     }
   };
 

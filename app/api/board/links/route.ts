@@ -129,10 +129,17 @@ export async function POST(request: Request) {
       );
     if (!job) return bad("Job not found.", 404);
 
+    /*
+     * "viewer" is the Fix Tracker's read-only Copy Link; anything else is a
+     * contractor working link. Allowlisted, so a typo cannot invent a third
+     * audience with undefined behaviour. `createJobToken` itself strips every
+     * write right off a viewer grant, whatever else the body says.
+     */
+    const audience = body.audience === "viewer" ? "viewer" : "contractor";
     const { token, scope } = await createJobToken(db, {
       organisationId: orgId,
       requestId,
-      audience: "contractor",
+      audience,
       label: text(body.label, 80),
       allowedKinds: body.allowedKinds,
       canComment: body.canComment !== false,

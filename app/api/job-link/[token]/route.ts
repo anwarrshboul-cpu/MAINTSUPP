@@ -479,8 +479,10 @@ export async function GET(
       }));
 
     // Z13 — tell the coordinator the first time a link is opened, so an
-    // ignored link is visible without anyone checking.
-    const firstOpen = !job.completionRequestedAt;
+    // ignored link is visible without anyone checking. Viewer links are
+    // excluded: "contractor opened the job" is not a thing a read-only ticket
+    // view means, and a shared status link would spam the ops inbox.
+    const firstOpen = !job.completionRequestedAt && scope.audience !== "viewer";
     await recordTokenUse(db, scope.id);
     if (firstOpen) {
       const template = contractorEventTemplate({
@@ -563,6 +565,8 @@ export async function GET(
         canComment: scope.canComment,
         canRequestCompletion: scope.canRequestCompletion,
       },
+      /* "viewer" renders the read-only ticket page — no action sections. */
+      audience: scope.audience,
       expiresAt: scope.expiresAt,
     });
   } catch {
@@ -614,6 +618,15 @@ export async function POST(
 
     const scope = await resolveJobToken(db, token);
     if (!scope) return unauthorised();
+
+    /*
+     * A viewer link is read-only in FULL: no note, no completion request, no
+     * blocked report. Refused here as well as rendered without the controls,
+     * because a public page's buttons are advisory and its API is the rule.
+     */
+    if (scope.audience === "viewer") {
+      return bad("This link is view-only.", 403);
+    }
 
     const body = await request.json().catch(() => ({}));
     const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";

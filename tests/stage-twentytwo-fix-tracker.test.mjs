@@ -390,10 +390,23 @@ test("the view's stylesheet is its own file, and brand-overrides keeps the origi
 
 test("a copied job link opens the job it names", async () => {
   const view = await read(VIEW);
-  // The button wrote `?item=<id>` and told the engineer the link was copied.
-  // Nothing read it back, so the contractor who received it landed on the board
-  // and hunted for the job by hand.
-  assert.match(view, /url\.searchParams\.set\("item", item\.id\)/);
+  /*
+   * The button used to write `?item=<id>` on the portal's own URL — a link
+   * that demanded a login from a store manager or landlord it was sent to.
+   * It now mints a READ-ONLY viewer token on the contractor-link
+   * infrastructure and copies the public /j/:token URL, which opens the job
+   * it names with no account at all. The grant is minted as "viewer", which
+   * `createJobToken` strips of every write right whatever else is sent.
+   */
+  assert.match(view, /audience: "viewer"/);
+  assert.match(view, /fetch\("\/api\/board\/links"/);
+  assert.doesNotMatch(
+    view,
+    /url\.searchParams\.set\("item", item\.id\)/,
+    "the copied link must be the public ticket, not a portal address behind a login",
+  );
+  // The internal `?item=` deep link is still honoured for anyone arriving
+  // with one — and still consumed, not left to reopen the panel forever.
   assert.match(view, /new URL\(window\.location\.href\)\.searchParams\.get\("item"\)/);
   assert.match(
     view,
