@@ -180,6 +180,43 @@ test("every registry write is mirrored onto the board's chip store", async () =>
   }
 });
 
+test("the chip store's own editor mirrors back onto the registry", async () => {
+  const route = await read("app/api/board/route.ts");
+  assert.match(route, /async function mirrorRegistryOption/);
+  for (const action of ['action === "create_option"', 'action === "update_option"', 'action === "delete_option"']) {
+    const body = route.slice(route.indexOf(action), route.indexOf(action) + 4000);
+    assert.match(
+      body,
+      /mirrorRegistryOption\(/,
+      `${action} writes the chip store, so it must mirror the registry`,
+    );
+  }
+});
+
+test("no blanket input rule reaches a checkbox, in any stylesheet", async () => {
+  /*
+   * The switch fix failed twice because the blanket "form controls are sunken"
+   * rule existed in THREE places and each fix found one. brand-overrides
+   * carries two (both excluded), and globals.css carried the third — measured
+   * in a real browser: the OFF track painted --surface-sunken whatever the
+   * tokens said. Every copy must exclude what cannot be typed into.
+   */
+  for (const path of ["app/globals.css", "app/brand-overrides.css"]) {
+    /* Comments stripped: the fixes narrate the selector they exclude. */
+    const css = (await read(path)).replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const match of css.matchAll(/\.portal-shell input([^,{]*)([,{])/g)) {
+      if (/:not\(\[type="checkbox"\]\)/.test(match[1])) continue;
+      /* The rest of the rule this selector belongs to, up to its close. */
+      const block = css.slice(match.index, css.indexOf("}", match.index) + 1);
+      assert.doesNotMatch(
+        block,
+        /background\s*:/,
+        `${path}: a bare ".portal-shell input" rule paints backgrounds — it would repaint every switch's track`,
+      );
+    }
+  }
+});
+
 test("the file index answers a photo column the way the board counts it", async () => {
   /*
    * /api/board counts a photo cell as rows filed by column PLUS rows carrying

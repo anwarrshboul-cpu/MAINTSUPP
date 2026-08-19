@@ -430,7 +430,15 @@ h1, h2, h3, .brand-word { font-family: Manrope, Inter, ui-sans-serif, system-ui,
 .form-field input,
 .form-field select,
 .form-field textarea,
-.portal-shell input,
+/*
+ * A CHECKBOX IS NOT A TEXT FIELD — the same exclusion brand-overrides.css
+ * carries on its copies of this rule, for the same reason: at (0,1,1) a bare
+ * `.portal-shell input` beats `.form-switch` at (0,1,0), so every switch in
+ * the form builder painted `--surface-sunken` in both states. This was the
+ * third and last copy of the blanket; the other two were fixed first and the
+ * switches still failed, because this one kept matching.
+ */
+.portal-shell input:not([type="checkbox"]):not([type="radio"]),
 .portal-shell select,
 .portal-shell textarea {
   border-color: var(--line-strong);

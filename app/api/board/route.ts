@@ -41,7 +41,10 @@ import {
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
+  optionSets,
+  optionValues,
 } from "../../../db/schema";
+import { invalidateOptionCache } from "../../lib/options-repository";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { exposeRequest } from "../../lib/request-payload";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
@@ -65,6 +68,99 @@ import { RETENTION_DAYS, sendGroupToBin, sendJobsToBin } from "../../lib/recycle
 const BOARD_IDS = ["maintenance", "store-documentation"] as const;
 type BoardId = (typeof BOARD_IDS)[number];
 const DEFAULT_BOARD_ID: BoardId = "maintenance";
+
+/*
+ * The other half of the option mirror. /api/options (the registry the options
+ * admin and the form builder write) mirrors every change onto
+ * `maintenance_board_options`; the three board option actions below write the
+ * chip store directly, so they mirror back onto `option_values` for the six
+ * registry-backed columns — or a chip renamed on the board would drift from
+ * the form that offers the same choice. One value, two stores, kept in step
+ * from whichever side the edit came.
+ */
+const BOARD_COLUMN_TO_SET: Record<string, string> = {
+  status: "maintenance_status",
+  label: "maintenance_label",
+  engineer: "engineer_required",
+  priority: "priority",
+  tier: "tier_level",
+  storeLocation: "store_location",
+};
+
+async function mirrorRegistryOption(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  columnKey: string,
+  value: string,
+  change:
+    | {
+        kind: "upsert";
+        label: string;
+        colourHex: string;
+        textColour: string;
+        active: boolean;
+        position?: number;
+      }
+    | { kind: "remove" },
+) {
+  const setKey = BOARD_COLUMN_TO_SET[columnKey];
+  if (!setKey) return;
+  const [set] = await db
+    .select({ id: optionSets.id })
+    .from(optionSets)
+    .where(and(eq(optionSets.organisationId, orgId), eq(optionSets.key, setKey)))
+    .limit(1);
+  if (!set) return;
+  const [existing] = await db
+    .select()
+    .from(optionValues)
+    .where(
+      and(
+        eq(optionValues.organisationId, orgId),
+        eq(optionValues.optionSetId, set.id),
+        eq(optionValues.value, value),
+      ),
+    )
+    .limit(1);
+  if (change.kind === "remove") {
+    if (!existing) return;
+    if (existing.system) {
+      await db
+        .update(optionValues)
+        .set({ active: false, updatedAt: new Date().toISOString() })
+        .where(eq(optionValues.id, existing.id));
+    } else {
+      await db.delete(optionValues).where(eq(optionValues.id, existing.id));
+    }
+  } else if (existing) {
+    await db
+      .update(optionValues)
+      .set({
+        label: change.label,
+        colourHex: change.colourHex,
+        textColour: change.textColour,
+        active: change.active,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(optionValues.id, existing.id));
+  } else {
+    await db.insert(optionValues).values({
+      id: `opt-${setKey}-${Date.now().toString(36)}`,
+      organisationId: orgId,
+      optionSetId: set.id,
+      value,
+      label: change.label,
+      colourHex: change.colourHex,
+      textColour: change.textColour,
+      position: change.position ?? 999,
+      isDone: false,
+      isDefault: false,
+      active: change.active,
+      system: false,
+    });
+  }
+  invalidateOptionCache(orgId, setKey);
+}
 
 function boardIdFrom(request: Request): BoardId {
   const raw = new URL(request.url).searchParams.get("board");
@@ -1612,6 +1708,16 @@ export async function POST(request: Request) {
           position,
         })
         .returning();
+      if (created) {
+        await mirrorRegistryOption(db, orgId, columnKey, created.value, {
+          kind: "upsert",
+          label: created.label,
+          colourHex: created.color,
+          textColour: created.textColor,
+          active: true,
+          position,
+        });
+      }
       return Response.json({ option: created }, { status: 201 });
     }
 
@@ -2573,6 +2679,13 @@ export async function PATCH(request: Request) {
       if (!option) {
         return Response.json({ error: "Label not found." }, { status: 404 });
       }
+      await mirrorRegistryOption(db, orgId, option.columnKey, option.value, {
+        kind: "upsert",
+        label: option.label,
+        colourHex: option.color,
+        textColour: option.textColor,
+        active: option.active,
+      });
       return Response.json({ option });
     }
 
@@ -2595,6 +2708,9 @@ export async function PATCH(request: Request) {
       await db
         .delete(maintenanceBoardOptions)
         .where(and(eq(maintenanceBoardOptions.id, optionId), eq(maintenanceBoardOptions.organisationId, orgId)));
+      await mirrorRegistryOption(db, orgId, existing.columnKey, existing.value, {
+        kind: "remove",
+      });
       return Response.json({ deleted: true, optionId });
     }
 
