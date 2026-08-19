@@ -97,12 +97,31 @@ test("the shared form is never hidden on a phone", async () => {
 
 test("the public form's inputs clear the iOS zoom floor", async () => {
   const css = await read(PUBLIC_CSS);
-  const inputs = css.slice(css.indexOf(".pf__field input,"));
+  /*
+   * `>` and not a descendant selector — see the note in the stylesheet. As a
+   * descendant rule this reached the visually-hidden file input nested in
+   * `.pf__files` and gave it `width: 100%` against the initial containing
+   * block, which was 421px of horizontal scroll at 1440px. The 16px floor
+   * below is the original guarantee and is unchanged.
+   */
+  const anchor = css.indexOf(".pf__field > input,");
+  assert.ok(anchor > 0, "the field rule must be scoped to direct children");
+  const inputs = css.slice(anchor);
   /*
    * Below 16px iOS Safari zooms on focus and does not zoom back, leaving a
    * submitter on a horizontally scrolled page mid-form.
    */
   assert.match(inputs.slice(0, 420), /font-size:\s*16px/);
+
+  /*
+   * And the hidden file input must not be reachable by it, or the overflow
+   * comes straight back the next time somebody widens the selector.
+   */
+  assert.doesNotMatch(
+    css,
+    /^\.pf__field input,/m,
+    "the descendant form of this rule is what caused the overflow",
+  );
   const tap = css.slice(css.indexOf(".pf__submit"));
   assert.match(tap.slice(0, 500), /min-height:\s*44px/, "the submit button is a tap target");
 });

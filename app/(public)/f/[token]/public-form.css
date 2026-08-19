@@ -17,6 +17,24 @@
  * spare, which matters because an operator can tint the accent but not these.
  */
 
+/*
+ * This route loads no shared stylesheet (see the layout), so the user agent
+ * defaults still apply. `body { margin: 8px }` against a `min-height: 100vh`
+ * section is a guaranteed scrollbar on every form, and `box-sizing` is
+ * `content-box` everywhere — a standing hazard for any padded percentage box.
+ * Both are reset here, scoped to this page rather than globally.
+ */
+.pf,
+.pf *,
+.pf *::before,
+.pf *::after {
+  box-sizing: border-box;
+}
+
+body:has(.pf) {
+  margin: 0;
+}
+
 .pf {
   --pf-canvas: #f4f7f8;
   --pf-card: #ffffff;
@@ -154,9 +172,25 @@
  * on focus and never zooms back, which strands a submitter mid-form on a
  * horizontally scrolled page.
  */
-.pf__field input,
-.pf__field select,
-.pf__field textarea {
+/*
+ * DIRECT CHILDREN ONLY — the `>` is load-bearing.
+ *
+ * As a descendant selector this had specificity (0,1,1) and reached the
+ * visually-hidden file input nested inside `.pf__files`, beating
+ * `.pf__fileinput` at (0,1,0). The hidden input therefore took `width: 100%`
+ * — and because nothing on this route is positioned, its `position: absolute`
+ * containing block is the INITIAL containing block, so 100% meant the whole
+ * viewport. Measured: a 1425px-wide invisible box at a 1440px viewport,
+ * producing 421px of horizontal scroll, and 34px of it even at 320px. It was
+ * the only overflowing element at every width.
+ *
+ * The real fields are all direct children of `.pf__field`; the hidden one is a
+ * grandchild. Scoping to `>` also stops this rule reaching any nested control
+ * added later.
+ */
+.pf__field > input,
+.pf__field > select,
+.pf__field > textarea {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--pf-line);
@@ -169,14 +203,14 @@
   min-width: 0;
 }
 
-.pf__field textarea {
+.pf__field > textarea {
   resize: vertical;
   min-height: 96px;
 }
 
-.pf__field input:focus-visible,
-.pf__field select:focus-visible,
-.pf__field textarea:focus-visible {
+.pf__field > input:focus-visible,
+.pf__field > select:focus-visible,
+.pf__field > textarea:focus-visible {
   outline: 2px solid var(--pf-accent);
   outline-offset: 1px;
   border-color: var(--pf-accent);

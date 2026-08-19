@@ -87,7 +87,24 @@ h1, h2, h3, .brand-word { font-family: Manrope, Inter, ui-sans-serif, system-ui,
 .form-field input,
 .form-field select,
 .form-field textarea,
-.portal-shell input,
+/*
+ * A CHECKBOX IS NOT A TEXT FIELD, and sweeping it into "form controls" is what
+ * made the form builder's switches invisible.
+ *
+ * `.form-switch` paints its own track from `--switch-off` / `--switch-on`, at
+ * specificity (0,1,0). This selector is (0,1,1) and beats it, so every switch
+ * in the builder rendered `--surface-sunken` regardless of state — and with the
+ * light-theme rule further down doing the same at (0,2,2), OFF and ON both came
+ * out `#ffffff` on a `#ffffff` card. Measured in a browser: 1.00:1. Pixel
+ * identical. Nothing on screen said which state it was in, or that it was a
+ * control at all.
+ *
+ * The exclusion follows the precedent already set for the mobile 16px rule
+ * further down this file: a checkbox or radio cannot be typed into and is not
+ * sized by its font, so a rule about the appearance of input FIELDS has no
+ * business reaching one.
+ */
+.portal-shell input:not([type="checkbox"]):not([type="radio"]),
 .portal-shell select,
 .portal-shell textarea { border-color: var(--line-strong); background: var(--surface-sunken); color: var(--ink); }
 .search-field input { background: transparent; }
@@ -5664,7 +5681,7 @@ body[data-theme="light"] .data-table td {
  */
 body[data-theme="light"]
   :is(.portal-main, .workspace-manager, .workspace-record-editor)
-  :is(input, select, textarea) {
+  :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
   border-color: var(--line);
   background: var(--paper);
   color: var(--ink);

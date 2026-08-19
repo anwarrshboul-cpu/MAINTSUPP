@@ -317,7 +317,22 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <span className={`brand-lockup${compact ? " brand-lockup--compact" : ""}`}>
       <span className="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 40 40" fill="none">
+        {/*
+          `width` and `height` are on the SVG itself, not left to CSS.
+          An outermost <svg> with only a viewBox has no intrinsic size, so it
+          falls back to the CSS default of 100%/100% — and the rules that size
+          `.brand-mark` live in globals.css / brand-overrides.css, which the
+          PUBLIC routes deliberately do not load (app/(public)/layout.tsx ships
+          no shared stylesheet, for bandwidth). On the shared form that made
+          this mark render 582×582 at a 1440px viewport and 320×320 on a phone:
+          the enormous "M" with a screen of dead space under it.
+
+          Sizing it at source fixes it on every route at once, including any
+          future page that loads no stylesheet. The `.brand-mark` CSS still
+          scales it where those sheets ARE loaded, because a width attribute is
+          a presentation hint and loses to any CSS rule.
+        */}
+        <svg viewBox="0 0 40 40" width="40" height="40" fill="none">
           <path
             d="M6 33V9l14 15"
             stroke="currentColor"
