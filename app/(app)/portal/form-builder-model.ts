@@ -26,6 +26,13 @@ export type BuilderForm = {
   /** What the Share dialog shows and copies — long or short, per the switch. */
   presentedUrl: string;
   config: StoredFormConfig;
+  /**
+   * The canonical option substitution — live sites for Location, the option
+   * registry for Engineer and Priority — exactly as `/api/forms/[token]`
+   * serves it, because both endpoints build it with `formOptionOverrides`.
+   * Preview projects with it; the Edit panel lists from it.
+   */
+  optionOverrides?: Record<string, Array<{ label: string; value: string }>>;
 };
 
 /** Which builder surface is open. `view` is the live, fillable form. */

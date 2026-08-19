@@ -27,6 +27,50 @@ import {
   uniqueSlug,
 } from "../../lib/sites-repository";
 
+/**
+ * What a reader is told when Sites cannot load, and what a developer is told.
+ *
+ * THE BUG THIS REPLACES. The catch returned `error.message` verbatim, and the
+ * Sites screen renders that string. Drizzle's wrapper message is the whole
+ * failing statement, so a transient database fault painted this across the top
+ * of the page:
+ *
+ *   Failed query: select "id", "name", "slug", "logo_url", … from
+ *   "organisations" where "organisations"."status" = ?  params: active
+ *
+ * Two separate faults, both fixed here:
+ *
+ *  1. IT WAS UNDIAGNOSABLE. `DrizzleQueryError.message` is only ever the SQL;
+ *     the REAL reason — "no such table", an I/O fault, a closed connection —
+ *     is on `error.cause`, and reading `.message` alone threw it away. So the
+ *     message named a query that is provably correct (the `organisations` DDL
+ *     matches the model in every source, and that statement runs clean against
+ *     the live database) while saying nothing about what actually failed. The
+ *     cause is now unwrapped and included in development.
+ *
+ *  2. IT PUBLISHED THE SCHEMA. Column names and table names went to whoever
+ *     opened the page, including an unauthenticated visitor on a shared link.
+ *     Raw text is development-only now, matching `databaseError` in
+ *     /api/maintenance, which is the house pattern for exactly this.
+ *
+ * The bootstrap case is called out separately because it is the one a reader
+ * can act on: it resolves by itself, and "retry in a moment" is true advice.
+ */
+function sitesDatabaseError(error: unknown) {
+  const top = error instanceof Error ? error.message : String(error);
+  const cause =
+    error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+  const combined = `${top} ${cause}`.trim();
+
+  if (process.env.NODE_ENV === "development") {
+    return cause ? `Sites database error: ${cause} — while running: ${top}` : `Sites database error: ${top}`;
+  }
+  if (combined.includes("no such table") || combined.includes("no such column")) {
+    return "The workspace database is being prepared. Please retry in a moment.";
+  }
+  return "Sites are temporarily unavailable.";
+}
+
 function text(value: unknown, max = 240) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -242,8 +286,7 @@ export async function GET(request: Request) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
-    const message = error instanceof Error ? error.message : "Sites could not be loaded.";
-    return Response.json({ error: message }, { status: 503 });
+    return Response.json({ error: sitesDatabaseError(error) }, { status: 503 });
   }
 }
 
@@ -350,12 +393,50 @@ export async function PATCH(request: Request) {
       id?: string;
       data?: Record<string, unknown>;
       confirmDuplicate?: boolean;
+      rename?: unknown;
     };
     const id = text(body.id, 120);
     if (!id) throw new Error("A site ID is required.");
 
     const existing = await getSite(db, orgId, id);
     if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
+
+    /*
+     * A NAME-ONLY rename, for callers that hold the site's identity and
+     * nothing else — the form builder's Location editor. The full-payload
+     * branch below rewrites every field with whatever was sent, which is right
+     * for the Sites form (it sends everything) and destructive for anyone
+     * else: a rename that had to travel as a full payload would null the
+     * thirty fields the caller did not have. Same duplicate check, same
+     * slug refresh, same audit trail; jobs and compliance rows reference the
+     * site by ID, so nothing else needs rewriting.
+     */
+    if (typeof body.rename === "string") {
+      const nextName = text(body.rename, 120);
+      if (!nextName) throw new Error("A site name is required.");
+      if (nextName !== existing.name) {
+        const duplicates = await findDuplicateCandidates(db, orgId, nextName, id);
+        if (duplicates.length && !body.confirmDuplicate) {
+          return Response.json(
+            { error: "A similar site already exists.", requiresConfirmation: true, duplicates },
+            { status: 409 },
+          );
+        }
+        await db
+          .update(sites)
+          .set({
+            name: nextName,
+            slug: await uniqueSlug(db, orgId, nextName, id),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+        await logChange(db, orgId, id, "renamed", actor.email, {
+          from: existing.name,
+          to: nextName,
+        });
+      }
+      return Response.json({ ok: true, id, name: nextName });
+    }
 
     const payload = sitePayload(body.data ?? {});
     if (!payload.name) throw new Error("A site name is required.");

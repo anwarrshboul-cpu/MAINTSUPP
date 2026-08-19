@@ -16,6 +16,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import { navigationLayouts, users } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
+import { can, resolvePermissions } from "../../lib/permissions";
 import { loadWorkspaceSections } from "../workspace-sections/route";
 import { sectionsToCatalogue } from "../workspace-sections/catalogue";
 import {
@@ -39,8 +40,34 @@ type LayoutRow = typeof navigationLayouts.$inferSelect;
  * or from anything in the body, so "I am an admin" is something the database
  * says about the caller.
  */
-function mayEditDefault(context: ScopedDatabase) {
-  return context.actor.role === "admin" || context.actor.role === "super_admin";
+/**
+ * Whether this caller may rewrite the WORKSPACE-DEFAULT sidebar.
+ *
+ * A CAPABILITY, not a role literal. It used to read
+ * `role === "admin" || role === "super_admin"`, which quietly opted this route
+ * out of the permission matrix: a super admin could revoke `settings.edit`
+ * from `admin` and that admin would still be able to rewrite the default
+ * sidebar — including its locked items — for everyone in the workspace.
+ *
+ * `settings.edit` is the capability its two siblings already use for exactly
+ * this decision (`/api/workspace-sections` and `/api/dashboard-layout`), so
+ * this is the matrix answering one question once rather than three routes
+ * answering it three ways. It is also the rule
+ * `tests/stage-twenty-teams-audit.test.mjs` states — that gates are
+ * capabilities and not role strings — applied to a file its allowlist happened
+ * not to name.
+ *
+ * A caller's OWN arrangement is untouched by this: that path is self-scoped and
+ * needs no capability, because rearranging your own sidebar is not an
+ * administrative act.
+ */
+async function mayEditDefault(context: ScopedDatabase) {
+  const subject = await resolvePermissions(
+    context.db,
+    context.orgId,
+    context.actor.role,
+  );
+  return can(subject, "settings.edit");
 }
 
 function parseItems(row: LayoutRow | null): NavArrangementItem[] {
@@ -212,7 +239,7 @@ export async function GET(request: Request) {
       locked,
       /* Which layer answered. "builtin" means nobody has arranged anything. */
       source: personalItems ? "user" : workspaceItems.length ? "workspace" : "builtin",
-      canEditDefault: mayEditDefault(context),
+      canEditDefault: await mayEditDefault(context),
       /* Null when the identity has no `users` row: they can still see a layout,
          they just have nowhere to save a personal one. Told plainly rather
          than discovered when a save silently does nothing. */
@@ -287,7 +314,7 @@ export async function PUT(request: Request) {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const scope = body.scope === "workspace" ? "workspace" : "user";
 
-    if (scope === "workspace" && !mayEditDefault(context)) {
+    if (scope === "workspace" && !(await mayEditDefault(context))) {
       return Response.json(
         { error: "Only an admin can change the workspace default sidebar." },
         { status: 403 },

@@ -252,6 +252,16 @@ export default function BoardChrome({
       {/* ── Row 2 — view tabs (AA3–AA6) ──────────────────────────────── */}
       {boardId === "maintenance" && (
       <nav className="board-views" aria-label="Board views">
+        {/*
+          The strip and its two arrows live in one positioned wrapper so the
+          arrows can overlay the strip instead of sitting beside it. When they
+          were flex siblings, an arrow appearing or disappearing changed the
+          strip's width, which re-fired the ResizeObserver that decides whether
+          the arrow shows — "ResizeObserver loop completed with undelivered
+          notifications" on every collapse/expand. Overlaid, their visibility
+          cannot change any measured size, so the loop cannot form.
+        */}
+        <div className="board-views__strip">
         <BoardViewsScroll direction="back" stripRef={tabsRef} />
 
         <div className="board-views__tabs" ref={tabsRef}>
@@ -345,6 +355,7 @@ export default function BoardChrome({
         </div>
 
         <BoardViewsScroll direction="forward" stripRef={tabsRef} />
+        </div>
 
         <div className="board-views__trailing">
           {overflowTabs.length > 0 && (

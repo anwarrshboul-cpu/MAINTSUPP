@@ -1,11 +1,13 @@
 "use client";
 
+import * as React from "react";
 import { Icon, type IconName } from "../../components";
 import {
   orderedQuestions,
   questionGlyph,
   type BuilderForm,
 } from "./form-builder-model";
+import { FormQuestionOptionsEditor } from "./form-options-editor";
 
 /**
  * The Edit, Design and Settings panels.
@@ -26,9 +28,90 @@ type PanelProps = {
   form: BuilderForm;
   patch: (patch: Record<string, unknown>) => void;
   busy: boolean;
+  /** The board's real groups, for "Group for answers". */
+  groups?: Array<{ id: string; name: string }>;
 };
 
 /* ── A few shared controls ───────────────────────────────────────────────── */
+
+/**
+ * A text-ish input that can actually be typed into.
+ *
+ * THE BUG THIS EXISTS TO FIX. Typing one character into any of these fields
+ * lost focus, so a value had to be entered one character per click. The cause
+ * was not remounting and not the list identity — the question cards are keyed
+ * by stable monday column ids and React reconciles them in place. It was
+ * `disabled={busy}`:
+ *
+ *     keystroke → patch() → setBusy(true) → React commits disabled={true}
+ *     → the user agent BLURS the disabled control → PATCH resolves
+ *     → setBusy(false) → the input is re-enabled, and nothing re-focuses it
+ *
+ * Disabling a focused form control blurs it; there is no way to keep the caret.
+ * So `busy` no longer disables anything the caret can live in — it is surfaced
+ * with `aria-busy` on the panel instead, which announces the state without
+ * stealing focus.
+ *
+ * The second half of the fix is this component holding a LOCAL draft. The value
+ * used to be bound straight to server state, which lags a round trip, so the
+ * character you typed visibly vanished and reappeared and the caret jumped to
+ * the end. The draft is authoritative while the field has focus; the server
+ * value re-seeds it only when it changes from outside.
+ *
+ * Committing on blur (and on Enter) rather than per keystroke also fixes a
+ * third problem that was invisible until you look at the API: the Redirect URL
+ * field validates `http(s)://` server-side, so typing "h", "ht", "htt" raised a
+ * refusal on EVERY keystroke and the field could never be filled in. Same for
+ * the response limit, where an empty box posts 0 and is refused.
+ */
+function DraftInput({
+  value,
+  onCommit,
+  busy,
+  ...rest
+}: {
+  value: string;
+  onCommit: (next: string) => void;
+  busy: boolean;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
+  const [draft, setDraft] = React.useState(value);
+  const focused = React.useRef(false);
+
+  /*
+   * Re-seed from the server only when this field is NOT being edited. Without
+   * the guard, an unrelated PATCH landing mid-word would overwrite what the
+   * person is halfway through typing.
+   */
+  React.useEffect(() => {
+    if (!focused.current) setDraft(value);
+  }, [value]);
+
+  return (
+    <input
+      {...rest}
+      value={draft}
+      aria-busy={busy || undefined}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        focused.current = false;
+        if (draft !== value) onCommit(draft);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          (event.target as HTMLInputElement).blur();
+        }
+        if (event.key === "Escape") {
+          setDraft(value);
+          (event.target as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
+}
 
 function Switch({
   label,
@@ -120,6 +203,22 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
     patch({ order: [...pageBlocks, ...order] });
   }
 
+  /**
+   * Merge one question's settings.
+   *
+   * Merged rather than replaced so setting "include time" cannot wipe "today
+   * as default" that was set a moment earlier — each control owns one key.
+   */
+  function setSetting(id: string, changes: Record<string, unknown>) {
+    patch({
+      questions: form.config.questions.map((question) =>
+        question.id === id
+          ? { ...question, settings: { ...(question.settings ?? {}), ...changes } }
+          : question,
+      ),
+    });
+  }
+
   function update(id: string, changes: Record<string, unknown>) {
     patch({
       questions: form.config.questions.map((question) =>
@@ -173,7 +272,22 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                 <span className={`form-edit__glyph form-edit__glyph--${glyph.tone}`}>
                   <Icon name={glyph.icon} size={12} />
                 </span>
-                <strong>{question.title}</strong>
+                {/*
+                  The question's own words are editable in place, as monday's
+                  canvas does it. An emptied title keeps the old one — a
+                  question with no name is a field nobody can answer.
+                */}
+                <DraftInput
+                  className="form-edit__titleinput"
+                  type="text"
+                  value={question.title}
+                  maxLength={120}
+                  busy={busy}
+                  aria-label={`Rename the question ${question.title}`}
+                  onCommit={(next) => {
+                    if (next.trim()) update(question.id, { title: next.trim() });
+                  }}
+                />
                 {question.required && <em aria-label="Required">*</em>}
                 <div className="form-edit__cardtools">
                   <button
@@ -207,8 +321,120 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                 </div>
               </div>
 
-              {question.description && (
-                <p className="form-edit__help">{question.description}</p>
+              <DraftInput
+                className="form-edit__helpinput"
+                type="text"
+                value={question.description ?? ""}
+                placeholder="Add a description for submitters (optional)"
+                maxLength={300}
+                busy={busy}
+                aria-label={`Describe the question ${question.title}`}
+                onCommit={(next) =>
+                  update(question.id, { description: next.trim() || null })
+                }
+              />
+
+              {/*
+                QUESTION SETTINGS — monday's per-question panel, inline.
+                Every control here changes what a submitter sees, and each one
+                is rendered only for the question types it means anything for:
+                a "today as default" switch on a text question would be a
+                control that does nothing, which is the thing being fixed.
+              */}
+              <div className="form-edit__settings">
+                {(question.type === "Date" || question.type === "DateRange") && (
+                  <>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={question.settings?.defaultCurrentDate === true}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, { defaultCurrentDate: event.target.checked })
+                        }
+                      />
+                      Today as default
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={question.settings?.includeTime === true}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, { includeTime: event.target.checked })
+                        }
+                      />
+                      Include time
+                    </label>
+                  </>
+                )}
+
+                {question.type === "SingleSelect" && (
+                  <>
+                    <label className="form-edit__setting">
+                      <span>Display</span>
+                      <select
+                        value={question.settings?.display ?? "Dropdown"}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, {
+                            display: event.target.value as "Dropdown" | "Vertical" | "Horizontal",
+                          })
+                        }
+                      >
+                        <option value="Dropdown">Show options in a dropdown</option>
+                        <option value="Vertical">List the options</option>
+                        <option value="Horizontal">List the options side by side</option>
+                      </select>
+                    </label>
+                    <label className="form-edit__setting">
+                      <span>Options order</span>
+                      <select
+                        value={question.settings?.optionsOrder ?? "Custom"}
+                        disabled={busy || !question.visible}
+                        onChange={(event) =>
+                          setSetting(question.id, {
+                            optionsOrder: event.target.value as "Custom" | "Alphabetical",
+                          })
+                        }
+                      >
+                        <option value="Custom">Custom</option>
+                        <option value="Alphabetical">Alphabetical</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+
+                {(question.type === "ShortText" || question.type === "LongText") && (
+                  <label className="form-edit__setting form-edit__setting--wide">
+                    <span>Pre-fill value</span>
+                    <DraftInput
+                      type="text"
+                      value={question.settings?.defaultAnswer ?? ""}
+                      placeholder="Leave empty for none"
+                      maxLength={200}
+                      busy={busy}
+                      readOnly={!question.visible}
+                      onCommit={(next) =>
+                        setSetting(question.id, { defaultAnswer: next || null })
+                      }
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/*
+                The options themselves — monday's Add / rename / reorder /
+                per-option actions, wired to the canonical registers. See the
+                header of form-options-editor.tsx for which register owns what.
+              */}
+              {question.type === "SingleSelect" && (
+                <FormQuestionOptionsEditor
+                  question={question}
+                  form={form}
+                  patch={patch}
+                  busy={busy}
+                />
               )}
 
               <div className="form-edit__cardfoot">
@@ -223,12 +449,6 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                   />
                   Required
                 </label>
-                {question.options && (
-                  <span className="form-edit__count">
-                    {question.options.filter((option) => option.visible && option.active).length}{" "}
-                    options
-                  </span>
-                )}
                 {!question.visible && <span className="form-edit__count">Hidden</span>}
               </div>
             </article>
@@ -292,8 +512,10 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
           <input
             type="color"
             value={appearance.primaryColor ?? "#0b7a72"}
-            disabled={busy}
-            onChange={(event) => setAppearance({ primaryColor: event.target.value })}
+            aria-busy={busy || undefined}
+            /* onBlur, not onChange: a colour picker fires per drag tick, which
+               was one PATCH per pixel of mouse travel. */
+            onBlur={(event) => setAppearance({ primaryColor: event.target.value })}
           />
         </label>
         {appearance.primaryColor && (
@@ -332,11 +554,9 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
             <input
               type="color"
               value={appearance.background.value ?? "#f4f7f8"}
-              disabled={busy}
-              onChange={(event) =>
-                setAppearance({
-                  background: { type: "Color", value: event.target.value },
-                })
+              aria-busy={busy || undefined}
+              onBlur={(event) =>
+                setAppearance({ background: { type: "Color", value: event.target.value } })
               }
             />
           </label>
@@ -344,15 +564,13 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
         {appearance.background.type === "Image" && (
           <label className="form-panel__field form-panel__field--stack">
             <span>Image URL</span>
-            <input
+            <DraftInput
               type="url"
               value={appearance.background.value ?? ""}
               placeholder="https://…"
-              disabled={busy}
-              onChange={(event) =>
-                setAppearance({
-                  background: { type: "Image", value: event.target.value || null },
-                })
+              busy={busy}
+              onCommit={(next) =>
+                setAppearance({ background: { type: "Image", value: next || null } })
               }
             />
           </label>
@@ -360,13 +578,13 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
 
         <label className="form-panel__field form-panel__field--stack">
           <span>Logo URL</span>
-          <input
+          <DraftInput
             type="url"
             value={appearance.logo.url ?? ""}
             placeholder="Leave empty for the MAINTSUPP mark"
-            disabled={busy}
-            onChange={(event) =>
-              setAppearance({ logo: { ...appearance.logo, url: event.target.value || null } })
+            busy={busy}
+            onCommit={(next) =>
+              setAppearance({ logo: { ...appearance.logo, url: next || null } })
             }
           />
         </label>
@@ -426,15 +644,13 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
         />
         <label className="form-panel__field form-panel__field--stack">
           <span>Submit button text</span>
-          <input
+          <DraftInput
             type="text"
             value={appearance.submitButton.text ?? ""}
             placeholder="Submit"
             maxLength={40}
-            disabled={busy}
-            onChange={(event) =>
-              setAppearance({ submitButton: { text: event.target.value || null } })
-            }
+            busy={busy}
+            onCommit={(next) => setAppearance({ submitButton: { text: next || null } })}
           />
         </label>
       </Section>
@@ -444,7 +660,7 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
 
 /* ── Settings ────────────────────────────────────────────────────────────── */
 
-export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
+export function FormSettingsPanel({ form, patch, busy, groups = [] }: PanelProps) {
   const { features } = form.config;
 
   function setFeatures(changes: Record<string, unknown>) {
@@ -502,12 +718,17 @@ export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
           {form.responseLimit !== null && (
             <label className="form-panel__inline">
               <span>Stop after</span>
-              <input
+              <DraftInput
                 type="number"
                 min={1}
-                value={form.responseLimit}
-                disabled={busy}
-                onChange={(event) => patch({ responseLimit: Number(event.target.value) })}
+                value={String(form.responseLimit)}
+                busy={busy}
+                /* Committed on blur, so an empty box mid-edit is never POSTed
+                   as 0 — which the API refuses outright. */
+                onCommit={(next) => {
+                  const limit = Number(next);
+                  if (Number.isInteger(limit) && limit >= 1) patch({ responseLimit: limit });
+                }}
               />
               <span>responses — {form.responseCount} received</span>
             </label>
@@ -531,11 +752,13 @@ export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
           {form.closeAt !== null && (
             <label className="form-panel__inline">
               <span>Closes on</span>
-              <input
+              <DraftInput
                 type="date"
                 value={form.closeAt.slice(0, 10)}
-                disabled={busy}
-                onChange={(event) => patch({ closeAt: event.target.value })}
+                busy={busy}
+                onCommit={(next) => {
+                  if (next) patch({ closeAt: next });
+                }}
               />
             </label>
           )}
@@ -606,19 +829,19 @@ export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
           {features.afterSubmissionView.redirectAfterSubmission.enabled && (
             <label className="form-panel__inline form-panel__inline--wide">
               <span>Go to</span>
-              <input
+              <DraftInput
                 type="url"
                 placeholder="https://…"
                 value={features.afterSubmissionView.redirectAfterSubmission.redirectUrl ?? ""}
-                disabled={busy}
-                onChange={(event) =>
+                busy={busy}
+                /* On blur, so a half-typed "htt" is never POSTed — the API
+                   refuses anything that is not http(s), so this field could
+                   never be filled in one character at a time. */
+                onCommit={(next) =>
                   setFeatures({
                     afterSubmissionView: {
                       ...features.afterSubmissionView,
-                      redirectAfterSubmission: {
-                        enabled: true,
-                        redirectUrl: event.target.value || null,
-                      },
+                      redirectAfterSubmission: { enabled: true, redirectUrl: next || null },
                     },
                   })
                 }
@@ -647,12 +870,31 @@ export function FormSettingsPanel({ form, patch, busy }: PanelProps) {
             setFeatures({ board: { ...features.board, allowCreatingItems: next } })
           }
         />
-        <p className="form-panel__static">
-          <strong>Group for answers</strong>
-          <span>
-            New answers go to <em>Incoming requests</em>, the board&rsquo;s top group.
-          </span>
-        </p>
+        {/*
+          A real selector. This was a paragraph asserting that answers go to
+          "Incoming requests" — which was true only because the submit route
+          hard-coded it and never read the setting at all.
+        */}
+        <label className="form-panel__field">
+          <span>Group for answers</span>
+          <select
+            value={features.board.itemGroupId ?? ""}
+            disabled={busy || !groups.length}
+            onChange={(event) =>
+              setFeatures({
+                board: { ...features.board, itemGroupId: event.target.value || null },
+              })
+            }
+          >
+            {/* Empty means "the board's top group" — the documented default. */}
+            <option value="">Incoming requests (default)</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </Section>
     </div>
   );

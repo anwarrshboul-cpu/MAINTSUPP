@@ -205,6 +205,8 @@ export const ICON_NAMES = [
   "sun",
   "thumb",
   "tool",
+  /* Added with the form builder's option editor — same one-set rule again. */
+  "trash",
   "upload",
   "updates",
   "user",

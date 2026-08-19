@@ -3,6 +3,7 @@ import type { getDb } from "../../db";
 import { formConfigurations } from "../../db/schema";
 import { maintenanceFormConfiguration, type FormQuestion } from "../../db/monday-board-spec";
 import { hashPassword, passwordProblem, verifyPassword } from "./password";
+import { projectPublicForm, type PublicQuestion } from "./form-projection";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -225,16 +226,6 @@ export function unavailableMessage(reason: "deactivated" | "closed" | "full") {
 
 /* ── What the browser is allowed to see ──────────────────────────────────── */
 
-export type PublicQuestion = {
-  id: string;
-  type: FormQuestion["type"];
-  title: string;
-  description: string | null;
-  required: boolean;
-  options: Array<{ label: string; value: string }> | null;
-  showIf: { questionId: string; equals: string[] } | null;
-};
-
 export type PublicForm = {
   token: string;
   title: string;
@@ -253,6 +244,7 @@ export type PublicForm = {
   submitButtonText: string | null;
   language: string | null;
 };
+
 
 /**
  * The public projection — an allowlist, never a redaction.
@@ -274,12 +266,11 @@ export type PublicForm = {
  * `order` should still be asked, not silently lost.
  */
 /**
- * The Location question, by monday's column id.
- *
- * Named here because it is the one question whose options are NOT the captured
- * ones. See `publicForm`'s `optionOverrides` note.
+ * The Location question's id lives in the PURE projection module so the
+ * browser-side builder can import it; re-exported here for the server routes
+ * that have always read it from this file.
  */
-export const LOCATION_QUESTION_ID = "single_selecty9rcyhe";
+export { LOCATION_QUESTION_ID } from "./form-projection";
 
 export function publicForm(
   record: FormRecord,
@@ -297,62 +288,30 @@ export function publicForm(
    * Serving the captured labels would therefore offer a submitter 21 choices of
    * which none could be submitted — every attempt refused with "Choose a
    * location from the list", naming a list it had just been shown. So the live
-   * site list wins for this question. The captured options remain the seed and
-   * are still what the builder shows, which is correct: they are what monday
-   * has, and this is what we can accept.
+   * site list wins for this question. `formOptionOverrides` in
+   * app/lib/form-options.ts is what builds the substitution.
    */
   optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
+  /* Injected so "today as default" is one clock's answer. */
+  now: Date = new Date(),
 ): PublicForm {
-  const { config } = record;
-  const byId = new Map(config.questions.map((question) => [question.id, question]));
-
-  const ordered: FormQuestion[] = [];
-  for (const id of config.order) {
-    const question = byId.get(id);
-    if (question) {
-      ordered.push(question);
-      byId.delete(id);
-    }
-  }
-  for (const remaining of byId.values()) ordered.push(remaining);
-
-  const questions = ordered
-    .filter((question) => question.visible && question.type !== "PAGE_BLOCK")
-    .map<PublicQuestion>((question) => ({
-      id: question.id,
-      type: question.type,
-      title: question.title,
-      description: question.description,
-      required: question.required,
-      options:
-        optionOverrides[question.id] ??
-        question.options
-          ?.filter((option) => option.visible && option.active)
-          .map((option) => ({ label: option.label, value: option.value })) ??
-        null,
-      showIf: question.showIf,
-    }));
-
-  return {
-    token: record.shareToken,
-    title: record.title,
-    description: record.description,
-    questions,
-    appearance: config.appearance,
-    welcome: config.features.preSubmissionView,
-    afterSubmission: {
-      title: config.features.afterSubmissionView.title,
-      description: config.features.afterSubmissionView.description,
-      allowResubmit: config.features.afterSubmissionView.allowResubmit,
-      showSuccessImage: config.features.afterSubmissionView.showSuccessImage,
-      redirectUrl: config.features.afterSubmissionView.redirectAfterSubmission.enabled
-        ? config.features.afterSubmissionView.redirectAfterSubmission.redirectUrl
-        : null,
+  /*
+   * The WHOLE payload comes from the shared, pure projection — the same
+   * function the builder's Preview calls in the browser. One implementation is
+   * what makes Preview and the public form the same form rather than two
+   * renderings that drift; this wrapper only contributes the identity fields a
+   * record carries and the projection cannot know.
+   */
+  return projectPublicForm(
+    record.config,
+    {
+      token: record.shareToken,
+      title: record.title,
+      description: record.description,
     },
-    progressBar: config.appearance.showProgressBar,
-    submitButtonText: config.appearance.submitButton.text,
-    language: config.accessibility.language,
-  };
+    optionOverrides,
+    now,
+  ) as PublicForm;
 }
 
 /* ── Passwords ───────────────────────────────────────────────────────────── */

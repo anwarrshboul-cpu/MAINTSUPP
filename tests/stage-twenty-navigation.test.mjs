@@ -363,10 +363,46 @@ test("locking is enforced in the PUT handler, not only in the UI", async () => {
     /mayEditDefault\(context\)/,
     "and the workspace default is admin-only",
   );
+  /*
+   * This used to assert the literal `context.actor.role === "admin"`.
+   *
+   * The GUARANTEE it was written for is in its own message: the decision is
+   * made from authority the DATABASE granted, never from anything in the
+   * request. That guarantee is unchanged — and is now stronger, because the
+   * answer comes from the permission matrix rather than from a role string
+   * this route compared for itself.
+   *
+   * The literal had to go. It opted this route out of the matrix: a super admin
+   * could revoke `settings.edit` from `admin` and that admin would still
+   * rewrite the workspace-default sidebar, and its locks, for everybody.
+   * `tests/stage-twenty-teams-audit.test.mjs` already forbids exactly this
+   * pattern — "the gates are capabilities, not role literals" — but only for
+   * three named files, and this was not one of them.
+   *
+   * So the assertions below are tightened rather than relaxed: the decision
+   * must go through `resolvePermissions` + `can(...)` on a real capability, it
+   * must still be seeded from the membership role `scopedDb` resolved, and the
+   * role must still never be read out of the request.
+   */
   assert.match(
     route,
-    /context\.actor\.role === "admin"/,
-    "on the role the database granted, not on anything in the request",
+    /resolvePermissions\(/,
+    "the decision is resolved from the database, not compared inline",
+  );
+  assert.match(
+    route,
+    /can\(subject, "settings\.edit"\)/,
+    "and it is a capability, not a role literal",
+  );
+  assert.match(
+    route,
+    /context\.actor\.role/,
+    "seeded from the role the database granted",
+  );
+  assert.doesNotMatch(
+    route,
+    /body\.role|payload\.role|searchParams\.get\("role"\)/,
+    "never from anything in the request",
   );
 });
 

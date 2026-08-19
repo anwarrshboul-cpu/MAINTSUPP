@@ -41,7 +41,13 @@ export type TokenScope = {
   id: string;
   requestId: string;
   organisationId: string;
-  audience: "reporter" | "contractor";
+  /**
+   * `viewer` is the Fix Tracker's Copy Link grant: READ-ONLY by construction.
+   * A viewer scope carries no evidence slots (so /api/files refuses every
+   * upload), no comment right and no completion right — and both the mint and
+   * the resolve force those off, so a hand-edited row cannot widen one.
+   */
+  audience: "reporter" | "contractor" | "viewer";
   label: string | null;
   /** The upload slots the shared page offers, in the words the link was issued in. */
   evidenceSlots: EvidenceKind[];
@@ -122,7 +128,7 @@ export async function createJobToken(
   input: {
     organisationId: string;
     requestId: string;
-    audience?: "reporter" | "contractor";
+    audience?: "reporter" | "contractor" | "viewer";
     label?: string;
     allowedKinds?: unknown;
     canComment?: boolean;
@@ -135,7 +141,16 @@ export async function createJobToken(
   const tokenHash = await hashToken(token);
   const days = Math.min(Math.max(Number(input.expiryDays) || DEFAULT_EXPIRY_DAYS, 1), 90);
   const expiresAt = new Date(Date.now() + days * 86_400_000).toISOString();
-  const allowedKinds = sanitiseKinds(input.allowedKinds);
+  const audience = input.audience ?? "contractor";
+  /*
+   * A viewer link is read-only WHATEVER the caller asked for. Deciding it here
+   * rather than trusting the route means no future caller can mint a
+   * "viewer" that uploads.
+   */
+  const viewer = audience === "viewer";
+  const allowedKinds = viewer ? [] : sanitiseKinds(input.allowedKinds);
+  const canComment = viewer ? false : input.canComment ?? true;
+  const canRequestCompletion = viewer ? false : input.canRequestCompletion ?? true;
   const id = `jat_${crypto.randomUUID().replace(/-/g, "")}`;
 
   await db.insert(jobAccessTokens).values({
@@ -143,11 +158,11 @@ export async function createJobToken(
     organisationId: input.organisationId,
     requestId: input.requestId,
     tokenHash,
-    audience: input.audience ?? "contractor",
+    audience,
     label: input.label?.trim().slice(0, 80) || null,
     allowedKinds: JSON.stringify(allowedKinds),
-    canComment: input.canComment ?? true,
-    canRequestCompletion: input.canRequestCompletion ?? true,
+    canComment,
+    canRequestCompletion,
     expiresAt,
     createdBy: input.createdBy ?? null,
   });
@@ -158,12 +173,12 @@ export async function createJobToken(
       id,
       requestId: input.requestId,
       organisationId: input.organisationId,
-      audience: input.audience ?? "contractor",
+      audience,
       label: input.label ?? null,
       evidenceSlots: allowedKinds,
       allowedKinds: storageKinds(allowedKinds),
-      canComment: input.canComment ?? true,
-      canRequestCompletion: input.canRequestCompletion ?? true,
+      canComment,
+      canRequestCompletion,
       canViewCost: false,
       expiresAt,
     },
@@ -193,7 +208,13 @@ export async function resolveJobToken(
   if (!row) return null;
   if (new Date(row.expiresAt).getTime() < Date.now()) return null;
 
-  const granted = sanitiseKinds(parseKinds(row.allowedKinds));
+  /*
+   * A viewer row resolves read-only regardless of what its columns say —
+   * `sanitiseKinds` deliberately turns an empty grant into the contractor
+   * default, which is right for contractor rows and must never apply here.
+   */
+  const viewer = row.audience === "viewer";
+  const granted = viewer ? [] : sanitiseKinds(parseKinds(row.allowedKinds));
   return {
     id: row.id,
     requestId: row.requestId,
@@ -202,8 +223,8 @@ export async function resolveJobToken(
     label: row.label,
     evidenceSlots: granted,
     allowedKinds: storageKinds(granted),
-    canComment: row.canComment,
-    canRequestCompletion: row.canRequestCompletion,
+    canComment: viewer ? false : row.canComment,
+    canRequestCompletion: viewer ? false : row.canRequestCompletion,
     canViewCost: false,
     expiresAt: row.expiresAt,
   };

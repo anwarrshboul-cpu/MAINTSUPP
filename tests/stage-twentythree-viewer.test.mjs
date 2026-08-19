@@ -311,10 +311,22 @@ test("the hover card is for a mouse, and a tap does not summon it", async () => 
     /onMouseEnter=\{\(\) => setHovered\(true\)\}/,
     "a phone synthesises mouseenter from a tap, and no pointer-out ever follows",
   );
+  /*
+   * The card became a portalled, measured overlay, so opening it is a call
+   * (`openCard`) rather than a bare setHovered — but the guarantee is the
+   * same and asserted at both ends: only a mouse pointerType may open it,
+   * and nothing opens it outside that guard.
+   */
   assert.match(
     manager,
-    /if \(event\.pointerType === "mouse"\) setHovered\(true\);/,
+    /if \(event\.pointerType === "mouse"\) \{\s*cancelClose\(\);\s*openCard\(\);/,
     "pointerType is the only reliable way to tell a finger from a mouse",
+  );
+  const openCalls = [...manager.matchAll(/openCard\(\);/g)];
+  assert.equal(
+    openCalls.length,
+    1,
+    "the guarded pointerEnter is the only caller — nothing else may summon the card",
   );
 });
 

@@ -1,9 +1,7 @@
-import { eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { getDb } from "../../../../db";
-import { sites } from "../../../../db/schema";
+import { formOptionOverrides } from "../../../lib/form-options";
 import {
-  LOCATION_QUESTION_ID,
   expectedUnlockValue,
   formAvailability,
   isUnlocked,
@@ -88,20 +86,15 @@ export async function GET(request: Request, context: { params: Promise<{ token: 
     }
 
     /*
-     * The Location options are this workspace's real sites, not monday's
-     * captured labels — see `publicForm`'s note. Read here rather than in the
-     * library so the library stays free of table knowledge.
+     * The Location, Engineer and Priority options come from their canonical
+     * registers — sites and `option_values` — not from the captured monday
+     * snapshot. `formOptionOverrides` is the ONE builder of that substitution,
+     * shared with `/api/board/form`, so the builder's Preview and this route
+     * cannot offer different lists.
      */
-    const estate = await db
-      .select({ name: sites.name })
-      .from(sites)
-      .where(eq(sites.organisationId, record.organisationId))
-      .orderBy(sites.name);
-    const locations = estate.map((site) => ({ label: site.name, value: site.name }));
-
     return Response.json({
       state: "open",
-      form: publicForm(record, locations.length ? { [LOCATION_QUESTION_ID]: locations } : {}),
+      form: publicForm(record, await formOptionOverrides(db, record.organisationId, record.config)),
     });
   } catch {
     return Response.json({ error: "This form is temporarily unavailable." }, { status: 503 });

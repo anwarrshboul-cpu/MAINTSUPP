@@ -150,6 +150,43 @@
   --chip-neutral-bg: #dfe5e9;
   --chip-neutral-fg: #40505d;
 
+  /*
+   * ---- The switch ------------------------------------------------------
+   *
+   * A switch has no text, so none of it is covered by the contrast test,
+   * which measures foreground/background TEXT pairs. That is exactly how it
+   * came to fail: every colour was a token, every token was measured, but the
+   * three pairings a switch actually depends on were not among them.
+   *
+   * Measured before this existed: the OFF track was `--chip-neutral-bg` on a
+   * `--surface-card` panel — 1.27:1 in light, indistinguishable from the page —
+   * and the white knob on that track was also 1.27:1, so you could not see
+   * WHICH SIDE THE THUMB WAS ON, which is the whole signal. Dark was worse in
+   * the other direction: OFF vs ON was 2.25:1, under the 3:1 that WCAG 1.4.11
+   * requires of a control's own boundary.
+   *
+   * These exist so the switch is measured on its own terms. Measured now:
+   *
+   *                      light          dark
+   *   off track vs card  3.51:1         3.64:1   the control is visible when off
+   *   knob vs off track  3.51:1         4.30:1   the thumb's position is readable
+   *   on track vs card   5.20:1         5.86:1   the control is visible when on
+   *   knob vs on track   5.20:1         6.99:1
+   *
+   * OFF and ON are deliberately NOT held to 3:1 against each other, and it is
+   * worth saying why rather than leaving it looking like an oversight: both
+   * tracks have to clear 3:1 against the same card, which pins them to a
+   * similar lightness, so any pair that satisfies both cannot also be far
+   * apart from each other. The state is carried by the THUMB'S POSITION —
+   * a non-colour signal — plus a strong hue change from grey to teal. That is
+   * the same trade every platform switch makes, and it is what keeps the
+   * control readable for someone who cannot separate the two hues.
+   */
+  --switch-off: #7b8b96;
+  --switch-off-knob: #ffffff;
+  --switch-on: #0b7a72;
+  --switch-on-knob: #ffffff;
+
   --shadow-sm: 0 1px 2px rgba(7, 24, 38, 0.04);
   --shadow-md: 0 12px 36px rgba(7, 24, 38, 0.09);
   --shadow-lg: 0 28px 80px rgba(7, 24, 38, 0.16);
@@ -244,6 +281,17 @@ body[data-theme="dark"] {
    * chrome and stays dark in both themes, so it owns one always-dark set on
    * the bare `:root` above rather than a light definition fighting a dark one.
    */
+
+  /*
+   * The switch in dark. `--brand-solid` is pinned across themes by design, and
+   * on a dark card it only reaches 2.92:1 — so the ON state uses the brighter
+   * teal here instead, which clears 3:1 against both the card and the off
+   * track. The knob goes dark so it reads against both states.
+   */
+  --switch-off: #6b7f8d;
+  --switch-off-knob: #101820;
+  --switch-on: #12b4a8;
+  --switch-on-knob: #06191a;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 14px 38px rgba(0, 0, 0, 0.34);
@@ -382,7 +430,15 @@ h1, h2, h3, .brand-word { font-family: Manrope, Inter, ui-sans-serif, system-ui,
 .form-field input,
 .form-field select,
 .form-field textarea,
-.portal-shell input,
+/*
+ * A CHECKBOX IS NOT A TEXT FIELD — the same exclusion brand-overrides.css
+ * carries on its copies of this rule, for the same reason: at (0,1,1) a bare
+ * `.portal-shell input` beats `.form-switch` at (0,1,0), so every switch in
+ * the form builder painted `--surface-sunken` in both states. This was the
+ * third and last copy of the blanket; the other two were fixed first and the
+ * switches still failed, because this one kept matching.
+ */
+.portal-shell input:not([type="checkbox"]):not([type="radio"]),
 .portal-shell select,
 .portal-shell textarea {
   border-color: var(--line-strong);
@@ -3931,15 +3987,27 @@ a {
   font-size: 7px;
 }
 
+/*
+ * The neutral status pill on Sites and Units & Assets.
+ *
+ * All three colours were literals with no theme override, so the pill kept a
+ * near-white ground and mid-grey ink in dark mode: #536874 on #f8fafb is fine
+ * on a light page and becomes a pale rectangle floating on a dark one, with
+ * the surrounding row painted from tokens around it.
+ *
+ * The chip-neutral pair is exactly this component's ground/ink and is retuned
+ * TOGETHER per theme (7.4:1 light, 7.9:1 dark) — the pairing note in the
+ * palette explains why the two halves must move together.
+ */
 .status-chip {
   display: inline-flex;
   align-items: center;
   min-height: 21px;
   padding: 0 8px;
-  border: 1px solid #dbe4e8;
+  border: 1px solid var(--line);
   border-radius: 99px;
-  background: #f8fafb;
-  color: #536874;
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
   font-size: 7px;
   font-weight: 650;
 }
@@ -8546,17 +8614,31 @@ th.sheet-column--name {
   height: 35px;
 }
 
+/*
+ * The file cell's hover card — monday's photo popover.
+ *
+ * FIXED, PORTALLED, AND FLIPPABLE. It renders into document.body at viewport
+ * coordinates (see FileHoverPreview), because as a child of the cell it was
+ * clipped by `.live-board-scroll { overflow: auto }` for every row near the
+ * top of the board and could never flip below when there was no room above.
+ * `left`/`top` arrive as inline styles; `is-below` marks the flipped case, and
+ * the unflipped card is pulled up by its own height because the anchor point
+ * is the cell's top edge.
+ *
+ * THE PICTURE IS SHOWN AT ITS OWN ASPECT RATIO. The old card squeezed the
+ * image into a 62×56 `object-fit: cover` box — a crop of a crop, since the
+ * thumbnail source is already a centre-cut square — so a tall doorway and a
+ * wide counter looked like the same square. `contain` in a wide pane shows the
+ * photograph's real shape, which is the whole point of a preview.
+ */
 .sheet-file-hover {
-  position: absolute;
-  z-index: 100;
-  bottom: calc(100% + 7px);
-  left: 50%;
-  display: grid;
-  width: 210px;
-  grid-template-columns: 62px 1fr;
-  gap: 4px 9px;
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 248px;
   padding: 8px;
-  transform: translateX(-50%);
   border: 1px solid var(--line);
   border-radius: 9px;
   background: white;
@@ -8565,12 +8647,23 @@ th.sheet-column--name {
   text-align: left;
 }
 
+.sheet-file-hover:not(.is-below) {
+  transform: translateY(-100%);
+}
+
 .sheet-file-hover__preview {
-  grid-row: 1 / 4;
-  display: grid;
-  place-items: center;
-  width: 62px;
-  height: 56px;
+  /*
+   * Flex, not grid: the image's `max-height: 100%` must resolve against this
+   * box's definite 170px. As a grid item it resolved against an implicit
+   * `auto` row that sized to the image, so a tall photograph rendered at its
+   * full height and the pane's overflow clipped it — a crop, the exact thing
+   * this card was rebuilt not to do.
+   */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 170px;
   overflow: hidden;
   border-radius: 6px;
   background: #edf2f4;
@@ -8578,31 +8671,34 @@ th.sheet-column--name {
 
 .sheet-file-hover__preview img,
 .sheet-file-hover__preview video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 .sheet-file-hover strong {
   overflow: hidden;
-  font-size: 8px;
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sheet-file-hover small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 8px;
 }
 
 .sheet-file-hover > button {
-  justify-self: start;
+  align-self: start;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--teal-700);
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .drawer-file-row {
@@ -13155,7 +13251,13 @@ body[data-theme="dark"] {
   flex-direction: column;
   gap: 0.125rem;
   padding: 0.75rem;
-  background: var(--card, #182830);
+  /*
+   * `--card` is not a token this palette defines — it never has been — so this
+   * ALWAYS fell through to the literal, painting a dark card on the light
+   * Documents and Activity panels of a site. `--surface-card` is the real
+   * token and is defined in both themes.
+   */
+  background: var(--surface-card);
   border-radius: 0.5rem;
 }
 

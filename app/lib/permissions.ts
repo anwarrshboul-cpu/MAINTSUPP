@@ -474,7 +474,41 @@ export function roleCapabilityWriteRefusal(
   targetRole: WorkspaceRole,
   capability: Capability,
   allowed: boolean | null,
+  /**
+   * What the actor's role EFFECTIVELY holds right now — defaults merged with
+   * this workspace's overrides.
+   *
+   * THIS PARAMETER EXISTS TO CLOSE A SELF-RESTORE HOLE, and the hole is worth
+   * describing because the rule below reads correct without it.
+   *
+   * "You cannot hand out a power you do not have" was measured against
+   * `defaultAllows(actorRole, …)` — the SHIPPED default — never against what
+   * the role actually holds. So every narrowing of `admin` was self-reversible:
+   * a super admin revoking `users.deactivate` from `admin` writes an override
+   * row, and any admin could then PUT that same cell back to `allowed: true`.
+   * `grantingUpward` was true, but `defaultAllows("admin", "users.deactivate")`
+   * was ALSO true, so no refusal fired and the row was rewritten. The only
+   * narrowing that stuck was removing `roles.edit` itself, which locks the
+   * editor rather than limiting anything.
+   *
+   * Passing the effective set makes the sentence mean what it says. Omitting it
+   * falls back to the defaults, which is the old behaviour — so callers that
+   * only need the shape (and cannot see the overrides) still work, but both
+   * real call sites pass it.
+   */
+  actorHolds?: Record<Capability, boolean>,
 ): string | null {
+  /*
+   * A super admin holds everything by definition (`can()` short-circuits), so
+   * the upward check can never refuse the role that is meant to hold the lot.
+   */
+  const actorHasCapability = (name: Capability) =>
+    actorRole === IMMUTABLE_ROLE
+      ? true
+      : actorHolds
+        ? actorHolds[name] === true
+        : defaultAllows(actorRole, name);
+
   if (targetRole === IMMUTABLE_ROLE) {
     return "The Super Admin role always holds every permission; it cannot be narrowed. This is what stops a workspace being locked out of its own permission editor.";
   }
@@ -508,10 +542,10 @@ export function roleCapabilityWriteRefusal(
    * this can never refuse the role that is meant to hold everything.
    */
   const grantingUpward = allowed === null
-    ? defaultAllows(targetRole, capability) && !defaultAllows(actorRole, capability)
+    ? defaultAllows(targetRole, capability) && !actorHasCapability(capability)
     : allowed === true;
 
-  if (grantingUpward && !defaultAllows(actorRole, capability)) {
+  if (grantingUpward && !actorHasCapability(capability)) {
     return `Your role does not hold "${capability}", so you cannot grant it. Ask someone who does.`;
   }
 

@@ -33,6 +33,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const BUILDER_CSS = "app/(app)/portal/form-builder.css";
 const PUBLIC_CSS = "app/(public)/f/[token]/public-form.css";
 const CONFIG_LIB = "app/lib/form-config.ts";
+const PROJECTION_LIB = "app/lib/form-projection.ts";
 
 /* ── Desktop only ────────────────────────────────────────────────────────── */
 
@@ -96,12 +97,31 @@ test("the shared form is never hidden on a phone", async () => {
 
 test("the public form's inputs clear the iOS zoom floor", async () => {
   const css = await read(PUBLIC_CSS);
-  const inputs = css.slice(css.indexOf(".pf__field input,"));
+  /*
+   * `>` and not a descendant selector — see the note in the stylesheet. As a
+   * descendant rule this reached the visually-hidden file input nested in
+   * `.pf__files` and gave it `width: 100%` against the initial containing
+   * block, which was 421px of horizontal scroll at 1440px. The 16px floor
+   * below is the original guarantee and is unchanged.
+   */
+  const anchor = css.indexOf(".pf__field > input,");
+  assert.ok(anchor > 0, "the field rule must be scoped to direct children");
+  const inputs = css.slice(anchor);
   /*
    * Below 16px iOS Safari zooms on focus and does not zoom back, leaving a
    * submitter on a horizontally scrolled page mid-form.
    */
   assert.match(inputs.slice(0, 420), /font-size:\s*16px/);
+
+  /*
+   * And the hidden file input must not be reachable by it, or the overflow
+   * comes straight back the next time somebody widens the selector.
+   */
+  assert.doesNotMatch(
+    css,
+    /^\.pf__field input,/m,
+    "the descendant form of this rule is what caused the overflow",
+  );
   const tap = css.slice(css.indexOf(".pf__submit"));
   assert.match(tap.slice(0, 500), /min-height:\s*44px/, "the submit button is a tap target");
 });
@@ -167,9 +187,21 @@ test("the public form defines its palette in both schemes", async () => {
 /* ── The public payload is an allowlist ──────────────────────────────────── */
 
 test("hidden questions never reach the browser", async () => {
-  const lib = await read(CONFIG_LIB);
-  const projection = lib.slice(lib.indexOf("export function publicForm"));
-
+  /*
+   * The projection moved to `app/lib/form-projection.ts` — a PURE module with
+   * no database imports — so the builder's Preview can call the very same
+   * function in the browser. It had to: `worker/index.ts` sets
+   * `X-Frame-Options: DENY` on every response, so the previous approach of
+   * framing the real /f/:token route was refused by policy on every port and
+   * every domain. Sharing the rules is what stops Preview and the public form
+   * drifting, and weakening that header would have been the wrong trade.
+   *
+   * So this follows the move rather than relaxing: the guarantee — a hidden
+   * question and a retired option never reach a browser — is asserted at its
+   * new home, and `form-config` is checked to be delegating rather than
+   * keeping a second copy that could rot.
+   */
+  const projection = await read(PROJECTION_LIB);
   assert.match(
     projection,
     /\.filter\(\(question\) => question\.visible && question\.type !== "PAGE_BLOCK"\)/,
@@ -177,6 +209,38 @@ test("hidden questions never reach the browser", async () => {
   );
   /* A retired store must not be selectable, and monday retires by flag. */
   assert.match(projection, /option\.visible && option\.active/);
+
+  /*
+   * The projection module now presents the WHOLE payload (`projectPublicForm`)
+   * so the builder's Preview can compute in the browser exactly what the
+   * server serves. Both hops are asserted: the pure module holds the one
+   * question filter, and the server's `publicForm` delegates to it rather
+   * than keeping a second copy that could rot.
+   */
+  assert.match(
+    projection,
+    /projectQuestions\(config, optionOverrides, now\)/,
+    "the presentation must be built on the shared question projection",
+  );
+  const lib = await read(CONFIG_LIB);
+  assert.match(
+    lib,
+    /return projectPublicForm\(/,
+    "the server must delegate to the shared projection, not keep a second copy of the rules",
+  );
+  assert.doesNotMatch(
+    lib.slice(lib.indexOf("export function publicForm")),
+    /question\.visible && question\.type !== "PAGE_BLOCK"/,
+    "the filter must live in exactly one place",
+  );
+
+  /*
+   * And the pure module must stay pure, or a client component importing it
+   * drags drizzle and the password hasher into the browser bundle.
+   */
+  assert.doesNotMatch(projection, /from "drizzle-orm"/);
+  assert.doesNotMatch(projection, /from "\.\.\/\.\.\/db"/);
+  assert.doesNotMatch(projection, /from "\.\/password"/);
 });
 
 test("the password hash has exactly one reader and never leaves it", async () => {

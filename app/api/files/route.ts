@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { AttachmentKind, MaintenanceRequest } from "../../lib/types";
 import { ensureDatabase } from "../../../db/init";
 import {
@@ -210,11 +210,49 @@ async function listFiles(request: Request) {
    * photographs for its own job.
    */
   const { db, orgId } = await scopedDb(request);
+
+  /*
+   * A column filter matches THE SAME rows the board counts for that cell.
+   *
+   * /api/board draws the two photo columns from rows filed by
+   * `board_column_id` PLUS rows that carry only the matching `kind` and no
+   * column — the app's own uploads store the kind, the monday import stored
+   * the column, and both are the cell's photographs. This list filtered by
+   * column alone, so the hover card fetched an empty answer for a cell whose
+   * strip was visibly full of pictures: count said three, card said "open to
+   * manage these files". The predicate below is the counting rule, verbatim.
+   */
+  let columnFilter;
+  if (columnId) {
+    const [columnRow] = await db
+      .select({ key: maintenanceBoardColumns.key })
+      .from(maintenanceBoardColumns)
+      .where(
+        and(
+          eq(maintenanceBoardColumns.id, columnId),
+          eq(maintenanceBoardColumns.organisationId, orgId),
+        ),
+      )
+      .limit(1);
+    const columnKind =
+      columnRow?.key === "issuePictures"
+        ? "issue"
+        : columnRow?.key === "completedPictures"
+          ? "completion"
+          : null;
+    columnFilter = columnKind
+      ? or(
+          eq(attachments.boardColumnId, columnId),
+          and(eq(attachments.kind, columnKind), isNull(attachments.boardColumnId)),
+        )
+      : eq(attachments.boardColumnId, columnId);
+  }
+
   const where = and(
     eq(attachments.organisationId, orgId),
     requestId ? eq(attachments.requestId, requestId) : undefined,
     kind ? eq(attachments.kind, kind) : undefined,
-    columnId ? eq(attachments.boardColumnId, columnId) : undefined,
+    columnFilter,
   );
   const rows = await db
     .select()

@@ -70,6 +70,23 @@
 }
 
 /*
+ * The wrapper the strip and its two arrows share.
+ *
+ * The arrows are OVERLAYS, not flex siblings, and that is a correctness fix
+ * rather than a styling choice. As siblings, an arrow appearing or vanishing
+ * changed the strip's width; the strip's own ResizeObserver then re-measured,
+ * re-decided the arrow, and the browser reported "ResizeObserver loop
+ * completed with undelivered notifications" on every board collapse/expand —
+ * measured at 1015px → 963px and back on one toggle. Absolutely positioned,
+ * their visibility cannot alter any observed size, so the cycle cannot start.
+ */
+.board-views__strip {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
  * The board strip's forward control — see the note beside it in
  * board-chrome.tsx for why that strip needs one and the account rail does not.
  *
@@ -79,17 +96,25 @@
  * and it disappears — not greys out — at the far end of the scroll, because a
  * dead control that stays on screen is the thing the reader has to test to
  * learn is dead.
+ *
+ * `--paper` behind it, because it now sits ON the strip: the mask fades the
+ * last 36px of tabs and the button is 44px, so without a ground of its own the
+ * chevron would land on partially faded tab text.
  */
 .board-views__forward {
   display: none;
-  flex: 0 0 auto;
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 2;
   min-width: 44px;
   min-height: 44px;
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: var(--radius-sm);
-  background: none;
+  background: var(--paper);
   color: var(--muted);
   cursor: pointer;
 }
@@ -117,14 +142,18 @@
  */
 .board-views__back {
   display: none;
-  flex: 0 0 auto;
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  z-index: 2;
   min-width: 44px;
   min-height: 44px;
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: var(--radius-sm);
-  background: none;
+  background: var(--paper);
   color: var(--muted);
   cursor: pointer;
 }

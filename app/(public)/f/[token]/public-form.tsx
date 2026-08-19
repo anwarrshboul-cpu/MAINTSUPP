@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { BrandMark, Icon } from "../../../components";
+import { Icon } from "../../../components";
+import { uploadEvidenceFile } from "../../../lib/client-upload";
+import {
+  DoneScreen,
+  FormBody,
+  Shell,
+  type PublicFormPayload,
+} from "./form-renderer";
 
 /**
  * The page somebody sees when they open a shared form link.
@@ -16,43 +23,13 @@ import { BrandMark, Icon } from "../../../components";
  * FIVE STATES, NOT ONE. A link can resolve to a form that is open, locked
  * behind a password, waiting for a sign-in, closed, or gone. Each says which,
  * because "this didn't work" is the one answer that generates a phone call.
+ *
+ * WHAT LIVES HERE AND WHAT DOES NOT. This file owns everything that talks to
+ * the server — the fetch, the gates, the password unlock, the submit and the
+ * uploads. What the form LOOKS like lives in `form-renderer.tsx`, shared with
+ * the builder's Preview, so the preview an operator checks and the page a
+ * submitter opens are one implementation.
  */
-
-type PublicQuestion = {
-  id: string;
-  type: string;
-  title: string;
-  description: string | null;
-  required: boolean;
-  options: Array<{ label: string; value: string }> | null;
-  showIf: { questionId: string; equals: string[] } | null;
-};
-
-type PublicFormPayload = {
-  token: string;
-  title: string;
-  description: string | null;
-  questions: PublicQuestion[];
-  appearance: {
-    layout: { alignment: string; type: string };
-    background: { type: string; value: string | null };
-    text: { font: string; size: string; color: string | null };
-    logo: { url: string | null; size: string };
-    primaryColor: string | null;
-    hideBranding: boolean;
-    showProgressBar: boolean;
-    submitButton: { text: string | null };
-  };
-  afterSubmission: {
-    title: string | null;
-    description: string | null;
-    allowResubmit: boolean;
-    showSuccessImage: boolean;
-    redirectUrl: string | null;
-  };
-  progressBar: boolean;
-  submitButtonText: string | null;
-};
 
 type Payload =
   | { state: "open"; form: PublicFormPayload }
@@ -60,31 +37,18 @@ type Payload =
   | { state: "login-required"; title: string }
   | { state: "unavailable"; reason: string; title: string; message: string };
 
-/**
- * Which of our submit fields a monday question id maps to.
- *
- * Keyed by the question ID rather than by its title, so renaming "Manager" in
- * the Design panel does not silently stop the answer reaching `requester`.
- */
-const FIELD_BY_QUESTION: Record<string, string> = {
-  single_selecty9rcyhe: "location",
-  short_text64: "requester",
-  numbertb4g1z46: "contact",
-  date: "requestedAt",
-  single_select: "engineer",
-  short_text: "description",
-  status: "priority",
-};
-
 export default function PublicForm({ token }: { token: string }) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [failed, setFailed] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(0);
   const [password, setPassword] = useState("");
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [state, setState] = useState<"form" | "sending" | "done">("form");
   const [error, setError] = useState<string | null>(null);
   const [reference, setReference] = useState("");
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
 
   const load = useMemo(
     () => async () => {
@@ -104,6 +68,58 @@ export default function PublicForm({ token }: { token: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /*
+   * Load the configured webfont — and only then.
+   *
+   * The Design panel offers Poppins, Figtree, Manrope, Rubik and Roboto, and
+   * the public route deliberately loads no shared stylesheet (see the layout:
+   * this page is opened on mobile data, in a service corridor). So the font
+   * stack resolved to whatever the device happened to have, which meant the
+   * picker did nothing on most phones — a control that changed a stored value
+   * and nothing a submitter could see.
+   *
+   * The link is appended once, only when the chosen face is one that needs
+   * fetching, so a form left on the default costs no extra request. `display=swap`
+   * keeps the text readable while it loads rather than blocking on it.
+   */
+  useEffect(() => {
+    if (payload?.state !== "open") return;
+    const face = payload.form.appearance.text.font;
+    const FETCHED = ["Poppins", "Figtree", "Manrope", "Rubik", "Roboto"];
+    if (!face || !FETCHED.includes(face)) return;
+
+    const id = `pf-font-${face}`;
+    if (document.getElementById(id)) return;
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(face)}:wght@400;600;700&display=swap`;
+    document.head.appendChild(link);
+  }, [payload]);
+
+  /*
+   * Seed the answers from the server-computed prefills.
+   *
+   * Only once, and only for fields the submitter has not touched: re-applying
+   * on every render would fight the person typing. "Today as default" is
+   * computed on the server (see `resolvePrefill`) precisely so the date shown
+   * and the date validated come from one clock.
+   */
+  useEffect(() => {
+    if (payload?.state !== "open") return;
+    setAnswers((current) => {
+      const seeded = { ...current };
+      let changed = false;
+      for (const question of payload.form.questions) {
+        if (question.settings.prefill && seeded[question.id] === undefined) {
+          seeded[question.id] = question.settings.prefill;
+          changed = true;
+        }
+      }
+      return changed ? seeded : current;
+    });
+  }, [payload]);
 
   async function unlock(event: FormEvent) {
     event.preventDefault();
@@ -125,27 +141,75 @@ export default function PublicForm({ token }: { token: string }) {
     event.preventDefault();
     if (payload?.state !== "open") return;
     setError(null);
-    setState("sending");
 
-    const body: Record<string, string> = {};
-    for (const question of payload.form.questions) {
-      const field = FIELD_BY_QUESTION[question.id];
-      if (field) body[field] = answers[question.id] ?? "";
+    /*
+     * A required File question, checked before the request is sent so the
+     * submitter is told at the point they can still fix it. The server checks
+     * the same thing — this is the courtesy, that is the rule.
+     */
+    const needsFile = payload.form.questions.find(
+      (question) => question.type === "File" && question.required,
+    );
+    if (needsFile && !files.length) {
+      setError(`${needsFile.title} is required — please attach at least one photograph or video.`);
+      return;
     }
 
+    setState("sending");
+
+    /*
+     * Every answer is posted, keyed by question id, and the server decides what
+     * each one means. The browser used to translate to a fixed seven-field
+     * shape, which silently dropped answers to the other twelve questions —
+     * so un-hiding a question in the builder produced a field that a submitter
+     * filled in and nothing ever stored.
+     */
     try {
       const response = await fetch(`/api/forms/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ answers, fileCount: files.length }),
       });
-      const result = (await response.json()) as { request?: { id: string }; error?: string };
+      const result = (await response.json()) as {
+        request?: { id: string };
+        uploadToken?: string | null;
+        error?: string;
+      };
       if (!response.ok || !result.request) {
         throw new Error(result.error || "Your request could not be submitted.");
       }
+
+      /*
+       * The uploads run AFTER the work order exists, because that is what they
+       * attach to. A failure here is reported but does not undo the job: a
+       * logged request with no photograph is recoverable — the coordinator can
+       * ask — whereas throwing away a submitted request is not.
+       */
+      const failedUploads: string[] = [];
+      for (const [index, file] of files.entries()) {
+        setUploading(index + 1);
+        try {
+          await uploadEvidenceFile({
+            file,
+            requestId: result.request.id,
+            uploadToken: result.uploadToken ?? undefined,
+            kind: "issue",
+          });
+        } catch {
+          failedUploads.push(file.name);
+        }
+      }
+      setUploading(0);
+
       setReference(result.request.id);
+      setUploadWarning(
+        failedUploads.length
+          ? `Your request was logged, but ${failedUploads.length} file${failedUploads.length > 1 ? "s" : ""} did not upload (${failedUploads.join(", ")}). Please reply to the confirmation with them attached.`
+          : null,
+      );
       setState("done");
       setAnswers({});
+      setFiles([]);
 
       const redirect = payload.form.afterSubmission.redirectUrl;
       if (redirect) window.location.href = redirect;
@@ -226,252 +290,32 @@ export default function PublicForm({ token }: { token: string }) {
 
   if (state === "done") {
     return (
-      <Shell title={form.title} appearance={form.appearance}>
-        <div className="pf__done">
-          {form.afterSubmission.showSuccessImage && <Icon name="check" size={34} />}
-          <h2>{form.afterSubmission.title || "Thank you!"}</h2>
-          <p>
-            {form.afterSubmission.description || (
-              <>
-                Logged as <strong>{reference}</strong>.
-              </>
-            )}
-          </p>
-          {form.afterSubmission.allowResubmit && (
-            <button type="button" className="pf__submit" onClick={() => setState("form")}>
-              Submit another
-            </button>
-          )}
-        </div>
+      <Shell title={form.title} appearance={form.appearance} language={form.language}>
+        <DoneScreen
+          form={form}
+          reference={reference}
+          warning={uploadWarning}
+          onResubmit={() => setState("form")}
+        />
       </Shell>
     );
   }
 
-  /* A question with a `showIf` only appears once its trigger has been answered. */
-  const visible = form.questions.filter((question) => {
-    if (!question.showIf) return true;
-    return question.showIf.equals.includes(answers[question.showIf.questionId] ?? "");
-  });
-  const answered = visible.filter((question) => (answers[question.id] ?? "").trim()).length;
-
   return (
-    <Shell title={form.title} description={form.description} appearance={form.appearance}>
-      {form.progressBar && (
-        <div
-          className="pf__progress"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={visible.length}
-          aria-valuenow={answered}
-          aria-label="Form progress"
-        >
-          <span style={{ width: `${visible.length ? (answered / visible.length) * 100 : 0}%` }} />
-        </div>
-      )}
-
-      <form className="pf__form" onSubmit={submit}>
-        {visible.map((question) => (
-          <Question
-            key={question.id}
-            question={question}
-            value={answers[question.id] ?? ""}
-            onChange={(value) =>
-              setAnswers((current) => ({ ...current, [question.id]: value }))
-            }
-          />
-        ))}
-
-        {error && (
-          <p className="pf__error" role="alert">
-            {error}
-          </p>
-        )}
-
-        <button type="submit" className="pf__submit" disabled={state === "sending"}>
-          {state === "sending" ? "Sending…" : form.submitButtonText || "Submit"}
-        </button>
-      </form>
+    <Shell title={form.title} description={form.description} appearance={form.appearance} language={form.language}>
+      <FormBody
+        form={form}
+        answers={answers}
+        onAnswer={(questionId, value) =>
+          setAnswers((current) => ({ ...current, [questionId]: value }))
+        }
+        files={files}
+        onFiles={setFiles}
+        error={error}
+        sending={state === "sending"}
+        uploading={uploading}
+        onSubmit={submit}
+      />
     </Shell>
-  );
-}
-
-/**
- * One question.
- *
- * File questions are rendered but NOT wired to an upload. The public submit
- * route creates the job and returns; attaching evidence needs an upload grant
- * that an anonymous submitter does not hold. Saying so on the field is better
- * than a control that silently drops what somebody attached.
- */
-function Question({
-  question,
-  value,
-  onChange,
-}: {
-  question: PublicQuestion;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const label = (
-    <span>
-      {question.title}
-      {question.required && <em aria-hidden="true"> *</em>}
-    </span>
-  );
-
-  if (question.type === "SingleSelect") {
-    return (
-      <label className="pf__field">
-        {label}
-        {question.description && <small>{question.description}</small>}
-        <select
-          required={question.required}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value="" disabled>
-            Choose an option
-          </option>
-          {question.options?.map((option) => (
-            <option key={option.value} value={option.label}>
-              {option.label || "—"}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  }
-
-  if (question.type === "Date") {
-    return (
-      <label className="pf__field">
-        {label}
-        {question.description && <small>{question.description}</small>}
-        <input
-          type="date"
-          required={question.required}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-    );
-  }
-
-  if (question.type === "Number") {
-    return (
-      <label className="pf__field">
-        {label}
-        {question.description && <small>{question.description}</small>}
-        <input
-          type="text"
-          inputMode="tel"
-          required={question.required}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-    );
-  }
-
-  if (question.type === "File") {
-    return (
-      <div className="pf__field pf__field--file">
-        {label}
-        {question.description && <small>{question.description}</small>}
-        <p className="pf__note">
-          <Icon name="paperclip" size={14} />
-          Photographs are collected after the request is logged — the coordinator will
-          reply with an upload link.
-        </p>
-      </div>
-    );
-  }
-
-  /* ShortText, LongText and anything new default to a text answer. */
-  const long = question.type === "LongText" || question.title.toLowerCase().includes("descri");
-  return (
-    <label className="pf__field">
-      {label}
-      {question.description && <small>{question.description}</small>}
-      {long ? (
-        <textarea
-          required={question.required}
-          rows={4}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      ) : (
-        <input
-          type="text"
-          required={question.required}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      )}
-    </label>
-  );
-}
-
-/**
- * The card the form sits on.
- *
- * The appearance settings are applied as inline custom properties rather than
- * as classes, because they are per-form values chosen by an operator — a class
- * cannot carry "#8a2be2". They are scoped to this element, so nothing here can
- * repaint the rest of the page.
- */
-function Shell({
-  title,
-  description,
-  appearance,
-  children,
-}: {
-  title?: string;
-  description?: string | null;
-  appearance?: PublicFormPayload["appearance"];
-  children: React.ReactNode;
-}) {
-  const style: React.CSSProperties & Record<string, string> = {} as never;
-  if (appearance?.primaryColor) style["--pf-accent"] = appearance.primaryColor;
-  if (appearance?.text.color) style["--pf-ink"] = appearance.text.color;
-  if (appearance?.background.type === "Color" && appearance.background.value) {
-    style["--pf-canvas"] = appearance.background.value;
-  }
-  if (appearance?.text.font) {
-    style["--pf-font"] = `${appearance.text.font}, Inter, system-ui, sans-serif`;
-  }
-
-  const align = appearance?.layout.alignment ?? "Center";
-
-  return (
-    <main
-      className="pf"
-      style={style}
-      data-align={align.toLowerCase()}
-      data-size={(appearance?.text.size ?? "Medium").toLowerCase()}
-    >
-      <div className="pf__card">
-        <header className="pf__head">
-          {appearance?.logo.url ? (
-            /*
-             * An operator-supplied URL. Rendered with a plain <img> rather than
-             * a framework image component because it is an arbitrary external
-             * host that no loader is configured for, and it is decorative —
-             * the form's own title carries the meaning.
-             */
-            // eslint-disable-next-line @next/next/no-img-element
-            <img className="pf__logo" src={appearance.logo.url} alt="" />
-          ) : (
-            <BrandMark compact />
-          )}
-          {title && <h1>{title}</h1>}
-          {description && <p className="pf__lede">{description}</p>}
-        </header>
-        {children}
-      </div>
-      {appearance && !appearance.hideBranding && (
-        <p className="pf__brand">Powered by MAINTSUPP</p>
-      )}
-    </main>
   );
 }

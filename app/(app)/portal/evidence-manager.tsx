@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../../components";
 import { uploadEvidenceFile } from "../../lib/client-upload";
 import {
@@ -257,6 +258,15 @@ export function EvidenceManager({
     if (completed) {
       onRequestChange(latestRequest);
       onNotify(`${completed} file${completed === 1 ? "" : "s"} added to ${request.id}.`);
+      /*
+       * The board's thumbnail strips draw from `fileCounts[].preview`, which
+       * only arrives with the board payload — so a new photograph used to stay
+       * invisible until a full page reload. This is the app's own refresh
+       * convention (see live-board.tsx, raise-ticket.tsx): the board re-fetches
+       * its data and repaints in place, previews included, for the system photo
+       * columns as well as custom ones. Not a page reload.
+       */
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
     }
     if (failures.length) setError(failures.join(" "));
     setUploading(false);
@@ -283,6 +293,8 @@ export function EvidenceManager({
         return next;
       });
       if (payload.request) onRequestChange(payload.request);
+      /* A removed photo must leave the board's thumbnail strip too. */
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
       if (viewerId === file.id) {
         // Deleting from inside the viewer moves to the next picture rather
         // than throwing you back to the grid, which is what monday does and
@@ -538,6 +550,15 @@ export function EvidenceManager({
  * a request per cell. The hover card still fetches, because it wants the full
  * record and only one cell is ever hovered.
  */
+/** The hover card's fixed width; position maths depends on knowing it. */
+const HOVER_CARD_WIDTH = 248;
+/**
+ * Roughly the card at its tallest — the 170px preview pane plus the three text
+ * rows. Only used to decide whether the card fits ABOVE the cell; the card
+ * itself sizes to its content.
+ */
+const HOVER_CARD_ESTIMATE = 240;
+
 export function FileHoverPreview({
   requestId,
   kind,
@@ -565,6 +586,62 @@ export function FileHoverPreview({
 }) {
   const [hovered, setHovered] = useState(false);
   const [files, setFiles] = useState<AttachmentRecord[] | null>(null);
+  /*
+   * Where the card goes, in VIEWPORT coordinates, decided when the hover
+   * starts. The card used to be an absolutely-positioned child of the cell,
+   * which had two consequences monday's does not have: `.live-board-scroll` is
+   * an `overflow: auto` container, so the card was CLIPPED for any row near
+   * the top of the board, and it could never flip below the cell when there
+   * was no room above. Rendering into a portal at `position: fixed` escapes
+   * the clip; the flip is decided here from the measured rect.
+   */
+  const [placement, setPlacement] = useState<{
+    left: number;
+    top: number;
+    below: boolean;
+  } | null>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  const openCard = () => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const rect = wrap.getBoundingClientRect();
+    const below = rect.top < HOVER_CARD_ESTIMATE + 16;
+    setPlacement({
+      left: Math.min(
+        Math.max(rect.left + rect.width / 2 - HOVER_CARD_WIDTH / 2, 8),
+        window.innerWidth - HOVER_CARD_WIDTH - 8,
+      ),
+      top: below ? rect.bottom + 8 : rect.top - 8,
+      below,
+    });
+    setHovered(true);
+  };
+
+  /*
+   * The card is no longer a child of the cell, so moving the pointer from the
+   * cell onto the card fires the cell's pointerleave. A short grace period
+   * keeps the card up across that hop — cancel on arriving, close on leaving
+   * either — so "Open & manage" stays clickable exactly as it was.
+   */
+  const cancelClose = () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => setHovered(false), 120);
+  };
+  useEffect(() => cancelClose, []);
+
+  /* A fixed-position card must not drift from its cell: any scroll closes it. */
+  useEffect(() => {
+    if (!hovered) return;
+    const close = () => setHovered(false);
+    window.addEventListener("scroll", close, { capture: true, passive: true });
+    return () => window.removeEventListener("scroll", close, { capture: true });
+  }, [hovered]);
 
   useEffect(() => {
     if (!hovered || files !== null || count < 1) return;
@@ -590,6 +667,7 @@ export function FileHoverPreview({
 
   return (
     <span
+      ref={wrapRef}
       className="sheet-file-wrap"
       /*
        * Pointer events, not mouse events, and only for a mouse.
@@ -603,10 +681,13 @@ export function FileHoverPreview({
        * way to tell a finger from a mouse at the moment of the event.
        */
       onPointerEnter={(event) => {
-        if (event.pointerType === "mouse") setHovered(true);
+        if (event.pointerType === "mouse") {
+          cancelClose();
+          openCard();
+        }
       }}
-      onPointerLeave={() => setHovered(false)}
-      onPointerCancel={() => setHovered(false)}
+      onPointerLeave={scheduleClose}
+      onPointerCancel={scheduleClose}
     >
       <button
         className={`sheet-file-cell${count ? " has-files" : ""}${
@@ -687,24 +768,49 @@ export function FileHoverPreview({
           </span>
         )}
       </button>
-      {hovered && count > 0 && (
-        <span className="sheet-file-hover">
-          {files === null ? (
-            <small>Loading preview…</small>
-          ) : files[0] ? (
-            <>
-              <span className="sheet-file-hover__preview">
-                <FilePreview file={files[0]} compact />
-              </span>
-              <strong>{files[0].originalName}</strong>
-              <small>{count > 1 ? `+${count - 1} more file${count === 2 ? "" : "s"}` : kindLabel(files[0].kind)}</small>
-              <button type="button" onClick={onOpen}>Open & manage</button>
-            </>
-          ) : (
-            <small>Open to manage these files</small>
-          )}
-        </span>
-      )}
+      {hovered &&
+        count > 0 &&
+        placement &&
+        createPortal(
+          <span
+            className={`sheet-file-hover${placement.below ? " is-below" : ""}`}
+            style={{ left: placement.left, top: placement.top }}
+            onPointerEnter={cancelClose}
+            onPointerLeave={scheduleClose}
+          >
+            {files === null ? (
+              <small>Loading preview…</small>
+            ) : files[0] ? (
+              <>
+                <span className="sheet-file-hover__preview">
+                  {/*
+                    The ORIGINAL image, not the 96px thumbnail. The thumbnail
+                    generator centre-crops to a square, so scaling it up here
+                    reproduced the squashed-crop look this card exists to fix —
+                    the true aspect ratio only exists in the original. One
+                    image, fetched for the one cell being hovered.
+                  */}
+                  {files[0].contentType.startsWith("image/") ? (
+                    <img
+                      src={`/api/files/${files[0].id}`}
+                      alt={files[0].originalName}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  ) : (
+                    <FilePreview file={files[0]} compact />
+                  )}
+                </span>
+                <strong>{files[0].originalName}</strong>
+                <small>{count > 1 ? `+${count - 1} more file${count === 2 ? "" : "s"}` : kindLabel(files[0].kind)}</small>
+                <button type="button" onClick={onOpen}>Open & manage</button>
+              </>
+            ) : (
+              <small>Open to manage these files</small>
+            )}
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }

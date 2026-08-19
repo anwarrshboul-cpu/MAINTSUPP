@@ -823,6 +823,11 @@ function FixTrackerDetail({
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  /** The minted public ticket URL, cached for this panel opening. */
+  const [publicLink, setPublicLink] = useState<string | null>(null);
+  /** What Copy Link did, shown under the header where the button is. */
+  const [share, setShare] = useState<{ url: string; copied: boolean } | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const timing = timingOf(item, todayUtc());
   const priority = chipLabel(item.priority);
@@ -856,14 +861,69 @@ function FixTrackerDetail({
   );
   const otherFiles = files.filter((file) => !inGallery.has(file.id));
 
+  /*
+   * Copy Link copies a PUBLIC, READ-ONLY ticket URL.
+   *
+   * It used to copy `?item=<id>` on the portal's own address — a link that
+   * asked whoever received it to sign in, which is exactly what sharing a
+   * ticket with a store manager or a landlord must not do. It now mints a
+   * "viewer" token on the same infrastructure the contractor links use
+   * (/j/:token): no login, no upload, no comment, no completion — the grant
+   * itself carries no write rights and the API refuses every POST from it.
+   * The registered whitelist still applies: cost, invoices and approvals are
+   * never in the payload.
+   *
+   * Minted once per panel opening and cached, so pressing Copy twice does not
+   * fill the links table with one-use tokens.
+   *
+   * EVERY OUTCOME IS SHOWN AT THE BUTTON, AND NONE OF THEM IS SILENT. The
+   * first version reported through `notice`, which renders at the BOTTOM of a
+   * panel long enough to scroll — so a refusal painted off-screen and the
+   * click read as doing nothing at all. Two failure modes are real:
+   *
+   *   · The mint can be refused (a session that has expired, a role without
+   *     board.edit). The server's reason now appears under the header.
+   *   · The clipboard can refuse the write: it needs the click's "user
+   *     activation", and the browser expires that a few seconds after the
+   *     click — a slow mint outlives it. When that happens the minted link is
+   *     shown in a row under the header with its own Copy button, whose click
+   *     is a fresh activation and copies synchronously. The link is never
+   *     lost to a clipboard technicality.
+   */
   const copyLink = async () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("item", item.id);
+    setShareError(null);
     try {
-      await navigator.clipboard.writeText(url.toString());
-      setNotice("Link copied.");
-    } catch {
-      setNotice("The link could not be copied.");
+      let url = publicLink;
+      if (!url) {
+        const response = await fetch("/api/board/links", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestId: item.id,
+            audience: "viewer",
+            label: "Fix Tracker share link",
+            expiryDays: 30,
+          }),
+        });
+        const payload = (await response.json()) as { url?: string; error?: string };
+        if (!response.ok || !payload.url) {
+          throw new Error(payload.error || "The share link could not be created.");
+        }
+        url = payload.url;
+        setPublicLink(url);
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        setShare({ url, copied: true });
+      } catch {
+        /* Activation expired mid-mint: hand over the link instead of failing. */
+        setShare({ url, copied: false });
+      }
+    } catch (caught) {
+      setShare(null);
+      setShareError(
+        caught instanceof Error ? caught.message : "The share link could not be created.",
+      );
     }
   };
 
@@ -985,8 +1045,8 @@ function FixTrackerDetail({
             </small>
           </div>
           <button className="secondary-button" type="button" onClick={() => void copyLink()}>
-            <Icon name="paperclip" size={15} />
-            Copy Link
+            <Icon name={share?.copied ? "check" : "paperclip"} size={15} />
+            {share?.copied ? "Copied" : "Copy Link"}
           </button>
           <button
             className="icon-button"
@@ -997,6 +1057,53 @@ function FixTrackerDetail({
             <Icon name="close" size={18} />
           </button>
         </header>
+
+        {/*
+          Copy Link's outcome, right where the button is — never only at the
+          foot of a panel that scrolls. See the note on `copyLink`.
+        */}
+        {shareError && (
+          <p className="fix-tracker__flag" role="alert">
+            <Icon name="alert" size={15} />
+            {shareError}
+          </p>
+        )}
+        {share && (
+          <div className="fix-tracker__share" role="status">
+            {share.copied ? (
+              <p>
+                <Icon name="check" size={14} />
+                Public read-only link copied — it opens without a login and shows
+                no costs or approvals.
+              </p>
+            ) : (
+              <p>
+                <Icon name="link" size={14} />
+                Your public read-only link is ready — copy it below.
+              </p>
+            )}
+            <span>
+              <input
+                readOnly
+                value={share.url}
+                aria-label="Public read-only link"
+                onFocus={(event) => event.target.select()}
+              />
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(share.url)
+                    .then(() => setShare({ ...share, copied: true }))
+                    .catch(() => undefined);
+                }}
+              >
+                Copy
+              </button>
+            </span>
+          </div>
+        )}
 
         {(timing.overdue || timing.stale) && (
           <p

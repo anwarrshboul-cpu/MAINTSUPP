@@ -2,6 +2,7 @@ import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
+  maintenanceBoardOptions,
   maintenanceRequests,
   optionSets,
   optionValues,
@@ -135,6 +136,92 @@ async function reassign(
   }
 }
 
+/**
+ * Which board column renders each option set. The same mapping the seed uses
+ * (db/seed-options.ts), restated here because that file is provisioning-only
+ * by rule — nothing in the app may import it.
+ */
+const SET_TO_BOARD_COLUMN: Record<string, string> = {
+  maintenance_status: "status",
+  maintenance_label: "label",
+  engineer_required: "engineer",
+  priority: "priority",
+  tier_level: "tier",
+  store_location: "storeLocation",
+};
+
+/**
+ * Keeps the board's chip store in step with the registry.
+ *
+ * The board draws its chips from `maintenance_board_options`; this route — the
+ * options admin and the form builder behind it — writes `option_values`. Two
+ * stores, and until this mirror they drifted on the first rename: an admin
+ * would rename "Urgent" here, the form and every selector would follow, and
+ * the board's chips would keep the old word indefinitely. The registry is the
+ * canonical copy by decision, so every write through this route lands on both,
+ * in the same request, matched by the stable `value` the two stores share.
+ */
+async function mirrorBoardOption(
+  db: ScopedDb,
+  orgId: string,
+  key: string,
+  value: string,
+  action:
+    | { kind: "upsert"; label: string; colourHex: string; textColour: string; active: boolean; position?: number }
+    | { kind: "remove" },
+) {
+  const columnKey = SET_TO_BOARD_COLUMN[key];
+  if (!columnKey) return;
+  const where = and(
+    eq(maintenanceBoardOptions.organisationId, orgId),
+    eq(maintenanceBoardOptions.columnKey, columnKey),
+    eq(maintenanceBoardOptions.value, value),
+  );
+  const [existing] = await db.select().from(maintenanceBoardOptions).where(where).limit(1);
+
+  if (action.kind === "remove") {
+    if (!existing) return;
+    /* Retire rather than delete when the seed would only recreate it. */
+    if (existing.system) {
+      await db
+        .update(maintenanceBoardOptions)
+        .set({ active: false, updatedAt: new Date().toISOString() })
+        .where(eq(maintenanceBoardOptions.id, existing.id));
+    } else {
+      await db.delete(maintenanceBoardOptions).where(eq(maintenanceBoardOptions.id, existing.id));
+    }
+    return;
+  }
+
+  if (existing) {
+    await db
+      .update(maintenanceBoardOptions)
+      .set({
+        label: action.label,
+        color: action.colourHex,
+        textColor: action.textColour,
+        active: action.active,
+        ...(action.position !== undefined ? { position: action.position } : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(maintenanceBoardOptions.id, existing.id));
+  } else {
+    await db.insert(maintenanceBoardOptions).values({
+      id: `board-${key}-${Date.now().toString(36)}`,
+      organisationId: orgId,
+      boardId: "maintenance",
+      columnKey,
+      value,
+      label: action.label,
+      color: action.colourHex,
+      textColor: action.textColour,
+      active: action.active,
+      system: false,
+      position: action.position ?? 999,
+    });
+  }
+}
+
 async function setIdForKey(db: ScopedDb, orgId: string, key: string) {
   const [row] = await db
     .select({ id: optionSets.id })
@@ -250,6 +337,14 @@ export async function POST(request: Request) {
           });
           created += 1;
         }
+        await mirrorBoardOption(db, orgId, key, value, {
+          kind: "upsert",
+          label: values.label,
+          colourHex: values.colourHex,
+          textColour: values.textColour,
+          active: values.active,
+          position: values.position,
+        });
       }
       invalidateOptionCache(orgId, key);
       return Response.json({ ok: true, created, updated });
@@ -272,6 +367,14 @@ export async function POST(request: Request) {
       isDefault: boolish(data.isDefault),
       active: boolish(data.active, true),
       system: false,
+    });
+    await mirrorBoardOption(db, orgId, key, value, {
+      kind: "upsert",
+      label: text(data.label, 120) || value,
+      colourHex: colour(data.colourHex, "#5c82af"),
+      textColour: colour(data.textColour, "#ffffff"),
+      active: boolish(data.active, true),
+      position: Number(data.position) || undefined,
     });
     invalidateOptionCache(orgId, key);
     await db.insert(activityLog).values({
@@ -312,6 +415,22 @@ export async function PATCH(request: Request) {
           .update(optionValues)
           .set({ position, updatedAt: new Date().toISOString() })
           .where(and(eq(optionValues.id, id), eq(optionValues.organisationId, orgId)));
+        /* The chip dropdown orders by the board copy's position — keep it in step. */
+        const [row] = await db
+          .select({ value: optionValues.value, label: optionValues.label, colourHex: optionValues.colourHex, textColour: optionValues.textColour, active: optionValues.active })
+          .from(optionValues)
+          .where(and(eq(optionValues.id, id), eq(optionValues.organisationId, orgId)))
+          .limit(1);
+        if (row) {
+          await mirrorBoardOption(db, orgId, key, row.value, {
+            kind: "upsert",
+            label: row.label,
+            colourHex: row.colourHex,
+            textColour: row.textColour,
+            active: row.active,
+            position,
+          });
+        }
       }
       invalidateOptionCache(orgId, key);
       return Response.json({ ok: true });
@@ -342,6 +461,13 @@ export async function PATCH(request: Request) {
       })
       .where(and(eq(optionValues.id, id), eq(optionValues.organisationId, orgId)));
 
+    await mirrorBoardOption(db, orgId, key, existing.value, {
+      kind: "upsert",
+      label: text(data.label, 120) || existing.label,
+      colourHex: colour(data.colourHex, existing.colourHex),
+      textColour: colour(data.textColour, existing.textColour),
+      active: boolish(data.active, existing.active),
+    });
     invalidateOptionCache(orgId, key);
     return Response.json({ ok: true, id });
   } catch (error) {
@@ -406,6 +532,7 @@ export async function DELETE(request: Request) {
       await db.delete(optionValues).where(eq(optionValues.id, id));
     }
 
+    await mirrorBoardOption(db, orgId, key, existing.value, { kind: "remove" });
     invalidateOptionCache(orgId, key);
     return Response.json({ ok: true, id, reassigned: usage, deactivated: existing.system });
   } catch (error) {

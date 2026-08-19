@@ -26,7 +26,11 @@ import {
   maintenanceRequests,
   teams,
 } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
+import {
+  anonymousRefusal,
+  scopedDb,
+  scopedDbWithCapability,
+} from "../../../lib/tenant-db";
 
 /** The kinds this route will restore, and the table each one flips. */
 const RESTORABLE = new Set(["job", "group", "board"]);
@@ -194,11 +198,23 @@ export async function GET(request: Request) {
   }
 }
 
-/** Restore one archived row — monday's per-row Restore button. */
+/**
+ * Restore one archived row — monday's per-row Restore button.
+ *
+ * `board.edit`, because restoring is a WRITE to the board and was the only
+ * direction of it that asked for nothing. Archiving a job goes through
+ * `board.edit` (`/api/board/items` DELETE), archiving a group likewise — but
+ * un-archiving went through a bare `scopedDb`, so a `client`, whose entire
+ * grant is `board.view` and `data.export`, could put any archived job, group
+ * or board back on the board. An asymmetry like that makes the archive a
+ * suggestion rather than a control.
+ */
 export async function POST(request: Request) {
   await ensureDatabase();
   try {
-    const context = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.edit");
+    if (guard.denied) return guard.denied;
+    const context = guard.scope;
     const payload = (await request.json()) as Record<string, unknown>;
     const kind = typeof payload.kind === "string" ? payload.kind : "";
     const id = typeof payload.id === "string" ? payload.id.slice(0, 80) : "";

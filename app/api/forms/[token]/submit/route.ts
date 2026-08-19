@@ -4,15 +4,21 @@ import { getDb } from "../../../../../db";
 import {
   activityLog,
   formConfigurations,
+  maintenanceBoardCells,
+  maintenanceGroups,
+  maintenanceBoardColumns,
   maintenanceRequests,
   sites,
 } from "../../../../../db/schema";
 import {
+  LOCATION_QUESTION_ID,
   formAvailability,
   isUnlocked,
   loadFormByToken,
   unavailableMessage,
 } from "../../../../lib/form-config";
+import { canonicalOptionValue, priorityRule } from "../../../../lib/priority-rules";
+import { listOptionValues } from "../../../../lib/options-repository";
 import { getSession } from "../../../../lib/auth-session";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +58,14 @@ function trimString(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+/** Matches the digest `/api/files` computes when it verifies an upload token. */
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /**
  * The job title, from the first line of the description.
  *
@@ -88,18 +102,119 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       return failure("This form is password protected.", 401);
     }
 
-    const payload = (await request.json()) as Record<string, unknown>;
-    const location = trimString(payload.location, 120);
-    const requester = trimString(payload.requester, 120);
-    const contact = trimString(payload.contact, 80);
-    const description = trimString(payload.description, 800);
-    const priority = trimString(payload.priority, 80) || "Medium";
-    const engineer = trimString(payload.engineer, 80);
+    /*
+     * ANSWERS ARRIVE KEYED BY QUESTION ID, and the server decides what each one
+     * means. The browser used to post a fixed seven-field object, which had two
+     * consequences worth spelling out because both were silent:
+     *
+     *   · An answer to any of the other twelve questions was dropped on the
+     *     floor. The Edit panel invites an operator to un-hide "Cost of Works"
+     *     or "Approved by"; a submitter would then fill the field in and the
+     *     value would never leave the browser.
+     *   · `required` could only ever be checked for the four fields the shape
+     *     happened to carry.
+     *
+     * Keying by question id means the set of questions is DATA, so un-hiding a
+     * question makes its answer arrive without anybody editing this route.
+     */
+    const body = (await request.json()) as { answers?: Record<string, unknown> };
+    const answers = (body.answers ?? {}) as Record<string, unknown>;
+    const answerFor = (id: string, max = 400) => trimString(answers[id], max);
 
-    if (!location || !requester || !contact || description.length < 10) {
+    /*
+     * Which questions were actually ASKED. A hidden question is not asked, and
+     * a conditional one is only asked when its trigger matched — validating
+     * either would refuse a submission over a field the submitter never saw.
+     * This mirrors the filter the public renderer applies.
+     */
+    const asked = record.config.questions.filter((question) => {
+      if (!question.visible || question.type === "PAGE_BLOCK") return false;
+      if (!question.showIf) return true;
+      return question.showIf.equals.includes(answerFor(question.showIf.questionId));
+    });
+
+    /*
+     * Required, enforced HERE and not only by the `required` attribute in the
+     * markup. The submit is a plain JSON fetch, so the browser's validation is
+     * advisory at best — anything that posts directly bypasses it entirely.
+     * The first unanswered question is named, because "something is missing" on
+     * a nine-question form is not an error message.
+     */
+    /*
+     * A File question is answered by an UPLOAD, which cannot be in this JSON —
+     * the files are attached after the work order exists, because /api/files
+     * files them against a request id. So the browser declares how many it is
+     * about to send, and a required File question is satisfied by a non-zero
+     * declaration rather than by a string.
+     *
+     * What that does and does not buy, stated plainly: it stops the ordinary
+     * "I did not attach anything" case server-side, before a job is created,
+     * which is the case the setting exists for. It is NOT proof that files
+     * arrive — a hostile client could declare a count and upload nothing, and
+     * the authenticated path through /api/maintenance has exactly the same
+     * property. What binds the real files to this job is the single-use upload
+     * token issued below, not the count.
+     */
+    const declaredFiles = Number((body as { fileCount?: unknown }).fileCount ?? 0);
+    const fileCount = Number.isFinite(declaredFiles) ? Math.max(0, declaredFiles) : 0;
+
+    const missing = asked.find((question) => {
+      if (!question.required) return false;
+      if (question.type === "File") return fileCount < 1;
+      return !answerFor(question.id);
+    });
+    if (missing) {
       return failure(
-        "Location, manager, contact details and a clear description are required.",
+        missing.type === "File"
+          ? `${missing.title} is required — please attach at least one photograph or video.`
+          : `${missing.title} is required.`,
       );
+    }
+
+    /* The questions that map onto first-class columns of a work order. */
+    const location = answerFor(LOCATION_QUESTION_ID, 120);
+    const requester = answerFor("short_text64", 120);
+    const contact = answerFor("numbertb4g1z46", 80);
+    const description = answerFor("short_text", 800);
+    const requestedAnswer = answerFor("date", 32);
+
+    /*
+     * Priority and Engineer are CANONICALISED against the option registry
+     * before anything is stored or computed from them.
+     *
+     * The registry separates `value` (the stable key stored jobs carry, which
+     * renaming never touches) from `label` (the display text an admin may
+     * edit). The form shows labels, so the answer arriving here is normally
+     * the current label; a form opened before a rename posts the old one,
+     * which for seeded rows equals the value — both resolve. Storing the VALUE
+     * is what lets an admin rename "Urgent" without splitting every dashboard
+     * grouping in two, and the SLA below reads the value, so a rename changes
+     * what people see and nothing about what the system does.
+     */
+    const priorityOptions = await listOptionValues(db, record.organisationId, "priority");
+    const priority = canonicalOptionValue(priorityOptions, answerFor("status", 80), "Medium");
+    const engineerOptions = await listOptionValues(
+      db,
+      record.organisationId,
+      "engineer_required",
+    );
+    /*
+     * `engineer` is NOT NULL on the board. An unanswered question falls back
+     * to "Other", which is a real label in the Engineer Required option set
+     * rather than an empty chip the board cannot draw.
+     */
+    const engineer = canonicalOptionValue(engineerOptions, answerFor("single_select", 80), "Other");
+
+    /*
+     * A floor on the description that `required` alone cannot express: a job
+     * nobody can act on is worse than no job. Only applied when the question is
+     * actually being asked.
+     */
+    if (asked.some((question) => question.id === "short_text") && description.length < 10) {
+      return failure("Please describe the work needed in a little more detail.");
+    }
+    if (!location || !requester || !contact) {
+      return failure("Location, manager and contact details are required.");
     }
 
     /*
@@ -128,15 +243,73 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       );
     const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
 
-    const submittedDate = trimString(payload.requestedAt, 32);
-    const parsedDate = submittedDate ? new Date(submittedDate) : null;
+    const parsedDate = requestedAnswer ? new Date(requestedAnswer) : null;
     const requestedAt =
       parsedDate && !Number.isNaN(parsedDate.getTime())
         ? parsedDate.toISOString()
         : new Date().toISOString();
 
-    const dueHours = priority === "Urgent" ? 4 : priority === "Medium" ? 72 : 120;
-    const dueAt = new Date(Date.now() + dueHours * 60 * 60 * 1000).toISOString();
+    /*
+     * The SLA clock and the tier come from `priorityRule`, keyed on the
+     * canonical VALUE — see app/lib/priority-rules.ts for why label-string
+     * comparisons had to go before labels became editable.
+     */
+    const rule = priorityRule(priority);
+    const dueAt = new Date(Date.now() + rule.dueHours * 60 * 60 * 1000).toISOString();
+
+    /*
+     * The single-use grant that lets an anonymous submitter attach the files
+     * they were just told were mandatory.
+     *
+     * Only minted when the form actually asks for files, so a form with no File
+     * question issues no upload capability at all. `/api/files` already knows
+     * how to accept it — it hashes what it is given and compares against
+     * `public_upload_token_hash` on the work order, with the expiry checked
+     * alongside — so nothing new is trusted here; this is the missing half of a
+     * handshake the file route was already written for.
+     *
+     * Thirty minutes: long enough to push a few phone videos over a shop's
+     * wifi, short enough that a token captured from a browser history is dead
+     * before it is useful. Only the HASH is stored, so a dump of the table
+     * cannot be turned back into a working upload grant.
+     */
+    /*
+     * WHERE THE ANSWER LANDS — the "Group for answers" setting, honoured.
+     *
+     * `stage` is what decides a job's group on this board, and this route used
+     * to hard-code "Incoming" regardless of what the panel said. So an operator
+     * could pick a group, see it saved, and every submission would still arrive
+     * somewhere else.
+     *
+     * The configured group is resolved to its `stage_key`, scoped to the form's
+     * own organisation so a stored id from another workspace resolves to
+     * nothing rather than to that workspace's group. Anything unresolvable —
+     * no setting, a deleted group, a group with no stage — falls back to
+     * "Incoming", which is the board's top group and the safe default: a job in
+     * the wrong group is recoverable, a job that failed to save is not.
+     */
+    let targetStage = "Incoming";
+    const configuredGroupId = record.config.features.board?.itemGroupId;
+    if (configuredGroupId) {
+      const [group] = await db
+        .select({ stageKey: maintenanceGroups.stageKey })
+        .from(maintenanceGroups)
+        .where(
+          and(
+            eq(maintenanceGroups.id, String(configuredGroupId)),
+            eq(maintenanceGroups.organisationId, record.organisationId),
+          ),
+        )
+        .limit(1);
+      if (group?.stageKey) targetStage = group.stageKey;
+    }
+
+    const wantsFiles = asked.some((question) => question.type === "File");
+    const uploadToken = wantsFiles ? crypto.randomUUID().replace(/-/g, "") : null;
+    const uploadTokenHash = uploadToken ? await sha256(uploadToken) : null;
+    const uploadTokenExpiresAt = uploadToken
+      ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
+      : null;
 
     const [created] = await db
       .insert(maintenanceRequests)
@@ -155,18 +328,13 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         requester,
         contact,
         category: "Other",
-        /*
-         * `engineer` is NOT NULL on the board. An unanswered question falls
-         * back to "Other", which is a real label in the Engineer Required
-         * option set rather than an empty chip the board cannot draw.
-         */
-        engineer: engineer || "Other",
-        tier: priority === "Urgent" ? 1 : priority === "Medium" ? 2 : 3,
+        engineer,
+        tier: rule.tier,
         priority,
-        stage: "Incoming",
         status: "Pending Approval",
         contractor: null,
         assignee: null,
+        stage: targetStage,
         requestedAt,
         dueAt,
         completedAt: null,
@@ -176,8 +344,8 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         issueAttachmentCount: 0,
         completedAttachmentCount: 0,
         generalAttachmentCount: 0,
-        publicUploadTokenHash: null,
-        publicUploadTokenExpiresAt: null,
+        publicUploadTokenHash: uploadTokenHash,
+        publicUploadTokenExpiresAt: uploadTokenExpiresAt,
         commentCount: 0,
         /* Nobody signed in, so nobody is credited. */
         createdByEmail: null,
@@ -195,6 +363,51 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     });
 
     /*
+     * ANSWERS THAT ARE NOT FIRST-CLASS COLUMNS OF A WORK ORDER.
+     *
+     * A question id here IS a monday column id — that is how the configuration
+     * was captured — and `maintenance_board_cells` is keyed by (request,
+     * column). So an answer to "Cost of Works" or "Approved by" has a proper
+     * home, and un-hiding one of the ten hidden questions now produces a value
+     * that lands in the right column instead of being discarded in the browser.
+     *
+     * Only columns the board actually has are written: `column_id` is a foreign
+     * key, and a question whose column was deleted must not take the whole
+     * submission down with it. Anything unmatched is skipped silently — the job
+     * itself is already saved and is worth more than the extra field.
+     */
+    const handled = new Set([
+      LOCATION_QUESTION_ID,
+      "short_text64",
+      "numbertb4g1z46",
+      "short_text",
+      "single_select",
+      "status",
+      "date",
+    ]);
+    const extras = asked.filter(
+      (question) => !handled.has(question.id) && answerFor(question.id),
+    );
+    if (extras.length) {
+      const columns = await db
+        .select({ id: maintenanceBoardColumns.id })
+        .from(maintenanceBoardColumns)
+        .where(eq(maintenanceBoardColumns.organisationId, record.organisationId));
+      const known = new Set(columns.map((column) => column.id));
+      for (const question of extras) {
+        if (!known.has(question.id)) continue;
+        await db.insert(maintenanceBoardCells).values({
+          id: crypto.randomUUID(),
+          organisationId: record.organisationId,
+          boardId: "maintenance",
+          requestId: id,
+          columnId: question.id,
+          value: answerFor(question.id, 800),
+        });
+      }
+    }
+
+    /*
      * Counted only after the row exists. Incrementing first would let a
      * rejected submission consume somebody else's place under a response limit.
      */
@@ -203,7 +416,14 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       .set({ responseCount: sql`${formConfigurations.responseCount} + 1` })
       .where(eq(formConfigurations.id, record.id));
 
-    return Response.json({ request: { id: created?.id ?? id } }, { status: 201 });
+    /*
+     * The plaintext token is returned exactly once, here, and never stored or
+     * logged. The browser uses it immediately for the uploads and then drops it.
+     */
+    return Response.json(
+      { request: { id: created?.id ?? id }, uploadToken },
+      { status: 201 },
+    );
   } catch {
     return Response.json({ error: "Your request could not be submitted." }, { status: 503 });
   }

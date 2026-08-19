@@ -293,6 +293,56 @@
   color: var(--fix-alarm);
 }
 
+/*
+ * Copy Link's outcome, rendered under the header the button sits in — the
+ * one place the person who just clicked is actually looking. The row also
+ * carries the minted URL and its own Copy button, because a clipboard write
+ * that outlives the click's user activation is refused by the browser; a
+ * second, fresh click on this row always succeeds.
+ */
+.fix-tracker__share {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.fix-tracker__share p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fix-tracker__share span {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fix-tracker__share input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.fix-tracker__share button {
+  flex: 0 0 auto;
+}
+
 .fix-tracker__fact-note {
   display: block;
   margin-top: 2px;

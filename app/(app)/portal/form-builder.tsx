@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components";
 import { FormDesignPanel, FormEditPanel, FormSettingsPanel } from "./form-builder-panels";
+import FormPreview from "./form-preview";
 import FormShareDialog from "./form-share-dialog";
 import type { BuilderForm, BuilderMode } from "./form-builder-model";
 import { FormView } from "./views/board-views";
@@ -39,6 +40,7 @@ import "./form-builder.css";
  */
 export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void }) {
   const [form, setForm] = useState<BuilderForm | null>(null);
+  const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
   const [mode, setMode] = useState<BuilderMode>("view");
   const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -49,9 +51,16 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
     let active = true;
     fetch("/api/board/form", { headers: { Accept: "application/json" } })
       .then(async (response) => {
-        const payload = (await response.json()) as { form?: BuilderForm; error?: string };
+        const payload = (await response.json()) as {
+          form?: BuilderForm;
+          groups?: Array<{ id: string; name: string }>;
+          error?: string;
+        };
         if (!response.ok || !payload.form) throw new Error(payload.error || "Unavailable");
-        if (active) setForm(payload.form);
+        if (active) {
+          setForm(payload.form);
+          setGroups(payload.groups ?? []);
+        }
       })
       .catch(() => {
         /*
@@ -205,8 +214,25 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
       <div className="form-builder__stage" data-mode={mode}>
         {mode === "edit" && <FormEditPanel form={form} patch={patch} busy={busy} />}
         {mode === "design" && <FormDesignPanel form={form} patch={patch} busy={busy} />}
-        {mode === "settings" && <FormSettingsPanel form={form} patch={patch} busy={busy} />}
-        {(mode === "view" || mode === "preview") && <FormView onSubmitted={onSubmitted} />}
+        {mode === "settings" && (
+          <FormSettingsPanel form={form} patch={patch} busy={busy} groups={groups} />
+        )}
+        {mode === "view" && <FormView onSubmitted={onSubmitted} />}
+        {mode === "preview" && (
+          /*
+           * PREVIEW IS THE PUBLIC FORM'S OWN RENDERER, mounted here.
+           *
+           * Not `FormView` (a different component that drifted), and not an
+           * iframe of the live route — `worker/index.ts` sends
+           * `X-Frame-Options: DENY` on every response, deliberately, so a
+           * frame is refused everywhere and weakening the header for a
+           * preview would be the wrong trade. `FormPreview` renders the same
+           * components over the same shared projection with the same option
+           * substitution the public endpoint serves, so what the operator
+           * sees is what the link shows — as one implementation, not a hope.
+           */
+          <FormPreview form={form} />
+        )}
       </div>
 
       {sharing && (

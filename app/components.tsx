@@ -42,6 +42,7 @@ export type IconName =
   | "sun"
   | "thumb"
   | "tool"
+  | "trash"
   | "upload"
   | "updates"
   | "user"
@@ -221,6 +222,13 @@ const paths: Record<IconName, ReactNode> = {
   tool: (
     <path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5L4 17a2 2 0 1 0 3 3l7.7-8.3a4 4 0 0 0 0-5.4Z" />
   ),
+  /* The option editor's remove action — a stroked bin on the shared grid. */
+  trash: (
+    <>
+      <path d="M4 7h16M10 11v6M14 11v6" />
+      <path d="M6 7l1 13a1.5 1.5 0 0 0 1.5 1.4h7A1.5 1.5 0 0 0 17 20l1-13M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7" />
+    </>
+  ),
   upload: (
     <>
       <path d="M12 17V3m-5 5 5-5 5 5M4 21h16" />
@@ -317,7 +325,22 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <span className={`brand-lockup${compact ? " brand-lockup--compact" : ""}`}>
       <span className="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 40 40" fill="none">
+        {/*
+          `width` and `height` are on the SVG itself, not left to CSS.
+          An outermost <svg> with only a viewBox has no intrinsic size, so it
+          falls back to the CSS default of 100%/100% — and the rules that size
+          `.brand-mark` live in globals.css / brand-overrides.css, which the
+          PUBLIC routes deliberately do not load (app/(public)/layout.tsx ships
+          no shared stylesheet, for bandwidth). On the shared form that made
+          this mark render 582×582 at a 1440px viewport and 320×320 on a phone:
+          the enormous "M" with a screen of dead space under it.
+
+          Sizing it at source fixes it on every route at once, including any
+          future page that loads no stylesheet. The `.brand-mark` CSS still
+          scales it where those sheets ARE loaded, because a width attribute is
+          a presentation hint and loses to any CSS rule.
+        */}
+        <svg viewBox="0 0 40 40" width="40" height="40" fill="none">
           <path
             d="M6 33V9l14 15"
             stroke="currentColor"
