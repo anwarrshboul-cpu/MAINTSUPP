@@ -8678,6 +8678,18 @@ th.sheet-column--name {
   object-fit: contain;
 }
 
+.sheet-file-hover__preview video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sheet-file-hover__doc {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
 .sheet-file-hover strong {
   overflow: hidden;
   font-size: 9px;
@@ -8686,6 +8698,148 @@ th.sheet-column--name {
 }
 
 .sheet-file-hover small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.sheet-file-hover__error {
+  color: #c52f45;
+}
+
+/*
+ * The card's actions — monday's row of real verbs under the preview. Every
+ * button acts on the EXACT file the card is showing; none is decorative.
+ */
+.sheet-file-hover__actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sheet-file-hover__actions button {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--teal-700);
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sheet-file-hover__actions button:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.sheet-file-hover__actions button.is-danger {
+  color: #c52f45;
+}
+
+/*
+ * The "+N" overflow list — ONLY the files the strip did not draw, each row a
+ * thumbnail, a truncating filename and the same three real actions. Portalled
+ * and fixed for the same clipping/flipping reasons as the card above.
+ */
+.sheet-file-overflow {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 268px;
+  max-height: 288px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  box-shadow: 0 15px 38px rgba(8, 28, 40, 0.23);
+  color: #344b57;
+  text-align: left;
+}
+
+.sheet-file-overflow:not(.is-below) {
+  transform: translateY(-100%);
+}
+
+.sheet-file-overflow__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.sheet-file-overflow__row:hover {
+  background: #edf2f4;
+}
+
+.sheet-file-overflow__thumb {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 32px;
+  flex: 0 0 30px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #edf2f4;
+  color: var(--muted);
+}
+
+.sheet-file-overflow__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sheet-file-overflow__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+}
+
+.sheet-file-overflow__tools {
+  display: inline-flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  /* Revealed on the row, monday-style, so the list reads as filenames first. */
+  opacity: 0;
+}
+
+.sheet-file-overflow__row:hover .sheet-file-overflow__tools,
+.sheet-file-overflow__row:focus-within .sheet-file-overflow__tools {
+  opacity: 1;
+}
+
+.sheet-file-overflow__tools button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sheet-file-overflow__tools button:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--ink);
+}
+
+.sheet-file-overflow__tools button.is-danger:hover {
+  color: #c52f45;
+}
+
+.sheet-file-overflow__note {
+  padding: 6px;
   color: var(--muted);
   font-size: 8px;
 }
@@ -12213,6 +12367,8 @@ body[data-theme="dark"] {
   .sheet-option-popover,
   .sheet-timeline-popover,
   .sheet-file-hover__preview,
+  .sheet-file-overflow,
+  .sheet-file-overflow__thumb,
   .column-settings-dialog > section,
   .mobile-cell-sheet__panel,
   .request-modal,
@@ -12223,6 +12379,10 @@ body[data-theme="dark"] {
     background: #121d25;
     color: var(--ink);
     box-shadow: var(--shadow-lg);
+  }
+
+  .sheet-file-overflow__row:hover {
+    background: #1b2a34;
   }
 
   .notification-item.is-unread,
@@ -13324,11 +13484,42 @@ body[data-theme="dark"] {
   display: block;
 }
 
+/*
+ * Each tile is its own hover target — the ring says "this one", monday-style,
+ * so the person can see WHICH photograph the floating card is describing.
+ */
+.sheet-file-cell.is-monday-media .sheet-file-cell__media-tile:hover {
+  outline: 2px solid var(--teal, #0b7a72);
+  outline-offset: 1px;
+}
+
 .sheet-file-cell.is-monday-media .sheet-file-cell__media > small {
   font-size: 10.5px;
   font-weight: 650;
   color: var(--muted, #5c6b74);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The overflow badge is a TILE-SHAPED HOVER TARGET, not a bare number:
+ * hovering it lists exactly the files the strip hid, so it needs the same
+ * footprint and affordance as the thumbnails it stands in for.
+ */
+.sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 26px;
+  padding: 0 3px;
+  border-radius: 3px;
+  border: 1px solid var(--line, #dce4e9);
+  background: var(--chip-neutral-bg, #eef2f5);
+  color: var(--chip-neutral-fg, #45525b);
+}
+
+.sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more:hover {
+  border-color: var(--teal, #0b7a72);
+  color: var(--ink, #132537);
 }
 
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {

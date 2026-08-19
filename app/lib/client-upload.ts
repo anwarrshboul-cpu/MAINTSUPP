@@ -348,6 +348,65 @@ async function multipartUpload({
   }
 }
 
+/**
+ * The board-strip derivative, made where the pixels already are.
+ *
+ * The server cannot make one — the Workers runtime has no image pipeline, and
+ * until now derivatives came only from an OFFLINE script over the import. So
+ * every photograph uploaded through the app was served at full camera
+ * resolution into a 22px board tile until somebody re-ran that script: the
+ * exact cost `?thumb=1` exists to avoid, paid on precisely the newest files.
+ *
+ * Same recipe as the script: 96px, centre-crop cover, WebP — so a tile drawn
+ * from this is indistinguishable from a tile drawn from the import. BEST
+ * EFFORT by design: the PUT needs an editor's session (a public-form
+ * submitter is refused, correctly), Safari cannot encode WebP (`toBlob`
+ * answers null), and none of that may fail the upload the person actually
+ * asked for — the fallback is the original serving in the tile, heavier but
+ * never broken, exactly as before.
+ */
+const THUMBNAIL_EDGE = 96;
+
+async function offerThumbnail(file: File, attachmentId: string) {
+  if (!file.type.startsWith("image/")) return;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = THUMBNAIL_EDGE;
+    canvas.height = THUMBNAIL_EDGE;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    /* Centre-crop cover, matching generate-thumbnails.mjs. */
+    const scale = Math.max(
+      THUMBNAIL_EDGE / bitmap.width,
+      THUMBNAIL_EDGE / bitmap.height,
+    );
+    const width = bitmap.width * scale;
+    const height = bitmap.height * scale;
+    context.drawImage(
+      bitmap,
+      (THUMBNAIL_EDGE - width) / 2,
+      (THUMBNAIL_EDGE - height) / 2,
+      width,
+      height,
+    );
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/webp", 0.72),
+    );
+    /* Not WebP (Safari), or somehow enormous: the server would refuse it. */
+    if (!blob || !blob.type.includes("webp") || blob.size > 512 * 1024) return;
+    await fetch(`/api/files/${encodeURIComponent(attachmentId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: blob,
+    });
+  } catch {
+    /* The upload itself already succeeded; a missing derivative costs bytes,
+       never correctness. */
+  }
+}
+
 export async function uploadEvidenceFile({
   file,
   requestId,
@@ -366,15 +425,22 @@ export async function uploadEvidenceFile({
   validateFile(file);
   onProgress?.(0);
 
+  const finish = async (result: UploadResponse) => {
+    if (result.file?.id) await offerThumbnail(file, result.file.id);
+    return result;
+  };
+
   if (file.size > DIRECT_UPLOAD_LIMIT) {
-    return multipartUpload({
-      file,
-      requestId,
-      kind,
-      columnId,
-      uploadToken,
-      onProgress,
-    });
+    return finish(
+      await multipartUpload({
+        file,
+        requestId,
+        kind,
+        columnId,
+        uploadToken,
+        onProgress,
+      }),
+    );
   }
 
   try {
@@ -386,17 +452,19 @@ export async function uploadEvidenceFile({
       uploadToken,
     });
     onProgress?.(100);
-    return result;
+    return finish(result);
   } catch (error) {
     if (error instanceof UploadApiError && error.status === 413) {
-      return multipartUpload({
-        file,
-        requestId,
-        kind,
-        columnId,
-        uploadToken,
-        onProgress,
-      });
+      return finish(
+        await multipartUpload({
+          file,
+          requestId,
+          kind,
+          columnId,
+          uploadToken,
+          onProgress,
+        }),
+      );
     }
     throw error;
   }

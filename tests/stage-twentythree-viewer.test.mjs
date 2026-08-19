@@ -312,22 +312,26 @@ test("the hover card is for a mouse, and a tap does not summon it", async () => 
     "a phone synthesises mouseenter from a tap, and no pointer-out ever follows",
   );
   /*
-   * The card became a portalled, measured overlay, so opening it is a call
-   * (`openCard`) rather than a bare setHovered — but the guarantee is the
-   * same and asserted at both ends: only a mouse pointerType may open it,
-   * and nothing opens it outside that guard.
+   * There are several hover targets now — each tile, the "+N" badge, and the
+   * cell itself for strip-less columns — so the mouse gate lives in ONE
+   * helper (`mouseOnly`) they all route through. The guarantee is unchanged
+   * and asserted at both ends: only a mouse pointerType may open a hover
+   * surface, and no pointerEnter handler opens one without the helper.
    */
   assert.match(
     manager,
-    /if \(event\.pointerType === "mouse"\) \{\s*cancelClose\(\);\s*openCard\(\);/,
+    /const mouseOnly = \(event: React\.PointerEvent, open: \(\) => void\) => \{\s*if \(event\.pointerType === "mouse"\) \{\s*cancelClose\(\);\s*open\(\);/,
     "pointerType is the only reliable way to tell a finger from a mouse",
   );
-  const openCalls = [...manager.matchAll(/openCard\(\);/g)];
-  assert.equal(
-    openCalls.length,
-    1,
-    "the guarded pointerEnter is the only caller — nothing else may summon the card",
-  );
+  const component = manager.slice(manager.indexOf("export function FileHoverPreview"));
+  const enters = [...component.matchAll(/onPointerEnter=\{([^}]*)\}/g)];
+  assert.ok(enters.length >= 4, "the tiles, the badge, the cell and the surfaces all react to hover");
+  for (const [, handler] of enters) {
+    assert.ok(
+      handler.includes("mouseOnly") || handler.includes("cancelClose"),
+      `a hover target may open only through the mouse gate (or hold a surface open): ${handler.trim().slice(0, 60)}`,
+    );
+  }
 });
 
 test("a file cell says which column it belongs to", async () => {

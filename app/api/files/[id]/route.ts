@@ -233,12 +233,15 @@ export async function GET(
     "Content-Security-Policy",
     "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox",
   );
-  // A derivative is immutable — it is regenerated under the same key only when
-  // the original changes, and the original cannot change in place.
-  headers.set(
-    "Cache-Control",
-    servingThumbnail ? "private, max-age=86400, immutable" : "private, max-age=300",
-  );
+  /*
+   * Both objects are immutable by construction, so both may say so. An
+   * attachment id is minted per upload and no route ever rewrites bytes under
+   * an existing id — "replacing" a file is delete-and-reupload, which is a
+   * NEW id and therefore a new URL. The original used to carry max-age=300,
+   * which made the hover preview refetch a multi-megabyte photograph every
+   * five minutes for a card that had already shown it.
+   */
+  headers.set("Cache-Control", "private, max-age=86400, immutable");
   headers.set("Accept-Ranges", "bytes");
   headers.set("Content-Length", String(range?.length ?? object.size));
   if (range) {

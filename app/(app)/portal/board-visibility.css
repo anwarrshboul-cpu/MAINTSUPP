@@ -76,7 +76,8 @@
     .column-settings-dialog,
     .sheet-option-popover,
     .sheet-timeline-popover,
-    .sheet-file-hover
+    .sheet-file-hover,
+    .sheet-file-overflow
   ) {
   content-visibility: visible;
 }

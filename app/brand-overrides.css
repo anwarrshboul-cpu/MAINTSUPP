@@ -506,12 +506,22 @@ body[data-theme="dark"] :is(
   .drawer-history-state,
   .drawer-history-note,
   .sheet-file-hover,
+  .sheet-file-overflow,
   .evidence-viewer > section,
   .evidence-viewer header
 ) {
   border-color: #35505d;
   background: #182830;
   color: #dce7eb;
+}
+
+/* The overflow list's rows and thumb wells, on the same dark ground. */
+body[data-theme="dark"] .sheet-file-overflow__row:hover {
+  background: #1f333e;
+}
+
+body[data-theme="dark"] :is(.sheet-file-overflow__thumb, .sheet-file-hover__preview) {
+  background: #101820;
 }
 
 body[data-theme="dark"] :is(
