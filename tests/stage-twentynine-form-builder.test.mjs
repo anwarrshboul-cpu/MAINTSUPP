@@ -33,6 +33,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const BUILDER_CSS = "app/(app)/portal/form-builder.css";
 const PUBLIC_CSS = "app/(public)/f/[token]/public-form.css";
 const CONFIG_LIB = "app/lib/form-config.ts";
+const PROJECTION_LIB = "app/lib/form-projection.ts";
 
 /* ── Desktop only ────────────────────────────────────────────────────────── */
 
@@ -167,9 +168,21 @@ test("the public form defines its palette in both schemes", async () => {
 /* ── The public payload is an allowlist ──────────────────────────────────── */
 
 test("hidden questions never reach the browser", async () => {
-  const lib = await read(CONFIG_LIB);
-  const projection = lib.slice(lib.indexOf("export function publicForm"));
-
+  /*
+   * The projection moved to `app/lib/form-projection.ts` — a PURE module with
+   * no database imports — so the builder's Preview can call the very same
+   * function in the browser. It had to: `worker/index.ts` sets
+   * `X-Frame-Options: DENY` on every response, so the previous approach of
+   * framing the real /f/:token route was refused by policy on every port and
+   * every domain. Sharing the rules is what stops Preview and the public form
+   * drifting, and weakening that header would have been the wrong trade.
+   *
+   * So this follows the move rather than relaxing: the guarantee — a hidden
+   * question and a retired option never reach a browser — is asserted at its
+   * new home, and `form-config` is checked to be delegating rather than
+   * keeping a second copy that could rot.
+   */
+  const projection = await read(PROJECTION_LIB);
   assert.match(
     projection,
     /\.filter\(\(question\) => question\.visible && question\.type !== "PAGE_BLOCK"\)/,
@@ -177,6 +190,26 @@ test("hidden questions never reach the browser", async () => {
   );
   /* A retired store must not be selectable, and monday retires by flag. */
   assert.match(projection, /option\.visible && option\.active/);
+
+  const lib = await read(CONFIG_LIB);
+  assert.match(
+    lib,
+    /projectQuestions\(config, optionOverrides, now\)/,
+    "the server must use the shared projection, not a second copy of the rules",
+  );
+  assert.doesNotMatch(
+    lib.slice(lib.indexOf("export function publicForm")),
+    /question\.visible && question\.type !== "PAGE_BLOCK"/,
+    "the filter must live in exactly one place",
+  );
+
+  /*
+   * And the pure module must stay pure, or a client component importing it
+   * drags drizzle and the password hasher into the browser bundle.
+   */
+  assert.doesNotMatch(projection, /from "drizzle-orm"/);
+  assert.doesNotMatch(projection, /from "\.\.\/\.\.\/db"/);
+  assert.doesNotMatch(projection, /from "\.\/password"/);
 });
 
 test("the password hash has exactly one reader and never leaves it", async () => {

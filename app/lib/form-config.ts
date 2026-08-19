@@ -3,6 +3,7 @@ import type { getDb } from "../../db";
 import { formConfigurations } from "../../db/schema";
 import { maintenanceFormConfiguration, type FormQuestion } from "../../db/monday-board-spec";
 import { hashPassword, passwordProblem, verifyPassword } from "./password";
+import { projectQuestions, type PublicQuestion } from "./form-projection";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -225,32 +226,6 @@ export function unavailableMessage(reason: "deactivated" | "closed" | "full") {
 
 /* ── What the browser is allowed to see ──────────────────────────────────── */
 
-export type PublicQuestion = {
-  id: string;
-  type: FormQuestion["type"];
-  title: string;
-  description: string | null;
-  required: boolean;
-  options: Array<{ label: string; value: string }> | null;
-  showIf: { questionId: string; equals: string[] } | null;
-  /**
-   * The question settings the RENDERER needs, resolved to concrete values.
-   *
-   * Resolved here rather than shipped raw so the browser never has to know
-   * monday's defaults — an absent `display` becomes "Dropdown", an absent
-   * `optionsOrder` becomes "Custom", and the renderer just does what it is
-   * told. `defaultAnswer` is folded together with "today as default" into one
-   * `prefill` string for the same reason: the renderer should not have to know
-   * that a date question expresses its default differently from a text one.
-   */
-  settings: {
-    display: "Dropdown" | "Vertical" | "Horizontal";
-    includeTime: boolean;
-    /** The value the field opens with, already computed. Empty means none. */
-    prefill: string;
-  };
-};
-
 export type PublicForm = {
   token: string;
   title: string;
@@ -269,6 +244,7 @@ export type PublicForm = {
   submitButtonText: string | null;
   language: string | null;
 };
+
 
 /**
  * The public projection — an allowlist, never a redaction.
@@ -366,50 +342,20 @@ export function publicForm(
    * Serving the captured labels would therefore offer a submitter 21 choices of
    * which none could be submitted — every attempt refused with "Choose a
    * location from the list", naming a list it had just been shown. So the live
-   * site list wins for this question. The captured options remain the seed and
-   * are still what the builder shows, which is correct: they are what monday
-   * has, and this is what we can accept.
+   * site list wins for this question.
    */
   optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
   /* Injected so "today as default" is one clock's answer — see resolvePrefill. */
   now: Date = new Date(),
 ): PublicForm {
   const { config } = record;
-  const byId = new Map(config.questions.map((question) => [question.id, question]));
 
-  const ordered: FormQuestion[] = [];
-  for (const id of config.order) {
-    const question = byId.get(id);
-    if (question) {
-      ordered.push(question);
-      byId.delete(id);
-    }
-  }
-  for (const remaining of byId.values()) ordered.push(remaining);
-
-  const questions = ordered
-    .filter((question) => question.visible && question.type !== "PAGE_BLOCK")
-    .map<PublicQuestion>((question) => ({
-      id: question.id,
-      type: question.type,
-      title: question.title,
-      description: question.description,
-      required: question.required,
-      options: orderOptions(
-        optionOverrides[question.id] ??
-          question.options
-            ?.filter((option) => option.visible && option.active)
-            .map((option) => ({ label: option.label, value: option.value })) ??
-          null,
-        question.settings?.optionsOrder ?? "Custom",
-      ),
-      showIf: question.showIf,
-      settings: {
-        display: question.settings?.display ?? "Dropdown",
-        includeTime: question.settings?.includeTime === true,
-        prefill: resolvePrefill(question, now),
-      },
-    }));
+  /*
+   * The questions come from the SHARED projection, which the builder's Preview
+   * also calls. That is what makes Preview and the public form the same form
+   * rather than two renderings that drift.
+   */
+  const questions = projectQuestions(config, optionOverrides, now);
 
   return {
     token: record.shareToken,
