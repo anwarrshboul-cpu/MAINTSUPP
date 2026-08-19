@@ -8644,8 +8644,16 @@ th.sheet-column--name {
 }
 
 .sheet-file-hover__preview {
-  display: grid;
-  place-items: center;
+  /*
+   * Flex, not grid: the image's `max-height: 100%` must resolve against this
+   * box's definite 170px. As a grid item it resolved against an implicit
+   * `auto` row that sized to the image, so a tall photograph rendered at its
+   * full height and the pane's overflow clipped it — a crop, the exact thing
+   * this card was rebuilt not to do.
+   */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 170px;
   overflow: hidden;

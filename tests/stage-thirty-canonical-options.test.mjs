@@ -160,6 +160,42 @@ test("the Fix Tracker mints a viewer link and the page renders it read-only", as
   assert.match(page, /readOnly \?/, "a read-only link draws no action sections");
 });
 
+test("every registry write is mirrored onto the board's chip store", async () => {
+  /*
+   * The board draws chips from `maintenance_board_options`; the registry the
+   * options admin and the form builder write is `option_values`. Before the
+   * mirror, renaming "Urgent" updated the form and every selector while the
+   * chips kept the old word forever. One write path, two stores, same request.
+   */
+  const route = await read("app/api/options/route.ts");
+  assert.match(route, /async function mirrorBoardOption/);
+  const handlers = ["export async function POST", "export async function PATCH", "export async function DELETE"];
+  for (const marker of handlers) {
+    const body = route.slice(route.indexOf(marker), route.indexOf(marker) + 5200);
+    assert.match(
+      body,
+      /mirrorBoardOption\(/,
+      `${marker} must keep the chip store in step with the registry`,
+    );
+  }
+});
+
+test("the file index answers a photo column the way the board counts it", async () => {
+  /*
+   * /api/board counts a photo cell as rows filed by column PLUS rows carrying
+   * only the matching kind. The hover card fetches through /api/files with the
+   * column id, so that route must apply the same predicate — filtering by
+   * column alone answered an empty list for a visibly full cell.
+   */
+  const route = await read("app/api/files/route.ts");
+  assert.match(route, /columnRow\?\.key === "issuePictures"/);
+  assert.match(
+    route,
+    /and\(eq\(attachments\.kind, columnKind\), isNull\(attachments\.boardColumnId\)\)/,
+    "kind-only rows belong to the cell too — the board already counts them",
+  );
+});
+
 /* ── 5. The board repaints without a reload ──────────────────────────────── */
 
 test("uploads and deletions announce themselves to the board", async () => {
