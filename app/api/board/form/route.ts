@@ -12,6 +12,7 @@ import {
   type FormRecord,
   type StoredFormConfig,
 } from "../../../lib/form-config";
+import { formOptionOverrides } from "../../../lib/form-options";
 import {
   anonymousRefusal,
   scopedDb,
@@ -69,7 +70,17 @@ function unavailable(error: unknown) {
  * order to draw the toggle in the right position, and sending the hash would
  * put a PBKDF2 digest into the browser for no reason at all.
  */
-function serialiseForm(request: Request, record: FormRecord) {
+function serialiseForm(
+  request: Request,
+  record: FormRecord,
+  /**
+   * The same substitution `/api/forms/[token]` serves, so the builder's
+   * Preview projects EXACTLY the options a submitter will be offered — live
+   * sites for Location, the canonical registry for Engineer and Priority —
+   * rather than the captured monday snapshot.
+   */
+  optionOverrides: Record<string, Array<{ label: string; value: string }>>,
+) {
   return {
     id: record.id,
     title: record.title,
@@ -87,6 +98,7 @@ function serialiseForm(request: Request, record: FormRecord) {
     /* What the dialog displays and the Copy button copies. */
     presentedUrl: presentedShareUrl(request, record),
     config: record.config,
+    optionOverrides,
   };
 }
 
@@ -114,7 +126,14 @@ export async function GET(request: Request) {
       )
       .orderBy(maintenanceGroups.position);
 
-    return Response.json({ form: serialiseForm(request, record), groups });
+    return Response.json({
+      form: serialiseForm(
+        request,
+        record,
+        await formOptionOverrides(db, orgId, record.config),
+      ),
+      groups,
+    });
   } catch (error) {
     return unavailable(error);
   }
@@ -320,7 +339,9 @@ export async function PATCH(request: Request) {
     const saved = await loadForm(db, orgId);
     return Response.json({
       ok: true,
-      form: saved && serialiseForm(request, saved),
+      form:
+        saved &&
+        serialiseForm(request, saved, await formOptionOverrides(db, orgId, saved.config)),
     });
   } catch (error) {
     return unavailable(error);

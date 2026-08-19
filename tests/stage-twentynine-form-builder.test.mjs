@@ -210,11 +210,23 @@ test("hidden questions never reach the browser", async () => {
   /* A retired store must not be selectable, and monday retires by flag. */
   assert.match(projection, /option\.visible && option\.active/);
 
+  /*
+   * The projection module now presents the WHOLE payload (`projectPublicForm`)
+   * so the builder's Preview can compute in the browser exactly what the
+   * server serves. Both hops are asserted: the pure module holds the one
+   * question filter, and the server's `publicForm` delegates to it rather
+   * than keeping a second copy that could rot.
+   */
+  assert.match(
+    projection,
+    /projectQuestions\(config, optionOverrides, now\)/,
+    "the presentation must be built on the shared question projection",
+  );
   const lib = await read(CONFIG_LIB);
   assert.match(
     lib,
-    /projectQuestions\(config, optionOverrides, now\)/,
-    "the server must use the shared projection, not a second copy of the rules",
+    /return projectPublicForm\(/,
+    "the server must delegate to the shared projection, not keep a second copy of the rules",
   );
   assert.doesNotMatch(
     lib.slice(lib.indexOf("export function publicForm")),

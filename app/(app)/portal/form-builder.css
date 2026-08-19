@@ -443,6 +443,280 @@
   width: 100%;
 }
 
+/*
+ * The question's own words, editable in place. Styled as the heading they
+ * replace — a border only on focus, so the canvas still reads as a form
+ * rather than a spreadsheet of inputs.
+ */
+.form-edit__titleinput {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.form-edit__helpinput {
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-edit__titleinput:hover,
+.form-edit__helpinput:hover {
+  border-color: var(--line);
+}
+
+.form-edit__titleinput:focus-visible,
+.form-edit__helpinput:focus-visible {
+  outline: none;
+  border-color: var(--accent-fg);
+  background: var(--surface-card);
+}
+
+/* ── The option editor — monday's Add option / edit / reorder ────────────── */
+
+.form-options {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+  min-width: 0;
+}
+
+.form-options__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--control-fg);
+  cursor: pointer;
+}
+
+.form-options__toggle:hover {
+  color: var(--ink);
+}
+
+.form-options__toggle svg:last-child {
+  transform: rotate(90deg);
+}
+
+.form-options__toggle[aria-expanded="true"] svg:last-child {
+  transform: rotate(-90deg);
+}
+
+.form-options__source {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.form-options__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--red-600);
+}
+
+.form-options__notice {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--teal-700);
+}
+
+.form-options__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.form-options__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.form-options__list li.is-hidden .form-options__label {
+  color: var(--muted-2);
+  text-decoration: line-through;
+}
+
+.form-options__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.form-options__list li input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--accent-fg);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.form-options__usage {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-style: normal;
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.form-options__tools {
+  display: inline-flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.form-options__tools button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-card);
+  color: var(--control-fg);
+  cursor: pointer;
+}
+
+.form-options__tools button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-options__tools button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.form-options__tools button:first-child svg {
+  transform: rotate(-90deg);
+}
+
+.form-options__tools button.is-down svg {
+  transform: rotate(90deg);
+}
+
+.form-options__tools button.is-danger:hover:not(:disabled) {
+  color: var(--red-600);
+}
+
+.form-options__add,
+.form-options__reassign {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.form-options__reassign p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--amber-600);
+}
+
+.form-options__add input,
+.form-options__reassign select {
+  flex: 1 1 160px;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.form-options__add button,
+.form-options__reassign button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-options__add button:hover:not(:disabled),
+.form-options__reassign button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.form-options__add button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.form-options__addbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--control-fg);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-options__addbtn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
 .form-edit__cardfoot {
   display: flex;
   align-items: center;
@@ -480,8 +754,11 @@
   font-weight: 600;
 }
 
-/* Preview — the real public form, framed. */
-.form-builder__preview-frame {
+/*
+ * Preview — the public form's own renderer, mounted inline. No iframe:
+ * X-Frame-Options is DENY across the app and stays that way.
+ */
+.form-builder__preview-live {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -489,13 +766,16 @@
   min-width: 0;
 }
 
-.form-builder__preview-frame iframe {
-  width: 100%;
-  /* Tall enough for the whole form; the frame scrolls its own overflow. */
-  min-height: 70vh;
+/*
+ * The mounted page styles itself through public-form.css. Its `.pf` root asks
+ * for a full viewport (`min-height: 100vh`) because on the real route it IS
+ * the page; inside the builder stage that would stretch the card past the
+ * panel for no reason, so the demand is relaxed here and only here.
+ */
+.form-builder__preview-live .pf {
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--surface-card);
 }
 
 .form-builder__preview-note {

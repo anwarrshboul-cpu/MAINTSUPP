@@ -18,6 +18,7 @@ import {
   workspaceSettings,
 } from "../../../db/schema";
 import { configuredValue } from "../../lib/options-repository";
+import { priorityRule } from "../../lib/priority-rules";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 function databaseError(error: unknown) {
@@ -297,9 +298,12 @@ export async function POST(request: Request) {
     // Monday's Priority column carries three labels — Urgent, Medium, Low.
     // The "High" branch this used to have matched nothing on the board, so
     // anything not Urgent silently fell through to the 120-hour Low target.
-    const dueHours = priority === "Urgent" ? 4 : priority === "Medium" ? 72 : 120;
+    // The hours themselves live in app/lib/priority-rules.ts, keyed on the
+    // registry VALUE `configuredValue` resolved above — so renaming a
+    // priority's display label cannot change its SLA.
+    const slaRule = priorityRule(priority);
     const dueAt = new Date(
-      Date.now() + dueHours * 60 * 60 * 1000,
+      Date.now() + slaRule.dueHours * 60 * 60 * 1000,
     ).toISOString();
     const [matchedSite] = await db
       .select({ id: sites.id })
@@ -335,7 +339,7 @@ export async function POST(request: Request) {
         contact,
         category,
         engineer,
-        tier: priority === "Urgent" ? 1 : priority === "Medium" ? 2 : 3,
+        tier: slaRule.tier,
         priority,
         stage: "Incoming",
         // Monday's first status. "Triage in progress" was one of six statuses

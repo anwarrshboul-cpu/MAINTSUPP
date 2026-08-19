@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components";
 import { FormDesignPanel, FormEditPanel, FormSettingsPanel } from "./form-builder-panels";
+import FormPreview from "./form-preview";
 import FormShareDialog from "./form-share-dialog";
 import type { BuilderForm, BuilderMode } from "./form-builder-model";
 import { FormView } from "./views/board-views";
@@ -219,40 +220,18 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
         {mode === "view" && <FormView onSubmitted={onSubmitted} />}
         {mode === "preview" && (
           /*
-           * PREVIEW IS THE PUBLIC FORM, not a second rendering of it.
+           * PREVIEW IS THE PUBLIC FORM'S OWN RENDERER, mounted here.
            *
-           * It used to render `FormView` — a different component, with its own
-           * nine hard-coded fields — so pressing Preview told an operator
-           * nothing about what they had just changed: none of the accent, font,
-           * text size, alignment, logo, progress bar, question order,
-           * hidden/required state or submit-button text appeared, and the two
-           * had already drifted apart in ways nobody would notice until a
-           * submitter complained.
-           *
-           * Framing the real route removes the possibility of drift rather than
-           * fixing this instance of it: there is exactly one renderer, and the
-           * preview is a submitter's view of it, gates included. If the form is
-           * deactivated or password-protected the preview says so — which is
-           * the truth about what the link currently does.
-           *
-           * `sandbox` keeps it inert: same-origin so it can read its own API,
-           * scripts so React runs, forms so the layout is honest — but no
-           * top-navigation, so a configured redirect cannot walk the operator
-           * out of the builder.
+           * Not `FormView` (a different component that drifted), and not an
+           * iframe of the live route — `worker/index.ts` sends
+           * `X-Frame-Options: DENY` on every response, deliberately, so a
+           * frame is refused everywhere and weakening the header for a
+           * preview would be the wrong trade. `FormPreview` renders the same
+           * components over the same shared projection with the same option
+           * substitution the public endpoint serves, so what the operator
+           * sees is what the link shows — as one implementation, not a hope.
            */
-          <div className="form-builder__preview-frame">
-            <iframe
-              key={form.presentedUrl}
-              src={form.presentedUrl}
-              title={`Preview of ${form.title}`}
-              sandbox="allow-same-origin allow-scripts allow-forms"
-            />
-            <p className="form-builder__preview-note">
-              <Icon name="alert" size={14} />
-              This is the live shared form. Anything submitted here creates a real
-              request.
-            </p>
-          </div>
+          <FormPreview form={form} />
         )}
       </div>
 

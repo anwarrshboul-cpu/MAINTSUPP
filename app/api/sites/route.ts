@@ -393,12 +393,50 @@ export async function PATCH(request: Request) {
       id?: string;
       data?: Record<string, unknown>;
       confirmDuplicate?: boolean;
+      rename?: unknown;
     };
     const id = text(body.id, 120);
     if (!id) throw new Error("A site ID is required.");
 
     const existing = await getSite(db, orgId, id);
     if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
+
+    /*
+     * A NAME-ONLY rename, for callers that hold the site's identity and
+     * nothing else — the form builder's Location editor. The full-payload
+     * branch below rewrites every field with whatever was sent, which is right
+     * for the Sites form (it sends everything) and destructive for anyone
+     * else: a rename that had to travel as a full payload would null the
+     * thirty fields the caller did not have. Same duplicate check, same
+     * slug refresh, same audit trail; jobs and compliance rows reference the
+     * site by ID, so nothing else needs rewriting.
+     */
+    if (typeof body.rename === "string") {
+      const nextName = text(body.rename, 120);
+      if (!nextName) throw new Error("A site name is required.");
+      if (nextName !== existing.name) {
+        const duplicates = await findDuplicateCandidates(db, orgId, nextName, id);
+        if (duplicates.length && !body.confirmDuplicate) {
+          return Response.json(
+            { error: "A similar site already exists.", requiresConfirmation: true, duplicates },
+            { status: 409 },
+          );
+        }
+        await db
+          .update(sites)
+          .set({
+            name: nextName,
+            slug: await uniqueSlug(db, orgId, nextName, id),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+        await logChange(db, orgId, id, "renamed", actor.email, {
+          from: existing.name,
+          to: nextName,
+        });
+      }
+      return Response.json({ ok: true, id, name: nextName });
+    }
 
     const payload = sitePayload(body.data ?? {});
     if (!payload.name) throw new Error("A site name is required.");

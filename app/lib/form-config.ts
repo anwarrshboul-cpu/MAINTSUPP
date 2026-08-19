@@ -3,7 +3,7 @@ import type { getDb } from "../../db";
 import { formConfigurations } from "../../db/schema";
 import { maintenanceFormConfiguration, type FormQuestion } from "../../db/monday-board-spec";
 import { hashPassword, passwordProblem, verifyPassword } from "./password";
-import { projectQuestions, type PublicQuestion } from "./form-projection";
+import { projectPublicForm, type PublicQuestion } from "./form-projection";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -266,65 +266,11 @@ export type PublicForm = {
  * `order` should still be asked, not silently lost.
  */
 /**
- * The Location question, by monday's column id.
- *
- * Named here because it is the one question whose options are NOT the captured
- * ones. See `publicForm`'s `optionOverrides` note.
+ * The Location question's id lives in the PURE projection module so the
+ * browser-side builder can import it; re-exported here for the server routes
+ * that have always read it from this file.
  */
-export const LOCATION_QUESTION_ID = "single_selecty9rcyhe";
-
-/**
- * The options in the order the form should offer them.
- *
- * "Custom" is monday's word for "the order they are stored in" and is the
- * default, so this is a no-op unless somebody chose alphabetical. Sorted with
- * `en-GB` collation rather than by code point, so accented store names land
- * where a reader expects rather than after Z.
- */
-function orderOptions(
-  options: Array<{ label: string; value: string }> | null,
-  order: "Custom" | "Alphabetical",
-) {
-  if (!options || order !== "Alphabetical") return options;
-  return [...options].sort((left, right) => left.label.localeCompare(right.label, "en-GB"));
-}
-
-/**
- * What the field opens with.
- *
- * "Today as default" is computed HERE, on the server, and this is the whole
- * reason it is not left to the browser: a date rendered from the visitor's
- * clock and a date validated against the server's can disagree by a day either
- * side of midnight, which is exactly the timezone day-shift bug the setting is
- * supposed to avoid. One clock decides.
- *
- * `defaultCurrentDate` wins over `defaultAnswer` for a date question, because a
- * form configured with both is asking for today and the fixed date is stale
- * configuration.
- */
-function resolvePrefill(question: FormQuestion, now: Date) {
-  const settings = question.settings;
-  if (!settings) return "";
-
-  if ((question.type === "Date" || question.type === "DateRange") && settings.defaultCurrentDate) {
-    /*
-     * Rendered as the value an `<input type="date">` expects. `toISOString`
-     * would be UTC and would show yesterday to anyone west of Greenwich in the
-     * evening, so the parts are read in the server's own zone instead.
-     */
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    if (settings.includeTime) {
-      const hour = String(now.getHours()).padStart(2, "0");
-      const minute = String(now.getMinutes()).padStart(2, "0");
-      return `${year}-${month}-${day}T${hour}:${minute}`;
-    }
-    return `${year}-${month}-${day}`;
-  }
-
-  return typeof settings.defaultAnswer === "string" ? settings.defaultAnswer : "";
-}
+export { LOCATION_QUESTION_ID } from "./form-projection";
 
 export function publicForm(
   record: FormRecord,
@@ -342,41 +288,30 @@ export function publicForm(
    * Serving the captured labels would therefore offer a submitter 21 choices of
    * which none could be submitted — every attempt refused with "Choose a
    * location from the list", naming a list it had just been shown. So the live
-   * site list wins for this question.
+   * site list wins for this question. `formOptionOverrides` in
+   * app/lib/form-options.ts is what builds the substitution.
    */
   optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
-  /* Injected so "today as default" is one clock's answer — see resolvePrefill. */
+  /* Injected so "today as default" is one clock's answer. */
   now: Date = new Date(),
 ): PublicForm {
-  const { config } = record;
-
   /*
-   * The questions come from the SHARED projection, which the builder's Preview
-   * also calls. That is what makes Preview and the public form the same form
-   * rather than two renderings that drift.
+   * The WHOLE payload comes from the shared, pure projection — the same
+   * function the builder's Preview calls in the browser. One implementation is
+   * what makes Preview and the public form the same form rather than two
+   * renderings that drift; this wrapper only contributes the identity fields a
+   * record carries and the projection cannot know.
    */
-  const questions = projectQuestions(config, optionOverrides, now);
-
-  return {
-    token: record.shareToken,
-    title: record.title,
-    description: record.description,
-    questions,
-    appearance: config.appearance,
-    welcome: config.features.preSubmissionView,
-    afterSubmission: {
-      title: config.features.afterSubmissionView.title,
-      description: config.features.afterSubmissionView.description,
-      allowResubmit: config.features.afterSubmissionView.allowResubmit,
-      showSuccessImage: config.features.afterSubmissionView.showSuccessImage,
-      redirectUrl: config.features.afterSubmissionView.redirectAfterSubmission.enabled
-        ? config.features.afterSubmissionView.redirectAfterSubmission.redirectUrl
-        : null,
+  return projectPublicForm(
+    record.config,
+    {
+      token: record.shareToken,
+      title: record.title,
+      description: record.description,
     },
-    progressBar: config.appearance.showProgressBar,
-    submitButtonText: config.appearance.submitButton.text,
-    language: config.accessibility.language,
-  };
+    optionOverrides,
+    now,
+  ) as PublicForm;
 }
 
 /* ── Passwords ───────────────────────────────────────────────────────────── */

@@ -42,6 +42,7 @@ export type IconName =
   | "sun"
   | "thumb"
   | "tool"
+  | "trash"
   | "upload"
   | "updates"
   | "user"
@@ -220,6 +221,13 @@ const paths: Record<IconName, ReactNode> = {
   ),
   tool: (
     <path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5L4 17a2 2 0 1 0 3 3l7.7-8.3a4 4 0 0 0 0-5.4Z" />
+  ),
+  /* The option editor's remove action — a stroked bin on the shared grid. */
+  trash: (
+    <>
+      <path d="M4 7h16M10 11v6M14 11v6" />
+      <path d="M6 7l1 13a1.5 1.5 0 0 0 1.5 1.4h7A1.5 1.5 0 0 0 17 20l1-13M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7" />
+    </>
   ),
   upload: (
     <>

@@ -7,6 +7,7 @@ import {
   questionGlyph,
   type BuilderForm,
 } from "./form-builder-model";
+import { FormQuestionOptionsEditor } from "./form-options-editor";
 
 /**
  * The Edit, Design and Settings panels.
@@ -271,7 +272,22 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                 <span className={`form-edit__glyph form-edit__glyph--${glyph.tone}`}>
                   <Icon name={glyph.icon} size={12} />
                 </span>
-                <strong>{question.title}</strong>
+                {/*
+                  The question's own words are editable in place, as monday's
+                  canvas does it. An emptied title keeps the old one — a
+                  question with no name is a field nobody can answer.
+                */}
+                <DraftInput
+                  className="form-edit__titleinput"
+                  type="text"
+                  value={question.title}
+                  maxLength={120}
+                  busy={busy}
+                  aria-label={`Rename the question ${question.title}`}
+                  onCommit={(next) => {
+                    if (next.trim()) update(question.id, { title: next.trim() });
+                  }}
+                />
                 {question.required && <em aria-label="Required">*</em>}
                 <div className="form-edit__cardtools">
                   <button
@@ -305,9 +321,18 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                 </div>
               </div>
 
-              {question.description && (
-                <p className="form-edit__help">{question.description}</p>
-              )}
+              <DraftInput
+                className="form-edit__helpinput"
+                type="text"
+                value={question.description ?? ""}
+                placeholder="Add a description for submitters (optional)"
+                maxLength={300}
+                busy={busy}
+                aria-label={`Describe the question ${question.title}`}
+                onCommit={(next) =>
+                  update(question.id, { description: next.trim() || null })
+                }
+              />
 
               {/*
                 QUESTION SETTINGS — monday's per-question panel, inline.
@@ -398,6 +423,20 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                 )}
               </div>
 
+              {/*
+                The options themselves — monday's Add / rename / reorder /
+                per-option actions, wired to the canonical registers. See the
+                header of form-options-editor.tsx for which register owns what.
+              */}
+              {question.type === "SingleSelect" && (
+                <FormQuestionOptionsEditor
+                  question={question}
+                  form={form}
+                  patch={patch}
+                  busy={busy}
+                />
+              )}
+
               <div className="form-edit__cardfoot">
                 <label>
                   <input
@@ -410,12 +449,6 @@ export function FormEditPanel({ form, patch, busy }: PanelProps) {
                   />
                   Required
                 </label>
-                {question.options && (
-                  <span className="form-edit__count">
-                    {question.options.filter((option) => option.visible && option.active).length}{" "}
-                    options
-                  </span>
-                )}
                 {!question.visible && <span className="form-edit__count">Hidden</span>}
               </div>
             </article>

@@ -17,6 +17,8 @@ import {
   loadFormByToken,
   unavailableMessage,
 } from "../../../../lib/form-config";
+import { canonicalOptionValue, priorityRule } from "../../../../lib/priority-rules";
+import { listOptionValues } from "../../../../lib/options-repository";
 import { getSession } from "../../../../lib/auth-session";
 
 export const dynamic = "force-dynamic";
@@ -174,9 +176,34 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     const requester = answerFor("short_text64", 120);
     const contact = answerFor("numbertb4g1z46", 80);
     const description = answerFor("short_text", 800);
-    const priority = answerFor("status", 80) || "Medium";
-    const engineer = answerFor("single_select", 80);
     const requestedAnswer = answerFor("date", 32);
+
+    /*
+     * Priority and Engineer are CANONICALISED against the option registry
+     * before anything is stored or computed from them.
+     *
+     * The registry separates `value` (the stable key stored jobs carry, which
+     * renaming never touches) from `label` (the display text an admin may
+     * edit). The form shows labels, so the answer arriving here is normally
+     * the current label; a form opened before a rename posts the old one,
+     * which for seeded rows equals the value — both resolve. Storing the VALUE
+     * is what lets an admin rename "Urgent" without splitting every dashboard
+     * grouping in two, and the SLA below reads the value, so a rename changes
+     * what people see and nothing about what the system does.
+     */
+    const priorityOptions = await listOptionValues(db, record.organisationId, "priority");
+    const priority = canonicalOptionValue(priorityOptions, answerFor("status", 80), "Medium");
+    const engineerOptions = await listOptionValues(
+      db,
+      record.organisationId,
+      "engineer_required",
+    );
+    /*
+     * `engineer` is NOT NULL on the board. An unanswered question falls back
+     * to "Other", which is a real label in the Engineer Required option set
+     * rather than an empty chip the board cannot draw.
+     */
+    const engineer = canonicalOptionValue(engineerOptions, answerFor("single_select", 80), "Other");
 
     /*
      * A floor on the description that `required` alone cannot express: a job
@@ -222,8 +249,13 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         ? parsedDate.toISOString()
         : new Date().toISOString();
 
-    const dueHours = priority === "Urgent" ? 4 : priority === "Medium" ? 72 : 120;
-    const dueAt = new Date(Date.now() + dueHours * 60 * 60 * 1000).toISOString();
+    /*
+     * The SLA clock and the tier come from `priorityRule`, keyed on the
+     * canonical VALUE — see app/lib/priority-rules.ts for why label-string
+     * comparisons had to go before labels became editable.
+     */
+    const rule = priorityRule(priority);
+    const dueAt = new Date(Date.now() + rule.dueHours * 60 * 60 * 1000).toISOString();
 
     /*
      * The single-use grant that lets an anonymous submitter attach the files
@@ -296,13 +328,8 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         requester,
         contact,
         category: "Other",
-        /*
-         * `engineer` is NOT NULL on the board. An unanswered question falls
-         * back to "Other", which is a real label in the Engineer Required
-         * option set rather than an empty chip the board cannot draw.
-         */
-        engineer: engineer || "Other",
-        tier: priority === "Urgent" ? 1 : priority === "Medium" ? 2 : 3,
+        engineer,
+        tier: rule.tier,
         priority,
         status: "Pending Approval",
         contractor: null,

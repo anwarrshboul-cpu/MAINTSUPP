@@ -31,6 +31,27 @@ import type { FormQuestion } from "../../db/monday-board-spec";
  * build time, so nothing server-only is dragged into the browser bundle.
  */
 
+/**
+ * The Location question, by monday's column id.
+ *
+ * Exported from HERE — the pure module — because the builder's option editor
+ * needs it in the browser, and `form-config` (which re-exports it for the
+ * server routes) cannot be imported by a client component. It is the one
+ * question whose options are the live `sites` register rather than anything
+ * captured or stored.
+ */
+export const LOCATION_QUESTION_ID = "single_selecty9rcyhe";
+
+/**
+ * Form questions whose options live in the canonical option registry
+ * (`option_values`), keyed by monday column id → option set key. See
+ * `formOptionOverrides` in app/lib/form-options.ts for the server half.
+ */
+export const CANONICAL_OPTION_SETS: Record<string, string> = {
+  single_select: "engineer_required",
+  status: "priority",
+};
+
 export type PublicQuestion = {
   id: string;
   type: FormQuestion["type"];
@@ -157,6 +178,156 @@ export function projectQuestions(
         prefill: resolvePrefill(question, now),
       },
     }));
+}
+
+/**
+ * Form-level preferences applied over a CANONICAL option list.
+ *
+ * Locations, Priority and Engineer options are owned by their registers — the
+ * `sites` table and `option_values` — and the form must never keep a
+ * disconnected copy: an option a submitter can pick has to exist canonically
+ * or the submission bounces. What the form MAY own is presentation: which of
+ * the canonical options it shows, and in what order. Those preferences live in
+ * the question's stored `options` array, and this merges the two:
+ *
+ *   · ORDER comes from the stored array — matched entries first, in stored
+ *     order; canonical options the form has never seen append after, so a
+ *     newly added site or priority appears rather than vanishing.
+ *   · VISIBILITY comes from the stored flags — an entry marked hidden or
+ *     inactive is withheld from the form (the canonical record is untouched).
+ *   · EXISTENCE and LABELS come from the canonical list — a stored entry whose
+ *     option no longer exists is dropped, and a canonical rename shows its new
+ *     label whatever the mirror recorded.
+ *
+ * Matching is tolerant of history: the captured monday configuration stored
+ * monday's numeric option ids in `value`, while mirrors the builder writes use
+ * the canonical value — so a stored entry claims a live option by value or by
+ * label, whichever connects.
+ */
+export function mergeOptionStates(
+  stored: FormQuestion["options"],
+  live: Array<{ label: string; value: string }>,
+): Array<{ label: string; value: string; hidden: boolean }> {
+  if (!stored?.length) return live.map((option) => ({ ...option, hidden: false }));
+
+  const remaining = new Map(live.map((option) => [option.value, option]));
+  const claim = (entry: { label: string; value: string }) => {
+    for (const key of [entry.value, entry.label]) {
+      const direct = remaining.get(key);
+      if (direct) {
+        remaining.delete(key);
+        return direct;
+      }
+      for (const [value, option] of remaining) {
+        if (option.label === key) {
+          remaining.delete(value);
+          return option;
+        }
+      }
+    }
+    return null;
+  };
+
+  const ordered: Array<{ label: string; value: string; hidden: boolean }> = [];
+  for (const entry of stored) {
+    const match = claim(entry);
+    /* A matched-but-hidden entry stays claimed, so it does not re-append. */
+    if (match) ordered.push({ ...match, hidden: !(entry.visible && entry.active) });
+  }
+  for (const option of remaining.values()) ordered.push({ ...option, hidden: false });
+  return ordered;
+}
+
+/** The submitter's view of the merge: hidden entries withheld entirely. */
+export function applyOptionPreferences(
+  stored: FormQuestion["options"],
+  live: Array<{ label: string; value: string }>,
+): Array<{ label: string; value: string }> {
+  return mergeOptionStates(stored, live)
+    .filter((option) => !option.hidden)
+    .map(({ label, value }) => ({ label, value }));
+}
+
+/**
+ * The whole public payload, computed from the configuration alone.
+ *
+ * Pure, and shared for the same reason `projectQuestions` is: the server
+ * builds this to answer `GET /api/forms/:token`, and the builder's Preview
+ * builds it IN THE BROWSER from the configuration it is editing. One
+ * implementation is what makes "Preview shows what the link shows" a property
+ * of the code rather than a hope.
+ */
+export type ProjectedPublicForm = {
+  token: string;
+  title: string;
+  description: string | null;
+  questions: PublicQuestion[];
+  appearance: FormConfigLike["appearance"];
+  welcome: FormConfigLike["features"]["preSubmissionView"];
+  afterSubmission: {
+    title: string | null;
+    description: string | null;
+    allowResubmit: boolean;
+    showSuccessImage: boolean;
+    redirectUrl: string | null;
+  };
+  progressBar: boolean;
+  submitButtonText: string | null;
+  language: string | null;
+};
+
+/**
+ * The slice of a stored config this module needs. Structural, so the real
+ * `StoredFormConfig` satisfies it without this file importing anything from
+ * the server side. Type-only, so still pure.
+ */
+type FormConfigLike = {
+  order: string[];
+  questions: FormQuestion[];
+  appearance: {
+    showProgressBar: boolean;
+    submitButton: { text: string | null };
+  };
+  features: {
+    preSubmissionView: unknown;
+    afterSubmissionView: {
+      title: string | null;
+      description: string | null;
+      allowResubmit: boolean;
+      showSuccessImage: boolean;
+      redirectAfterSubmission: { enabled: boolean; redirectUrl: string | null };
+    };
+  };
+  accessibility: { language: string | null };
+};
+
+export function projectPublicForm(
+  config: FormConfigLike,
+  identity: { token: string; title: string; description: string | null },
+  optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
+  now: Date = new Date(),
+): ProjectedPublicForm {
+  const questions = projectQuestions(config, optionOverrides, now);
+  return {
+    token: identity.token,
+    title: identity.title,
+    description: identity.description,
+    questions,
+    appearance: config.appearance,
+    welcome: config.features.preSubmissionView,
+    afterSubmission: {
+      title: config.features.afterSubmissionView.title,
+      description: config.features.afterSubmissionView.description,
+      allowResubmit: config.features.afterSubmissionView.allowResubmit,
+      showSuccessImage: config.features.afterSubmissionView.showSuccessImage,
+      redirectUrl: config.features.afterSubmissionView.redirectAfterSubmission.enabled
+        ? config.features.afterSubmissionView.redirectAfterSubmission.redirectUrl
+        : null,
+    },
+    progressBar: config.appearance.showProgressBar,
+    submitButtonText: config.appearance.submitButton.text,
+    language: config.accessibility.language,
+  };
 }
 
 /**
