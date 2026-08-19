@@ -41,7 +41,7 @@ test("each tile opens a card for its OWN file", async () => {
   /* The tile map hands ITS file to the opener… */
   assert.match(
     manager,
-    /preview\.slice\(0, VISIBLE_TILES\)\.map\(\(file\) => \(\s*<span\s+className="sheet-file-cell__media-tile"/,
+    /preview\.slice\(0, visibleTiles\)\.map\(\(file\) => \(\s*<span\s+className="sheet-file-cell__media-tile"/,
     "tiles are rendered per preview entry",
   );
   assert.match(
@@ -78,7 +78,7 @@ test("the +N list holds exactly the hidden files, in strip order", async () => {
   /* Hidden = not visible, matched by id — an index slice could repeat a file. */
   assert.match(
     manager,
-    /const visibleIds = new Set\(preview\.slice\(0, VISIBLE_TILES\)\.map\(\(file\) => file\.id\)\)/,
+    /const visibleIds = new Set\(preview\.slice\(0, visibleTiles\)\.map\(\(file\) => file\.id\)\)/,
   );
   assert.match(manager, /allFiles\?\.filter\(\(file\) => !visibleIds\.has\(file\.id\)\)/);
   /* One comparator, stated once, used for the fetch — (createdAt, id). */
@@ -113,7 +113,7 @@ test("tiles use the derivative; the card and list never blow up a crop", async (
   /* Strip tiles and overflow rows: ?thumb=1. The card pane: the original. */
   const cardPane = component.slice(
     component.indexOf('className="sheet-file-hover__preview"'),
-    component.indexOf('className="sheet-file-hover__actions"'),
+    component.indexOf('className="sheet-file-hover__more"'),
   );
   assert.match(cardPane, /src=\{`\/api\/files\/\$\{hoveredFile\.id\}`\}/);
   assert.doesNotMatch(cardPane, /thumb=1/, "the large preview must never be the 96px centre-crop");
@@ -150,12 +150,61 @@ test("the overflow list is a portalled, positioned surface in both themes", asyn
   assert.match(block.slice(0, 500), /z-index: var\(--z-dropdown\);/);
   /* Flip anchor: above by default, below when the row is near the top. */
   assert.match(css, /\.sheet-file-overflow:not\(\.is-below\) \{\s*transform: translateY\(-100%\);/);
-  /* Dark parity in BOTH dark paths — the OS preference and the toggle. */
-  const darkBlock = css.slice(css.indexOf(".sheet-file-hover__preview,\n  .sheet-file-overflow"));
-  assert.ok(darkBlock.length > 0, "the globals dark block lists the overflow surface");
+  /* Dark parity in BOTH dark paths — the OS preference and the toggle.
+     (`\r?\n`, because a CRLF checkout must not turn this into a no-op.) */
+  assert.match(
+    css,
+    /\.sheet-file-hover__preview,\r?\n\s*\.sheet-file-overflow,/,
+    "the globals dark block lists the overflow surface",
+  );
   const brand = await read("app/brand-overrides.css");
   assert.match(brand, /\.sheet-file-overflow,/, "the data-theme dark list includes the overflow surface");
   /* And the deferred-group containment escape hatch names it. */
   const visibility = await read("app/(app)/portal/board-visibility.css");
-  assert.match(visibility, /\.sheet-file-overflow\s*\n?\s*\)/);
+  assert.match(visibility, /\.sheet-file-overflow,\s*\n?\s*\.sheet-file-menu\s*\n?\s*\)/);
+});
+
+/* ── 5. The per-file "…" menu ────────────────────────────────────────────── */
+
+test("every '…' opens the menu for its OWN file, and every verb acts on it", async () => {
+  const manager = await read(MANAGER);
+  /* The card's corner "…" carries the card's file… */
+  assert.match(manager, /toggleMenuAt\(event\.currentTarget, hoveredFile\)/);
+  /* …and each overflow row's "…" carries that row's file. */
+  const rows = manager.slice(manager.indexOf("hiddenFiles.map"));
+  assert.match(rows.slice(0, 1600), /toggleMenuAt\(event\.currentTarget, file\)/);
+  /* Toggling is by id — the same "…" closes its own menu, nothing else's. */
+  assert.match(manager, /if \(menu\?\.file\.id === file\.id\) \{\s*setMenu\(null\);/);
+  /* The verbs read the menu's file, never an index, never files[0]. */
+  const menuBlock = manager.slice(manager.indexOf('className="sheet-file-menu"'));
+  assert.match(menuBlock, /const chosen = menu\.file;\s*setMenu\(null\);\s*fileAct\(chosen, "open"\)/);
+  assert.match(menuBlock, /const chosen = menu\.file;\s*setMenu\(null\);\s*fileAct\(chosen, "download"\)/);
+  assert.match(menuBlock, /const chosen = menu\.file;\s*setMenu\(null\);\s*fileAct\(chosen, "delete"\)/);
+  /* Only real verbs: monday's versioning/updates/extract have no backend here. */
+  assert.doesNotMatch(menuBlock, /file versions|Post updates|Extract data/i);
+  /* The menu is a fixed, portalled surface, styled in BOTH dark paths. */
+  const css = await read("app/globals.css");
+  const menuCss = css.slice(css.indexOf(".sheet-file-menu {"));
+  assert.match(menuCss.slice(0, 400), /position: fixed;/);
+  assert.match(css, /\.sheet-file-overflow,\r?\n\s*\.sheet-file-menu,/, "the media-query dark list names the menu");
+  const brand = await read("app/brand-overrides.css");
+  assert.match(brand, /\.sheet-file-menu,/, "the data-theme dark list names the menu");
+});
+
+/* ── 6. monday's visible-thumbnail rule — measured, not assumed ──────────── */
+
+test("the strip fits tiles to its measured width and folds the rest into +N", async () => {
+  const manager = await read(MANAGER);
+  /* One shared observer feeds every strip its width, live during a resize. */
+  assert.match(manager, /new ResizeObserver/);
+  assert.match(manager, /stripCallbacks\.get\(entry\.target\)\?\.\(entry\.contentRect\.width\)/);
+  /* The rule: fit plainly, else reserve the badge's slot and fold behind it. */
+  assert.match(manager, /Math\.floor\(\(stripWidth \+ TILE_GAP\) \/ tileSpan\)/);
+  assert.match(manager, /Math\.floor\(\(stripWidth - BADGE_RESERVE \+ TILE_GAP\) \/ tileSpan\)/);
+  assert.match(manager, /const badgeCount = count - visibleTiles/);
+  assert.match(manager, /\+\{badgeCount\}/);
+  /* Touch parity: a tap opens the tile's own surface, not the manage panel. */
+  assert.match(manager, /event\.pointerType !== "mouse"/);
+  assert.match(manager, /touchTapRef\.current = true;\s*openAt\(event\.currentTarget, \{ target: "file", file \}\)/);
+  assert.match(manager, /touchTapRef\.current = true;\s*openAt\(event\.currentTarget, \{ target: "overflow" \}\)/);
 });

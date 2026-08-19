@@ -551,21 +551,48 @@ export function EvidenceManager({
  * record and only one cell is ever hovered.
  */
 /** The hover card's fixed width; position maths depends on knowing it. */
-const HOVER_CARD_WIDTH = 248;
+const HOVER_CARD_WIDTH = 264;
 /**
- * Roughly the card at its tallest — the 170px preview pane plus the name, meta
- * and action rows. Only used to decide whether the card fits ABOVE the anchor;
+ * Roughly the card at its tallest — the 190px preview pane plus the name row
+ * and padding. Only used to decide whether the card fits ABOVE the anchor;
  * the card itself sizes to its content.
  */
-const HOVER_CARD_ESTIMATE = 288;
+const HOVER_CARD_ESTIMATE = 240;
 /** The "+N" overflow list's width and per-row height, for the same maths. */
-const OVERFLOW_LIST_WIDTH = 268;
-const OVERFLOW_ROW_HEIGHT = 42;
+const OVERFLOW_LIST_WIDTH = 280;
+const OVERFLOW_ROW_HEIGHT = 40;
+/** The per-file "…" menu: its width and a four-verb height estimate. */
+const FILE_MENU_WIDTH = 180;
+const FILE_MENU_ESTIMATE = 148;
 /**
- * How many tiles the strip draws before folding the rest into "+N" — the
- * count the board payload's four-file preview was sized for.
+ * The strip's geometry, shared with the CSS: 38×28 tiles with a 4px gap, and
+ * a 22px "+N" circle plus its gap — measured off the reference screenshots,
+ * where a tile is ~1.7× the badge's diameter. monday does not draw a fixed
+ * number of thumbnails — it fits as many as the column's width allows and
+ * folds the rest into "+N" (three at the default width, which this geometry
+ * reproduces on the default 175px photo column). The strip measures itself
+ * and applies the same rule, so resizing a photo column refits the tiles
+ * live.
  */
-const VISIBLE_TILES = 3;
+const TILE_WIDTH = 38;
+const TILE_GAP = 4;
+const BADGE_RESERVE = 26;
+
+/*
+ * ONE ResizeObserver for every strip on the board. Two photo columns across
+ * hundreds of rendered rows would otherwise mean hundreds of observer
+ * instances; a single observer with a callback map costs one, and the fit
+ * rule still reacts while a column-resize handle is mid-drag.
+ */
+const stripCallbacks = new WeakMap<Element, (width: number) => void>();
+const stripObserver =
+  typeof ResizeObserver === "undefined"
+    ? null
+    : new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          stripCallbacks.get(entry.target)?.(entry.contentRect.width);
+        }
+      });
 
 /**
  * The exact order the board payload builds `preview[]` with — chronological,
@@ -643,8 +670,25 @@ export function FileHoverPreview({
    */
   const [allFiles, setAllFiles] = useState<AttachmentRecord[] | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  /*
+   * The per-file "…" menu — monday's. At most one is open, it belongs to ONE
+   * exact file, and it can be asked for from the hover card's corner button
+   * or from any overflow row. Position is viewport coordinates, portalled
+   * like the other surfaces.
+   */
+  const [menu, setMenu] = useState<{
+    file: { id: string; originalName: string; contentType: string };
+    left: number;
+    top: number;
+  } | null>(null);
+  /* The strip's measured width — null until the first layout. */
+  const [stripWidth, setStripWidth] = useState<number | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  const mediaRef = useRef<HTMLSpanElement>(null);
   const closeTimer = useRef<number | null>(null);
+  /* A tap on a tile opens the tile's surface, not the manage panel; the flag
+     swallows the click the browser fires right after that pointerup. */
+  const touchTapRef = useRef(false);
 
   /*
    * Pointer events, not mouse events, and only for a mouse — in ONE place.
@@ -662,12 +706,92 @@ export function FileHoverPreview({
     }
   };
 
+  /*
+   * The matching guard for LEAVING. A tap fires pointerup and then
+   * pointerleave in the same gesture, so an ungated scheduleClose would
+   * shut the surface the tap just opened 140ms later. Touch surfaces close
+   * on the outside-pointerdown listener below instead.
+   */
+  const mouseLeave = (event: React.PointerEvent) => {
+    if (event.pointerType === "mouse") scheduleClose();
+  };
+
+  /* Measure the strip, and keep measuring while a column resize drags it. */
+  useEffect(() => {
+    if (!mondayMediaStyle) return;
+    const node = mediaRef.current;
+    if (!node) return;
+    const apply = (width: number) => {
+      const rounded = Math.round(width);
+      setStripWidth((current) => (current === rounded ? current : rounded));
+    };
+    apply(node.clientWidth);
+    if (!stripObserver) return;
+    stripCallbacks.set(node, apply);
+    stripObserver.observe(node);
+    return () => {
+      stripObserver.unobserve(node);
+      stripCallbacks.delete(node);
+    };
+  }, [mondayMediaStyle]);
+
+  /*
+   * monday's visible-thumbnail rule, measured rather than assumed: fit as
+   * many tiles as the strip's width allows; when the files outnumber what
+   * fits — or outnumber the payload's preview entries — reserve room for the
+   * "+N" circle and fold the rest behind it. Until the first measurement the
+   * strip assumes three, the count monday's default column width shows, so
+   * the first paint is right on the untouched board.
+   */
+  const tileSpan = TILE_WIDTH + TILE_GAP;
+  const fitPlain =
+    stripWidth === null
+      ? 3
+      : Math.max(1, Math.floor((stripWidth + TILE_GAP) / tileSpan));
+  const fitBadged =
+    stripWidth === null
+      ? 3
+      : Math.max(1, Math.floor((stripWidth - BADGE_RESERVE + TILE_GAP) / tileSpan));
+  const availableTiles = preview.length > 0 ? Math.min(preview.length, count) : count;
+  const visibleTiles =
+    count > fitPlain || availableTiles < count
+      ? Math.max(1, Math.min(fitBadged, availableTiles))
+      : availableTiles;
+  const badgeCount = count - visibleTiles;
+
+  /*
+   * Open (or toggle shut) the "…" menu for ONE exact file, beside the control
+   * that asked: to the right when there is room, flipped left at the viewport
+   * edge, clamped vertically. The menu is the only path to the file verbs, so
+   * it works from the card and from every overflow row alike.
+   */
+  const toggleMenuAt = (
+    anchor: Element,
+    file: { id: string; originalName: string; contentType: string },
+  ) => {
+    if (menu?.file.id === file.id) {
+      setMenu(null);
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    let left = rect.right + 6;
+    if (left + FILE_MENU_WIDTH > window.innerWidth - 8) {
+      left = Math.max(8, rect.left - FILE_MENU_WIDTH - 6);
+    }
+    const top = Math.min(
+      Math.max(rect.top - 4, 8),
+      Math.max(8, window.innerHeight - FILE_MENU_ESTIMATE - 8),
+    );
+    setActionError(null);
+    setMenu({ file, left, top });
+  };
+
   const openAt = (anchor: Element, target: HoverTarget) => {
     const rect = anchor.getBoundingClientRect();
     const width = target.target === "overflow" ? OVERFLOW_LIST_WIDTH : HOVER_CARD_WIDTH;
     const estimate =
       target.target === "overflow"
-        ? Math.min(Math.max(count - VISIBLE_TILES, 1), 6) * OVERFLOW_ROW_HEIGHT + 28
+        ? Math.min(Math.max(count - visibleTiles, 1), 6) * OVERFLOW_ROW_HEIGHT + 28
         : HOVER_CARD_ESTIMATE;
     const below = rect.top < estimate + 16;
     setPlacement({
@@ -700,11 +824,40 @@ export function FileHoverPreview({
 
   /* A fixed-position surface must not drift from its cell: scroll closes it. */
   useEffect(() => {
-    if (!hover) return;
-    const close = () => setHover(null);
+    if (!hover && !menu) return;
+    const close = () => {
+      setHover(null);
+      setMenu(null);
+    };
     window.addEventListener("scroll", close, { capture: true, passive: true });
     return () => window.removeEventListener("scroll", close, { capture: true });
+  }, [hover, menu]);
+
+  /* The "…" menu never outlives the surface it was opened from. */
+  useEffect(() => {
+    if (!hover) setMenu(null);
   }, [hover]);
+
+  /*
+   * Touch has no pointerleave, and a click-away should dismiss the menu on
+   * any device: a pointerdown landing outside this cell and outside every
+   * floating surface closes whatever is open.
+   */
+  useEffect(() => {
+    if (!hover && !menu) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (wrapRef.current?.contains(target)) return;
+      if (target.closest(".sheet-file-hover, .sheet-file-overflow, .sheet-file-menu")) {
+        return;
+      }
+      setHover(null);
+      setMenu(null);
+    };
+    window.addEventListener("pointerdown", onDown, { capture: true });
+    return () => window.removeEventListener("pointerdown", onDown, { capture: true });
+  }, [hover, menu]);
 
   /*
    * The strip changed — a file arrived or left. Whatever list was cached no
@@ -779,7 +932,7 @@ export function FileHoverPreview({
    * tiles rather than sliced by index, so the list can never repeat a file
    * that is already on screen even if the two sources momentarily disagree.
    */
-  const visibleIds = new Set(preview.slice(0, VISIBLE_TILES).map((file) => file.id));
+  const visibleIds = new Set(preview.slice(0, visibleTiles).map((file) => file.id));
   const hiddenFiles = allFiles?.filter((file) => !visibleIds.has(file.id)) ?? null;
 
   /* The large card for ONE file — the one whose tile is being hovered. */
@@ -803,8 +956,8 @@ export function FileHoverPreview({
           );
         }
       }}
-      onPointerLeave={scheduleClose}
-      onPointerCancel={scheduleClose}
+      onPointerLeave={mouseLeave}
+      onPointerCancel={mouseLeave}
     >
       <button
         className={`sheet-file-cell${count ? " has-files" : ""}${
@@ -828,13 +981,16 @@ export function FileHoverPreview({
           {count ? `${count} file${count === 1 ? "" : "s"}` : "Add"}
         </span>
         {mondayMediaStyle && (
-          <span className="sheet-file-cell__media" aria-hidden="true">
+          <span className="sheet-file-cell__media" aria-hidden="true" ref={mediaRef}>
             {count ? (
               <>
                 {/*
-                  Three real tiles, then the overflow badge — and EACH TILE is
-                  its own hover target carrying its own file, so hovering the
-                  second photograph previews the second photograph.
+                  As many real tiles as the measured width fits, then the
+                  overflow circle — and EACH TILE is its own hover target
+                  carrying its own file, so hovering the second photograph
+                  previews the second photograph. A tap does the same, because
+                  a phone has no hover: pointerup opens the tile's card and
+                  the flag swallows the click that would open the panel.
 
                   `loading="lazy"` is what makes this affordable: the board
                   renders 744 rows and two photo columns, so eager decoding
@@ -846,7 +1002,7 @@ export function FileHoverPreview({
                   square, because "there is a document here" is the honest
                   render for something that has no picture.
                 */}
-                {preview.slice(0, VISIBLE_TILES).map((file) => (
+                {preview.slice(0, visibleTiles).map((file) => (
                   <span
                     className="sheet-file-cell__media-tile"
                     key={file.id}
@@ -855,8 +1011,20 @@ export function FileHoverPreview({
                         openAt(event.currentTarget, { target: "file", file }),
                       )
                     }
-                    onPointerLeave={scheduleClose}
-                    onPointerCancel={scheduleClose}
+                    onPointerLeave={mouseLeave}
+                    onPointerCancel={mouseLeave}
+                    onPointerUp={(event) => {
+                      if (event.pointerType !== "mouse") {
+                        touchTapRef.current = true;
+                        openAt(event.currentTarget, { target: "file", file });
+                      }
+                    }}
+                    onClick={(event) => {
+                      if (!touchTapRef.current) return;
+                      touchTapRef.current = false;
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
                   >
                     {file.contentType.startsWith("image/") ? (
                       <img
@@ -866,8 +1034,8 @@ export function FileHoverPreview({
                         // Measured: 146 KB of JPEG becomes 1.1 KB of WebP.
                         src={`/api/files/${file.id}?thumb=1`}
                         alt=""
-                        width={22}
-                        height={26}
+                        width={38}
+                        height={28}
                         loading="lazy"
                         decoding="async"
                       />
@@ -882,12 +1050,12 @@ export function FileHoverPreview({
                   after the board loaded. Better a square than a gap.
                 */}
                 {!preview.length &&
-                  Array.from({ length: Math.min(count, VISIBLE_TILES) }, (_, index) => (
+                  Array.from({ length: Math.min(count, visibleTiles) }, (_, index) => (
                     <span className="sheet-file-cell__media-tile" key={index}>
                       <Icon name="image" size={13} />
                     </span>
                   ))}
-                {count > VISIBLE_TILES && (
+                {badgeCount > 0 && (
                   <small
                     className="sheet-file-cell__media-more"
                     onPointerEnter={(event) =>
@@ -895,10 +1063,22 @@ export function FileHoverPreview({
                         openAt(event.currentTarget, { target: "overflow" }),
                       )
                     }
-                    onPointerLeave={scheduleClose}
-                    onPointerCancel={scheduleClose}
+                    onPointerLeave={mouseLeave}
+                    onPointerCancel={mouseLeave}
+                    onPointerUp={(event) => {
+                      if (event.pointerType !== "mouse") {
+                        touchTapRef.current = true;
+                        openAt(event.currentTarget, { target: "overflow" });
+                      }
+                    }}
+                    onClick={(event) => {
+                      if (!touchTapRef.current) return;
+                      touchTapRef.current = false;
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
                   >
-                    +{count - VISIBLE_TILES}
+                    +{badgeCount}
                   </small>
                 )}
               </>
@@ -919,7 +1099,7 @@ export function FileHoverPreview({
             className={`sheet-file-hover${placement.below ? " is-below" : ""}`}
             style={{ left: placement.left, top: placement.top }}
             onPointerEnter={cancelClose}
-            onPointerLeave={scheduleClose}
+            onPointerLeave={mouseLeave}
           >
             <span className="sheet-file-hover__preview">
               {/*
@@ -955,27 +1135,27 @@ export function FileHoverPreview({
                 </span>
               )}
             </span>
-            <strong title={hoveredFile.originalName}>{hoveredFile.originalName}</strong>
-            <small>{humanSize(hoveredFile.byteSize)}</small>
-            {actionError && <small className="sheet-file-hover__error">{actionError}</small>}
-            <span className="sheet-file-hover__actions">
-              <button type="button" onClick={() => fileAct(hoveredFile, "open")}>
-                Open
-              </button>
-              <button type="button" onClick={() => fileAct(hoveredFile, "download")}>
-                Download
-              </button>
-              <button
-                type="button"
-                className="is-danger"
-                onClick={() => fileAct(hoveredFile, "delete")}
-              >
-                Delete
-              </button>
-              <button type="button" onClick={onOpen}>
-                Manage
-              </button>
+            {/*
+              monday's card corner: one "…" button over the preview, opening
+              the file-verb menu for THE file the card is showing. The verbs
+              moved off the card face and into the menu so the card reads as
+              monday's does — picture, then filename.
+            */}
+            <button
+              type="button"
+              className="sheet-file-hover__more"
+              aria-label={`Actions for ${hoveredFile.originalName}`}
+              aria-haspopup="menu"
+              aria-expanded={menu?.file.id === hoveredFile.id}
+              onClick={(event) => toggleMenuAt(event.currentTarget, hoveredFile)}
+            >
+              <Icon name="more" size={15} />
+            </button>
+            <span className="sheet-file-hover__name">
+              <strong title={hoveredFile.originalName}>{hoveredFile.originalName}</strong>
+              <small>{humanSize(hoveredFile.byteSize)}</small>
             </span>
+            {actionError && <small className="sheet-file-hover__error">{actionError}</small>}
           </span>,
           document.body,
         )}
@@ -988,7 +1168,7 @@ export function FileHoverPreview({
             className={`sheet-file-overflow${placement.below ? " is-below" : ""}`}
             style={{ left: placement.left, top: placement.top }}
             onPointerEnter={cancelClose}
-            onPointerLeave={scheduleClose}
+            onPointerLeave={mouseLeave}
             role="list"
             aria-label={columnTitle ? `More files in ${columnTitle}` : "More files"}
           >
@@ -1016,36 +1196,100 @@ export function FileHoverPreview({
                   <span className="sheet-file-overflow__name" title={file.originalName}>
                     {file.originalName}
                   </span>
-                  <span className="sheet-file-overflow__tools">
-                    <button
-                      type="button"
-                      aria-label={`Open ${file.originalName}`}
-                      onClick={() => fileAct(file, "open")}
-                    >
-                      <Icon name="grid" size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Download ${file.originalName}`}
-                      onClick={() => fileAct(file, "download")}
-                    >
-                      <Icon name="download" size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      className="is-danger"
-                      aria-label={`Delete ${file.originalName}`}
-                      onClick={() => fileAct(file, "delete")}
-                    >
-                      <Icon name="trash" size={12} />
-                    </button>
-                  </span>
+                  {/*
+                    monday's row affordance: ONE "…" revealed on the row,
+                    opening the verb menu for THIS row's file. The verbs
+                    themselves live in the menu, so a mis-aimed click on a
+                    row can no longer delete anything.
+                  */}
+                  <button
+                    type="button"
+                    className={`sheet-file-overflow__menu${
+                      menu?.file.id === file.id ? " is-open" : ""
+                    }`}
+                    aria-label={`Actions for ${file.originalName}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.file.id === file.id}
+                    onClick={(event) => toggleMenuAt(event.currentTarget, file)}
+                  >
+                    <Icon name="more" size={14} />
+                  </button>
                 </span>
               ))
             )}
             {actionError && (
               <small className="sheet-file-overflow__note">{actionError}</small>
             )}
+          </span>,
+          document.body,
+        )}
+
+      {/* ── The per-file "…" menu — real verbs only, for ONE exact file ──── */}
+      {menu &&
+        createPortal(
+          <span
+            className="sheet-file-menu"
+            role="menu"
+            aria-label={`Actions for ${menu.file.originalName}`}
+            style={{ left: menu.left, top: menu.top }}
+            onPointerEnter={cancelClose}
+            onPointerLeave={mouseLeave}
+          >
+            {/*
+              Every verb closes the menu and then acts on `menu.file` — the
+              file whose "…" was clicked, never a neighbour, never files[0].
+              These are the four things MAINTSUPP can genuinely do to a file;
+              monday's versioning/updates/extract verbs have no backend here
+              and are deliberately absent rather than decorative.
+            */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const chosen = menu.file;
+                setMenu(null);
+                fileAct(chosen, "open");
+              }}
+            >
+              <Icon name="arrow" size={13} />
+              Open File
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const chosen = menu.file;
+                setMenu(null);
+                fileAct(chosen, "download");
+              }}
+            >
+              <Icon name="download" size={13} />
+              Download File
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const chosen = menu.file;
+                setMenu(null);
+                fileAct(chosen, "delete");
+              }}
+            >
+              <Icon name="trash" size={13} />
+              Delete File
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                setHover(null);
+                onOpen();
+              }}
+            >
+              <Icon name="folder" size={13} />
+              Manage files
+            </button>
           </span>,
           document.body,
         )}

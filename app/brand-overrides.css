@@ -507,6 +507,8 @@ body[data-theme="dark"] :is(
   .drawer-history-note,
   .sheet-file-hover,
   .sheet-file-overflow,
+  .sheet-file-menu,
+  .sheet-file-hover__more,
   .evidence-viewer > section,
   .evidence-viewer header
 ) {
@@ -518,6 +520,25 @@ body[data-theme="dark"] :is(
 /* The overflow list's rows and thumb wells, on the same dark ground. */
 body[data-theme="dark"] .sheet-file-overflow__row:hover {
   background: #1f333e;
+}
+
+body[data-theme="dark"] :is(.sheet-file-menu button:hover, .sheet-file-hover__more:hover) {
+  background: #1f333e;
+}
+
+body[data-theme="dark"]
+  :is(.sheet-file-overflow__menu:hover, .sheet-file-overflow__menu.is-open) {
+  background: #24404e;
+  color: #dce7eb;
+}
+
+/* monday's "+N" circle, a step lighter so it still reads on the dark rows. */
+body[data-theme="dark"]
+  .sheet-file-cell.is-monday-media
+  .sheet-file-cell__media
+  > .sheet-file-cell__media-more {
+  background: #454550;
+  color: #fff;
 }
 
 body[data-theme="dark"] :is(.sheet-file-overflow__thumb, .sheet-file-hover__preview) {

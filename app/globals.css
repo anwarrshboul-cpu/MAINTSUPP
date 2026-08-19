@@ -8636,11 +8636,11 @@ th.sheet-column--name {
   z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  width: 248px;
+  gap: 6px;
+  width: 264px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 8px;
   background: white;
   box-shadow: 0 15px 38px rgba(8, 28, 40, 0.23);
   color: #344b57;
@@ -8663,10 +8663,12 @@ th.sheet-column--name {
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 170px;
+  height: 190px;
   overflow: hidden;
   border-radius: 6px;
-  background: #edf2f4;
+  /* monday letterboxes on white, so a portrait photograph reads as a
+     photograph with margins rather than a picture in a grey well. */
+  background: #fff;
 }
 
 .sheet-file-hover__preview img,
@@ -8692,54 +8694,69 @@ th.sheet-column--name {
 
 .sheet-file-hover strong {
   overflow: hidden;
-  font-size: 9px;
+  font-size: 11px;
+  font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sheet-file-hover small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 8.5px;
 }
 
 .sheet-file-hover__error {
   color: #c52f45;
 }
 
-/*
- * The card's actions — monday's row of real verbs under the preview. Every
- * button acts on the EXACT file the card is showing; none is decorative.
- */
-.sheet-file-hover__actions {
+/* monday's bottom row: the filename, then quiet metadata at the far edge. */
+.sheet-file-hover__name {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 2px;
 }
 
-.sheet-file-hover__actions button {
+.sheet-file-hover__name strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sheet-file-hover__name small {
   flex: 0 0 auto;
-  padding: 4px 8px;
+}
+
+/*
+ * monday's card corner: one "…" floating over the preview. It opens the
+ * file-verb menu for the exact file the card is showing — the verbs live
+ * there now, not on the card face.
+ */
+.sheet-file-hover__more {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--line);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--teal-700);
-  font-size: 8px;
-  font-weight: 700;
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(8, 28, 40, 0.16);
   cursor: pointer;
 }
 
-.sheet-file-hover__actions button:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-}
-
-.sheet-file-hover__actions button.is-danger {
-  color: #c52f45;
+.sheet-file-hover__more:hover {
+  background: #edf2f4;
 }
 
 /*
  * The "+N" overflow list — ONLY the files the strip did not draw, each row a
- * thumbnail, a truncating filename and the same three real actions. Portalled
- * and fixed for the same clipping/flipping reasons as the card above.
+ * thumbnail, a truncating filename and one "…" that opens the row's own verb
+ * menu. Portalled and fixed for the same clipping/flipping reasons as the
+ * card above.
  */
 .sheet-file-overflow {
   position: fixed;
@@ -8747,7 +8764,7 @@ th.sheet-column--name {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 268px;
+  width: 280px;
   max-height: 288px;
   overflow-y: auto;
   padding: 6px;
@@ -8768,6 +8785,7 @@ th.sheet-column--name {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 40px;
   padding: 4px 6px;
   border-radius: 6px;
 }
@@ -8779,9 +8797,9 @@ th.sheet-column--name {
 .sheet-file-overflow__thumb {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 32px;
-  flex: 0 0 30px;
+  width: 34px;
+  height: 28px;
+  flex: 0 0 34px;
   overflow: hidden;
   border-radius: 4px;
   background: #edf2f4;
@@ -8801,41 +8819,45 @@ th.sheet-column--name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
-.sheet-file-overflow__tools {
-  display: inline-flex;
-  gap: 2px;
-  flex: 0 0 auto;
-  /* Revealed on the row, monday-style, so the list reads as filenames first. */
-  opacity: 0;
-}
-
-.sheet-file-overflow__row:hover .sheet-file-overflow__tools,
-.sheet-file-overflow__row:focus-within .sheet-file-overflow__tools {
-  opacity: 1;
-}
-
-.sheet-file-overflow__tools button {
+/*
+ * monday's row affordance: ONE "…" per row, revealed on the row so the list
+ * reads as filenames first, held visible while its menu is open (`.is-open`)
+ * and always visible where there is no hover to reveal it.
+ */
+.sheet-file-overflow__menu {
   display: inline-grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  opacity: 0;
 }
 
-.sheet-file-overflow__tools button:hover {
-  background: rgba(0, 0, 0, 0.07);
+.sheet-file-overflow__row:hover .sheet-file-overflow__menu,
+.sheet-file-overflow__row:focus-within .sheet-file-overflow__menu,
+.sheet-file-overflow__menu.is-open {
+  opacity: 1;
+}
+
+.sheet-file-overflow__menu:hover,
+.sheet-file-overflow__menu.is-open {
+  /* monday marks the active "…" with a blue-tinted chip. */
+  background: #d7e6f7;
   color: var(--ink);
 }
 
-.sheet-file-overflow__tools button.is-danger:hover {
-  color: #c52f45;
+@media (hover: none) {
+  .sheet-file-overflow__menu {
+    opacity: 1;
+  }
 }
 
 .sheet-file-overflow__note {
@@ -8844,15 +8866,48 @@ th.sheet-column--name {
   font-size: 8px;
 }
 
-.sheet-file-hover > button {
-  align-self: start;
-  padding: 0;
+/*
+ * The per-file "…" menu — monday's floating verb list, one file at a time.
+ * Fixed and portalled like the surfaces it is asked from, positioned beside
+ * the "…" that opened it (flipping left at the viewport edge).
+ */
+.sheet-file-menu {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 180px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 15px 38px rgba(8, 28, 40, 0.23);
+  color: #344b57;
+  text-align: left;
+}
+
+.sheet-file-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
-  color: var(--teal-700);
-  font-size: 8px;
-  font-weight: 700;
+  color: inherit;
+  font-size: 10.5px;
+  font-weight: 560;
   cursor: pointer;
+}
+
+.sheet-file-menu button:hover {
+  background: #edf2f4;
+}
+
+.sheet-file-menu button svg {
+  color: var(--muted);
 }
 
 .drawer-file-row {
@@ -12368,6 +12423,8 @@ body[data-theme="dark"] {
   .sheet-timeline-popover,
   .sheet-file-hover__preview,
   .sheet-file-overflow,
+  .sheet-file-menu,
+  .sheet-file-hover__more,
   .sheet-file-overflow__thumb,
   .column-settings-dialog > section,
   .mobile-cell-sheet__panel,
@@ -12383,6 +12440,23 @@ body[data-theme="dark"] {
 
   .sheet-file-overflow__row:hover {
     background: #1b2a34;
+  }
+
+  .sheet-file-menu button:hover,
+  .sheet-file-hover__more:hover {
+    background: #1b2a34;
+  }
+
+  .sheet-file-overflow__menu:hover,
+  .sheet-file-overflow__menu.is-open {
+    background: #1f333e;
+    color: var(--ink);
+  }
+
+  /* monday's "+N" circle, lifted a step so it still reads on a dark row. */
+  .sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more {
+    background: #454550;
+    color: #fff;
   }
 
   .notification-item.is-unread,
@@ -13455,22 +13529,42 @@ body[data-theme="dark"] {
   min-width: 0;
 }
 
+/*
+ * monday's cell shows the photographs alone — no count beside them — so once
+ * a cell HAS files its textual label steps down to screen readers only. The
+ * visually-hidden pattern rather than `display: none`, because the custom
+ * file columns do not pass a `columnTitle` and the label is then the
+ * button's only accessible name.
+ */
+.sheet-file-cell.is-monday-media.has-files .sheet-file-cell__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .sheet-file-cell.is-monday-media .sheet-file-cell__media {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  gap: 4px;
+  /* The strip owns the cell's width so it can MEASURE it: the fit rule in
+     FileHoverPreview draws as many tiles as this box says fit. */
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-tile {
   position: relative;
   display: grid;
-  width: 22px;
-  height: 26px;
-  flex: 0 0 22px;
+  width: 38px;
+  height: 28px;
+  flex: 0 0 38px;
   place-items: center;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: 4px;
   /* The chip colour doubles as the loading state, so a tile that has not
      fetched yet reads as deliberate rather than as a hole in the row. */
   background: var(--board-file-chip, #27c2e8);
@@ -13501,25 +13595,27 @@ body[data-theme="dark"] {
 }
 
 /*
- * The overflow badge is a TILE-SHAPED HOVER TARGET, not a bare number:
- * hovering it lists exactly the files the strip hid, so it needs the same
- * footprint and affordance as the thumbnails it stands in for.
+ * The overflow badge — monday's dark "+N" circle. Still a HOVER TARGET, not
+ * a bare number: hovering (or tapping) it lists exactly the files the strip
+ * hid.
  */
 .sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more {
   display: grid;
   place-items: center;
   min-width: 22px;
-  height: 26px;
-  padding: 0 3px;
-  border-radius: 3px;
-  border: 1px solid var(--line, #dce4e9);
-  background: var(--chip-neutral-bg, #eef2f5);
-  color: var(--chip-neutral-fg, #45525b);
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 999px;
+  background: #323338;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
 }
 
 .sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more:hover {
-  border-color: var(--teal, #0b7a72);
-  color: var(--ink, #132537);
+  background: #4b4b57;
 }
 
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
