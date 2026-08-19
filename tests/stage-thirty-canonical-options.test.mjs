@@ -144,6 +144,30 @@ test("the public job route refuses every write from a viewer link", async () => 
   assert.match(post, /This link is view-only\./);
 });
 
+test("Copy Link's outcome is shown at the button, never only off-screen", async () => {
+  /*
+   * The first wiring reported through `notice`, which renders at the FOOT of
+   * a panel long enough to scroll — a refusal painted off-screen and the
+   * click read as doing nothing. The share feedback must render before the
+   * facts grid (i.e. adjacent to the header the button lives in), and a
+   * clipboard refusal must surface the link for manual copy, not swallow it.
+   */
+  const view = await read("app/(app)/portal/views/fix-tracker.tsx");
+  const feedback = view.indexOf('className="fix-tracker__share"');
+  const facts = view.indexOf('className="fix-tracker__facts"');
+  assert.ok(feedback > 0, "the share feedback block must exist");
+  assert.ok(feedback < facts, "and it must sit with the header, above the facts");
+  assert.match(view, /setShare\(\{ url, copied: false \}\)/, "a refused clipboard hands over the link");
+
+  /*
+   * The mint refuses strangers in production and spares the demo identity in
+   * development only — the same line every other write route draws.
+   */
+  const links = await read("app/api/board/links/route.ts");
+  assert.match(links, /!authenticated && !demoIdentityAllowed\(\)/);
+  assert.match(links, /Sign in to issue a contractor link\./);
+});
+
 test("the Fix Tracker mints a viewer link and the page renders it read-only", async () => {
   const view = await read("app/(app)/portal/views/fix-tracker.tsx");
   assert.match(view, /audience: "viewer"/);

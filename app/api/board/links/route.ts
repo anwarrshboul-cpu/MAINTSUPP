@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { attachments, maintenanceRequests } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { demoIdentityAllowed } from "../../../lib/tenant-access";
 import {
   DEFAULT_EXPIRY_DAYS,
   createJobToken,
@@ -108,8 +109,15 @@ export async function POST(request: Request) {
      * guarded by `scopedDb` alone, which resolves a tenant and never refuses.
      * Anyone who could reach this route could hand themselves a URL that opens
      * a job with no login at all.
+     *
+     * The demo identity is spared IN DEVELOPMENT ONLY, on the same reasoning
+     * `scopedDbWithCapability` already applies to every other write: the role
+     * switcher is how the product is previewed locally, and a Copy Link button
+     * that silently 401s under it reads as broken. `demoIdentityAllowed()` is
+     * `NODE_ENV !== "production"`, so in production this line is exactly the
+     * check it was before and a stranger still gets nothing.
      */
-    if (!authenticated) {
+    if (!authenticated && !demoIdentityAllowed()) {
       return bad("Sign in to issue a contractor link.", 401);
     }
     const body = await request.json().catch(() => ({}));
