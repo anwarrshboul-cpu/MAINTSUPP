@@ -196,7 +196,15 @@ await fsp.writeFile(
          */
         {
           src: "^/assets/(.*)$",
-          headers: { "cache-control": "public, max-age=31536000, immutable" },
+          headers: {
+            "cache-control": "public, max-age=31536000, immutable",
+            /*
+             * The worker's withSecurityHeaders never sees CDN-served files,
+             * so the one header that matters for static JS/CSS is restated
+             * here: without it a browser may sniff past the served type.
+             */
+            "x-content-type-options": "nosniff",
+          },
           continue: true,
         },
         /*

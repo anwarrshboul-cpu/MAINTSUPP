@@ -1052,7 +1052,25 @@ async function boardPayload(
           inArray(attachments.kind, [...kindColumns.keys()]),
         ),
       )
-      .orderBy(asc(attachments.createdAt));
+      /*
+       * The id tiebreak matters here for exactly the reason documented above
+       * for the column-filed scan: phone uploads land several rows inside one
+       * second, and without it two loads of the same board could disagree
+       * about which photograph is "first".
+       */
+      .orderBy(asc(attachments.createdAt), asc(attachments.id));
+    /*
+     * A MERGE, NOT AN APPEND. A cell can hold both column-filed rows (the
+     * monday import) and kind-filed rows (the app's own uploads), and this
+     * loop used to push the kind rows AFTER the column rows regardless of
+     * date — so a mixed cell's preview was two sorted runs glued together,
+     * not a chronological strip, and the hover overflow list (which sorts
+     * globally) would disagree with the tiles about which files are hidden.
+     * Each source contributes its own oldest four, so the union's true oldest
+     * four are guaranteed to be among the at-most-eight collected — sorting
+     * the merged handful and re-capping yields the correct global order.
+     */
+    const mixed = new Set<string>();
     for (const row of kindRows) {
       const columnId = kindColumns.get(row.kind);
       if (!row.requestId || !columnId) continue;
@@ -1063,7 +1081,7 @@ async function boardPayload(
         grouped.set(key, entry);
       }
       entry.count += 1;
-      if (entry.preview.length < 4) {
+      if (entry.preview.length < 8) {
         entry.preview.push({
           id: row.id,
           contentType: row.contentType,
@@ -1071,7 +1089,22 @@ async function boardPayload(
           byteSize: row.byteSize,
           createdAt: row.createdAt,
         });
+        mixed.add(key);
       }
+    }
+    for (const key of mixed) {
+      const entry = grouped.get(key);
+      if (!entry) continue;
+      entry.preview.sort((left, right) =>
+        left.createdAt === right.createdAt
+          ? left.id < right.id
+            ? -1
+            : 1
+          : left.createdAt < right.createdAt
+            ? -1
+            : 1,
+      );
+      entry.preview.length = Math.min(entry.preview.length, 4);
     }
   }
   const fileCounts = [...grouped.values()];

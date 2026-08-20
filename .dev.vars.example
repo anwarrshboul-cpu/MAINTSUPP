@@ -1,10 +1,34 @@
-# Copy to `.dev.vars` for local development. Safe to commit — no secrets here.
+# Copy to `.dev.vars` for local development. Safe to commit — placeholders only.
 #
-# SUPABASE_PUBLISHABLE_KEY is the anon/publishable key and is public by design:
-# it identifies the project, and RLS is what guards the data.
-#
-# The service-role key is NOT listed here and must never be put in .dev.vars
-# used by the client bundle. It belongs only in Supabase Edge Function secrets.
-SUPABASE_URL="https://<project-ref>.supabase.co"
-SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
-MAINTSUPP_SITE_URL="http://localhost:5174"
+# The portal reads NONE of these in the default dev setup: `npx vite` runs on
+# Miniflare's local D1 + R2 bindings with zero configuration. Everything below
+# exists for running the portal against the PRODUCTION-SHAPED stack (Node +
+# Postgres + S3 storage), which is what Vercel + Supabase runs. The full map,
+# including which Vercel environment each belongs in, is in
+# docs/DEPLOYMENT-PORTAL.md.
+
+# ── Database (Supabase Postgres) ─────────────────────────────────────────────
+# PG_D1=1 switches the D1 shim to Postgres; without it the shim uses SQLite.
+# DATABASE_URL must be the SESSION pooler (port 5432) — the transaction pooler
+# (6543) deadlocks this workload; db/node-pg-d1.ts refuses it loudly.
+# PG_D1=1
+# DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
+
+# ── Storage (Supabase Storage over its S3-compatible API) ────────────────────
+# All four or none — a partial set falls back to the local-filesystem driver,
+# which on Vercel means uploads land in per-instance /tmp and vanish.
+# S3_ENDPOINT="https://<project-ref>.supabase.co/storage/v1/s3"
+# S3_BUCKET="maintsupp-files"
+# S3_ACCESS_KEY_ID="<storage-access-key>"
+# S3_SECRET_ACCESS_KEY="<storage-secret-key>"
+# S3_REGION="eu-west-2"
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# The owner account's seed password (min 12 chars). In production this is
+# REQUIRED: with no value the owner row is created with no password and
+# sign-in fails closed. In development the documented public default applies.
+# MAINTSUPP_OWNER_PASSWORD="<a-long-owner-password>"
+
+# ── Node-runtime local alternatives (Railway-style, not needed for Vite dev) ─
+# D1_SQLITE_PATH="./.storage/portal.sqlite"
+# R2_LOCAL_DIR="./.storage/r2"

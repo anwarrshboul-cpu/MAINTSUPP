@@ -258,7 +258,12 @@ async function listFiles(request: Request) {
     .select()
     .from(attachments)
     .where(where)
-    .orderBy(desc(attachments.createdAt))
+    /*
+     * Newest first, with the id as the tiebreak — a phone batch lands several
+     * rows in the same second, and `created_at` alone leaves the database
+     * free to return those in a different order per query.
+     */
+    .orderBy(desc(attachments.createdAt), desc(attachments.id))
     .limit(limit);
   return Response.json({ files: rows.map(attachmentPayload) });
 }
