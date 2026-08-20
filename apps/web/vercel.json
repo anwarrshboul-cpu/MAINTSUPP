@@ -2,5 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "buildCommand": "next build",
-  "installCommand": "npm install --prefix ../.."
+  "installCommand": "npm install --prefix ../..",
+  "git": {
+    "deploymentEnabled": {
+      "main": false,
+      "feat/monday-attachment-cells-deploy-prep": false
+    }
+  }
 }
