@@ -7,7 +7,11 @@ import {
 } from "../../../../db/schema";
 import type { MaintenanceRequest } from "../../../lib/types";
 import { resolveJobToken } from "../../../lib/job-tokens";
-import { scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import {
+  anonymousRefusal,
+  scopedDb,
+  scopedDbWithCapability,
+} from "../../../lib/tenant-db";
 
 /**
  * The only types rendered inline in the browser.
@@ -367,7 +371,23 @@ export async function PUT(
   const { id } = await context.params;
   await ensureDatabase();
 
-  const guard = await scopedDbWithCapability(request, "board.edit");
+  /*
+   * A missing derivative is a nicety; an anonymous caller asking for one is not
+   * an outage. The public form uploads a photograph with no session behind it,
+   * and the browser then offers a thumbnail here — where
+   * `scopedDbWithCapability` THROWS for an anonymous request instead of
+   * returning a refusal, which surfaced as a 500 on an ordinary submission.
+   * Refused the way every other route refuses, so the log stays honest about
+   * what is actually broken.
+   */
+  let guard: Awaited<ReturnType<typeof scopedDbWithCapability>>;
+  try {
+    guard = await scopedDbWithCapability(request, "board.edit");
+  } catch (error) {
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    throw error;
+  }
   if (guard.denied) return guard.denied;
   const { db, orgId } = guard.scope;
 
