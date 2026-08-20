@@ -5,8 +5,7 @@
   "installCommand": "npm install --prefix ../..",
   "git": {
     "deploymentEnabled": {
-      "main": false,
-      "feat/monday-attachment-cells-deploy-prep": false
+      "main": false
     }
   }
 }

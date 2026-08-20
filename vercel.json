@@ -6,8 +6,7 @@
   "outputDirectory": "apps/web/.next",
   "git": {
     "deploymentEnabled": {
-      "main": false,
-      "feat/monday-attachment-cells-deploy-prep": false
+      "main": false
     }
   }
 }
