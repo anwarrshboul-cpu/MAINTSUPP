@@ -218,6 +218,25 @@ export function PhotoSlot({
   const srcSet = (ext: "avif" | "webp") =>
     widths.map((width) => `/assets/photos/${slot}-${width}.${ext} ${width}w`).join(", ");
 
+  /*
+   * NO ENTRY IN THE MANIFEST MEANS NO PHOTOGRAPH — so do not ask for one.
+   *
+   * `photo-widths.ts` is generated from the files that are actually on disk,
+   * and its own note explains that advertising a width which is not there makes
+   * the browser fetch a file that does not exist. The base `<img src>` sat
+   * outside that reasoning: `trade-glazing` and `trade-drainage` have never had
+   * a photograph, so every visit fetched two missing JPEGs, failed, and retried
+   * each of them twice more on a backoff — six 404s per page load, in the
+   * network panel and in the server log, for images nobody is waiting on.
+   *
+   * The generated artwork below is not a placeholder for those two slots, it is
+   * the artwork; drawing it and stopping is the honest end state. Drop a
+   * `trade-glazing.jpg` into `public/assets/photos`, re-run `convert-images`,
+   * and the manifest entry brings the photograph back with no code change —
+   * which is the same contract as before.
+   */
+  const hasPhotograph = widths.length > 0;
+
   return (
     <div className={`ph${className ? ` ${className}` : ""}`}>
       <div
@@ -227,14 +246,10 @@ export function PhotoSlot({
           __html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${body}</svg>`,
         }}
       />
-      {!(failed && attempt >= 2) && (
+      {hasPhotograph && !(failed && attempt >= 2) && (
         <picture>
-          {widths.length > 0 && (
-            <>
-              <source type="image/avif" srcSet={srcSet("avif")} sizes={sizes} />
-              <source type="image/webp" srcSet={srcSet("webp")} sizes={sizes} />
-            </>
-          )}
+          <source type="image/avif" srcSet={srcSet("avif")} sizes={sizes} />
+          <source type="image/webp" srcSet={srcSet("webp")} sizes={sizes} />
           <img
             key={attempt}
             ref={measure}

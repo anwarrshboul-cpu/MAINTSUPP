@@ -847,6 +847,36 @@ class NodePgConnection {
         DateStyle: "ISO, MDY",
         application_name: "maintsupp-legacy-portal",
       },
+      /*
+       * IDLE SOCKETS MUST BE GIVEN BACK, which is the other half of the pool
+       * sizing above and the half that was missing.
+       *
+       * `max: 2` bounds what ONE instance holds. It says nothing about how many
+       * instances hold two each, and postgres.js keeps a socket open for the
+       * life of the process by default — so a function instance that served one
+       * request an hour ago still owns its connections, and Vercel keeps
+       * instances warm long after a deployment is superseded. Instances from
+       * several deployments therefore accumulate against one pooler until:
+       *
+       *   PostgresError: (EMAXCONNSESSION) max clients reached in session mode
+       *   — max clients are limited to pool_size: 30
+       *
+       * which is what the preview started answering to /api/context after a run
+       * of deployments — a 500 on the first request the client's browser makes,
+       * with nothing wrong in the code path it names.
+       *
+       * Twenty seconds is comfortably longer than any single request here (the
+       * schema bootstrap runs inside one `batch()`, which reserves its
+       * connection and so is never idle) and far shorter than the minutes an
+       * instance stays warm. The reconnect is transparent — postgres.js dials
+       * again on the next query — so the cost is one connect on a cold path and
+       * the gain is that idle instances stop hoarding a shared, capped resource.
+       *
+       * `max_lifetime` recycles even a busy connection every half hour, so a
+       * socket the pooler has quietly dropped cannot be held indefinitely.
+       */
+      idle_timeout: positiveInteger(env["PG_D1_IDLE_TIMEOUT"], 20),
+      max_lifetime: positiveInteger(env["PG_D1_MAX_LIFETIME"], 60 * 30),
       // The bootstrap's DDL raises "already exists, skipping" notices by the
       // hundred on every boot. They are the expected outcome, not news.
       onnotice: () => {},

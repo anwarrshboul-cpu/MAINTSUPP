@@ -213,3 +213,52 @@ test("only the hero loads eagerly", async () => {
     `exactly one image should be eager and it must be the hero — more and the first paint gets slower, not faster. Found: ${eager.join(", ") || "none"}`,
   );
 });
+
+test("a slot with no photograph asks for none", async () => {
+  /*
+   * THE BUG THIS REPLACES. `photo-widths.ts` is generated from the files that
+   * are actually on disk, and it is the authority on which slots have a
+   * photograph — its own note explains that advertising a width which is not
+   * there makes the browser fetch a file that does not exist. The base
+   * `<img src>` sat outside that reasoning and was rendered unconditionally.
+   *
+   * `trade-glazing` and `trade-drainage` have never had a photograph, so every
+   * visit to the home page fetched two missing JPEGs, failed, and retried each
+   * of them twice more on a backoff: six 404s per page load, in the visitor's
+   * network panel and in the server log, for images nobody was waiting on.
+   */
+  const source = await readFile(
+    new URL("../app/(marketing)/_sections/photo.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /const hasPhotograph = widths\.length > 0;/);
+  assert.match(
+    source,
+    /\{hasPhotograph && !\(failed && attempt >= 2\) && \(/,
+    "the whole <picture> is skipped, not just the <source> elements",
+  );
+
+  const manifest = await readFile(
+    new URL("../app/(marketing)/_sections/photo-widths.ts", import.meta.url),
+    "utf8",
+  );
+  const named = new Set([...manifest.matchAll(/^ {2}"([^"]+)":/gm)].map((m) => m[1]));
+  const files = (await readdir(new URL("../public/assets/photos", import.meta.url)))
+    .filter((f) => /^[^.]+\.jpg$/.test(f))
+    .map((f) => f.replace(".jpg", ""));
+  assert.deepEqual(
+    [...named].sort(),
+    files.sort(),
+    "the manifest must stay exactly the set of photographs on disk — it is what decides whether a request is made at all",
+  );
+
+  /* The two documented gaps: named by the site, absent from the asset pack. */
+  const services = await readFile(
+    new URL("../app/(marketing)/_sections/services.tsx", import.meta.url),
+    "utf8",
+  );
+  for (const slot of ["trade-glazing", "trade-drainage"]) {
+    assert.ok(services.includes(`slot: "${slot}"`), `${slot} is still a trade tile`);
+    assert.ok(!named.has(slot), `${slot} has no photograph, so it must request none`);
+  }
+});
