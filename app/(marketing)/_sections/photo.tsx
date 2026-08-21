@@ -238,16 +238,17 @@ export function PhotoSlot({
    * `photo-widths.ts` is generated from the files that are actually on disk,
    * and its own note explains that advertising a width which is not there makes
    * the browser fetch a file that does not exist. The base `<img src>` sat
-   * outside that reasoning: `trade-glazing` and `trade-drainage` have never had
-   * a photograph, so every visit fetched two missing JPEGs, failed, and retried
-   * each of them twice more on a backoff — six 404s per page load, in the
-   * network panel and in the server log, for images nobody is waiting on.
+   * outside that reasoning: `trade-glazing` and `trade-drainage` had no
+   * photograph at the time, so every visit fetched two missing JPEGs, failed,
+   * and retried each of them twice more on a backoff — six 404s per page load,
+   * in the network panel and in the server log, for images nobody was waiting
+   * on.
    *
-   * The generated artwork below is not a placeholder for those two slots, it is
-   * the artwork; drawing it and stopping is the honest end state. Drop a
-   * `trade-glazing.jpg` into `public/assets/photos`, re-run `convert-images`,
-   * and the manifest entry brings the photograph back with no code change —
-   * which is the same contract as before.
+   * Those two are supplied now and the guard is doing the opposite job for
+   * them: their manifest entries exist, so their photographs are requested. The
+   * rule is what matters and it has not changed — a slot with no entry asks for
+   * nothing, and adding the files plus the entry is the whole of what it takes
+   * to give one a picture, with no change to this component or its callers.
    */
   const hasPhotograph = widths.length > 0;
 

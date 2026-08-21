@@ -231,7 +231,10 @@ test("the founder section renders a frame rather than somebody else's face", asy
 
 test("the contractor page asks the eleven questions, in order", async () => {
   const page = await read("app/(marketing)/contractors/page.tsx");
-  assert.match(page, /title: "Join the Contractor Network — Maintsupp"/);
+  /* `absolute`, because the root layout appends "| MAINTSUPP" to every title
+     and the brief specifies this one exactly — a plain string rendered as
+     "Join the Contractor Network — Maintsupp | MAINTSUPP". */
+  assert.match(page, /title: \{ absolute: "Join the Contractor Network — Maintsupp" \}/);
   assert.match(page, /<h1 className="h1">Join the Maintsupp contractor network<\/h1>/);
   assert.match(page, /Maintsupp coordinates maintenance across multi-site commercial portfolios in/);
   assert.match(page, /Approval\s+requires document checks before any work is assigned\./);

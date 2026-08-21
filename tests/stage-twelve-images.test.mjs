@@ -243,10 +243,16 @@ test("a slot with no photograph asks for none", async () => {
    * there makes the browser fetch a file that does not exist. The base
    * `<img src>` sat outside that reasoning and was rendered unconditionally.
    *
-   * `trade-glazing` and `trade-drainage` have never had a photograph, so every
-   * visit to the home page fetched two missing JPEGs, failed, and retried each
-   * of them twice more on a backoff: six 404s per page load, in the visitor's
-   * network panel and in the server log, for images nobody was waiting on.
+   * `trade-glazing` and `trade-drainage` had no photograph at the time, so
+   * every visit to the home page fetched two missing JPEGs, failed, and retried
+   * each of them twice more on a backoff: six 404s per page load, in the
+   * visitor's network panel and in the server log, for images nobody was
+   * waiting on.
+   *
+   * Both are supplied now, which does not retire the rule — it is what decides
+   * that their photographs ARE requested. The invariant asserted below is the
+   * one that matters either way: the manifest is exactly the set of base files
+   * on disk, so a slot asks for a photograph precisely when it has one.
    */
   const source = await readFile(
     new URL("../app/(marketing)/_sections/photo.tsx", import.meta.url),
@@ -273,13 +279,19 @@ test("a slot with no photograph asks for none", async () => {
     "the manifest must stay exactly the set of photographs on disk — it is what decides whether a request is made at all",
   );
 
-  /* The two documented gaps: named by the site, absent from the asset pack. */
+  /*
+   * All eight trade tiles now have a photograph — glazing and drainage were the
+   * last two without one, and they were supplied in the approved pack. So the
+   * assertion flipped: it used to require those two to request nothing, and now
+   * requires every tile to have a picture to request.
+   */
   const services = await readFile(
     new URL("../app/(marketing)/_sections/services.tsx", import.meta.url),
     "utf8",
   );
-  for (const slot of ["trade-glazing", "trade-drainage"]) {
-    assert.ok(services.includes(`slot: "${slot}"`), `${slot} is still a trade tile`);
-    assert.ok(!named.has(slot), `${slot} has no photograph, so it must request none`);
+  const slots = [...services.matchAll(/slot: "(trade-[a-z]+)"/g)].map((match) => match[1]);
+  assert.equal(slots.length, 8, "the eight faults in the trade strip");
+  for (const slot of slots) {
+    assert.ok(named.has(slot), `${slot} is a trade tile with no photograph on disk`);
   }
 });
