@@ -13530,13 +13530,15 @@ body[data-theme="dark"] {
 }
 
 /*
- * monday's cell shows the photographs alone — no count beside them — so once
- * a cell HAS files its textual label steps down to screen readers only. The
- * visually-hidden pattern rather than `display: none`, because the custom
- * file columns do not pass a `columnTitle` and the label is then the
- * button's only accessible name.
+ * monday's cell shows the photographs alone — no count beside them, and no
+ * "Add" on the empty ones — so the textual label steps down to screen readers
+ * only. The visually-hidden pattern rather than `display: none`, because the
+ * custom file columns do not pass a `columnTitle` and the label is then the
+ * button's only accessible name: a sighted person gets the hover affordance
+ * below, a screen-reader user still hears "Add a file to Picture of completed
+ * works".
  */
-.sheet-file-cell.is-monday-media.has-files .sheet-file-cell__label {
+.sheet-file-cell.is-monday-media .sheet-file-cell__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -13559,9 +13561,9 @@ body[data-theme="dark"] {
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-tile {
   position: relative;
   display: grid;
-  width: 38px;
-  height: 28px;
-  flex: 0 0 38px;
+  width: 32px;
+  height: 24px;
+  flex: 0 0 32px;
   place-items: center;
   overflow: hidden;
   border-radius: 4px;
@@ -13602,8 +13604,8 @@ body[data-theme="dark"] {
 .sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more {
   display: grid;
   place-items: center;
-  min-width: 22px;
-  height: 22px;
+  min-width: 20px;
+  height: 20px;
   padding: 0 4px;
   border: 0;
   border-radius: 999px;
@@ -13618,14 +13620,55 @@ body[data-theme="dark"] {
   background: #4b4b57;
 }
 
+/*
+ * THE EMPTY CELL IS EMPTY.
+ *
+ * It used to carry a dashed box and a plus at rest, on every row with no
+ * photograph — which on a 745-row board is a column of buttons pretending to
+ * be a column of pictures. monday shows nothing until the pointer arrives.
+ *
+ * The affordance is still in the DOM at rest (it is the button's own child, so
+ * removing it would cost a layout on every hover and make the cell twitch); it
+ * is merely invisible and non-interactive until the cell is hovered or
+ * something inside it takes focus. `visibility` rather than `display` keeps the
+ * row height fixed, which is the whole reason the strip does not jump.
+ */
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
-  display: grid;
-  width: 22px;
-  height: 26px;
-  place-items: center;
-  border-radius: 3px;
-  border: 1px dashed rgba(120, 140, 155, 0.5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 4px;
   color: var(--muted, #5c6b74);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 90ms ease-out;
+}
+
+.sheet-file-wrap:hover .sheet-file-cell.is-monday-media .sheet-file-cell__media-add,
+.sheet-file-cell.is-monday-media:hover .sheet-file-cell__media-add,
+.sheet-file-cell.is-monday-media:focus-visible .sheet-file-cell__media-add,
+.sheet-file-wrap:focus-within .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sheet-file-cell.is-monday-media:hover .sheet-file-cell__media-add {
+  background: var(--surface-hover, #eef3f5);
+}
+
+/*
+ * Touch has no hover, so the affordance has to stand still there or the cell
+ * becomes a control nobody can find. Same treatment monday gives a phone.
+ */
+@media (hover: none) {
+  .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
+    opacity: 1;
+    visibility: visible;
+    border: 1px dashed rgba(120, 140, 155, 0.45);
+  }
 }
 
 /* ------------------------------------------------------------------ */
