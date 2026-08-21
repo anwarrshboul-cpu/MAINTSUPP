@@ -137,21 +137,30 @@ export function TrustStrip() {
         <dl className="claims">
           {CLAIMS.map((claim) => (
             <div className="claim claim--iconed" key={claim.title}>
-              <span className="claim__ic">
-                <svg
-                  className="ic"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  {claim.icon}
-                </svg>
-              </span>
-              <dt>{claim.title}</dt>
+              {/*
+                * The icon lives INSIDE the <dt>, not beside it. A <div> group in
+                * a <dl> may only hold <dt> and <dd>, so a sibling <span> made
+                * the list invalid — axe reports it as a serious violation and a
+                * screen reader loses the term/description pairing. The stacked
+                * look is unchanged; `.claim dt` does the stacking now.
+                */}
+              <dt>
+                <span className="claim__ic">
+                  <svg
+                    className="ic"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    {claim.icon}
+                  </svg>
+                </span>
+                <span className="claim__title">{claim.title}</span>
+              </dt>
               <dd>{claim.body}</dd>
             </div>
           ))}

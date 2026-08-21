@@ -1050,6 +1050,14 @@ export function DateCell({
       <input
         className="sheet-date-input"
         type="date"
+        /*
+         * The column name IS the label. Without it every date box on the board
+         * is an unnamed form control — 36 of them on the jobs board alone, and
+         * axe rates that critical: a screen reader announces "date entry, blank"
+         * thirty-six times with nothing to tell them apart. The mobile branch
+         * above already names itself this way.
+         */
+        aria-label={title}
         value={currentDate}
         onChange={(event) => {
           const date = event.target.value;

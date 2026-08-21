@@ -2579,9 +2579,18 @@ export function LiveMaintenanceBoard({
       )}
 
       {/* `.live-job-metrics`, and `is-collapsed` once it sticks — the classes,
-          the refs and the reasoning all live in jobs-meter-strip.tsx. */}
+          the refs and the reasoning all live in jobs-meter-strip.tsx.
+
+          `tabIndex` because the strip scrolls sideways at phone widths, and a
+          scrolling region with no tab stop cannot be scrolled by keyboard at
+          all — the cards past the fold are simply unreachable. */}
       {boardId === "maintenance" && (
-      <section className={sectionClassName} ref={sectionRef} aria-label="Job meters">
+        <section
+          className={sectionClassName}
+          ref={sectionRef}
+          aria-label="Job meters"
+          tabIndex={0}
+        >
         <AnalyticsMetricCard label="Open" value={String(jobAnalytics.open.count)} detail="Active work orders" icon="inbox" tone="teal" trend={jobAnalytics.open.trend} trendLabel={jobMeterTrendLabels.open} />
         <AnalyticsMetricCard label="P1 critical" value={String(jobAnalytics.critical.count)} detail="Urgent or Tier 1" icon="alert" tone="red" trend={jobAnalytics.critical.trend} trendLabel={jobMeterTrendLabels.critical} />
         <AnalyticsMetricCard label="Awaiting parts" value={String(jobAnalytics.parts.count)} detail="Supply dependency" icon="tool" tone="orange" trend={jobAnalytics.parts.trend} trendLabel={jobMeterTrendLabels.parts} />

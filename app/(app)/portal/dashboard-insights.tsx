@@ -472,7 +472,16 @@ export function ContractorScorecard({ requests }: { requests: MaintenanceRequest
       title="Contractor scorecard"
       hint={`${plural(rows.length, "contractor")} by job volume`}
     >
-      <div className="insight-table-wrap">
+      {/* A region that scrolls has to be reachable by keyboard: at 390px this
+          wrapper is the only way to see the columns past the fold, and without
+          a tab stop a keyboard user cannot scroll it at all. Named so the stop
+          is not an anonymous one. */}
+      <div
+        className="insight-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Contractor scorecard"
+      >
         <table className="insight-table">
           <thead>
             <tr>
@@ -850,7 +859,16 @@ export function SpendMatrix({
       title="Spend by site"
       hint={`${window.label}. Darker means more spent.`}
     >
-      <div className="insight-table-wrap">
+      {/* A region that scrolls has to be reachable by keyboard: at 390px this
+          wrapper is the only way to see the columns past the fold, and without
+          a tab stop a keyboard user cannot scroll it at all. Named so the stop
+          is not an anonymous one. */}
+      <div
+        className="insight-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Spend by site"
+      >
         <table className="insight-matrix">
           <thead>
             <tr>
@@ -1050,7 +1068,16 @@ export function SiteAttention({
       title="Sites needing attention"
       hint="Ranked by urgent work and compliance gaps"
     >
-      <div className="insight-table-wrap">
+      {/* A region that scrolls has to be reachable by keyboard: at 390px this
+          wrapper is the only way to see the columns past the fold, and without
+          a tab stop a keyboard user cannot scroll it at all. Named so the stop
+          is not an anonymous one. */}
+      <div
+        className="insight-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Sites needing attention"
+      >
         <table className="insight-table insight-table--split">
           <thead>
             <tr>

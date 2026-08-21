@@ -2549,7 +2549,13 @@ function OverviewView({
         />
       </section>
 
-      <section className="analytics-metric-grid analytics-metric-grid--six">
+      {/* Focusable because it scrolls sideways at phone widths: without a tab
+          stop a keyboard user cannot reach the cards past the fold. */}
+      <section
+        className="analytics-metric-grid analytics-metric-grid--six"
+        aria-label="Portfolio metrics"
+        tabIndex={0}
+      >
         <AnalyticsMetricCard label="Active units" value={String(activeUnitCount)} detail={activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} onClick={() => onNavigate("units")} />
         <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.stage === "Attention", period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, (request) => request.stage !== "Completed", period, now)} onClick={() => onNavigate("maintenance")} />
@@ -4001,7 +4007,13 @@ function ReportsView({
         />
       </section>
 
-      <section className="analytics-metric-grid report-metric-grid">
+      {/* Focusable because it scrolls sideways at phone widths: without a tab
+          stop a keyboard user cannot reach the cards past the fold. */}
+      <section
+        className="analytics-metric-grid report-metric-grid"
+        aria-label="Report metrics"
+        tabIndex={0}
+      >
         {/*
           An empty period reads as a dash and says so, never as £0.
           £0 is a result — it says the portfolio spent nothing — and on a period
