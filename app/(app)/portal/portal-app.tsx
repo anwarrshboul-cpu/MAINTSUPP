@@ -2461,6 +2461,7 @@ function OverviewView({
 }) {
   const now = useCurrentTime();
   const [portfolio, setPortfolio] = useState("all");
+  const [overviewLayoutSlot, setOverviewLayoutSlot] = useState<HTMLElement | null>(null);
   const [period, setPeriod] = useState("90");
   const scopedStores = useMemo(
     () => storeRows.filter((store) => store.lifecycle === "Current" && (portfolio === "all" || store.id === portfolio)),
@@ -2523,9 +2524,28 @@ function OverviewView({
           portfolios={portfolioOptions(storeRows)}
           onPortfolioChange={setPortfolio}
           period={period}
-          periods={analyticsPeriodOptions}
-          onPeriodChange={setPeriod}
+          /*
+           * Overview's own range, with the same picker Reports uses: Today,
+           * Last 7 days, Month to date, Last 30/90 days, Year to date and a
+           * validated custom start/end — instead of the four rolling windows
+           * the plain select offered. It is this page's state and nobody
+           * else's, which is the point: a range chosen here does not follow
+           * the reader to Reports or Compliance.
+           *
+           * It changes the figures, not just the label — `period` is what
+           * `scopedRequests` filters on above, and every meter, chart and
+           * tile on this page reads from that.
+           */
+          periodControl={<PeriodPicker value={period} onChange={setPeriod} now={now} />}
           onExport={() => downloadCsv(scopedRequests)}
+          /*
+           * "Edit layout" belongs with the other page controls, not floating
+           * above the panels it edits. Reports already portals its bar into
+           * this toolbar; Overview drew its own in place, which is why it sat
+           * alone in the top-left with nothing beside it. Same slot, same
+           * component, same state — only where the bar is drawn changes.
+           */
+          slotRef={setOverviewLayoutSlot}
         />
       </section>
 
@@ -2626,6 +2646,7 @@ function OverviewView({
 
       <DashboardWidgets
         surface="overview"
+        barSlot={overviewLayoutSlot}
         widgets={[
           {
             key: "sla",
