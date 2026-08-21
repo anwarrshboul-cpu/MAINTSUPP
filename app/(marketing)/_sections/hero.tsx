@@ -16,7 +16,13 @@ import { PhotoSlot } from "./photo";
 /* ── hero feed ────────────────────────────────────────────────────────────── */
 
 const feedLines: Array<[string, string]> = [
-  ["Shutter fault reported", "Retail unit, Manchester — contractor assigned in 14 minutes"],
+  /*
+   * "same day", not "in 14 minutes". A minute count on a rotating chip reads as
+   * a response time the reader can hold us to, and this feed is an
+   * illustration of the kind of thing that moves through the system — which is
+   * what the "Example" tag beside it now says out loud.
+   */
+  ["Shutter fault reported", "Retail unit, Manchester — contractor assigned same day"],
   ["Fire alarm service booked", "Leisure venue, Cardiff — certificate due in 21 days"],
   ["Job closed with evidence", "Kiosk, Leeds — before/after photos and cost reconciled"],
   ["No power to till bank", "Store, Birmingham — escalated to P1, engineer en route"],
@@ -43,6 +49,10 @@ function HeroFeed() {
       {/* Keyed on the index so React remounts the node and the CSS entry
           animation replays, exactly as the source's innerHTML swap did. */}
       <span className="feedline" key={index}>
+        {/* Marks the whole chip as an illustration rather than a claim. It is
+            the first thing in the reading order, so it qualifies the line
+            before the line is read. */}
+        <em className="feedline__tag">Example</em>
         <strong>{title}</strong>
         <span>{detail}</span>
       </span>

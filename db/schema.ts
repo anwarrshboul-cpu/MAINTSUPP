@@ -532,6 +532,48 @@ export const leads = sqliteTable(
   ],
 );
 
+/**
+ * An application from the public /contractors page.
+ *
+ * SEPARATE FROM `leads`, and the reason is not tidiness. A lead is a
+ * prospective client and this is a prospective supplier: different people read
+ * them, they are answered differently, and this carries four things a lead has
+ * no column for — whether they hold public liability cover, how long they have
+ * traded, what they are certified for, and a recorded consent. Folding them
+ * together would have meant packing structured answers into `challenge` as
+ * prose and teaching every reader of that column to unpack them again.
+ *
+ * `insured` is the string "Yes" or "No" rather than a boolean because the form
+ * asks a question with two named answers and an unanswered one is refused; a
+ * boolean would make "not stated" indistinguishable from "No".
+ */
+export const contractorApplications = sqliteTable(
+  "contractor_applications",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    company: text("company").notNull(),
+    contactName: text("contact_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone").notNull(),
+    /** JSON array of trades, validated against a fixed list server-side. */
+    trades: text("trades").notNull(),
+    regions: text("regions").notNull(),
+    insured: text("insured").notNull(),
+    yearsTrading: text("years_trading"),
+    certifications: text("certifications"),
+    notes: text("notes"),
+    /** Recorded, because "they agreed" is a claim that needs a row behind it. */
+    consent: integer("consent", { mode: "boolean" }).notNull().default(false),
+    status: text("status").notNull().default("New"),
+    notifiedAt: text("notified_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("contractor_applications_created_idx").on(table.organisationId, table.createdAt),
+  ],
+);
+
 export const maintenanceGroups = sqliteTable(
   "maintenance_groups",
   {

@@ -204,9 +204,31 @@ export function SiteHeader() {
             <a className="btn btn--outline btn--sm hdr__report" href="#report">
               Report a Job
             </a>
-            <a className="btn btn--primary btn--sm hdr__cta" href="#review">
-              <span className="cta-long">Book a Portfolio Review</span>
-              <span className="cta-short">Book Review</span>
+            {/*
+              ONE NAME, whatever the CSS does.
+
+              Two spans share this link so the label can shorten on a phone, and
+              CSS shows exactly one of them at a time — that part was already
+              right. What was not: both strings sit in the DOM, so anything
+              reading the element's text rather than its rendered boxes sees
+              "Book a Portfolio ReviewBook Review", and if the stylesheet ever
+              failed to load a reader would get both too.
+
+              `aria-label` fixes the accessible name to one string, and hiding
+              both spans from assistive tech means the name can only come from
+              there. The visual swap is untouched.
+            */}
+            <a
+              className="btn btn--primary btn--sm hdr__cta"
+              href="#review"
+              aria-label="Book a Portfolio Review"
+            >
+              <span className="cta-long" aria-hidden="true">
+                Book a Portfolio Review
+              </span>
+              <span className="cta-short" aria-hidden="true">
+                Book Review
+              </span>
             </a>
             <button
               ref={burger}
@@ -313,6 +335,10 @@ export function SiteFooter() {
             <li><a href="#pricing">Pricing</a></li>
             <li><a href="#case-study">Case Study</a></li>
             <li><a href="#sectors">Who We Help</a></li>
+            {/* Footer only, deliberately — the top nav is for the people the
+                site is selling to, and a contractor looking for work is not
+                that reader. */}
+            <li><Link href="/contractors">Join our contractor network</Link></li>
             <li><a href="#review">Contact</a></li>
           </ul>
         </div>
@@ -324,7 +350,7 @@ export function SiteFooter() {
             {/* Same door, same name as the header and the utility bar. */}
             <li><Link href="/portal">Portal Login</Link></li>
             <li><Link href="/faqs">FAQs</Link></li>
-            <li><a href="#portal">The software</a></li>
+            <li><a href="#portal">Client portal</a></li>
           </ul>
         </div>
 

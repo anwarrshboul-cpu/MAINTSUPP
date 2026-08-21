@@ -112,11 +112,25 @@ function seatsArt(w: number, h: number) {
 }
 
 function toolArt(w: number, h: number, c1 = "#0B1E29", c2 = "#0DA1A9", glyphPath = "M20 6 9 17l-5-5") {
+  /*
+   * THE BUG THIS FIXES. The `<g>` below interpolates `glyphPath` as its
+   * children, and two kinds of string arrive here: `services.tsx` passes whole
+   * markup (`<path d="…"/>`), while the default above — used by the case study,
+   * which passes no glyph — is a bare `d` value. A bare value has no element
+   * around it, so it became a TEXT NODE inside the `<g>` and "M20 6 9 17l-5-5"
+   * rendered as visible content in the case-study section.
+   *
+   * Normalising here rather than at the call sites keeps both shapes working
+   * and puts the fix where the assumption is made.
+   */
+  const glyph = glyphPath.trim().startsWith("<")
+    ? glyphPath
+    : `<path d="${glyphPath}"/>`;
   return (
     `<rect width="${w}" height="${h}" fill="${c1}"/>` +
     `<circle cx="${w * 0.68}" cy="${h * 0.32}" r="${w * 0.46}" fill="${c2}" opacity=".55"/>` +
     `<circle cx="${w * 0.24}" cy="${h * 0.76}" r="${w * 0.34}" fill="${c2}" opacity=".32"/>` +
-    `<g transform="translate(${w * 0.5 - w * 0.18},${h * 0.28}) scale(${w * 0.36 / 24})" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${glyphPath}</g>`
+    `<g transform="translate(${w * 0.5 - w * 0.18},${h * 0.28}) scale(${w * 0.36 / 24})" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${glyph}</g>`
   );
 }
 

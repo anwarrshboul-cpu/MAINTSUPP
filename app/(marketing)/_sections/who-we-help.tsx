@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ApprovedPhoto } from "./approved-photo";
 
 /**
  * SECTION 3 — Who we help.
@@ -77,36 +78,51 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
+/*
+ * The photographs are the approved v3 pack's, mapped card-by-card from the
+ * README's own table rather than by eye. Every `photo` below is the exact
+ * "Site path" that table gives for that card's label.
+ *
+ * `alt` is empty on all six: the card's own <h3> is the label the picture
+ * illustrates and sits immediately beneath it, so describing the photograph
+ * again would have a screen reader read every card twice.
+ */
 const AUDIENCES = [
   {
     icon: "storefront",
     label: "Retail chains",
     body: "Stores where a shutter that will not lift is a day of lost trade.",
+    photo: "/assets/audience/who-we-help-retail-chains.png",
   },
   {
     icon: "kiosk",
     label: "Shopping-centre kiosks",
     body: "Units inside a landlord's estate, with permits and out-of-hours access.",
+    photo: "/assets/audience/who-we-help-shopping-centre-kiosks.png",
   },
   {
     icon: "branches",
     label: "Franchise groups",
     body: "One standard to hold across sites you do not all operate yourself.",
+    photo: "/assets/audience/who-we-help-franchise-groups.png",
   },
   {
     icon: "heartPulse",
     label: "Clinics & wellness",
     body: "Sites where compliance paperwork is inspected, not just filed.",
+    photo: "/assets/audience/who-we-help-clinics-wellness.png",
   },
   {
     icon: "dumbbell",
     label: "Gyms & studios",
     body: "Long opening hours, heavy equipment and plant that runs all day.",
+    photo: "/assets/audience/who-we-help-gyms-studios.png",
   },
   {
     icon: "office",
     label: "Small commercial offices",
     body: "Portfolios too small for an in-house team and too large to wing it.",
+    photo: "/assets/audience/who-we-help-commercial-offices.png",
   },
 ] as const;
 
@@ -122,6 +138,13 @@ export function WhoWeHelp() {
         <ul className="whogrid reveal">
           {AUDIENCES.map((entry) => (
             <li className="whocard" key={entry.label}>
+              <ApprovedPhoto
+                src={entry.photo}
+                alt=""
+                className="whocard__photo"
+                sizes="(min-width: 1024px) 380px, (min-width: 640px) 45vw, 92vw"
+              />
+              <span className="whocard__body">
               <span className="whocard__ic">
                 <svg
                   className="ic"
@@ -138,6 +161,7 @@ export function WhoWeHelp() {
               </span>
               <h3>{entry.label}</h3>
               <p>{entry.body}</p>
+              </span>
             </li>
           ))}
         </ul>

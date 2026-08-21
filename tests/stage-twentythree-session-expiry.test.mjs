@@ -36,6 +36,12 @@ const PUBLIC_ROUTES = new Set([
    * them their session expired would be advice about a session they never had.
    */
   "app/api/report-job/route.ts",
+  /*
+   * The public contractor application. A contractor applying for work has no
+   * account either, so "your session expired, sign in" is advice about a
+   * session they never had.
+   */
+  "app/api/contractor-applications/route.ts",
   "app/api/job-link/[token]/route.ts",
   /*
    * The shared form link, on the same footing as the contractor job link above:

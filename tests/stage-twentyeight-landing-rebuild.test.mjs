@@ -45,10 +45,34 @@ const ANCHORS = [
   "review",
 ];
 
-test("the page is ten sections and no more", async () => {
+test("the page is eleven sections, in the v2 order, each exactly once", async () => {
+  /*
+   * Was ten. The v2 positioning edit moved Report a Job from second to fourth
+   * and added "Who runs Maintsupp" between the case study and the portal.
+   *
+   * The order is asserted, not just the count: the whole point of the edit was
+   * the sequence — who it is for, what it covers, then the form — and a count
+   * alone would pass just as happily with the form back at the top.
+   */
   const page = await read("app/(marketing)/page.tsx");
-  const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)];
-  assert.equal(rendered.length, 11, "ten sections; section 10 is two components");
+  const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(rendered, [
+    "Hero",
+    "WhoWeHelp",
+    "Services",
+    "ReportJob",
+    "Problem",
+    "HowItWorks",
+    "Pricing",
+    "CaseStudy",
+    "Founder",
+    "Portal",
+    "TrustStrip",
+    "FinalCta",
+  ], "eleven sections; the last is two components — a dark band and the form beneath it");
+  assert.equal(new Set(rendered).size, rendered.length, "each exactly once");
 });
 
 /* ── 2. Copy rules ───────────────────────────────────────────────────────── */
@@ -225,18 +249,36 @@ test("evidence is required, and checked outside CHECKS because it is not a field
   assert.match(form, /\{filesError \|\| errors\.rjUpload\}/, "and it is shown in the upload block");
 });
 
-test("each urgency states the response time it buys", async () => {
+test("the urgency chips promise no response time", async () => {
+  /*
+   * THIS ASSERTION IS THE REVERSE OF THE ONE IT REPLACES.
+   *
+   * The chips used to print "Within 4 hrs", "Next working day" and so on,
+   * added under an earlier brief. The v2 positioning brief withdraws them: no
+   * response-time or SLA commitment may appear anywhere on the page, and its
+   * audit tests for absence rather than merely forbidding new ones.
+   *
+   * The P-codes stay. A code classifies how bad the fault is — something the
+   * reporter can answer and triage needs. A response time is a promise about
+   * what happens next, and that is the part that was withdrawn.
+   */
   const form = await read("app/(marketing)/_sections/report-job.tsx");
-  for (const [code, sla] of [
-    ["P1", "Within 4 hrs"],
-    ["P2", "Next working day"],
-    ["P3", "5 working days"],
-  ]) {
-    /* A comment sits between `code` and `sla` on P1, so the window has to be
-       wide enough to carry it — measured at 310 characters. */
-    assert.match(form, new RegExp(`code: "${code}"[\\s\\S]{0,400}?sla: "${sla}"`), `${code} — ${sla}`);
+
+  for (const code of ["P1", "P2", "P3", "P4"]) {
+    assert.match(form, new RegExp(`code: "${code}"`), `${code} is still offered`);
   }
-  assert.match(form, /className="chip__sla"/, "and the chip renders it");
+  assert.match(form, /P1 — Critical, site unsafe or cannot trade/);
+
+  assert.ok(!form.includes("chip__sla"), "the SLA line is no longer rendered");
+  assert.ok(!/sla:/.test(form), "and the field is gone, so it cannot be rendered again");
+
+  /* Comments stripped: the note recording why the promises went quotes them,
+     and a check that fails on its own rationale would push the reasoning out
+     of the file to make the test pass. */
+  const rendered = form.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const promise of ["Within 4 hrs", "Next working day", "5 working days"]) {
+    assert.ok(!rendered.includes(promise), `response time still present: ${promise}`);
+  }
 });
 
 test("every invalid field is reported at once, not one at a time", async () => {

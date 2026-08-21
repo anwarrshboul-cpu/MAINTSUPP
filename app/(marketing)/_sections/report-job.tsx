@@ -56,20 +56,31 @@ type Picked = { file: File; url: string };
  * not a routine job. The four-way distinction is not lost — the P-code is
  * written into the description, which is the field triage reads first.
  */
+/*
+ * NO RESPONSE TIMES ON THESE CHIPS.
+ *
+ * Each carried an SLA beside its label — "Within 4 hrs", "Next working day"
+ * and so on — added under an earlier brief that asked for them. The v2
+ * positioning brief withdraws that: no response-time or SLA commitment may
+ * appear anywhere on the page, and its audit tests for their ABSENCE rather
+ * than merely forbidding new ones. So the field goes with the markup, or the
+ * next person to render the list brings the promise back.
+ *
+ * The P-codes and their descriptions stay. "P1 — Critical, site unsafe or
+ * cannot trade" classifies how bad the fault is, which is what triage needs and
+ * what the reporter can actually answer; "Within 4 hrs" was a promise about
+ * what Maintsupp would do next, and that is the part that was withdrawn.
+ */
 const URGENCIES = [
   {
     id: "p1",
     code: "P1",
     label: "P1 — Critical, site unsafe or cannot trade",
-    /* The response time each priority buys, in the approved reference's own
-       words. A reporter choosing between P1 and P3 is really choosing between
-       four hours and five days, and the form was not telling them that. */
-    sla: "Within 4 hrs",
     priority: "Urgent",
   },
-  { id: "p2", code: "P2", label: "P2 — Urgent, trading impaired", sla: "Next working day", priority: "Urgent" },
-  { id: "p3", code: "P3", label: "P3 — Routine", sla: "5 working days", priority: "Medium" },
-  { id: "p4", code: "P4", label: "P4 — Cosmetic / quote request", sla: "Quoted, then scheduled", priority: "Low" },
+  { id: "p2", code: "P2", label: "P2 — Urgent, trading impaired", priority: "Urgent" },
+  { id: "p3", code: "P3", label: "P3 — Routine", priority: "Medium" },
+  { id: "p4", code: "P4", label: "P4 — Cosmetic / quote request", priority: "Low" },
 ] as const;
 
 /** The eight fault categories, each mapped onto a real `engineer_required` option. */
@@ -547,10 +558,7 @@ export function ReportJob() {
                       checked={urgency === entry.code}
                       onChange={() => setUrgency(entry.code)}
                     />
-                    <label htmlFor={`rjUrgency-${entry.id}`}>
-                      {entry.label}
-                      <span className="chip__sla">{entry.sla}</span>
-                    </label>
+                    <label htmlFor={`rjUrgency-${entry.id}`}>{entry.label}</label>
                   </Fragment>
                 ))}
               </div>

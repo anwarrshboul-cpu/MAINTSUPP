@@ -177,7 +177,10 @@ const sectionSources = async () => {
 test("photographs appear across the page, not just the hero", async () => {
   const sources = await sectionSources();
   const count = sources.reduce(
-    (total, { source }) => total + (source.match(/<PhotoSlot/g) ?? []).length,
+    (total, { source }) =>
+      total +
+      (source.match(/<PhotoSlot/g) ?? []).length +
+      (source.match(/<ApprovedPhoto/g) ?? []).length,
     0,
   );
   /*
@@ -191,14 +194,32 @@ test("photographs appear across the page, not just the hero", async () => {
    */
   assert.ok(count >= 5, `expected photographs across the page, found ${count}`);
 
+  /*
+   * `workflow.tsx` left this list when the approved v3 pack supplied real
+   * photographs for all seven stages: it renders `<ApprovedPhoto>` now, which
+   * addresses a file by the site path the pack's README gives it and has
+   * nothing to fall back to, because there is nothing missing to fall back
+   * from. `who-we-help.tsx` joined for the same reason.
+   *
+   * So the check is "a photograph, by whichever of the two mechanisms suits the
+   * section", not "a PhotoSlot" — otherwise adopting the approved pack would
+   * read as losing an image.
+   */
   const withPhotos = sources
-    .filter(({ source }) => source.includes("<PhotoSlot"))
+    .filter(({ source }) => source.includes("<PhotoSlot") || source.includes("<ApprovedPhoto"))
     .map(({ file }) => file)
     .sort();
   assert.deepEqual(
     withPhotos,
-    ["case-study.tsx", "hero.tsx", "portal.tsx", "services.tsx", "workflow.tsx"],
-    "the brief's five image-bearing sections: hero, trade strip, carousel, case study, dashboard",
+    [
+      "case-study.tsx",
+      "hero.tsx",
+      "portal.tsx",
+      "services.tsx",
+      "who-we-help.tsx",
+      "workflow.tsx",
+    ],
+    "hero, trade strip, carousel, case study, dashboard, and the two sections the v3 pack supplies",
   );
 });
 
