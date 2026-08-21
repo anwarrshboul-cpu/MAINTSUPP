@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "../../components";
+import { formatDate as sharedFormatDate } from "../../lib/format-date";
 
 type LinkRecord = {
   id: string;
@@ -41,16 +42,8 @@ const STATE_LABEL: Record<LinkRecord["state"], string> = {
   revoked: "Revoked",
 };
 
-function formatDate(value: string | null) {
-  if (!value) return "—";
-  const when = new Date(value);
-  if (Number.isNaN(when.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(when);
-}
+// DD/MM/YYYY, through the one formatter the platform writes dates with.
+const formatDate = sharedFormatDate;
 
 /**
  * Coordinator view of a job's contractor links — Group Z, item Z11.

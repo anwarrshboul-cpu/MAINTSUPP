@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../../components";
+import { formatShortDateTime } from "../../lib/format-date";
 import "./media-viewer.css";
 
 export interface MediaViewerFile {
@@ -131,14 +132,10 @@ function clamp(value: number, low: number, high: number) {
 
 function formatWhen(value: string) {
   const at = new Date(value);
+  // An unreadable stamp shows itself rather than a dash: on a file's own detail
+  // line, the raw string is at least evidence of what was stored.
   if (Number.isNaN(at.getTime())) return value;
-  return at.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatShortDateTime(at);
 }
 
 /** The part of an email a human reads as a name. */

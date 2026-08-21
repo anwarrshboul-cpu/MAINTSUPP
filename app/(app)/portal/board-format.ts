@@ -12,6 +12,11 @@ import type {
 } from "../../lib/types";
 import { dateOnlyValue } from "../../lib/expiry-status";
 import {
+  formatDayMonth,
+  formatMonthYear,
+  formatShortDate,
+} from "../../lib/format-date";
+import {
   type BoardDateIcon,
   type BoardDateMetadata,
   type ColumnKey,
@@ -135,25 +140,22 @@ export function formatMobileBoardDate(
   const date = rawDateInputValue(value);
   if (!date) return "—";
   const metadata = parseBoardDateMetadata(metadataValue, date);
-  const [year, month, day] = date.split("-").map(Number);
-  const label = new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
+  /*
+   * en-GB, through the shared formatter — this asked `Intl` for **en-US**, so
+   * every date cell on the maintenance board read "Nov 24" in a product sold to
+   * UK estates managers while the same day read "24/11/2026" two screens away.
+   * See app/lib/format-date.ts.
+   */
+  const label = formatDayMonth(date);
   return metadata.time ? `${label}, ${formatBoardTime(metadata.time)}` : label;
 }
 
 export function formatFullBoardDate(value: string) {
   const date = rawDateInputValue(value);
+  // "Choose date" rather than a dash: this is the label ON the picker button,
+  // so an empty one is an invitation rather than a missing value.
   if (!date) return "Choose date";
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
+  return formatShortDate(date);
 }
 
 export function todayBoardDate() {
@@ -179,12 +181,11 @@ export function shiftBoardCalendarMonth(value: string, amount: number) {
 }
 
 export function boardCalendarMonthLabel(value: string, yearFirst = false) {
-  const [year, month] = value.split("-").map(Number);
-  const monthLabel = new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
-  return yearFirst ? `${year} ${monthLabel}` : `${monthLabel} ${year}`;
+  const label = formatMonthYear(value);
+  if (!yearFirst) return label;
+  // The mobile sheet puts the year first. Same two words, other way round.
+  const [monthLabel, year] = label.split(" ");
+  return `${year} ${monthLabel}`;
 }
 
 export function boardCalendarDays(value: string, weekStartsOn: 0 | 1) {

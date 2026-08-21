@@ -28,6 +28,7 @@
 
 import { useMemo } from "react";
 import { Icon } from "../../components";
+import { formatDayMonth, formatShortDate } from "../../lib/format-date";
 import type { MaintenanceGroup, MaintenanceRequest } from "../../lib/types";
 // The key format belongs to one place. Writing `${id}::${columnId}` here as
 // well is how two halves of a lookup come to disagree.
@@ -69,15 +70,13 @@ function whenRaised(value: string | null) {
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days > 1 && days < 7) return `${days} days ago`;
-  if (days < 0) return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-  }).format(parsed);
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: parsed.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
-  }).format(parsed);
+  // A date in the future, and one in a previous year, are the two cases the
+  // relative form cannot carry — through the shared formatter, so they read as
+  // dates do everywhere else. See app/lib/format-date.ts.
+  if (days < 0) return formatDayMonth(parsed);
+  return parsed.getFullYear() === new Date().getFullYear()
+    ? formatDayMonth(parsed)
+    : formatShortDate(parsed);
 }
 
 export function BoardMobileList({

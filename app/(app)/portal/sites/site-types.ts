@@ -8,6 +8,7 @@
  */
 
 import { chipInk } from "../chip-ink";
+import { formatDate as sharedFormatDate } from "../../../lib/format-date";
 
 export type OptionChoice = {
   id: string;
@@ -158,17 +159,17 @@ export async function api<T>(
   return payload as T;
 }
 
-/** Dates are shown DD/MM/YYYY in Europe/London, per the platform convention. */
+/**
+ * DD/MM/YYYY, through the one formatter the platform writes dates with.
+ *
+ * The zone is not passed on purpose: a bare `YYYY-MM-DD` — which is what every
+ * lease and review date on a site is — never reaches `Date` inside the shared
+ * formatter, so it cannot shift a day whatever zone the reader is in. A value
+ * carrying a time is a moment and reads in the reader's own zone, as it does
+ * everywhere else.
+ */
 export function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value.length <= 10 ? `${value}T00:00:00Z` : value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "Europe/London",
-  }).format(parsed);
+  return sharedFormatDate(value);
 }
 
 /** Money is held in pence. Divide only at the point of display. */

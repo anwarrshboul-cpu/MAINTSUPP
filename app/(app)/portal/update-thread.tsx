@@ -53,6 +53,7 @@ import {
   type ReactNode,
 } from "react";
 import { Avatar, Icon } from "../../components";
+import { formatLongDate, formatTimeOfDay } from "../../lib/format-date";
 import type { RequestUpdate, RequestUpdateFile } from "../../lib/types";
 
 /* ------------------------------------------------------------------ */
@@ -109,13 +110,9 @@ function exactMoment(value: string | null): string {
     : value;
   const parsed = new Date(normalised);
   if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // The long month is this one screen's own choice — it is a tooltip and a
+  // screen-reader label rather than a column, so it has room for the word.
+  return `${formatLongDate(parsed)}, ${formatTimeOfDay(parsed)}`;
 }
 
 /* ------------------------------------------------------------------ */

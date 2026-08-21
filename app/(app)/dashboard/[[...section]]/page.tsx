@@ -18,6 +18,7 @@ const routes: Record<string, Section> = {
   settings: "settings",
   team: "team",
   admin: "admin-users",
+  audit: "audit",
   "admin/roles": "admin-roles",
   "admin/clients": "admin-clients",
 };

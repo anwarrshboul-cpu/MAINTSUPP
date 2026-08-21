@@ -38,10 +38,20 @@ import type {
   StoreRecord,
 } from "../../lib/types";
 import { AccountMenu } from "./account-menu";
+import {
+  formatDayMonth,
+  formatMonthShort,
+  formatMonthYear,
+  formatShortDate,
+  formatShortDateTime,
+  formatTimeOfDay,
+} from "../../lib/format-date";
 import { chipInk } from "./chip-ink";
 import {
   awaitingApprovalStatuses,
   awaitingPartsStatuses,
+  isClosedRequest,
+  isOpenRequest,
 } from "./dashboard-meters";
 import { ThemeToggle } from "./theme-toggle";
 import { DashboardWidgets, type DashboardWidget } from "./dashboard-widgets";
@@ -82,6 +92,7 @@ import { SitesManager } from "./sites/sites-manager";
 import { AdminClientsView } from "./views/admin-clients";
 import { AdminRolesView } from "./views/admin-roles";
 import { AdminUsersView } from "./views/admin-users";
+import { AuditLog } from "./views/audit-log";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
 import { complianceTrend, tradeBreakdown } from "./views/overview-series";
 import { UnitsManager } from "./units/units-manager";
@@ -140,7 +151,14 @@ export type Section =
   // users must not be handed the roles editor by a tab they can click.
   | "admin-users"
   | "admin-roles"
-  | "admin-clients";
+  | "admin-clients"
+  /*
+   * The audit trail. The screen and its API have existed since Stage 20 and
+   * nothing in the product linked to them: /dashboard/audit answered, and the
+   * only way to reach it was to type it. A log nobody can find is a log nobody
+   * reads.
+   */
+  | "audit";
 
 type ViewMode = "board" | "list";
 
@@ -189,6 +207,15 @@ type RuntimeWorkspaceContext = {
   }> | null;
   testingMode: boolean;
   authenticationEnabled: boolean;
+  /**
+   * What this actor may do here — the defaults merged with this workspace's
+   * overrides, decided by the same `can()` every route enforces with.
+   *
+   * Optional because a browser holding a cached payload from before this field
+   * existed must not crash the shell; a missing map means "not answered", which
+   * every reader treats as "do not offer" rather than "denied".
+   */
+  capabilities?: Record<string, boolean>;
 };
 
 type WorkspaceManagerState = {
@@ -245,6 +272,12 @@ const sectionMeta: Record<
     eyebrow: "Owner console",
     title: "Every client workspace",
     icon: "building",
+  },
+  audit: {
+    label: "Audit",
+    eyebrow: "Administration",
+    title: "Audit trail",
+    icon: "shield",
   },
   overview: {
     label: "Overview",
@@ -374,7 +407,16 @@ const navPrimary: Section[] = [
   "settings",
 ];
 
-const navSecondary: Section[] = ["team", "admin-users", "admin-roles", "admin-clients"];
+const navSecondary: Section[] = [
+  "team",
+  "admin-users",
+  "admin-roles",
+  "admin-clients",
+  // Last under Workspace, beside the two screens that decide who may do what.
+  // Filtered out of the catalogue entirely for a role without `audit.read` —
+  // see `navCatalogue`.
+  "audit",
+];
 
 const sectionRoutes: Record<Section, string> = {
   overview: "",
@@ -394,6 +436,11 @@ const sectionRoutes: Record<Section, string> = {
   "admin-users": "admin",
   "admin-roles": "admin/roles",
   "admin-clients": "admin/clients",
+  // The URL /dashboard/audit already answered, from a static segment that drew
+  // the log with no sidebar around it. The route is kept exactly; what changed
+  // is that it now resolves through the shell like every other section, so the
+  // person reading it can get back out.
+  audit: "audit",
 };
 
 const routeSections: Record<string, Section> = Object.fromEntries(
@@ -459,16 +506,19 @@ type WorkspaceSectionEntry = {
   group: string;
 };
 
+/*
+ * The dashboard's dates, through the shared formatter.
+ *
+ * Same two forms this always produced — "24 Nov 2026" and "24 Nov 2026, 14:05"
+ * — but named in one place rather than assembled from `Intl` options here.
+ * The zone is pinned to Europe/London because these are timestamps on work
+ * orders and the estate is in the UK; a date-only value never reaches `Date`
+ * at all, which is what stops it shifting a day. See app/lib/format-date.ts.
+ */
 function formatDate(value: string | null, includeTime = false) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    timeZone: "Europe/London",
-    ...(includeTime
-      ? { hour: "2-digit", minute: "2-digit", hour12: false }
-      : { year: "numeric" }),
-  }).format(new Date(value));
+  return includeTime
+    ? formatShortDateTime(value, { timeZone: "Europe/London" })
+    : formatShortDate(value, { timeZone: "Europe/London" });
 }
 
 function formatMoney(value: number | null) {
@@ -545,7 +595,18 @@ function useScrollLock(active: boolean) {
   }, [active]);
 }
 
-function activityActor(email: string | null) {
+/**
+ * Who an event is attributed to.
+ *
+ * A cell change from `item_activity` carries a display NAME rather than an
+ * email — that is what `item_activity.actor_name` holds — so it is read from
+ * the detail rather than being derived from an address that is not there. Both
+ * halves of the merged history therefore name somebody; before this, the cell
+ * changes had no reader at all.
+ */
+function activityActor(email: string | null, detail?: Record<string, unknown>) {
+  const named = typeof detail?.actorName === "string" ? detail.actorName.trim() : "";
+  if (named) return named;
   if (!email) return "Operations team";
   if (email === "public-form") return "Request form";
   const localPart = email.split("@")[0] || email;
@@ -557,6 +618,26 @@ function activityActor(email: string | null) {
 }
 
 function activityDescription(entry: RequestActivityEntry) {
+  /*
+   * A per-cell change, from `item_activity` — the one store in this system
+   * that records WHICH COLUMN moved and what it held on either side.
+   * `activity_log` has no column field, so "Priority went from Low to Urgent"
+   * was recorded and unreadable until this history merged the two. See the note
+   * at the merge in app/api/maintenance/route.ts.
+   */
+  if (entry.action === "column.value_changed") {
+    const column = typeof entry.detail.column === "string" ? entry.detail.column : "a column";
+    const from = typeof entry.detail.from === "string" ? entry.detail.from.trim() : "";
+    const to = typeof entry.detail.to === "string" ? entry.detail.to.trim() : "";
+    if (!from && to) return `set ${column} to "${to}".`;
+    if (from && !to) return `cleared ${column}.`;
+    if (from && to) return `changed ${column} from "${from}" to "${to}".`;
+    return `changed ${column}.`;
+  }
+  if (entry.action.startsWith("item.")) {
+    // duplicated / created / moved / archived, from the same store.
+    return `${entry.action.slice("item.".length).replace(/_/g, " ")} this item.`;
+  }
   if (entry.action === "request.created") return "created this request.";
   if (entry.action === "request.note_added") return "added an update.";
   if (entry.action === "request.stage_changed") {
@@ -611,7 +692,7 @@ function stageIcon(stage: RequestStage): IconName {
 function notificationCandidates(requests: MaintenanceRequest[]) {
   return requests.filter(
     (request) =>
-      request.stage !== "Completed" &&
+      isOpenRequest(request) &&
       (request.stage === "Attention" || request.priority === "Urgent"),
   );
 }
@@ -724,7 +805,7 @@ function requestAgeDays(request: MaintenanceRequest, now: number) {
  * not a monday label, so it is not a guess.
  */
 function jobStatusSegments(requests: MaintenanceRequest[]): DonutSegment[] {
-  const open = requests.filter((request) => request.stage !== "Completed");
+  const open = requests.filter(isOpenRequest);
   const normalise = (value: string) =>
     value.trim().toLowerCase().replace(/\s+/g, " ");
   const inSet = (labels: readonly string[]) => {
@@ -1331,16 +1412,35 @@ export default function PortalApp({
    * `app/api/navigation/layout.ts` still decides order and visibility.
    */
   const navCatalogue = useMemo<SidebarNavEntry[]>(
-    () => [
-      ...builtInNavCatalogue,
-      ...workspaceSections.map((entry) => ({
-        key: entry.key,
-        label: entry.label,
-        icon: entry.icon,
-        group: entry.group,
-      })),
-    ],
-    [workspaceSections],
+    () =>
+      [
+        ...builtInNavCatalogue,
+        ...workspaceSections.map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          icon: entry.icon,
+          group: entry.group,
+        })),
+      ].filter((entry) => {
+        /*
+         * The audit trail is the one built-in section whose EXISTENCE is
+         * decided by a capability rather than only its contents.
+         *
+         * Every other administration screen is listed for everybody and
+         * refuses on its own — which is right for Users and Roles, where a
+         * client seeing the entry and being told no is merely tidy. An
+         * organisation-wide record of who did what is different: the fact that
+         * one exists, and where it is, is not something to advertise to a role
+         * that may not read it. `audit.read` is the same capability
+         * /api/audit enforces, so the entry and the answer cannot disagree.
+         *
+         * `undefined` while the context loads, which keeps the item out until
+         * the answer arrives rather than flashing it and taking it away.
+         */
+        if (entry.key !== "audit") return true;
+        return runtimeContext?.capabilities?.["audit.read"] === true;
+      }),
+    [runtimeContext, workspaceSections],
   );
 
   /*
@@ -1632,7 +1732,7 @@ export default function PortalApp({
     : surfaceMeta;
   const urgentCount = requests.filter(
     (request) =>
-      request.priority === "Urgent" && request.stage !== "Completed",
+      request.priority === "Urgent" && isOpenRequest(request),
   ).length;
   const notificationItems = useMemo(
     () =>
@@ -1928,10 +2028,7 @@ export default function PortalApp({
             </button>
             <span className="topbar-updated" aria-live="polite">
               {dataUpdatedAt
-                ? `Updated ${dataUpdatedAt.toLocaleTimeString("en-GB", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}`
+                ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
                 : "Not yet loaded"}
             </span>
             <button
@@ -2208,6 +2305,14 @@ export default function PortalApp({
             sidebar can be rearranged by its owner, so the presence of a nav
             item is not a permission.
           */}
+          {/*
+            The audit trail. Like the three administration screens above it, the
+            component re-checks its own capability against /api/audit rather
+            than trusting that being routed here meant anything — a sidebar can
+            be rearranged by its owner, so the presence of a nav item is not a
+            permission and never was.
+          */}
+          {activeSurface === "audit" && <AuditLog />}
           {activeSurface === "admin-users" && <AdminUsersView />}
           {activeSurface === "admin-roles" && <AdminRolesView />}
           {activeSurface === "admin-clients" && (
@@ -2485,11 +2590,26 @@ function OverviewView({
   const activeUnitCount = units.filter(
     (unit) => unit.status === "Active" && (portfolio === "all" || unit.siteId === portfolio),
   ).length;
-  const open = scopedRequests.filter((request) => request.stage !== "Completed");
+  /*
+   * OPEN AND CLOSED COME FROM ONE PREDICATE, SHARED WITH THE BOARD'S METERS.
+   *
+   * This read `stage !== "Completed"` while the six meters above the job board
+   * read `stage === "Completed" || status === "Job Completed"`, and the two
+   * disagree on live data: the imported rows sit in monday's "… Recently
+   * completed" groups, which carry no lifecycle stage here, so 28 jobs whose own
+   * status says "Job Completed" counted as open on this page and as closed on
+   * the board. Two screens, one portfolio, different numbers.
+   *
+   * `isOpenRequest` and `isClosedRequest` in dashboard-meters.ts are that
+   * predicate, and they are a partition — every row is one or the other — which
+   * is what lets Overview, Reports and the board's meters be checked against
+   * each other rather than taken on trust.
+   */
+  const open = scopedRequests.filter(isOpenRequest);
   const attention = open
     .filter((request) => request.stage === "Attention" || request.priority === "Urgent")
     .sort((left, right) => requestAgeDays(right, now) - requestAgeDays(left, now));
-  const completed = scopedRequests.filter((request) => request.stage === "Completed");
+  const completed = scopedRequests.filter(isClosedRequest);
   const overdue = open.filter(
     (request) => request.dueAt && new Date(request.dueAt).getTime() < now,
   );
@@ -2561,7 +2681,7 @@ function OverviewView({
       >
         <AnalyticsMetricCard label="Active units" value={String(activeUnitCount)} detail={activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} onClick={() => onNavigate("units")} />
         <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.stage === "Attention", period, now)} onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, (request) => request.stage !== "Completed", period, now)} onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Overdue" value={String(overdue.length)} detail="Target date passed" icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Completed" value={String(completed.length)} detail="Verified closures" icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Compliance" value={`${compliancePercent}%`} detail={complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} onClick={() => onNavigate("compliance")} />
@@ -3432,10 +3552,7 @@ function CalendarView({
   );
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
-  const monthLabel = new Intl.DateTimeFormat("en-GB", {
-    month: "long",
-    year: "numeric",
-  }).format(cursor);
+  const monthLabel = formatMonthYear(cursor);
   const firstOffset = (new Date(year, month, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const previousMonthDays = new Date(year, month, 0).getDate();
@@ -3669,7 +3786,7 @@ function CalendarView({
         <div className="planned-register-list">
           {planned.filter((item) => item.status !== "Cancelled").slice(0, 6).map((item) => (
             <button type="button" key={item.id} onClick={() => onManage(item.id)}>
-              <span className="planned-register-date"><strong>{new Date(item.nextDueAt).getDate()}</strong><small>{new Intl.DateTimeFormat("en-GB", { month: "short" }).format(new Date(item.nextDueAt))}</small></span>
+              <span className="planned-register-date"><strong>{new Date(item.nextDueAt).getDate()}</strong><small>{formatMonthShort(item.nextDueAt)}</small></span>
               <span><strong>{item.title}</strong><small>{item.siteName} · {item.frequency}</small></span>
               <span className="status-chip">{item.status}</span>
               <Icon name="chevron" size={15} />
@@ -3975,9 +4092,9 @@ function ContractorsView({
           const name = request.contractor ?? "Unassigned";
           const current = map.get(name) ?? { name, assignedJobs: 0, completedJobs: 0, spend: 0, urgentJobs: 0, trades: new Set<string>() };
           current.assignedJobs += 1;
-          current.completedJobs += request.stage === "Completed" ? 1 : 0;
+          current.completedJobs += isClosedRequest(request) ? 1 : 0;
           current.spend += request.cost ?? 0;
-          current.urgentJobs += request.priority === "Urgent" && request.stage !== "Completed" ? 1 : 0;
+          current.urgentJobs += request.priority === "Urgent" && isOpenRequest(request) ? 1 : 0;
           current.trades.add(request.category);
           map.set(name, current);
           return map;
@@ -4035,8 +4152,8 @@ function ContractorsView({
     return {
       ...contractor,
       assignedJobs: theirs.length,
-      completedJobs: theirs.filter((request) => request.stage === "Completed").length,
-      urgentJobs: theirs.filter((request) => request.priority === "Urgent" && request.stage !== "Completed").length,
+      completedJobs: theirs.filter(isClosedRequest).length,
+      urgentJobs: theirs.filter((request) => request.priority === "Urgent" && isOpenRequest(request)).length,
       spend: theirs.reduce((sum, request) => sum + (request.cost ?? 0), 0),
     };
   });
@@ -4717,12 +4834,10 @@ type MobileRequestFieldEditor = {
 
 
 function mondayDate(value: string | null) {
+  // en-GB, through the shared formatter: "24 Nov", not "Nov 24". This was the
+  // second of the four en-US formatters a completion audit found.
   if (!value) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "Europe/London",
-  }).format(new Date(value));
+  return formatDayMonth(value, { fallback: "", timeZone: "Europe/London" });
 }
 
 function mondayDateInput(value: string | null) {
@@ -6296,7 +6411,7 @@ function RequestDrawer({
                       }`}
                     />
                     <p>
-                      <strong>{activityActor(entry.actorEmail)}</strong>{" "}
+                      <strong>{activityActor(entry.actorEmail, entry.detail)}</strong>{" "}
                       {activityDescription(entry)}
                     </p>
                     <small>{formatDate(entry.createdAt, true)}</small>

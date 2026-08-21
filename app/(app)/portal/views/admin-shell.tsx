@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon, type IconName } from "../../../components";
+import { formatShortDate } from "../../../lib/format-date";
 import { chipStyle } from "../chip-ink";
 import "./admin-console.css";
 
@@ -261,11 +262,9 @@ export function relativeTime(value: string | null | undefined) {
   if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
   const days = Math.round(hours / 24);
   if (days < 31) return `${days} day${days === 1 ? "" : "s"} ago`;
-  return new Date(parsed).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  // Past a month the relative form stops helping and the date is the better
+  // answer — through the shared formatter, so it reads as it does everywhere.
+  return formatShortDate(new Date(parsed));
 }
 
 /** Small dismissable strip for the result of the last write. */

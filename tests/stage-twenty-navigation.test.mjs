@@ -134,21 +134,28 @@ test("each layer only overrides the keys it names", () => {
 /* ── the property this stage exists for ──────────────────────────────────── */
 
 test("A SECTION THAT NO SAVED LAYOUT KNOWS ABOUT STILL APPEARS", () => {
-  // Exactly the case the other Stage 20 teams create: /dashboard/admin,
-  // /dashboard/audit, /dashboard/teams and /dashboard/account arrive after
-  // people have already arranged their sidebars.
+  /*
+   * Exactly the case the other Stage 20 teams create: /dashboard/admin,
+   * /dashboard/teams and /dashboard/account arrive after people have already
+   * arranged their sidebars.
+   *
+   * "audit" WAS the fourth of these and is now a built-in — Batch 1A gave the
+   * audit trail a sidebar entry, which is precisely the migration this test
+   * describes, so it moved from the fixture's arrivals into `BUILT_IN_ORDER`
+   * below. Leaving it in both would have made it a section the saved layout
+   * DOES know about, which is the opposite of what is being checked.
+   */
   const catalogue = [
     ...builtInCatalogue(),
     { key: "admin", label: "Admin", group: OPERATIONS },
-    { key: "audit", label: "Audit", group: WORKSPACE },
     { key: "teams", label: "Teams", group: WORKSPACE },
     { key: "account", label: "Account", group: WORKSPACE },
   ];
   // A fully specified layout, saved before any of them existed. Derived from
   // the whole of BUILT_IN_ORDER rather than a hand-listed subset, so that a
   // section added to the built-in order later — as the three administration
-  // screens were — does not read as one of this fixture's four arrivals and
-  // quietly weaken the exact-equality assertion below.
+  // screens were, and as Audit now has been — does not read as one of this
+  // fixture's arrivals and quietly weaken the exact-equality assertion below.
   const saved = [
     heading(OPERATIONS),
     ...BUILT_IN_ORDER.filter((entry) => entry.group === OPERATIONS).map((entry) =>
@@ -167,24 +174,26 @@ test("A SECTION THAT NO SAVED LAYOUT KNOWS ABOUT STILL APPEARS", () => {
     locked: [],
   });
 
-  for (const key of ["admin", "audit", "teams", "account"]) {
+  for (const key of ["admin", "teams", "account"]) {
     assert.ok(
       visible(result).includes(key),
       `${key} must appear even though no stored layout mentions it`,
     );
   }
-  assert.deepEqual(result.appeared.sort(), ["account", "admin", "audit", "teams"]);
+  assert.deepEqual(result.appeared.sort(), ["account", "admin", "teams"]);
 
   // And under the right heading, not swept to the bottom of the sidebar.
   const byKey = new Map(result.flat.map((row) => [row.key, row.group]));
   assert.equal(byKey.get("admin"), OPERATIONS);
-  assert.equal(byKey.get("audit"), WORKSPACE);
+  assert.equal(byKey.get("teams"), WORKSPACE);
 });
 
 test("a new section survives a layout that reordered everything else", () => {
+  // "teams" rather than "audit" for the same reason as above: the fixture needs
+  // a key the built-in order does NOT contain, and Audit is now one it does.
   const catalogue = [
     ...builtInCatalogue(),
-    { key: "audit", label: "Audit", group: WORKSPACE },
+    { key: "teams", label: "Teams", group: WORKSPACE },
   ];
   const result = resolveNavigation({
     catalogue,
@@ -198,7 +207,7 @@ test("a new section survives a layout that reordered everything else", () => {
     userItems: null,
     locked: [],
   });
-  assert.ok(visible(result).includes("audit"));
+  assert.ok(visible(result).includes("teams"));
 });
 
 test("a saved key the catalogue no longer contains is dropped, not drawn", () => {

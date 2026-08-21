@@ -94,7 +94,19 @@ const withoutComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
 const specUrl = asModule(transpile(await read("db/monday-board-spec.ts")));
 const spec = await import(specUrl);
 
-const expiryUrl = asModule(transpile(await read("app/lib/expiry-status.ts")));
+/*
+ * expiry-status.ts writes its dates through app/lib/format-date.ts, the one
+ * en-GB formatter the platform shares, rather than keeping two `Intl`
+ * instances of its own. That is one more relative specifier a data: URL cannot
+ * resolve, so it is substituted like every other dependency here.
+ */
+const formatDateUrl = asModule(transpile(await read("app/lib/format-date.ts")));
+const expiryUrl = asModule(
+  transpile(await read("app/lib/expiry-status.ts")).replace(
+    /from ["']\.\/format-date["']/g,
+    `from "${formatDateUrl}"`,
+  ),
+);
 const expiry = await import(expiryUrl);
 
 const register = await import(
