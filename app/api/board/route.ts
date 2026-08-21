@@ -2413,6 +2413,33 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      /*
+       * A SYSTEM COLUMN IS A FIELD ON THE JOB, NOT A CELL.
+       *
+       * Contractor, Status, Priority and the rest are columns on
+       * `maintenance_requests`; the board draws them from the request, and every
+       * other screen — the contractor register, the scorecard, exports, the
+       * calendar — reads the same field. Writing one here stored a row in
+       * `maintenance_board_cells` that shadowed the field without setting it, so
+       * assigning a contractor on the board left `request.contractor` null and
+       * the register kept saying nobody was assigned, with the board insisting
+       * otherwise. Nothing in the UI does this — `saveCustomCell` is for custom
+       * columns, as its name says — but the route accepted it, and a silent
+       * divergence between the board and every other page is the worst possible
+       * way to find that out.
+       *
+       * `PATCH /api/maintenance` with `{ id, fields }` is where a job's own
+       * fields are set, and it is what the board itself calls.
+       */
+      if (column.system) {
+        return Response.json(
+          {
+            error:
+              "That column is a field on the job. Use PATCH /api/maintenance with { id, fields } so every other screen sees the change.",
+          },
+          { status: 400 },
+        );
+      }
       let value = "";
       try {
         value = normalizeCellValue(type, payload.value);

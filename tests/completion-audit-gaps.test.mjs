@@ -183,3 +183,39 @@ test("the desktop date cell shows a calendar, not just the browser's own picker"
     "out of the flow — the board is table-layout:fixed on a 40px row and an inline grid would shove every row below it down",
   );
 });
+
+test("a system column cannot be shadowed by a board cell", async () => {
+  /*
+   * THE BUG THIS PINS. Contractor, Status, Priority and the rest are columns on
+   * `maintenance_requests`; the board draws them from the request and every
+   * other screen — the contractor register, the scorecard, exports, the
+   * calendar — reads the same field.
+   *
+   * `update_cell` had no `system` check, so writing one stored a row in
+   * `maintenance_board_cells` that shadowed the field without setting it.
+   * Assigning a contractor that way left `request.contractor` null: the board
+   * showed a name and the register went on saying nobody was assigned. Proven
+   * against the preview — `update_cell` answered 200 and the job's contractor
+   * was still null afterwards.
+   *
+   * Nothing in the UI does this (`saveCustomCell` is for custom columns, as its
+   * name says), which is exactly why the route had to be the one to refuse.
+   */
+  const route = await read("app/api/board/route.ts");
+  const cellAction = route.slice(route.indexOf('if (action === "update_cell")'));
+  const guard = cellAction.slice(0, cellAction.indexOf("const [cell]"));
+  assert.match(guard, /if \(column\.system\) \{/, "the route must refuse a system column");
+  assert.match(
+    guard,
+    /PATCH \/api\/maintenance with \{ id, fields \}/,
+    "and name the endpoint that does set the field, or the refusal is a dead end",
+  );
+  assert.ok(
+    guard.indexOf("if (column.system)") < guard.indexOf("maintenanceBoardCells"),
+    "the refusal must come before anything is written",
+  );
+
+  const board = await read("app/(app)/portal/live-board.tsx");
+  assert.match(board, /onSaveCustom=\{\(column, value\) =>\s*saveCustomCell\(request, column, value\)/,
+    "the only caller stays the custom-column path");
+});
