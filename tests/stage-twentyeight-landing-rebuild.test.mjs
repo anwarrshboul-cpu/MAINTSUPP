@@ -187,7 +187,7 @@ test("the form asks the brief's eleven questions, in order", async () => {
   assert.deepEqual(sorted, order, "the fields must appear in the brief's order");
 });
 
-test("the eight required fields are validated, and the three optional ones are not", async () => {
+test("the required fields are validated, and the access window stays optional", async () => {
   const form = await read("app/(marketing)/_sections/report-job.tsx");
   const checks = form.slice(form.indexOf("const CHECKS"), form.indexOf("type FieldValue"));
   for (const id of [
@@ -199,12 +199,44 @@ test("the eight required fields are validated, and the three optional ones are n
     "rjPostcode",
     "rjCategory",
     "rjUrgency",
+    /*
+     * The description joined them: the approved reference marks it required,
+     * because a coordinator triaging "P1, Electrical, Oxford Street" with no
+     * sentence has to ring the store back before choosing a trade.
+     */
+    "rjDesc",
   ]) {
     assert.match(checks, new RegExp(`"${id}"`), `${id} must be required`);
   }
-  for (const id of ["rjDesc", "rjAccess"]) {
-    assert.doesNotMatch(checks, new RegExp(`"${id}"`), `${id} is optional in the brief`);
+  /* The access window is the one field a reporter may genuinely not know. */
+  assert.doesNotMatch(checks, /"rjAccess"/, "the access window stays optional");
+});
+
+test("evidence is required, and checked outside CHECKS because it is not a field", async () => {
+  /*
+   * The files live in component state, not in a form control, so the rule
+   * cannot sit in CHECKS with the others — but it must run in the same pass,
+   * or somebody missing both a description and a photograph is told about one,
+   * fixes it, and is then told about the other.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /if \(picked\.length === 0\) \{\s*found\.rjUpload =/);
+  assert.match(form, /Add at least one photo or video/);
+  assert.match(form, /\{filesError \|\| errors\.rjUpload\}/, "and it is shown in the upload block");
+});
+
+test("each urgency states the response time it buys", async () => {
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  for (const [code, sla] of [
+    ["P1", "Within 4 hrs"],
+    ["P2", "Next working day"],
+    ["P3", "5 working days"],
+  ]) {
+    /* A comment sits between `code` and `sla` on P1, so the window has to be
+       wide enough to carry it — measured at 310 characters. */
+    assert.match(form, new RegExp(`code: "${code}"[\\s\\S]{0,400}?sla: "${sla}"`), `${code} — ${sla}`);
   }
+  assert.match(form, /className="chip__sla"/, "and the chip renders it");
 });
 
 test("every invalid field is reported at once, not one at a time", async () => {
@@ -218,6 +250,59 @@ test("every invalid field is reported at once, not one at a time", async () => {
   assert.match(form, /if \(message\) found\[name\] = message;/, "collect, do not return early");
   assert.match(form, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
   assert.match(form, /focus\(\{ preventScroll: true \}\)/, "scroll first, then focus");
+});
+
+test("the form posts to a route a logged-out visitor may actually use", async () => {
+  /*
+   * THE BUG THIS REPLACES. The form posted to `/api/maintenance`, which
+   * requires the `board.edit` capability. Every visitor to a marketing page is
+   * logged out by definition, so every submission came back
+   * `401 Your session has ended. Sign in to continue.` — the form has never
+   * once worked, and the failure looked like a session problem rather than a
+   * missing endpoint.
+   *
+   * The fix is NOT to loosen `/api/maintenance`: that would make every board in
+   * every tenant writable by anyone who could guess a payload. It is a separate
+   * public route with its tenant pinned.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /fetch\("\/api\/report-job"/, "the public route, not the operator one");
+  assert.doesNotMatch(
+    form,
+    /fetch\("\/api\/maintenance"/,
+    "/api/maintenance requires board.edit and a visitor has none",
+  );
+
+  const route = await read("app/api/report-job/route.ts");
+  assert.match(route, /allowAnonymous: true/, "a visitor has no session");
+  assert.match(
+    route,
+    /const orgId = PRIMARY_ORGANISATION_ID/,
+    "the tenant is pinned, never taken from the payload or a cookie",
+  );
+  assert.doesNotMatch(
+    route,
+    /payload\.(organisationId|orgId|tenant)/,
+    "no request may steer a job into another workspace",
+  );
+  assert.match(route, /configuredValue\(db, orgId, "priority"/, "canonicalise, do not trust");
+  assert.match(route, /source: "Website form"/, "a coordinator must see where this came from");
+  assert.match(route, /uploadToken/, "and the reporter must be able to attach the photographs");
+});
+
+test("the description reports its own error like every other field", async () => {
+  /*
+   * Making the description required without giving it an error slot is worse
+   * than leaving it optional: the submit is blocked, nine other fields light up
+   * red, and the one actually stopping the form says nothing.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /id="rjDesc-err"/, "the description needs somewhere to put its message");
+  assert.match(
+    form,
+    /className=\{fieldClass\("rjDesc"\)\}/,
+    "and the red outline every other field gets",
+  );
 });
 
 test("the priority and engineer values the form sends exist on the board", async () => {

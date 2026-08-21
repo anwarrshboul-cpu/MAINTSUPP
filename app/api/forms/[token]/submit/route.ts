@@ -48,6 +48,12 @@ export const dynamic = "force-dynamic";
  * shared middle into a helper would mean editing a heavily asserted file to
  * serve a new caller. The duplication is the cheaper and safer trade, and this
  * comment is the marker for whoever changes one and needs to change the other.
+ *
+ * There is now a THIRD: app/api/report-job/route.ts, the website's own form.
+ * It is public like this one but its questions are fixed in the page rather
+ * than editable in the builder, so it pins its tenant instead of reading one
+ * from a form record. Three routes create a job; changing the shape of one is
+ * a reason to look at the other two.
  */
 
 function failure(message: string, status = 400) {

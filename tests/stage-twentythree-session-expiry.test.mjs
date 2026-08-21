@@ -30,6 +30,12 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 /** Public by design: no account exists behind either, so "sign in" is wrong advice. */
 const PUBLIC_ROUTES = new Set([
   "app/api/leads/route.ts",
+  /*
+   * The website's own Report-a-Job form. The visitor is a store manager on the
+   * marketing site with no account at all, so a 503 there is a 503 — telling
+   * them their session expired would be advice about a session they never had.
+   */
+  "app/api/report-job/route.ts",
   "app/api/job-link/[token]/route.ts",
   /*
    * The shared form link, on the same footing as the contractor job link above:

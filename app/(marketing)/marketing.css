@@ -1121,6 +1121,12 @@ fieldset.field:focus{outline:none}
 .chipgroup input{position:absolute;opacity:0;width:1px;height:1px}
 .chipgroup label{display:inline-flex;align-items:center;gap:8px;padding:10px 15px;min-height:44px;border:1.5px solid var(--border);border-radius:var(--r-pill);font-size:.83rem;cursor:pointer;transition:all var(--t-base) var(--ease)}
 .chipgroup label:hover{border-color:var(--steel-mid)}
+/* The response time each urgency buys, from the approved reference. Shown on
+   the chip because choosing P1 over P3 is really choosing 4 hours over 5 days. */
+.chip__sla{margin-left:8px;padding:2px 8px;border-radius:var(--r-pill);background:var(--cloud);
+  color:var(--slate);font-size:.72rem;font-weight:600;white-space:nowrap}
+.chipgroup input:checked + label .chip__sla{background:rgba(255,255,255,.22);color:inherit}
+@media (max-width:430px){.chipgroup label{flex-wrap:wrap}.chip__sla{margin-left:0}}
 .chipgroup input:checked+label{background:var(--navy);border-color:var(--navy);color:#fff}
 .chipgroup input:focus-visible+label{outline:3px solid var(--amber);outline-offset:2px}
 .consent{display:flex;gap:11px;align-items:flex-start;font-size:.84rem;cursor:pointer}

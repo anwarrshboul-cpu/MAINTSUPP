@@ -61,11 +61,15 @@ const URGENCIES = [
     id: "p1",
     code: "P1",
     label: "P1 — Critical, site unsafe or cannot trade",
+    /* The response time each priority buys, in the approved reference's own
+       words. A reporter choosing between P1 and P3 is really choosing between
+       four hours and five days, and the form was not telling them that. */
+    sla: "Within 4 hrs",
     priority: "Urgent",
   },
-  { id: "p2", code: "P2", label: "P2 — Urgent, trading impaired", priority: "Urgent" },
-  { id: "p3", code: "P3", label: "P3 — Routine", priority: "Medium" },
-  { id: "p4", code: "P4", label: "P4 — Cosmetic / quote request", priority: "Low" },
+  { id: "p2", code: "P2", label: "P2 — Urgent, trading impaired", sla: "Next working day", priority: "Urgent" },
+  { id: "p3", code: "P3", label: "P3 — Routine", sla: "5 working days", priority: "Medium" },
+  { id: "p4", code: "P4", label: "P4 — Cosmetic / quote request", sla: "Quoted, then scheduled", priority: "Low" },
 ] as const;
 
 /** The eight fault categories, each mapped onto a real `engineer_required` option. */
@@ -132,6 +136,19 @@ const CHECKS: Array<[string, (value: string) => string]> = [
   ],
   ["rjCategory", (v) => (v ? "" : "Choose the fault category.")],
   ["rjUrgency", (v) => (v ? "" : "Choose how urgent this is.")],
+  /*
+   * Description and evidence are required in the approved reference, and the
+   * reason is operational rather than editorial: a coordinator triaging "P1,
+   * Electrical, Oxford Street" with no sentence and no photograph has to ring
+   * the store back before they can even choose a trade. Both were optional.
+   */
+  [
+    "rjDesc",
+    (v) =>
+      v.trim().length >= 10
+        ? ""
+        : "Describe the fault — a sentence is enough, and it decides who we send.",
+  ],
 ];
 
 type FieldValue = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -232,6 +249,15 @@ export function ReportJob() {
       const message = check(value);
       if (message) found[name] = message;
     }
+    /*
+     * Evidence is required too, and it cannot go in CHECKS because the files
+     * live in component state rather than in a form field. Same collected-
+     * errors pass, so a reporter missing both a description and a photograph
+     * is told both at once rather than one, then the other.
+     */
+    if (picked.length === 0) {
+      found.rjUpload = "Add at least one photo or video of the fault.";
+    }
     setErrors(found);
 
     if (Object.keys(found).length > 0) {
@@ -291,7 +317,7 @@ export function ReportJob() {
     setStatus({ text: "Creating your maintenance request…", tone: "" });
 
     try {
-      const response = await fetch("/api/maintenance", {
+      const response = await fetch("/api/report-job", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -521,7 +547,10 @@ export function ReportJob() {
                       checked={urgency === entry.code}
                       onChange={() => setUrgency(entry.code)}
                     />
-                    <label htmlFor={`rjUrgency-${entry.id}`}>{entry.label}</label>
+                    <label htmlFor={`rjUrgency-${entry.id}`}>
+                      {entry.label}
+                      <span className="chip__sla">{entry.sla}</span>
+                    </label>
                   </Fragment>
                 ))}
               </div>
@@ -530,21 +559,26 @@ export function ReportJob() {
               </p>
             </fieldset>
 
-            <div className="field">
+            <div className={fieldClass("rjDesc")}>
               <label htmlFor="rjDesc">
-                Description <span className="hint">optional</span>
+                Description {req}
               </label>
               <textarea
                 id="rjDesc"
                 name="description"
                 rows={3}
                 placeholder="What's the problem?"
+                aria-invalid={invalid("rjDesc")}
+                aria-describedby={errors.rjDesc ? "rjDesc-err" : undefined}
               />
+              <p className="field__err" id="rjDesc-err" hidden={!errors.rjDesc}>
+                {errors.rjDesc}
+              </p>
             </div>
 
             <div className="field">
               <span className="lbl">
-                Photo upload <span className="hint">optional, but it speeds everything up</span>
+                Photos or video {req}
               </span>
               <div
                 className={`upload${dragOver ? " is-over" : ""}`}
@@ -716,8 +750,14 @@ export function ReportJob() {
                   nameplate saves a return visit.
                 </p>
               )}
-              <p className="field__err" data-err="rjFiles" hidden={!filesError}>
-                {filesError}
+              {/* Two ways this block can be wrong — a rejected file, or no
+                  file at all — and one place to say so. */}
+              <p
+                className="field__err"
+                data-err="rjFiles"
+                hidden={!filesError && !errors.rjUpload}
+              >
+                {filesError || errors.rjUpload}
               </p>
             </div>
 
