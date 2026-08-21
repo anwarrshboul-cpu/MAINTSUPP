@@ -30,8 +30,14 @@ test("the row menu offers everything monday's does", async () => {
 });
 
 test("the column menu offers everything monday's does", async () => {
-  const board = await read("app/(app)/portal/live-board.tsx");
-  const menu = board.slice(board.indexOf('<div className="custom-column-menu"'));
+  /*
+   * The heading and its menu live in board-column-header.tsx since Batch 1A —
+   * live-board.tsx is held under 6,000 lines and the sort, filter, pin and
+   * reorder controls took it past that. Nothing about the menu's contents
+   * moved; four entries were ADDED, and they are asserted here too so the
+   * board cannot quietly lose one of them either.
+   */
+  const menu = await read("app/(app)/portal/board-column-header.tsx");
   for (const label of [
     "Rename column",
     "Wrap text",
@@ -43,8 +49,13 @@ test("the column menu offers everything monday's does", async () => {
     "Change column type",
     "Hide column",
     "Delete column",
+    // Batch 1A.
+    "Add as a tie-breaker",
+    "Filter this column",
+    "Freeze column to the left",
+    "Move column left",
   ]) {
-    assert.ok(menu.slice(0, 4000).includes(label), `the column menu must offer "${label}"`);
+    assert.ok(menu.includes(label), `the column menu must offer "${label}"`);
   }
 });
 
@@ -64,8 +75,11 @@ test("collapsing a column narrows it rather than hiding it", async () => {
   // Applied once where the columns are derived, so the header, the cells and
   // the summary row cannot disagree about a column's width.
   assert.match(board, /collapsedColumns\.has\(entry\.column\.id\)/);
-  // Hide is still its own separate action.
-  assert.match(board, /Hide column/);
+  // Hide is still its own separate action — in the column menu, which lives in
+  // board-column-header.tsx since Batch 1A split it out of live-board.tsx.
+  const menu = await read("app/(app)/portal/board-column-header.tsx");
+  assert.match(menu, /Hide column/);
+  assert.match(menu, /Collapse column/);
 });
 
 test("grouping by a column writes nothing", async () => {

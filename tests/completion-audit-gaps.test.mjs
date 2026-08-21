@@ -67,10 +67,25 @@ test("the chosen sort is remembered", async () => {
     "anything that is not one of the two directions must be dropped",
   );
 
+  /*
+   * The board's sort became an ORDERED LIST in Batch 1A, so the three
+   * single-column mechanics this used to pin are now one function each in
+   * board-sort.ts: `sortSettingsFor` decides what a column stores,
+   * `readSortRules` reads them all back, and a column dropped from the sort has
+   * both `sort` and `sortPriority` removed rather than the one being cleared by
+   * hand. The property is unchanged — a chosen sort survives a reload — and is
+   * asserted at each of the three points it passes through.
+   */
   const board = await read("app/(app)/portal/live-board.tsx");
-  assert.match(board, /settings: \{ \.\.\.column\.settings, sort: direction \}/, "written on sort");
-  assert.match(board, /allBoardColumns\.find\(\(entry\) => entry\.column\.settings\.sort\)/, "read back on load");
-  assert.match(board, /const \{ sort: _dropped, \.\.\.rest \} = stale\.column\.settings/, "and the previous holder is cleared");
+  const sort = await read("app/(app)/portal/board-sort.ts");
+  assert.match(board, /updateCustomColumn\(entry\.column, \{ settings \}\)/, "written on sort");
+  assert.match(board, /sortSettingsFor\(/, "through the one function that decides what a column stores");
+  assert.match(board, /setSortRules\(readSortRules\(allBoardColumns\)\)/, "read back on load");
+  assert.match(
+    sort,
+    /const \{ sort: _sort, sortPriority: _priority, \.\.\.rest \}/,
+    "and a column dropped from the sort keeps neither half of it",
+  );
 });
 
 test("every analytics page owns a date range with presets and a custom span", async () => {

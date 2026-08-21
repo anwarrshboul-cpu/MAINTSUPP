@@ -14143,3 +14143,350 @@ body[data-theme="dark"] {
   color: var(--muted);
   font-size: 0.78rem;
 }
+
+/* ── Batch 1A — the board's sort, filter, pin and reorder chrome ─────────────
+ *
+ * Four features that share one 35px header row and one toolbar, so their
+ * styling is kept together rather than scattered among the rules each one
+ * happens to sit beside. Everything here is additive: no existing selector is
+ * redefined, and the Items column's own sticky rules are untouched.
+ */
+
+/* The Sort/Filter split buttons in the toolbar. */
+.live-board-rules-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.live-board-tool--adjacent {
+  min-width: 0;
+  margin-left: -6px;
+  padding: 0 6px;
+}
+
+.live-board-tool.is-active {
+  border-color: #0073ea;
+  background: #eaf3fe;
+  color: #0073ea;
+}
+
+/* How many rules are set, so a collapsed panel still says it is doing something. */
+.live-board-tool__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #0073ea;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+/* ── The panels ──────────────────────────────────────────────────────────── */
+
+.board-rules {
+  position: absolute;
+  z-index: 71;
+  top: calc(100% + 7px);
+  left: 0;
+  display: grid;
+  gap: 10px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 16px 40px rgba(7, 24, 38, 0.18);
+  color: #1f3a4a;
+  font-size: 12px;
+}
+
+.board-rules__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.board-rules__head strong {
+  font-size: 13px;
+}
+
+.board-rules__head > button:last-child {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #61717c;
+}
+
+.board-rules__hint {
+  color: #61717c;
+  font-size: 11px;
+}
+
+.board-rules__join {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.board-rules__join button {
+  padding: 4px 9px;
+  border: 0;
+  background: white;
+  color: #465b68;
+  font-size: 11px;
+}
+
+.board-rules__join button.is-active {
+  background: #0073ea;
+  color: white;
+}
+
+.board-rules__empty {
+  margin: 0;
+  padding: 6px 2px;
+  color: #61717c;
+}
+
+.board-rules__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-rules__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fa;
+}
+
+.board-rules__rank {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #0073ea;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.board-rules__label {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-rules__row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: #465b68;
+  font-size: 11px;
+}
+
+.board-rules__row button:disabled {
+  opacity: 0.4;
+}
+
+/* The two priority arrows are the same glyph; one is turned over. */
+.board-rules__row button[aria-label*="higher sort priority"] svg {
+  transform: rotate(180deg);
+}
+
+.board-rules__row select,
+.board-rules__foot select,
+.board-rules__row input {
+  min-height: 28px;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: inherit;
+  font-size: 11px;
+}
+
+.board-rules__values {
+  display: flex;
+  flex: 1 1 180px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.board-rules__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 11px;
+  background: #e5effa;
+  color: #16436b;
+  font-size: 11px;
+}
+
+.board-rules__chip button {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.board-rules__and {
+  color: #61717c;
+}
+
+.board-rules__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.board-rules__foot label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.board-rules__foot-label {
+  color: #61717c;
+}
+
+.board-rules__clear {
+  margin-left: auto;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: #c83e3e;
+  font-size: 11px;
+}
+
+.board-rules__count {
+  margin: 0;
+  color: #61717c;
+  font-size: 11px;
+}
+
+/* ── Header indicators ───────────────────────────────────────────────────── */
+
+/*
+ * The 1/2/3 badge on a sorted heading. Drawn only when the board carries more
+ * than one rule — see the header component — so an ordinary single sort keeps
+ * the bare arrow it has always had.
+ */
+.column-sort-rank {
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: #0073ea;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 12px;
+}
+
+.column-filter-indicator {
+  display: inline-grid;
+  place-items: center;
+  color: #0073ea;
+}
+
+/* Where a dragged column would land. */
+.live-sheet th.is-column-drop-target {
+  box-shadow: inset 3px 0 0 #0073ea;
+}
+
+body.is-dragging-board-column .live-sheet th {
+  cursor: grabbing;
+}
+
+.custom-column-header > strong {
+  cursor: grab;
+}
+
+/* ── Frozen columns ──────────────────────────────────────────────────────── */
+
+/*
+ * A pinned cell has to be OPAQUE, because the rows it covers scroll underneath
+ * it. In dark mode `.live-sheet td` and `.live-sheet th` already carry an
+ * explicit background (brand-overrides.css), so only the light palette needs
+ * saying here. The `left` and `z-index` come from the element's inline style —
+ * they are the running width of everything frozen ahead, which is data. See
+ * board-pinning.ts.
+ */
+.live-sheet td.is-pinned-column,
+.live-sheet th.is-pinned-column,
+.sheet-summary-cell.is-pinned-column {
+  position: sticky;
+  background: white;
+  box-shadow: 1px 0 0 rgba(7, 24, 38, 0.08);
+}
+
+.live-sheet th.is-pinned-column,
+.sheet-summary-cell.is-pinned-column {
+  background: #f7f9fa;
+}
+
+.live-sheet tbody tr:hover td.is-pinned-column {
+  background: #eef6fc;
+}
+
+.live-sheet tbody tr.is-selected td.is-pinned-column {
+  background: #d9edff;
+}
+
+@media (max-width: 760px) {
+  /*
+   * NOTHING IS FROZEN ON A PHONE, and that is deliberate rather than an
+   * oversight. The stylesheet already unsticks the checkbox gutter and the
+   * Items column below 760px — two frozen columns on a 390px screen leave
+   * nothing to scroll — so a pinned column follows the same rule. The pin is
+   * remembered and applies again on a wider screen.
+   */
+  .live-sheet td.is-pinned-column,
+  .live-sheet th.is-pinned-column,
+  .sheet-summary-cell.is-pinned-column {
+    position: relative !important;
+    left: auto !important;
+    z-index: auto !important;
+    box-shadow: none;
+  }
+
+  .board-rules {
+    left: auto;
+    right: 0;
+    width: min(420px, calc(100vw - 24px));
+  }
+
+  .board-rules__row {
+    align-items: stretch;
+  }
+}

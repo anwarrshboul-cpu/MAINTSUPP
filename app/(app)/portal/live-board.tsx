@@ -18,10 +18,7 @@ import { viewReplacesGrid } from "./board-view-pane";
 import BoardColumnSummary from "./board-column-summary";
 import { boardIdentity } from "./board-identity";
 import { DEFERRED_GROUP_CLASS, deferredGroupHeight } from "./board-visibility";
-import {
-  ColumnSettingsDialog,
-  columnSettingsActionLabel,
-} from "./board-column-settings";
+import { ColumnSettingsDialog } from "./board-column-settings";
 import { chipStyle } from "./chip-ink";
 import { Icon } from "../../components";
 import { publishBoardOptions } from "../../lib/board-option-registry";
@@ -47,13 +44,11 @@ import {
   FileHoverPreview,
 } from "./evidence-manager";
 import { BoardFileCell } from "./cells/board-file-cell";
-import { SummaryDistribution } from "./cells/summary-distribution";
 import { ExpiryCell } from "./cells/expiry-cell";
 import { FileCell, boardFileCellFiles } from "./cells/file-cell";
 import {
   AnalyticsMetricCard,
   AnalyticsToolbar,
-  analyticsPeriodOptions,
   withinAnalyticsPeriod,
 } from "./dashboard-analytics";
 import { computeJobMeters, jobMeterTrendLabels } from "./dashboard-meters";
@@ -66,13 +61,11 @@ import {
   type BoardDropTarget,
   type BoardResponse,
   type ColumnKey,
-  type ColumnTypeDefinition,
   type CompactBoardResponse,
   type EditableFields,
   type MaintenanceBoardSnapshot,
   type MaintenanceBoardSnapshotColumn,
   type Option,
-  columnTypeDefinitions,
   decodeBoardResponse,
   editableFallbackOptions,
   fallbackGroups,
@@ -82,7 +75,6 @@ import {
 } from "./board-model";
 import {
   boardItemName,
-  compareBoardValues,
   moveBoardItemPlacement,
   systemColumnSortValue,
 } from "./board-ordering";
@@ -90,14 +82,10 @@ import {
   customCellKey,
   choiceList,
   customCellDisplay,
-  customCellSortValue,
   findChoice,
   serializeCustomCellValue,
   shouldCenterBoardCell,
   displayedBoardColumnWidth,
-  compactNumber,
-  dateRangeSummary,
-  filledSummary,
 } from "./board-format";
 import { useBoardMenuFit } from "./board-menu-fit";
 import {
@@ -107,6 +95,44 @@ import {
 } from "./board-primitives";
 import { BoardMobileSection } from "./board-mobile-list";
 import { copyBoardText, downloadBoardCsv } from "./board-export";
+import { BoardColumnHeader } from "./board-column-header";
+import { ColumnPicker } from "./board-column-picker";
+import { BoardFilterPanel, BoardSortPanel, type FilterChoice } from "./board-controls";
+import {
+  type BoardSortRule,
+  type SortDirection,
+  addSortRule,
+  compareBoardRows,
+  flipSortRule,
+  moveSortRule,
+  readSortRules,
+  removeSortRule,
+  replaceSortRules,
+  sortBoardRows,
+  sortDirectionFor,
+  sortRuleIndex,
+  sortSettingsFor,
+} from "./board-sort";
+import {
+  EMPTY_FILTER,
+  type BoardFilterState,
+  applyBoardFilter,
+  filterKindFor,
+  filterSettingsFor,
+  findFilterRule,
+  isFilterableColumn,
+  operatorsFor,
+  readFilterState,
+  removeFilterRule,
+  setFilterRule,
+} from "./board-filter";
+import {
+  stickyColumnOffsets,
+  stickyZIndex,
+  type StickyColumn,
+} from "./board-pinning";
+import { summariesFor } from "../../lib/column-types";
+import { useCapability } from "../../lib/client-capabilities";
 import {
   type ThemeChoice,
   setThemeChoice,
@@ -281,9 +307,33 @@ export function LiveMaintenanceBoard({
   /** Store Documentation's filter, holding a Store Type choice id. */
   const [storeType, setStoreType] = useState("All");
   const [assignee, setAssignee] = useState("All");
-  const [sortDirection, setSortDirection] = useState<"newest" | "oldest">(
-    "newest",
-  );
+  /*
+   * THE BOARD'S ORDERED SORT.
+   *
+   * This was `{ columnId, direction } | null`, so sorting by a second column
+   * discarded the first and "Priority, then Due Date" — the ordering a
+   * maintenance board is actually read in — could not be expressed. Position in
+   * the array is priority: rule 0 decides, rule 1 breaks its ties. The rules
+   * and the comparator live in board-sort.ts, where they can be tested against
+   * rows rather than eyeballed on the page.
+   */
+  const [sortRules, setSortRules] = useState<BoardSortRule[]>([]);
+  /** The board's structured filter — see board-filter.ts. */
+  const [filterState, setFilterState] = useState<BoardFilterState>(EMPTY_FILTER);
+  const [sortPanelOpen, setSortPanelOpen] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  /** Which column a drag is carrying, and which one it is currently over. */
+  const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
+  const [columnDropTargetId, setColumnDropTargetId] = useState<string | null>(null);
+  /*
+   * Whether this person may produce a CSV, answered by the server.
+   *
+   * The rule itself is on POST /api/board/csv; this only decides whether to
+   * draw a button that would be refused. `null` while the answer is in flight,
+   * and the control is drawn in that state rather than flickering off on every
+   * page load — see lib/client-capabilities.ts.
+   */
+  const canExport = useCapability("data.export");
   /*
    * HIDDEN COLUMNS ARE SERVER STATE, seeded here and written back on change.
    *
@@ -306,10 +356,6 @@ export function LiveMaintenanceBoard({
   const [columnInsertAfterId, setColumnInsertAfterId] = useState<string | null>(
     null,
   );
-  const [columnSort, setColumnSort] = useState<{
-    columnId: string;
-    direction: "asc" | "desc";
-  } | null>(null);
   const [columnSearch, setColumnSearch] = useState("");
   const [showMoreColumnTypes, setShowMoreColumnTypes] = useState(false);
   const [columnMenuInstance, setColumnMenuInstance] = useState<string | null>(
@@ -687,6 +733,68 @@ export function LiveMaintenanceBoard({
     [storeTypeColumn],
   );
 
+  /*
+   * Which board this grid is, in the two forms the rest of the component asks
+   * for it. Declared here rather than beside the JSX because the sort and
+   * filter helpers above the render read them, and a const referenced before
+   * its declaration is a temporal dead zone error rather than an undefined.
+   */
+  const isStoreDocumentation = boardId === "store-documentation";
+  const canEditGroups = !isStoreDocumentation;
+
+  const allBoardColumns = useMemo<BoardDisplayColumn[]>(
+    () =>
+      [
+        ...systemColumns.map(
+          (column): BoardDisplayColumn => ({
+            kind: "system",
+            key: column.key as ColumnKey,
+            column,
+          }),
+        ),
+        ...customColumns.map(
+          (column): BoardDisplayColumn => ({ kind: "custom", column }),
+        ),
+      ].sort((left, right) => left.column.position - right.column.position),
+    [customColumns, systemColumns],
+  );
+
+  /** Every column by id, which the sort and filter engines both look through. */
+  const columnsById = useMemo(
+    () => new Map(allBoardColumns.map((entry) => [entry.column.id, entry])),
+    [allBoardColumns],
+  );
+
+  const systemOptionOrders = useMemo(() => {
+    const orders = new Map<string, Map<string, number>>();
+    for (const key of [
+      "tier",
+      "engineer",
+      "priority",
+      "label",
+      "status",
+      "storeLocation",
+    ] as BoardOptionColumn[]) {
+      const saved = boardOptions
+        .filter((option) => option.columnKey === key)
+        .sort((left, right) => left.position - right.position);
+      const choices = saved.length
+        ? saved.map((option) => ({ value: option.value, label: option.label }))
+        : (editableFallbackOptions[key] ?? []).map((option) => ({
+            value: option.value,
+            label: option.label,
+          }));
+      if (!choices.length) continue;
+      const lookup = new Map<string, number>();
+      choices.forEach((choice, index) => {
+        if (choice.value) lookup.set(choice.value, index);
+        if (choice.label) lookup.set(choice.label, index);
+      });
+      orders.set(key, lookup);
+    }
+    return orders;
+  }, [boardOptions]);
+
   const filtered = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();
     return [...scopedRequests]
@@ -725,12 +833,22 @@ export function LiveMaintenanceBoard({
               ? !request.assignee
               : request.assignee === assignee)),
       )
-      .sort((a, b) => {
-        const delta =
-          new Date(b.requestedAt).getTime() -
-          new Date(a.requestedAt).getTime();
-        return sortDirection === "newest" ? delta : -delta;
-      });
+      /*
+       * NEWEST FIRST IS THE BASE ORDER, NOT THE SORT.
+       *
+       * This used to be where the toolbar's Newest/Oldest button applied — and
+       * it had no effect on the grid, because `groupedRows` below re-sorts
+       * every group by stored position. It changed the CSV and nothing a person
+       * could see. Newest/Oldest is now a rule on the Date Requested column
+       * like any other sort, so the toolbar and the grid agree; what is left
+       * here is a deterministic base order, so two rows no rule separates do
+       * not swap places between renders.
+       */
+      .sort(
+        (left, right) =>
+          new Date(right.requestedAt).getTime() -
+          new Date(left.requestedAt).getTime(),
+      );
   }, [
     assignee,
     boardId,
@@ -743,8 +861,28 @@ export function LiveMaintenanceBoard({
     storeTypeColumn,
     deferredQuery,
     scopedRequests,
-    sortDirection,
   ]);
+
+  /*
+   * The structured filter, applied after the search box and the two toolbar
+   * dropdowns. The three coexist deliberately: search answers "where is that
+   * job", a filter answers "show me this kind of work", and neither is a
+   * substitute for the other.
+   */
+  const filterContext = useMemo(
+    () => ({
+      boardId,
+      columnsById,
+      cells: customCells,
+      fileCounts: customFileCounts,
+    }),
+    [boardId, columnsById, customCells, customFileCounts],
+  );
+
+  const visibleRows = useMemo(
+    () => applyBoardFilter(filtered, filterState, filterContext),
+    [filtered, filterState, filterContext],
+  );
 
   const selectedRequests = useMemo(
     () => requests.filter((request) => selectedIds.has(request.id)),
@@ -763,8 +901,8 @@ export function LiveMaintenanceBoard({
    * underneath them.
    */
   const jobAnalytics = useMemo(
-    () => computeJobMeters(filtered, analyticsPeriod, analyticsNow),
-    [analyticsNow, analyticsPeriod, filtered],
+    () => computeJobMeters(visibleRows, analyticsPeriod, analyticsNow),
+    [analyticsNow, analyticsPeriod, visibleRows],
   );
 
   /* The six meters stay reachable by collapsing into a strip pinned under the
@@ -997,22 +1135,6 @@ export function LiveMaintenanceBoard({
     }
   };
 
-  const allBoardColumns = useMemo<BoardDisplayColumn[]>(
-    () =>
-      [
-        ...systemColumns.map(
-          (column): BoardDisplayColumn => ({
-            kind: "system",
-            key: column.key as ColumnKey,
-            column,
-          }),
-        ),
-        ...customColumns.map(
-          (column): BoardDisplayColumn => ({ kind: "custom", column }),
-        ),
-      ].sort((left, right) => left.column.position - right.column.position),
-    [customColumns, systemColumns],
-  );
 
   /**
    * The key `hiddenColumns` uses for a column.
@@ -1040,17 +1162,23 @@ export function LiveMaintenanceBoard({
   }, [allBoardColumns]);
 
   /*
-   * The saved sort, read back from whichever column carries it. Seeded only
-   * when the board has no sort of its own yet, so re-reading the columns after
-   * a cell edit cannot yank the board out from under a sort chosen a moment ago.
+   * The saved sort and filter, read back off the columns that carry them.
+   *
+   * SEEDED ONCE PER BOARD, tracked by a ref rather than by "is the state still
+   * empty". The columns reload after every cell edit and after every column
+   * write; with an emptiness test, clearing a sort would be undone by the very
+   * next reload, and clearing a filter likewise — the state and the saved state
+   * would each keep re-asserting the other. The ref says "this board's stored
+   * choices have been applied", which is the actual condition.
    */
+  const seededChoicesFor = useRef<string | null>(null);
   useEffect(() => {
-    const saved = allBoardColumns.find((entry) => entry.column.settings.sort);
-    if (!saved) return;
-    setColumnSort((current) =>
-      current ?? { columnId: saved.column.id, direction: saved.column.settings.sort! },
-    );
-  }, [allBoardColumns]);
+    if (!allBoardColumns.length) return;
+    if (seededChoicesFor.current === boardId) return;
+    seededChoicesFor.current = boardId;
+    setSortRules(readSortRules(allBoardColumns));
+    setFilterState(readFilterState(allBoardColumns));
+  }, [allBoardColumns, boardId]);
 
   /**
    * Hide or show a column, and remember it.
@@ -1150,38 +1278,33 @@ export function LiveMaintenanceBoard({
    * rather than read through `optionsFor`, which is declared further down the
    * component and would be in its temporal dead zone from inside this memo.
    */
-  const systemOptionOrders = useMemo(() => {
-    const orders = new Map<string, Map<string, number>>();
-    for (const key of [
-      "tier",
-      "engineer",
-      "priority",
-      "label",
-      "status",
-      "storeLocation",
-    ] as BoardOptionColumn[]) {
-      const saved = boardOptions
-        .filter((option) => option.columnKey === key)
-        .sort((left, right) => left.position - right.position);
-      const choices = saved.length
-        ? saved.map((option) => ({ value: option.value, label: option.label }))
-        : (editableFallbackOptions[key] ?? []).map((option) => ({
-            value: option.value,
-            label: option.label,
-          }));
-      if (!choices.length) continue;
-      const lookup = new Map<string, number>();
-      choices.forEach((choice, index) => {
-        if (choice.value) lookup.set(choice.value, index);
-        if (choice.label) lookup.set(choice.label, index);
-      });
-      orders.set(key, lookup);
-    }
-    return orders;
-  }, [boardOptions]);
+
+  /**
+   * Everything the comparator needs that is neither a rule nor a row.
+   *
+   * Built once per render rather than closed over inside the sort, so the same
+   * context can order the grid, the CSV export and a test.
+   */
+  const sortContext = useMemo(
+    () => ({
+      boardId,
+      columnsById,
+      cells: customCells,
+      fileCounts: customFileCounts,
+      optionOrderFor: (key: ColumnKey) => systemOptionOrders.get(key),
+      positionOf: (requestId: string) =>
+        placement.get(requestId)?.position ?? Number.MAX_SAFE_INTEGER,
+    }),
+    [boardId, columnsById, customCells, customFileCounts, placement, systemOptionOrders],
+  );
+
+  /** The rows in the order the grid draws them, flattened. What an export gets. */
+  const exportRows = useMemo(
+    () => sortBoardRows(visibleRows, sortRules, sortContext),
+    [sortContext, sortRules, visibleRows],
+  );
 
   const groupedRows = useMemo(() => {
-    const optionOrderFor = (key: ColumnKey) => systemOptionOrders.get(key);
     const rowsByGroup = new Map<string, MaintenanceRequest[]>(
       groupByColumn ? [] : groups.map((group) => [group.id, []]),
     );
@@ -1189,7 +1312,7 @@ export function LiveMaintenanceBoard({
       ? allBoardColumns.find((item) => item.column.id === groupByColumn)
       : null;
 
-    for (const request of filtered) {
+    for (const request of visibleRows) {
       // Subitems hang under their parent, not beside it. Without this a child
       // was placed in a group and drawn as a top-level row, so the same work
       // appeared twice and the group counts were wrong.
@@ -1215,85 +1338,30 @@ export function LiveMaintenanceBoard({
       rowsByGroup.set(groupId, rows);
     }
 
-    const activeColumn = columnSort
-      ? allBoardColumns.find(
-          (entry) => entry.column.id === columnSort.columnId,
-        )
-      : null;
-    const direction = columnSort?.direction === "desc" ? -1 : 1;
+    /*
+     * ONE COMPARATOR, ONE SET OF RULES — see board-sort.ts.
+     *
+     * This used to inline a single column's comparison, with the option-order
+     * lookup and the empty-last rule spelled out here. All of it moved, whole,
+     * so that the ordering can be tested against rows rather than eyeballed on
+     * the page, and so the CSV export can be sorted by the same function the
+     * grid draws with instead of a second copy that agrees until it does not.
+     */
     for (const rows of rowsByGroup.values()) {
-      rows.sort((left, right) => {
-        if (activeColumn) {
-          const valueFor = (request: MaintenanceRequest) =>
-            activeColumn.kind === "system"
-              ? activeColumn.key === "name"
-                ? boardItemName(
-                    request,
-                    boardId,
-                    customCells[customCellKey(request.id, activeColumn.column.id)],
-                  )
-                : /*
-                     An option-backed system column sorts by the ORDER ITS
-                     OPTIONS ARE DEFINED IN, not by the label. Priority on this
-                     board is Medium, Low, Urgent — alphabetical ordering would
-                     put Low above Medium and present that as ascending, which
-                     is wrong in the only way that matters on a maintenance
-                     board. Anything not in the list sorts after everything
-                     that is, rather than landing at position 0.
-                   */
-                  optionOrderFor(activeColumn.key)
-                  ? (() => {
-                      const order = optionOrderFor(activeColumn.key)!;
-                      const raw = String(
-                        systemColumnSortValue(request, activeColumn.key) ?? "",
-                      );
-                      if (!raw) return "";
-                      return order.get(raw) ?? order.size;
-                    })()
-                  : systemColumnSortValue(request, activeColumn.key)
-              : activeColumn.column.type === "files"
-                ? customFileCounts[
-                    customCellKey(request.id, activeColumn.column.id)
-                  ] ?? 0
-                : customCellSortValue(
-                    activeColumn.column,
-                    customCells[
-                      customCellKey(request.id, activeColumn.column.id)
-                    ] ?? "",
-                  );
-          /*
-           * Empty last, in BOTH directions. Reversing the sort should reverse
-           * the rows that have a value, not float the blank ones to the top —
-           * on a board where most cells are still empty that reads as the sort
-           * having lost the data. Two empties fall through to the placement
-           * tiebreak below, so their order is stable between renders.
-           */
-          const leftValue = valueFor(left);
-          const rightValue = valueFor(right);
-          const leftEmpty = leftValue === "" || leftValue === null;
-          const rightEmpty = rightValue === "" || rightValue === null;
-          if (leftEmpty !== rightEmpty) return leftEmpty ? 1 : -1;
-          const compared = compareBoardValues(leftValue, rightValue);
-          if (compared) return compared * direction;
-        }
-        return (
-          (placement.get(left.id)?.position ?? Number.MAX_SAFE_INTEGER) -
-          (placement.get(right.id)?.position ?? Number.MAX_SAFE_INTEGER)
-        );
-      });
+      rows.sort((left, right) =>
+        compareBoardRows(left, right, sortRules, sortContext),
+      );
     }
     return rowsByGroup;
   }, [
     allBoardColumns,
-    boardId,
-    columnSort,
     customCells,
-    customFileCounts,
-    filtered,
     groupByColumn,
     groups,
     placement,
-    systemOptionOrders,
+    sortContext,
+    sortRules,
+    visibleRows,
   ]);
 
   const groupRows = (groupId: string) => groupedRows.get(groupId) ?? [];
@@ -1314,7 +1382,7 @@ export function LiveMaintenanceBoard({
     if (!entry) return groups.map((group) => ({ group, synthetic: false }));
 
     const seen = new Map<string, MaintenanceGroup>();
-    for (const request of filtered) {
+    for (const request of visibleRows) {
       if (request.parentId) continue;
       const value = String(
         entry.kind === "system"
@@ -1337,7 +1405,7 @@ export function LiveMaintenanceBoard({
     return [...seen.values()]
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((group) => ({ group, synthetic: true }));
-  }, [allBoardColumns, customCells, filtered, groupByColumn, groups]);
+  }, [allBoardColumns, customCells, visibleRows, groupByColumn, groups]);
 
   /**
    * Children keyed by parent — monday's Subitems column.
@@ -1557,6 +1625,10 @@ export function LiveMaintenanceBoard({
       settings?: BoardColumnSettings;
       width?: number;
       visible?: boolean;
+      /* Both have been columns on the table since Stage 1; neither had a
+         writer on this route until the board gained controls for them. */
+      pinned?: boolean;
+      summary?: string;
     },
   ) => {
     const response = await fetch(boardUrl("/api/board", boardId), {
@@ -1625,40 +1697,44 @@ export function LiveMaintenanceBoard({
   };
 
   /**
-   * Sort by a column, and remember it.
+   * Write the board's sort to the columns that carry it.
    *
-   * The sort moves locally first so the board reorders under the pointer, then
-   * it is written to the column's settings. It used to be `useState` and
-   * nothing else, which meant a sort lasted until the next reload while the
-   * column width and visibility beside it persisted — the inconsistency an
-   * operator notices first.
+   * The rules move locally first so the grid reorders under the pointer, then
+   * every column whose stored sort has changed is written. That is more writes
+   * than the single sort needed — clearing one rule renumbers the ones after it
+   * — but it is the only way the saved order and the drawn order can be the
+   * same thing. `sortSettingsFor` decides what one column should store; this
+   * decides which columns need telling.
    *
-   * At most one column carries a sort, so the previous holder is cleared in the
-   * same breath. A failed write leaves the board sorted and says so rather than
-   * silently reverting: the reorder on screen is real either way, only its
-   * memory is at stake.
+   * A failed write leaves the board sorted and says so, rather than silently
+   * reverting: the reorder on screen is real either way, only its memory is at
+   * stake.
    */
-  const sortByColumn = (
-    column: MaintenanceBoardColumn,
-    direction: "asc" | "desc",
-  ) => {
-    const previous = columnSort;
-    setColumnSort({ columnId: column.id, direction });
+  const commitSortRules = (next: BoardSortRule[]) => {
+    const previous = sortRules;
+    setSortRules(next);
     setColumnMenuInstance(null);
+    const touched = new Set([
+      ...previous.map((rule) => rule.columnId),
+      ...next.map((rule) => rule.columnId),
+    ]);
     void (async () => {
       try {
-        if (previous && previous.columnId !== column.id) {
-          const stale = allBoardColumns.find(
-            (entry) => entry.column.id === previous.columnId,
+        for (const columnId of touched) {
+          const entry = columnsById.get(columnId);
+          if (!entry) continue;
+          const settings = sortSettingsFor(
+            entry.column.settings as Record<string, unknown>,
+            next,
+            columnId,
           );
-          if (stale) {
-            const { sort: _dropped, ...rest } = stale.column.settings;
-            await updateCustomColumn(stale.column, { settings: rest });
+          if (
+            JSON.stringify(settings) === JSON.stringify(entry.column.settings)
+          ) {
+            continue;
           }
+          await updateCustomColumn(entry.column, { settings });
         }
-        await updateCustomColumn(column, {
-          settings: { ...column.settings, sort: direction },
-        });
       } catch (error) {
         onNotify(
           error instanceof Error
@@ -1667,6 +1743,352 @@ export function LiveMaintenanceBoard({
         );
       }
     })();
+  };
+
+  /** A header click, or "Sort ascending" in a column menu: this column alone. */
+  const sortByColumn = (
+    column: MaintenanceBoardColumn,
+    direction: SortDirection,
+  ) => commitSortRules(replaceSortRules(column.id, direction));
+
+  /** The deliberate multi-sort action: append this column as a tie-breaker. */
+  const addSortByColumn = (
+    column: MaintenanceBoardColumn,
+    direction: SortDirection,
+  ) => commitSortRules(addSortRule(sortRules, column.id, direction));
+
+  /**
+   * Which columns a rule may name.
+   *
+   * Visible ones only, in board order — offering to sort by a column somebody
+   * has hidden would reorder the grid by something they cannot see. Subitems is
+   * excluded from both: it is an expander rather than a value, and monday does
+   * not offer it either.
+   */
+  const sortableColumns = useMemo(
+    () => visibleBoardColumns.filter((entry) => entry.column.type !== "subitems"),
+    [visibleBoardColumns],
+  );
+  const filterableColumns = useMemo(
+    () => visibleBoardColumns.filter(isFilterableColumn),
+    [visibleBoardColumns],
+  );
+
+  /**
+   * The values a filter on this column can be built from.
+   *
+   * WHICH SIDE OF THE OPTION THE RULE STORES depends on where the value lives.
+   * A system option column is matched against the FIELD ON THE JOB — Priority
+   * holds "Urgent" — so the rule stores the option's value. A workspace column
+   * is matched against what its cell DISPLAYS, because a stored choice id is
+   * not something anybody would pick from a list, so the rule stores the label.
+   * `toFilterItem` in board-filter.ts is the other half of that arrangement.
+   */
+  const filterChoicesFor = (entry: BoardDisplayColumn): FilterChoice[] => {
+      if (entry.kind === "custom") {
+        if (entry.column.type === "checkbox") {
+          return [
+            { value: "Yes", label: "Yes" },
+            { value: "No", label: "No" },
+          ];
+        }
+        return choiceList(entry.column).map((choice) => ({
+          value: choice.label,
+          label: choice.label,
+        }));
+      }
+      if (entry.key === "assignee") {
+        return assignees.map((person) => ({ value: person, label: person }));
+      }
+      if (entry.key === "move") {
+        // The four lifecycle stages, which is what the Group column writes.
+        return ["Incoming", "Booked", "Attention", "Completed"].map((stage) => ({
+          value: stage,
+          label: stage,
+        }));
+      }
+      const optionKey = (
+        {
+          tier: "tier",
+          engineer: "engineer",
+          priority: "priority",
+          label: "label",
+          status: "status",
+          location: "storeLocation",
+          storeLocation: "storeLocation",
+        } as Partial<Record<ColumnKey, BoardOptionColumn>>
+      )[entry.key];
+      if (!optionKey) return [];
+    return optionsFor(optionKey)
+      .filter((option) => option.active !== false)
+      .map((option) => ({ value: option.value, label: option.label ?? option.value }));
+  };
+
+  /**
+   * Write the board's filter to the columns that carry it.
+   *
+   * Same shape as `commitSortRules`, and for the same reason: a rule belongs to
+   * its column, so one change can add, remove or re-join several at once and
+   * only the columns whose stored settings actually differ are written.
+   */
+  const commitFilterState = (next: BoardFilterState) => {
+    const previous = filterState;
+    setFilterState(next);
+    const touched = new Set([
+      ...previous.rules.map((rule) => rule.columnId),
+      ...next.rules.map((rule) => rule.columnId),
+    ]);
+    void (async () => {
+      try {
+        for (const columnId of touched) {
+          const entry = columnsById.get(columnId);
+          if (!entry) continue;
+          const settings = filterSettingsFor(
+            entry.column.settings as Record<string, unknown>,
+            next,
+            columnId,
+          );
+          if (JSON.stringify(settings) === JSON.stringify(entry.column.settings)) {
+            continue;
+          }
+          await updateCustomColumn(entry.column, { settings });
+        }
+      } catch (error) {
+        onNotify(
+          error instanceof Error
+            ? `Filtered, but the choice could not be saved: ${error.message}`
+            : "Filtered, but the choice could not be saved.",
+        );
+      }
+    })();
+  };
+
+  /**
+   * Where each frozen column sits, recomputed whenever a width or an order
+   * changes. `visibleBoardColumns` already carries the collapsed override, so a
+   * collapsed pin contributes the 44px it actually occupies.
+   */
+  const stickyOffsets = useMemo(
+    () => stickyColumnOffsets(visibleBoardColumns, isMobile),
+    [visibleBoardColumns, isMobile],
+  );
+
+  /**
+   * Freeze a column against the left edge, or release it.
+   *
+   * Optimistic like every other column write here: the grid redraws first and
+   * the failure puts it back, because a column that looks pinned and is not is
+   * worse than one that refused to pin.
+   */
+  const toggleColumnPinned = async (entry: BoardDisplayColumn) => {
+    const next = entry.column.pinned !== true;
+    setColumnMenuInstance(null);
+    const apply = (pinned: boolean) => (current: MaintenanceBoardColumn[]) =>
+      current.map((item) =>
+        item.id === entry.column.id ? { ...item, pinned } : item,
+      );
+    if (entry.column.system) setSystemColumns(apply(next));
+    else setCustomColumns(apply(next));
+    try {
+      await updateCustomColumn(entry.column, { pinned: next });
+      onNotify(
+        next
+          ? `${entry.column.title} is frozen to the left.`
+          : `${entry.column.title} scrolls with the board again.`,
+      );
+    } catch (error) {
+      if (entry.column.system) setSystemColumns(apply(!next));
+      else setCustomColumns(apply(!next));
+      onNotify(
+        error instanceof Error ? error.message : "The column could not be pinned.",
+      );
+    }
+  };
+
+  /** Which summary the group footer runs over this column. "" means the default. */
+  const setColumnSummary = async (
+    column: MaintenanceBoardColumn,
+    summary: string,
+  ) => {
+    setColumnMenuInstance(null);
+    const apply = (value: string | null) => (current: MaintenanceBoardColumn[]) =>
+      current.map((item) =>
+        item.id === column.id ? { ...item, summary: value } : item,
+      );
+    const previous = column.summary ?? null;
+    if (column.system) setSystemColumns(apply(summary || null));
+    else setCustomColumns(apply(summary || null));
+    try {
+      await updateCustomColumn(column, { summary });
+    } catch (error) {
+      if (column.system) setSystemColumns(apply(previous));
+      else setCustomColumns(apply(previous));
+      onNotify(
+        error instanceof Error ? error.message : "The summary could not be changed.",
+      );
+    }
+  };
+
+  /**
+   * Write a new column order.
+   *
+   * PATCH /api/board/columns has taken a bulk `[{ id, position }]` since Stage
+   * 1 and no UI ever called it. It is called here rather than through
+   * /api/board's `update_column` because reordering is one request for the
+   * whole board: sending 26 individual writes would leave the board in a
+   * half-reordered state if one of them failed.
+   *
+   * Positions are renumbered in thousands so a later "add column to the right"
+   * still has room to insert between two neighbours, which is the same spacing
+   * the seeder and `create_column` use.
+   */
+  const applyColumnOrder = async (ordered: BoardDisplayColumn[]) => {
+    const positions = ordered.map((entry, index) => ({
+      id: entry.column.id,
+      position: index * 1000,
+    }));
+    const positionById = new Map(positions.map((entry) => [entry.id, entry.position]));
+    const reposition = (current: MaintenanceBoardColumn[]) =>
+      current.map((column) =>
+        positionById.has(column.id)
+          ? { ...column, position: positionById.get(column.id)! }
+          : column,
+      );
+    const previousSystem = systemColumns;
+    const previousCustom = customColumns;
+    setSystemColumns(reposition);
+    setCustomColumns(reposition);
+    setColumnMenuInstance(null);
+    try {
+      const response = await fetch(boardUrl("/api/board/columns", boardId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order: positions }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "The column order could not be saved.");
+      }
+    } catch (error) {
+      setSystemColumns(previousSystem);
+      setCustomColumns(previousCustom);
+      onNotify(
+        error instanceof Error ? error.message : "The column order could not be saved.",
+      );
+    }
+  };
+
+  /** Move one column one place left or right, among the columns on screen. */
+  const moveColumnBy = async (entry: BoardDisplayColumn, delta: -1 | 1) => {
+    const from = visibleBoardColumns.findIndex(
+      (item) => item.column.id === entry.column.id,
+    );
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= visibleBoardColumns.length) return;
+    const ordered = [...visibleBoardColumns];
+    const [moved] = ordered.splice(from, 1);
+    ordered.splice(to, 0, moved);
+    await applyColumnOrder(ordered);
+  };
+
+  /**
+   * Finish a header drag: the dragged column lands where the drop happened.
+   *
+   * Dropping a column on itself, or on nothing, is a no-op rather than a
+   * reorder to position 0 — a drag that ends where it began should leave the
+   * board exactly as it was.
+   */
+  const dropColumnOn = async (targetColumnId: string) => {
+    const sourceId = draggingColumnId;
+    setDraggingColumnId(null);
+    setColumnDropTargetId(null);
+    if (!sourceId || sourceId === targetColumnId) return;
+    const from = visibleBoardColumns.findIndex((item) => item.column.id === sourceId);
+    const to = visibleBoardColumns.findIndex(
+      (item) => item.column.id === targetColumnId,
+    );
+    if (from < 0 || to < 0) return;
+    const ordered = [...visibleBoardColumns];
+    const [moved] = ordered.splice(from, 1);
+    ordered.splice(to, 0, moved);
+    await applyColumnOrder(ordered);
+  };
+
+  /**
+   * Ask the server for a CSV of these rows and hand it to the browser.
+   *
+   * Four controls export — the page heading, the toolbar, a group's menu and
+   * the selection bar — and each passes a different set of rows. What they
+   * share is the columns being drawn and the failure path, which is why the
+   * request is assembled once here: a refusal has to reach the operator with
+   * the server's own sentence, not disappear into a download that never starts.
+   */
+  const exportRowsToCsv = async (rows: MaintenanceRequest[]) => {
+    try {
+      await downloadBoardCsv({
+        boardId,
+        requests: rows,
+        columns: visibleBoardColumns.map((entry) => entry.column),
+      });
+    } catch (error) {
+      onNotify(
+        error instanceof Error ? error.message : "The board could not be exported.",
+      );
+    }
+  };
+
+  /** Opens the filter panel with a rule already started on one column. */
+  const filterByColumn = (entry: BoardDisplayColumn) => {
+    setColumnMenuInstance(null);
+    setSortPanelOpen(false);
+    setFilterPanelOpen(true);
+    if (findFilterRule(filterState, entry.column.id)) return;
+    const first = operatorsFor(entry)[0];
+    if (!first) return;
+    commitFilterState(
+      setFilterRule(filterState, {
+        columnId: entry.column.id,
+        operator: first.key,
+        values: [],
+      }),
+    );
+  };
+
+  /**
+   * The toolbar's one-click sort, and what it is called right now.
+   *
+   * On maintenance it is Date Requested; on Store Documentation the Store name,
+   * because a store is not a ticket and has no meaningful "requested" date.
+   * Either way it now writes a RULE on a real column, which is the fix: the old
+   * Newest/Oldest set a private flag that reordered the CSV and nothing on
+   * screen, because every group is re-sorted by the board's own comparator.
+   *
+   * With no rule set the board is in its base order — newest first — so that is
+   * what the label says, and the first click moves it to oldest.
+   */
+  const quickSortColumn = isStoreDocumentation
+    ? itemNameColumn
+    : systemColumns.find((column) => column.key === "requested") ?? null;
+  const quickSortDirection = quickSortColumn
+    ? sortDirectionFor(sortRules, quickSortColumn.id)
+    : null;
+  const quickSortLabel = isStoreDocumentation
+    ? {
+        text: quickSortDirection === "desc" ? "Z–A" : "A–Z",
+        aria: "Sort stores by name",
+      }
+    : {
+        text: quickSortDirection === "asc" ? "Oldest" : "Newest",
+        aria: "Sort by the date each job was requested",
+      };
+  const quickSortToggle = () => {
+    if (!quickSortColumn) return;
+    commitSortRules(
+      replaceSortRules(
+        quickSortColumn.id,
+        quickSortDirection === "asc" ? "desc" : "asc",
+      ),
+    );
   };
 
   const openColumnPickerAfter = (
@@ -2666,8 +3088,6 @@ export function LiveMaintenanceBoard({
   };
 
   const identity = boardIdentity(boardId);
-  const isStoreDocumentation = boardId === "store-documentation";
-  const canEditGroups = !isStoreDocumentation;
   const newItemLabel = isStoreDocumentation ? "New store" : "New item";
   const addItemToGroupLabel = isStoreDocumentation ? "Add store to group" : "Add item to group";
 
@@ -2698,15 +3118,7 @@ export function LiveMaintenanceBoard({
             />
           }
           onPeriodChange={setAnalyticsPeriod}
-          onExport={() =>
-            downloadBoardCsv(
-              boardId,
-              scopedRequests,
-              customColumns,
-              customCells,
-              customFileCounts,
-            )
-          }
+          onExport={canExport === false ? undefined : () => void exportRowsToCsv(scopedRequests)}
         />
       </section>
       )}
@@ -2910,6 +3322,16 @@ export function LiveMaintenanceBoard({
                 ))}
               </select>
             ) : (
+              /*
+                THE OPTIONS THIS WORKSPACE ACTUALLY HAS, not four literals.
+
+                This list read Urgent, High, Medium, Low. The registry holds
+                Medium, Low and Urgent — monday's Priority column has no "High"
+                — so the dropdown offered a value no job could carry and could
+                never match, while any priority an admin added was missing from
+                it. Same source as the chips in the grid, so a renamed option
+                renames here too.
+              */
               <select
                 aria-label="Filter by priority"
                 value={priority}
@@ -2917,57 +3339,123 @@ export function LiveMaintenanceBoard({
                   setPriority(event.target.value as "All" | Priority)
                 }
               >
-                <option>All</option>
-                <option>Urgent</option>
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
+                <option value="All">All</option>
+                {optionsFor("priority").map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label ?? option.value}
+                  </option>
+                ))}
               </select>
             )}
           </label>
 
           {/*
-            Sort. On maintenance this flips the board between newest and oldest
-            first. Store Documentation has no meaningful "requested" date — a
-            store is not a ticket — so it sorts the sheet alphabetically by
-            store instead, driving the same `columnSort` the Store column's own
-            header menu sets, so the two controls agree rather than fighting.
+            SORT — the composite control, beside the quick sort in every header.
+
+            The button is the fast path this toolbar always had: on maintenance
+            it flips the board between newest and oldest first, on Store
+            Documentation between A–Z and Z–A, because a store is not a ticket
+            and has no meaningful "requested" date. What changed is that both
+            now write a RULE on a real column — Date Requested, or the Store
+            column — instead of a private flag the grid ignored. The old
+            Newest/Oldest reordered the CSV and nothing on screen, because
+            `groupedRows` re-sorted every group by stored position underneath
+            it.
+
+            The chevron beside it opens the full ordered sort, where a
+            tie-breaker can be added, reordered or dropped.
           */}
-          {isStoreDocumentation && itemNameColumn ? (
+          <div className="live-board-menu-wrap live-board-rules-wrap" data-board-popover>
             <button
               className="live-board-tool"
               type="button"
-              aria-label="Sort stores by name"
-              onClick={() =>
-                setColumnSort((current) =>
-                  current?.columnId === itemNameColumn.id &&
-                  current.direction === "asc"
-                    ? { columnId: itemNameColumn.id, direction: "desc" }
-                    : { columnId: itemNameColumn.id, direction: "asc" },
-                )
-              }
+              aria-label={quickSortLabel.aria}
+              onClick={quickSortToggle}
             >
               <Icon name="activity" size={16} />
-              {columnSort?.columnId === itemNameColumn.id &&
-              columnSort.direction === "desc"
-                ? "Z–A"
-                : "A–Z"}
+              {quickSortLabel.text}
             </button>
-          ) : (
             <button
-              className="live-board-tool"
+              className="live-board-tool live-board-tool--adjacent"
               type="button"
+              aria-label="Open the board's sort rules"
+              aria-expanded={sortPanelOpen}
               onClick={() => {
-                setColumnSort(null);
-                setSortDirection((current) =>
-                  current === "newest" ? "oldest" : "newest",
-                );
+                setSortPanelOpen((open) => !open);
+                setFilterPanelOpen(false);
+                setActionsOpen(false);
+                setHideOpen(false);
               }}
             >
-              <Icon name="activity" size={16} />
-              {sortDirection === "newest" ? "Newest" : "Oldest"}
+              {sortRules.length > 1 && (
+                <span className="live-board-tool__count">{sortRules.length}</span>
+              )}
+              <Icon name="chevron" size={14} />
             </button>
-          )}
+            {sortPanelOpen && (
+              <BoardSortPanel
+                columns={sortableColumns}
+                rules={sortRules}
+                onReplace={(columnId, direction) =>
+                  commitSortRules(replaceSortRules(columnId, direction))
+                }
+                onAdd={(columnId, direction) =>
+                  commitSortRules(addSortRule(sortRules, columnId, direction))
+                }
+                onFlip={(columnId) => commitSortRules(flipSortRule(sortRules, columnId))}
+                onMove={(columnId, delta) =>
+                  commitSortRules(moveSortRule(sortRules, columnId, delta))
+                }
+                onRemove={(columnId) => commitSortRules(removeSortRule(sortRules, columnId))}
+                onClear={() => commitSortRules([])}
+                onClose={() => setSortPanelOpen(false)}
+              />
+            )}
+          </div>
+
+          {/*
+            FILTER — the structured one. The engine behind it has been in
+            views/view-model.ts since Stage 6 with all thirteen of monday's
+            operators; nothing on the grid could reach it. The search box above
+            and the two dropdowns beside it are untouched and AND with whatever
+            is set here.
+          */}
+          <div className="live-board-menu-wrap live-board-rules-wrap" data-board-popover>
+            <button
+              className={`live-board-tool${filterState.rules.length ? " is-active" : ""}`}
+              type="button"
+              aria-expanded={filterPanelOpen}
+              onClick={() => {
+                setFilterPanelOpen((open) => !open);
+                setSortPanelOpen(false);
+                setActionsOpen(false);
+                setHideOpen(false);
+              }}
+            >
+              <Icon name="filter" size={16} />
+              Filter
+              {filterState.rules.length > 0 && (
+                <span className="live-board-tool__count">{filterState.rules.length}</span>
+              )}
+            </button>
+            {filterPanelOpen && (
+              <BoardFilterPanel
+                columns={filterableColumns}
+                state={filterState}
+                choicesFor={filterChoicesFor}
+                kindFor={filterKindFor}
+                matched={visibleRows.length}
+                total={filtered.length}
+                onJoinChange={(join) => commitFilterState({ ...filterState, join })}
+                onRuleChange={(rule) => commitFilterState(setFilterRule(filterState, rule))}
+                onRemove={(columnId) =>
+                  commitFilterState(removeFilterRule(filterState, columnId))
+                }
+                onClear={() => commitFilterState({ join: filterState.join, rules: [] })}
+                onClose={() => setFilterPanelOpen(false)}
+              />
+            )}
+          </div>
 
           <div className="live-board-menu-wrap" data-board-popover>
             <button
@@ -3030,22 +3518,25 @@ export function LiveMaintenanceBoard({
             </label>
           )}
 
-          <button
-            className="live-board-tool"
-            type="button"
-            onClick={() =>
-              downloadBoardCsv(
-                boardId,
-                filtered,
-                customColumns,
-                customCells,
-                customFileCounts,
-              )
-            }
-          >
-            <Icon name="download" size={16} />
-            Export
-          </button>
+          {/*
+            The export controls are drawn only where the server would allow one.
+            THE RULE IS NOT HERE — POST /api/board/csv holds `data.export` and
+            refuses without it — so this is a courtesy, not a gate, and it reads
+            the same answer the server enforces with rather than guessing from a
+            role. `canExport === null` means the answer is still in flight, and
+            the button is drawn: flashing every control off on each page load
+            reads as a permissions fault.
+          */}
+          {canExport !== false && (
+            <button
+              className="live-board-tool"
+              type="button"
+              onClick={() => void exportRowsToCsv(exportRows)}
+            >
+              <Icon name="download" size={16} />
+              Export
+            </button>
+          )}
         </div>
         </BoardChrome>
 
@@ -3367,22 +3858,18 @@ export function LiveMaintenanceBoard({
                               </button>
                             </>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              downloadBoardCsv(
-                                boardId,
-                                rows,
-                                customColumns,
-                                customCells,
-                                customFileCounts,
-                              );
-                              setGroupMenuId(null);
-                            }}
-                          >
-                            <Icon name="download" size={15} />
-                            Export group
-                          </button>
+                          {canExport !== false && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void exportRowsToCsv(rows);
+                                setGroupMenuId(null);
+                              }}
+                            >
+                              <Icon name="download" size={15} />
+                              Export group
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
@@ -3454,9 +3941,10 @@ export function LiveMaintenanceBoard({
                               }
                             />
                           </th>
-                          {visibleBoardColumns.map((entry) => {
+                          {visibleBoardColumns.map((entry, columnIndex) => {
                             const column = entry.column;
                             const instanceId = `${group.id}:${column.id}`;
+                            const rank = sortRuleIndex(sortRules, column.id);
                             return (
                               <BoardColumnHeader
                                 key={column.id}
@@ -3466,10 +3954,23 @@ export function LiveMaintenanceBoard({
                                 }
                                 column={column}
                                 menuOpen={columnMenuInstance === instanceId}
-                                sortDirection={
-                                  columnSort?.columnId === column.id
-                                    ? columnSort.direction
-                                    : null
+                                sortDirection={sortDirectionFor(sortRules, column.id)}
+                                /* The rank is drawn only when there is more than
+                                   one rule: a "1" beside the only sorted column
+                                   says nothing and adds a badge to every board. */
+                                sortRank={
+                                  sortRules.length > 1 && rank >= 0 ? rank + 1 : null
+                                }
+                                filtered={Boolean(findFilterRule(filterState, column.id))}
+                                pinned={column.pinned === true}
+                                sticky={stickyOffsets.get(column.id)}
+                                summaries={summariesFor(column.type)}
+                                canMoveLeft={columnIndex > 0}
+                                canMoveRight={columnIndex < visibleBoardColumns.length - 1}
+                                dropTarget={
+                                  columnDropTargetId === column.id &&
+                                  draggingColumnId !== null &&
+                                  draggingColumnId !== column.id
                                 }
                                 onMenuToggle={() => {
                                   setColumnMenuInstance((current) =>
@@ -3492,6 +3993,20 @@ export function LiveMaintenanceBoard({
                                 onSort={(direction) =>
                                   sortByColumn(column, direction)
                                 }
+                                onAddSort={(direction) =>
+                                  addSortByColumn(column, direction)
+                                }
+                                onFilter={() => filterByColumn(entry)}
+                                onTogglePin={() => void toggleColumnPinned(entry)}
+                                onMove={(delta) => void moveColumnBy(entry, delta)}
+                                onSummary={(summary) => void setColumnSummary(column, summary)}
+                                onDragStartColumn={() => setDraggingColumnId(column.id)}
+                                onDragOverColumn={() => setColumnDropTargetId(column.id)}
+                                onDropColumn={() => void dropColumnOn(column.id)}
+                                onDragEndColumn={() => {
+                                  setDraggingColumnId(null);
+                                  setColumnDropTargetId(null);
+                                }}
                                 onAddRight={() =>
                                   openColumnPickerAfter(group.id, column)
                                 }
@@ -3583,6 +4098,7 @@ export function LiveMaintenanceBoard({
                               dropTarget.beforeRequestId === request.id
                             }
                             columns={visibleBoardColumns}
+                            stickyOffsets={stickyOffsets}
                             onOpen={() => {
                               setRowMenuId(null);
                               setGroupMenuId(null);
@@ -3777,6 +4293,7 @@ export function LiveMaintenanceBoard({
                                 assigneeOptions={assigneeOptions}
                                 customCells={customCells}
                                 customFileCounts={customFileCounts}
+                                sticky={stickyOffsets.get(column.id)}
                               />
                             );
                           })}
@@ -3804,7 +4321,7 @@ export function LiveMaintenanceBoard({
             Add new group
           </button>
           <span>
-            Showing <strong>{filtered.length}</strong> of {scopedRequests.length}{" "}
+            Showing <strong>{visibleRows.length}</strong> of {scopedRequests.length}{" "}
             items
           </span>
         </div>
@@ -3824,21 +4341,12 @@ export function LiveMaintenanceBoard({
             <Icon name="grid" size={18} />
             Duplicate
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              downloadBoardCsv(
-                boardId,
-                selectedRequests,
-                customColumns,
-                customCells,
-                customFileCounts,
-              )
-            }
-          >
-            <Icon name="download" size={18} />
-            Export
-          </button>
+          {canExport !== false && (
+            <button type="button" onClick={() => void exportRowsToCsv(selectedRequests)}>
+              <Icon name="download" size={18} />
+              Export
+            </button>
+          )}
           <button
             type="button"
             disabled={bulkBusy}
@@ -4001,439 +4509,6 @@ export function LiveMaintenanceBoard({
       )}
     </div>
     </MobileBoardContext.Provider>
-  );
-}
-
-function BoardColumnHeader({
-  kind,
-  systemKey,
-  column,
-  menuOpen,
-  sortDirection,
-  onMenuToggle,
-  onConfigure,
-  onRename,
-  onToggleWrap,
-  onSort,
-  onAddRight,
-  onDuplicate,
-  onClear,
-  onHide,
-  onDelete,
-  onChangeType,
-  onCollapse,
-  onGroupBy,
-  collapsed,
-  groupedByThis,
-  onResizePreview,
-  onResizeCommit,
-}: {
-  kind: BoardDisplayColumn["kind"];
-  systemKey?: ColumnKey;
-  column: MaintenanceBoardColumn;
-  menuOpen: boolean;
-  sortDirection: "asc" | "desc" | null;
-  onMenuToggle: () => void;
-  onConfigure?: () => void;
-  onRename: () => void;
-  onToggleWrap: () => void;
-  onSort: (direction: "asc" | "desc") => void;
-  onAddRight: () => void;
-  onDuplicate?: () => void;
-  onClear?: () => void;
-  onHide: () => void;
-  onDelete?: () => void;
-  /** Retype a custom column. System columns refuse — the board reads them. */
-  onChangeType?: (type: BoardColumnType) => void;
-  onCollapse: () => void;
-  onGroupBy: () => void;
-  collapsed: boolean;
-  groupedByThis: boolean;
-  onResizePreview: (width: number) => void;
-  onResizeCommit: (width: number) => void;
-}) {
-  const mobile = useContext(MobileBoardContext);
-  const displayedWidth = displayedBoardColumnWidth(column, mobile);
-  const definition =
-    columnTypeDefinitions.find((item) => item.type === column.type) ??
-    columnTypeDefinitions[2];
-  const className =
-    kind === "system" && systemKey
-      ? `sheet-column--${systemKey}`
-      : "sheet-column--custom";
-  return (
-    <th
-      className={`${className}${
-        column.settings.wrap ? " is-column-wrapped" : ""
-      }`}
-      /* Announced, not just drawn: a screen reader reads the sort off the
-         column header the same way a sighted reader reads the arrow. */
-      aria-sort={
-        sortDirection === "asc"
-          ? "ascending"
-          : sortDirection === "desc"
-            ? "descending"
-            : "none"
-      }
-      style={{
-        width: displayedWidth,
-        minWidth: displayedWidth,
-        maxWidth: displayedWidth,
-      }}
-    >
-      <div className="custom-column-header" data-board-popover>
-        {kind === "custom" && (
-          <span
-            className="custom-column-header__type"
-            style={{ background: definition.color }}
-          >
-            <Icon name={definition.icon} size={13} />
-          </span>
-        )}
-        <strong title={column.title}>{column.title}</strong>
-        {/*
-          QUICK SORT, monday-style: the control is always here, not conditional
-          on the column already being sorted.
-
-          At rest on an unsorted column it is invisible (CSS, on hover and
-          focus-within) so 26 headers do not turn into 26 buttons; the moment a
-          column IS sorted its arrow stays put, because "which column is this
-          board ordered by" has to be answerable without waving the mouse over
-          every header.
-
-          It drives the SAME `onSort` the `...` menu calls, so there is one
-          sort state and the two controls cannot disagree. First click sorts
-          ascending, the next reverses — `sortDirection` is the board's, not a
-          second copy kept in here.
-        */}
-        <button
-          className={`column-sort-indicator${sortDirection ? " is-active" : ""}`}
-          type="button"
-          title={
-            sortDirection
-              ? `Sorted ${sortDirection === "asc" ? "ascending" : "descending"} — click to reverse`
-              : `Sort ${column.title} ascending`
-          }
-          aria-label={
-            sortDirection === "asc"
-              ? `Sort ${column.title} descending`
-              : `Sort ${column.title} ascending`
-          }
-          onClick={() => onSort(sortDirection === "asc" ? "desc" : "asc")}
-        >
-          <Icon
-            name={
-              sortDirection === "asc"
-                ? "sortAsc"
-                : sortDirection === "desc"
-                  ? "sortDesc"
-                  : "sortNone"
-            }
-            size={13}
-          />
-        </button>
-        <button
-          className="custom-column-header__more"
-          type="button"
-          aria-label={`Actions for ${column.title}`}
-          onClick={onMenuToggle}
-        >
-          <Icon name="more" size={15} />
-        </button>
-        {menuOpen && (
-          <div className="custom-column-menu">
-            <small>{kind === "system" ? "Board" : definition.label} column</small>
-            {onConfigure && (
-              <button type="button" onClick={onConfigure}>
-                <Icon name="settings" size={15} />
-                {columnSettingsActionLabel(column.type)}
-              </button>
-            )}
-            <button type="button" onClick={onRename}>
-              <Icon name="settings" size={15} />
-              Rename column
-            </button>
-            <button type="button" onClick={onToggleWrap}>
-              <Icon name="list" size={15} />
-              {column.settings.wrap ? "Unwrap text" : "Wrap text"}
-            </button>
-            <button type="button" onClick={() => onSort("asc")}>
-              <Icon name="activity" size={15} />
-              Sort ascending
-            </button>
-            <button type="button" onClick={() => onSort("desc")}>
-              <Icon name="activity" size={15} />
-              Sort descending
-            </button>
-            <button type="button" onClick={onAddRight}>
-              <Icon name="plus" size={15} />
-              Add column to the right
-            </button>
-            {onDuplicate && (
-              <button type="button" onClick={onDuplicate}>
-                <Icon name="grid" size={15} />
-                Duplicate column
-              </button>
-            )}
-            {onClear && (
-              <button type="button" onClick={onClear}>
-                <Icon name="close" size={15} />
-                Clear column
-              </button>
-            )}
-            <button type="button" onClick={onCollapse}>
-              <Icon name="chevron" size={15} />
-              {collapsed ? "Expand column" : "Collapse column"}
-            </button>
-            <button type="button" onClick={onGroupBy}>
-              <Icon name="grid" size={15} />
-              {groupedByThis ? "Stop grouping by this" : "Group by this column"}
-            </button>
-            {onChangeType && (
-              <label className="custom-column-menu__type">
-                <span>
-                  <Icon name="settings" size={15} />
-                  Change column type
-                </span>
-                <select
-                  value={column.type}
-                  onChange={(event) =>
-                    onChangeType(event.target.value as BoardColumnType)
-                  }
-                >
-                  {columnTypeDefinitions.map((item) => (
-                    <option key={item.type} value={item.type}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <button type="button" onClick={onHide}>
-              <Icon name="list" size={15} />
-              Hide column
-            </button>
-            {onDelete && (
-              <button className="is-danger" type="button" onClick={onDelete}>
-                <Icon name="close" size={15} />
-                Delete column
-              </button>
-            )}
-          </div>
-        )}
-        <ColumnResizeHandle
-          column={column}
-          displayedWidth={displayedWidth}
-          minimum={systemKey === "name" ? (mobile ? 150 : 220) : 90}
-          onPreview={onResizePreview}
-          onCommit={onResizeCommit}
-        />
-      </div>
-    </th>
-  );
-}
-
-function ColumnResizeHandle({
-  column,
-  displayedWidth,
-  minimum,
-  onPreview,
-  onCommit,
-}: {
-  column: MaintenanceBoardColumn;
-  displayedWidth: number;
-  minimum: number;
-  onPreview: (width: number) => void;
-  onCommit: (width: number) => void;
-}) {
-  const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startWidth = displayedWidth;
-    let latestWidth = startWidth;
-    document.body.classList.add("is-resizing-board-column");
-    const move = (moveEvent: PointerEvent) => {
-      latestWidth = Math.max(
-        minimum,
-        Math.min(600, Math.round(startWidth + moveEvent.clientX - startX)),
-      );
-      onPreview(latestWidth);
-    };
-    const finish = () => {
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", finish);
-      document.removeEventListener("pointercancel", finish);
-      document.body.classList.remove("is-resizing-board-column");
-      if (latestWidth !== startWidth) onCommit(latestWidth);
-    };
-    document.addEventListener("pointermove", move);
-    document.addEventListener("pointerup", finish, { once: true });
-    document.addEventListener("pointercancel", finish, { once: true });
-  };
-  return (
-    <button
-      className="column-resize-handle"
-      type="button"
-      aria-label={`Resize ${column.title} column`}
-      title="Resize column"
-      onPointerDown={startResize}
-    />
-  );
-}
-
-function ColumnPicker({
-  query,
-  showMore,
-  busy,
-  onQueryChange,
-  onShowMore,
-  onChoose,
-  onClose,
-}: {
-  query: string;
-  showMore: boolean;
-  busy: boolean;
-  onQueryChange: (value: string) => void;
-  onShowMore: () => void;
-  onChoose: (type: BoardColumnType) => void;
-  onClose: () => void;
-}) {
-  const mobile = useContext(MobileBoardContext);
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
-
-  const needle = query.trim().toLowerCase();
-  const mobilePrimaryTypes: BoardColumnType[] = [
-    "status",
-    "people",
-    "date",
-    "text",
-    "number",
-    "timeline",
-    "dropdown",
-    "checkbox",
-  ];
-  const mobilePrimaryDefinitions = mobilePrimaryTypes
-    .map((type) => columnTypeDefinitions.find((item) => item.type === type))
-    .filter((item): item is ColumnTypeDefinition => Boolean(item));
-  const mobileMoreDefinitions = columnTypeDefinitions.filter(
-    (item) => !mobilePrimaryTypes.includes(item.type),
-  );
-  const visibleDefinitions = mobile
-    ? showMore
-      ? [...mobilePrimaryDefinitions, ...mobileMoreDefinitions]
-      : mobilePrimaryDefinitions
-    : columnTypeDefinitions.filter(
-        (item) =>
-          (item.section !== "More columns" || showMore || Boolean(needle)) &&
-          (!needle ||
-            item.label.toLowerCase().includes(needle) ||
-            item.description.toLowerCase().includes(needle)),
-      );
-  const sections: ColumnTypeDefinition["section"][] = [
-    "Essentials",
-    "Super useful",
-    "More columns",
-  ];
-
-  return (
-    <div
-      className={`column-picker${mobile ? " column-picker--mobile" : ""}`}
-      role="dialog"
-      aria-label="Add column"
-    >
-      {mobile ? (
-        <header className="column-picker__mobile-header">
-          <button
-            type="button"
-            aria-label="Close column picker"
-            onClick={onClose}
-          >
-            <Icon name="close" size={25} />
-          </button>
-          <strong>Create new column</strong>
-          <span aria-hidden="true" />
-        </header>
-      ) : (
-        <header>
-          <label>
-            <Icon name="search" size={16} />
-            <input
-              autoFocus
-              type="search"
-              value={query}
-              placeholder="Search or describe your column"
-              onChange={(event) => onQueryChange(event.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            aria-label="Close column picker"
-            onClick={onClose}
-          >
-            <Icon name="close" size={17} />
-          </button>
-        </header>
-      )}
-      <div className="column-picker__body">
-        {(mobile ? ["Essentials" as const] : sections).map((section) => {
-          const definitions = visibleDefinitions.filter(
-            (item) => mobile || item.section === section,
-          );
-          if (!definitions.length) return null;
-          return (
-            <section key={section}>
-              {!mobile && <small>{section}</small>}
-              <div>
-                {definitions.map((definition) => (
-                  <button
-                    key={definition.type}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onChoose(definition.type)}
-                  >
-                    <span style={{ background: definition.color }}>
-                      <Icon name={definition.icon} size={mobile ? 23 : 15} />
-                    </span>
-                    <span>
-                      <strong>
-                        {mobile && definition.type === "dropdown"
-                          ? "Tags"
-                          : definition.label === "Numbers"
-                            ? "Number"
-                            : definition.label}
-                      </strong>
-                      {!mobile && <small>{definition.description}</small>}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-        {!visibleDefinitions.length && (
-          <div className="column-picker__empty">
-            No matching column type. Try text, date, people or files.
-          </div>
-        )}
-      </div>
-      {!showMore && !needle && (
-        <button
-          className="column-picker__more"
-          type="button"
-          onClick={onShowMore}
-        >
-          More columns
-          <Icon name="chevron" size={15} />
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -5016,6 +5091,7 @@ function BoardRow({
   dragging,
   dropBefore,
   columns,
+  stickyOffsets,
   onOpen,
   onOpenUpdates,
   onSelected,
@@ -5061,6 +5137,14 @@ function BoardRow({
   dragging: boolean;
   dropBefore: boolean;
   columns: BoardDisplayColumn[];
+  /**
+   * Where each frozen column sits, keyed by column id.
+   *
+   * Computed once for the board rather than per row: it depends only on the
+   * columns and their widths, and 745 rows recomputing the same running total
+   * would be 745 identical passes over 26 columns on every render.
+   */
+  stickyOffsets: Map<string, StickyColumn>;
   onOpen: () => void;
   onOpenUpdates: () => void;
   onSelected: (selected: boolean) => void;
@@ -5137,12 +5221,28 @@ function BoardRow({
   const [moveListOpen, setMoveListOpen] = useState(false);
   const columnStyle = (column: MaintenanceBoardColumn): CSSProperties => {
     const width = displayedBoardColumnWidth(column, mobile);
-    return {
+    const style: CSSProperties = {
       width,
       minWidth: width,
       maxWidth: width,
     };
+    /*
+     * A frozen column's left offset is the running width of everything frozen
+     * ahead of it, which is data rather than a stylesheet constant — see
+     * board-pinning.ts. The stylesheet still owns the Items column's own sticky
+     * rules; this only supplies the number, and only where one applies.
+     */
+    const sticky = stickyOffsets.get(column.id);
+    if (sticky) {
+      style.left = sticky.left;
+      style.zIndex = stickyZIndex(sticky.order, false);
+    }
+    return style;
   };
+
+  /** Marks a cell whose column is pinned, so the stylesheet can make it opaque. */
+  const pinnedClass = (column: MaintenanceBoardColumn) =>
+    column.pinned === true ? " is-pinned-column" : "";
   const systemCell = (
     key: ColumnKey,
     column: MaintenanceBoardColumn,
@@ -5151,7 +5251,8 @@ function BoardRow({
       "sheet-column--" +
       key +
       (column.settings.wrap ? " is-column-wrapped" : "") +
-      (shouldCenterBoardCell(column, key) ? " is-content-centered" : "");
+      (shouldCenterBoardCell(column, key) ? " is-content-centered" : "") +
+      pinnedClass(column);
     const shared = {
       className,
       style: columnStyle(column),
@@ -5378,6 +5479,37 @@ function BoardRow({
               }
               onSave={(completedAt, metadata) => {
                 onSave({ completedAt });
+                onSaveDateMetadata(column, metadata);
+              }}
+            />
+          </td>
+        );
+      /*
+       * THE JOB'S DEADLINE, AND THE SAME FIELD THE CALENDAR READS.
+       *
+       * `maintenance_requests.due_at` has driven the overdue meter, the Planned
+       * calendar and the SLA window since long before the board showed it; the
+       * only way to set it was the Timeline column's end handle or the request
+       * drawer. This writes THE SAME FIELD — there is no cell behind it — so a
+       * date set here is the date the calendar draws and the date the overdue
+       * count measures against, with nothing to keep in step.
+       *
+       * The same `DateCell` the other three date columns use, so the picker,
+       * the icon menu and the keyboard behaviour are one implementation.
+       * `metadataValue` is the icon and time that sit alongside the date, which
+       * IS a cell — decoration on the value, never the value.
+       */
+      case "dueDate":
+        return (
+          <td {...shared}>
+            <DateCell
+              title={column.title}
+              value={request.dueAt}
+              metadataValue={
+                customCells[customCellKey(request.id, column.id)] ?? ""
+              }
+              onSave={(dueAt, metadata) => {
+                onSave({ dueAt });
                 onSaveDateMetadata(column, metadata);
               }}
             />
@@ -5715,7 +5847,8 @@ function BoardRow({
               "sheet-column--custom sheet-column--custom-" +
               column.type +
               (column.settings.wrap ? " is-column-wrapped" : "") +
-              (shouldCenterBoardCell(column) ? " is-content-centered" : "")
+              (shouldCenterBoardCell(column) ? " is-content-centered" : "") +
+              pinnedClass(column)
             }
             key={column.id}
             style={columnStyle(column)}
