@@ -115,17 +115,53 @@ test("the Total Care saving is derived from the prices above it", async () => {
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
   const bands = [...pricing.matchAll(
     /coordination: (\d+), compliance: (\d+), total: (\d+)/g,
-  )];
-  assert.equal(bands.length, 2, "two numbered bands");
-  for (const [, coordination, compliance, total] of bands) {
-    assert.equal(
-      Number(coordination) + Number(compliance) - Number(total),
-      20,
-      "the badge claims £20; the cards must agree",
-    );
-  }
+  )].map(([, coordination, compliance, total]) => ({
+    coordination: Number(coordination),
+    compliance: Number(compliance),
+    total: Number(total),
+  }));
+
+  /*
+   * Three numbered bands now, not two: 26+ used to be a "Custom" card with a
+   * button and carries a published rate. The approved figures, pinned here so
+   * a price cannot drift silently — they are quoted to clients.
+   */
+  assert.deepEqual(bands, [
+    { coordination: 65, compliance: 55, total: 100 },
+    { coordination: 58, compliance: 48, total: 88 },
+    { coordination: 52, compliance: 42, total: 78 },
+  ]);
+
+  /* The badge claims a saving per band; each band's cards must produce it. */
+  assert.deepEqual(
+    bands.map((band) => band.coordination + band.compliance - band.total),
+    [20, 18, 16],
+  );
   assert.match(pricing, /save £\{saving\} per store/, "the badge must read the computed figure");
-  assert.match(pricing, /saving !== null/, "and must not appear on the band with no prices");
+  assert.match(
+    pricing,
+    /const saving = band\.coordination \+ band\.compliance - band\.total/,
+    "and must derive it from the band on screen rather than a typed number",
+  );
+});
+
+test("the store count drives the band, the rate and the monthly total", async () => {
+  /*
+   * The calculator is the section's one input. If any of these stops being
+   * derived, the page can show a reader a rate their own store count does not
+   * qualify for — which is worse than showing no calculator at all.
+   */
+  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  assert.match(pricing, /type="range"/, "there is a real slider, not a band picker alone");
+  assert.match(pricing, /function bandForCount/, "the band is computed from the count");
+  assert.match(
+    pricing,
+    /amount \* storeCount/,
+    "the monthly total is rate x count, not a typed figure",
+  );
+  /* The struck-through price is the entry band's, so it cannot contradict it. */
+  assert.match(pricing, /was=\{entryBand\[plan\.key\]\}/);
+  assert.match(pricing, /was > amount/, "and only shows once the reader is past that band");
 });
 
 /* ── 3. The Report a Job form ────────────────────────────────────────────── */
