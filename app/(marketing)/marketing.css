@@ -920,9 +920,29 @@ fieldset.field:focus{outline:none}
 .casestudy__stats{gap:12px}
 .casestudy__photo{border-radius:var(--r-lg);overflow:hidden;aspect-ratio:4/3}
 
-.pricing__bands{margin-top:26px}
-.pkg__price--custom{align-items:flex-end}
-.pkg__price--custom .pkg__num{font-size:1.5rem}
+.pricing__bands{margin-top:18px}
+
+/* The store-count calculator. One control, and every price below follows it. */
+.pricing__calc{margin-top:26px;padding:18px 20px;border:1px solid var(--line);
+  border-radius:var(--r-lg);background:var(--paper)}
+.pricing__calc-top{display:flex;align-items:center;justify-content:space-between;
+  gap:16px;flex-wrap:wrap}
+.pricing__calc-top label{font-weight:650;color:var(--navy)}
+.pricing__readout{display:flex;align-items:baseline;gap:6px;margin:0}
+.pricing__readout strong{font-family:var(--font-display);font-size:2rem;font-weight:800;
+  color:var(--teal-600,#0e6f68);line-height:1;min-width:2.2ch;text-align:right}
+.pricing__readout span{font-size:.85rem;color:var(--slate)}
+.pricing__slider{width:100%;margin:14px 0 6px;accent-color:var(--teal-600,#0e6f68);
+  height:26px;cursor:pointer}
+/* A 26px target is below the 44px touch floor on its own, so the padding on the
+   card carries the rest of it; the thumb itself is what a finger aims at. */
+.pricing__slider::-webkit-slider-thumb{width:22px;height:22px}
+.pricing__band-note{margin:0;font-size:.82rem;color:var(--slate);min-height:1.2em}
+
+/* What the reader actually pays, under each plan's per-store rate. */
+.pkg__total{margin:-6px 0 14px;font-size:.84rem;color:var(--slate)}
+.pkg__total strong{color:var(--navy);font-weight:700}
+.pkg__was{color:var(--slate);opacity:.75;font-size:1rem}
 .pkg__setup{margin:12px 0 0;font-size:.76rem;color:var(--slate)}
 .pkg__cta{margin-top:16px}
 .pricing__notes{list-style:none;display:grid;gap:8px;margin:0;font-size:.82rem;
