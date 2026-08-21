@@ -1922,9 +1922,32 @@ button.analytics-score-panel {
   cursor: pointer;
 }
 
-.analytics-panel-footer:hover {
-  background: #1a3039;
-  color: #71e0d8;
+/*
+ * The footer hover was a literal, and the literal was a dark one: #1a3039 on
+ * #71e0d8. In dark mode that reads as a panel footer lighting up. In light
+ * mode — which is what the product actually ships — pointing at "Show summary"
+ * or "View all expiring" dropped a near-black bar across the bottom of a white
+ * card, which is what the Compliance screenshots caught.
+ *
+ * `--teal-100` is the wash that already exists for this: #dff5f2 in light,
+ * #123c3a in dark, redefined per theme in globals.css alongside the ink that
+ * goes on it. Using the pair instead of two hex codes makes the hover correct
+ * in both themes by construction rather than by having a second rule remember
+ * to override the first.
+ *
+ * Focus gets the same treatment, because a keyboard user landing here was
+ * getting the same black bar — and a focus ring that hides its own label is
+ * not a focus ring.
+ */
+.analytics-panel-footer:hover,
+.analytics-panel-footer:focus-visible {
+  background: var(--teal-100);
+  color: var(--accent-fg);
+}
+
+.analytics-panel-footer:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: -2px;
 }
 
 .analytics-expiry-types > header > div {

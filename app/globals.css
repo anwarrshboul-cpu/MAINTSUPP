@@ -7193,6 +7193,22 @@ th.sheet-column--name {
   background: white;
 }
 
+/*
+ * The summary card at the top of a site / compliance drawer.
+ *
+ * It used to be `--navy-950` with white text — a token that is deliberately
+ * ALWAYS dark, because it belongs to the navigation rail. Inside a white
+ * drawer that is a black rectangle the width of the panel, which is what the
+ * Compliance screenshots caught: the store name and address arriving as a slab
+ * of night in an otherwise light interface.
+ *
+ * A summary block still has to read as distinct from the sections under it,
+ * so it keeps a tinted ground and a border rather than becoming invisible —
+ * but the tint is `--teal-100`, the wash that is redefined per theme
+ * (#dff5f2 light, #123c3a dark) and already carries `--accent-fg` as its ink.
+ * Light mode gets a brand-tinted card; dark mode keeps a dark one, without a
+ * second rule to remember.
+ */
 .site-profile-banner {
   display: grid;
   grid-template-columns: 43px 1fr;
@@ -7200,9 +7216,10 @@ th.sheet-column--name {
   align-items: center;
   min-height: 76px;
   padding: 13px;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--navy-950);
-  color: white;
+  background: var(--teal-100);
+  color: var(--ink);
 }
 
 .site-profile-banner > span {
@@ -7211,8 +7228,8 @@ th.sheet-column--name {
   width: 42px;
   height: 42px;
   border-radius: 10px;
-  background: rgba(18, 181, 170, 0.15);
-  color: #6bd6cc;
+  background: var(--paper);
+  color: var(--accent-fg);
 }
 
 .site-profile-banner > div {
@@ -7226,7 +7243,9 @@ th.sheet-column--name {
 }
 
 .site-profile-banner small {
-  color: #9cb1bd;
+  /* Was #9cb1bd — a grey chosen to sit on the old near-black ground, and
+     1.9:1 against the light card that replaced it. */
+  color: var(--muted);
   font-size: 8px;
   line-height: 1.4;
 }
