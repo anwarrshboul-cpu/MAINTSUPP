@@ -375,6 +375,7 @@ export function translateSql(sql: string, options: TranslateOptions = {}): strin
   text = rewriteAutoincrement(text);
   text = rewriteTextTimestampDefaults(text);
   text = rewriteInsertConflictClause(text, options);
+  text = rewriteConflictTargetQualifiers(text);
   text = rewriteBooleanInserts(text);
   text = rewriteBooleanComparisons(text);
   text = rewritePlaceholders(text);
@@ -953,6 +954,54 @@ function rewriteInsertConflictClause(
     });
   }
 
+  return applyEdits(sql, edits);
+}
+
+/**
+ * 8b. An `ON CONFLICT` target names bare columns, never `"table"."column"`.
+ *
+ * This one is drizzle's, not the application's. Its sqlite dialect renders
+ * `onConflictDoUpdate({ target: [table.a, table.b] })` as
+ *
+ *   ON CONFLICT ("cells"."organisation_id", "cells"."board_id", …)
+ *
+ * SQLite accepts the qualified form. Postgres does not: its grammar for the
+ * conflict target is an index column list, so the first dot is a syntax error
+ * reported at the following comma — `42601: syntax error at or near ","`,
+ * which names neither `ON CONFLICT` nor the column and reads like a driver
+ * fault. Unqualified, the same statement is accepted.
+ *
+ * Found on the Vercel preview, where every board cell edit answered 503: the
+ * Store Documentation expiry dates that prompted the hunt, and equally the
+ * Jobs board, roles, import, workspace and recycle-bin upserts — eight
+ * `onConflictDoUpdate` call sites, all of which take a target and all of which
+ * were failing the same way. It never showed up before because D1 is SQLite.
+ *
+ * Only the parenthesised target is touched, and only its qualifiers. The
+ * `DO UPDATE SET` assignments are already unqualified (Postgres requires that
+ * too, and drizzle emits it correctly), and a `WHERE` inside the clause is
+ * left alone because there a qualifier is legal and can be load-bearing.
+ * `ON CONFLICT DO NOTHING` and `ON CONFLICT ON CONSTRAINT …` have no target
+ * list and fall straight through.
+ */
+function rewriteConflictTargetQualifiers(sql: string): string {
+  const mask = maskNonCode(sql);
+  const edits: Edit[] = [];
+  const pattern = /\bON\s+CONFLICT\s*\(/gi;
+  for (let match = pattern.exec(mask); match; match = pattern.exec(mask)) {
+    const open = match.index + match[0].length - 1;
+    const close = matchParen(mask, open);
+    for (const part of splitTopLevel(mask, open + 1, close)) {
+      const range = tighten(sql, part);
+      const text = sql.slice(range.start, range.end);
+      /* `"table"."column"` — keep the last segment, drop what qualifies it. */
+      const qualified = /^"[^"]+"\s*\.\s*("[^"]+")$/.exec(text);
+      if (qualified) {
+        edits.push({ start: range.start, end: range.end, text: qualified[1] });
+      }
+    }
+    pattern.lastIndex = close;
+  }
   return applyEdits(sql, edits);
 }
 
