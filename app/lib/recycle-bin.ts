@@ -45,6 +45,7 @@
 import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import {
+  boardViews,
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
@@ -296,6 +297,74 @@ export async function sendGroupToBin(
   return true;
 }
 
+/**
+ * Send a board view to the bin instead of deleting it outright.
+ *
+ * WHY THIS ONE, AND NOT EVERY STRUCTURE ON THE BOARD. W13-06 asks for
+ * recoverable archiving "where possible", which is a resource-by-resource
+ * question rather than a blanket rule. A view is the case where the answer is
+ * unambiguous: the whole thing is one small configuration row — its name, type,
+ * icon, saved filters, saved sort, position — so a complete snapshot fits in
+ * the `placement` column that already exists, and putting it back is a single
+ * insert. Nothing else has to change and no migration is involved.
+ *
+ * A COLUMN is the case where the answer is no, for now. Its data is the cells,
+ * and there are 8,565 of them on the live board; recovering one means either a
+ * `deleted_at` on `maintenance_board_columns` with the cells retained behind
+ * it, or a snapshot far too large for this table. Both are schema changes, so
+ * `delete_column` still deletes and its audit event records `recoverable:
+ * false` rather than implying a safety net that is not there.
+ *
+ * Unlike a job or a group, the row does NOT survive: `board_views` has a UNIQUE
+ * index on (organisation, board, key), and a soft-deleted row would hold that
+ * key against a view somebody creates in the meantime. The snapshot is the
+ * whole record, so nothing is lost by removing it.
+ */
+export async function sendBoardViewToBin(
+  db: Database,
+  orgId: string,
+  actor: BinActor,
+  viewId: string,
+): Promise<boolean> {
+  const [view] = await db
+    .select()
+    .from(boardViews)
+    .where(and(eq(boardViews.id, viewId), eq(boardViews.organisationId, orgId)));
+  if (!view) return false;
+
+  const deletedAt = nowIso();
+  await db.insert(recycleBin).values({
+    id: newId(),
+    organisationId: orgId,
+    entityType: "board_view",
+    entityId: view.id,
+    boardId: view.boardId,
+    title: view.name,
+    summary: `${view.type} view`,
+    placement: JSON.stringify({
+      boardId: view.boardId,
+      key: view.key,
+      name: view.name,
+      type: view.type,
+      icon: view.icon,
+      filters: view.filters,
+      sort: view.sort,
+      settings: view.settings,
+      position: view.position,
+      createdBy: view.createdBy,
+    }),
+    deletedByEmail: actor.email ?? null,
+    deletedByName: actor.displayName ?? null,
+    deletedAt,
+    expiresAt: expiryFrom(deletedAt),
+  });
+
+  await db
+    .delete(boardViews)
+    .where(and(eq(boardViews.id, view.id), eq(boardViews.organisationId, orgId)));
+  return true;
+}
+
 /* ── Restoring ─────────────────────────────────────────────────────────── */
 
 export type RestoreOutcome =
@@ -326,6 +395,7 @@ export async function restoreFromBin(
 
   if (entry.entityType === "job") return restoreJob(db, orgId, entry);
   if (entry.entityType === "group") return restoreGroup(db, orgId, entry);
+  if (entry.entityType === "board_view") return restoreBoardView(db, orgId, entry);
 
   return {
     ok: false,
@@ -536,6 +606,80 @@ async function restoreGroup(
       position === wanted
         ? `"${group.name}" is back on the board at its original position.`
         : `"${group.name}" is back on the board. Its original slot was taken, so it was placed at the end.`,
+  };
+}
+
+/**
+ * Put a deleted board view back on its tab strip.
+ *
+ * The snapshot is the whole row, so this is an insert rather than a flag flip.
+ * Two things can have changed while it sat in the bin and both are handled
+ * rather than allowed to fail the write: its `key` may have been taken by a new
+ * view (the index is UNIQUE on organisation + board + key), and its position
+ * may now belong to something else — a tab strip's positions are not unique, so
+ * the second is cosmetic and the view simply sorts beside whatever took its
+ * place.
+ */
+async function restoreBoardView(
+  db: Database,
+  orgId: string,
+  entry: BinRow,
+): Promise<RestoreOutcome> {
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    snapshot = entry.placement ? (JSON.parse(entry.placement) as Record<string, unknown>) : null;
+  } catch {
+    snapshot = null;
+  }
+  if (!snapshot) {
+    return {
+      ok: false,
+      error: "That view's snapshot could not be read, so there is nothing to restore.",
+      status: 410,
+    };
+  }
+
+  const boardId = String(snapshot.boardId ?? entry.boardId ?? "maintenance");
+  const existing = await db
+    .select({ key: boardViews.key })
+    .from(boardViews)
+    .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, boardId)));
+  const taken = new Set(existing.map((row) => row.key));
+
+  const wantedKey = String(snapshot.key ?? "view");
+  let key = wantedKey;
+  let suffix = 2;
+  while (taken.has(key)) key = `${wantedKey}-${suffix++}`;
+
+  await db.insert(boardViews).values({
+    id: entry.entityId,
+    organisationId: orgId,
+    boardId,
+    key,
+    name: String(snapshot.name ?? entry.title),
+    type: String(snapshot.type ?? "table"),
+    icon: typeof snapshot.icon === "string" ? snapshot.icon : null,
+    filters: typeof snapshot.filters === "string" ? snapshot.filters : "[]",
+    sort: typeof snapshot.sort === "string" ? snapshot.sort : "[]",
+    settings: typeof snapshot.settings === "string" ? snapshot.settings : "{}",
+    position: Number.isFinite(Number(snapshot.position)) ? Number(snapshot.position) : 0,
+    // A restored view is never the board's default and never a system row: both
+    // are properties of the strip as it stands now, not of the row that left it.
+    isDefault: false,
+    system: false,
+    createdBy: typeof snapshot.createdBy === "string" ? snapshot.createdBy : null,
+  });
+
+  await db.delete(recycleBin).where(eq(recycleBin.id, entry.id));
+
+  return {
+    ok: true,
+    entityType: "board_view",
+    entityId: entry.entityId,
+    message:
+      key === wantedKey
+        ? `"${entry.title}" is back on the board's view strip, with its saved filters and sort.`
+        : `"${entry.title}" is back on the board's view strip. Another view had taken its key, so it was restored under "${key}".`,
   };
 }
 

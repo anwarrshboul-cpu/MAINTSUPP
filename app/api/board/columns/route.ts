@@ -2,6 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { maintenanceBoardCells, maintenanceBoardColumns } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { resolveBoard } from "../../../lib/board-registry";
 import {
   canConvert,
@@ -158,6 +159,18 @@ export async function POST(request: Request) {
       system: false,
     });
 
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+      action: "board.column_created",
+      entityType: "maintenance_board_column",
+      entityId: id,
+      summary: `Added the "${title}" ${type} column to ${board.key}.`,
+      detail: { board: board.key, key, title, type },
+      request,
+    });
+
     return Response.json({ id, key, title, type }, { status: 201 });
   } catch (error) {
     return unavailable(error);
@@ -178,10 +191,38 @@ export async function PATCH(request: Request) {
 
     // Bulk reorder — [{ id, position }]
     if (Array.isArray(body.order)) {
+      /*
+       * The order BEFORE, read once, so the audit event can say what actually
+       * moved rather than restating the payload it was handed. Ids the caller
+       * named that belong to another workspace are absent from this map and are
+       * skipped below, exactly as the update's own `organisationId` predicate
+       * skips them.
+       */
+      const known = await db
+        .select({
+          id: maintenanceBoardColumns.id,
+          title: maintenanceBoardColumns.title,
+          position: maintenanceBoardColumns.position,
+          boardId: maintenanceBoardColumns.boardId,
+        })
+        .from(maintenanceBoardColumns)
+        .where(eq(maintenanceBoardColumns.organisationId, orgId));
+      const byId = new Map(known.map((row) => [row.id, row]));
+
+      const moved: Array<{ id: string; title: string; from: number; to: number }> = [];
       for (const entry of body.order) {
         const id = text(entry?.id, 64);
         const position = Number(entry?.position);
         if (!id || !Number.isFinite(position)) continue;
+        const existing = byId.get(id);
+        if (existing && existing.position !== position) {
+          moved.push({
+            id,
+            title: existing.title,
+            from: existing.position,
+            to: position,
+          });
+        }
         await db
           .update(maintenanceBoardColumns)
           .set({ position, updatedAt: sql`CURRENT_TIMESTAMP` })
@@ -191,6 +232,24 @@ export async function PATCH(request: Request) {
               eq(maintenanceBoardColumns.organisationId, orgId),
             ),
           );
+      }
+
+      if (moved.length) {
+        const board = byId.get(moved[0].id)?.boardId ?? "maintenance";
+        await recordAudit({
+          db,
+          organisationId: orgId,
+          actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+          action: "board.columns_reordered",
+          entityType: "maintenance_board_column",
+          entityId: moved[0].id,
+          summary:
+            moved.length === 1
+              ? `Moved the "${moved[0].title}" column on ${board}.`
+              : `Reordered ${moved.length} columns on ${board}.`,
+          detail: { board, moved },
+          request,
+        });
       }
       return Response.json({ ok: true });
     }
@@ -278,6 +337,37 @@ export async function PATCH(request: Request) {
         and(eq(maintenanceBoardColumns.id, id), eq(maintenanceBoardColumns.organisationId, orgId)),
       );
 
+    /*
+     * Structure only — see the same rule in /api/board's `update_column`. A
+     * width is a preference and fires on every drag; a rename, a hide, a pin,
+     * a summary or a type conversion changes the board for everybody and is
+     * what W13-05 asks to be attributable.
+     */
+    const structural = ["title", "type", "visible", "pinned", "summary"].filter(
+      (field) => field in patch && patch[field] !== (existing as Record<string, unknown>)[field],
+    );
+    if (structural.length) {
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+        action: "board.column_updated",
+        entityType: "maintenance_board_column",
+        entityId: id,
+        summary: `Updated the "${patch.title ?? existing.title}" column on ${existing.boardId} (${structural.join(", ")}).`,
+        detail: {
+          board: existing.boardId,
+          ...changeDetail(
+            Object.fromEntries(
+              structural.map((field) => [field, (existing as Record<string, unknown>)[field]]),
+            ),
+            Object.fromEntries(structural.map((field) => [field, patch[field]])),
+          ),
+        },
+        request,
+      });
+    }
+
     return Response.json({ ok: true });
   } catch (error) {
     return unavailable(error);
@@ -346,6 +436,20 @@ export async function DELETE(request: Request) {
       .where(
         and(eq(maintenanceBoardColumns.id, id), eq(maintenanceBoardColumns.organisationId, orgId)),
       );
+
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+      action: "board.column_deleted",
+      entityType: "maintenance_board_column",
+      entityId: id,
+      summary: `Deleted the "${existing.title}" column from ${existing.boardId}, discarding ${affected} value${affected === 1 ? "" : "s"}.`,
+      // Not recoverable, and the line says so. See the matching note in
+      // /api/board's delete_column for what making it recoverable would take.
+      detail: { board: existing.boardId, title: existing.title, type: existing.type, discarded: affected, recoverable: false },
+      request,
+    });
 
     return Response.json({ ok: true, discarded: affected });
   } catch (error) {

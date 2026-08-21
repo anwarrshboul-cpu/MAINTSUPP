@@ -2,6 +2,8 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { boardViews } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
+import { RETENTION_DAYS, sendBoardViewToBin } from "../../../lib/recycle-bin";
 import { DEFAULT_BOARD_KEY, resolveBoard } from "../../../lib/board-registry";
 
 export const dynamic = "force-dynamic";
@@ -342,6 +344,22 @@ export async function POST(request: Request) {
       createdBy: actor.displayName || null,
     });
 
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor({
+        actor,
+        identityEmail: guard.scope.identityEmail,
+        session: guard.scope.session,
+      }),
+      action: "board.view_created",
+      entityType: "board_view",
+      entityId: id,
+      summary: `Added the "${name}" ${type} view to ${board.key}.`,
+      detail: { board: board.key, key, name, type },
+      request,
+    });
+
     return Response.json({ id, key, name, type }, { status: 201 });
   } catch (error) {
     return unavailable(error);
@@ -358,14 +376,43 @@ export async function PATCH(request: Request) {
     const body = await request.json().catch(() => ({}));
 
     if (Array.isArray(body.order)) {
+      const before = await db
+        .select({ id: boardViews.id, name: boardViews.name, position: boardViews.position, boardId: boardViews.boardId })
+        .from(boardViews)
+        .where(eq(boardViews.organisationId, orgId));
+      const byId = new Map(before.map((row) => [row.id, row]));
+      const moved: Array<{ id: string; name: string; from: number; to: number }> = [];
+
       for (const entry of body.order) {
         const id = text(entry?.id, 64);
         const position = Number(entry?.position);
         if (!id || !Number.isFinite(position)) continue;
+        const existing = byId.get(id);
+        if (existing && existing.position !== position) {
+          moved.push({ id, name: existing.name, from: existing.position, to: position });
+        }
         await db
           .update(boardViews)
           .set({ position, updatedAt: sql`CURRENT_TIMESTAMP` })
           .where(and(eq(boardViews.id, id), eq(boardViews.organisationId, orgId)));
+      }
+
+      if (moved.length) {
+        await recordAudit({
+          db,
+          organisationId: orgId,
+          actor: auditActor({
+            actor: guard.scope.actor,
+            identityEmail: guard.scope.identityEmail,
+            session: guard.scope.session,
+          }),
+          action: "board.views_reordered",
+          entityType: "board_view",
+          entityId: moved[0].id,
+          summary: `Reordered ${moved.length} view${moved.length === 1 ? "" : "s"} on ${byId.get(moved[0].id)?.boardId ?? "the board"}.`,
+          detail: { moved },
+          request,
+        });
       }
       return Response.json({ ok: true });
     }
@@ -410,6 +457,42 @@ export async function PATCH(request: Request) {
       .set(patch)
       .where(and(eq(boardViews.id, id), eq(boardViews.organisationId, orgId)));
 
+    /*
+     * Renaming a view and making it the board's default are changes everybody
+     * in the workspace sees; saving a filter or a sort onto it is a change to
+     * what that view shows, which is the same kind of thing. All four are
+     * recorded. The `settings` blob is not diffed field by field — it carries
+     * a tab glyph and the parity stamp, neither of which is a decision.
+     */
+    const auditable = ["name", "filters", "sort", "isDefault"].filter(
+      (field) => field in patch,
+    );
+    if (auditable.length) {
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({
+          actor: guard.scope.actor,
+          identityEmail: guard.scope.identityEmail,
+          session: guard.scope.session,
+        }),
+        action: "board.view_updated",
+        entityType: "board_view",
+        entityId: id,
+        summary: `Updated the "${patch.name ?? existing.name}" view on ${existing.boardId} (${auditable.join(", ")}).`,
+        detail: {
+          board: existing.boardId,
+          ...changeDetail(
+            Object.fromEntries(
+              auditable.map((field) => [field, (existing as Record<string, unknown>)[field]]),
+            ),
+            Object.fromEntries(auditable.map((field) => [field, patch[field]])),
+          ),
+        },
+        request,
+      });
+    }
+
     return Response.json({ ok: true });
   } catch (error) {
     return unavailable(error);
@@ -436,11 +519,48 @@ export async function DELETE(request: Request) {
       return bad("The main table cannot be removed — it is how the board is edited.", 409);
     }
 
-    await db
-      .delete(boardViews)
-      .where(and(eq(boardViews.id, id), eq(boardViews.organisationId, orgId)));
+    /*
+     * W13-06 — the view goes to the recycle bin rather than to nothing.
+     *
+     * It used to be a straight DELETE, so a mis-click on "Delete" in the tab
+     * menu destroyed the view's saved filters and sort with no way back. A view
+     * is one small configuration row, so the whole of it fits in the bin's
+     * existing snapshot column and Restore is a single insert — no schema
+     * change, and the 30-day retention every other binned thing gets.
+     */
+    const binned = await sendBoardViewToBin(
+      db,
+      orgId,
+      {
+        email: guard.scope.identityEmail || guard.scope.actor.email,
+        displayName: guard.scope.actor.displayName,
+      },
+      id,
+    );
+    if (!binned) return bad("View not found.", 404);
 
-    return Response.json({ ok: true });
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor({
+        actor: guard.scope.actor,
+        identityEmail: guard.scope.identityEmail,
+        session: guard.scope.session,
+      }),
+      action: "board.view_deleted",
+      entityType: "board_view",
+      entityId: id,
+      summary: `Moved the "${existing.name}" view on ${existing.boardId} to the recycle bin.`,
+      detail: {
+        board: existing.boardId,
+        type: existing.type,
+        recoverable: true,
+        retentionDays: RETENTION_DAYS,
+      },
+      request,
+    });
+
+    return Response.json({ ok: true, recycled: true, retentionDays: RETENTION_DAYS });
   } catch (error) {
     return unavailable(error);
   }

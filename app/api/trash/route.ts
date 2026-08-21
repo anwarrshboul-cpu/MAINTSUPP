@@ -153,7 +153,7 @@ export async function POST(request: Request) {
       organisationId: orgId,
       actor: auditActor({ actor, identityEmail, session }),
       action: "trash.restored",
-      entityType: outcome.entityType === "job" ? "maintenance_request" : "maintenance_group",
+      entityType: RESTORED_ENTITY_TYPES[outcome.entityType] ?? outcome.entityType,
       entityId: outcome.entityId,
       summary: outcome.message,
       detail: { entityType: outcome.entityType, entityId: outcome.entityId },
@@ -165,6 +165,19 @@ export async function POST(request: Request) {
     return unavailable(error);
   }
 }
+
+/**
+ * What each restorable kind is called in the audit trail.
+ *
+ * The audit vocabulary names database entities; the bin names user-facing
+ * things. This was a two-way ternary that read "job or else group", so adding a
+ * third kind would have silently filed every restored view as a group.
+ */
+const RESTORED_ENTITY_TYPES: Record<string, string> = {
+  job: "maintenance_request",
+  group: "maintenance_group",
+  board_view: "board_view",
+};
 
 /* ── DELETE — permanent ────────────────────────────────────────────────── */
 
@@ -294,6 +307,14 @@ function purgeFor(db: Database): PurgeFn {
   return async (organisationId, entityType, entityId) => {
     if (entityType === "job") return purgeJob(db, organisationId, entityId);
     if (entityType === "group") return purgeGroup(db, organisationId, entityId);
+    /*
+     * A board view leaves nothing behind. Unlike a job or a group, its row is
+     * removed the moment it goes to the bin — `board_views` has a UNIQUE index
+     * on (organisation, board, key) that a soft-deleted row would hold against
+     * a view created in the meantime — so the entry itself IS the whole thing,
+     * and letting the bin row go is the entire purge. See `sendBoardViewToBin`.
+     */
+    if (entityType === "board_view") return true;
     // An entity kind this build does not know how to destroy. Declining leaves
     // the entry in the bin, which is visible and fixable; pretending otherwise
     // would strand the row.

@@ -93,7 +93,12 @@ test("the destructive and bulk-write paths are audited", async () => {
   // The rows, their cells, their attachments and their activity_log history are
   // all gone by this point — the audit row is the only surviving record.
   assert.match(board, /action: "board\.items_deleted"/);
-  assert.match(board, /import \{ auditActor, recordAudit \}/);
+  // The import list is matched loosely on purpose: the board route now pulls
+  // `changeDetail` alongside these two for the structural-change events added
+  // in Batch 1A, and the property being pinned is that the route records
+  // through the shared module at all — not the exact shape of one line.
+  assert.match(board, /import \{[^}]*\brecordAudit\b[^}]*\} from "\.\.\/\.\.\/lib\/audit"/);
+  assert.match(board, /import \{[^}]*\bauditActor\b[^}]*\} from "\.\.\/\.\.\/lib\/audit"/);
 
   assert.match(importer, /action: "data\.imported"/);
   assert.match(

@@ -59,9 +59,43 @@ export interface BoardColumnSettings {
    * chosen in live-board.tsx; keeping it on the column keeps one component
    * responsible for reading and writing it.
    *
-   * At most one column carries it: setting a new sort clears the old one.
+   * NO LONGER AT MOST ONE. Several columns may carry a sort at once — that is
+   * what makes a subsort possible — and `sortPriority` below is what orders
+   * them. A column carrying a sort with no priority is read as priority 0,
+   * which is exactly what every board saved before multi-sort existed looks
+   * like, so the old single-column state reads back unchanged.
    */
   sort?: "asc" | "desc";
+  /**
+   * Where this column sits in the board's ordered sort: 0 is the primary sort,
+   * 1 breaks its ties, 2 breaks those, and so on.
+   *
+   * Meaningless without `sort`, and dropped whenever `sort` is cleared. Ties on
+   * the priority itself fall back to column position, so a hand-edited row
+   * cannot make the order non-deterministic.
+   */
+  sortPriority?: number;
+  /**
+   * This column's filter rule, if it carries one.
+   *
+   * The board's filter is the set of these across its columns, which is how
+   * monday models it: a filter belongs to the column it narrows, so deleting
+   * the column deletes its filter with it and no orphan rule can survive.
+   * `operator` is one of the operators in views/view-model.ts, and `values`
+   * holds as many operands as that operator takes — none, one, or two.
+   */
+  filter?: { operator: string; values: string[] };
+  /**
+   * How the board combines its filter rules — "and" (the default) or "or".
+   *
+   * A BOARD-LEVEL choice stored on each filtered column, deliberately. There is
+   * nowhere else for it to live that every board has: `maintenance_board_columns`
+   * is the only per-board store this grid already writes to, and Store
+   * Documentation has no `board_views` row to hang it on. A change writes to
+   * every filtered column at once and the read takes the lowest-position
+   * filtered column's answer, so the mirror cannot drift into two answers.
+   */
+  filterJoin?: "and" | "or";
 }
 
 export interface MaintenanceBoardColumn {
@@ -84,6 +118,28 @@ export interface MaintenanceBoardColumn {
    * than in browser state.
    */
   visible: boolean;
+  /**
+   * Whether the column is frozen against the left edge while the grid scrolls
+   * sideways.
+   *
+   * `maintenance_board_columns.pinned` has existed since Stage 1 and the PATCH
+   * route has always accepted it; nothing ever returned it, so the board could
+   * store a pin it had no way to draw. The Items column is sticky by
+   * construction and is not expressed through this flag — `stickyColumnOffsets`
+   * in live-board.tsx lays the two out together.
+   */
+  pinned?: boolean;
+  /**
+   * The summary function the group footer runs over this column — "sum",
+   * "count", "battery" and the rest, per `summariesFor` in lib/column-types.ts.
+   *
+   * Stored and server-validated since Stage 1, and likewise never returned, so
+   * the seed's own choices — "battery" on Status and Priority, "sum" on Cost of
+   * Works, "min"/"max" on the two dates — were written to the database and then
+   * ignored by the strip that exists to honour them. Null means "whatever this
+   * column's type or key summarises to by default".
+   */
+  summary?: string | null;
 }
 
 export interface MaintenanceBoardCell {

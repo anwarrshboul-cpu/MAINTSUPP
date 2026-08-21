@@ -38,6 +38,7 @@ import {
   workspaceSections,
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability, type ScopedDatabase } from "../../lib/tenant-db";
+import { auditActor, recordAudit } from "../../lib/audit";
 import {
   DEFAULT_ICON,
   DEFAULT_SURFACE,
@@ -277,6 +278,7 @@ export async function POST(request: Request) {
     });
 
     const created = await findByKey(context, key);
+    await recordSectionChange(context, request, "workspace.section_created", key, `Added the "${label}" workspace section.`, { key, label, surface, board: board.boardKey });
     return Response.json({ section: created ? toSection(created) : null }, { status: 201 });
   } catch (error) {
     const message =
@@ -349,10 +351,16 @@ export async function PATCH(request: Request) {
             ),
           );
       }
-      return Response.json({
-        ok: true,
-        order: [...ordered, ...trailing.map((section) => section.key)],
-      });
+      const order = [...ordered, ...trailing.map((section) => section.key)];
+      await recordSectionChange(
+        context,
+        request,
+        "workspace.sections_reordered",
+        order[0] ?? "",
+        `Reordered the workspace's added sections.`,
+        { order },
+      );
+      return Response.json({ ok: true, order });
     }
 
     const key = typeof body.key === "string" ? body.key.trim() : "";
@@ -427,12 +435,50 @@ export async function PATCH(request: Request) {
       );
 
     const updated = await findByKey(context, row.key);
+    await recordSectionChange(
+      context,
+      request,
+      "workspace.section_updated",
+      row.key,
+      `Changed the "${updated?.label ?? row.label}" workspace section.`,
+      { key: row.key, before: toSection(row), after: updated ? toSection(updated) : null },
+    );
     return Response.json({ section: updated ? toSection(updated) : null });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "The section could not be changed.";
     return Response.json({ error: message }, { status: 400 });
   }
+}
+
+/**
+ * One audit line about a workspace section.
+ *
+ * A section is a nav destination the whole workspace shares — adding, renaming,
+ * re-homing, archiving or deleting one changes the product for every colleague,
+ * which is exactly the class of change W13-05 asks to be attributable. Wrapped
+ * in one helper because five call sites in this file would otherwise each
+ * assemble the same actor and the same request context by hand.
+ */
+async function recordSectionChange(
+  context: ScopedDatabase,
+  request: Request,
+  action: string,
+  key: string,
+  summary: string,
+  detail: unknown,
+) {
+  await recordAudit({
+    db: context.db,
+    organisationId: context.orgId,
+    actor: auditActor(context),
+    action,
+    entityType: "workspace_section",
+    entityId: key,
+    summary,
+    detail,
+    request,
+  });
 }
 
 /**
@@ -519,6 +565,14 @@ export async function DELETE(request: Request) {
             eq(workspaceSections.key, row.key),
           ),
         );
+      await recordSectionChange(
+        context,
+        request,
+        "workspace.section_archived",
+        row.key,
+        `Archived the "${row.label}" workspace section. It can be restored.`,
+        { key: row.key, label: row.label, recoverable: true },
+      );
       return Response.json({ ok: true, key: row.key, archived: true });
     }
 
@@ -544,6 +598,14 @@ export async function DELETE(request: Request) {
           eq(workspaceSections.key, row.key),
         ),
       );
+    await recordSectionChange(
+      context,
+      request,
+      "workspace.section_deleted",
+      row.key,
+      `Permanently deleted the "${row.label}" workspace section.`,
+      { key: row.key, label: row.label, recoverable: false },
+    );
     return Response.json({ ok: true, key: row.key, deleted: true });
   } catch (error) {
     const message =

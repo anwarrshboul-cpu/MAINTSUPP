@@ -45,7 +45,8 @@ import {
   optionValues,
 } from "../../../db/schema";
 import { invalidateOptionCache } from "../../lib/options-repository";
-import { auditActor, recordAudit } from "../../lib/audit";
+import { auditActor, changeDetail, recordAudit } from "../../lib/audit";
+import { summariesFor } from "../../lib/column-types";
 import { exposeRequest } from "../../lib/request-payload";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
@@ -310,6 +311,37 @@ const defaultChoiceColors = [
   "#0086c0",
 ];
 
+/**
+ * The filter operators a column may store, as `matchesRule` in
+ * views/view-model.ts implements them.
+ *
+ * DUPLICATED ON PURPOSE, and pinned by a test. view-model.ts is the browser's
+ * filter engine and imports nothing, so it could be imported here — but that
+ * would pull a module out of the client graph into an API route to read
+ * thirteen strings, and the same trade was already made and documented for
+ * `ROLE_RANK` in lib/permissions.ts. `boardFilterOperatorsMatchTheEngine` in
+ * tests/batch-1a-board-controls.test.mjs fails if the two lists drift, so the
+ * copy cannot rot.
+ *
+ * The server's job here is only to refuse an operator that does not exist. What
+ * each one MEANS is decided in one place, by the engine.
+ */
+const BOARD_FILTER_OPERATORS = new Set([
+  "any_of",
+  "not_any_of",
+  "is_empty",
+  "is_not_empty",
+  "contains",
+  "not_contains",
+  "starts_with",
+  "ends_with",
+  "greater_than",
+  "lower_than",
+  "between",
+  "within_the_last",
+  "within_the_next",
+]);
+
 function validOptionColor(value: string) {
   return optionColors.has(value) || /^#[0-9a-f]{6}$/.test(value);
 }
@@ -382,6 +414,60 @@ function cleanChoices(value: unknown) {
     .slice(0, 50);
 }
 
+/**
+ * The sort and filter a column carries, cleaned.
+ *
+ * These three fields are the board's ordered sort and its filter set, stored on
+ * the columns they belong to — see `BoardColumnSettings` in lib/types.ts for
+ * why they live there rather than on `board_views`. They are type-independent,
+ * which is why they are lifted out of the three branches of `cleanSettings`
+ * below; a status column and a date column store a sort priority identically.
+ *
+ * ANYTHING UNRECOGNISED DROPS OUT rather than being stored. A settings blob is
+ * written from the browser, so a stray operator or a non-finite priority would
+ * otherwise survive a round trip and be handed back to every reader of the
+ * board as though the server had approved it.
+ */
+function cleanViewSettings(
+  record: Record<string, unknown>,
+): Pick<BoardColumnSettings, "sort" | "sortPriority" | "filter" | "filterJoin"> {
+  const sort =
+    record.sort === "asc" ? ("asc" as const) : record.sort === "desc" ? ("desc" as const) : undefined;
+  // A priority without a sort orders nothing, so it is dropped with it.
+  const rawPriority = Number(record.sortPriority);
+  const sortPriority =
+    sort && Number.isFinite(rawPriority)
+      ? Math.min(Math.max(Math.trunc(rawPriority), 0), 50)
+      : undefined;
+
+  const rawFilter =
+    record.filter && typeof record.filter === "object"
+      ? (record.filter as Record<string, unknown>)
+      : null;
+  const operator = trimString(rawFilter?.operator, 24);
+  const filter =
+    rawFilter && BOARD_FILTER_OPERATORS.has(operator)
+      ? {
+          operator,
+          // At most two operands — `between` is the only operator that takes a
+          // second — each capped so a filter cannot become a payload.
+          values: (Array.isArray(rawFilter.values) ? rawFilter.values : [])
+            .slice(0, 2)
+            .map((value) => trimString(value, 200)),
+        }
+      : undefined;
+
+  const filterJoin =
+    record.filterJoin === "or" ? ("or" as const) : record.filterJoin === "and" ? ("and" as const) : undefined;
+
+  return {
+    ...(sort ? { sort } : {}),
+    ...(sortPriority !== undefined ? { sortPriority } : {}),
+    ...(filter ? { filter } : {}),
+    ...(filterJoin ? { filterJoin } : {}),
+  };
+}
+
 function cleanSettings(
   value: unknown,
   type: BoardColumnType,
@@ -391,15 +477,13 @@ function cleanSettings(
       ? (value as Record<string, unknown>)
       : {};
   const wrap = record.wrap === true;
-  // The board's saved sort, kept on the column it sorts by. Anything other than
-  // the two directions drops out, so a stray value cannot survive a round trip.
-  const sort = record.sort === "asc" || record.sort === "desc" ? record.sort : undefined;
+  const view = cleanViewSettings(record);
   if (type === "status" || type === "dropdown") {
     const choices = cleanChoices(record.choices);
     return {
       choices: choices.length ? choices : defaultSettings(type).choices,
       wrap,
-      ...(sort ? { sort } : {}),
+      ...view,
     };
   }
   if (type === "people") {
@@ -407,10 +491,10 @@ function cleanSettings(
     return {
       people: people.length ? people : defaultSettings(type).people,
       wrap,
-      ...(sort ? { sort } : {}),
+      ...view,
     };
   }
-  return { wrap, ...(sort ? { sort } : {}) };
+  return { wrap, ...view };
 }
 
 function parseSettings(value: string, type: BoardColumnType) {
@@ -434,6 +518,45 @@ function newItemTitle(boardId: BoardId) {
   return boardId === "store-documentation" ? "New store" : "New maintenance item";
 }
 
+type ColumnRow = typeof maintenanceBoardColumns.$inferSelect;
+
+/**
+ * The fields of a column an audit reader cares about.
+ *
+ * Width and sort are deliberately absent — see the note at the `update_column`
+ * audit call for why a resize is not a structural change.
+ */
+function columnAuditShape(row: ColumnRow) {
+  return {
+    title: row.title,
+    type: row.type,
+    visible: row.visible !== false,
+    pinned: row.pinned === true,
+    summary: row.summary ?? null,
+    position: row.position,
+  };
+}
+
+/**
+ * What to call this edit in one word, or null if it is not worth recording.
+ *
+ * Returns the FIRST structural difference rather than a list: the summary line
+ * needs a verb, and the full before/after sits in the event's detail where a
+ * reader can open it.
+ */
+function structuralColumnChange(before: ColumnRow, after: ColumnRow) {
+  if (before.title !== after.title) return "Renamed";
+  if (before.type !== after.type) return "Changed the type of";
+  if ((before.visible !== false) !== (after.visible !== false)) {
+    return after.visible === false ? "Hid" : "Showed";
+  }
+  if ((before.pinned === true) !== (after.pinned === true)) {
+    return after.pinned === true ? "Pinned" : "Unpinned";
+  }
+  if ((before.summary ?? null) !== (after.summary ?? null)) return "Re-summarised";
+  return null;
+}
+
 function columnPayload(
   row: typeof maintenanceBoardColumns.$inferSelect,
 ): MaintenanceBoardColumn {
@@ -451,6 +574,16 @@ function columnPayload(
     system: row.system,
     // Carried so hiding a column survives a reload — see MaintenanceBoardColumn.
     visible: row.visible !== false,
+    /*
+     * `pinned` and `summary` have been columns on this table since Stage 1 and
+     * writable through PATCH /api/board/columns for almost as long. Neither was
+     * ever sent back, so the board could store a pin it had no way to draw and
+     * the seed's own summary choices — "battery" on Status, "sum" on Cost of
+     * Works — were written and then ignored by the strip that exists to honour
+     * them. Returning them is the whole of what those two features needed.
+     */
+    pinned: row.pinned === true,
+    summary: row.summary ?? null,
   };
 }
 
@@ -1385,6 +1518,17 @@ export async function POST(request: Request) {
           position: Number(last.value ?? -1) + 1,
         })
         .returning();
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor, identityEmail, session }),
+        action: "board.group_created",
+        entityType: "maintenance_group",
+        entityId: group.id,
+        summary: `Created the "${group.name}" group on ${boardId}.`,
+        detail: { board: boardId, color: group.color, position: group.position },
+        request,
+      });
       return Response.json({ group }, { status: 201 });
     }
 
@@ -1561,6 +1705,17 @@ export async function POST(request: Request) {
           system: false,
         })
         .returning();
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor, identityEmail, session }),
+        action: "board.column_created",
+        entityType: "maintenance_board_column",
+        entityId: created.id,
+        summary: `Added the "${created.title}" ${type} column to ${boardId}.`,
+        detail: { board: boardId, ...columnAuditShape(created) },
+        request,
+      });
       return Response.json(
         { column: columnPayload(created) },
         { status: 201 },
@@ -2138,7 +2293,10 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId, identityEmail } = guard.scope;
+    // `session` joins the other two for the audit trail: an event whose email
+    // has no user id behind it was performed under the testing role switcher,
+    // and a reader has to be able to tell those apart. See `auditActor`.
+    const { actor, db, orgId, identityEmail, session } = guard.scope;
     const payload = (await request.json()) as Record<string, unknown>;
     const action = trimString(payload.action, 40);
     const boardId = boardIdFrom(request);
@@ -2153,6 +2311,11 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      const [before] = await db
+        .select({ name: maintenanceGroups.name })
+        .from(maintenanceGroups)
+        .where(and(eq(maintenanceGroups.id, groupId), eq(maintenanceGroups.organisationId, orgId)))
+        .limit(1);
       const [group] = await db
         .update(maintenanceGroups)
         .set({ name, updatedAt: new Date().toISOString() })
@@ -2160,6 +2323,19 @@ export async function PATCH(request: Request) {
         .returning();
       if (!group) {
         return Response.json({ error: "Group not found." }, { status: 404 });
+      }
+      if (before && before.name !== group.name) {
+        await recordAudit({
+          db,
+          organisationId: orgId,
+          actor: auditActor({ actor, identityEmail, session }),
+          action: "board.group_renamed",
+          entityType: "maintenance_group",
+          entityId: group.id,
+          summary: `Renamed the "${before.name}" group to "${group.name}" on ${boardId}.`,
+          detail: { board: boardId, ...changeDetail({ name: before.name }, { name: group.name }) },
+          request,
+        });
       }
       return Response.json({ group });
     }
@@ -2173,6 +2349,17 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      const [beforeColour] = await db
+        .select({ color: maintenanceGroups.color })
+        .from(maintenanceGroups)
+        .where(
+          and(
+            eq(maintenanceGroups.boardId, boardId),
+            eq(maintenanceGroups.id, groupId),
+            eq(maintenanceGroups.organisationId, orgId),
+          ),
+        )
+        .limit(1);
       const [group] = await db
         .update(maintenanceGroups)
         .set({ color: requestedColor, updatedAt: new Date().toISOString() })
@@ -2186,6 +2373,22 @@ export async function PATCH(request: Request) {
         .returning();
       if (!group) {
         return Response.json({ error: "Group not found." }, { status: 404 });
+      }
+      if (beforeColour && beforeColour.color !== group.color) {
+        await recordAudit({
+          db,
+          organisationId: orgId,
+          actor: auditActor({ actor, identityEmail, session }),
+          action: "board.group_updated",
+          entityType: "maintenance_group",
+          entityId: group.id,
+          summary: `Recoloured the "${group.name}" group on ${boardId}.`,
+          detail: {
+            board: boardId,
+            ...changeDetail({ color: beforeColour.color }, { color: group.color }),
+          },
+          request,
+        });
       }
       return Response.json({ group });
     }
@@ -2239,6 +2442,21 @@ export async function PATCH(request: Request) {
         .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
             isNull(maintenanceGroups.deletedAt),))
         .orderBy(asc(maintenanceGroups.position));
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor, identityEmail, session }),
+        action: "board.group_reordered",
+        entityType: "maintenance_group",
+        entityId: selected.id,
+        summary: `Moved the "${selected.name}" group ${direction} on ${boardId}.`,
+        detail: {
+          board: boardId,
+          direction,
+          order: reordered.map((entry) => ({ id: entry.id, name: entry.name })),
+        },
+        request,
+      });
       return Response.json({ groups: reordered });
     }
 
@@ -2370,6 +2588,23 @@ export async function PATCH(request: Request) {
         { email: identityEmail || actor.email, displayName: actor.displayName },
         group.id,
       );
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor, identityEmail, session }),
+        action: "board.group_deleted",
+        entityType: "maintenance_group",
+        entityId: group.id,
+        summary: `Moved the "${group.name}" group on ${boardId} to the recycle bin; its items went to "${target.name}".`,
+        detail: {
+          board: boardId,
+          movedTo: { id: target.id, name: target.name },
+          movedItems: movedItems.length,
+          recoverable: true,
+          retentionDays: RETENTION_DAYS,
+        },
+        request,
+      });
       return Response.json({
         deleted: true,
         recycled: true,
@@ -2537,11 +2772,60 @@ export async function PATCH(request: Request) {
       if (typeof payload.visible === "boolean") {
         values.visible = payload.visible;
       }
+      /*
+       * Freezing a column against the left edge, and which summary its group
+       * footer runs. Both were already columns on this table with a validated
+       * writer on /api/board/columns and no writer here, which is the route the
+       * grid actually calls — so neither could be set from the board.
+       */
+      if (typeof payload.pinned === "boolean") {
+        values.pinned = payload.pinned;
+      }
+      if (payload.summary !== undefined) {
+        const summary = trimString(payload.summary, 24);
+        // Validated against the column's own type, exactly as
+        // PATCH /api/board/columns does — a `sum` on a status column would be a
+        // stored instruction the footer could not carry out.
+        if (summary && !summariesFor(existing.type).includes(summary as never)) {
+          return Response.json(
+            { error: `A ${existing.type} column cannot be summarised by "${summary}".` },
+            { status: 400 },
+          );
+        }
+        values.summary = summary || null;
+      }
       const [column] = await db
         .update(maintenanceBoardColumns)
         .set(values)
         .where(and(eq(maintenanceBoardColumns.id, columnId), eq(maintenanceBoardColumns.organisationId, orgId)))
         .returning();
+      /*
+       * Audited — but not every keystroke of it.
+       *
+       * A column being renamed, hidden, pinned or re-summarised is a change to
+       * the shape of the board that everybody in the workspace sees, and W13-05
+       * asks for those to be attributable. A width drag and a sort direction
+       * are not: they fire many times a minute, they are per-column preferences
+       * rather than structure, and logging them would bury the events somebody
+       * is actually looking for. `structuralColumnChange` decides.
+       */
+      const structural = structuralColumnChange(existing, column);
+      if (structural) {
+        await recordAudit({
+          db,
+          organisationId: orgId,
+          actor: auditActor({ actor, identityEmail, session }),
+          action: "board.column_updated",
+          entityType: "maintenance_board_column",
+          entityId: column.id,
+          summary: `${structural} the "${column.title}" column on ${boardId}.`,
+          detail: {
+            board: boardId,
+            ...changeDetail(columnAuditShape(existing), columnAuditShape(column)),
+          },
+          request,
+        });
+      }
       return Response.json({ column: columnPayload(column) });
     }
 
@@ -2576,6 +2860,32 @@ export async function PATCH(request: Request) {
           .delete(maintenanceBoardColumns)
           .where(and(eq(maintenanceBoardColumns.id, columnId), eq(maintenanceBoardColumns.organisationId, orgId)));
       }
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor, identityEmail, session }),
+        action: action === "delete_column" ? "board.column_deleted" : "board.column_cleared",
+        entityType: "maintenance_board_column",
+        entityId: columnId,
+        summary:
+          action === "delete_column"
+            ? `Deleted the "${existing.title}" column from ${boardId}, discarding its values.`
+            : `Cleared every value in the "${existing.title}" column on ${boardId}.`,
+        detail: {
+          board: boardId,
+          ...columnAuditShape(existing),
+          /*
+           * Deleting a column is NOT recoverable, and the audit line says so
+           * rather than leaving a reader to assume the recycle bin caught it.
+           * Making it recoverable needs a `deleted_at` on
+           * `maintenance_board_columns` plus retention of the cells it owns —
+           * a schema change, which is why W13-06 records this as identified
+           * and deferred rather than silently unaddressed.
+           */
+          recoverable: false,
+        },
+        request,
+      });
       return Response.json({
         cleared: true,
         deleted: action === "delete_column",

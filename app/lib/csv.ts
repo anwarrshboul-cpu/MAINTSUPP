@@ -90,6 +90,22 @@ function escapeCell(value: unknown) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
+/**
+ * The same writer, taking positional rows rather than keyed records.
+ *
+ * `toCsv` keys each row by its header text, which is right for a fixed export
+ * template like the site register and wrong for a board: two columns on a board
+ * may legitimately share a title, and the second would overwrite the first.
+ * This takes the values already in column order, so the header row and the data
+ * rows cannot drift apart.
+ */
+export function rowsToCsv(headers: string[], rows: unknown[][]) {
+  const lines = [headers.map(escapeCell).join(",")];
+  for (const row of rows) lines.push(row.map(escapeCell).join(","));
+  // A BOM keeps Excel from mangling accented site names on open.
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
 export function toCsv(headers: string[], rows: Array<Record<string, unknown>>) {
   const lines = [headers.map(escapeCell).join(",")];
   for (const row of rows) {

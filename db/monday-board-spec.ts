@@ -228,12 +228,32 @@ export const maintenanceColumns: SeedColumn[] = [
 ];
 
 /**
- * MAINTSUPP-only. Not a monday column — it is the row's "move to group" control,
- * which monday exposes from the row menu rather than as a column. Kept out of
- * `maintenanceColumns` so a parity count of that array reads 25.
+ * MAINTSUPP-only columns. Neither is a monday column, which is why both are kept
+ * out of `maintenanceColumns` — folding either in would make a parity count of
+ * that array read 26 or 27 rather than monday's 25.
+ *
+ * `move` is the row's "move to group" control, which monday exposes from the row
+ * menu rather than as a column. `dueDate` surfaces this product's own
+ * `maintenance_requests.due_at`, which monday's board has no equivalent of.
  */
 export const maintenanceUiColumns: SeedColumn[] = [
   { key: "move", title: "Group", type: "dropdown", width: 185, system: true },
+  /*
+   * The job's deadline, which the product has always had and the board has
+   * never shown.
+   *
+   * `maintenance_requests.due_at` drives the overdue meter, the Planned
+   * calendar and the SLA window, and until now the only way to set it was the
+   * Timeline column's end handle or the request drawer. An operator looking at
+   * the board could not see when a job was due, which is the single question a
+   * maintenance board is opened to answer.
+   *
+   * It reads and writes THE SAME FIELD — there is no cell behind it. A date
+   * column storing its own value would be a second deadline that the calendar
+   * and the overdue count could not see, which is exactly the shadow this
+   * board already refuses elsewhere.
+   */
+  { key: "dueDate", title: "Due Date", type: "date", width: 150 },
 ];
 
 /* ── Maintenance — groups ─────────────────────────────────────────────────── */

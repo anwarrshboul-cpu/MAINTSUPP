@@ -50,10 +50,21 @@ test("the chosen sort is remembered", async () => {
   assert.match(types, /sort\?: "asc" \| "desc";/, "the setting must exist on the column");
 
   const route = await read("app/api/board/route.ts");
+  /*
+   * The property is that only the two directions survive the round trip. The
+   * expression moved into `cleanViewSettings` in Batch 1A — the sort is no
+   * longer the only view state a column carries, so the three type branches
+   * of `cleanSettings` share one cleaner — and gained the `as const`
+   * narrowing that wider return type needs. Matched on the two comparisons
+   * rather than on one whole line, so the next legitimate reshaping does not
+   * fail this either.
+   */
+  assert.match(route, /record\.sort === "asc"/);
+  assert.match(route, /record\.sort === "desc"/);
   assert.match(
     route,
-    /record\.sort === "asc" \|\| record\.sort === "desc" \? record\.sort : undefined/,
-    "and survive the settings round trip, with anything else dropped",
+    /: undefined;/,
+    "anything that is not one of the two directions must be dropped",
   );
 
   const board = await read("app/(app)/portal/live-board.tsx");

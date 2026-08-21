@@ -20,6 +20,7 @@ import {
   roleIdentityEmail,
 } from "../../lib/tenant-access";
 import { listOptionValues } from "../../lib/options-repository";
+import { effectiveCapabilities, resolvePermissions } from "../../lib/permissions";
 import { type WorkspaceRole } from "../../lib/workspace-actor";
 
 function clean(value: unknown, max = 120) {
@@ -99,7 +100,7 @@ async function contextPayload(request: Request) {
     .filter((organisation) => context.organisationIds.includes(organisation.id))
     .sort((left, right) => left.name.localeCompare(right.name));
 
-  const [siteRows, priorities, engineers, labels] = await Promise.all([
+  const [siteRows, priorities, engineers, labels, permissions] = await Promise.all([
     context.db
       .select({ id: sites.id, name: sites.name })
       .from(sites)
@@ -108,12 +109,29 @@ async function contextPayload(request: Request) {
     listOptionValues(context.db, context.orgId, "priority"),
     listOptionValues(context.db, context.orgId, "engineer_required"),
     listOptionValues(context.db, context.orgId, "maintenance_label"),
+    resolvePermissions(context.db, context.orgId, context.actor.role),
   ]);
 
   return {
     actor: context.actor,
     currentOrganisation: context.organisation,
     organisations: visibleOrganisations,
+    /*
+     * WHAT THIS ACTOR MAY DO, decided by the server.
+     *
+     * The defaults merged with this workspace's overrides — the same answer
+     * `can()` gives every route that enforces one, so a control the browser
+     * hides and a request the API refuses can never disagree. It is a read of
+     * the caller's OWN permissions and nobody else's, so it discloses nothing
+     * a person could not learn by clicking.
+     *
+     * Two callers were already waiting for this and guessing without it:
+     * `raise-ticket.tsx` reads `context.capabilities["board.edit"]` and falls
+     * back to inferring from the role string, and the board's CSV export had
+     * no answer at all — `data.export` gated the Sites register and nothing on
+     * the board. Guessing from a role is wrong the moment an admin narrows one.
+     */
+    capabilities: effectiveCapabilities(context.actor.role, permissions.capabilities),
     // Stage 19 — what the actor is allowed to see, and how it was decided.
     identity: {
       email: context.identityEmail,
