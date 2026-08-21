@@ -48,6 +48,22 @@ function optionalText(value: unknown, max = 240) {
   return result || null;
 }
 
+/**
+ * A day rate, in pence.
+ *
+ * The form asks for pounds because that is what a rate card says, and the
+ * column stores pence because that is what every other money column here
+ * stores. An empty box is not a rate of zero — it means nobody has recorded
+ * one — so it stays null and the register prints a dash rather than "£0.00",
+ * which would read as "they work for free".
+ */
+function ratePence(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const pounds = Number(value);
+  if (!Number.isFinite(pounds) || pounds < 0) return null;
+  return Math.round(pounds * 100);
+}
+
 function numeric(value: unknown, fallback: number, min = 0, max = 1_000_000) {
   const parsed = Number(value);
   return Number.isFinite(parsed)
@@ -461,6 +477,12 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       name: contractor.name,
       email: contractor.email,
       phone: contractor.phone,
+      // The person, the place, what was agreed and what it costs — see the
+      // note on the `contractors` table for why the row could not hold them.
+      contactName: contractor.contactName,
+      address: contractor.address,
+      notes: contractor.notes,
+      dayRatePence: contractor.dayRatePence,
       serviceCategories: parseStringArray(contractor.serviceCategories),
       coverageAreas: parseStringArray(contractor.coverageAreas),
       certifications: parseStringArray(contractor.certifications),
@@ -656,7 +678,7 @@ export async function POST(request: Request) {
       const name = text(data.name, 140);
       if (!name) throw new Error("A contractor name is required.");
       id = newId("contractor", name);
-      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: numeric(data.rating, 0, 0, 5), active: booleanValue(data.active) });
+      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: numeric(data.rating, 0, 0, 5), active: booleanValue(data.active) });
     } else if (entity === "planned") {
       const title = text(data.title, 160);
       const siteId = text(data.siteId, 100);
@@ -686,6 +708,25 @@ export async function POST(request: Request) {
   }
 }
 
+/**
+ * Include a column in an UPDATE only when the caller actually sent it.
+ *
+ * THE BUG THIS EXISTS FOR. Every PATCH branch below builds its `set` from
+ * `text(data.x)` unconditionally, and `text` turns a missing key into "". The
+ * manage form always posts a whole record so the screens never noticed — but
+ * anything sending a partial update, which is the obvious way to use a PATCH,
+ * silently blanked every field it did not mention. Deactivating a contractor
+ * with `{ active: false }` erased their name, email, phone, trades and
+ * coverage, leaving a nameless row in the register.
+ */
+function supplied<T>(
+  data: Record<string, unknown>,
+  key: string,
+  read: (value: unknown) => T,
+): Record<string, T> {
+  return key in data ? { [key]: read(data[key]) } : {};
+}
+
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
@@ -706,7 +747,26 @@ export async function PATCH(request: Request) {
     } else if (entity === "unit") {
       await db.update(units).set({ siteId: text(data.siteId, 100), name: text(data.name, 140), category: text(data.category, 80), manufacturer: optionalText(data.manufacturer, 100), model: optionalText(data.model, 100), serialNumber: optionalText(data.serialNumber, 100), status: text(data.status, 40), notes: optionalText(data.notes, 500), updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     } else if (entity === "contractor") {
-      await db.update(contractors).set({ name: text(data.name, 140), email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60), rating: numeric(data.rating, 0, 0, 5), active: booleanValue(data.active), updatedAt: new Date().toISOString() }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
+      await db.update(contractors).set({
+        // Only what was sent — see `supplied`. A partial PATCH used to blank
+        // every column it did not mention.
+        ...supplied(data, "name", (value) => text(value, 140)),
+        ...supplied(data, "email", (value) => optionalText(value, 160)),
+        ...supplied(data, "phone", (value) => optionalText(value, 80)),
+        ...supplied(data, "contactName", (value) => optionalText(value, 140)),
+        ...supplied(data, "address", (value) => optionalText(value, 240)),
+        ...supplied(data, "notes", (value) => optionalText(value, 2000)),
+        // The form's key is `dayRate` in pounds; the column is pence.
+        ...("dayRate" in data ? { dayRatePence: ratePence(data.dayRate) } : {}),
+        ...supplied(data, "serviceCategories", (value) => JSON.stringify(stringArray(value))),
+        ...supplied(data, "coverageAreas", (value) => JSON.stringify(stringArray(value))),
+        ...supplied(data, "certifications", (value) => JSON.stringify(stringArray(value))),
+        ...supplied(data, "insuranceExpiry", (value) => optionalText(value, 40)),
+        ...supplied(data, "availability", (value) => text(value, 60)),
+        ...supplied(data, "rating", (value) => numeric(value, 0, 0, 5)),
+        ...supplied(data, "active", booleanValue),
+        updatedAt: new Date().toISOString(),
+      }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
     } else if (entity === "planned") {
       await db.update(plannedMaintenance).set({ siteId: text(data.siteId, 100), unitId: optionalText(data.unitId, 100), contractorId: optionalText(data.contractorId, 100), title: text(data.title, 160), category: text(data.category, 80), frequency: text(data.frequency, 60), nextDueAt: text(data.nextDueAt, 40), lastCompletedAt: optionalText(data.lastCompletedAt, 40), status: text(data.status, 40), reminderDays: numeric(data.reminderDays, 30, 0, 365), updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
     } else if (entity === "member") {

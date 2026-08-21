@@ -49,6 +49,19 @@ export interface BoardColumnSettings {
   choices?: BoardColumnChoice[];
   people?: BoardColumnChoice[];
   wrap?: boolean;
+  /**
+   * The board's saved sort, carried by the column it sorts by.
+   *
+   * Sorting was `useState` and nothing else, so it lasted until the next
+   * reload while column width and visibility beside it did not — the
+   * inconsistency an operator notices first. `board_views.sort` is the other
+   * candidate home, but views are owned by board-chrome.tsx and the sort is
+   * chosen in live-board.tsx; keeping it on the column keeps one component
+   * responsible for reading and writing it.
+   *
+   * At most one column carries it: setting a new sort clears the old one.
+   */
+  sort?: "asc" | "desc";
 }
 
 export interface MaintenanceBoardColumn {
@@ -60,6 +73,17 @@ export interface MaintenanceBoardColumn {
   width: number;
   settings: BoardColumnSettings;
   system: boolean;
+  /**
+   * Whether the board draws this column.
+   *
+   * `maintenance_board_columns.visible` has existed since Stage 1 and nothing
+   * read it: hiding a column lived in a `useState<Set<string>>` in
+   * live-board.tsx, so it came back on the next reload. Hiding twelve
+   * certificate columns to look at two is exactly the kind of thing an operator
+   * does once and expects to stay done, which is why it is carried here rather
+   * than in browser state.
+   */
+  visible: boolean;
 }
 
 export interface MaintenanceBoardCell {

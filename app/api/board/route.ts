@@ -391,11 +391,15 @@ function cleanSettings(
       ? (value as Record<string, unknown>)
       : {};
   const wrap = record.wrap === true;
+  // The board's saved sort, kept on the column it sorts by. Anything other than
+  // the two directions drops out, so a stray value cannot survive a round trip.
+  const sort = record.sort === "asc" || record.sort === "desc" ? record.sort : undefined;
   if (type === "status" || type === "dropdown") {
     const choices = cleanChoices(record.choices);
     return {
       choices: choices.length ? choices : defaultSettings(type).choices,
       wrap,
+      ...(sort ? { sort } : {}),
     };
   }
   if (type === "people") {
@@ -403,9 +407,10 @@ function cleanSettings(
     return {
       people: people.length ? people : defaultSettings(type).people,
       wrap,
+      ...(sort ? { sort } : {}),
     };
   }
-  return { wrap };
+  return { wrap, ...(sort ? { sort } : {}) };
 }
 
 function parseSettings(value: string, type: BoardColumnType) {
@@ -444,6 +449,8 @@ function columnPayload(
     width: row.width,
     settings: parseSettings(row.settings, type),
     system: row.system,
+    // Carried so hiding a column survives a reload — see MaintenanceBoardColumn.
+    visible: row.visible !== false,
   };
 }
 
@@ -2492,6 +2499,16 @@ export async function PATCH(request: Request) {
       const width = Number(payload.width);
       if (Number.isInteger(width) && width >= 90 && width <= 600) {
         values.width = width;
+      }
+      /*
+       * Hiding a column is a saved decision, not a browser-session one. The
+       * board used to keep it in a `useState<Set<string>>`, so an operator who
+       * hid ten certificate columns to read the other two got all twelve back
+       * on the next reload. The `visible` field has been on the table since
+       * Stage 1 and simply had no writer.
+       */
+      if (typeof payload.visible === "boolean") {
+        values.visible = payload.visible;
       }
       const [column] = await db
         .update(maintenanceBoardColumns)

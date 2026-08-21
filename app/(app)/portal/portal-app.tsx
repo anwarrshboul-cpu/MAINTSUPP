@@ -74,6 +74,7 @@ import {
   SlaPerformance,
   SpendAgainstBudget,
   SpendMatrix,
+  SpendTrend,
 } from "./dashboard-insights";
 import { storeDocumentationResponsibility } from "../../../db/monday-board-spec";
 import ContractorLinkPanel from "./contractor-link-panel";
@@ -2165,7 +2166,9 @@ export default function PortalApp({
             <CalendarView
               requests={requests}
               planned={currentPlanned}
+              complianceRecords={workspace?.compliance ?? []}
               onManage={(id) => openWorkspaceManager("planned", id)}
+              onOpenCompliance={(id) => openWorkspaceManager("compliance", id)}
               onOpenRequest={(request) => {
                 openRequest(request);
                 setSection("maintenance");
@@ -3096,6 +3099,18 @@ function ComplianceView({
   const [filter, setFilter] = useState<"All" | ComplianceState>("All");
   const [portfolio, setPortfolio] = useState("all");
   const [expiryWindow, setExpiryWindow] = useState("all");
+  /*
+   * A start and an end of the reader's own, for the expiry horizon.
+   *
+   * The preset horizons answer "what falls due in the next 90 days". They
+   * cannot answer "what falls due in the quarter I am about to be audited on",
+   * which is the question that gets asked in a compliance meeting — so
+   * "Between two dates" is a fourth shape alongside them. It stays an EXPIRY
+   * filter rather than becoming a reporting period: this page is about what is
+   * coming, not what happened.
+   */
+  const [expiryFrom, setExpiryFrom] = useState("");
+  const [expiryTo, setExpiryTo] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const now = useCurrentTime();
@@ -3154,9 +3169,22 @@ function ComplianceView({
       [record.siteName, managerFor(record.siteId), record.kind, record.state]
         .some((value) => value.toLowerCase().includes(needle));
     const matchesStatus = filter === "All" || record.state === filter;
-    const matchesWindow = expiryWindow === "all" ||
-      !record.expiry ||
-      new Date(record.expiry).getTime() <= now + Number(expiryWindow) * 86_400_000;
+    const matchesWindow = (() => {
+      if (expiryWindow === "custom") {
+        // A half-open range is still useful: "everything after March" is a
+        // question, and so is "everything before the audit".
+        if (!record.expiry) return !expiryFrom && !expiryTo;
+        const at = new Date(record.expiry).getTime();
+        if (expiryFrom && at < new Date(`${expiryFrom}T00:00:00`).getTime()) return false;
+        if (expiryTo && at > new Date(`${expiryTo}T23:59:59`).getTime()) return false;
+        return true;
+      }
+      return (
+        expiryWindow === "all" ||
+        !record.expiry ||
+        new Date(record.expiry).getTime() <= now + Number(expiryWindow) * 86_400_000
+      );
+    })();
     return matchesSearch && matchesStatus && matchesWindow;
   });
   const expiringTypes = Array.from(
@@ -3253,6 +3281,7 @@ function ComplianceView({
             { value: "30", label: "Next 30 days" },
             { value: "90", label: "Next 90 days" },
             { value: "180", label: "Next 180 days" },
+            { value: "custom", label: "Between two dates…" },
           ]}
           onPeriodChange={setExpiryWindow}
           onExport={() => downloadTableCsv(
@@ -3262,6 +3291,30 @@ function ComplianceView({
           )}
           exportLabel="Export register"
         >
+          {/* Only when asked for, so the row is not two empty date boxes wide
+              for the four readers in five who want a preset. */}
+          {expiryWindow === "custom" && (
+            <>
+              <label className="analytics-period analytics-period--argument">
+                <span className="visually-hidden">Expiring from</span>
+                <input
+                  aria-label="Expiring from"
+                  type="date"
+                  value={expiryFrom}
+                  onChange={(event) => setExpiryFrom(event.target.value)}
+                />
+              </label>
+              <label className="analytics-period analytics-period--argument">
+                <span className="visually-hidden">Expiring until</span>
+                <input
+                  aria-label="Expiring until"
+                  type="date"
+                  value={expiryTo}
+                  onChange={(event) => setExpiryTo(event.target.value)}
+                />
+              </label>
+            </>
+          )}
           <button className="analytics-toolbar__button" type="button" onClick={() => onManage(null)}>
             <Icon name="plus" size={17} /> Manage register
           </button>
@@ -3339,16 +3392,39 @@ function ComplianceView({
   );
 }
 
+/**
+ * One thing on the operations calendar.
+ *
+ * Two sources land on the same grid — a job's response deadline and a
+ * certificate's expiry — and a reader scanning a month should not have to know
+ * which table a date came from. `kind` is what decides where a click goes.
+ */
+type CalendarEvent = {
+  id: string;
+  kind: "job" | "compliance";
+  title: string;
+  subtitle: string;
+  tone: "urgent" | "visit" | "standard" | "renewal";
+  request?: MaintenanceRequest;
+  recordId?: string;
+};
+
 function CalendarView({
   requests,
   planned,
+  complianceRecords,
   onManage,
   onOpenRequest,
+  onOpenCompliance,
 }: {
   requests: MaintenanceRequest[];
   planned: WorkspacePlannedItem[];
+  complianceRecords: WorkspaceSnapshot["compliance"];
   onManage: (id?: string | null) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
+  /* A renewal on the grid opens the certificate behind it, the same way a job
+     opens its work order — see `CalendarEvent.kind`. */
+  onOpenCompliance: (id: string | null) => void;
 }) {
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(
@@ -3385,16 +3461,81 @@ function CalendarView({
       }),
     [daysInMonth, firstOffset, month, previousMonthDays, year],
   );
+  /*
+   * THE PAGE'S OWN RANGE, and what it is for on a calendar.
+   *
+   * The month grid already answers "what is happening in March". The range
+   * answers a different question — "show me only the next quarter's renewals"
+   * — and it filters what is DRAWN, so a reader paging through months sees a
+   * consistent slice rather than everything. Choosing a range also moves the
+   * grid to the month the range starts in, so the answer is on screen without
+   * a second click.
+   */
+  const [period, setPeriod] = useState("90");
+  const nowMs = today.getTime();
+  const periodWindow = resolvePeriod(period, nowMs);
+  const withinPeriod = (value: string | null | undefined) => {
+    if (!periodWindow) return true;
+    if (!value) return false;
+    const at = Date.parse(value);
+    return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
+  };
+  const choosePeriod = (next: string) => {
+    setPeriod(next);
+    const range = resolvePeriod(next, Date.now());
+    if (range) {
+      const start = new Date(range.start);
+      setCursor(new Date(start.getFullYear(), start.getMonth(), 1));
+    }
+  };
+
+  /*
+   * JOBS AND COMPLIANCE RENEWALS, on one grid.
+   *
+   * The heading has always promised "booked visits, response deadlines and
+   * compliance renewals in one schedule" and the grid drew only the first two:
+   * `eventMap` was built from `requests` alone, so every certificate expiry —
+   * the dates this page exists to warn about — was invisible here and visible
+   * only on Compliance. Both now land on the day they fall.
+   */
   const eventMap = useMemo(() => {
-    const map = new Map<string, MaintenanceRequest[]>();
+    const map = new Map<string, CalendarEvent[]>();
+    const add = (value: string | null | undefined, event: CalendarEvent) => {
+      if (!value) return;
+      const at = new Date(value);
+      if (Number.isNaN(at.getTime())) return;
+      const key = `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}`;
+      map.set(key, [...(map.get(key) ?? []), event]);
+    };
     for (const request of requests) {
-      if (!request.dueAt) continue;
-      const due = new Date(request.dueAt);
-      const key = `${due.getFullYear()}-${due.getMonth()}-${due.getDate()}`;
-      map.set(key, [...(map.get(key) ?? []), request]);
+      if (!withinPeriod(request.dueAt)) continue;
+      add(request.dueAt, {
+        id: request.id,
+        kind: "job",
+        title: request.title,
+        subtitle: request.location,
+        tone:
+          request.priority === "Urgent"
+            ? "urgent"
+            : request.stage === "Booked"
+              ? "visit"
+              : "standard",
+        request,
+      });
+    }
+    for (const record of complianceRecords) {
+      if (!withinPeriod(record.expiry)) continue;
+      add(record.expiry, {
+        id: record.id,
+        kind: "compliance",
+        title: `${record.kind} renewal`,
+        subtitle: record.siteName,
+        tone: record.state === "Expired" ? "urgent" : "renewal",
+        recordId: record.id,
+      });
     }
     return map;
-  }, [requests]);
+  }, [complianceRecords, period, requests]);
 
   return (
     <div className="section-stack">
@@ -3411,6 +3552,7 @@ function CalendarView({
           </p>
         </div>
         <div className="section-header__actions">
+          <PeriodPicker value={period} onChange={choosePeriod} now={nowMs} />
           <button
             className="secondary-button"
             type="button"
@@ -3501,19 +3643,17 @@ function CalendarView({
                   {events.slice(0, 3).map((event) => (
                     <button
                       type="button"
-                      className={`calendar-event calendar-event--${
-                        event.priority === "Urgent"
-                          ? "urgent"
-                          : event.stage === "Booked"
-                            ? "visit"
-                            : "standard"
-                      }`}
-                      key={event.id}
-                      onClick={() => onOpenRequest(event)}
+                      className={`calendar-event calendar-event--${event.tone}`}
+                      key={`${event.kind}-${event.id}`}
+                      onClick={() =>
+                        event.kind === "job" && event.request
+                          ? onOpenRequest(event.request)
+                          : onOpenCompliance(event.recordId ?? null)
+                      }
                       title={`${event.id}: ${event.title}`}
                     >
                       <strong>{event.title}</strong>
-                      <small>{event.location}</small>
+                      <small>{event.subtitle}</small>
                     </button>
                   ))}
                   {events.length > 3 && <small>+{events.length - 3} more</small>}
@@ -3547,7 +3687,26 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
-  const filtered = files.filter((file) =>
+  /*
+   * This page's own reporting range, defaulting to a year because a document
+   * register is consulted over a longer horizon than a job board. It is this
+   * page's state and nobody else's — a range chosen here does not follow the
+   * reader to Reports.
+   *
+   * It filters the register itself, not just the label: `withinPeriod` is
+   * applied before the search, so the counts above the table, the export and
+   * the rows all describe the same set.
+   */
+  const [period, setPeriod] = useState("12m");
+  const now = Date.now();
+  const window = resolvePeriod(period, now);
+  const withinPeriod = (file: FileRecord) => {
+    if (!window) return true;
+    const at = Date.parse(file.uploadedAt);
+    return Number.isNaN(at) ? true : at >= window.start && at <= window.end;
+  };
+  const inRange = files.filter(withinPeriod);
+  const filtered = inRange.filter((file) =>
     [file.name, file.kind, file.site, file.requestId ?? ""]
       .join(" ")
       .toLowerCase()
@@ -3569,36 +3728,39 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
             clear owner and source.
           </p>
         </div>
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={() => downloadFileRegister(filtered)}
-        >
-          <Icon name="download" size={17} />
-          Export register
-        </button>
+        <div className="section-header__controls">
+          <PeriodPicker value={period} onChange={setPeriod} now={now} />
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => downloadFileRegister(filtered)}
+          >
+            <Icon name="download" size={17} />
+            Export register
+          </button>
+        </div>
       </section>
 
       <section className="document-stat-grid">
         <div>
           <Icon name="folder" size={20} />
           <span>
-            <small>Total documents</small>
-            <strong>{files.length}</strong>
+            <small>Documents in range</small>
+            <strong>{inRange.length}</strong>
           </span>
         </div>
         <div>
           <Icon name="upload" size={20} />
           <span>
             <small>Added this month</small>
-            <strong>{files.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}</strong>
+            <strong>{inRange.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}</strong>
           </span>
         </div>
         <div>
           <Icon name="alert" size={20} />
           <span>
             <small>Require attention</small>
-            <strong>{files.filter((file) => file.status === "Expiring soon").length}</strong>
+            <strong>{inRange.filter((file) => file.status === "Expiring soon").length}</strong>
           </span>
         </div>
       </section>
@@ -3748,17 +3910,26 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
 function ContractorContact({
   contractor,
 }: {
-  contractor: { name: string; email?: string | null; phone?: string | null };
+  contractor: {
+    name: string;
+    contactName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  };
 }) {
   const phone = (contractor.phone ?? "").trim();
   const email = (contractor.email ?? "").trim();
+  const person = (contractor.contactName ?? "").trim();
 
-  if (!phone && !email) {
+  if (!phone && !email && !person) {
     return <span className="contractor-contact__none">No contact details</span>;
   }
 
   return (
     <span className="contractor-contact">
+      {/* The person leads, because a number nobody has a name for is the
+          thing that gets dialled last. */}
+      {person && <strong className="contractor-contact__person">{person}</strong>}
       {phone && (
         <a
           className="contractor-contact__link"
@@ -3816,6 +3987,11 @@ function ContractorsView({
         name: contractor.name,
         email: null,
         phone: null,
+        // Derived from the jobs, so there is no register row carrying these.
+        contactName: null,
+        address: null,
+        notes: null,
+        dayRatePence: null,
         serviceCategories: Array.from(contractor.trades),
         coverageAreas: ["UK"],
         certifications: [],
@@ -3830,12 +4006,46 @@ function ContractorsView({
       })),
     [requests],
   );
-  const contractors = registeredContractors.length ? registeredContractors : fallbackContractors;
+  const roster = registeredContractors.length ? registeredContractors : fallbackContractors;
+
+  /*
+   * THE PAGE'S OWN REPORTING RANGE.
+   *
+   * "Assigned 40, completed 38" is a different claim over a quarter than over
+   * five years, and this page had no way to say which it meant. The register
+   * itself — who they are, what they cover, what they are certified for — is
+   * not time-bound and never filters; the WORK counts beside it are, so they
+   * are recomputed from the jobs inside the window rather than taken from the
+   * workspace payload's all-time totals. A contractor with no work in the
+   * window stays listed, showing zeroes, because "we use them and they did
+   * nothing this quarter" is the answer the reader came for.
+   */
+  const [period, setPeriod] = useState("12m");
+  const nowMs = Date.now();
+  const periodWindow = resolvePeriod(period, nowMs);
+  const inWindow = (request: MaintenanceRequest) => {
+    if (!periodWindow) return true;
+    const at = Date.parse(request.completedAt ?? request.requestedAt);
+    return Number.isNaN(at) ? true : at >= periodWindow.start && at <= periodWindow.end;
+  };
+  const scopedRequests = requests.filter(inWindow);
+
+  const contractors = roster.map((contractor) => {
+    const theirs = scopedRequests.filter((request) => request.contractor === contractor.name);
+    return {
+      ...contractor,
+      assignedJobs: theirs.length,
+      completedJobs: theirs.filter((request) => request.stage === "Completed").length,
+      urgentJobs: theirs.filter((request) => request.priority === "Urgent" && request.stage !== "Completed").length,
+      spend: theirs.reduce((sum, request) => sum + (request.cost ?? 0), 0),
+    };
+  });
 
   return (
     <div className="section-stack">
       <section className="section-header"><div><span className="eyebrow-chip"><Icon name="users" size={15} />Managed network</span><h1>Contractors</h1><p>Qualifications, coverage, assigned work, completion performance and costs in one operational register.</p></div>
         <div className="section-header__actions">
+          <PeriodPicker value={period} onChange={setPeriod} now={nowMs} />
           {/* Somebody looking at a contractor is usually about to give them
               something to do. */}
           <RaiseTicketButton
@@ -3854,9 +4064,9 @@ function ContractorsView({
         <div><span className="site-stat-icon site-stat-icon--green"><Icon name="chart" size={19} /></span><small>Tracked spend</small><strong>{formatMoney(contractors.reduce((sum, item) => sum + item.spend, 0))}</strong></div>
       </section>
       <section className="panel sites-panel"><div className="table-scroll"><table className="data-table sites-table">
-        <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
+        <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Coverage</th><th>Day rate</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
         <tbody>{contractors.map((contractor) => (
-          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
+          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.coverageAreas.join(", ") || "Not specified"}</td><td>{contractor.dayRatePence === null || contractor.dayRatePence === undefined ? "—" : formatMoney(contractor.dayRatePence / 100)}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
         ))}</tbody>
       </table></div></section>
     </div>
@@ -4085,6 +4295,19 @@ function ReportsView({
         surface="reports"
         barSlot={layoutSlot}
         widgets={[
+          {
+            /*
+             * First, because "is this quarter worse than the last" is the
+             * question a spend report is opened to answer, and Reports could
+             * not answer it — the chart existed only on Overview.
+             */
+            key: "spend-trend",
+            label: "Spend trend",
+            wide: true,
+            render: () => (
+              <SpendTrend requests={scopedRequests} period={period} now={now} />
+            ),
+          },
           {
             key: "spend-matrix",
             label: "Spend matrix",

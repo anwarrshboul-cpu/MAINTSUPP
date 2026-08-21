@@ -7209,3 +7209,33 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
     min-height: 44px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   A PAGE HEADER THAT CARRIES CONTROLS.
+
+   Documents, Contractors and Planned each own a reporting range now, and their
+   headers had room for one button and nothing else — the picker and the export
+   button ended up stacked. This is the same row treatment `.analytics-toolbar`
+   gives its controls, scoped to the plain section header the three of them use.
+   --------------------------------------------------------------------------- */
+.section-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .section-header__controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* The person to ask for, above the number to ring them on. */
+.contractor-contact__person {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+}

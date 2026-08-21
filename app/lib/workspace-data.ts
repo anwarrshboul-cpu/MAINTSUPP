@@ -41,6 +41,19 @@ export type WorkspaceContractor = {
   name: string;
   email: string | null;
   phone: string | null;
+  /**
+   * The person to ask for, as distinct from the company.
+   *
+   * "Call Apex Electrical" is not an instruction anybody can follow at 7am with
+   * water coming through a ceiling. These four — the person, where they are,
+   * what was agreed and what they charge — were the gap between what the
+   * register held and what a coordinator needed off it.
+   */
+  contactName: string | null;
+  address: string | null;
+  notes: string | null;
+  /** Pence. Null means nobody has recorded a rate, which is not a rate of £0. */
+  dayRatePence: number | null;
   serviceCategories: string[];
   coverageAreas: string[];
   certifications: string[];

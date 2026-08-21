@@ -293,6 +293,8 @@ export const fallbackSystemColumns: MaintenanceBoardColumn[] = columnLabels.map(
     width: column.width,
     settings: { wrap: false },
     system: true,
+    // Drawn by default; only a saved `visible: false` hides a column.
+    visible: true,
   }),
 );
 

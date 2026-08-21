@@ -36,8 +36,10 @@ import {
   bucketFor,
   parseStamp,
   periodColumns,
+  periodSpendSeries,
   resolvePeriod,
 } from "./period-model";
+import { TrendChart } from "./dashboard-analytics";
 
 /**
  * The period a panel covers when its caller does not name one.
@@ -927,6 +929,61 @@ export function SpendMatrix({
 /* ── Cost by job category ────────────────────────────────────────────────── */
 
 /** Which kinds of fault cost the most. Nominal categories, so one hue. */
+/**
+ * Spend over time, on Reports.
+ *
+ * Overview has had this chart since it gained a date range; Reports — the page
+ * whose whole subject is money — did not, so "is this quarter worse than the
+ * last" could be answered on the dashboard but not on the report. It is the
+ * same series and the same honest empty state, drawn from the same
+ * `periodSpendSeries` so the two pages cannot disagree about a month.
+ */
+export function SpendTrend({
+  requests,
+  period,
+  now,
+}: {
+  requests: MaintenanceRequest[];
+  period: string;
+  now: number;
+}) {
+  const series = useMemo(
+    () => periodSpendSeries(requests, period, now),
+    [now, period, requests],
+  );
+  const window = resolvePeriod(period, now);
+
+  /*
+   * Cost is optional on a job and most are still open, so a portfolio can
+   * genuinely have no spend recorded. Plotting that as a line pinned to the
+   * axis looks like a charting failure and, worse, invites the reader to
+   * conclude the work was free.
+   */
+  if (!series.some((point) => point.value > 0)) {
+    return (
+      <InsightPanel
+        title="Spend trend"
+        hint={window.label}
+        empty={{
+          message: "No costs recorded against jobs in this period",
+          hint: "Spend appears here once jobs carry a Cost of Works.",
+        }}
+      >
+        <span />
+      </InsightPanel>
+    );
+  }
+
+  return (
+    <InsightPanel title="Spend trend" hint={window.label}>
+      <TrendChart
+        items={series}
+        valueFormatter={(value) => money(value)}
+      />
+    </InsightPanel>
+  );
+}
+
 export function CostByCategory({ requests }: { requests: MaintenanceRequest[] }) {
   const rows = useMemo(() => {
     const byCategory = new Map<string, { total: number; jobs: number }>();

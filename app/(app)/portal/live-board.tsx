@@ -57,6 +57,7 @@ import {
   withinAnalyticsPeriod,
 } from "./dashboard-analytics";
 import { computeJobMeters, jobMeterTrendLabels } from "./dashboard-meters";
+import { PeriodPicker } from "./period-picker";
 import { JobsMeterToggle, useCollapsingMeters } from "./jobs-meter-strip";
 
 import {
@@ -283,6 +284,16 @@ export function LiveMaintenanceBoard({
   const [sortDirection, setSortDirection] = useState<"newest" | "oldest">(
     "newest",
   );
+  /*
+   * HIDDEN COLUMNS ARE SERVER STATE, seeded here and written back on change.
+   *
+   * This was a bare `new Set()`, so hiding a column lasted until the next
+   * reload — an operator who hid ten certificate columns to read the other two
+   * got all twelve back on the next visit. `visible` has been on
+   * `maintenance_board_columns` since Stage 1 with nothing reading or writing
+   * it; `visibilityKeyFor` below is the one place that maps a column to the key
+   * this set uses, so the seed and the toggle cannot drift apart.
+   */
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [actionsOpen, setActionsOpen] = useState(false);
   const [hideOpen, setHideOpen] = useState(false);
@@ -1003,6 +1014,76 @@ export function LiveMaintenanceBoard({
     [customColumns, systemColumns],
   );
 
+  /**
+   * The key `hiddenColumns` uses for a column.
+   *
+   * System columns are keyed by their stable `key` and custom ones by their id,
+   * because a custom column has no meaningful key of its own. Both shapes were
+   * already spelled out at three call sites; this is the single definition they
+   * now share.
+   */
+  const visibilityKeyFor = (entry: BoardDisplayColumn) =>
+    entry.kind === "system" ? entry.key : `custom:${entry.column.id}`;
+
+  /*
+   * Seeded from the board payload, and re-seeded whenever the columns reload —
+   * a board switch or a refresh brings its own visibility with it.
+   */
+  useEffect(() => {
+    setHiddenColumns(
+      new Set(
+        allBoardColumns
+          .filter((entry) => entry.column.visible === false)
+          .map(visibilityKeyFor),
+      ),
+    );
+  }, [allBoardColumns]);
+
+  /*
+   * The saved sort, read back from whichever column carries it. Seeded only
+   * when the board has no sort of its own yet, so re-reading the columns after
+   * a cell edit cannot yank the board out from under a sort chosen a moment ago.
+   */
+  useEffect(() => {
+    const saved = allBoardColumns.find((entry) => entry.column.settings.sort);
+    if (!saved) return;
+    setColumnSort((current) =>
+      current ?? { columnId: saved.column.id, direction: saved.column.settings.sort! },
+    );
+  }, [allBoardColumns]);
+
+  /**
+   * Hide or show a column, and remember it.
+   *
+   * The local set moves first so the board redraws immediately; the write
+   * follows. A failed write is reported and the column comes back, because a
+   * column that looks hidden but is not is worse than one that refused to hide.
+   */
+  const setColumnVisible = async (entry: BoardDisplayColumn, next: boolean) => {
+    const key = visibilityKeyFor(entry);
+    setHiddenColumns((current) => {
+      const updated = new Set(current);
+      if (next) updated.delete(key);
+      else updated.add(key);
+      return updated;
+    });
+    try {
+      await updateCustomColumn(entry.column, { visible: next });
+    } catch (error) {
+      setHiddenColumns((current) => {
+        const reverted = new Set(current);
+        if (next) reverted.add(key);
+        else reverted.delete(key);
+        return reverted;
+      });
+      onNotify(
+        error instanceof Error
+          ? error.message
+          : "The column could not be hidden.",
+      );
+    }
+  };
+
   const groupForRequest = (request: MaintenanceRequest) =>
     placement.get(request.id)?.groupId ??
     groups.find((group) => group.stageKey === request.stage)?.id ??
@@ -1475,6 +1556,7 @@ export function LiveMaintenanceBoard({
       title?: string;
       settings?: BoardColumnSettings;
       width?: number;
+      visible?: boolean;
     },
   ) => {
     const response = await fetch(boardUrl("/api/board", boardId), {
@@ -1542,12 +1624,49 @@ export function LiveMaintenanceBoard({
     }
   };
 
+  /**
+   * Sort by a column, and remember it.
+   *
+   * The sort moves locally first so the board reorders under the pointer, then
+   * it is written to the column's settings. It used to be `useState` and
+   * nothing else, which meant a sort lasted until the next reload while the
+   * column width and visibility beside it persisted — the inconsistency an
+   * operator notices first.
+   *
+   * At most one column carries a sort, so the previous holder is cleared in the
+   * same breath. A failed write leaves the board sorted and says so rather than
+   * silently reverting: the reorder on screen is real either way, only its
+   * memory is at stake.
+   */
   const sortByColumn = (
     column: MaintenanceBoardColumn,
     direction: "asc" | "desc",
   ) => {
+    const previous = columnSort;
     setColumnSort({ columnId: column.id, direction });
     setColumnMenuInstance(null);
+    void (async () => {
+      try {
+        if (previous && previous.columnId !== column.id) {
+          const stale = allBoardColumns.find(
+            (entry) => entry.column.id === previous.columnId,
+          );
+          if (stale) {
+            const { sort: _dropped, ...rest } = stale.column.settings;
+            await updateCustomColumn(stale.column, { settings: rest });
+          }
+        }
+        await updateCustomColumn(column, {
+          settings: { ...column.settings, sort: direction },
+        });
+      } catch (error) {
+        onNotify(
+          error instanceof Error
+            ? `Sorted, but the choice could not be saved: ${error.message}`
+            : "Sorted, but the choice could not be saved.",
+        );
+      }
+    })();
   };
 
   const openColumnPickerAfter = (
@@ -2563,7 +2682,21 @@ export function LiveMaintenanceBoard({
           portfolios={portfolioChoices}
           onPortfolioChange={setPortfolio}
           period={analyticsPeriod}
-          periods={analyticsPeriodOptions}
+          /*
+           * The full picker, not the four rolling windows the plain select
+           * offered. `withinAnalyticsPeriod` — which is what `scopedRequests`
+           * filters on above — already understood the whole vocabulary; only
+           * the control was narrower than the code behind it, so a reader could
+           * ask for "last 90 days" but not for a named month or a start and end
+           * of their own.
+           */
+          periodControl={
+            <PeriodPicker
+              value={analyticsPeriod}
+              onChange={setAnalyticsPeriod}
+              now={analyticsNow}
+            />
+          }
           onPeriodChange={setAnalyticsPeriod}
           onExport={() =>
             downloadBoardCsv(
@@ -2856,23 +2989,13 @@ export function LiveMaintenanceBoard({
               <div className="live-board-menu column-menu" ref={hideMenuRef}>
                 <strong>Visible columns</strong>
                 {allBoardColumns.map((entry) => {
-                  const key =
-                    entry.kind === "system"
-                      ? entry.key
-                      : `custom:${entry.column.id}`;
+                  const key = visibilityKeyFor(entry);
                   return (
                     <label key={key}>
                       <input
                         type="checkbox"
                         checked={visible(key)}
-                        onChange={() =>
-                          setHiddenColumns((current) => {
-                            const next = new Set(current);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
-                            return next;
-                          })
-                        }
+                        onChange={() => void setColumnVisible(entry, !visible(key))}
                       />
                       {entry.column.title}
                     </label>
@@ -3392,14 +3515,7 @@ export function LiveMaintenanceBoard({
                                 collapsed={collapsedColumns.has(column.id)}
                                 groupedByThis={groupByColumn === column.id}
                                 onHide={() => {
-                                  const visibilityKey =
-                                    entry.kind === "system"
-                                      ? entry.key
-                                      : `custom:${column.id}`;
-                                  setHiddenColumns(
-                                    (current) =>
-                                      new Set(current).add(visibilityKey),
-                                  );
+                                  void setColumnVisible(entry, false);
                                   setColumnMenuInstance(null);
                                 }}
                                 onDelete={

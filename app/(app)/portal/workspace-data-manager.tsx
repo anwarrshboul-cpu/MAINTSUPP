@@ -52,7 +52,7 @@ const emptyDefaults: Record<Exclude<ManagerTab, "activity" | "import">, EditorDa
   site: { name: "", type: "Kiosk", region: "UK", lifecycle: "Current", address: "", manager: "" },
   compliance: { siteId: "", kind: "", state: "Missing", expiry: "" },
   unit: { siteId: "", name: "", category: "Asset", manufacturer: "", model: "", serialNumber: "", status: "Active", notes: "" },
-  contractor: { name: "", email: "", phone: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", availability: "Available", rating: "4", active: true },
+  contractor: { name: "", contactName: "", email: "", phone: "", address: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", dayRate: "", availability: "Available", rating: "4", active: true, notes: "" },
   planned: { siteId: "", unitId: "", contractorId: "", title: "", category: "Planned maintenance", frequency: "Annual", nextDueAt: "", lastCompletedAt: "", status: "Scheduled", reminderDays: "30" },
   member: { name: "", email: "", role: "Client", active: true },
 };
@@ -123,15 +123,26 @@ function fieldsFor(tab: Exclude<ManagerTab, "activity">, workspace: WorkspaceSna
   ];
   if (tab === "contractor") return [
     { key: "name", label: "Contractor name", required: true },
+    /*
+     * The person, not just the company. "Call Apex Electrical" is not an
+     * instruction anybody can follow at 7am with water coming through a
+     * ceiling; "call Dan at Apex" is.
+     */
+    { key: "contactName", label: "Contact person", placeholder: "Who to ask for" },
     { key: "email", label: "Email", type: "email" },
     { key: "phone", label: "Phone", type: "tel" },
+    { key: "address", label: "Address", placeholder: "Where they are based" },
     { key: "serviceCategories", label: "Service categories", placeholder: "Electrical, HVAC, Plumbing" },
     { key: "coverageAreas", label: "Coverage areas", placeholder: "UK, London, Midlands" },
     { key: "certifications", label: "Certifications", placeholder: "Comma-separated" },
     { key: "insuranceExpiry", label: "Insurance expiry", type: "date" },
+    /* Pounds here, pence in the column — see `ratePence` in the workspace API.
+       Left empty it stays null, because no recorded rate is not a rate of £0. */
+    { key: "dayRate", label: "Day rate (£)", type: "number", placeholder: "e.g. 320" },
     { key: "availability", label: "Availability", type: "select", options: ["Available", "Limited", "Unavailable", "Inactive"].map((value) => ({ value, label: value })) },
     { key: "rating", label: "Rating (0–5)", type: "number" },
     { key: "active", label: "Active contractor", type: "checkbox" },
+    { key: "notes", label: "Notes", type: "textarea", placeholder: "What was agreed, access arrangements, anything the next coordinator needs" },
   ];
   if (tab === "planned") return [
     { key: "siteId", label: "Site", type: "select", required: true, options: siteOptions },
@@ -193,6 +204,16 @@ function recordToEditor(tab: Exclude<ManagerTab, "activity">, record: Record<str
     },
   }).map((field) => field.key);
   const selected = Object.fromEntries(wanted.map((key) => [key, record[key]]));
+  /*
+   * The rate is stored in pence and edited in pounds, so the two names differ
+   * and the plain key copy above cannot find it. Without this the box is empty
+   * every time an existing contractor is opened, and saving would wipe a rate
+   * that was already recorded.
+   */
+  if (tab === "contractor" && "dayRate" in selected) {
+    const pence = record.dayRatePence;
+    selected.dayRate = typeof pence === "number" ? String(pence / 100) : "";
+  }
   return editorData(selected, ["expiry", "insuranceExpiry", "nextDueAt", "lastCompletedAt"]);
 }
 

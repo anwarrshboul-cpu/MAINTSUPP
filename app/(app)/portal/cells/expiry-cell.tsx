@@ -219,6 +219,34 @@ export function ExpiryCell({
               }
             }}
           >
+            {/*
+              THE CALENDAR, on desktop too.
+              
+              The editor was a native `<input type="date">` and two buttons, so
+              picking a date meant opening the browser's own picker — a
+              different control on every browser, and nothing like the grid
+              monday shows. This is the same `MobileBoardCalendar` the phone
+              sheet already used, so there is one calendar in the product
+              rather than two that drift.
+
+              The input stays beneath it: typing a date is faster than clicking
+              to it when you know the date, and it is what a keyboard reaches
+              first.
+            */}
+            <span className="expiry-cell__calendar">
+              <MobileBoardCalendar
+                month={calendarMonth}
+                mode="single"
+                weekStartsOn={1}
+                yearFirst
+                selectedStart={draftDate}
+                onMonthChange={setCalendarMonth}
+                onSelect={(value) => {
+                  setDraftDate(value);
+                  commit(value);
+                }}
+              />
+            </span>
             <input
               className="expiry-cell__input"
               type="date"

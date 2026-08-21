@@ -287,6 +287,16 @@ export const contractors = sqliteTable(
     name: text("name").notNull(),
     email: text("email"),
     phone: text("phone"),
+    /*
+     * The person, as distinct from the company. "Call Apex Electrical" is not
+     * an instruction anybody can follow at 7am with water coming through a
+     * ceiling; "call Dan at Apex" is.
+     */
+    contactName: text("contact_name"),
+    address: text("address"),
+    notes: text("notes"),
+    /** Pence, like every other money column here, so nothing has to round. */
+    dayRatePence: integer("day_rate_pence"),
     serviceCategories: text("service_categories").notNull().default("[]"),
     coverageAreas: text("coverage_areas").notNull().default("[]"),
     certifications: text("certifications").notNull().default("[]"),

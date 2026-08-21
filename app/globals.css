@@ -6511,6 +6511,13 @@ th.sheet-column--name {
   background: var(--teal-100);
 }
 
+/* A certificate renewal, so it reads as a deadline of a different kind from a
+   job. Theme tokens, not a hard-coded pale ground — see the note above. */
+.calendar-event--renewal {
+  border-color: var(--purple-600);
+  background: var(--purple-100);
+}
+
 .calendar-event strong,
 .calendar-event small {
   overflow: hidden;

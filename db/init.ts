@@ -623,6 +623,17 @@ async function ensureBoardEngineColumns(d1: D1DatabaseLike) {
     ["maintenance_requests", "reference", "TEXT"],
     ["maintenance_requests", "archived", "INTEGER NOT NULL DEFAULT 0"],
     ["maintenance_requests", "archived_at", "TEXT"],
+    /*
+     * The four things a coordinator needs about a contractor that the register
+     * could not hold. The row had a company name, an email and a phone number,
+     * so "who do I actually ask for", "where are they", "what did we agree" and
+     * "what do they charge" all lived in somebody's head. `day_rate` is stored
+     * in pence, like every other money column here, so nothing has to round.
+     */
+    ["contractors", "contact_name", "TEXT"],
+    ["contractors", "address", "TEXT"],
+    ["contractors", "notes", "TEXT"],
+    ["contractors", "day_rate_pence", "INTEGER"],
   ];
 
   for (const [table, column, definition] of additions) {

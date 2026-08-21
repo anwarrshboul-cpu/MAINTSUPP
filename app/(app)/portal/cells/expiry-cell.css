@@ -233,6 +233,40 @@
   min-width: 0;
 }
 
+/*
+ * THE CALENDAR FLOATS, and the reason is the note above.
+ *
+ * The board is `table-layout: fixed` with a 40px row, and the editor is sized
+ * to the cell precisely so opening it cannot change the row height. A calendar
+ * grid in the flow would add ~250px and shove every row below it down the
+ * moment a date cell was clicked, so it is taken out of the flow and hung
+ * under the cell instead — the same relationship the mobile sheet has to the
+ * row it belongs to.
+ */
+.expiry-cell {
+  position: relative;
+}
+
+.expiry-cell__calendar {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  display: block;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(7, 24, 38, 0.18);
+}
+
+/* Near the right-hand edge of the board the grid would otherwise be cut off by
+   the scroll container, so the last columns hang it from their right edge. */
+.sheet-column--custom:nth-last-child(-n + 3) .expiry-cell__calendar {
+  left: auto;
+  right: 0;
+}
+
 .expiry-cell__actions {
   display: inline-flex;
   gap: 2px;
