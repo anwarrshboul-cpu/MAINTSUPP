@@ -7165,3 +7165,47 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
     max-width: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   TEXT TABS ARE NOT THE ICON TOGGLE.
+
+   `.view-switch` was written for a two-button grid/list toggle, so
+   `.view-switch button` is a fixed 30x30 box with `padding: 0` — and the
+   mobile touch-target rule above widens that to a fixed 44x44. Three screens
+   reuse the class for a strip of TEXT tabs, and a word does not fit in a 30px
+   square with no padding: "Identity", "Address", "Contacts", "Access",
+   "Opening", "Lease" and "Reconciliation" all overflowed their boxes and
+   printed on top of one another, which is what the site editor showed.
+
+   The two icon toggles keep the square. The three text strips opt out of it
+   with a modifier and size to their own content instead. They wrap rather than
+   scroll, so seven tabs still fit at 320px without the page overflowing and
+   without introducing a scrolling region that needs its own tab stop.
+
+   Affected: sites/site-form.tsx, sites/site-detail.tsx, admin/options-admin.tsx
+   — all three are `role="tablist"` with text children.
+   --------------------------------------------------------------------------- */
+.view-switch--text {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.view-switch--text button {
+  width: auto;
+  height: auto;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  /* Overrides the 44x44 square above — the height is the touch target, the
+     width belongs to the word. */
+  .view-switch--text button {
+    width: auto;
+    height: auto;
+    min-height: 44px;
+  }
+}

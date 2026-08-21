@@ -144,7 +144,7 @@ export function SiteDetail({
         </div>
       </header>
 
-      <div className="view-switch" role="tablist" aria-label="Site sections">
+      <div className="view-switch view-switch--text" role="tablist" aria-label="Site sections">
         {TABS.map((entry) => (
           <button
             key={entry}

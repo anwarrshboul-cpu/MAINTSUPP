@@ -153,7 +153,7 @@ export function OptionsAdmin({ onNotify }: { onNotify: (message: string) => void
         ) : null}
       </header>
 
-      <div className="view-switch" role="tablist" aria-label="Option lists">
+      <div className="view-switch view-switch--text" role="tablist" aria-label="Option lists">
         {sets.map((set) => (
           <button
             key={set.id}

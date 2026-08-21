@@ -122,7 +122,7 @@ export function SiteForm({
 
   return (
     <div className="site-form">
-      <div className="view-switch" role="tablist" aria-label="Site detail sections">
+      <div className="view-switch view-switch--text" role="tablist" aria-label="Site detail sections">
         {SECTIONS.map((entry) => (
           <button
             key={entry}
