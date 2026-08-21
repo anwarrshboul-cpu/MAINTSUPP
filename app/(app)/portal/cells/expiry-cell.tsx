@@ -159,6 +159,14 @@ export function ExpiryCell({
     setEditing(false);
   };
 
+  /** Today as the `<input type="date">` value, honouring an injected clock. */
+  const todayInputValue = (clock?: Date) => {
+    const now = clock ?? new Date();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${now.getFullYear()}-${month}-${day}`;
+  };
+
   const openEditor = () => {
     setDraftDate(currentMetadata.date);
     setCalendarMonth(boardCalendarMonth(currentMetadata.date));
@@ -191,25 +199,73 @@ export function ExpiryCell({
 
       <div className={`expiry-cell is-${status.state}`}>
         {editing && !mobile ? (
-          <input
-            className="expiry-cell__input"
-            type="date"
-            autoFocus
-            value={draftDate}
-            aria-label={`Set ${title}`}
-            onChange={(event) => {
-              setDraftDate(event.target.value);
-              commit(event.target.value);
-            }}
-            onBlur={() => setEditing(false)}
+          /*
+           * The desktop editor: the native picker, plus the two verbs a date
+           * cell is always asked for. It was the bare input before, which
+           * meant "make this today" was a trip through the calendar and
+           * "remove this date" had no affordance at all outside the mobile
+           * sheet — the keyboard could clear the field, nothing said so.
+           *
+           * `onBlur` closes the editor, so both buttons commit on
+           * `onMouseDown` (which fires first) rather than on click, or the
+           * blur would unmount them before the click landed.
+           */
+          <div
+            className="expiry-cell__editor"
             onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
               if (event.key === "Escape") {
                 setDraftDate(currentMetadata.date);
                 setEditing(false);
               }
             }}
-          />
+          >
+            <input
+              className="expiry-cell__input"
+              type="date"
+              autoFocus
+              value={draftDate}
+              aria-label={`Set ${title}`}
+              onChange={(event) => {
+                setDraftDate(event.target.value);
+                commit(event.target.value);
+              }}
+              onBlur={(event) => {
+                /* Keep the editor open while focus moves to Today/Clear. */
+                if (event.relatedTarget instanceof Node &&
+                    event.currentTarget.parentElement?.contains(event.relatedTarget)) {
+                  return;
+                }
+                setEditing(false);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+            />
+            <span className="expiry-cell__actions">
+              <button
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  commit(todayInputValue(today));
+                }}
+              >
+                Today
+              </button>
+              {clearable && currentMetadata.date && (
+                <button
+                  type="button"
+                  className="is-clear"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    setDraftDate("");
+                    commit("");
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </span>
+          </div>
         ) : (
           trigger
         )}
