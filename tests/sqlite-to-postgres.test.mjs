@@ -215,6 +215,48 @@ test("ON CONFLICT is placed before RETURNING, where the grammar wants it", () =>
   );
 });
 
+/*
+ * The conflict TARGET, which is drizzle's output rather than this repo's SQL.
+ *
+ * Every board cell edit answered 503 on Postgres until these passed: the
+ * sqlite dialect qualifies the target columns, Postgres reads the dot as a
+ * syntax error at the following comma, and the message names neither the
+ * clause nor the column.
+ */
+test("a qualified ON CONFLICT target loses its table qualifiers", () => {
+  // app/api/board/route.ts — update_cell, as drizzle renders it.
+  const sql =
+    'insert into "maintenance_board_cells" ("id", "value") values (?, ?) ' +
+    'on conflict ("maintenance_board_cells"."organisation_id", "maintenance_board_cells"."board_id", ' +
+    '"maintenance_board_cells"."request_id", "maintenance_board_cells"."column_id") ' +
+    'do update set "value" = ?';
+  const out = squash(translateSql(sql));
+  assert.ok(
+    out.includes('on conflict ("organisation_id", "board_id", "request_id", "column_id")'),
+    out,
+  );
+  assert.doesNotMatch(out, /on conflict \([^)]*"[^"]+"\s*\."/i);
+});
+
+test("an unqualified target, DO NOTHING and ON CONSTRAINT are left alone", () => {
+  for (const tail of [
+    'on conflict ("id") do update set "a" = ?',
+    "on conflict do nothing",
+    "on conflict on constraint sites_pkey do nothing",
+  ]) {
+    const out = squash(translateSql(`insert into "t" ("a") values (?) ${tail}`));
+    assert.ok(out.endsWith(squash(tail).replace("?", "$2")) || out.endsWith(squash(tail)), out);
+  }
+});
+
+test("the rewrite reads code, not string literals that look like columns", () => {
+  const out = translateSql(
+    `insert into "t" ("a") values ('x"."y') on conflict ("t"."id") do nothing`,
+  );
+  assert.ok(out.includes(`'x"."y'`), "the literal must survive untouched");
+  assert.ok(out.includes('on conflict ("id")'), out);
+});
+
 test("INSERT OR ABORT/FAIL/ROLLBACK collapse to a plain INSERT", () => {
   for (const verb of ["ABORT", "FAIL", "ROLLBACK"]) {
     const out = squash(
