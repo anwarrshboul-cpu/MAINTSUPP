@@ -89,6 +89,7 @@ import {
   customCellKey,
   choiceList,
   customCellDisplay,
+  customCellSortValue,
   findChoice,
   serializeCustomCellValue,
   shouldCenterBoardCell,
@@ -1058,7 +1059,48 @@ export function LiveMaintenanceBoard({
     onBoardSnapshotChange,
   ]);
 
+  /*
+   * The business order of every option-backed system column, as position
+   * lookups keyed by BOTH the stored value and the label — a cell may hold
+   * either, depending on whether it was picked in the grid or imported.
+   *
+   * This is what makes "sort by Priority" mean P1 before P4 rather than "L"
+   * before "M": the order the workspace put its own options in. Built here
+   * rather than read through `optionsFor`, which is declared further down the
+   * component and would be in its temporal dead zone from inside this memo.
+   */
+  const systemOptionOrders = useMemo(() => {
+    const orders = new Map<string, Map<string, number>>();
+    for (const key of [
+      "tier",
+      "engineer",
+      "priority",
+      "label",
+      "status",
+      "storeLocation",
+    ] as BoardOptionColumn[]) {
+      const saved = boardOptions
+        .filter((option) => option.columnKey === key)
+        .sort((left, right) => left.position - right.position);
+      const choices = saved.length
+        ? saved.map((option) => ({ value: option.value, label: option.label }))
+        : (editableFallbackOptions[key] ?? []).map((option) => ({
+            value: option.value,
+            label: option.label,
+          }));
+      if (!choices.length) continue;
+      const lookup = new Map<string, number>();
+      choices.forEach((choice, index) => {
+        if (choice.value) lookup.set(choice.value, index);
+        if (choice.label) lookup.set(choice.label, index);
+      });
+      orders.set(key, lookup);
+    }
+    return orders;
+  }, [boardOptions]);
+
   const groupedRows = useMemo(() => {
+    const optionOrderFor = (key: ColumnKey) => systemOptionOrders.get(key);
     const rowsByGroup = new Map<string, MaintenanceRequest[]>(
       groupByColumn ? [] : groups.map((group) => [group.id, []]),
     );
@@ -1109,18 +1151,48 @@ export function LiveMaintenanceBoard({
                     boardId,
                     customCells[customCellKey(request.id, activeColumn.column.id)],
                   )
-                : systemColumnSortValue(request, activeColumn.key)
+                : /*
+                     An option-backed system column sorts by the ORDER ITS
+                     OPTIONS ARE DEFINED IN, not by the label. Priority on this
+                     board is Medium, Low, Urgent — alphabetical ordering would
+                     put Low above Medium and present that as ascending, which
+                     is wrong in the only way that matters on a maintenance
+                     board. Anything not in the list sorts after everything
+                     that is, rather than landing at position 0.
+                   */
+                  optionOrderFor(activeColumn.key)
+                  ? (() => {
+                      const order = optionOrderFor(activeColumn.key)!;
+                      const raw = String(
+                        systemColumnSortValue(request, activeColumn.key) ?? "",
+                      );
+                      if (!raw) return "";
+                      return order.get(raw) ?? order.size;
+                    })()
+                  : systemColumnSortValue(request, activeColumn.key)
               : activeColumn.column.type === "files"
                 ? customFileCounts[
                     customCellKey(request.id, activeColumn.column.id)
                   ] ?? 0
-                : customCellDisplay(
+                : customCellSortValue(
                     activeColumn.column,
                     customCells[
                       customCellKey(request.id, activeColumn.column.id)
                     ] ?? "",
                   );
-          const compared = compareBoardValues(valueFor(left), valueFor(right));
+          /*
+           * Empty last, in BOTH directions. Reversing the sort should reverse
+           * the rows that have a value, not float the blank ones to the top —
+           * on a board where most cells are still empty that reads as the sort
+           * having lost the data. Two empties fall through to the placement
+           * tiebreak below, so their order is stable between renders.
+           */
+          const leftValue = valueFor(left);
+          const rightValue = valueFor(right);
+          const leftEmpty = leftValue === "" || leftValue === null;
+          const rightEmpty = rightValue === "" || rightValue === null;
+          if (leftEmpty !== rightEmpty) return leftEmpty ? 1 : -1;
+          const compared = compareBoardValues(leftValue, rightValue);
           if (compared) return compared * direction;
         }
         return (
@@ -1140,6 +1212,7 @@ export function LiveMaintenanceBoard({
     groupByColumn,
     groups,
     placement,
+    systemOptionOrders,
   ]);
 
   const groupRows = (groupId: string) => groupedRows.get(groupId) ?? [];
@@ -3868,6 +3941,15 @@ function BoardColumnHeader({
       className={`${className}${
         column.settings.wrap ? " is-column-wrapped" : ""
       }`}
+      /* Announced, not just drawn: a screen reader reads the sort off the
+         column header the same way a sighted reader reads the arrow. */
+      aria-sort={
+        sortDirection === "asc"
+          ? "ascending"
+          : sortDirection === "desc"
+            ? "descending"
+            : "none"
+      }
       style={{
         width: displayedWidth,
         minWidth: displayedWidth,
@@ -3884,17 +3966,47 @@ function BoardColumnHeader({
           </span>
         )}
         <strong title={column.title}>{column.title}</strong>
-        {sortDirection && (
-          <button
-            className="column-sort-indicator"
-            type="button"
-            title={`Sorted ${sortDirection === "asc" ? "ascending" : "descending"}`}
-            aria-label={`Reverse ${column.title} sort`}
-            onClick={() => onSort(sortDirection === "asc" ? "desc" : "asc")}
-          >
-            <Icon name="activity" size={12} />
-          </button>
-        )}
+        {/*
+          QUICK SORT, monday-style: the control is always here, not conditional
+          on the column already being sorted.
+
+          At rest on an unsorted column it is invisible (CSS, on hover and
+          focus-within) so 26 headers do not turn into 26 buttons; the moment a
+          column IS sorted its arrow stays put, because "which column is this
+          board ordered by" has to be answerable without waving the mouse over
+          every header.
+
+          It drives the SAME `onSort` the `...` menu calls, so there is one
+          sort state and the two controls cannot disagree. First click sorts
+          ascending, the next reverses — `sortDirection` is the board's, not a
+          second copy kept in here.
+        */}
+        <button
+          className={`column-sort-indicator${sortDirection ? " is-active" : ""}`}
+          type="button"
+          title={
+            sortDirection
+              ? `Sorted ${sortDirection === "asc" ? "ascending" : "descending"} — click to reverse`
+              : `Sort ${column.title} ascending`
+          }
+          aria-label={
+            sortDirection === "asc"
+              ? `Sort ${column.title} descending`
+              : `Sort ${column.title} ascending`
+          }
+          onClick={() => onSort(sortDirection === "asc" ? "desc" : "asc")}
+        >
+          <Icon
+            name={
+              sortDirection === "asc"
+                ? "sortAsc"
+                : sortDirection === "desc"
+                  ? "sortDesc"
+                  : "sortNone"
+            }
+            size={13}
+          />
+        </button>
         <button
           className="custom-column-header__more"
           type="button"

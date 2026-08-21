@@ -203,6 +203,48 @@ export function boardCalendarDays(value: string, weekStartsOn: 0 | 1) {
   });
 }
 
+/**
+ * What a cell sorts BY, which is not always what it shows.
+ *
+ * `customCellDisplay` is for reading; this is for ordering, and the two differ
+ * wherever the display is a label over an underlying order:
+ *
+ *   status / dropdown / people — the choice's POSITION in the column's own
+ *     option list, not its label. The board already defines that order (it is
+ *     the order the options are drawn in, and for Priority it is P1 → P4), and
+ *     sorting alphabetically would put "Low" above "Urgent" and call that
+ *     ascending. Unknown values sort after every known one rather than at
+ *     position 0, which is where a missing lookup would otherwise land them.
+ *   checkbox — false before true, deterministically.
+ *   number — a real number, so 2 comes before 10.
+ *
+ * Everything else falls through to the display string, which for a date is
+ * already the ISO `YYYY-MM-DD` and therefore sorts chronologically on its own.
+ */
+export function customCellSortValue(
+  column: MaintenanceBoardColumn,
+  value: string,
+): string | number {
+  if (!value) return "";
+  if (
+    column.type === "status" ||
+    column.type === "dropdown" ||
+    column.type === "people"
+  ) {
+    const choices = choiceList(column);
+    const index = choices.findIndex(
+      (choice) => choice.id === value || choice.label === value,
+    );
+    return index === -1 ? choices.length : index;
+  }
+  if (column.type === "checkbox") return value === "true" ? 1 : 0;
+  if (column.type === "number") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+  }
+  return customCellDisplay(column, value);
+}
+
 export function customCellDisplay(column: MaintenanceBoardColumn, value: string) {
   if (!value) return "";
   if (

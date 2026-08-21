@@ -37,6 +37,9 @@ export type IconName =
   | "settings"
   | "share"
   | "shield"
+  | "sortAsc"
+  | "sortDesc"
+  | "sortNone"
   | "spark"
   | "store"
   | "sun"
@@ -202,6 +205,26 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
       <path d="m9 12 2 2 4-4" />
+    </>
+  ),
+  /* The three states of a sortable column header, drawn to the same 24-box so
+     swapping between them cannot shift the header by a pixel. */
+  sortNone: (
+    <>
+      <path d="M8 9.5 12 5l4 4.5" />
+      <path d="M8 14.5 12 19l4-4.5" />
+    </>
+  ),
+  sortAsc: (
+    <>
+      <path d="M12 19V5" />
+      <path d="m7 10 5-5 5 5" />
+    </>
+  ),
+  sortDesc: (
+    <>
+      <path d="M12 5v14" />
+      <path d="m7 14 5 5 5-5" />
     </>
   ),
   spark: (

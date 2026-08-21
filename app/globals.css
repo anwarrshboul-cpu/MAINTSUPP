@@ -10176,6 +10176,24 @@ th.sheet-column--name {
   transform: none;
 }
 
+/*
+ * QUICK SORT on the column header — monday's, and the same control in three
+ * states rather than three controls.
+ *
+ * IDLE on an unsorted column: present but invisible. `opacity` and not
+ * `display`, because the header is a flex row and removing a 22px child on
+ * hover would shift the title and the `...` sideways every time the pointer
+ * crossed a header. Nothing about the header's height or the column's width
+ * depends on this element's visibility.
+ *
+ * HOVER (or keyboard focus anywhere in the header): the neutral up/down glyph
+ * fades in, so the affordance is discoverable without 26 headers advertising
+ * it at once.
+ *
+ * ACTIVE: the arrow stays, in the board's blue, whether or not the pointer is
+ * anywhere near — the one question this control has to answer at a glance is
+ * "which column is this board sorted by, and which way".
+ */
 .column-sort-indicator {
   display: grid;
   width: 22px !important;
@@ -10185,12 +10203,48 @@ th.sheet-column--name {
   padding: 0;
   border: 0;
   border-radius: 50% !important;
+  background: transparent !important;
+  color: var(--muted, #5c6b74) !important;
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+  cursor: pointer;
+}
+
+.custom-column-header:hover .column-sort-indicator,
+.custom-column-header:focus-within .column-sort-indicator,
+.column-sort-indicator:focus-visible {
+  opacity: 1;
+}
+
+.custom-column-header:hover .column-sort-indicator:hover {
+  background: var(--surface-hover, #eef3f5) !important;
+  color: var(--ink, #132537) !important;
+}
+
+/* Sorted: always visible, and unmistakably the active one. */
+.column-sort-indicator.is-active {
+  opacity: 1;
   background: #0073ea !important;
   color: white !important;
 }
 
 .column-sort-indicator svg {
   transform: none !important;
+}
+
+/*
+ * A finger has no hover. Sorting still has to be reachable, and the `...`
+ * menu is the guaranteed path, but leaving the arrow visible on touch costs
+ * nothing and saves a trip through the menu.
+ */
+@media (hover: none) {
+  .column-sort-indicator {
+    opacity: 0.55;
+  }
+
+  .column-sort-indicator.is-active {
+    opacity: 1;
+  }
 }
 
 .custom-column-menu {
