@@ -19,16 +19,33 @@
  *     because a subsort nobody can see the shape of gets fought with;
  *   · the RESIZE HANDLE is a button with its own pointer capture, and it stops
  *     propagation, so a drag on it is a resize and never a reorder;
- *   · REORDER is `draggable` on the TITLE only, not on the whole cell. That is
- *     what keeps it clear of the resize handle, the sort arrow and the menu
- *     button — each of which is a real control a person aims at — while still
- *     giving a wide, obvious grab area;
+ *   · REORDER is a POINTER DRAG ON THE CELL, with a movement threshold. It was
+ *     `draggable` on the title, which never fired: the title is an absolutely
+ *     positioned centring overlay with `pointer-events: none` — see the note in
+ *     board-column-drag.ts — so it could not receive the `mousedown` a drag
+ *     begins with.
+ *
+ *     THE WHOLE CELL IS THE GRAB AREA, THE SORT ARROW AND THE `…` INCLUDED.
+ *     Excluding them was tried and is wrong: they sit at the right of a flex row
+ *     with `margin-left: auto`, so on a 127px column they cover the middle of
+ *     the header — measured, a press at the exact centre of "Tier Level" landed
+ *     on the sort arrow. A drag surface with a hole in the middle of it is not
+ *     one a person can use. So a press on either button still starts a drag, and
+ *     a drag that actually happens swallows the click that would have followed;
+ *     a press that does not move is a click and does exactly what the button
+ *     says. Only the RESIZE HANDLE and an open MENU are excluded, because both
+ *     already own the horizontal drag gesture themselves;
  *   · the MENU is the keyboard and touch route to everything drag offers, so
  *     "move left" and "move right" are listed there rather than drag being the
  *     only way to reorder a board.
  */
 
-import { useContext, type CSSProperties, type DragEvent } from "react";
+import {
+  useContext,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Icon } from "../../components";
 import type { BoardColumnType, MaintenanceBoardColumn } from "../../lib/types";
 import { columnSettingsActionLabel } from "./board-column-settings";
@@ -70,8 +87,10 @@ export type ColumnHeaderProps = {
   summaries: readonly string[];
   canMoveLeft: boolean;
   canMoveRight: boolean;
-  /** True while a column is being dragged over this one. */
-  dropTarget: boolean;
+  /** True while this column is the one being dragged. */
+  dragging: boolean;
+  /** Which edge of this header the drop indicator sits on, if any. */
+  dropSide: "before" | "after" | null;
   onMenuToggle: () => void;
   onConfigure?: () => void;
   onRename: () => void;
@@ -97,10 +116,21 @@ export type ColumnHeaderProps = {
   groupedByThis: boolean;
   onResizePreview: (width: number) => void;
   onResizeCommit: (width: number) => void;
-  onDragStartColumn: () => void;
-  onDragOverColumn: () => void;
-  onDropColumn: () => void;
-  onDragEndColumn: () => void;
+  /**
+   * The whole pointer sequence for a header drag.
+   *
+   * All four land on the CELL because that is what takes the pointer capture:
+   * once captured, every later move and the release are dispatched here even
+   * when the pointer is over a different column, which is what lets a drag
+   * cross the board. The board decides whether a press becomes a drag — only it
+   * can see the other columns.
+   */
+  onColumnPointerDown: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
+  onColumnPointerMove: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
+  onColumnPointerUp: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
+  onColumnPointerCancel: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
+  /** Swallows the click that follows a completed drag. See the cell below. */
+  onColumnClickCapture: (event: ReactMouseEvent<HTMLTableCellElement>) => void;
 };
 
 export function BoardColumnHeader({
@@ -116,7 +146,8 @@ export function BoardColumnHeader({
   summaries,
   canMoveLeft,
   canMoveRight,
-  dropTarget,
+  dragging,
+  dropSide,
   onMenuToggle,
   onConfigure,
   onRename,
@@ -139,10 +170,11 @@ export function BoardColumnHeader({
   groupedByThis,
   onResizePreview,
   onResizeCommit,
-  onDragStartColumn,
-  onDragOverColumn,
-  onDropColumn,
-  onDragEndColumn,
+  onColumnPointerDown,
+  onColumnPointerMove,
+  onColumnPointerUp,
+  onColumnPointerCancel,
+  onColumnClickCapture,
 }: ColumnHeaderProps) {
   const mobile = useContext(MobileBoardContext);
   const displayedWidth = displayedBoardColumnWidth(column, mobile);
@@ -173,10 +205,15 @@ export function BoardColumnHeader({
         // background; `sticky` still carries its offset so the run stays
         // contiguous when a pinned column sits beside it.
         pinned ? "is-pinned-column" : "",
-        dropTarget ? "is-column-drop-target" : "",
+        dragging ? "is-column-dragging" : "",
+        dropSide === "before" ? "is-column-drop-before" : "",
+        dropSide === "after" ? "is-column-drop-after" : "",
       ]
         .filter(Boolean)
         .join(" ")}
+      /* The drag measures the headers in this row to work out which gap the
+         pointer is over, and it finds them by this attribute. */
+      data-column-id={column.id}
       /* Announced, not just drawn: a screen reader reads the sort off the
          column header the same way a sighted reader reads the arrow. */
       aria-sort={
@@ -187,16 +224,18 @@ export function BoardColumnHeader({
             : "none"
       }
       style={style}
-      onDragOver={(event: DragEvent<HTMLTableCellElement>) => {
-        // Without preventDefault the browser refuses the drop and the cursor
-        // shows "no entry" over every valid target.
-        event.preventDefault();
-        onDragOverColumn();
-      }}
-      onDrop={(event: DragEvent<HTMLTableCellElement>) => {
-        event.preventDefault();
-        onDropColumn();
-      }}
+      onPointerDown={onColumnPointerDown}
+      onPointerMove={onColumnPointerMove}
+      onPointerUp={onColumnPointerUp}
+      onPointerCancel={onColumnPointerCancel}
+      /*
+       * Capture, so it runs before the sort arrow's or the menu button's own
+       * handler. A drag that began on one of them ends with a `click` the
+       * browser dispatches anyway; this is where that click is swallowed. A
+       * press that never became a drag leaves the flag clear and the click
+       * through, which is what keeps a plain click on the arrow a plain sort.
+       */
+      onClickCapture={onColumnClickCapture}
     >
       <div className="custom-column-header" data-board-popover>
         {kind === "custom" && (
@@ -207,20 +246,13 @@ export function BoardColumnHeader({
             <Icon name={definition.icon} size={13} />
           </span>
         )}
-        <strong
-          title={`${column.title} — drag to move this column`}
-          draggable
-          onDragStart={(event: DragEvent<HTMLElement>) => {
-            // The id travels in the payload as well as in the board's own
-            // state: a drag that starts here and ends somewhere unexpected is
-            // then still identifiable rather than silently moving whatever the
-            // last drag touched.
-            event.dataTransfer.setData("text/plain", column.id);
-            event.dataTransfer.effectAllowed = "move";
-            onDragStartColumn();
-          }}
-          onDragEnd={onDragEndColumn}
-        >
+        {/*
+          NOT the drag handle, and it cannot be: this element is absolutely
+          positioned across the cell with `pointer-events: none` so the label
+          stays centred without swallowing the controls beneath it. The cell
+          above carries the drag. See board-column-drag.ts.
+        */}
+        <strong title={`${column.title} — drag the header to move this column`}>
           {column.title}
         </strong>
         {filtered && (
@@ -287,7 +319,7 @@ export function BoardColumnHeader({
           <Icon name="more" size={15} />
         </button>
         {menuOpen && (
-          <div className="custom-column-menu">
+          <div className="custom-column-menu" data-column-drag-ignore>
             <small>{kind === "system" ? "Board" : definition.label} column</small>
             {onConfigure && (
               <button type="button" onClick={onConfigure}>
@@ -466,6 +498,7 @@ function ColumnResizeHandle({
     <button
       className="column-resize-handle"
       type="button"
+      data-column-drag-ignore
       aria-label={`Resize ${column.title} column`}
       title="Resize column"
       onPointerDown={startResize}

@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -131,6 +132,15 @@ import {
   stickyZIndex,
   type StickyColumn,
 } from "./board-pinning";
+import {
+  COLUMN_DRAG_THRESHOLD,
+  type ColumnBox,
+  type ColumnDropMarker,
+  columnDropIndex,
+  columnDropMarker,
+  moveColumnTo,
+  withFrozenColumnsLeading,
+} from "./board-column-drag";
 import { summariesFor } from "../../lib/column-types";
 import { useCapability } from "../../lib/client-capabilities";
 import {
@@ -322,9 +332,6 @@ export function LiveMaintenanceBoard({
   const [filterState, setFilterState] = useState<BoardFilterState>(EMPTY_FILTER);
   const [sortPanelOpen, setSortPanelOpen] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  /** Which column a drag is carrying, and which one it is currently over. */
-  const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
-  const [columnDropTargetId, setColumnDropTargetId] = useState<string | null>(null);
   /*
    * Whether this person may produce a CSV, answered by the server.
    *
@@ -1978,7 +1985,22 @@ export function LiveMaintenanceBoard({
    * still has room to insert between two neighbours, which is the same spacing
    * the seeder and `create_column` use.
    */
-  const applyColumnOrder = async (ordered: BoardDisplayColumn[]) => {
+  const applyColumnOrder = async (requested: BoardDisplayColumn[]) => {
+    /*
+     * FROZEN COLUMNS KEEP THE LEADING REGION — see `withFrozenColumnsLeading`.
+     *
+     * A frozen column drawn between two scrolling ones cannot be laid out: its
+     * offset would no longer continue the run from the left edge, so it would
+     * be painted over whatever had scrolled beneath it. The rule is applied
+     * here rather than in each caller so a drag, a menu move and anything added
+     * later all obey it, and the operator is told when it moved something,
+     * because a board that quietly disagrees with the gesture is worse than one
+     * that explains itself.
+     */
+    const ordered = withFrozenColumnsLeading(requested);
+    if (ordered !== requested) {
+      onNotify("Frozen columns stay at the left of the board.");
+    }
     const positions = ordered.map((entry, index) => ({
       id: entry.column.id,
       position: index * 1000,
@@ -2014,6 +2036,230 @@ export function LiveMaintenanceBoard({
     }
   };
 
+  /**
+   * DRAGGING A COLUMN HEADER.
+   *
+   * Pointer events rather than the DOM drag API, and the reason is worth having
+   * here as well as in board-column-drag.ts: the header's title is an
+   * absolutely positioned centring overlay with `pointer-events: none`, so
+   * `draggable` on it never received a `mousedown` and `dragstart` never fired.
+   * Measured in Chromium on the deployed Preview — pointerdown, mousedown,
+   * selectstart, mouseup, click, and no drag event of any kind.
+   *
+   * The shape below is the row drag's, because the row drag already solved the
+   * same problems: a movement threshold so a press is still a click, pointer
+   * capture so the gesture survives leaving the element, and one guarded entry
+   * point so the controls sitting on the header keep their own behaviour.
+   */
+  const columnDragRef = useRef<{
+    pointerId: number;
+    columnId: string;
+    startX: number;
+    active: boolean;
+    element: HTMLTableCellElement;
+    /** Every header in the row the drag started in, measured once. */
+    boxes: ColumnBox[];
+    /** The scroller to nudge when the pointer reaches the edge of the board. */
+    scroller: HTMLElement | null;
+  } | null>(null);
+
+  /**
+   * Set when a drag completes, cleared by the click that follows it.
+   *
+   * The browser dispatches a `click` after every press-and-release, including
+   * one that travelled 300px across the board. If the press began on the sort
+   * arrow — which it will, because that arrow covers the middle of a narrow
+   * header — that click would sort the column the drag just moved. A ref rather
+   * than state: it is consumed by the very next event and must not cost a
+   * render.
+   */
+  const suppressColumnClickRef = useRef(false);
+
+  /**
+   * What the drag is doing, as one piece of state.
+   *
+   * One object rather than two so a move that changes both the marker and the
+   * dragged column is a single render. It is written ONLY when the drop index
+   * changes: the board draws 1,102 header cells, and setting state on every
+   * pointer move re-rendered all of them sixty times a second, which is what
+   * made the first attempt feel broken even where it fired.
+   */
+  const [columnDrag, setColumnDrag] = useState<{
+    columnId: string;
+    insertBefore: number;
+    marker: ColumnDropMarker;
+  } | null>(null);
+
+  /**
+   * Nudge the board sideways when a drag reaches its edge.
+   *
+   * Without this a column can only be moved as far as the visible width, which
+   * on a 26-column board is about a third of it.
+   */
+  const autoScrollColumns = (scroller: HTMLElement | null, pointerX: number) => {
+    if (!scroller) return;
+    const box = scroller.getBoundingClientRect();
+    const edge = 64;
+    if (pointerX < box.left + edge) {
+      scroller.scrollLeft -= Math.max(8, (box.left + edge - pointerX) / 2);
+    } else if (pointerX > box.right - edge) {
+      scroller.scrollLeft += Math.max(8, (pointerX - (box.right - edge)) / 2);
+    }
+  };
+
+  /**
+   * A press on a column header.
+   *
+   * Records where it started and nothing else — a press is a click until it has
+   * moved far enough to be a drag. Touch is deliberately excluded: making the
+   * header swallow touch gestures would cost the horizontal scroll that is how
+   * a phone reads this board at all, and Move left / Move right in the column
+   * menu is the reliable route there. See the batch note on mobile.
+   */
+  const onColumnPointerDown = (
+    entry: BoardDisplayColumn,
+    event: ReactPointerEvent<HTMLTableCellElement>,
+  ) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    if (event.pointerType === "touch") return;
+    /*
+     * NOT WHILE THE BOARD IS STILL SYNCING.
+     *
+     * Until the snapshot lands the grid is drawn from `fallbackSystemColumns`,
+     * whose ids are invented client-side (`column-system-tier`) and match no
+     * row in the database. A drag in that window would send those invented ids
+     * to the order endpoint, which cannot place them, and the snapshot would
+     * then arrive and put the column back — a reorder that visibly undoes
+     * itself, which is one of the ways this was reported as not working. The
+     * board already says "Syncing board" while this is true, and the header
+     * takes a waiting cursor to match.
+     */
+    if (loadingBoard) return;
+    /*
+     * Only the resize handle and an open menu are excluded. The sort arrow and
+     * the `…` button are NOT: they sit at the right of a flex row with
+     * `margin-left: auto`, so on a narrow column they cover the middle of the
+     * header, and a grab area with a hole in the middle of it is not one a
+     * person can use. A press on either still starts a drag; a press that never
+     * moves is a click and does exactly what the button says.
+     */
+    if (
+      event.target instanceof Element &&
+      event.target.closest("[data-column-drag-ignore]")
+    ) {
+      return;
+    }
+    const row = event.currentTarget.parentElement;
+    if (!row) return;
+    const boxes: ColumnBox[] = [...row.querySelectorAll<HTMLElement>("th[data-column-id]")]
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { id: node.dataset.columnId ?? "", left: rect.left, right: rect.right };
+      })
+      .filter((box) => box.id);
+    if (boxes.length < 2) return;
+
+    columnDragRef.current = {
+      pointerId: event.pointerId,
+      columnId: entry.column.id,
+      startX: event.clientX,
+      active: false,
+      element: event.currentTarget,
+      boxes,
+      scroller: event.currentTarget.closest<HTMLElement>(".live-board-scroll"),
+    };
+  };
+
+  const onColumnPointerMove = (event: ReactPointerEvent<HTMLTableCellElement>) => {
+    const drag = columnDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (!drag.active) {
+      // A press that has not travelled far enough is still a press, and the
+      // header's own controls must keep behaving exactly as they always have.
+      if (Math.abs(event.clientX - drag.startX) < COLUMN_DRAG_THRESHOLD) return;
+      if (event.buttons !== 1) {
+        columnDragRef.current = null;
+        return;
+      }
+      drag.active = true;
+      try {
+        drag.element.setPointerCapture(drag.pointerId);
+      } catch {
+        // The pointer may already have ended; the move below still works.
+      }
+      document.body.classList.add("is-dragging-board-column");
+    }
+
+    // Selecting the header text mid-drag would leave a blue smear behind the
+    // gesture, and on some browsers cancels the pointer capture outright.
+    event.preventDefault();
+    autoScrollColumns(drag.scroller, event.clientX);
+
+    const insertBefore = columnDropIndex(event.clientX, drag.boxes);
+    setColumnDrag((current) => {
+      if (current && current.insertBefore === insertBefore) return current;
+      return {
+        columnId: drag.columnId,
+        insertBefore,
+        marker: columnDropMarker(visibleBoardColumns, drag.columnId, insertBefore),
+      };
+    });
+  };
+
+  const endColumnDrag = () => {
+    const drag = columnDragRef.current;
+    columnDragRef.current = null;
+    document.body.classList.remove("is-dragging-board-column");
+    setColumnDrag(null);
+    if (drag?.active) {
+      try {
+        drag.element.releasePointerCapture(drag.pointerId);
+      } catch {
+        // Already released with the pointer.
+      }
+    }
+    return drag;
+  };
+
+  const onColumnPointerUp = (event: ReactPointerEvent<HTMLTableCellElement>) => {
+    const drag = columnDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const insertBefore = drag.active
+      ? columnDropIndex(event.clientX, drag.boxes)
+      : -1;
+    const columnId = drag.columnId;
+    const wasActive = drag.active;
+    endColumnDrag();
+    if (!wasActive || insertBefore < 0) return;
+
+    /*
+     * A completed drag must not also read as a click — this is the whole reason
+     * a drop does not sort the column it just moved, given that the press very
+     * often begins on the sort arrow.
+     */
+    event.preventDefault();
+    event.stopPropagation();
+    suppressColumnClickRef.current = true;
+
+    const requested = moveColumnTo(visibleBoardColumns, columnId, insertBefore);
+    if (requested === visibleBoardColumns) return;
+    void applyColumnOrder(requested);
+  };
+
+  const onColumnPointerCancel = (event: ReactPointerEvent<HTMLTableCellElement>) => {
+    if (columnDragRef.current?.pointerId !== event.pointerId) return;
+    endColumnDrag();
+  };
+
+  /** Eats exactly one click, the one the browser fires after a drop. */
+  const onColumnClickCapture = (event: ReactMouseEvent<HTMLTableCellElement>) => {
+    if (!suppressColumnClickRef.current) return;
+    suppressColumnClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   /** Move one column one place left or right, among the columns on screen. */
   const moveColumnBy = async (entry: BoardDisplayColumn, delta: -1 | 1) => {
     const from = visibleBoardColumns.findIndex(
@@ -2021,29 +2267,6 @@ export function LiveMaintenanceBoard({
     );
     const to = from + delta;
     if (from < 0 || to < 0 || to >= visibleBoardColumns.length) return;
-    const ordered = [...visibleBoardColumns];
-    const [moved] = ordered.splice(from, 1);
-    ordered.splice(to, 0, moved);
-    await applyColumnOrder(ordered);
-  };
-
-  /**
-   * Finish a header drag: the dragged column lands where the drop happened.
-   *
-   * Dropping a column on itself, or on nothing, is a no-op rather than a
-   * reorder to position 0 — a drag that ends where it began should leave the
-   * board exactly as it was.
-   */
-  const dropColumnOn = async (targetColumnId: string) => {
-    const sourceId = draggingColumnId;
-    setDraggingColumnId(null);
-    setColumnDropTargetId(null);
-    if (!sourceId || sourceId === targetColumnId) return;
-    const from = visibleBoardColumns.findIndex((item) => item.column.id === sourceId);
-    const to = visibleBoardColumns.findIndex(
-      (item) => item.column.id === targetColumnId,
-    );
-    if (from < 0 || to < 0) return;
     const ordered = [...visibleBoardColumns];
     const [moved] = ordered.splice(from, 1);
     ordered.splice(to, 0, moved);
@@ -3958,7 +4181,7 @@ export function LiveMaintenanceBoard({
                   </header>
 
                   {!isCollapsed && (
-                    <table className="live-sheet">
+                    <table className={`live-sheet${loadingBoard ? " is-syncing" : ""}`}>
                       <thead>
                         <tr>
                           <th className="sheet-check">
@@ -4003,10 +4226,11 @@ export function LiveMaintenanceBoard({
                                 summaries={summariesFor(column.type)}
                                 canMoveLeft={columnIndex > 0}
                                 canMoveRight={columnIndex < visibleBoardColumns.length - 1}
-                                dropTarget={
-                                  columnDropTargetId === column.id &&
-                                  draggingColumnId !== null &&
-                                  draggingColumnId !== column.id
+                                dragging={columnDrag?.columnId === column.id}
+                                dropSide={
+                                  columnDrag?.marker?.columnId === column.id
+                                    ? columnDrag.marker.side
+                                    : null
                                 }
                                 onMenuToggle={() => {
                                   setColumnMenuInstance((current) =>
@@ -4036,13 +4260,13 @@ export function LiveMaintenanceBoard({
                                 onTogglePin={() => void toggleColumnPinned(entry)}
                                 onMove={(delta) => void moveColumnBy(entry, delta)}
                                 onSummary={(summary) => void setColumnSummary(column, summary)}
-                                onDragStartColumn={() => setDraggingColumnId(column.id)}
-                                onDragOverColumn={() => setColumnDropTargetId(column.id)}
-                                onDropColumn={() => void dropColumnOn(column.id)}
-                                onDragEndColumn={() => {
-                                  setDraggingColumnId(null);
-                                  setColumnDropTargetId(null);
-                                }}
+                                onColumnPointerDown={(event) =>
+                                  onColumnPointerDown(entry, event)
+                                }
+                                onColumnPointerMove={onColumnPointerMove}
+                                onColumnPointerUp={onColumnPointerUp}
+                                onColumnPointerCancel={onColumnPointerCancel}
+                                onColumnClickCapture={onColumnClickCapture}
                                 onAddRight={() =>
                                   openColumnPickerAfter(group.id, column)
                                 }

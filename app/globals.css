@@ -14456,17 +14456,70 @@ body[data-theme="dark"] {
   color: #0073ea;
 }
 
-/* Where a dragged column would land. */
-.live-sheet th.is-column-drop-target {
+/*
+ * DRAGGING A COLUMN HEADER.
+ *
+ * The grab area is the CELL. The title inside it is an absolutely positioned
+ * centring overlay with `pointer-events: none` — it cannot take a cursor and it
+ * cannot start a drag, which is exactly why the first attempt at this never
+ * fired. See board-column-drag.ts.
+ *
+ * The three controls that sit on the header keep their own cursors, so the one
+ * thing a person can tell from the pointer is which of the four they are about
+ * to use.
+ */
+.live-sheet thead th[data-column-id] {
+  cursor: grab;
+}
+
+/*
+ * Columns drawn before the snapshot lands are the client-side fallback, and
+ * their ids are invented. They cannot be reordered, so they do not offer to be.
+ */
+.live-sheet.is-syncing thead th[data-column-id] {
+  cursor: progress;
+}
+
+.live-sheet thead th[data-column-id] .column-resize-handle {
+  cursor: col-resize;
+}
+
+.live-sheet thead th[data-column-id] .column-sort-indicator,
+.live-sheet thead th[data-column-id] .custom-column-header__more,
+.live-sheet thead th[data-column-id] .custom-column-menu {
+  cursor: default;
+}
+
+/* The column being carried. Faded, so the board underneath stays readable. */
+.live-sheet th.is-column-dragging {
+  cursor: grabbing;
+  opacity: 0.45;
+}
+
+/*
+ * Where it would land. A 3px rule down the edge of the gap, drawn INSIDE the
+ * cell so it cannot widen the table and set off a horizontal scroll of its own.
+ */
+.live-sheet th.is-column-drop-before {
   box-shadow: inset 3px 0 0 #0073ea;
 }
 
+.live-sheet th.is-column-drop-after {
+  box-shadow: inset -3px 0 0 #0073ea;
+}
+
+/*
+ * While a drag is running the whole board takes the grabbing cursor and stops
+ * selecting text. Both are on `body` because the pointer is captured by one
+ * cell and may be anywhere on screen.
+ */
+body.is-dragging-board-column,
 body.is-dragging-board-column .live-sheet th {
   cursor: grabbing;
 }
 
-.custom-column-header > strong {
-  cursor: grab;
+body.is-dragging-board-column {
+  user-select: none;
 }
 
 /* ── Frozen columns ──────────────────────────────────────────────────────── */
