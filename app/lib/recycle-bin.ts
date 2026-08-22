@@ -46,6 +46,8 @@ import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import {
   boardViews,
+  maintenanceBoardCells,
+  maintenanceBoardColumns,
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
@@ -308,12 +310,13 @@ export async function sendGroupToBin(
  * the `placement` column that already exists, and putting it back is a single
  * insert. Nothing else has to change and no migration is involved.
  *
- * A COLUMN is the case where the answer is no, for now. Its data is the cells,
- * and there are 8,565 of them on the live board; recovering one means either a
- * `deleted_at` on `maintenance_board_columns` with the cells retained behind
- * it, or a snapshot far too large for this table. Both are schema changes, so
- * `delete_column` still deletes and its audit event records `recoverable:
- * false` rather than implying a safety net that is not there.
+ * A COLUMN was the case where the answer was no, and it is the case this
+ * correction settles. The reasoning above was right — its data is the cells, and
+ * there are 8,565 of them on the live board, far too many to snapshot into this
+ * table — so it took the other half of that sentence: a `deleted_at` on
+ * `maintenance_board_columns` with the cells retained behind it. See
+ * `sendColumnToBin`. The audit event now records `recoverable: true`, and it is
+ * true.
  *
  * Unlike a job or a group, the row does NOT survive: `board_views` has a UNIQUE
  * index on (organisation, board, key), and a soft-deleted row would hold that
@@ -365,6 +368,122 @@ export async function sendBoardViewToBin(
   return true;
 }
 
+/**
+ * Send a board column to the bin, keeping every value it holds.
+ *
+ * WHY THIS ONE IS A FLAG AND THE VIEW WAS A SNAPSHOT.
+ *
+ * A view is a configuration row; its whole self fits in `placement`. A column's
+ * self is its CELLS — 8,565 of them on the live board, plus whatever files hang
+ * off a file column — and no JSON blob in this table is going to hold those. So
+ * the row stays where it is and one nullable field decides whether the board
+ * can see it, which is the same answer jobs and groups already use.
+ *
+ * The consequence is that every read of `maintenance_board_columns` that draws,
+ * exports or mutates a column has to exclude the binned ones, and those were
+ * enumerated rather than guessed — see `DELIBERATELY UNFILTERED` below for the
+ * two that must NOT be, and why leaving them alone is what makes a restore a
+ * month later safe.
+ *
+ * The snapshot in `placement` is still written, and it still matters: it is what
+ * restore reads to put the column back at the position, width, pin state and
+ * summary function it had, rather than merely un-hiding it at whatever the
+ * board looks like now.
+ */
+export async function sendColumnToBin(
+  db: Database,
+  orgId: string,
+  actor: BinActor,
+  columnId: string,
+): Promise<{ ok: true; title: string; values: number } | { ok: false; error: string }> {
+  const [column] = await db
+    .select()
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.id, columnId),
+        eq(maintenanceBoardColumns.organisationId, orgId),
+        isNull(maintenanceBoardColumns.deletedAt),
+      ),
+    );
+  if (!column) return { ok: false, error: "Column not found." };
+  if (column.system) {
+    return { ok: false, error: "System columns cannot be deleted. Hide it instead." };
+  }
+
+  // Only for the line the bin shows. The values are kept either way.
+  const [filled] = await db
+    .select({ total: sql<number>`COUNT(*)` })
+    .from(maintenanceBoardCells)
+    .where(
+      and(
+        eq(maintenanceBoardCells.organisationId, orgId),
+        eq(maintenanceBoardCells.columnId, columnId),
+        sql`${maintenanceBoardCells.value} <> ''`,
+      ),
+    );
+  const values = Number(filled?.total ?? 0);
+
+  const deletedAt = nowIso();
+  await db.insert(recycleBin).values({
+    id: newId(),
+    organisationId: orgId,
+    entityType: "column",
+    entityId: column.id,
+    boardId: column.boardId,
+    title: column.title,
+    summary: `${column.type} column · ${values} value${values === 1 ? "" : "s"} kept`,
+    /*
+     * Everything a restore has to put back that is not the cells. The cells do
+     * not move, so they are not listed; the arrangement does, and it is the
+     * half that a person notices is wrong.
+     */
+    placement: JSON.stringify({
+      boardId: column.boardId,
+      key: column.key,
+      title: column.title,
+      type: column.type,
+      position: column.position,
+      width: column.width,
+      settings: column.settings,
+      visible: column.visible,
+      pinned: column.pinned,
+      required: column.required,
+      summary: column.summary,
+      optionSetKey: column.optionSetKey,
+      description: column.description,
+    }),
+    deletedByEmail: actor.email ?? null,
+    deletedByName: actor.displayName ?? null,
+    deletedAt,
+    expiresAt: expiryFrom(deletedAt),
+  });
+
+  /*
+   * The position is NOT vacated, unlike a group's.
+   *
+   * `maintenance_board_columns_position_idx` is a plain index, not a unique
+   * one, so a binned column holding its slot blocks nothing — and holding it is
+   * what lets restore put the column back among the neighbours it had rather
+   * than at the end of the board.
+   */
+  await db
+    .update(maintenanceBoardColumns)
+    .set({
+      deletedAt,
+      deletedBy: actor.email ?? null,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(maintenanceBoardColumns.id, column.id),
+        eq(maintenanceBoardColumns.organisationId, orgId),
+      ),
+    );
+
+  return { ok: true, title: column.title, values };
+}
+
 /* ── Restoring ─────────────────────────────────────────────────────────── */
 
 export type RestoreOutcome =
@@ -396,6 +515,7 @@ export async function restoreFromBin(
   if (entry.entityType === "job") return restoreJob(db, orgId, entry);
   if (entry.entityType === "group") return restoreGroup(db, orgId, entry);
   if (entry.entityType === "board_view") return restoreBoardView(db, orgId, entry);
+  if (entry.entityType === "column") return restoreColumn(db, orgId, entry);
 
   return {
     ok: false,
@@ -620,6 +740,129 @@ async function restoreGroup(
  * the second is cosmetic and the view simply sorts beside whatever took its
  * place.
  */
+/**
+ * Put a column back on the board, with every value it was holding.
+ *
+ * The cells never went anywhere, so this is not a re-creation: clearing
+ * `deleted_at` makes eight thousand existing rows visible again, at the same
+ * item and the same column, with the same values. What has to be put back
+ * deliberately is the ARRANGEMENT — position, width, pin, visibility, summary
+ * function — because a column that returns at the far right of the board, 160
+ * pixels wide and unpinned, has not been restored so much as re-added.
+ *
+ * The board is renumbered afterwards. Positions are 1,000 apart and a column
+ * that spent a month in the bin may find its old number taken; sorting by
+ * position and rewriting the sequence puts it back among the neighbours it had
+ * without leaving two columns claiming one slot.
+ */
+async function restoreColumn(
+  db: Database,
+  orgId: string,
+  entry: BinRow,
+): Promise<RestoreOutcome> {
+  const [column] = await db
+    .select()
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.id, entry.entityId),
+        eq(maintenanceBoardColumns.organisationId, orgId),
+      ),
+    );
+  if (!column) {
+    return {
+      ok: false,
+      error: "That column is no longer in the database, so there is nothing to restore.",
+      status: 410,
+    };
+  }
+
+  let snapshot: Record<string, unknown> = {};
+  try {
+    snapshot = entry.placement
+      ? (JSON.parse(entry.placement) as Record<string, unknown>)
+      : {};
+  } catch {
+    // A snapshot that will not parse costs the arrangement, not the data. The
+    // column comes back as it was left, which is far better than refusing.
+    snapshot = {};
+  }
+
+  const number = (value: unknown, fallback: number) =>
+    Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const flag = (value: unknown, fallback: boolean) =>
+    typeof value === "boolean" ? value : fallback;
+
+  await db
+    .update(maintenanceBoardColumns)
+    .set({
+      deletedAt: null,
+      deletedBy: null,
+      position: number(snapshot.position, column.position),
+      width: number(snapshot.width, column.width),
+      settings: typeof snapshot.settings === "string" ? snapshot.settings : column.settings,
+      visible: flag(snapshot.visible, column.visible),
+      pinned: flag(snapshot.pinned, column.pinned),
+      required: flag(snapshot.required, column.required),
+      summary:
+        typeof snapshot.summary === "string" || snapshot.summary === null
+          ? (snapshot.summary as string | null)
+          : column.summary,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(maintenanceBoardColumns.id, column.id),
+        eq(maintenanceBoardColumns.organisationId, orgId),
+      ),
+    );
+
+  /*
+   * Renumber the board so the restored column has a slot of its own. Ordered by
+   * position with the restored column winning a tie, which is what puts it
+   * BEFORE the column that took its number rather than after it.
+   */
+  const live = await db
+    .select({ id: maintenanceBoardColumns.id, position: maintenanceBoardColumns.position })
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.organisationId, orgId),
+        eq(maintenanceBoardColumns.boardId, column.boardId),
+        isNull(maintenanceBoardColumns.deletedAt),
+      ),
+    );
+  live.sort((left, right) => {
+    if (left.position !== right.position) return left.position - right.position;
+    if (left.id === column.id) return -1;
+    if (right.id === column.id) return 1;
+    return 0;
+  });
+  for (const [index, row] of live.entries()) {
+    const position = index * 1000;
+    if (row.position === position) continue;
+    await db
+      .update(maintenanceBoardColumns)
+      .set({ position })
+      .where(
+        and(
+          eq(maintenanceBoardColumns.id, row.id),
+          eq(maintenanceBoardColumns.organisationId, orgId),
+        ),
+      );
+  }
+
+  await db.delete(recycleBin).where(eq(recycleBin.id, entry.id));
+
+  const place = live.findIndex((row) => row.id === column.id) + 1;
+  return {
+    ok: true,
+    entityType: "column",
+    entityId: column.id,
+    message: `"${column.title}" is back on the board in position ${place}, with every value it was holding.`,
+  };
+}
+
 async function restoreBoardView(
   db: Database,
   orgId: string,

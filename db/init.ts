@@ -651,6 +651,14 @@ async function ensureBoardEngineColumns(d1: D1DatabaseLike) {
     ["maintenance_board_columns", "summary", "TEXT"],
     ["maintenance_board_columns", "option_set_key", "TEXT"],
     ["maintenance_board_columns", "description", "TEXT"],
+    /*
+     * Recoverable columns. Nullable and additive: an existing row reads NULL,
+     * which is "live", so every board behaves exactly as it did before this
+     * ran. Reversible in the only sense that matters — dropping the feature
+     * means ignoring these two fields, not migrating anything back.
+     */
+    ["maintenance_board_columns", "deleted_at", "TEXT"],
+    ["maintenance_board_columns", "deleted_by", "TEXT"],
     ["maintenance_groups", "collapsed", "INTEGER NOT NULL DEFAULT 0"],
     ["maintenance_groups", "archived", "INTEGER NOT NULL DEFAULT 0"],
     ["maintenance_groups", "description", "TEXT"],

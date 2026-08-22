@@ -132,6 +132,7 @@ export async function POST(request: Request) {
         and(
           eq(maintenanceBoardColumns.organisationId, orgId),
           eq(maintenanceBoardColumns.boardId, board.key),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       )
       .orderBy(asc(maintenanceBoardColumns.position));

@@ -19,8 +19,13 @@
  *                          granted deliberately; that is the capability's whole
  *                          purpose and this is the route it was waiting for.
  *
- * A client — `board.view` and `data.export` and nothing else — can therefore see
- * nothing here, because they cannot reach the bin's GET either.
+ * A client holds `board.view`, so a client CAN read this route. That sentence
+ * used to say the opposite, and the opposite is what a reader would have relied
+ * on. What a client cannot do is act: restoring needs `board.edit` and purging
+ * needs `data.delete`, and neither is theirs. The payload therefore says which
+ * of the two verbs this caller holds, so the screen can offer what it can
+ * actually carry out rather than drawing buttons that answer 403 — and so the
+ * sidebar can decide whether to list the bin at all.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -29,12 +34,14 @@ import {
   activityLog,
   attachments,
   maintenanceBoardCells,
+  maintenanceBoardColumns,
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
   recycleBin,
 } from "../../../db/schema";
 import { auditActor, recordAudit } from "../../lib/audit";
+import { can, resolvePermissions } from "../../lib/permissions";
 import {
   RETENTION_DAYS,
   listBin,
@@ -85,6 +92,16 @@ export async function GET(request: Request) {
     const actor = url.searchParams.get("actor");
     const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
 
+    /*
+     * What this caller may DO, answered once and sent with the list.
+     *
+     * The same resolution the guard above already performed, reused for the two
+     * verbs this route also offers. Cheaper than two more guarded round trips
+     * and, more to the point, it is the only way the screen can tell the
+     * difference between "nothing to restore" and "not yours to restore".
+     */
+    const subject = await resolvePermissions(db, orgId, guard.scope.actor.role);
+
     const all = await listBin(db, orgId);
     const entries = all.filter((entry) => {
       if (kind && kind !== "all" && entry.entityType !== kind) return false;
@@ -99,6 +116,8 @@ export async function GET(request: Request) {
     return Response.json({
       bin: {
         recoverable: true,
+        canRestore: can(subject, "board.edit"),
+        canPurge: can(subject, "data.delete"),
         retentionDays: RETENTION_DAYS,
         entries,
         total: all.length,
@@ -177,6 +196,9 @@ const RESTORED_ENTITY_TYPES: Record<string, string> = {
   job: "maintenance_request",
   group: "maintenance_group",
   board_view: "board_view",
+  // The correction: a column can be in the bin now, and a restored one is a
+  // `maintenance_board_column` in the audit trail like every change to it.
+  column: "maintenance_board_column",
 };
 
 /* ── DELETE — permanent ────────────────────────────────────────────────── */
@@ -315,11 +337,76 @@ function purgeFor(db: Database): PurgeFn {
      * and letting the bin row go is the entire purge. See `sendBoardViewToBin`.
      */
     if (entityType === "board_view") return true;
+    if (entityType === "column") return purgeColumn(db, organisationId, entityId);
     // An entity kind this build does not know how to destroy. Declining leaves
     // the entry in the bin, which is visible and fixable; pretending otherwise
     // would strand the row.
     return false;
   };
+}
+
+/**
+ * Destroy a column: its files, then its values, then the column itself.
+ *
+ * This is the only place a column's cells are ever deleted, and it runs either
+ * because someone chose "Delete for good" in front of a confirmation naming the
+ * column, or because thirty days elapsed. Everything before this point is
+ * reversible; nothing after it is.
+ *
+ * Order matters and is the same as `purgeJob`'s: the objects in storage, then
+ * the rows that point at them, then the rows that point at those. The foreign
+ * key from `maintenance_board_cells.column_id` means the column row cannot go
+ * first — which is also why the bin had to keep the column row rather than
+ * orphaning its cells behind it.
+ */
+async function purgeColumn(db: Database, orgId: string, columnId: string) {
+  const files = await db
+    .select({ objectKey: attachments.objectKey })
+    .from(attachments)
+    .where(
+      and(
+        eq(attachments.boardColumnId, columnId),
+        eq(attachments.organisationId, orgId),
+      ),
+    );
+
+  if (files.length) {
+    const { env } = await import("cloudflare:workers");
+    const runtimeEnv = env as unknown as { BUCKET?: R2Bucket };
+    if (runtimeEnv.BUCKET) {
+      for (const keys of chunkIds(files.map((file) => file.objectKey), 1000)) {
+        await runtimeEnv.BUCKET.delete(keys);
+      }
+    }
+    // Storage being down does not wedge the entry in the bin for ever. See the
+    // matching note in `purgeJob`.
+  }
+
+  await db
+    .delete(attachments)
+    .where(
+      and(
+        eq(attachments.boardColumnId, columnId),
+        eq(attachments.organisationId, orgId),
+      ),
+    );
+  await db
+    .delete(maintenanceBoardCells)
+    .where(
+      and(
+        eq(maintenanceBoardCells.columnId, columnId),
+        eq(maintenanceBoardCells.organisationId, orgId),
+      ),
+    );
+  await db
+    .delete(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.id, columnId),
+        eq(maintenanceBoardColumns.organisationId, orgId),
+      ),
+    );
+  return true;
 }
 
 /**

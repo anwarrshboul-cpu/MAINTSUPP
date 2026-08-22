@@ -90,6 +90,7 @@ import { storeDocumentationResponsibility } from "../../../db/monday-board-spec"
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AdminClientsView } from "./views/admin-clients";
+import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
 import { AdminUsersView } from "./views/admin-users";
 import { AuditLog } from "./views/audit-log";
@@ -158,7 +159,15 @@ export type Section =
    * only way to reach it was to type it. A log nobody can find is a log nobody
    * reads.
    */
-  | "audit";
+  | "audit"
+  /*
+   * The recycle bin, for the same reason and with a sharper edge. The bin, its
+   * 30-day retention, its API and its screen all existed; the only route to
+   * them was nine items down the menu behind the avatar, and the client's
+   * report was that there was no way to get a deleted row back. Undo that
+   * nobody can find is not undo. This renders the same panel over the same API.
+   */
+  | "recycle-bin";
 
 type ViewMode = "board" | "list";
 
@@ -278,6 +287,14 @@ const sectionMeta: Record<
     eyebrow: "Administration",
     title: "Audit trail",
     icon: "shield",
+  },
+  "recycle-bin": {
+    label: "Recycle Bin",
+    eyebrow: "Workspace",
+    title: "Recycle Bin",
+    // No bin in the icon set; the recycling arrows are the nearest true thing,
+    // and they read as "put it back" rather than as "throw it away".
+    icon: "refresh",
   },
   overview: {
     label: "Overview",
@@ -416,6 +433,9 @@ const navSecondary: Section[] = [
   // Filtered out of the catalogue entirely for a role without `audit.read` —
   // see `navCatalogue`.
   "audit",
+  // Beside the audit trail, which is the other screen someone opens when
+  // something has gone wrong and they need to know what happened to it.
+  "recycle-bin",
 ];
 
 const sectionRoutes: Record<Section, string> = {
@@ -441,6 +461,13 @@ const sectionRoutes: Record<Section, string> = {
   // is that it now resolves through the shell like every other section, so the
   // person reading it can get back out.
   audit: "audit",
+  /*
+   * A route of its own rather than a link into /dashboard/account/trash: the
+   * account area is a different shell with a different rail, and a sidebar item
+   * that throws the reader out of the portal is how the bin got lost the first
+   * time. Both URLs answer, and both render the one panel.
+   */
+  "recycle-bin": "recycle-bin",
 };
 
 const routeSections: Record<string, Section> = Object.fromEntries(
@@ -1437,6 +1464,20 @@ export default function PortalApp({
          * `undefined` while the context loads, which keeps the item out until
          * the answer arrives rather than flashing it and taking it away.
          */
+        if (entry.key === "recycle-bin") {
+          /*
+           * Listed for whoever can RESTORE, which is `board.edit`.
+           *
+           * Reading the bin only needs `board.view`, so a client can open it —
+           * and /api/trash tells the screen so, which is why the buttons it
+           * cannot use are not drawn. But a sidebar entry is a promise that
+           * there is something to do behind it, and for a client there is not:
+           * they can neither restore nor purge. The screen stays reachable by
+           * URL for anyone who may read it; the nav item is for whoever the bin
+           * is actually FOR.
+           */
+          return runtimeContext?.capabilities?.["board.edit"] === true;
+        }
         if (entry.key !== "audit") return true;
         return runtimeContext?.capabilities?.["audit.read"] === true;
       }),
@@ -2313,6 +2354,12 @@ export default function PortalApp({
             permission and never was.
           */}
           {activeSurface === "audit" && <AuditLog />}
+          {/*
+            The recycle bin — the same panel the account area draws, over the
+            same /api/trash. See recycle-bin-section.tsx for why it is a door
+            and not a room.
+          */}
+          {activeSurface === "recycle-bin" && <RecycleBinSection onNotify={setToast} />}
           {activeSurface === "admin-users" && <AdminUsersView />}
           {activeSurface === "admin-roles" && <AdminRolesView />}
           {activeSurface === "admin-clients" && (

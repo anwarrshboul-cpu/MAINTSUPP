@@ -684,6 +684,25 @@ export const maintenanceBoardColumns = sqliteTable(
     summary: text("summary"),
     optionSetKey: text("option_set_key"),
     description: text("description"),
+    /**
+     * In the recycle bin since this moment, or NULL for a live column.
+     *
+     * The same shape `maintenanceGroups` and `maintenanceRequests` already
+     * carry, and for the same reason: the row and everything hanging off it —
+     * every cell, every file, the type, the width, the position, the pin, the
+     * summary function — stay exactly where they are, and one nullable field
+     * decides whether the board can see them. A column's data is its cells, and
+     * there are thousands of them; no snapshot in `recycle_bin.placement` could
+     * hold those, which is why the earlier answer here was "not recoverable".
+     *
+     * The row also keeps its KEY, which matters: the unique index below is on
+     * (organisation, board, column_key), so a binned column still holds its key
+     * and a new column with the same title is given a suffixed one. That is
+     * what makes a restore thirty days later safe rather than a constraint
+     * violation.
+     */
+    deletedAt: text("deleted_at"),
+    deletedBy: text("deleted_by"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },

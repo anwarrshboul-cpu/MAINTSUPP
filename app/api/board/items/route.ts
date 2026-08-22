@@ -381,6 +381,7 @@ export async function PATCH(request: Request) {
           and(
             eq(maintenanceBoardColumns.id, columnId),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         );
       if (!column) return bad("Column not found.", 404);

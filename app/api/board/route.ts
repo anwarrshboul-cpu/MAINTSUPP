@@ -51,7 +51,12 @@ import { exposeRequest } from "../../lib/request-payload";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import { selectInChunks } from "../../lib/sql-batching";
-import { RETENTION_DAYS, sendGroupToBin, sendJobsToBin } from "../../lib/recycle-bin";
+import {
+  RETENTION_DAYS,
+  sendColumnToBin,
+  sendGroupToBin,
+  sendJobsToBin,
+} from "../../lib/recycle-bin";
 
 /*
  * Which board a request is for.
@@ -881,6 +886,7 @@ async function ensureBoardState(
       and(
         eq(maintenanceBoardColumns.boardId, boardId),
         eq(maintenanceBoardColumns.organisationId, orgId),
+        isNull(maintenanceBoardColumns.deletedAt),
       ),
     )
     .orderBy(asc(maintenanceBoardColumns.position));
@@ -1082,7 +1088,13 @@ async function boardPayload(
     (await db
       .select()
       .from(maintenanceBoardColumns)
-      .where(and(eq(maintenanceBoardColumns.boardId, boardId), eq(maintenanceBoardColumns.organisationId, orgId)))
+      .where(
+        and(
+          eq(maintenanceBoardColumns.boardId, boardId),
+          eq(maintenanceBoardColumns.organisationId, orgId),
+          isNull(maintenanceBoardColumns.deletedAt),
+        ),
+      )
       .orderBy(asc(maintenanceBoardColumns.position)));
   const cells = await db
     .select({
@@ -1696,6 +1708,7 @@ export async function POST(request: Request) {
             eq(maintenanceBoardColumns.boardId, boardId),
             eq(maintenanceBoardColumns.system, false),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         );
       if (Number(columnCount.value) >= 40) {
@@ -1704,6 +1717,12 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+      /*
+       * DELIBERATELY UNFILTERED — binned columns count here, as they do in the
+       * key scan in /api/board/columns. A column in the bin keeps its title, and
+       * a board that ends up with two "Colour" columns the moment one is
+       * restored is a board nobody can read. The new one takes "Colour 2".
+       */
       const existingColumns = await db
         .select({ title: maintenanceBoardColumns.title })
         .from(maintenanceBoardColumns)
@@ -1722,7 +1741,13 @@ export async function POST(request: Request) {
       const orderedColumns = await db
         .select()
         .from(maintenanceBoardColumns)
-        .where(and(eq(maintenanceBoardColumns.boardId, boardId), eq(maintenanceBoardColumns.organisationId, orgId)))
+        .where(
+          and(
+            eq(maintenanceBoardColumns.boardId, boardId),
+            eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
+          ),
+        )
         .orderBy(asc(maintenanceBoardColumns.position));
       for (const [index, column] of orderedColumns.entries()) {
         const position = index * 1000;
@@ -1784,6 +1809,7 @@ export async function POST(request: Request) {
             eq(maintenanceBoardColumns.boardId, boardId),
             eq(maintenanceBoardColumns.id, columnId),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         )
         .limit(1);
@@ -1804,6 +1830,7 @@ export async function POST(request: Request) {
             eq(maintenanceBoardColumns.boardId, boardId),
             eq(maintenanceBoardColumns.system, false),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         );
       if (Number(columnCount.value) >= 40) {
@@ -1815,7 +1842,13 @@ export async function POST(request: Request) {
       const orderedColumns = await db
         .select()
         .from(maintenanceBoardColumns)
-        .where(and(eq(maintenanceBoardColumns.boardId, boardId), eq(maintenanceBoardColumns.organisationId, orgId)))
+        .where(
+          and(
+            eq(maintenanceBoardColumns.boardId, boardId),
+            eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
+          ),
+        )
         .orderBy(asc(maintenanceBoardColumns.position));
       for (const [index, column] of orderedColumns.entries()) {
         const position = index * 1000;
@@ -2679,6 +2712,7 @@ export async function PATCH(request: Request) {
             eq(maintenanceBoardColumns.boardId, boardId),
             eq(maintenanceBoardColumns.id, columnId),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         )
         .limit(1);
@@ -2804,6 +2838,7 @@ export async function PATCH(request: Request) {
             eq(maintenanceBoardColumns.boardId, boardId),
             eq(maintenanceBoardColumns.id, columnId),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         )
         .limit(1);
@@ -2902,6 +2937,7 @@ export async function PATCH(request: Request) {
             eq(maintenanceBoardColumns.boardId, boardId),
             eq(maintenanceBoardColumns.id, columnId),
             eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
           ),
         )
         .limit(1);
@@ -2914,14 +2950,32 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
-      await deleteFilesForColumn(db, orgId, columnId);
-      await db
-        .delete(maintenanceBoardCells)
-        .where(and(eq(maintenanceBoardCells.columnId, columnId), eq(maintenanceBoardCells.organisationId, orgId)));
-      if (action === "delete_column") {
+      /*
+       * TWO VERBS THAT USED TO SHARE A BODY.
+       *
+       * "Clear" empties a column and keeps it: the files go, the values go, the
+       * column stays. It is destructive on purpose and stays that way.
+       *
+       * "Delete" now takes the column off the board and keeps everything it was
+       * holding — which means it must NOT run the two lines above. Deleting the
+       * files here would have made the column recoverable and its attachments
+       * not, which is the worst of the three possible answers.
+       */
+      if (action === "clear_column") {
+        await deleteFilesForColumn(db, orgId, columnId);
         await db
-          .delete(maintenanceBoardColumns)
-          .where(and(eq(maintenanceBoardColumns.id, columnId), eq(maintenanceBoardColumns.organisationId, orgId)));
+          .delete(maintenanceBoardCells)
+          .where(and(eq(maintenanceBoardCells.columnId, columnId), eq(maintenanceBoardCells.organisationId, orgId)));
+      } else {
+        const binned = await sendColumnToBin(
+          db,
+          orgId,
+          auditActor({ actor, identityEmail, session }),
+          columnId,
+        );
+        if (!binned.ok) {
+          return Response.json({ error: binned.error }, { status: 409 });
+        }
       }
       await recordAudit({
         db,
@@ -2932,20 +2986,20 @@ export async function PATCH(request: Request) {
         entityId: columnId,
         summary:
           action === "delete_column"
-            ? `Deleted the "${existing.title}" column from ${boardId}, discarding its values.`
+            ? `Moved the "${existing.title}" column on ${boardId} to the recycle bin, keeping its values.`
             : `Cleared every value in the "${existing.title}" column on ${boardId}.`,
         detail: {
           board: boardId,
           ...columnAuditShape(existing),
           /*
-           * Deleting a column is NOT recoverable, and the audit line says so
-           * rather than leaving a reader to assume the recycle bin caught it.
-           * Making it recoverable needs a `deleted_at` on
-           * `maintenance_board_columns` plus retention of the cells it owns —
-           * a schema change, which is why W13-06 records this as identified
-           * and deferred rather than silently unaddressed.
+           * Deleting a column IS recoverable now — the row and every cell it
+           * owns stay behind a `deleted_at`, and the bin holds the arrangement
+           * needed to put it back. Clearing one is not, and never was: it
+           * destroys the values and keeps the column, which is a different
+           * verb with a different promise.
            */
-          recoverable: false,
+          recoverable: action === "delete_column",
+          ...(action === "delete_column" ? { retentionDays: RETENTION_DAYS } : {}),
         },
         request,
       });

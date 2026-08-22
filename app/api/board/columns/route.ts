@@ -1,9 +1,10 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { maintenanceBoardCells, maintenanceBoardColumns } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { resolveBoard } from "../../../lib/board-registry";
+import { RETENTION_DAYS, sendColumnToBin } from "../../../lib/recycle-bin";
 import {
   canConvert,
   getColumnType,
@@ -60,6 +61,7 @@ export async function GET(request: Request) {
         and(
           eq(maintenanceBoardColumns.organisationId, orgId),
           eq(maintenanceBoardColumns.boardId, board.key),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       )
       .orderBy(asc(maintenanceBoardColumns.position));
@@ -118,6 +120,16 @@ export async function POST(request: Request) {
       return bad(`A ${definition.label} column needs an option set to draw its choices from.`);
     }
 
+    /*
+     * DELIBERATELY UNFILTERED — binned columns count here.
+     *
+     * `maintenance_board_columns_key_idx` is UNIQUE on (organisation, board,
+     * column_key) and a binned column keeps its key. Skipping binned rows would
+     * let this hand out a key the index already holds, and the insert below
+     * would fail with a constraint violation rather than a message. Counting
+     * them costs a new column of the same name a suffix — `colour_2` — and buys
+     * the guarantee that a restore thirty days later cannot collide.
+     */
     let key = keyFrom(title);
     const existing = await db
       .select({ key: maintenanceBoardColumns.key })
@@ -206,7 +218,12 @@ export async function PATCH(request: Request) {
           boardId: maintenanceBoardColumns.boardId,
         })
         .from(maintenanceBoardColumns)
-        .where(eq(maintenanceBoardColumns.organisationId, orgId));
+        .where(
+          and(
+            eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
+          ),
+        );
       const byId = new Map(known.map((row) => [row.id, row]));
 
       const moved: Array<{ id: string; title: string; from: number; to: number }> = [];
@@ -264,6 +281,7 @@ export async function PATCH(request: Request) {
         and(
           eq(maintenanceBoardColumns.id, id),
           eq(maintenanceBoardColumns.organisationId, orgId),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       );
     if (!existing) return bad("Column not found.", 404);
@@ -393,6 +411,7 @@ export async function DELETE(request: Request) {
         and(
           eq(maintenanceBoardColumns.id, id),
           eq(maintenanceBoardColumns.organisationId, orgId),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       );
     if (!existing) return bad("Column not found.", 404);
@@ -412,30 +431,37 @@ export async function DELETE(request: Request) {
       );
     const affected = Number(filled?.total ?? 0);
 
+    /*
+     * Still a confirmation, and no longer a warning about loss.
+     *
+     * Removing a column takes it off everybody's board, so it is worth asking
+     * about. What it no longer does is discard anything: the values go with it
+     * into the recycle bin and come back with it. The message says the true
+     * thing, because a person who reads "discards them" and stops has been
+     * talked out of an action that was safe.
+     */
     if (affected > 0 && !confirmed) {
       return Response.json(
         {
           error: "has-data",
           affected,
-          message: `"${existing.title}" holds ${affected} value${affected === 1 ? "" : "s"}. Deleting it discards them.`,
+          message: `"${existing.title}" holds ${affected} value${affected === 1 ? "" : "s"}. It goes to the Recycle Bin with them, and can be restored for ${RETENTION_DAYS} days.`,
         },
         { status: 409 },
       );
     }
 
-    await db
-      .delete(maintenanceBoardCells)
-      .where(
-        and(
-          eq(maintenanceBoardCells.organisationId, orgId),
-          eq(maintenanceBoardCells.columnId, id),
-        ),
-      );
-    await db
-      .delete(maintenanceBoardColumns)
-      .where(
-        and(eq(maintenanceBoardColumns.id, id), eq(maintenanceBoardColumns.organisationId, orgId)),
-      );
+    const binned = await sendColumnToBin(
+      db,
+      orgId,
+      auditActor({
+        actor: guard.scope.actor,
+        identityEmail: guard.scope.identityEmail,
+        session: guard.scope.session,
+      }),
+      id,
+    );
+    if (!binned.ok) return bad(binned.error, 409);
 
     await recordAudit({
       db,
@@ -444,14 +470,21 @@ export async function DELETE(request: Request) {
       action: "board.column_deleted",
       entityType: "maintenance_board_column",
       entityId: id,
-      summary: `Deleted the "${existing.title}" column from ${existing.boardId}, discarding ${affected} value${affected === 1 ? "" : "s"}.`,
-      // Not recoverable, and the line says so. See the matching note in
-      // /api/board's delete_column for what making it recoverable would take.
-      detail: { board: existing.boardId, title: existing.title, type: existing.type, discarded: affected, recoverable: false },
+      summary: `Moved the "${existing.title}" column on ${existing.boardId} to the recycle bin, keeping ${affected} value${affected === 1 ? "" : "s"}.`,
+      // Recoverable, and the line says so — this is what a reader checks when
+      // they are deciding whether something can still be had back.
+      detail: {
+        board: existing.boardId,
+        title: existing.title,
+        type: existing.type,
+        kept: affected,
+        recoverable: true,
+        retentionDays: RETENTION_DAYS,
+      },
       request,
     });
 
-    return Response.json({ ok: true, discarded: affected });
+    return Response.json({ ok: true, binned: true, kept: affected });
   } catch (error) {
     return unavailable(error);
   }

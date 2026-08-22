@@ -73,11 +73,18 @@ const RECOVERY_MATRIX = [
     note: "Deleting a board removes the row. Archiving is reversible.",
   },
   {
+    entity: "Board views",
+    table: "board_views",
+    softDelete: true,
+    archivable: false,
+    note: "Deleting a view moves it to the recycle bin for 30 days. Restore brings back its name, icon, saved filters, saved sort and its place on the strip.",
+  },
+  {
     entity: "Board columns",
     table: "maintenance_board_columns",
-    softDelete: false,
+    softDelete: true,
     archivable: false,
-    note: "Deleting a column removes the column and every cell stored against it. There is no recovery.",
+    note: "Deleting a column moves it to the recycle bin for 30 days, and every value it holds stays with it — nothing is discarded until somebody chooses \"Delete for good\" or the 30 days run out. Restore puts the column back at its old position, width, pin and summary, with its values. Hiding a column is different again: it stays on the board and only stops being drawn.",
   },
   {
     entity: "Files and evidence",
@@ -92,6 +99,13 @@ const RECOVERY_MATRIX = [
     softDelete: false,
     archivable: false,
     note: "Closing a site or retiring a unit keeps the row and is reversible. Neither is deleted.",
+  },
+  {
+    entity: "Contractors",
+    table: "contractors",
+    softDelete: false,
+    archivable: true,
+    note: "Contractors are never deleted. Removing one marks it inactive and unavailable, which is reversible from the Contractors screen; the jobs it worked keep pointing at it.",
   },
   {
     entity: "Teams",

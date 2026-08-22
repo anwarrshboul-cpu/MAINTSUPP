@@ -126,7 +126,9 @@ export function AccountShell({ panel }: { panel: string }) {
       case "trash":
         // Stage 23 — Trash restores and permanently deletes now, so it reports
         // outcomes through the same notifier every other acting panel uses.
-        return <AccountTrashPanel snapshot={snapshot} onNotify={notify} />;
+        return (
+          <AccountTrashPanel timezone={snapshot.profile.timezone} onNotify={notify} />
+        );
       case "archive":
         return <AccountArchivePanel snapshot={snapshot} onNotify={notify} />;
       case "integrations":
