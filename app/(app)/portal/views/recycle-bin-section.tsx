@@ -27,6 +27,16 @@
 
 import { useEffect, useState } from "react";
 import { AccountTrashPanel } from "./account-workspace";
+/*
+ * The panel's stylesheet, which the account shell imports for its own copy.
+ *
+ * A component that renders somebody else's markup has to bring that markup's
+ * CSS with it. Without this the bin drew here with none of it: the table lost
+ * the `overflow-x: auto` that lets it scroll inside its own strip, and a 636px
+ * table pushed the page 258px wider than a phone at 390. Vite dedupes the two
+ * imports, so the account area is unaffected.
+ */
+import "./account-views.css";
 
 export function RecycleBinSection({ onNotify }: { onNotify: (message: string) => void }) {
   const [timezone, setTimezone] = useState<string | undefined>(undefined);

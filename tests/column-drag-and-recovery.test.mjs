@@ -313,6 +313,32 @@ test("the recycle bin is a portal section, not only a menu item", () => {
   );
 });
 
+test("a typed URL and a sidebar click land on the same screen", async () => {
+  /*
+   * Two maps, one truth. `portal-app.tsx` decides what the address bar says
+   * after a click; the dashboard route decides what a typed URL, a reload or a
+   * shared link resolves to. The recycle bin was added to one and not the
+   * other, so clicking it worked and reloading it landed on Overview — which is
+   * the same "I cannot find it" the whole correction is about.
+   */
+  const route = await read("app/(app)/dashboard/[[...section]]/page.tsx");
+  const client = portal.slice(
+    portal.indexOf("const sectionRoutes: Record<Section, string> = {"),
+    portal.indexOf("const routeSections"),
+  );
+  const slugs = [...client.matchAll(/^\s*"?([a-z-]+)"?: "([a-z/-]*)",/gm)]
+    .map(([, section, slug]) => ({ section, slug }))
+    .filter((entry) => entry.slug);
+  assert.ok(slugs.length > 10, `only ${slugs.length} routes parsed — portal-app moved`);
+  for (const { section, slug } of slugs) {
+    assert.match(
+      route,
+      new RegExp(`"?${slug.replace("/", "\/")}"?: "${section}"`),
+      `/dashboard/${slug} must resolve to ${section} on the server too`,
+    );
+  }
+});
+
 test("the bin's nav entry is offered to whoever can restore", () => {
   const block = portal.slice(
     portal.indexOf('if (entry.key === "recycle-bin")'),
