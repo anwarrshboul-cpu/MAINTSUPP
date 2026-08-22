@@ -123,6 +123,24 @@ function dateValues(
     .filter(Boolean);
 }
 
+/**
+ * How a number reads in THIS column.
+ *
+ * Cost of Works is money and the default strip has always drawn it as money;
+ * honouring a stored "sum" must not quietly turn £5,545.00 into 5,545. A
+ * workspace `number` column is a quantity and keeps the plain form.
+ */
+function summaryNumber(entry: BoardDisplayColumn, value: number) {
+  const money = entry.kind === "system" && entry.key === "cost";
+  return money
+    ? new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: "GBP",
+        maximumFractionDigits: 2,
+      }).format(value)
+    : compactNumber(value);
+}
+
 /** What the chosen summary prints, or null to fall through to the default. */
 function chosenSummaryText(
   entry: BoardDisplayColumn,
@@ -160,17 +178,18 @@ function chosenSummaryText(
   // zero, which would read as a real total of nothing.
   if (!numbers.length) return "No values";
 
+  const format = (value: number) => summaryNumber(entry, value);
   switch (summary) {
     case "sum":
-      return `Total ${compactNumber(numbers.reduce((total, value) => total + value, 0))}`;
+      return `Total ${format(numbers.reduce((total, value) => total + value, 0))}`;
     case "average":
-      return `Average ${compactNumber(
+      return `Average ${format(
         numbers.reduce((total, value) => total + value, 0) / numbers.length,
       )}`;
     case "min":
-      return `Lowest ${compactNumber(Math.min(...numbers))}`;
+      return `Lowest ${format(Math.min(...numbers))}`;
     case "max":
-      return `Highest ${compactNumber(Math.max(...numbers))}`;
+      return `Highest ${format(Math.max(...numbers))}`;
     case "median": {
       const sorted = [...numbers].sort((left, right) => left - right);
       const middle = Math.floor(sorted.length / 2);
@@ -178,7 +197,7 @@ function chosenSummaryText(
         sorted.length % 2 === 0
           ? (sorted[middle - 1] + sorted[middle]) / 2
           : sorted[middle];
-      return `Median ${compactNumber(median)}`;
+      return `Median ${format(median)}`;
     }
     default:
       return null;

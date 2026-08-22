@@ -845,6 +845,35 @@ test("boardFilterOperatorsMatchTheEngine", async () => {
 
 /* ── The Due Date column ─────────────────────────────────────────────────── */
 
+test("a stored summary drives the group footer, in the column own units", async () => {
+  /*
+   * `maintenance_board_columns.summary` has been written and server-validated
+   * since Stage 1 — the seed sets "battery" on Status and Priority and "sum"
+   * on Cost of Works — and the board payload never returned it, so the strip
+   * drew whatever the column TYPE implied and ignored what anybody chose.
+   *
+   * Money is the part that is easy to get wrong on the way back: honouring the
+   * stored "sum" must not turn 5,545 pounds into a bare 5,545.
+   */
+  const summary = await read("app/(app)/portal/board-column-summary.tsx");
+  assert.ok(
+    summary.includes("const chosen = chosenSummaryText("),
+    "a stored choice must win over the type-derived default",
+  );
+  assert.ok(
+    summary.includes('entry.kind === "system" && entry.key === "cost"'),
+    "and Cost of Works must still read as money",
+  );
+  assert.ok(summary.includes('currency: "GBP"'));
+  // "battery" is a distribution bar rather than a line of text, and it is what
+  // the default already draws, so it falls through rather than being redone.
+  assert.ok(summary.includes('if (!summary || summary === "battery") return null;'));
+
+  const route = await read("app/api/board/route.ts");
+  assert.ok(route.includes("summary: row.summary ?? null,"), "the payload must carry it");
+  assert.ok(route.includes("summariesFor(existing.type).includes(summary as never)"));
+});
+
 test("a date cell's marker is decoration, and can never be a second date", async () => {
   /*
    * THE DEFECT THIS CLOSES, which predates Batch 1A and which the Due Date
