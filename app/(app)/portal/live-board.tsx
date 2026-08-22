@@ -1505,6 +1505,42 @@ export function LiveMaintenanceBoard({
     }
   };
 
+  /**
+   * The marker and time of day a date cell carries beside its date.
+   *
+   * A SYSTEM date column's date belongs to the job — it is written by
+   * `saveFields` through PATCH /api/maintenance, which is what the calendar and
+   * the overdue count read. Only the decoration is a cell, and it is stored
+   * WITHOUT a date so it can never disagree with the field about one. That is
+   * also what lets the server accept it: `update_cell` refuses a system column
+   * outright otherwise, and every date edit on this board used to fire a second
+   * request that came back 400 and put an error in front of the operator.
+   *
+   * A workspace column's date IS its cell, so nothing is stripped there.
+   */
+  const saveDateDecoration = (
+    request: MaintenanceRequest,
+    column: MaintenanceBoardColumn,
+    metadataValue: string,
+  ) => {
+    if (!column.system) return saveCustomCell(request, column, metadataValue);
+    let decoration = "";
+    if (metadataValue) {
+      try {
+        const parsed = JSON.parse(metadataValue) as {
+          time?: unknown;
+          icon?: unknown;
+        };
+        const time = typeof parsed.time === "string" ? parsed.time : "";
+        const icon = typeof parsed.icon === "string" ? parsed.icon : "";
+        if (time || icon) decoration = JSON.stringify({ time, icon });
+      } catch {
+        // Unreadable metadata clears the decoration rather than storing it.
+      }
+    }
+    return saveCustomCell(request, column, decoration);
+  };
+
   const optionsFor = (columnKey: BoardOptionColumn): Option[] => {
     const saved = boardOptions
       .filter((option) => option.columnKey === columnKey)
@@ -4166,7 +4202,7 @@ export function LiveMaintenanceBoard({
                               saveCustomCell(request, column, value)
                             }
                             onSaveDateMetadata={(column, value) =>
-                              saveCustomCell(request, column, value)
+                              saveDateDecoration(request, column, value)
                             }
                             onUpdateCustomColumn={(column, settings) =>
                               updateCustomColumn(column, { settings }).then(

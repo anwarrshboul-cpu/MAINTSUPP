@@ -845,6 +845,69 @@ test("boardFilterOperatorsMatchTheEngine", async () => {
 
 /* ── The Due Date column ─────────────────────────────────────────────────── */
 
+test("a date cell's marker is decoration, and can never be a second date", async () => {
+  /*
+   * THE DEFECT THIS CLOSES, which predates Batch 1A and which the Due Date
+   * column would have inherited.
+   *
+   * `update_cell` learned to refuse a system column when a cell holding a
+   * contractor name was found shadowing the field — the register kept saying
+   * nobody was assigned while the board insisted otherwise. Correct, except
+   * that the board's date cells legitimately store one thing that is NOT a
+   * shadow: the colour-coded marker and the time of day drawn beside the date.
+   * `maintenance_requests` has nowhere to put a marker.
+   *
+   * So every date edit on the board fired a second request that came back 400
+   * and put an error in front of the operator, on all four system date columns.
+   * Measured against the running server before this change: Date Requested,
+   * Date Completed, Next Update and Due Date each produced one 200 (the field)
+   * and one 400 (the decoration).
+   *
+   * The decoration is now stored WITHOUT a date, which is what lets the guard
+   * admit it: a cell that cannot carry a date cannot disagree with the field
+   * about one.
+   */
+  const route = await read("app/api/board/route.ts");
+  const fn = route.slice(
+    route.indexOf("function dateDecorationValue"),
+    route.indexOf("function normalizeCellValue"),
+  );
+  assert.match(fn, /if \(type !== "date"\) return null;/, "only a date column has a marker");
+  assert.match(
+    fn,
+    /if \(trimString\(record\.date, 10\)\) return null;/,
+    "a decoration carrying a date is not a decoration",
+  );
+  assert.match(fn, /boardDateIconIds\.has\(icon\)/, "and the marker must be a real one");
+
+  // The guard still refuses everything else about a system column.
+  const guard = route.slice(route.indexOf("const decoration = dateDecorationValue"));
+  assert.match(
+    guard.slice(0, 700),
+    /if \(decoration === null\) \{[\s\S]*?That column is a field on the job/,
+    "anything that is not a decoration is refused exactly as before",
+  );
+
+  // And the board sends one, rather than a second copy of the date.
+  const board = await read("app/(app)/portal/live-board.tsx");
+  assert.match(board, /const saveDateDecoration = \(/);
+  assert.match(
+    board,
+    /if \(time \|\| icon\) decoration = JSON\.stringify\(\{ time, icon \}\);/,
+    "the date is stripped before the cell is written",
+  );
+  assert.match(
+    board,
+    /onSaveDateMetadata=\{\(column, value\) =>\s*saveDateDecoration\(request, column, value\)/,
+  );
+
+  // The picker opens on the FIELD's date, so a decoration written before this
+  // — which does carry one — cannot open it on the wrong day.
+  const cells = await read("app/(app)/portal/board-cells.tsx");
+  const opener = cells.slice(cells.indexOf("const openEditor = () => {"));
+  assert.match(opener.slice(0, 900), /setDraftDate\(currentDate \|\| next\.date\);/);
+});
+
 test("Due Date is the canonical field, not a cell beside it", async () => {
   const spec = await read("db/monday-board-spec.ts");
   assert.match(spec, /key: "dueDate", title: "Due Date", type: "date"/);

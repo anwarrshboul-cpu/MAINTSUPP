@@ -4370,6 +4370,41 @@ a {
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   background: white;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+/*
+ * THE ROW SCROLLS RATHER THAN PUSHING THE PAGE.
+ *
+ * `.live-board-toolbar` is a flex row with the default `nowrap`, so once its
+ * controls are wider than the column they widen the DOCUMENT. block 9 of
+ * brand-overrides.css hit that between 761 and 768px and wrote down what it
+ * meant at the time: "any future control added to that row would have done the
+ * same thing". Batch 1A added two — the sort panel's chevron and Filter — and
+ * the row went 18px past a 1024px viewport.
+ *
+ * The containment the phone already had is therefore extended to every width,
+ * rather than a control being taken away. Where the row already fits, an
+ * `auto` overflow is a no-op.
+ *
+ * THE GUARD IS LOAD-BEARING. A scroll container clips its children, so an open
+ * dropdown would be cut off at the toolbar's own edge. `.board-rules` — the
+ * sort and filter panels — is listed beside `.live-board-menu` for exactly the
+ * reason that rule lists it, and without it the two new panels would have been
+ * clipped on a phone by the rule that was already there.
+ */
+.live-board-toolbar:not(:has(.live-board-menu, .board-rules)) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.live-board-toolbar:has(.live-board-menu, .board-rules) {
+  overflow: visible;
+}
+
+.live-board-toolbar::-webkit-scrollbar {
+  display: none;
 }
 
 .live-board-split {
@@ -10644,12 +10679,14 @@ th.sheet-column--name {
     -webkit-overflow-scrolling: touch;
   }
 
-  .live-board-toolbar:not(:has(.live-board-menu)) {
+  /* The same pair as the top-level rule, restated here only because this block
+     also changes the toolbar's position and padding. See the note there. */
+  .live-board-toolbar:not(:has(.live-board-menu, .board-rules)) {
     overflow-x: auto;
     overflow-y: hidden;
   }
 
-  .live-board-toolbar:has(.live-board-menu) {
+  .live-board-toolbar:has(.live-board-menu, .board-rules) {
     overflow: visible;
   }
 

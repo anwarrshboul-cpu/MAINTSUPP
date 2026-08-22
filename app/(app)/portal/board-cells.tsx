@@ -864,11 +864,21 @@ export function DateCell({
 
   const openEditor = () => {
     const next = parseBoardDateMetadata(metadataValue ?? value, currentDate);
-    setDraftDate(next.date);
+    /*
+     * The DATE comes from `value` — the field, or the cell on a workspace
+     * column — and the time and marker from the metadata beside it.
+     *
+     * `next.date` would be the same thing on a workspace column, where the
+     * metadata IS the value. On a system column it can be a date left in an old
+     * decoration cell, and opening the picker on a day the board is not showing
+     * is how somebody saves the wrong one. Decorations written from here carry
+     * no date at all; this is what makes the ones written before that harmless.
+     */
+    setDraftDate(currentDate || next.date);
     setDraftTime(next.time);
     setDraftIcon(next.icon);
     setIconPickerOpen(false);
-    setCalendarMonth(boardCalendarMonth(next.date));
+    setCalendarMonth(boardCalendarMonth(currentDate || next.date));
     setOpen(true);
   };
 

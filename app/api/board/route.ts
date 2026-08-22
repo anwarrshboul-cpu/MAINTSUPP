@@ -587,6 +587,58 @@ function columnPayload(
   };
 }
 
+/**
+ * The icon and the time a SYSTEM date column carries beside the job's own date.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT A HOLE IN THE GUARD BELOW.
+ *
+ * The board's date cells offer a colour-coded marker — "On time", "Late",
+ * "Waiting" — and a time of day. `maintenance_requests` has nowhere to put a
+ * marker, so it is stored as a cell, which is correct: it is decoration ON a
+ * value rather than the value. The DATE always goes to the field, through
+ * `PATCH /api/maintenance`, and every other screen reads it there.
+ *
+ * WHAT WAS BROKEN. The cell was written carrying `{ date, time, icon }`, so
+ * once `update_cell` learned to refuse a system column — correctly, because a
+ * cell holding a contractor name shadowed the field and the register kept
+ * saying nobody was assigned — every date edit on the board fired a second
+ * request that came back 400 and put an error in front of the operator. The
+ * date itself had already saved. All four system date columns did it.
+ *
+ * So the decoration is stored WITHOUT a date. Nothing about it can shadow
+ * anything, which is what lets the guard admit it: a cell that cannot carry a
+ * date cannot disagree with the field about one. `parseBoardDateMetadata` in
+ * board-format.ts already falls back to the field's date when the metadata has
+ * none, which is what makes this shape readable without any change to the cell.
+ *
+ * Returns the value to store, "" to clear it, or null when the payload is not a
+ * decoration at all — in which case the caller refuses exactly as before.
+ */
+function dateDecorationValue(type: BoardColumnType, value: unknown): string | null {
+  if (type !== "date") return null;
+  const text = trimString(value, 200);
+  if (!text) return "";
+  if (!text.startsWith("{")) return null;
+  let record: Record<string, unknown>;
+  try {
+    record = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  // A decoration must NOT carry a date. That is the field's, and a cell holding
+  // one is precisely the shadow the guard exists to prevent.
+  if (trimString(record.date, 10)) return null;
+  const time = trimString(record.time, 5);
+  const icon = trimString(record.icon, 40);
+  if (time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    throw new Error("Choose a valid time.");
+  }
+  if (icon && !boardDateIconIds.has(icon)) {
+    throw new Error("Choose a valid date icon.");
+  }
+  return time || icon ? JSON.stringify({ time, icon }) : "";
+}
+
 function normalizeCellValue(type: BoardColumnType, value: unknown) {
   if (type === "files") return "";
   if (type === "checkbox") {
@@ -2666,18 +2718,29 @@ export async function PATCH(request: Request) {
        * `PATCH /api/maintenance` with `{ id, fields }` is where a job's own
        * fields are set, and it is what the board itself calls.
        */
-      if (column.system) {
-        return Response.json(
-          {
-            error:
-              "That column is a field on the job. Use PATCH /api/maintenance with { id, fields } so every other screen sees the change.",
-          },
-          { status: 400 },
-        );
-      }
       let value = "";
       try {
-        value = normalizeCellValue(type, payload.value);
+        if (column.system) {
+          /*
+           * The ONE thing a system column may store as a cell: the marker and
+           * the time of day a date column draws beside the job's own date. It
+           * carries no date of its own, so it cannot shadow the field — see
+           * `dateDecorationValue`. Everything else is refused, as before.
+           */
+          const decoration = dateDecorationValue(type, payload.value);
+          if (decoration === null) {
+            return Response.json(
+              {
+                error:
+                  "That column is a field on the job. Use PATCH /api/maintenance with { id, fields } so every other screen sees the change.",
+              },
+              { status: 400 },
+            );
+          }
+          value = decoration;
+        } else {
+          value = normalizeCellValue(type, payload.value);
+        }
       } catch (error) {
         return Response.json(
           {

@@ -7004,7 +7004,7 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
     scrollbar-width: none;
   }
 
-  .live-board-toolbar:not(:has(.live-board-menu)) {
+  .live-board-toolbar:not(:has(.live-board-menu, .board-rules)) {
     overflow-x: auto;
     overflow-y: hidden;
   }
