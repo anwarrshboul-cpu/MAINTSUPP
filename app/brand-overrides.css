@@ -251,6 +251,7 @@ body[data-theme="dark"] :is(
 
 body[data-theme="dark"] :is(
   .live-board-menu,
+  .board-rules,
   .sheet-group__menu,
   .sheet-row-menu,
   .custom-column-menu,
@@ -355,6 +356,8 @@ body[data-theme="dark"] :is(
   .sheet-row-menu button:hover,
   .sheet-row-menu label:hover,
   .custom-column-menu > button:hover,
+  .board-rules__row button:hover,
+  .board-rules__foot button:hover,
   .column-picker button:hover,
   .live-selection-bar > button:hover,
   .live-selection-move button:hover,
@@ -1922,9 +1925,32 @@ button.analytics-score-panel {
   cursor: pointer;
 }
 
-.analytics-panel-footer:hover {
-  background: #1a3039;
-  color: #71e0d8;
+/*
+ * The footer hover was a literal, and the literal was a dark one: #1a3039 on
+ * #71e0d8. In dark mode that reads as a panel footer lighting up. In light
+ * mode — which is what the product actually ships — pointing at "Show summary"
+ * or "View all expiring" dropped a near-black bar across the bottom of a white
+ * card, which is what the Compliance screenshots caught.
+ *
+ * `--teal-100` is the wash that already exists for this: #dff5f2 in light,
+ * #123c3a in dark, redefined per theme in globals.css alongside the ink that
+ * goes on it. Using the pair instead of two hex codes makes the hover correct
+ * in both themes by construction rather than by having a second rule remember
+ * to override the first.
+ *
+ * Focus gets the same treatment, because a keyboard user landing here was
+ * getting the same black bar — and a focus ring that hides its own label is
+ * not a focus ring.
+ */
+.analytics-panel-footer:hover,
+.analytics-panel-footer:focus-visible {
+  background: var(--teal-100);
+  color: var(--accent-fg);
+}
+
+.analytics-panel-footer:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: -2px;
 }
 
 .analytics-expiry-types > header > div {
@@ -6978,7 +7004,7 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
     scrollbar-width: none;
   }
 
-  .live-board-toolbar:not(:has(.live-board-menu)) {
+  .live-board-toolbar:not(:has(.live-board-menu, .board-rules)) {
     overflow-x: auto;
     overflow-y: hidden;
   }
@@ -7141,4 +7167,137 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
   .analytics-status {
     max-width: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   TEXT TABS ARE NOT THE ICON TOGGLE.
+
+   `.view-switch` was written for a two-button grid/list toggle, so
+   `.view-switch button` is a fixed 30x30 box with `padding: 0` — and the
+   mobile touch-target rule above widens that to a fixed 44x44. Three screens
+   reuse the class for a strip of TEXT tabs, and a word does not fit in a 30px
+   square with no padding: "Identity", "Address", "Contacts", "Access",
+   "Opening", "Lease" and "Reconciliation" all overflowed their boxes and
+   printed on top of one another, which is what the site editor showed.
+
+   The two icon toggles keep the square. The three text strips opt out of it
+   with a modifier and size to their own content instead. They wrap rather than
+   scroll, so seven tabs still fit at 320px without the page overflowing and
+   without introducing a scrolling region that needs its own tab stop.
+
+   Affected: sites/site-form.tsx, sites/site-detail.tsx, admin/options-admin.tsx
+   — all three are `role="tablist"` with text children.
+   --------------------------------------------------------------------------- */
+.view-switch--text {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.view-switch--text button {
+  width: auto;
+  height: auto;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  /* Overrides the 44x44 square above — the height is the touch target, the
+     width belongs to the word. */
+  .view-switch--text button {
+    width: auto;
+    height: auto;
+    min-height: 44px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   A PAGE HEADER THAT CARRIES CONTROLS.
+
+   Documents, Contractors and Planned each own a reporting range now, and their
+   headers had room for one button and nothing else — the picker and the export
+   button ended up stacked. This is the same row treatment `.analytics-toolbar`
+   gives its controls, scoped to the plain section header the three of them use.
+   --------------------------------------------------------------------------- */
+.section-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .section-header__controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* The person to ask for, above the number to ring them on. */
+.contractor-contact__person {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+
+/* ── Batch 1A — the board's rule panels and frozen columns, in the dark palette
+ *
+ * The panels take their surface from the popover list above; what is left is
+ * the controls inside them and the one thing a frozen column cannot inherit: an
+ * opaque background. The grid's own dark rules already give every `td` and
+ * `th` a solid colour, so the pinned cell needs only its divider and the two
+ * row states that light mode paints white.
+ */
+body[data-theme="dark"] :is(
+  .board-rules__row,
+  .board-rules__foot select,
+  .board-rules__row select,
+  .board-rules__row input,
+  .board-rules__row button,
+  .board-rules__clear,
+  .board-rules__join button
+) {
+  border-color: #35505d;
+  background: #101820;
+  color: #edf4f6;
+}
+
+body[data-theme="dark"] .board-rules__join button.is-active {
+  background: #0073ea;
+  color: #fff;
+}
+
+body[data-theme="dark"] .board-rules__chip {
+  background: #1d3d55;
+  color: #d6e8f5;
+}
+
+body[data-theme="dark"] :is(
+  .board-rules__hint,
+  .board-rules__empty,
+  .board-rules__count,
+  .board-rules__foot-label,
+  .board-rules__and
+) {
+  color: #9fb4bf;
+}
+
+body[data-theme="dark"] .board-rules__clear {
+  color: #ff8f9a;
+}
+
+body[data-theme="dark"] :is(
+  .live-sheet td.is-pinned-column,
+  .live-sheet th.is-pinned-column,
+  .sheet-summary-cell.is-pinned-column
+) {
+  box-shadow: 1px 0 0 #2b414b;
+}
+
+body[data-theme="dark"] .live-sheet tbody tr:hover td.is-pinned-column {
+  background: #203740 !important;
 }

@@ -164,7 +164,20 @@ test("the widget bar can be portalled, and tells a missing slot from no slot", a
   assert.match(source, /\{usesSlot \? barSlot && createPortal\(bar, barSlot\) : bar\}/);
 });
 
-test("Reports asks for the header slot and Overview does not", async () => {
+test("both Reports and Overview ask for the header slot", async () => {
+  /*
+   * WHAT CHANGED, AND WHY THE ASSERTION FLIPPED.
+   *
+   * This used to require the opposite of Overview — that it ask for no slot at
+   * all and keep its widget bar under the charts. That was right while Reports
+   * was the only surface with a toolbar to portal into. Overview has one now,
+   * and leaving Edit Layout stranded below the fold while the identical control
+   * sat in the header one page over was the inconsistency a reader noticed
+   * first. Both surfaces portal into their own toolbar.
+   *
+   * `usesSlot` still tells `undefined` from `null`, so a surface with no
+   * toolbar is unaffected — see the test above.
+   */
   const source = await read(PORTAL);
 
   const reportsAt = source.indexOf("function ReportsView(");
@@ -178,11 +191,13 @@ test("Reports asks for the header slot and Overview does not", async () => {
   assert.ok(overviewAt > 0, "OverviewView must exist");
   const overview = source.slice(overviewAt, source.indexOf("\nfunction ", overviewAt + 10));
   assert.match(overview, /surface="overview"/);
-  assert.doesNotMatch(
+  assert.match(
     overview,
-    /barSlot|slotRef/,
-    "Overview keeps its bar exactly where it was — it must ask for no slot at all",
+    /const \[overviewLayoutSlot, setOverviewLayoutSlot\] = useState<HTMLElement \| null>\(null\);/,
+    "Overview holds its own slot element",
   );
+  assert.match(overview, /slotRef=\{setOverviewLayoutSlot\}/, "the toolbar publishes the slot");
+  assert.match(overview, /barSlot=\{overviewLayoutSlot\}/, "and the widget bar portals into it");
 });
 
 test("the header control is styled by the toolbar's own rules, not by a copy of them", async () => {

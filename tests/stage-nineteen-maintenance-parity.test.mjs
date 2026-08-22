@@ -142,7 +142,7 @@ test("the 25 columns keep monday's keys, titles, types and order", async () => {
   );
 });
 
-test("the move-to-group control stays outside the 25", async () => {
+test("MAINTSUPP's own columns stay outside the 25", async () => {
   const spec = await read(SPEC);
   const block = section(
     spec,
@@ -150,11 +150,25 @@ test("the move-to-group control stays outside the 25", async () => {
     "/* ── Maintenance — groups",
   );
 
-  // Monday exposes "move to group" from the row menu, not as a column. It is a
-  // MAINTSUPP-only control, so it lives in its own array: folding it into
-  // `maintenanceColumns` would make a parity count read 26.
+  /*
+   * The property being pinned is that monday's 25 stay 25 — not that this array
+   * never grows. Two entries live here, and both are MAINTSUPP's own:
+   *
+   *   move     monday exposes "move to group" from the row menu, not a column.
+   *   dueDate  monday's board has no deadline column; this product's
+   *            `maintenance_requests.due_at` has driven the overdue meter and
+   *            the Planned calendar since long before the board showed it.
+   *
+   * Folding either into `maintenanceColumns` would make a parity count read 26
+   * or 27, which is what the assertion above exists to catch. Anything else
+   * appearing here should be argued for in the same terms.
+   */
   const keys = [...block.matchAll(/key: "([A-Za-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(keys, ["move"], "only the group control may live here");
+  assert.deepEqual(
+    keys,
+    ["move", "dueDate"],
+    "only MAINTSUPP's own non-monday columns may live here",
+  );
 });
 
 /* ── Groups ───────────────────────────────────────────────────────────────── */

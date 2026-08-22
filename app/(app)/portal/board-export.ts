@@ -1,106 +1,100 @@
 "use client";
 
 /**
- * The board as a CSV.
+ * The board as a CSV, and the clipboard helper beside it.
  *
- * Lifted out of `live-board.tsx`, which is held to 6,000 lines by
- * `stage-eight-board-split.test.mjs`. It is a good seam independently:
- * producing a file has nothing to do with drawing a grid, it is the one piece
- * of the board a `data.export` capability gates, and it is the piece somebody
- * reads when a column comes out in the wrong order.
+ * WHAT MOVED, AND WHY
+ *
+ * This file used to BUILD the CSV: it took the rows React was holding, joined
+ * them with commas and handed the result to a `Blob`. That made the export a
+ * purely local act, which is why `data.export` — "Download boards, sites and
+ * reports as CSV" — gated the site register and gated nothing here. Hiding the
+ * Export button would not have closed it either, because the file was produced
+ * from data already in the page.
+ *
+ * So the file now comes from `POST /api/board/csv`, which holds the capability
+ * check. What is exported is still decided here — the caller passes the rows it
+ * is showing in the order it is showing them, and the columns it is drawing —
+ * so a filtered, sorted, partly-hidden board still exports as what is on the
+ * screen. The server decides *whether*, and re-reads every value from the
+ * database rather than trusting the payload.
+ *
+ * A DENIED EXPORT SAYS SO. The 403 carries the capability's own sentence
+ * ("Your role (Client) does not have the "data.export" permission…"), which is
+ * surfaced to the operator rather than swallowed into a generic failure — a
+ * download that silently does nothing is the worst of the three outcomes.
  */
 
-import { columnLabels } from "./board-model";
-import { boardItemName } from "./board-ordering";
-import {
-  customCellDisplay,
-  customCellKey,
-  dateInputValue,
-} from "./board-format";
-import { toCsv } from "../../lib/csv";
 import type {
   MaintenanceBoardColumn,
   MaintenanceRequest,
 } from "../../lib/types";
 
-export function downloadBoardCsv(
-  boardId: string,
-  requests: MaintenanceRequest[],
-  customColumns: MaintenanceBoardColumn[] = [],
-  customCells: Record<string, string> = {},
-  customFileCounts: Record<string, number> = {},
-) {
-  const headers = [
-    ...columnLabels.slice(0, -1).map((column) => column.label),
-    ...customColumns.map((column) => column.title),
-  ];
-  const nameColumn = customColumns.find((column) => column.key === "name");
-  const rows = requests.map((request) => [
-    `${boardItemName(
-      request,
-      boardId,
-      nameColumn ? customCells[customCellKey(request.id, nameColumn.id)] : undefined,
-    )}${
-      request.commentCount ? ` (${request.commentCount} updates)` : ""
-    }`,
-    request.location,
-    request.description,
-    `Tier ${request.tier}`,
-    request.engineer,
-    request.priority,
-    request.category,
-    request.status,
-    request.contractor ?? "",
-    request.assignee ?? "",
-    dateInputValue(request.requestedAt),
-    dateInputValue(request.completedAt),
-    `${dateInputValue(request.requestedAt)} to ${dateInputValue(request.dueAt)}`,
-    request.requester,
-    dateInputValue(request.nextUpdateAt),
-    request.issueAttachmentCount ??
-      Math.max(
-        request.attachmentCount -
-          (request.completedAttachmentCount ?? 0) -
-          (request.generalAttachmentCount ?? 0),
-        0,
-      ),
-    request.completedAttachmentCount ?? 0,
-    request.cost ?? "",
-    request.approvedBy ?? "",
-    request.invoice ?? "",
-    request.attachmentCount,
-    request.contact,
-    request.location,
-    request.formUrl ?? "",
-    ...customColumns.map((column) =>
-      column.type === "files"
-        ? customFileCounts[customCellKey(request.id, column.id)] ?? 0
-        : customCellDisplay(
-            column,
-            customCells[customCellKey(request.id, column.id)] ?? "",
-          ),
-    ),
-  ]);
-  const escape = (value: unknown) =>
-    `"${String(value ?? "").replaceAll('"', '""')}"`;
-  const csv = [headers, ...rows]
-    .map((row) => row.map(escape).join(","))
-    .join("\n");
+export type BoardExportRequest = {
+  boardId: string;
+  /** The rows on screen, in the order they appear. */
+  requests: MaintenanceRequest[];
+  /** The columns being drawn, in the order they are drawn. */
+  columns: MaintenanceBoardColumn[];
+};
+
+/**
+ * Ask the server for the file and hand it to the browser.
+ *
+ * Rejects with the server's own message when the export is refused or fails, so
+ * every call site can report it with the notifier it already has.
+ */
+export async function downloadBoardCsv({
+  boardId,
+  requests,
+  columns,
+}: BoardExportRequest) {
+  const response = await fetch("/api/board/csv", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      board: boardId,
+      requestIds: requests.map((request) => request.id),
+      columnIds: columns.map((column) => column.id),
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(
+      payload.error ||
+        (response.status === 403
+          ? "Your role does not have permission to export this board."
+          : "The board could not be exported."),
+    );
+  }
+
+  const blob = await response.blob();
+  const href = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(
-    new Blob([csv], { type: "text/csv;charset=utf-8" }),
-  );
-  link.download = `maintsupp-live-board-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.href = href;
+  link.download =
+    filenameFrom(response.headers.get("content-disposition")) ??
+    `maintsupp-${boardId}-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
-  URL.revokeObjectURL(link.href);
+  // Revoked on the next frame rather than immediately: Safari has not always
+  // finished reading the object URL by the time `click()` returns.
+  window.setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+
+/** The server's chosen filename, if it sent one in the usual header shape. */
+function filenameFrom(disposition: string | null) {
+  if (!disposition) return null;
+  const match = /filename="([^"]+)"/.exec(disposition);
+  return match?.[1] ?? null;
 }
 
 /**
  * Copy to the clipboard, with the pre-`navigator.clipboard` fallback.
  *
- * Exported alongside the CSV because both are "get this out of the board" —
- * one to a file, one to the clipboard — and both have to cope with a browser
- * that refuses the modern API over plain http.
+ * Kept alongside the CSV because both are "get this out of the board" — one to
+ * a file, one to the clipboard — and both have to cope with a browser that
+ * refuses the modern API over plain http.
  */
 export async function copyBoardText(value: string) {
   if (navigator.clipboard?.writeText) {
@@ -118,12 +112,3 @@ export async function copyBoardText(value: string) {
   textarea.remove();
   if (!copied) throw new Error("Clipboard access is unavailable.");
 }
-
-/**
- * Which board this grid is bound to.
- *
- * Defaults to maintenance so every existing mount keeps working untouched. The
- * board reaches the API as a query param; routing it through one helper rather
- * than editing 26 call sites is what stops a single missed URL quietly reading
- * or writing the wrong board's rows.
- */

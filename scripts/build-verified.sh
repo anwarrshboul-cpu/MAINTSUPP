@@ -19,6 +19,15 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
+# `cloudflare:workers` is a workerd-only module and the deployment target is
+# Node on Vercel. Without this flag the bundle keeps eight live
+# `import("cloudflare:workers")` calls, and every one of them throws
+# ERR_UNSUPPORTED_ESM_URL_SCHEME the first time a route touches the database —
+# so login, the board and the public forms all 5xx while the build itself
+# reports success. The flag resolves the module to db/node-workers-env.ts.
+# vercel/build-output.mjs re-checks this; see the note there.
+export D1_NODE_SHIM=1
+
 echo "Running bounded vinext build..."
 "${timeout_bin}" \
   --signal=TERM \

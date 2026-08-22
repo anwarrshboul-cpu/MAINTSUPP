@@ -63,21 +63,27 @@ test("marketing copy was ported, not rewritten", async () => {
  * full-bleed band and the form beneath it — which is why the list of components
  * is eleven long and the list of SECTIONS is ten.
  */
+/*
+ * The v2 positioning order. Report a Job moved from second to fourth — the page
+ * now says who it is for and what it covers before asking for eleven fields —
+ * and "Who runs Maintsupp" was added between the case study and the portal.
+ */
 const SECTIONS = [
   "Hero",
-  "ReportJob",
   "WhoWeHelp",
   "Services",
+  "ReportJob",
   "Problem",
   "HowItWorks",
   "Pricing",
   "CaseStudy",
+  "Founder",
   "Portal",
   "TrustStrip",
   "FinalCta",
 ];
 
-test("the ten sections render on the homepage, in order, each exactly once", async () => {
+test("the eleven sections render on the homepage, in order, each exactly once", async () => {
   const page = await read("app/(marketing)/page.tsx");
   const body = page.slice(page.indexOf("export default function HomePage"));
 

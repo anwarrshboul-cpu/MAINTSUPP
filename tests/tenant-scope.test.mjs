@@ -11,6 +11,7 @@ const dataRoutes = [
   "app/api/leads/route.ts",
   "app/api/maintenance/route.ts",
   "app/api/notifications/route.ts",
+  "app/api/report-job/route.ts",
   "app/api/workspace/route.ts",
 ];
 
@@ -21,11 +22,12 @@ test("all data APIs resolve an organisation-scoped database", async () => {
      * `scopedDb(request, { allowAnonymous: true })` counts too.
      *
      * What this test is about is that the organisation comes from `scopedDb`
-     * and never from the request. Two routes are genuinely public — the lead
-     * form has no account behind it, and a contractor uploading from a job
-     * link proves themselves with that token — so they pass an option and then
-     * do their own checking. They still resolve their organisation the same
-     * way, which is the property being asserted.
+     * and never from the request. Three routes are genuinely public — the lead
+     * form has no account behind it, the website's Report-a-Job form has none
+     * either, and a contractor uploading from a job link proves themselves with
+     * that token — so they pass an option and then do their own checking. They
+     * still resolve their organisation the same way, which is the property
+     * being asserted.
      */
     assert.match(
       source,

@@ -177,7 +177,10 @@ const sectionSources = async () => {
 test("photographs appear across the page, not just the hero", async () => {
   const sources = await sectionSources();
   const count = sources.reduce(
-    (total, { source }) => total + (source.match(/<PhotoSlot/g) ?? []).length,
+    (total, { source }) =>
+      total +
+      (source.match(/<PhotoSlot/g) ?? []).length +
+      (source.match(/<ApprovedPhoto/g) ?? []).length,
     0,
   );
   /*
@@ -191,14 +194,32 @@ test("photographs appear across the page, not just the hero", async () => {
    */
   assert.ok(count >= 5, `expected photographs across the page, found ${count}`);
 
+  /*
+   * `workflow.tsx` left this list when the approved v3 pack supplied real
+   * photographs for all seven stages: it renders `<ApprovedPhoto>` now, which
+   * addresses a file by the site path the pack's README gives it and has
+   * nothing to fall back to, because there is nothing missing to fall back
+   * from. `who-we-help.tsx` joined for the same reason.
+   *
+   * So the check is "a photograph, by whichever of the two mechanisms suits the
+   * section", not "a PhotoSlot" — otherwise adopting the approved pack would
+   * read as losing an image.
+   */
   const withPhotos = sources
-    .filter(({ source }) => source.includes("<PhotoSlot"))
+    .filter(({ source }) => source.includes("<PhotoSlot") || source.includes("<ApprovedPhoto"))
     .map(({ file }) => file)
     .sort();
   assert.deepEqual(
     withPhotos,
-    ["case-study.tsx", "hero.tsx", "portal.tsx", "services.tsx", "workflow.tsx"],
-    "the brief's five image-bearing sections: hero, trade strip, carousel, case study, dashboard",
+    [
+      "case-study.tsx",
+      "hero.tsx",
+      "portal.tsx",
+      "services.tsx",
+      "who-we-help.tsx",
+      "workflow.tsx",
+    ],
+    "hero, trade strip, carousel, case study, dashboard, and the two sections the v3 pack supplies",
   );
 });
 
@@ -212,4 +233,65 @@ test("only the hero loads eagerly", async () => {
     ["hero.tsx"],
     `exactly one image should be eager and it must be the hero — more and the first paint gets slower, not faster. Found: ${eager.join(", ") || "none"}`,
   );
+});
+
+test("a slot with no photograph asks for none", async () => {
+  /*
+   * THE BUG THIS REPLACES. `photo-widths.ts` is generated from the files that
+   * are actually on disk, and it is the authority on which slots have a
+   * photograph — its own note explains that advertising a width which is not
+   * there makes the browser fetch a file that does not exist. The base
+   * `<img src>` sat outside that reasoning and was rendered unconditionally.
+   *
+   * `trade-glazing` and `trade-drainage` had no photograph at the time, so
+   * every visit to the home page fetched two missing JPEGs, failed, and retried
+   * each of them twice more on a backoff: six 404s per page load, in the
+   * visitor's network panel and in the server log, for images nobody was
+   * waiting on.
+   *
+   * Both are supplied now, which does not retire the rule — it is what decides
+   * that their photographs ARE requested. The invariant asserted below is the
+   * one that matters either way: the manifest is exactly the set of base files
+   * on disk, so a slot asks for a photograph precisely when it has one.
+   */
+  const source = await readFile(
+    new URL("../app/(marketing)/_sections/photo.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /const hasPhotograph = widths\.length > 0;/);
+  assert.match(
+    source,
+    /\{hasPhotograph && !\(failed && attempt >= 2\) && \(/,
+    "the whole <picture> is skipped, not just the <source> elements",
+  );
+
+  const manifest = await readFile(
+    new URL("../app/(marketing)/_sections/photo-widths.ts", import.meta.url),
+    "utf8",
+  );
+  const named = new Set([...manifest.matchAll(/^ {2}"([^"]+)":/gm)].map((m) => m[1]));
+  const files = (await readdir(new URL("../public/assets/photos", import.meta.url)))
+    .filter((f) => /^[^.]+\.jpg$/.test(f))
+    .map((f) => f.replace(".jpg", ""));
+  assert.deepEqual(
+    [...named].sort(),
+    files.sort(),
+    "the manifest must stay exactly the set of photographs on disk — it is what decides whether a request is made at all",
+  );
+
+  /*
+   * All eight trade tiles now have a photograph — glazing and drainage were the
+   * last two without one, and they were supplied in the approved pack. So the
+   * assertion flipped: it used to require those two to request nothing, and now
+   * requires every tile to have a picture to request.
+   */
+  const services = await readFile(
+    new URL("../app/(marketing)/_sections/services.tsx", import.meta.url),
+    "utf8",
+  );
+  const slots = [...services.matchAll(/slot: "(trade-[a-z]+)"/g)].map((match) => match[1]);
+  assert.equal(slots.length, 8, "the eight faults in the trade strip");
+  for (const slot of slots) {
+    assert.ok(named.has(slot), `${slot} is a trade tile with no photograph on disk`);
+  }
 });

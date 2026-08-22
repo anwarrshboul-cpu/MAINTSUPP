@@ -45,10 +45,34 @@ const ANCHORS = [
   "review",
 ];
 
-test("the page is ten sections and no more", async () => {
+test("the page is eleven sections, in the v2 order, each exactly once", async () => {
+  /*
+   * Was ten. The v2 positioning edit moved Report a Job from second to fourth
+   * and added "Who runs Maintsupp" between the case study and the portal.
+   *
+   * The order is asserted, not just the count: the whole point of the edit was
+   * the sequence — who it is for, what it covers, then the form — and a count
+   * alone would pass just as happily with the form back at the top.
+   */
   const page = await read("app/(marketing)/page.tsx");
-  const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)];
-  assert.equal(rendered.length, 11, "ten sections; section 10 is two components");
+  const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(rendered, [
+    "Hero",
+    "WhoWeHelp",
+    "Services",
+    "ReportJob",
+    "Problem",
+    "HowItWorks",
+    "Pricing",
+    "CaseStudy",
+    "Founder",
+    "Portal",
+    "TrustStrip",
+    "FinalCta",
+  ], "eleven sections; the last is two components — a dark band and the form beneath it");
+  assert.equal(new Set(rendered).size, rendered.length, "each exactly once");
 });
 
 /* ── 2. Copy rules ───────────────────────────────────────────────────────── */
@@ -115,17 +139,53 @@ test("the Total Care saving is derived from the prices above it", async () => {
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
   const bands = [...pricing.matchAll(
     /coordination: (\d+), compliance: (\d+), total: (\d+)/g,
-  )];
-  assert.equal(bands.length, 2, "two numbered bands");
-  for (const [, coordination, compliance, total] of bands) {
-    assert.equal(
-      Number(coordination) + Number(compliance) - Number(total),
-      20,
-      "the badge claims £20; the cards must agree",
-    );
-  }
+  )].map(([, coordination, compliance, total]) => ({
+    coordination: Number(coordination),
+    compliance: Number(compliance),
+    total: Number(total),
+  }));
+
+  /*
+   * Three numbered bands now, not two: 26+ used to be a "Custom" card with a
+   * button and carries a published rate. The approved figures, pinned here so
+   * a price cannot drift silently — they are quoted to clients.
+   */
+  assert.deepEqual(bands, [
+    { coordination: 65, compliance: 55, total: 100 },
+    { coordination: 58, compliance: 48, total: 88 },
+    { coordination: 52, compliance: 42, total: 78 },
+  ]);
+
+  /* The badge claims a saving per band; each band's cards must produce it. */
+  assert.deepEqual(
+    bands.map((band) => band.coordination + band.compliance - band.total),
+    [20, 18, 16],
+  );
   assert.match(pricing, /save £\{saving\} per store/, "the badge must read the computed figure");
-  assert.match(pricing, /saving !== null/, "and must not appear on the band with no prices");
+  assert.match(
+    pricing,
+    /const saving = band\.coordination \+ band\.compliance - band\.total/,
+    "and must derive it from the band on screen rather than a typed number",
+  );
+});
+
+test("the store count drives the band, the rate and the monthly total", async () => {
+  /*
+   * The calculator is the section's one input. If any of these stops being
+   * derived, the page can show a reader a rate their own store count does not
+   * qualify for — which is worse than showing no calculator at all.
+   */
+  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  assert.match(pricing, /type="range"/, "there is a real slider, not a band picker alone");
+  assert.match(pricing, /function bandForCount/, "the band is computed from the count");
+  assert.match(
+    pricing,
+    /amount \* storeCount/,
+    "the monthly total is rate x count, not a typed figure",
+  );
+  /* The struck-through price is the entry band's, so it cannot contradict it. */
+  assert.match(pricing, /was=\{entryBand\[plan\.key\]\}/);
+  assert.match(pricing, /was > amount/, "and only shows once the reader is past that band");
 });
 
 /* ── 3. The Report a Job form ────────────────────────────────────────────── */
@@ -151,7 +211,7 @@ test("the form asks the brief's eleven questions, in order", async () => {
   assert.deepEqual(sorted, order, "the fields must appear in the brief's order");
 });
 
-test("the eight required fields are validated, and the three optional ones are not", async () => {
+test("the required fields are validated, and the access window stays optional", async () => {
   const form = await read("app/(marketing)/_sections/report-job.tsx");
   const checks = form.slice(form.indexOf("const CHECKS"), form.indexOf("type FieldValue"));
   for (const id of [
@@ -163,11 +223,61 @@ test("the eight required fields are validated, and the three optional ones are n
     "rjPostcode",
     "rjCategory",
     "rjUrgency",
+    /*
+     * The description joined them: the approved reference marks it required,
+     * because a coordinator triaging "P1, Electrical, Oxford Street" with no
+     * sentence has to ring the store back before choosing a trade.
+     */
+    "rjDesc",
   ]) {
     assert.match(checks, new RegExp(`"${id}"`), `${id} must be required`);
   }
-  for (const id of ["rjDesc", "rjAccess"]) {
-    assert.doesNotMatch(checks, new RegExp(`"${id}"`), `${id} is optional in the brief`);
+  /* The access window is the one field a reporter may genuinely not know. */
+  assert.doesNotMatch(checks, /"rjAccess"/, "the access window stays optional");
+});
+
+test("evidence is required, and checked outside CHECKS because it is not a field", async () => {
+  /*
+   * The files live in component state, not in a form control, so the rule
+   * cannot sit in CHECKS with the others — but it must run in the same pass,
+   * or somebody missing both a description and a photograph is told about one,
+   * fixes it, and is then told about the other.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /if \(picked\.length === 0\) \{\s*found\.rjUpload =/);
+  assert.match(form, /Add at least one photo or video/);
+  assert.match(form, /\{filesError \|\| errors\.rjUpload\}/, "and it is shown in the upload block");
+});
+
+test("the urgency chips promise no response time", async () => {
+  /*
+   * THIS ASSERTION IS THE REVERSE OF THE ONE IT REPLACES.
+   *
+   * The chips used to print "Within 4 hrs", "Next working day" and so on,
+   * added under an earlier brief. The v2 positioning brief withdraws them: no
+   * response-time or SLA commitment may appear anywhere on the page, and its
+   * audit tests for absence rather than merely forbidding new ones.
+   *
+   * The P-codes stay. A code classifies how bad the fault is — something the
+   * reporter can answer and triage needs. A response time is a promise about
+   * what happens next, and that is the part that was withdrawn.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+
+  for (const code of ["P1", "P2", "P3", "P4"]) {
+    assert.match(form, new RegExp(`code: "${code}"`), `${code} is still offered`);
+  }
+  assert.match(form, /P1 — Critical, site unsafe or cannot trade/);
+
+  assert.ok(!form.includes("chip__sla"), "the SLA line is no longer rendered");
+  assert.ok(!/sla:/.test(form), "and the field is gone, so it cannot be rendered again");
+
+  /* Comments stripped: the note recording why the promises went quotes them,
+     and a check that fails on its own rationale would push the reasoning out
+     of the file to make the test pass. */
+  const rendered = form.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const promise of ["Within 4 hrs", "Next working day", "5 working days"]) {
+    assert.ok(!rendered.includes(promise), `response time still present: ${promise}`);
   }
 });
 
@@ -182,6 +292,59 @@ test("every invalid field is reported at once, not one at a time", async () => {
   assert.match(form, /if \(message\) found\[name\] = message;/, "collect, do not return early");
   assert.match(form, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
   assert.match(form, /focus\(\{ preventScroll: true \}\)/, "scroll first, then focus");
+});
+
+test("the form posts to a route a logged-out visitor may actually use", async () => {
+  /*
+   * THE BUG THIS REPLACES. The form posted to `/api/maintenance`, which
+   * requires the `board.edit` capability. Every visitor to a marketing page is
+   * logged out by definition, so every submission came back
+   * `401 Your session has ended. Sign in to continue.` — the form has never
+   * once worked, and the failure looked like a session problem rather than a
+   * missing endpoint.
+   *
+   * The fix is NOT to loosen `/api/maintenance`: that would make every board in
+   * every tenant writable by anyone who could guess a payload. It is a separate
+   * public route with its tenant pinned.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /fetch\("\/api\/report-job"/, "the public route, not the operator one");
+  assert.doesNotMatch(
+    form,
+    /fetch\("\/api\/maintenance"/,
+    "/api/maintenance requires board.edit and a visitor has none",
+  );
+
+  const route = await read("app/api/report-job/route.ts");
+  assert.match(route, /allowAnonymous: true/, "a visitor has no session");
+  assert.match(
+    route,
+    /const orgId = PRIMARY_ORGANISATION_ID/,
+    "the tenant is pinned, never taken from the payload or a cookie",
+  );
+  assert.doesNotMatch(
+    route,
+    /payload\.(organisationId|orgId|tenant)/,
+    "no request may steer a job into another workspace",
+  );
+  assert.match(route, /configuredValue\(db, orgId, "priority"/, "canonicalise, do not trust");
+  assert.match(route, /source: "Website form"/, "a coordinator must see where this came from");
+  assert.match(route, /uploadToken/, "and the reporter must be able to attach the photographs");
+});
+
+test("the description reports its own error like every other field", async () => {
+  /*
+   * Making the description required without giving it an error slot is worse
+   * than leaving it optional: the submit is blocked, nine other fields light up
+   * red, and the one actually stopping the form says nothing.
+   */
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /id="rjDesc-err"/, "the description needs somewhere to put its message");
+  assert.match(
+    form,
+    /className=\{fieldClass\("rjDesc"\)\}/,
+    "and the red outline every other field gets",
+  );
 });
 
 test("the priority and engineer values the form sends exist on the board", async () => {

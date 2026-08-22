@@ -112,11 +112,25 @@ function seatsArt(w: number, h: number) {
 }
 
 function toolArt(w: number, h: number, c1 = "#0B1E29", c2 = "#0DA1A9", glyphPath = "M20 6 9 17l-5-5") {
+  /*
+   * THE BUG THIS FIXES. The `<g>` below interpolates `glyphPath` as its
+   * children, and two kinds of string arrive here: `services.tsx` passes whole
+   * markup (`<path d="…"/>`), while the default above — used by the case study,
+   * which passes no glyph — is a bare `d` value. A bare value has no element
+   * around it, so it became a TEXT NODE inside the `<g>` and "M20 6 9 17l-5-5"
+   * rendered as visible content in the case-study section.
+   *
+   * Normalising here rather than at the call sites keeps both shapes working
+   * and puts the fix where the assumption is made.
+   */
+  const glyph = glyphPath.trim().startsWith("<")
+    ? glyphPath
+    : `<path d="${glyphPath}"/>`;
   return (
     `<rect width="${w}" height="${h}" fill="${c1}"/>` +
     `<circle cx="${w * 0.68}" cy="${h * 0.32}" r="${w * 0.46}" fill="${c2}" opacity=".55"/>` +
     `<circle cx="${w * 0.24}" cy="${h * 0.76}" r="${w * 0.34}" fill="${c2}" opacity=".32"/>` +
-    `<g transform="translate(${w * 0.5 - w * 0.18},${h * 0.28}) scale(${w * 0.36 / 24})" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${glyphPath}</g>`
+    `<g transform="translate(${w * 0.5 - w * 0.18},${h * 0.28}) scale(${w * 0.36 / 24})" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${glyph}</g>`
   );
 }
 
@@ -218,6 +232,26 @@ export function PhotoSlot({
   const srcSet = (ext: "avif" | "webp") =>
     widths.map((width) => `/assets/photos/${slot}-${width}.${ext} ${width}w`).join(", ");
 
+  /*
+   * NO ENTRY IN THE MANIFEST MEANS NO PHOTOGRAPH — so do not ask for one.
+   *
+   * `photo-widths.ts` is generated from the files that are actually on disk,
+   * and its own note explains that advertising a width which is not there makes
+   * the browser fetch a file that does not exist. The base `<img src>` sat
+   * outside that reasoning: `trade-glazing` and `trade-drainage` had no
+   * photograph at the time, so every visit fetched two missing JPEGs, failed,
+   * and retried each of them twice more on a backoff — six 404s per page load,
+   * in the network panel and in the server log, for images nobody was waiting
+   * on.
+   *
+   * Those two are supplied now and the guard is doing the opposite job for
+   * them: their manifest entries exist, so their photographs are requested. The
+   * rule is what matters and it has not changed — a slot with no entry asks for
+   * nothing, and adding the files plus the entry is the whole of what it takes
+   * to give one a picture, with no change to this component or its callers.
+   */
+  const hasPhotograph = widths.length > 0;
+
   return (
     <div className={`ph${className ? ` ${className}` : ""}`}>
       <div
@@ -227,14 +261,10 @@ export function PhotoSlot({
           __html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${body}</svg>`,
         }}
       />
-      {!(failed && attempt >= 2) && (
+      {hasPhotograph && !(failed && attempt >= 2) && (
         <picture>
-          {widths.length > 0 && (
-            <>
-              <source type="image/avif" srcSet={srcSet("avif")} sizes={sizes} />
-              <source type="image/webp" srcSet={srcSet("webp")} sizes={sizes} />
-            </>
-          )}
+          <source type="image/avif" srcSet={srcSet("avif")} sizes={sizes} />
+          <source type="image/webp" srcSet={srcSet("webp")} sizes={sizes} />
           <img
             key={attempt}
             ref={measure}

@@ -524,6 +524,40 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at)",
     ),
+    /*
+     * Contractor applications from the public /contractors page.
+     *
+     * A separate table from `leads` rather than a flag on it. A lead is a
+     * prospective client and an application is a prospective supplier: they are
+     * read by different people, answered differently, and carry different
+     * fields — insurance, years trading, certifications and a recorded consent,
+     * none of which a lead has. Folding them together would have meant packing
+     * four structured answers into the `challenge` free-text column and then
+     * teaching every reader of that column to unpack them.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_applications (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL,
+         company TEXT NOT NULL,
+         contact_name TEXT NOT NULL,
+         email TEXT NOT NULL,
+         phone TEXT NOT NULL,
+         trades TEXT NOT NULL,
+         regions TEXT NOT NULL,
+         insured TEXT NOT NULL,
+         years_trading TEXT,
+         certifications TEXT,
+         notes TEXT,
+         consent INTEGER NOT NULL DEFAULT 0,
+         status TEXT NOT NULL DEFAULT 'New',
+         notified_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_applications_created_idx ON contractor_applications (organisation_id, created_at)",
+    ),
     d1.prepare(
       `CREATE TABLE IF NOT EXISTS activity_log (
          id TEXT PRIMARY KEY NOT NULL,
@@ -617,12 +651,31 @@ async function ensureBoardEngineColumns(d1: D1DatabaseLike) {
     ["maintenance_board_columns", "summary", "TEXT"],
     ["maintenance_board_columns", "option_set_key", "TEXT"],
     ["maintenance_board_columns", "description", "TEXT"],
+    /*
+     * Recoverable columns. Nullable and additive: an existing row reads NULL,
+     * which is "live", so every board behaves exactly as it did before this
+     * ran. Reversible in the only sense that matters — dropping the feature
+     * means ignoring these two fields, not migrating anything back.
+     */
+    ["maintenance_board_columns", "deleted_at", "TEXT"],
+    ["maintenance_board_columns", "deleted_by", "TEXT"],
     ["maintenance_groups", "collapsed", "INTEGER NOT NULL DEFAULT 0"],
     ["maintenance_groups", "archived", "INTEGER NOT NULL DEFAULT 0"],
     ["maintenance_groups", "description", "TEXT"],
     ["maintenance_requests", "reference", "TEXT"],
     ["maintenance_requests", "archived", "INTEGER NOT NULL DEFAULT 0"],
     ["maintenance_requests", "archived_at", "TEXT"],
+    /*
+     * The four things a coordinator needs about a contractor that the register
+     * could not hold. The row had a company name, an email and a phone number,
+     * so "who do I actually ask for", "where are they", "what did we agree" and
+     * "what do they charge" all lived in somebody's head. `day_rate` is stored
+     * in pence, like every other money column here, so nothing has to round.
+     */
+    ["contractors", "contact_name", "TEXT"],
+    ["contractors", "address", "TEXT"],
+    ["contractors", "notes", "TEXT"],
+    ["contractors", "day_rate_pence", "INTEGER"],
   ];
 
   for (const [table, column, definition] of additions) {

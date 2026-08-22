@@ -19,6 +19,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { formatShortDateTime } from "../../../lib/format-date";
 import { Icon } from "../../../components";
 import auditCss from "./audit-log.css?url";
 
@@ -91,14 +92,13 @@ function formatWhen(value: string) {
     : value;
   const date = new Date(normalised);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  /*
+   * "24 Nov 2026, 14:35" through the shared formatter, plus the seconds this
+   * screen alone wants: two events a second apart are two events, and an audit
+   * reader following a sequence needs to see which came first.
+   */
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${formatShortDateTime(date)}:${seconds}`;
 }
 
 function formatValue(value: unknown): string {

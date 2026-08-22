@@ -3,6 +3,7 @@ import { ensureDatabase } from "../../../db/init";
 import { dashboardLayouts } from "../../../db/schema";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { can, resolvePermissions } from "../../lib/permissions";
+import { auditActor, recordAudit } from "../../lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -134,7 +135,8 @@ export async function PUT(request: Request) {
 
 async function saveLayout(request: Request) {
   await ensureDatabase();
-  const { db, orgId, session, actor } = await scopedDb(request);
+  const scope = await scopedDb(request);
+  const { db, orgId, session, actor } = scope;
 
   let payload: Record<string, unknown>;
   try {
@@ -209,6 +211,29 @@ async function saveLayout(request: Request) {
       surface,
       items: serialised,
       updatedBy: actor.email,
+    });
+  }
+
+  /*
+   * The WORKSPACE default is recorded; a personal arrangement is not.
+   *
+   * Same split the capability check above already makes, and for the same
+   * reason: changing the default changes what every colleague opens on, which
+   * is a structural change one person made and everybody else has to live with.
+   * Rearranging your own dashboard changes nothing anybody else can see, and
+   * logging it would file an event on every drag.
+   */
+  if (asWorkspaceDefault) {
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor(scope),
+      action: "dashboard.default_changed",
+      entityType: "dashboard_layout",
+      entityId: surface,
+      summary: `Changed the workspace default ${surface} dashboard layout.`,
+      detail: { surface, items },
+      request,
     });
   }
 

@@ -38,10 +38,20 @@ import type {
   StoreRecord,
 } from "../../lib/types";
 import { AccountMenu } from "./account-menu";
+import {
+  formatDayMonth,
+  formatMonthShort,
+  formatMonthYear,
+  formatShortDate,
+  formatShortDateTime,
+  formatTimeOfDay,
+} from "../../lib/format-date";
 import { chipInk } from "./chip-ink";
 import {
   awaitingApprovalStatuses,
   awaitingPartsStatuses,
+  isClosedRequest,
+  isOpenRequest,
 } from "./dashboard-meters";
 import { ThemeToggle } from "./theme-toggle";
 import { DashboardWidgets, type DashboardWidget } from "./dashboard-widgets";
@@ -74,13 +84,16 @@ import {
   SlaPerformance,
   SpendAgainstBudget,
   SpendMatrix,
+  SpendTrend,
 } from "./dashboard-insights";
 import { storeDocumentationResponsibility } from "../../../db/monday-board-spec";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AdminClientsView } from "./views/admin-clients";
+import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
 import { AdminUsersView } from "./views/admin-users";
+import { AuditLog } from "./views/audit-log";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
 import { complianceTrend, tradeBreakdown } from "./views/overview-series";
 import { UnitsManager } from "./units/units-manager";
@@ -139,7 +152,22 @@ export type Section =
   // users must not be handed the roles editor by a tab they can click.
   | "admin-users"
   | "admin-roles"
-  | "admin-clients";
+  | "admin-clients"
+  /*
+   * The audit trail. The screen and its API have existed since Stage 20 and
+   * nothing in the product linked to them: /dashboard/audit answered, and the
+   * only way to reach it was to type it. A log nobody can find is a log nobody
+   * reads.
+   */
+  | "audit"
+  /*
+   * The recycle bin, for the same reason and with a sharper edge. The bin, its
+   * 30-day retention, its API and its screen all existed; the only route to
+   * them was nine items down the menu behind the avatar, and the client's
+   * report was that there was no way to get a deleted row back. Undo that
+   * nobody can find is not undo. This renders the same panel over the same API.
+   */
+  | "recycle-bin";
 
 type ViewMode = "board" | "list";
 
@@ -188,6 +216,15 @@ type RuntimeWorkspaceContext = {
   }> | null;
   testingMode: boolean;
   authenticationEnabled: boolean;
+  /**
+   * What this actor may do here — the defaults merged with this workspace's
+   * overrides, decided by the same `can()` every route enforces with.
+   *
+   * Optional because a browser holding a cached payload from before this field
+   * existed must not crash the shell; a missing map means "not answered", which
+   * every reader treats as "do not offer" rather than "denied".
+   */
+  capabilities?: Record<string, boolean>;
 };
 
 type WorkspaceManagerState = {
@@ -244,6 +281,20 @@ const sectionMeta: Record<
     eyebrow: "Owner console",
     title: "Every client workspace",
     icon: "building",
+  },
+  audit: {
+    label: "Audit",
+    eyebrow: "Administration",
+    title: "Audit trail",
+    icon: "shield",
+  },
+  "recycle-bin": {
+    label: "Recycle Bin",
+    eyebrow: "Workspace",
+    title: "Recycle Bin",
+    // No bin in the icon set; the recycling arrows are the nearest true thing,
+    // and they read as "put it back" rather than as "throw it away".
+    icon: "refresh",
   },
   overview: {
     label: "Overview",
@@ -373,7 +424,19 @@ const navPrimary: Section[] = [
   "settings",
 ];
 
-const navSecondary: Section[] = ["team", "admin-users", "admin-roles", "admin-clients"];
+const navSecondary: Section[] = [
+  "team",
+  "admin-users",
+  "admin-roles",
+  "admin-clients",
+  // Last under Workspace, beside the two screens that decide who may do what.
+  // Filtered out of the catalogue entirely for a role without `audit.read` —
+  // see `navCatalogue`.
+  "audit",
+  // Beside the audit trail, which is the other screen someone opens when
+  // something has gone wrong and they need to know what happened to it.
+  "recycle-bin",
+];
 
 const sectionRoutes: Record<Section, string> = {
   overview: "",
@@ -393,6 +456,18 @@ const sectionRoutes: Record<Section, string> = {
   "admin-users": "admin",
   "admin-roles": "admin/roles",
   "admin-clients": "admin/clients",
+  // The URL /dashboard/audit already answered, from a static segment that drew
+  // the log with no sidebar around it. The route is kept exactly; what changed
+  // is that it now resolves through the shell like every other section, so the
+  // person reading it can get back out.
+  audit: "audit",
+  /*
+   * A route of its own rather than a link into /dashboard/account/trash: the
+   * account area is a different shell with a different rail, and a sidebar item
+   * that throws the reader out of the portal is how the bin got lost the first
+   * time. Both URLs answer, and both render the one panel.
+   */
+  "recycle-bin": "recycle-bin",
 };
 
 const routeSections: Record<string, Section> = Object.fromEntries(
@@ -458,16 +533,19 @@ type WorkspaceSectionEntry = {
   group: string;
 };
 
+/*
+ * The dashboard's dates, through the shared formatter.
+ *
+ * Same two forms this always produced — "24 Nov 2026" and "24 Nov 2026, 14:05"
+ * — but named in one place rather than assembled from `Intl` options here.
+ * The zone is pinned to Europe/London because these are timestamps on work
+ * orders and the estate is in the UK; a date-only value never reaches `Date`
+ * at all, which is what stops it shifting a day. See app/lib/format-date.ts.
+ */
 function formatDate(value: string | null, includeTime = false) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    timeZone: "Europe/London",
-    ...(includeTime
-      ? { hour: "2-digit", minute: "2-digit", hour12: false }
-      : { year: "numeric" }),
-  }).format(new Date(value));
+  return includeTime
+    ? formatShortDateTime(value, { timeZone: "Europe/London" })
+    : formatShortDate(value, { timeZone: "Europe/London" });
 }
 
 function formatMoney(value: number | null) {
@@ -544,7 +622,18 @@ function useScrollLock(active: boolean) {
   }, [active]);
 }
 
-function activityActor(email: string | null) {
+/**
+ * Who an event is attributed to.
+ *
+ * A cell change from `item_activity` carries a display NAME rather than an
+ * email — that is what `item_activity.actor_name` holds — so it is read from
+ * the detail rather than being derived from an address that is not there. Both
+ * halves of the merged history therefore name somebody; before this, the cell
+ * changes had no reader at all.
+ */
+function activityActor(email: string | null, detail?: Record<string, unknown>) {
+  const named = typeof detail?.actorName === "string" ? detail.actorName.trim() : "";
+  if (named) return named;
   if (!email) return "Operations team";
   if (email === "public-form") return "Request form";
   const localPart = email.split("@")[0] || email;
@@ -556,6 +645,26 @@ function activityActor(email: string | null) {
 }
 
 function activityDescription(entry: RequestActivityEntry) {
+  /*
+   * A per-cell change, from `item_activity` — the one store in this system
+   * that records WHICH COLUMN moved and what it held on either side.
+   * `activity_log` has no column field, so "Priority went from Low to Urgent"
+   * was recorded and unreadable until this history merged the two. See the note
+   * at the merge in app/api/maintenance/route.ts.
+   */
+  if (entry.action === "column.value_changed") {
+    const column = typeof entry.detail.column === "string" ? entry.detail.column : "a column";
+    const from = typeof entry.detail.from === "string" ? entry.detail.from.trim() : "";
+    const to = typeof entry.detail.to === "string" ? entry.detail.to.trim() : "";
+    if (!from && to) return `set ${column} to "${to}".`;
+    if (from && !to) return `cleared ${column}.`;
+    if (from && to) return `changed ${column} from "${from}" to "${to}".`;
+    return `changed ${column}.`;
+  }
+  if (entry.action.startsWith("item.")) {
+    // duplicated / created / moved / archived, from the same store.
+    return `${entry.action.slice("item.".length).replace(/_/g, " ")} this item.`;
+  }
   if (entry.action === "request.created") return "created this request.";
   if (entry.action === "request.note_added") return "added an update.";
   if (entry.action === "request.stage_changed") {
@@ -610,7 +719,7 @@ function stageIcon(stage: RequestStage): IconName {
 function notificationCandidates(requests: MaintenanceRequest[]) {
   return requests.filter(
     (request) =>
-      request.stage !== "Completed" &&
+      isOpenRequest(request) &&
       (request.stage === "Attention" || request.priority === "Urgent"),
   );
 }
@@ -723,7 +832,7 @@ function requestAgeDays(request: MaintenanceRequest, now: number) {
  * not a monday label, so it is not a guess.
  */
 function jobStatusSegments(requests: MaintenanceRequest[]): DonutSegment[] {
-  const open = requests.filter((request) => request.stage !== "Completed");
+  const open = requests.filter(isOpenRequest);
   const normalise = (value: string) =>
     value.trim().toLowerCase().replace(/\s+/g, " ");
   const inSet = (labels: readonly string[]) => {
@@ -1330,16 +1439,49 @@ export default function PortalApp({
    * `app/api/navigation/layout.ts` still decides order and visibility.
    */
   const navCatalogue = useMemo<SidebarNavEntry[]>(
-    () => [
-      ...builtInNavCatalogue,
-      ...workspaceSections.map((entry) => ({
-        key: entry.key,
-        label: entry.label,
-        icon: entry.icon,
-        group: entry.group,
-      })),
-    ],
-    [workspaceSections],
+    () =>
+      [
+        ...builtInNavCatalogue,
+        ...workspaceSections.map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          icon: entry.icon,
+          group: entry.group,
+        })),
+      ].filter((entry) => {
+        /*
+         * The audit trail is the one built-in section whose EXISTENCE is
+         * decided by a capability rather than only its contents.
+         *
+         * Every other administration screen is listed for everybody and
+         * refuses on its own — which is right for Users and Roles, where a
+         * client seeing the entry and being told no is merely tidy. An
+         * organisation-wide record of who did what is different: the fact that
+         * one exists, and where it is, is not something to advertise to a role
+         * that may not read it. `audit.read` is the same capability
+         * /api/audit enforces, so the entry and the answer cannot disagree.
+         *
+         * `undefined` while the context loads, which keeps the item out until
+         * the answer arrives rather than flashing it and taking it away.
+         */
+        if (entry.key === "recycle-bin") {
+          /*
+           * Listed for whoever can RESTORE, which is `board.edit`.
+           *
+           * Reading the bin only needs `board.view`, so a client can open it —
+           * and /api/trash tells the screen so, which is why the buttons it
+           * cannot use are not drawn. But a sidebar entry is a promise that
+           * there is something to do behind it, and for a client there is not:
+           * they can neither restore nor purge. The screen stays reachable by
+           * URL for anyone who may read it; the nav item is for whoever the bin
+           * is actually FOR.
+           */
+          return runtimeContext?.capabilities?.["board.edit"] === true;
+        }
+        if (entry.key !== "audit") return true;
+        return runtimeContext?.capabilities?.["audit.read"] === true;
+      }),
+    [runtimeContext, workspaceSections],
   );
 
   /*
@@ -1631,7 +1773,7 @@ export default function PortalApp({
     : surfaceMeta;
   const urgentCount = requests.filter(
     (request) =>
-      request.priority === "Urgent" && request.stage !== "Completed",
+      request.priority === "Urgent" && isOpenRequest(request),
   ).length;
   const notificationItems = useMemo(
     () =>
@@ -1927,10 +2069,7 @@ export default function PortalApp({
             </button>
             <span className="topbar-updated" aria-live="polite">
               {dataUpdatedAt
-                ? `Updated ${dataUpdatedAt.toLocaleTimeString("en-GB", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}`
+                ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
                 : "Not yet loaded"}
             </span>
             <button
@@ -2165,7 +2304,9 @@ export default function PortalApp({
             <CalendarView
               requests={requests}
               planned={currentPlanned}
+              complianceRecords={workspace?.compliance ?? []}
               onManage={(id) => openWorkspaceManager("planned", id)}
+              onOpenCompliance={(id) => openWorkspaceManager("compliance", id)}
               onOpenRequest={(request) => {
                 openRequest(request);
                 setSection("maintenance");
@@ -2205,6 +2346,20 @@ export default function PortalApp({
             sidebar can be rearranged by its owner, so the presence of a nav
             item is not a permission.
           */}
+          {/*
+            The audit trail. Like the three administration screens above it, the
+            component re-checks its own capability against /api/audit rather
+            than trusting that being routed here meant anything — a sidebar can
+            be rearranged by its owner, so the presence of a nav item is not a
+            permission and never was.
+          */}
+          {activeSurface === "audit" && <AuditLog />}
+          {/*
+            The recycle bin — the same panel the account area draws, over the
+            same /api/trash. See recycle-bin-section.tsx for why it is a door
+            and not a room.
+          */}
+          {activeSurface === "recycle-bin" && <RecycleBinSection onNotify={setToast} />}
           {activeSurface === "admin-users" && <AdminUsersView />}
           {activeSurface === "admin-roles" && <AdminRolesView />}
           {activeSurface === "admin-clients" && (
@@ -2461,6 +2616,7 @@ function OverviewView({
 }) {
   const now = useCurrentTime();
   const [portfolio, setPortfolio] = useState("all");
+  const [overviewLayoutSlot, setOverviewLayoutSlot] = useState<HTMLElement | null>(null);
   const [period, setPeriod] = useState("90");
   const scopedStores = useMemo(
     () => storeRows.filter((store) => store.lifecycle === "Current" && (portfolio === "all" || store.id === portfolio)),
@@ -2481,11 +2637,26 @@ function OverviewView({
   const activeUnitCount = units.filter(
     (unit) => unit.status === "Active" && (portfolio === "all" || unit.siteId === portfolio),
   ).length;
-  const open = scopedRequests.filter((request) => request.stage !== "Completed");
+  /*
+   * OPEN AND CLOSED COME FROM ONE PREDICATE, SHARED WITH THE BOARD'S METERS.
+   *
+   * This read `stage !== "Completed"` while the six meters above the job board
+   * read `stage === "Completed" || status === "Job Completed"`, and the two
+   * disagree on live data: the imported rows sit in monday's "… Recently
+   * completed" groups, which carry no lifecycle stage here, so 28 jobs whose own
+   * status says "Job Completed" counted as open on this page and as closed on
+   * the board. Two screens, one portfolio, different numbers.
+   *
+   * `isOpenRequest` and `isClosedRequest` in dashboard-meters.ts are that
+   * predicate, and they are a partition — every row is one or the other — which
+   * is what lets Overview, Reports and the board's meters be checked against
+   * each other rather than taken on trust.
+   */
+  const open = scopedRequests.filter(isOpenRequest);
   const attention = open
     .filter((request) => request.stage === "Attention" || request.priority === "Urgent")
     .sort((left, right) => requestAgeDays(right, now) - requestAgeDays(left, now));
-  const completed = scopedRequests.filter((request) => request.stage === "Completed");
+  const completed = scopedRequests.filter(isClosedRequest);
   const overdue = open.filter(
     (request) => request.dueAt && new Date(request.dueAt).getTime() < now,
   );
@@ -2523,16 +2694,41 @@ function OverviewView({
           portfolios={portfolioOptions(storeRows)}
           onPortfolioChange={setPortfolio}
           period={period}
-          periods={analyticsPeriodOptions}
-          onPeriodChange={setPeriod}
+          /*
+           * Overview's own range, with the same picker Reports uses: Today,
+           * Last 7 days, Month to date, Last 30/90 days, Year to date and a
+           * validated custom start/end — instead of the four rolling windows
+           * the plain select offered. It is this page's state and nobody
+           * else's, which is the point: a range chosen here does not follow
+           * the reader to Reports or Compliance.
+           *
+           * It changes the figures, not just the label — `period` is what
+           * `scopedRequests` filters on above, and every meter, chart and
+           * tile on this page reads from that.
+           */
+          periodControl={<PeriodPicker value={period} onChange={setPeriod} now={now} />}
           onExport={() => downloadCsv(scopedRequests)}
+          /*
+           * "Edit layout" belongs with the other page controls, not floating
+           * above the panels it edits. Reports already portals its bar into
+           * this toolbar; Overview drew its own in place, which is why it sat
+           * alone in the top-left with nothing beside it. Same slot, same
+           * component, same state — only where the bar is drawn changes.
+           */
+          slotRef={setOverviewLayoutSlot}
         />
       </section>
 
-      <section className="analytics-metric-grid analytics-metric-grid--six">
+      {/* Focusable because it scrolls sideways at phone widths: without a tab
+          stop a keyboard user cannot reach the cards past the fold. */}
+      <section
+        className="analytics-metric-grid analytics-metric-grid--six"
+        aria-label="Portfolio metrics"
+        tabIndex={0}
+      >
         <AnalyticsMetricCard label="Active units" value={String(activeUnitCount)} detail={activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} onClick={() => onNavigate("units")} />
         <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.stage === "Attention", period, now)} onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, (request) => request.stage !== "Completed", period, now)} onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Overdue" value={String(overdue.length)} detail="Target date passed" icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Completed" value={String(completed.length)} detail="Verified closures" icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Compliance" value={`${compliancePercent}%`} detail={complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} onClick={() => onNavigate("compliance")} />
@@ -2626,6 +2822,7 @@ function OverviewView({
 
       <DashboardWidgets
         surface="overview"
+        barSlot={overviewLayoutSlot}
         widgets={[
           {
             key: "sla",
@@ -3069,6 +3266,18 @@ function ComplianceView({
   const [filter, setFilter] = useState<"All" | ComplianceState>("All");
   const [portfolio, setPortfolio] = useState("all");
   const [expiryWindow, setExpiryWindow] = useState("all");
+  /*
+   * A start and an end of the reader's own, for the expiry horizon.
+   *
+   * The preset horizons answer "what falls due in the next 90 days". They
+   * cannot answer "what falls due in the quarter I am about to be audited on",
+   * which is the question that gets asked in a compliance meeting — so
+   * "Between two dates" is a fourth shape alongside them. It stays an EXPIRY
+   * filter rather than becoming a reporting period: this page is about what is
+   * coming, not what happened.
+   */
+  const [expiryFrom, setExpiryFrom] = useState("");
+  const [expiryTo, setExpiryTo] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const now = useCurrentTime();
@@ -3127,9 +3336,22 @@ function ComplianceView({
       [record.siteName, managerFor(record.siteId), record.kind, record.state]
         .some((value) => value.toLowerCase().includes(needle));
     const matchesStatus = filter === "All" || record.state === filter;
-    const matchesWindow = expiryWindow === "all" ||
-      !record.expiry ||
-      new Date(record.expiry).getTime() <= now + Number(expiryWindow) * 86_400_000;
+    const matchesWindow = (() => {
+      if (expiryWindow === "custom") {
+        // A half-open range is still useful: "everything after March" is a
+        // question, and so is "everything before the audit".
+        if (!record.expiry) return !expiryFrom && !expiryTo;
+        const at = new Date(record.expiry).getTime();
+        if (expiryFrom && at < new Date(`${expiryFrom}T00:00:00`).getTime()) return false;
+        if (expiryTo && at > new Date(`${expiryTo}T23:59:59`).getTime()) return false;
+        return true;
+      }
+      return (
+        expiryWindow === "all" ||
+        !record.expiry ||
+        new Date(record.expiry).getTime() <= now + Number(expiryWindow) * 86_400_000
+      );
+    })();
     return matchesSearch && matchesStatus && matchesWindow;
   });
   const expiringTypes = Array.from(
@@ -3226,6 +3448,7 @@ function ComplianceView({
             { value: "30", label: "Next 30 days" },
             { value: "90", label: "Next 90 days" },
             { value: "180", label: "Next 180 days" },
+            { value: "custom", label: "Between two dates…" },
           ]}
           onPeriodChange={setExpiryWindow}
           onExport={() => downloadTableCsv(
@@ -3235,6 +3458,30 @@ function ComplianceView({
           )}
           exportLabel="Export register"
         >
+          {/* Only when asked for, so the row is not two empty date boxes wide
+              for the four readers in five who want a preset. */}
+          {expiryWindow === "custom" && (
+            <>
+              <label className="analytics-period analytics-period--argument">
+                <span className="visually-hidden">Expiring from</span>
+                <input
+                  aria-label="Expiring from"
+                  type="date"
+                  value={expiryFrom}
+                  onChange={(event) => setExpiryFrom(event.target.value)}
+                />
+              </label>
+              <label className="analytics-period analytics-period--argument">
+                <span className="visually-hidden">Expiring until</span>
+                <input
+                  aria-label="Expiring until"
+                  type="date"
+                  value={expiryTo}
+                  onChange={(event) => setExpiryTo(event.target.value)}
+                />
+              </label>
+            </>
+          )}
           <button className="analytics-toolbar__button" type="button" onClick={() => onManage(null)}>
             <Icon name="plus" size={17} /> Manage register
           </button>
@@ -3312,16 +3559,39 @@ function ComplianceView({
   );
 }
 
+/**
+ * One thing on the operations calendar.
+ *
+ * Two sources land on the same grid — a job's response deadline and a
+ * certificate's expiry — and a reader scanning a month should not have to know
+ * which table a date came from. `kind` is what decides where a click goes.
+ */
+type CalendarEvent = {
+  id: string;
+  kind: "job" | "compliance";
+  title: string;
+  subtitle: string;
+  tone: "urgent" | "visit" | "standard" | "renewal";
+  request?: MaintenanceRequest;
+  recordId?: string;
+};
+
 function CalendarView({
   requests,
   planned,
+  complianceRecords,
   onManage,
   onOpenRequest,
+  onOpenCompliance,
 }: {
   requests: MaintenanceRequest[];
   planned: WorkspacePlannedItem[];
+  complianceRecords: WorkspaceSnapshot["compliance"];
   onManage: (id?: string | null) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
+  /* A renewal on the grid opens the certificate behind it, the same way a job
+     opens its work order — see `CalendarEvent.kind`. */
+  onOpenCompliance: (id: string | null) => void;
 }) {
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(
@@ -3329,10 +3599,7 @@ function CalendarView({
   );
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
-  const monthLabel = new Intl.DateTimeFormat("en-GB", {
-    month: "long",
-    year: "numeric",
-  }).format(cursor);
+  const monthLabel = formatMonthYear(cursor);
   const firstOffset = (new Date(year, month, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const previousMonthDays = new Date(year, month, 0).getDate();
@@ -3358,16 +3625,81 @@ function CalendarView({
       }),
     [daysInMonth, firstOffset, month, previousMonthDays, year],
   );
+  /*
+   * THE PAGE'S OWN RANGE, and what it is for on a calendar.
+   *
+   * The month grid already answers "what is happening in March". The range
+   * answers a different question — "show me only the next quarter's renewals"
+   * — and it filters what is DRAWN, so a reader paging through months sees a
+   * consistent slice rather than everything. Choosing a range also moves the
+   * grid to the month the range starts in, so the answer is on screen without
+   * a second click.
+   */
+  const [period, setPeriod] = useState("90");
+  const nowMs = today.getTime();
+  const periodWindow = resolvePeriod(period, nowMs);
+  const withinPeriod = (value: string | null | undefined) => {
+    if (!periodWindow) return true;
+    if (!value) return false;
+    const at = Date.parse(value);
+    return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
+  };
+  const choosePeriod = (next: string) => {
+    setPeriod(next);
+    const range = resolvePeriod(next, Date.now());
+    if (range) {
+      const start = new Date(range.start);
+      setCursor(new Date(start.getFullYear(), start.getMonth(), 1));
+    }
+  };
+
+  /*
+   * JOBS AND COMPLIANCE RENEWALS, on one grid.
+   *
+   * The heading has always promised "booked visits, response deadlines and
+   * compliance renewals in one schedule" and the grid drew only the first two:
+   * `eventMap` was built from `requests` alone, so every certificate expiry —
+   * the dates this page exists to warn about — was invisible here and visible
+   * only on Compliance. Both now land on the day they fall.
+   */
   const eventMap = useMemo(() => {
-    const map = new Map<string, MaintenanceRequest[]>();
+    const map = new Map<string, CalendarEvent[]>();
+    const add = (value: string | null | undefined, event: CalendarEvent) => {
+      if (!value) return;
+      const at = new Date(value);
+      if (Number.isNaN(at.getTime())) return;
+      const key = `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}`;
+      map.set(key, [...(map.get(key) ?? []), event]);
+    };
     for (const request of requests) {
-      if (!request.dueAt) continue;
-      const due = new Date(request.dueAt);
-      const key = `${due.getFullYear()}-${due.getMonth()}-${due.getDate()}`;
-      map.set(key, [...(map.get(key) ?? []), request]);
+      if (!withinPeriod(request.dueAt)) continue;
+      add(request.dueAt, {
+        id: request.id,
+        kind: "job",
+        title: request.title,
+        subtitle: request.location,
+        tone:
+          request.priority === "Urgent"
+            ? "urgent"
+            : request.stage === "Booked"
+              ? "visit"
+              : "standard",
+        request,
+      });
+    }
+    for (const record of complianceRecords) {
+      if (!withinPeriod(record.expiry)) continue;
+      add(record.expiry, {
+        id: record.id,
+        kind: "compliance",
+        title: `${record.kind} renewal`,
+        subtitle: record.siteName,
+        tone: record.state === "Expired" ? "urgent" : "renewal",
+        recordId: record.id,
+      });
     }
     return map;
-  }, [requests]);
+  }, [complianceRecords, period, requests]);
 
   return (
     <div className="section-stack">
@@ -3384,6 +3716,7 @@ function CalendarView({
           </p>
         </div>
         <div className="section-header__actions">
+          <PeriodPicker value={period} onChange={choosePeriod} now={nowMs} />
           <button
             className="secondary-button"
             type="button"
@@ -3474,19 +3807,17 @@ function CalendarView({
                   {events.slice(0, 3).map((event) => (
                     <button
                       type="button"
-                      className={`calendar-event calendar-event--${
-                        event.priority === "Urgent"
-                          ? "urgent"
-                          : event.stage === "Booked"
-                            ? "visit"
-                            : "standard"
-                      }`}
-                      key={event.id}
-                      onClick={() => onOpenRequest(event)}
+                      className={`calendar-event calendar-event--${event.tone}`}
+                      key={`${event.kind}-${event.id}`}
+                      onClick={() =>
+                        event.kind === "job" && event.request
+                          ? onOpenRequest(event.request)
+                          : onOpenCompliance(event.recordId ?? null)
+                      }
                       title={`${event.id}: ${event.title}`}
                     >
                       <strong>{event.title}</strong>
-                      <small>{event.location}</small>
+                      <small>{event.subtitle}</small>
                     </button>
                   ))}
                   {events.length > 3 && <small>+{events.length - 3} more</small>}
@@ -3502,7 +3833,7 @@ function CalendarView({
         <div className="planned-register-list">
           {planned.filter((item) => item.status !== "Cancelled").slice(0, 6).map((item) => (
             <button type="button" key={item.id} onClick={() => onManage(item.id)}>
-              <span className="planned-register-date"><strong>{new Date(item.nextDueAt).getDate()}</strong><small>{new Intl.DateTimeFormat("en-GB", { month: "short" }).format(new Date(item.nextDueAt))}</small></span>
+              <span className="planned-register-date"><strong>{new Date(item.nextDueAt).getDate()}</strong><small>{formatMonthShort(item.nextDueAt)}</small></span>
               <span><strong>{item.title}</strong><small>{item.siteName} · {item.frequency}</small></span>
               <span className="status-chip">{item.status}</span>
               <Icon name="chevron" size={15} />
@@ -3520,7 +3851,26 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
-  const filtered = files.filter((file) =>
+  /*
+   * This page's own reporting range, defaulting to a year because a document
+   * register is consulted over a longer horizon than a job board. It is this
+   * page's state and nobody else's — a range chosen here does not follow the
+   * reader to Reports.
+   *
+   * It filters the register itself, not just the label: `withinPeriod` is
+   * applied before the search, so the counts above the table, the export and
+   * the rows all describe the same set.
+   */
+  const [period, setPeriod] = useState("12m");
+  const now = Date.now();
+  const window = resolvePeriod(period, now);
+  const withinPeriod = (file: FileRecord) => {
+    if (!window) return true;
+    const at = Date.parse(file.uploadedAt);
+    return Number.isNaN(at) ? true : at >= window.start && at <= window.end;
+  };
+  const inRange = files.filter(withinPeriod);
+  const filtered = inRange.filter((file) =>
     [file.name, file.kind, file.site, file.requestId ?? ""]
       .join(" ")
       .toLowerCase()
@@ -3542,36 +3892,39 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
             clear owner and source.
           </p>
         </div>
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={() => downloadFileRegister(filtered)}
-        >
-          <Icon name="download" size={17} />
-          Export register
-        </button>
+        <div className="section-header__controls">
+          <PeriodPicker value={period} onChange={setPeriod} now={now} />
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => downloadFileRegister(filtered)}
+          >
+            <Icon name="download" size={17} />
+            Export register
+          </button>
+        </div>
       </section>
 
       <section className="document-stat-grid">
         <div>
           <Icon name="folder" size={20} />
           <span>
-            <small>Total documents</small>
-            <strong>{files.length}</strong>
+            <small>Documents in range</small>
+            <strong>{inRange.length}</strong>
           </span>
         </div>
         <div>
           <Icon name="upload" size={20} />
           <span>
             <small>Added this month</small>
-            <strong>{files.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}</strong>
+            <strong>{inRange.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}</strong>
           </span>
         </div>
         <div>
           <Icon name="alert" size={20} />
           <span>
             <small>Require attention</small>
-            <strong>{files.filter((file) => file.status === "Expiring soon").length}</strong>
+            <strong>{inRange.filter((file) => file.status === "Expiring soon").length}</strong>
           </span>
         </div>
       </section>
@@ -3721,17 +4074,26 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
 function ContractorContact({
   contractor,
 }: {
-  contractor: { name: string; email?: string | null; phone?: string | null };
+  contractor: {
+    name: string;
+    contactName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  };
 }) {
   const phone = (contractor.phone ?? "").trim();
   const email = (contractor.email ?? "").trim();
+  const person = (contractor.contactName ?? "").trim();
 
-  if (!phone && !email) {
+  if (!phone && !email && !person) {
     return <span className="contractor-contact__none">No contact details</span>;
   }
 
   return (
     <span className="contractor-contact">
+      {/* The person leads, because a number nobody has a name for is the
+          thing that gets dialled last. */}
+      {person && <strong className="contractor-contact__person">{person}</strong>}
       {phone && (
         <a
           className="contractor-contact__link"
@@ -3777,9 +4139,9 @@ function ContractorsView({
           const name = request.contractor ?? "Unassigned";
           const current = map.get(name) ?? { name, assignedJobs: 0, completedJobs: 0, spend: 0, urgentJobs: 0, trades: new Set<string>() };
           current.assignedJobs += 1;
-          current.completedJobs += request.stage === "Completed" ? 1 : 0;
+          current.completedJobs += isClosedRequest(request) ? 1 : 0;
           current.spend += request.cost ?? 0;
-          current.urgentJobs += request.priority === "Urgent" && request.stage !== "Completed" ? 1 : 0;
+          current.urgentJobs += request.priority === "Urgent" && isOpenRequest(request) ? 1 : 0;
           current.trades.add(request.category);
           map.set(name, current);
           return map;
@@ -3789,6 +4151,11 @@ function ContractorsView({
         name: contractor.name,
         email: null,
         phone: null,
+        // Derived from the jobs, so there is no register row carrying these.
+        contactName: null,
+        address: null,
+        notes: null,
+        dayRatePence: null,
         serviceCategories: Array.from(contractor.trades),
         coverageAreas: ["UK"],
         certifications: [],
@@ -3803,12 +4170,46 @@ function ContractorsView({
       })),
     [requests],
   );
-  const contractors = registeredContractors.length ? registeredContractors : fallbackContractors;
+  const roster = registeredContractors.length ? registeredContractors : fallbackContractors;
+
+  /*
+   * THE PAGE'S OWN REPORTING RANGE.
+   *
+   * "Assigned 40, completed 38" is a different claim over a quarter than over
+   * five years, and this page had no way to say which it meant. The register
+   * itself — who they are, what they cover, what they are certified for — is
+   * not time-bound and never filters; the WORK counts beside it are, so they
+   * are recomputed from the jobs inside the window rather than taken from the
+   * workspace payload's all-time totals. A contractor with no work in the
+   * window stays listed, showing zeroes, because "we use them and they did
+   * nothing this quarter" is the answer the reader came for.
+   */
+  const [period, setPeriod] = useState("12m");
+  const nowMs = Date.now();
+  const periodWindow = resolvePeriod(period, nowMs);
+  const inWindow = (request: MaintenanceRequest) => {
+    if (!periodWindow) return true;
+    const at = Date.parse(request.completedAt ?? request.requestedAt);
+    return Number.isNaN(at) ? true : at >= periodWindow.start && at <= periodWindow.end;
+  };
+  const scopedRequests = requests.filter(inWindow);
+
+  const contractors = roster.map((contractor) => {
+    const theirs = scopedRequests.filter((request) => request.contractor === contractor.name);
+    return {
+      ...contractor,
+      assignedJobs: theirs.length,
+      completedJobs: theirs.filter(isClosedRequest).length,
+      urgentJobs: theirs.filter((request) => request.priority === "Urgent" && isOpenRequest(request)).length,
+      spend: theirs.reduce((sum, request) => sum + (request.cost ?? 0), 0),
+    };
+  });
 
   return (
     <div className="section-stack">
       <section className="section-header"><div><span className="eyebrow-chip"><Icon name="users" size={15} />Managed network</span><h1>Contractors</h1><p>Qualifications, coverage, assigned work, completion performance and costs in one operational register.</p></div>
         <div className="section-header__actions">
+          <PeriodPicker value={period} onChange={setPeriod} now={nowMs} />
           {/* Somebody looking at a contractor is usually about to give them
               something to do. */}
           <RaiseTicketButton
@@ -3827,9 +4228,9 @@ function ContractorsView({
         <div><span className="site-stat-icon site-stat-icon--green"><Icon name="chart" size={19} /></span><small>Tracked spend</small><strong>{formatMoney(contractors.reduce((sum, item) => sum + item.spend, 0))}</strong></div>
       </section>
       <section className="panel sites-panel"><div className="table-scroll"><table className="data-table sites-table">
-        <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
+        <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Coverage</th><th>Day rate</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
         <tbody>{contractors.map((contractor) => (
-          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
+          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.coverageAreas.join(", ") || "Not specified"}</td><td>{contractor.dayRatePence === null || contractor.dayRatePence === undefined ? "—" : formatMoney(contractor.dayRatePence / 100)}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
         ))}</tbody>
       </table></div></section>
     </div>
@@ -3980,7 +4381,13 @@ function ReportsView({
         />
       </section>
 
-      <section className="analytics-metric-grid report-metric-grid">
+      {/* Focusable because it scrolls sideways at phone widths: without a tab
+          stop a keyboard user cannot reach the cards past the fold. */}
+      <section
+        className="analytics-metric-grid report-metric-grid"
+        aria-label="Report metrics"
+        tabIndex={0}
+      >
         {/*
           An empty period reads as a dash and says so, never as £0.
           £0 is a result — it says the portfolio spent nothing — and on a period
@@ -4052,6 +4459,19 @@ function ReportsView({
         surface="reports"
         barSlot={layoutSlot}
         widgets={[
+          {
+            /*
+             * First, because "is this quarter worse than the last" is the
+             * question a spend report is opened to answer, and Reports could
+             * not answer it — the chart existed only on Overview.
+             */
+            key: "spend-trend",
+            label: "Spend trend",
+            wide: true,
+            render: () => (
+              <SpendTrend requests={scopedRequests} period={period} now={now} />
+            ),
+          },
           {
             key: "spend-matrix",
             label: "Spend matrix",
@@ -4461,12 +4881,10 @@ type MobileRequestFieldEditor = {
 
 
 function mondayDate(value: string | null) {
+  // en-GB, through the shared formatter: "24 Nov", not "Nov 24". This was the
+  // second of the four en-US formatters a completion audit found.
   if (!value) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "Europe/London",
-  }).format(new Date(value));
+  return formatDayMonth(value, { fallback: "", timeZone: "Europe/London" });
 }
 
 function mondayDateInput(value: string | null) {
@@ -6040,7 +6458,7 @@ function RequestDrawer({
                       }`}
                     />
                     <p>
-                      <strong>{activityActor(entry.actorEmail)}</strong>{" "}
+                      <strong>{activityActor(entry.actorEmail, entry.detail)}</strong>{" "}
                       {activityDescription(entry)}
                     </p>
                     <small>{formatDate(entry.createdAt, true)}</small>

@@ -30,11 +30,22 @@ export default function BoardHeader({
       </div>
 
       <div className="board-header__actions">
-        <button type="button" className="board-header__action">
+        {/*
+          Both carry an `aria-label` even though both show their name, because
+          below 768px `.board-header__actions … span` is display:none. That left
+          Integrate an icon with no accessible name at all — axe rates an unnamed
+          button critical — and left Automate announcing its badge number and
+          nothing else, so a screen reader said "three, button".
+        */}
+        <button type="button" className="board-header__action" aria-label="Integrate">
           <Icon name="spark" size={16} />
           <span>Integrate</span>
         </button>
-        <button type="button" className="board-header__action">
+        <button
+          type="button"
+          className="board-header__action"
+          aria-label={`Automate (${automationCount})`}
+        >
           <Icon name="activity" size={16} />
           <span>Automate</span>
           <em className="board-header__count">{automationCount}</em>

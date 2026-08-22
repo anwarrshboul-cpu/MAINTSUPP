@@ -1,8 +1,10 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { maintenanceBoardCells, maintenanceBoardColumns } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { resolveBoard } from "../../../lib/board-registry";
+import { RETENTION_DAYS, sendColumnToBin } from "../../../lib/recycle-bin";
 import {
   canConvert,
   getColumnType,
@@ -59,6 +61,7 @@ export async function GET(request: Request) {
         and(
           eq(maintenanceBoardColumns.organisationId, orgId),
           eq(maintenanceBoardColumns.boardId, board.key),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       )
       .orderBy(asc(maintenanceBoardColumns.position));
@@ -117,6 +120,16 @@ export async function POST(request: Request) {
       return bad(`A ${definition.label} column needs an option set to draw its choices from.`);
     }
 
+    /*
+     * DELIBERATELY UNFILTERED — binned columns count here.
+     *
+     * `maintenance_board_columns_key_idx` is UNIQUE on (organisation, board,
+     * column_key) and a binned column keeps its key. Skipping binned rows would
+     * let this hand out a key the index already holds, and the insert below
+     * would fail with a constraint violation rather than a message. Counting
+     * them costs a new column of the same name a suffix — `colour_2` — and buys
+     * the guarantee that a restore thirty days later cannot collide.
+     */
     let key = keyFrom(title);
     const existing = await db
       .select({ key: maintenanceBoardColumns.key })
@@ -158,6 +171,18 @@ export async function POST(request: Request) {
       system: false,
     });
 
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+      action: "board.column_created",
+      entityType: "maintenance_board_column",
+      entityId: id,
+      summary: `Added the "${title}" ${type} column to ${board.key}.`,
+      detail: { board: board.key, key, title, type },
+      request,
+    });
+
     return Response.json({ id, key, title, type }, { status: 201 });
   } catch (error) {
     return unavailable(error);
@@ -178,10 +203,43 @@ export async function PATCH(request: Request) {
 
     // Bulk reorder — [{ id, position }]
     if (Array.isArray(body.order)) {
+      /*
+       * The order BEFORE, read once, so the audit event can say what actually
+       * moved rather than restating the payload it was handed. Ids the caller
+       * named that belong to another workspace are absent from this map and are
+       * skipped below, exactly as the update's own `organisationId` predicate
+       * skips them.
+       */
+      const known = await db
+        .select({
+          id: maintenanceBoardColumns.id,
+          title: maintenanceBoardColumns.title,
+          position: maintenanceBoardColumns.position,
+          boardId: maintenanceBoardColumns.boardId,
+        })
+        .from(maintenanceBoardColumns)
+        .where(
+          and(
+            eq(maintenanceBoardColumns.organisationId, orgId),
+            isNull(maintenanceBoardColumns.deletedAt),
+          ),
+        );
+      const byId = new Map(known.map((row) => [row.id, row]));
+
+      const moved: Array<{ id: string; title: string; from: number; to: number }> = [];
       for (const entry of body.order) {
         const id = text(entry?.id, 64);
         const position = Number(entry?.position);
         if (!id || !Number.isFinite(position)) continue;
+        const existing = byId.get(id);
+        if (existing && existing.position !== position) {
+          moved.push({
+            id,
+            title: existing.title,
+            from: existing.position,
+            to: position,
+          });
+        }
         await db
           .update(maintenanceBoardColumns)
           .set({ position, updatedAt: sql`CURRENT_TIMESTAMP` })
@@ -191,6 +249,24 @@ export async function PATCH(request: Request) {
               eq(maintenanceBoardColumns.organisationId, orgId),
             ),
           );
+      }
+
+      if (moved.length) {
+        const board = byId.get(moved[0].id)?.boardId ?? "maintenance";
+        await recordAudit({
+          db,
+          organisationId: orgId,
+          actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+          action: "board.columns_reordered",
+          entityType: "maintenance_board_column",
+          entityId: moved[0].id,
+          summary:
+            moved.length === 1
+              ? `Moved the "${moved[0].title}" column on ${board}.`
+              : `Reordered ${moved.length} columns on ${board}.`,
+          detail: { board, moved },
+          request,
+        });
       }
       return Response.json({ ok: true });
     }
@@ -205,6 +281,7 @@ export async function PATCH(request: Request) {
         and(
           eq(maintenanceBoardColumns.id, id),
           eq(maintenanceBoardColumns.organisationId, orgId),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       );
     if (!existing) return bad("Column not found.", 404);
@@ -278,6 +355,37 @@ export async function PATCH(request: Request) {
         and(eq(maintenanceBoardColumns.id, id), eq(maintenanceBoardColumns.organisationId, orgId)),
       );
 
+    /*
+     * Structure only — see the same rule in /api/board's `update_column`. A
+     * width is a preference and fires on every drag; a rename, a hide, a pin,
+     * a summary or a type conversion changes the board for everybody and is
+     * what W13-05 asks to be attributable.
+     */
+    const structural = ["title", "type", "visible", "pinned", "summary"].filter(
+      (field) => field in patch && patch[field] !== (existing as Record<string, unknown>)[field],
+    );
+    if (structural.length) {
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+        action: "board.column_updated",
+        entityType: "maintenance_board_column",
+        entityId: id,
+        summary: `Updated the "${patch.title ?? existing.title}" column on ${existing.boardId} (${structural.join(", ")}).`,
+        detail: {
+          board: existing.boardId,
+          ...changeDetail(
+            Object.fromEntries(
+              structural.map((field) => [field, (existing as Record<string, unknown>)[field]]),
+            ),
+            Object.fromEntries(structural.map((field) => [field, patch[field]])),
+          ),
+        },
+        request,
+      });
+    }
+
     return Response.json({ ok: true });
   } catch (error) {
     return unavailable(error);
@@ -303,6 +411,7 @@ export async function DELETE(request: Request) {
         and(
           eq(maintenanceBoardColumns.id, id),
           eq(maintenanceBoardColumns.organisationId, orgId),
+          isNull(maintenanceBoardColumns.deletedAt),
         ),
       );
     if (!existing) return bad("Column not found.", 404);
@@ -322,32 +431,60 @@ export async function DELETE(request: Request) {
       );
     const affected = Number(filled?.total ?? 0);
 
+    /*
+     * Still a confirmation, and no longer a warning about loss.
+     *
+     * Removing a column takes it off everybody's board, so it is worth asking
+     * about. What it no longer does is discard anything: the values go with it
+     * into the recycle bin and come back with it. The message says the true
+     * thing, because a person who reads "discards them" and stops has been
+     * talked out of an action that was safe.
+     */
     if (affected > 0 && !confirmed) {
       return Response.json(
         {
           error: "has-data",
           affected,
-          message: `"${existing.title}" holds ${affected} value${affected === 1 ? "" : "s"}. Deleting it discards them.`,
+          message: `"${existing.title}" holds ${affected} value${affected === 1 ? "" : "s"}. It goes to the Recycle Bin with them, and can be restored for ${RETENTION_DAYS} days.`,
         },
         { status: 409 },
       );
     }
 
-    await db
-      .delete(maintenanceBoardCells)
-      .where(
-        and(
-          eq(maintenanceBoardCells.organisationId, orgId),
-          eq(maintenanceBoardCells.columnId, id),
-        ),
-      );
-    await db
-      .delete(maintenanceBoardColumns)
-      .where(
-        and(eq(maintenanceBoardColumns.id, id), eq(maintenanceBoardColumns.organisationId, orgId)),
-      );
+    const binned = await sendColumnToBin(
+      db,
+      orgId,
+      auditActor({
+        actor: guard.scope.actor,
+        identityEmail: guard.scope.identityEmail,
+        session: guard.scope.session,
+      }),
+      id,
+    );
+    if (!binned.ok) return bad(binned.error, 409);
 
-    return Response.json({ ok: true, discarded: affected });
+    await recordAudit({
+      db,
+      organisationId: orgId,
+      actor: auditActor({ actor: guard.scope.actor, identityEmail: guard.scope.identityEmail, session: guard.scope.session }),
+      action: "board.column_deleted",
+      entityType: "maintenance_board_column",
+      entityId: id,
+      summary: `Moved the "${existing.title}" column on ${existing.boardId} to the recycle bin, keeping ${affected} value${affected === 1 ? "" : "s"}.`,
+      // Recoverable, and the line says so — this is what a reader checks when
+      // they are deciding whether something can still be had back.
+      detail: {
+        board: existing.boardId,
+        title: existing.title,
+        type: existing.type,
+        kept: affected,
+        recoverable: true,
+        retentionDays: RETENTION_DAYS,
+      },
+      request,
+    });
+
+    return Response.json({ ok: true, binned: true, kept: affected });
   } catch (error) {
     return unavailable(error);
   }

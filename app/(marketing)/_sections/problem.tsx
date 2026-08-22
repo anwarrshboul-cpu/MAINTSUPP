@@ -1,7 +1,3 @@
-"use client";
-
-import { useState } from "react";
-
 /* ── 5. THE PROBLEM — before / after comparison ───────────────────────────── */
 
 /** Icon path markup, copied verbatim from the source's `P` object. */
@@ -29,8 +25,6 @@ function Ic({ path, cls }: { path: string; cls?: string }) {
     />
   );
 }
-
-type Which = "before" | "after";
 
 /**
  * FIVE PAIRS, stored as pairs.
@@ -67,63 +61,65 @@ const PAIRS: ReadonlyArray<{ before: string; after: string }> = [
 ];
 
 export function Problem() {
-  const [which, setWhich] = useState<Which>("before");
-
   return (
     <section className="section section--tint" id="problem">
       <div className="wrap">
-        <div
-          className="reveal"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 20,
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-          }}
-        >
-          <div>
-            <p className="eyebrow">The operating problem</p>
-            <h2 className="h2">
-              Stop managing maintenance through scattered calls and spreadsheets.
-            </h2>
-          </div>
-          <div className="switcher" role="group" aria-label="Compare before and after">
-            <button
-              type="button"
-              id="cmpBefore"
-              className={which === "before" ? "is-on" : undefined}
-              aria-pressed={which === "before"}
-              onClick={() => setWhich("before")}
-            >
-              Without Maintsupp
-            </button>
-            <button
-              type="button"
-              id="cmpAfter"
-              className={which === "after" ? "is-on" : undefined}
-              aria-pressed={which === "after"}
-              onClick={() => setWhich("after")}
-            >
-              With Maintsupp
-            </button>
-          </div>
+        <div className="reveal">
+          <p className="eyebrow">The operating problem</p>
+          <h2 className="h2">
+            Stop managing maintenance through scattered calls and spreadsheets.
+          </h2>
         </div>
 
-        {/* Keyed on the mode so React remounts the cards and the CSS `feedin`
-            animation replays on every switch, as it did in the source where the
-            grid's innerHTML was rewritten wholesale. */}
-        <div className="compare reveal" id="compareGrid" key={which}>
+        {/*
+          BOTH SIDES, ALWAYS, WITH NO CONTROL TO FIND.
+
+          This was a two-button switcher: "Without Maintsupp" or "With
+          Maintsupp", one at a time. A comparison that shows one side at a time
+          is not a comparison — the reader had to hold five statements in their
+          head, press a button, and match them up from memory, and nothing on
+          screen said the two lists were even the same five items in the same
+          order. On a phone the switcher was also the only hint that a second
+          half existed at all.
+
+          Paired rows instead: each pain sits beside the thing that answers it,
+          side by side on desktop and stacked as a labelled pair on a phone. The
+          five pairs are the same five, in the same order.
+        */}
+        <ul className="compare compare--paired reveal">
           {PAIRS.map((pair) => (
-            <div
-              key={pair.before}
-              className={`compare__card compare__card--${which === "before" ? "pain" : "gain"}`}
-            >
-              <Ic path={which === "before" ? P.alert : P.checkc} />
-              <h3>{which === "before" ? pair.before : pair.after}</h3>
-            </div>
+            <li className="comparepair" key={pair.before}>
+              <div className="compare__card compare__card--pain">
+                {/* The column headings live on the first pair only — repeating
+                    "Without / With" five times is noise once the pattern is
+                    established, and `aria-hidden` keeps the repeat out of the
+                    accessible name too. Each card still names its own side for
+                    a screen reader via the visually-hidden span below. */}
+                <span className="comparepair__side">Without Maintsupp</span>
+                <Ic path={P.alert} />
+                <h3>{pair.before}</h3>
+              </div>
+              <span className="comparepair__arrow" aria-hidden="true">
+                <svg
+                  className="ic ic--sm"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </span>
+              <div className="compare__card compare__card--gain">
+                <span className="comparepair__side">With Maintsupp</span>
+                <Ic path={P.checkc} />
+                <h3>{pair.after}</h3>
+              </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );

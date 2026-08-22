@@ -920,9 +920,29 @@ fieldset.field:focus{outline:none}
 .casestudy__stats{gap:12px}
 .casestudy__photo{border-radius:var(--r-lg);overflow:hidden;aspect-ratio:4/3}
 
-.pricing__bands{margin-top:26px}
-.pkg__price--custom{align-items:flex-end}
-.pkg__price--custom .pkg__num{font-size:1.5rem}
+.pricing__bands{margin-top:18px}
+
+/* The store-count calculator. One control, and every price below follows it. */
+.pricing__calc{margin-top:26px;padding:18px 20px;border:1px solid var(--line);
+  border-radius:var(--r-lg);background:var(--paper)}
+.pricing__calc-top{display:flex;align-items:center;justify-content:space-between;
+  gap:16px;flex-wrap:wrap}
+.pricing__calc-top label{font-weight:650;color:var(--navy)}
+.pricing__readout{display:flex;align-items:baseline;gap:6px;margin:0}
+.pricing__readout strong{font-family:var(--font-display);font-size:2rem;font-weight:800;
+  color:var(--teal-600,#0e6f68);line-height:1;min-width:2.2ch;text-align:right}
+.pricing__readout span{font-size:.85rem;color:var(--slate)}
+.pricing__slider{width:100%;margin:14px 0 6px;accent-color:var(--teal-600,#0e6f68);
+  height:26px;cursor:pointer}
+/* A 26px target is below the 44px touch floor on its own, so the padding on the
+   card carries the rest of it; the thumb itself is what a finger aims at. */
+.pricing__slider::-webkit-slider-thumb{width:22px;height:22px}
+.pricing__band-note{margin:0;font-size:.82rem;color:var(--slate);min-height:1.2em}
+
+/* What the reader actually pays, under each plan's per-store rate. */
+.pkg__total{margin:-6px 0 14px;font-size:.84rem;color:var(--slate)}
+.pkg__total strong{color:var(--navy);font-weight:700}
+.pkg__was{color:var(--slate);opacity:.75;font-size:1rem}
 .pkg__setup{margin:12px 0 0;font-size:.76rem;color:var(--slate)}
 .pkg__cta{margin-top:16px}
 .pricing__notes{list-style:none;display:grid;gap:8px;margin:0;font-size:.82rem;
@@ -993,8 +1013,13 @@ fieldset.field:focus{outline:none}
    are the same component. */
 .whogrid{list-style:none;display:grid;gap:14px;margin-top:30px;
   grid-template-columns:repeat(auto-fit,minmax(232px,1fr))}
+/* The card now leads with its approved photograph, so the padding moves off the
+   card and onto the body — a 22px inset would leave a white gutter around a
+   picture that is meant to meet the card's edges. */
 .whocard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
-  padding:22px;display:grid;gap:9px;align-content:start}
+  display:grid;gap:0;align-content:start;overflow:hidden}
+.whocard__photo{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}
+.whocard__body{padding:20px 22px 22px;display:grid;gap:9px;align-content:start}
 .whocard__ic{width:40px;height:40px;display:grid;place-items:center;border-radius:var(--r-sm);
   background:var(--steel-soft);color:var(--steel)}
 .whocard__ic .ic{width:22px;height:22px}
@@ -1052,7 +1077,9 @@ fieldset.field:focus{outline:none}
 .claims{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .claim{border-left:1px solid rgba(255,255,255,.2);padding-left:17px}
 .claim:first-child{border-left:0;padding-left:0}
-.claim dt{font-family:var(--font-display);font-size:clamp(1.3rem,1rem + 1.3vw,1.85rem);font-weight:800;color:#fff;display:flex;align-items:baseline;gap:4px}
+/* The icon is a child of the <dt> so the <dl> stays valid; the dt stacks it
+   above the title, which is exactly what .claim--iconed used to do. */
+.claim dt{font-family:var(--font-display);font-size:clamp(1.3rem,1rem + 1.3vw,1.85rem);font-weight:800;color:#fff;display:grid;gap:6px;justify-items:start}
 .claim dd{margin:5px 0 0;font-size:.78rem;color:#9DB4BE}
 
 /* ------------------------------------------------------------------- faq */
@@ -1101,6 +1128,12 @@ fieldset.field:focus{outline:none}
 .chipgroup input{position:absolute;opacity:0;width:1px;height:1px}
 .chipgroup label{display:inline-flex;align-items:center;gap:8px;padding:10px 15px;min-height:44px;border:1.5px solid var(--border);border-radius:var(--r-pill);font-size:.83rem;cursor:pointer;transition:all var(--t-base) var(--ease)}
 .chipgroup label:hover{border-color:var(--steel-mid)}
+/* The response time each urgency buys, from the approved reference. Shown on
+   the chip because choosing P1 over P3 is really choosing 4 hours over 5 days. */
+.chip__sla{margin-left:8px;padding:2px 8px;border-radius:var(--r-pill);background:var(--cloud);
+  color:var(--slate);font-size:.72rem;font-weight:600;white-space:nowrap}
+.chipgroup input:checked + label .chip__sla{background:rgba(255,255,255,.22);color:inherit}
+@media (max-width:430px){.chipgroup label{flex-wrap:wrap}.chip__sla{margin-left:0}}
 .chipgroup input:checked+label{background:var(--navy);border-color:var(--navy);color:#fff}
 .chipgroup input:focus-visible+label{outline:3px solid var(--amber);outline-offset:2px}
 .consent{display:flex;gap:11px;align-items:flex-start;font-size:.84rem;cursor:pointer}
@@ -1344,3 +1377,87 @@ img,svg,table{max-width:100%}
    the original's `background-size:cover` framing exactly. */
 .ph picture { position: absolute; inset: 0; display: block; }
 img.ph__img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ------------------------------------------------ without vs with (paired)
+   Both sides visible with no control to find — see the note in problem.tsx.
+   Desktop puts the pain and its answer on one row with an arrow between; a
+   phone stacks them, and the small side labels are what keep the pairing
+   readable once they are one above the other rather than side by side. */
+.compare--paired{display:grid;gap:14px;margin-top:22px;list-style:none;padding:0}
+.comparepair{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch}
+.comparepair__arrow{display:grid;place-items:center;color:var(--steel);opacity:.55}
+.comparepair__side{font-size:.68rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--slate);opacity:.75}
+.compare--paired .compare__card{display:grid;gap:7px;align-content:start}
+
+@media (max-width:760px){
+  /* Stacked pairs: the arrow turns downward so the relationship still reads
+     top-to-bottom rather than becoming two unrelated cards. */
+  .comparepair{grid-template-columns:1fr;gap:8px}
+  .comparepair__arrow{transform:rotate(90deg);padding:2px 0}
+  .comparepair + .comparepair{margin-top:8px;padding-top:14px;border-top:1px solid var(--border)}
+}
+
+/* ------------------------------------------------ who runs maintsupp (section 9)
+   Photo left, text right; stacked photo-first on a phone, which is what the
+   source order already gives — so the mobile rule is simply one column. */
+.founder{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:32px;align-items:center}
+.founder__media{position:relative}
+.founder__photo{display:block;width:100%;height:auto;aspect-ratio:9/11;object-fit:cover;
+  border-radius:var(--r-lg);border:1px solid var(--border)}
+/* The empty frame the photograph will occupy — same box, same radius, so
+   dropping the file in changes nothing about the layout around it. */
+.founder__frame{aspect-ratio:9/11;display:grid;place-items:center;border-radius:var(--r-lg);
+  border:1px dashed var(--border);background:var(--steel-soft);color:var(--steel);opacity:.65}
+.founder__frame .ic{width:44px;height:44px}
+.founder__body{display:grid;gap:12px;align-content:start}
+.founder__name{margin:0;font-weight:700;color:var(--navy)}
+.founder__chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 0;padding:0;list-style:none}
+
+@media (max-width:860px){
+  .founder{grid-template-columns:1fr;gap:22px}
+  .founder__media{max-width:320px}
+  .founder__photo,.founder__frame{aspect-ratio:4/3}
+}
+
+/* ------------------------------------------------ contractor application (/contractors)
+   Reuses the landing forms' field, error, chip-group and status styles so the
+   page is the same form system and not a second one. Only the shapes this page
+   introduces are defined here: the two-up grid, the trades checkbox group, and
+   the fieldsets that give the two grouped controls a name. */
+.contractor-form{display:grid;gap:16px;margin-top:26px}
+.form-grid{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+.contractor-form .fieldset{border:0;padding:0;margin:0;display:grid;gap:8px;min-width:0}
+.contractor-form legend{padding:0;font-size:.83rem;font-weight:600;color:var(--navy)}
+/* The fieldset takes focus when it is the first error, so it needs a focus ring
+   of its own — it has no control of its own to carry one. */
+.contractor-form .fieldset:focus-visible{outline:2px solid var(--steel);outline-offset:4px;border-radius:var(--r-sm)}
+
+.checkgroup{display:flex;flex-wrap:wrap;gap:8px}
+.checkchip{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;cursor:pointer;
+  border:1px solid var(--border);border-radius:999px;background:#fff;
+  font-size:.83rem;color:var(--navy);min-height:44px}
+.checkchip input{width:17px;height:17px;accent-color:var(--steel);flex:none}
+.checkchip:has(input:checked){border-color:var(--steel);background:var(--steel-soft)}
+.checkchip:has(input:focus-visible){outline:2px solid var(--steel);outline-offset:2px}
+
+.contractor-form .is-invalid .checkchip,
+.contractor-form .is-invalid input,
+.contractor-form .is-invalid select,
+.contractor-form .is-invalid textarea{border-color:var(--critical)}
+
+@media (max-width:640px){
+  .form-grid{grid-template-columns:1fr}
+}
+
+/* ------------------------------------------------ approved v3 photographs
+   These are real <img> elements, not the background-image `.ph__img` the old
+   PhotoSlot painted — so they need the fit spelling out. Without it the
+   default `object-fit: fill` stretches every picture to whatever box it lands
+   in: the workflow frame is 21/9 and its photographs are 16/9, and step 1 is
+   1240x531 where the rest are 1672x941, so all seven were being squashed and
+   step 1 worst of all.
+
+   `cover` crops rather than distorts, which is the trade the brief asks for —
+   sensible crop, no stretching, and no blurred side-fill. */
+.wf__photo{display:block;width:100%;height:100%;object-fit:cover;object-position:center}

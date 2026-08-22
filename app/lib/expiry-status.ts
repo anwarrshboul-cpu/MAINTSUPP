@@ -22,6 +22,8 @@
  * loop, and a test can pin the date.
  */
 
+import { formatLongDate, formatShortDate } from "./format-date";
+
 /* ── Policy ───────────────────────────────────────────────────────────────── */
 
 /**
@@ -139,25 +141,18 @@ function todayDayIndex(today: Date): number {
   );
 }
 
-const enGbLong = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
-const enGbShort = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
 /**
  * en-GB rendering of a date-only value — "12 March 2026" or "12 Mar 2026".
  *
  * Formatted in UTC for the reason given on `utcDayIndex`: a date-only value
- * must never shift a day on its way to the screen.
+ * must never shift a day on its way to the screen. The shared formatter in
+ * app/lib/format-date.ts holds that rule for the whole platform now — a bare
+ * `YYYY-MM-DD` is split into three numbers there and never reaches `Date` —
+ * so the two `Intl` instances this file kept have gone rather than being a
+ * tenth copy of the same decision.
+ *
+ * `dateOnlyValue` still runs first, because it is what decides which malformed
+ * values count as no date at all, and that answer has to match the cells.
  */
 export function formatExpiryDate(
   isoDate: string,
@@ -165,9 +160,9 @@ export function formatExpiryDate(
 ): string {
   const date = dateOnlyValue(isoDate);
   if (!date) return "";
-  const [year, month, day] = date.split("-").map(Number);
-  const value = new Date(Date.UTC(year, month - 1, day));
-  return (style === "long" ? enGbLong : enGbShort).format(value);
+  return style === "long"
+    ? formatLongDate(date, { fallback: "" })
+    : formatShortDate(date, { fallback: "" });
 }
 
 function pluraliseDays(count: number): string {

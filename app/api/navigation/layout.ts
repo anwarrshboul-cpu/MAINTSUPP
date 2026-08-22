@@ -94,6 +94,23 @@ export const BUILT_IN_ORDER: ReadonlyArray<{ key: string; group: string }> = [
   { key: "admin-users", group: "group:workspace" },
   { key: "admin-roles", group: "group:workspace" },
   { key: "admin-clients", group: "group:workspace" },
+  /*
+   * The audit trail. Listed here so `GET /api/navigation` knows the section
+   * exists and where it sits; whether a particular person is OFFERED it is a
+   * capability question the browser answers with `audit.read`, in
+   * `navCatalogue`. Membership of the catalogue and the right to see an entry
+   * are deliberately different questions — see the header.
+   */
+  { key: "audit", group: "group:workspace" },
+  /*
+   * The recycle bin, beside the audit trail and for the same reason: both are
+   * what somebody opens when something has gone wrong. Listed here so the
+   * server knows the section exists and where it sits; whether a particular
+   * person is OFFERED it is a capability question the browser answers with
+   * `board.edit`, since a reader who cannot restore or purge has nothing to do
+   * behind the entry.
+   */
+  { key: "recycle-bin", group: "group:workspace" },
 ];
 
 /** Server-side labels, used only when no browser catalogue was supplied. */
@@ -112,6 +129,8 @@ const BUILT_IN_LABELS: Record<string, string> = {
   reports: "Reports",
   settings: "Settings",
   team: "Team",
+  audit: "Audit",
+  "recycle-bin": "Recycle Bin",
 };
 
 /** One thing the product can actually navigate to. Supplied by the renderer. */

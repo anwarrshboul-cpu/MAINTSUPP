@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { PhotoSlot } from "./photo";
+import { ApprovedPhoto } from "./approved-photo";
 
 /**
  * How it works — the seven-stage stepper, ported from the standalone landing
@@ -94,6 +94,20 @@ function wrap(index: number) {
   return (index + COUNT) % COUNT;
 }
 
+/*
+ * Step → file, copied from the "How it works" table in the approved pack's
+ * README. The order here IS the step order, so index 0 is step 1.
+ */
+const WORKFLOW_PHOTOS = [
+  "/assets/workflow/how-it-works-01-report-full.jpg",
+  "/assets/workflow/how-it-works-02-triage-full.webp",
+  "/assets/workflow/how-it-works-03-approve-full.webp",
+  "/assets/workflow/how-it-works-04-assign-full.webp",
+  "/assets/workflow/how-it-works-05-attend-full.webp",
+  "/assets/workflow/how-it-works-06-verify-full.webp",
+  "/assets/workflow/how-it-works-07-reporting-full.webp",
+] as const;
+
 export function Workflow() {
   const [active, setActive] = useState(0);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -154,9 +168,13 @@ export function Workflow() {
   }
 
   const stage = STAGES[active];
-  // Positional, not name-based: stages 1 and 7 are both "Report" and each has
-  // its own photograph.
-  const slot = `workflow-${active + 1}-${stage.name.toLowerCase()}`;
+  /*
+   * The approved v3 workflow photograph for this stage, taken from the pack's
+   * README by STEP NUMBER rather than by name — stages 1 and 7 are both called
+   * "Report" and have different pictures, so a name lookup would put step 1's
+   * photograph under step 7.
+   */
+  const approved = WORKFLOW_PHOTOS[active];
 
   return (
     <section className="section section--tint" id="how">
@@ -209,17 +227,21 @@ export function Workflow() {
           </ul>
           <div>
             <div className="wf__stage" ref={stageRef}>
-              <PhotoSlot
-                // Remount per stage so a retrying image does not carry its
-                // failure state across to the next photograph.
-                key={slot}
-                slot={slot}
-                w={1400}
-                h={600}
-                art="stage"
-                n={active}
+              {/*
+                The approved photograph for this stage. `key` remounts it on a
+                stage change so the browser starts the next picture cleanly
+                rather than showing the previous one until the new one decodes.
+
+                The first stage loads eagerly: it is what is on screen when the
+                section is reached, and lazy-loading the visible image is the
+                one case where the attribute costs more than it saves.
+              */}
+              <ApprovedPhoto
+                key={approved}
+                src={approved}
                 alt={stage.alt}
-                desc={stage.desc}
+                loading={active === 0 ? "eager" : "lazy"}
+                sizes="(min-width: 1100px) 640px, (min-width: 700px) 60vw, 92vw"
                 className="wf__photo"
               />
               <div
@@ -242,7 +264,7 @@ export function Workflow() {
                     <dd>{stage.you}</dd>
                   </div>
                   <div>
-                    <dt>What the system records</dt>
+                    <dt>What we record on your file</dt>
                     <dd>{stage.records}</dd>
                   </div>
                 </dl>

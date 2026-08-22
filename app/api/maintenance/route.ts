@@ -13,6 +13,7 @@ import {
 import {
   activityLog,
   attachments,
+  itemActivity,
   maintenanceRequests,
   sites,
   workspaceSettings,
@@ -66,6 +67,40 @@ function exposeActivity(
     detail,
     createdAt: row.createdAt,
   };
+}
+
+/**
+ * One per-cell change, in the shape the drawer's Activity tab already reads.
+ *
+ * The action is namespaced `column.*` so the renderer can tell a cell edit
+ * apart from a lifecycle event without inspecting the detail, and the column
+ * key and both values travel in `detail` — which is what makes this row worth
+ * showing at all. `actor_name` is a display name rather than an email here, so
+ * it is passed as one and the reader is not asked to interpret it as an
+ * address.
+ */
+function exposeItemActivity(
+  row: typeof itemActivity.$inferSelect,
+): RequestActivityEntry {
+  return {
+    id: row.id,
+    action: row.columnKey ? "column.value_changed" : `item.${row.action}`,
+    actorEmail: null,
+    detail: {
+      actorName: row.actorName,
+      column: row.columnKey,
+      from: row.valueBefore,
+      to: row.valueAfter,
+      board: row.boardId,
+    },
+    createdAt: row.createdAt,
+  };
+}
+
+/** Sortable time for a stamp from either history table. Unreadable sorts last. */
+function activityStamp(value: string) {
+  const parsed = Date.parse(value.includes("T") ? value : value.replace(" ", "T") + "Z");
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 }
 
 function optionalIsoDate(value: unknown) {
@@ -166,22 +201,69 @@ export async function GET(request: Request) {
         return Response.json({ error: "Request not found." }, { status: 404 });
       }
 
-      const activities = await db
-        .select()
-        .from(activityLog)
-        .where(
-          and(
-            eq(activityLog.entityType, "maintenance_request"),
-            eq(activityLog.entityId, requestId),
-            eq(activityLog.organisationId, orgId),
-          ),
-        )
-        .orderBy(desc(activityLog.createdAt))
-        .limit(100);
+      /*
+       * THE JOB'S HISTORY, FROM BOTH PLACES IT IS WRITTEN.
+       *
+       * `activity_log` records what happened to the request — created,
+       * duplicated, archived, moved between groups — and is what this drawer
+       * has always shown. `item_activity` records what happened to its CELLS,
+       * with the column and the value on either side of the change, and is
+       * written by POST/PATCH /api/board/items.
+       *
+       * WHY THEY ARE MERGED HERE RATHER THAN ONE OF THEM RETIRED. A completion
+       * audit found `item_activity` written in one place and read in none, and
+       * offered two ways out: surface it, or stop writing it. It is surfaced,
+       * because it is the only store in this system that carries a per-column
+       * before and after — `activity_log` has no column field at all, and
+       * `audit_events` deliberately records changes to the SYSTEM rather than
+       * to the work. "Priority went from Low to Urgent on Tuesday" was
+       * recorded and unreadable; now it is in the drawer beside everything
+       * else that happened to the job.
+       *
+       * Both are read-only here, both are capped, and the merge is by time so
+       * the tab still answers "what happened, most recent first" — which is the
+       * only question it exists to answer.
+       */
+      const [activities, cellChanges] = await Promise.all([
+        db
+          .select()
+          .from(activityLog)
+          .where(
+            and(
+              eq(activityLog.entityType, "maintenance_request"),
+              eq(activityLog.entityId, requestId),
+              eq(activityLog.organisationId, orgId),
+            ),
+          )
+          .orderBy(desc(activityLog.createdAt))
+          .limit(100),
+        db
+          .select()
+          .from(itemActivity)
+          .where(
+            and(
+              eq(itemActivity.requestId, requestId),
+              eq(itemActivity.organisationId, orgId),
+            ),
+          )
+          .orderBy(desc(itemActivity.createdAt))
+          .limit(100),
+      ]);
+
+      const merged = [
+        ...activities.map(exposeActivity),
+        ...cellChanges.map(exposeItemActivity),
+      ].sort((left, right) =>
+        // Newest first. Both tables store ISO-8601 or SQLite's own
+        // `YYYY-MM-DD HH:MM:SS`; neither sorts against the other lexically, so
+        // the comparison is on parsed time. An unparseable stamp sorts last
+        // rather than to the top, where it would look like the latest event.
+        activityStamp(right.createdAt) - activityStamp(left.createdAt),
+      );
 
       return Response.json({
         request: exposeRequest(row),
-        activities: activities.map(exposeActivity),
+        activities: merged.slice(0, 100),
       });
     }
 

@@ -241,9 +241,19 @@
   margin-top: -4px;
 }
 
+/*
+ * Underlined, not merely coloured.
+ *
+ * A link inside a paragraph that differs from the text around it only by hue is
+ * invisible to a reader who cannot see that hue — WCAG 1.4.1, and axe's
+ * `link-in-text-block`. The underline is offset so it does not cut through
+ * descenders.
+ */
 .account-card a,
 .account-note a {
   color: var(--accent-fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .account-card code,
@@ -342,8 +352,18 @@
   font-weight: 700;
 }
 
-.account-tag--on { background: rgba(18, 180, 168, 0.2); color: #7fe6dd; }
-.account-tag--off { background: rgba(218, 70, 70, 0.16); color: #f0a5a5; }
+/*
+ * The two state pills — "10 recoverable", "6 days left", "expiring".
+ *
+ * They were #7fe6dd and #f0a5a5, which are DARK-THEME inks: pale teal and pale
+ * rose, meant to sit on something dark. This product's surface is #f4f7f8, so
+ * on a 20%-opacity tint of their own hue they measured under 3:1 and axe
+ * reported 20 nodes. The tint is kept — it is what makes the pill read as a
+ * state at a glance — and the ink is taken down to the dark end of the same
+ * hue, which passes AA and still says teal-for-fine and red-for-urgent.
+ */
+.account-tag--on { background: rgba(18, 180, 168, 0.2); color: #0b5049; }
+.account-tag--off { background: rgba(218, 70, 70, 0.16); color: #8a1f1f; }
 
 /* ── Stats, lists, tables, definitions ──────────────────────────────────── */
 
@@ -369,8 +389,18 @@
   letter-spacing: -0.02em;
 }
 
-.account-stats span { color: #8d9aa7; font-size: 11.5px; }
-.account-stats small { color: #6f8894; font-size: 10.5px; }
+/*
+ * The label under each figure, and the note under that.
+ *
+ * #8d9aa7 on the card's own background measured 2.9:1 against a 4.5:1
+ * requirement — axe reported it on 26 nodes. These are the words that say what
+ * the number IS ("in the bin", "expiring this week"), so they are not
+ * decoration that can be allowed to fade. Darkened until they pass; the
+ * hierarchy still reads, because size and weight were doing most of that work
+ * anyway.
+ */
+.account-stats span { color: #566370; font-size: 11.5px; }
+.account-stats small { color: #4f6570; font-size: 10.5px; }
 
 .account-list {
   display: grid;

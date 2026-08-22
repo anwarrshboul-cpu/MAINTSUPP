@@ -864,11 +864,21 @@ export function DateCell({
 
   const openEditor = () => {
     const next = parseBoardDateMetadata(metadataValue ?? value, currentDate);
-    setDraftDate(next.date);
+    /*
+     * The DATE comes from `value` — the field, or the cell on a workspace
+     * column — and the time and marker from the metadata beside it.
+     *
+     * `next.date` would be the same thing on a workspace column, where the
+     * metadata IS the value. On a system column it can be a date left in an old
+     * decoration cell, and opening the picker on a day the board is not showing
+     * is how somebody saves the wrong one. Decorations written from here carry
+     * no date at all; this is what makes the ones written before that harmless.
+     */
+    setDraftDate(currentDate || next.date);
     setDraftTime(next.time);
     setDraftIcon(next.icon);
     setIconPickerOpen(false);
-    setCalendarMonth(boardCalendarMonth(next.date));
+    setCalendarMonth(boardCalendarMonth(currentDate || next.date));
     setOpen(true);
   };
 
@@ -1050,6 +1060,14 @@ export function DateCell({
       <input
         className="sheet-date-input"
         type="date"
+        /*
+         * The column name IS the label. Without it every date box on the board
+         * is an unnamed form control — 36 of them on the jobs board alone, and
+         * axe rates that critical: a screen reader announces "date entry, blank"
+         * thirty-six times with nothing to tell them apart. The mobile branch
+         * above already names itself this way.
+         */
+        aria-label={title}
         value={currentDate}
         onChange={(event) => {
           const date = event.target.value;

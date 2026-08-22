@@ -42,10 +42,16 @@ export const photoWidths: Record<string, number[]> = {
   "trade-doors": [
     480
   ],
+  "trade-drainage": [
+    480
+  ],
   "trade-electrical": [
     480
   ],
   "trade-fabric": [
+    480
+  ],
+  "trade-glazing": [
     480
   ],
   "trade-hvac": [

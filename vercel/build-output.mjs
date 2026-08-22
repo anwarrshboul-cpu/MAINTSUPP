@@ -90,6 +90,34 @@ if (!fs.existsSync(path.join(distServer, "index.js")) || !fs.existsSync(distClie
  * with db/node-workers-env.ts and db/node-r2.ts.
  */
 const serverSource = await fsp.readFile(path.join(distServer, "index.js"), "utf8");
+/*
+ * ASSERT THE ABSENCE, NOT THE PRESENCE.
+ *
+ * This used to look for the string `db/node-workers-env.ts` and conclude the
+ * build was shimmed if it found it — but that string survives an UNSHIMMED
+ * build too, because the doc comment naming the module is bundled either way.
+ * So the guard passed on a build carrying eight live
+ * `import("cloudflare:workers")` calls, and the deployment 5xx'd on login, on
+ * the board, and on the public form while every step before it reported
+ * success.
+ *
+ * The invariant that actually matters is that no live import survives, so that
+ * is what is now counted. Comments are stripped first, because four of the doc
+ * comments explaining the shim quote the very call they replaced — a naive scan
+ * reports a correctly shimmed build as broken.
+ */
+const executableSource = serverSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+const liveWorkerImports = executableSource.match(/import\(\s*["']cloudflare:[a-z]+["']\s*\)/g) ?? [];
+if (liveWorkerImports.length) {
+  console.error(
+    `dist/server/index.js still contains ${liveWorkerImports.length} live ` +
+      "`import(\"cloudflare:…\")` call(s). Node cannot load that scheme, so every\n" +
+      "database call will fail at runtime. Rebuild with:  D1_NODE_SHIM=1 npx vinext build",
+  );
+  process.exit(1);
+}
 if (!serverSource.includes("db/node-workers-env.ts")) {
   console.error(
     "dist/server/index.js was NOT built with D1_NODE_SHIM=1 — it will try to\n" +

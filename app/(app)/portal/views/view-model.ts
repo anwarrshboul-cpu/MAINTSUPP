@@ -226,6 +226,8 @@ export function groupBy(items: BoardItem[], field: string) {
   return buckets;
 }
 
+import { formatDate as sharedFormatDate } from "../../../lib/format-date";
+
 /**
  * Formats a cost. POUNDS, despite what this was called.
  *
@@ -248,14 +250,6 @@ export function formatMoney(pounds: number | null) {
     currency: "GBP",
   }).format(pounds);
 }
-
-const DAY_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-const EN_GB_NUMERIC = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
 
 /**
  * A DD/MM/YYYY date, in the UK convention the rest of the platform uses.
@@ -285,17 +279,12 @@ const EN_GB_NUMERIC = new Intl.DateTimeFormat("en-GB", {
  * cannot reach it. Anything carrying a time keeps the local rendering it had,
  * unchanged. `parseIsoDay` in the calendar takes the same approach for the
  * same reason.
+ *
+ * THAT RULE NOW LIVES IN app/lib/format-date.ts, where every screen shares it.
+ * It was worked out here and then worked out again, separately, in
+ * expiry-status.ts; a completion audit counted nine independent date formatters
+ * across the portal, four of them asking `Intl` for en-US. This is the same
+ * function it always was, in one place, and the export stays so the board's
+ * alternative views need no edit.
  */
-export function formatDate(value: string | null) {
-  if (!value) return "—";
-
-  const dayOnly = DAY_ONLY.exec(value.trim());
-  if (dayOnly) {
-    const [, year, month, day] = dayOnly;
-    return `${day}/${month}/${year}`;
-  }
-
-  const when = new Date(value);
-  if (Number.isNaN(when.getTime())) return "—";
-  return EN_GB_NUMERIC.format(when);
-}
+export const formatDate = sharedFormatDate;

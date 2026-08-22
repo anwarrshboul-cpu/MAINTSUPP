@@ -146,7 +146,16 @@ export function AnalyticsToolbar({
    * control it wants and the layout stays in one place.
    */
   periodControl?: ReactNode;
-  onExport: () => void;
+  /**
+   * Omitted where this screen's export is not on offer.
+   *
+   * The jobs board passes nothing when the server says the reader lacks
+   * `data.export`, and the button is then not drawn at all rather than drawn
+   * disabled — a disabled control with no explanation reads as a fault. The
+   * rule itself is on the route that produces the file; this only decides
+   * whether to offer a button that would be refused.
+   */
+  onExport?: () => void;
   exportLabel?: string;
   children?: ReactNode;
   slotRef?: (node: HTMLDivElement | null) => void;
@@ -189,10 +198,12 @@ export function AnalyticsToolbar({
         up with the pickers instead of forming a box of its own.
       */}
       {slotRef && <div className="analytics-toolbar__slot" ref={slotRef} />}
-      <button type="button" onClick={onExport}>
-        <Icon name="download" size={17} />
-        {exportLabel}
-      </button>
+      {onExport && (
+        <button type="button" onClick={onExport}>
+          <Icon name="download" size={17} />
+          {exportLabel}
+        </button>
+      )}
     </div>
   );
 }

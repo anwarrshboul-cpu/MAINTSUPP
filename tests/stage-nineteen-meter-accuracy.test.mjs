@@ -375,13 +375,23 @@ test("the period window is defined once for the rows and the meters", async () =
 
 test("the board's meters read the rows the board is drawing", async () => {
   const board = await read("app/(app)/portal/live-board.tsx");
-  // `filtered` is the table's own row set — search, priority and assignee
-  // included. `scopedRequests` is portfolio and period only, so reading it left
-  // all six numbers frozen while the filters emptied the table underneath them.
+  /*
+   * `visibleRows` is the table's own row set: `filtered` (search, priority and
+   * assignee) with the structured column filters applied on top — Batch 1A
+   * added the second stage, and the meters have to read the LAST one or they
+   * describe rows the table is not drawing. `scopedRequests` is portfolio and
+   * period only, which is what left all six numbers frozen while the filters
+   * emptied the table underneath them.
+   */
   assert.match(
     board,
-    /computeJobMeters\(filtered, analyticsPeriod, analyticsNow\)/,
-    "the meters must be computed from the filtered rows",
+    /computeJobMeters\(visibleRows, analyticsPeriod, analyticsNow\)/,
+    "the meters must be computed from the rows the grid draws",
+  );
+  assert.match(
+    board,
+    /applyBoardFilter\(filtered, filterState, filterContext\)/,
+    "and those rows must be the filtered ones",
   );
   assert.doesNotMatch(
     board,

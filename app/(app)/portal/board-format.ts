@@ -12,6 +12,11 @@ import type {
 } from "../../lib/types";
 import { dateOnlyValue } from "../../lib/expiry-status";
 import {
+  formatDayMonth,
+  formatMonthYear,
+  formatShortDate,
+} from "../../lib/format-date";
+import {
   type BoardDateIcon,
   type BoardDateMetadata,
   type ColumnKey,
@@ -135,25 +140,22 @@ export function formatMobileBoardDate(
   const date = rawDateInputValue(value);
   if (!date) return "—";
   const metadata = parseBoardDateMetadata(metadataValue, date);
-  const [year, month, day] = date.split("-").map(Number);
-  const label = new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
+  /*
+   * en-GB, through the shared formatter — this asked `Intl` for **en-US**, so
+   * every date cell on the maintenance board read "Nov 24" in a product sold to
+   * UK estates managers while the same day read "24/11/2026" two screens away.
+   * See app/lib/format-date.ts.
+   */
+  const label = formatDayMonth(date);
   return metadata.time ? `${label}, ${formatBoardTime(metadata.time)}` : label;
 }
 
 export function formatFullBoardDate(value: string) {
   const date = rawDateInputValue(value);
+  // "Choose date" rather than a dash: this is the label ON the picker button,
+  // so an empty one is an invitation rather than a missing value.
   if (!date) return "Choose date";
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
+  return formatShortDate(date);
 }
 
 export function todayBoardDate() {
@@ -179,12 +181,11 @@ export function shiftBoardCalendarMonth(value: string, amount: number) {
 }
 
 export function boardCalendarMonthLabel(value: string, yearFirst = false) {
-  const [year, month] = value.split("-").map(Number);
-  const monthLabel = new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
-  return yearFirst ? `${year} ${monthLabel}` : `${monthLabel} ${year}`;
+  const label = formatMonthYear(value);
+  if (!yearFirst) return label;
+  // The mobile sheet puts the year first. Same two words, other way round.
+  const [monthLabel, year] = label.split(" ");
+  return `${year} ${monthLabel}`;
 }
 
 export function boardCalendarDays(value: string, weekStartsOn: 0 | 1) {
@@ -201,6 +202,48 @@ export function boardCalendarDays(value: string, weekStartsOn: 0 | 1) {
       "0",
     )}`;
   });
+}
+
+/**
+ * What a cell sorts BY, which is not always what it shows.
+ *
+ * `customCellDisplay` is for reading; this is for ordering, and the two differ
+ * wherever the display is a label over an underlying order:
+ *
+ *   status / dropdown / people — the choice's POSITION in the column's own
+ *     option list, not its label. The board already defines that order (it is
+ *     the order the options are drawn in, and for Priority it is P1 → P4), and
+ *     sorting alphabetically would put "Low" above "Urgent" and call that
+ *     ascending. Unknown values sort after every known one rather than at
+ *     position 0, which is where a missing lookup would otherwise land them.
+ *   checkbox — false before true, deterministically.
+ *   number — a real number, so 2 comes before 10.
+ *
+ * Everything else falls through to the display string, which for a date is
+ * already the ISO `YYYY-MM-DD` and therefore sorts chronologically on its own.
+ */
+export function customCellSortValue(
+  column: MaintenanceBoardColumn,
+  value: string,
+): string | number {
+  if (!value) return "";
+  if (
+    column.type === "status" ||
+    column.type === "dropdown" ||
+    column.type === "people"
+  ) {
+    const choices = choiceList(column);
+    const index = choices.findIndex(
+      (choice) => choice.id === value || choice.label === value,
+    );
+    return index === -1 ? choices.length : index;
+  }
+  if (column.type === "checkbox") return value === "true" ? 1 : 0;
+  if (column.type === "number") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+  }
+  return customCellDisplay(column, value);
 }
 
 export function customCellDisplay(column: MaintenanceBoardColumn, value: string) {

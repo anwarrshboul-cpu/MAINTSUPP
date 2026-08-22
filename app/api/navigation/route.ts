@@ -17,6 +17,7 @@ import { ensureDatabase } from "../../../db/init";
 import { navigationLayouts, users } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
 import { can, resolvePermissions } from "../../lib/permissions";
+import { auditActor, recordAudit } from "../../lib/audit";
 import { loadWorkspaceSections } from "../workspace-sections/route";
 import { sectionsToCatalogue } from "../workspace-sections/catalogue";
 import {
@@ -307,6 +308,40 @@ async function writeRow(
  *     is rejected with 422 and saves nothing — not partially applied, not
  *     silently corrected.
  */
+/**
+ * Record a change to the WORKSPACE DEFAULT sidebar. Never a personal one.
+ *
+ * The distinction is the whole of the noise/value trade W13-05 asks for. The
+ * workspace default decides what every colleague sees when they sign in and
+ * which items an admin has locked on — that is a structural change to the
+ * product, made by one person, felt by everybody, and it belongs in the trail.
+ * A person rearranging their own sidebar changes nothing anybody else can see,
+ * grants nothing, and would file an event every time somebody dragged an item;
+ * the same split /api/dashboard-layout and /api/workspace-sections/view
+ * already make between the two scopes.
+ */
+async function recordDefaultNavigationChange(
+  context: Awaited<ReturnType<typeof scopedDb>>,
+  request: Request,
+  kind: "saved" | "reset",
+  detail: unknown,
+) {
+  await recordAudit({
+    db: context.db,
+    organisationId: context.orgId,
+    actor: auditActor(context),
+    action: kind === "reset" ? "navigation.default_reset" : "navigation.default_changed",
+    entityType: "navigation_layout",
+    entityId: context.orgId,
+    summary:
+      kind === "reset"
+        ? "Reset the workspace default sidebar to the built-in order."
+        : "Changed the workspace default sidebar layout.",
+    detail,
+    request,
+  });
+}
+
 export async function PUT(request: Request) {
   try {
     await ensureDatabase();
@@ -351,6 +386,7 @@ export async function PUT(request: Request) {
           .delete(navigationLayouts)
           .where(eq(navigationLayouts.id, row.id));
       }
+      if (scope === "workspace" && row) await recordDefaultNavigationChange(context, request, "reset", null);
       return Response.json({ ok: true, scope, reset: true });
     }
 
@@ -391,6 +427,13 @@ export async function PUT(request: Request) {
 
     const existing = scope === "workspace" ? workspace : personal;
     await writeRow(context, userId, existing, items, locked);
+    if (scope === "workspace") {
+      await recordDefaultNavigationChange(context, request, "saved", {
+        items,
+        locked,
+        previous: { items: workspaceItems, locked: storedLocked },
+      });
+    }
     return Response.json({ ok: true, scope, locked });
   } catch (error) {
     const message =

@@ -287,6 +287,16 @@ export const contractors = sqliteTable(
     name: text("name").notNull(),
     email: text("email"),
     phone: text("phone"),
+    /*
+     * The person, as distinct from the company. "Call Apex Electrical" is not
+     * an instruction anybody can follow at 7am with water coming through a
+     * ceiling; "call Dan at Apex" is.
+     */
+    contactName: text("contact_name"),
+    address: text("address"),
+    notes: text("notes"),
+    /** Pence, like every other money column here, so nothing has to round. */
+    dayRatePence: integer("day_rate_pence"),
     serviceCategories: text("service_categories").notNull().default("[]"),
     coverageAreas: text("coverage_areas").notNull().default("[]"),
     certifications: text("certifications").notNull().default("[]"),
@@ -522,6 +532,48 @@ export const leads = sqliteTable(
   ],
 );
 
+/**
+ * An application from the public /contractors page.
+ *
+ * SEPARATE FROM `leads`, and the reason is not tidiness. A lead is a
+ * prospective client and this is a prospective supplier: different people read
+ * them, they are answered differently, and this carries four things a lead has
+ * no column for — whether they hold public liability cover, how long they have
+ * traded, what they are certified for, and a recorded consent. Folding them
+ * together would have meant packing structured answers into `challenge` as
+ * prose and teaching every reader of that column to unpack them again.
+ *
+ * `insured` is the string "Yes" or "No" rather than a boolean because the form
+ * asks a question with two named answers and an unanswered one is refused; a
+ * boolean would make "not stated" indistinguishable from "No".
+ */
+export const contractorApplications = sqliteTable(
+  "contractor_applications",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    company: text("company").notNull(),
+    contactName: text("contact_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone").notNull(),
+    /** JSON array of trades, validated against a fixed list server-side. */
+    trades: text("trades").notNull(),
+    regions: text("regions").notNull(),
+    insured: text("insured").notNull(),
+    yearsTrading: text("years_trading"),
+    certifications: text("certifications"),
+    notes: text("notes"),
+    /** Recorded, because "they agreed" is a claim that needs a row behind it. */
+    consent: integer("consent", { mode: "boolean" }).notNull().default(false),
+    status: text("status").notNull().default("New"),
+    notifiedAt: text("notified_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("contractor_applications_created_idx").on(table.organisationId, table.createdAt),
+  ],
+);
+
 export const maintenanceGroups = sqliteTable(
   "maintenance_groups",
   {
@@ -632,6 +684,25 @@ export const maintenanceBoardColumns = sqliteTable(
     summary: text("summary"),
     optionSetKey: text("option_set_key"),
     description: text("description"),
+    /**
+     * In the recycle bin since this moment, or NULL for a live column.
+     *
+     * The same shape `maintenanceGroups` and `maintenanceRequests` already
+     * carry, and for the same reason: the row and everything hanging off it —
+     * every cell, every file, the type, the width, the position, the pin, the
+     * summary function — stay exactly where they are, and one nullable field
+     * decides whether the board can see them. A column's data is its cells, and
+     * there are thousands of them; no snapshot in `recycle_bin.placement` could
+     * hold those, which is why the earlier answer here was "not recoverable".
+     *
+     * The row also keeps its KEY, which matters: the unique index below is on
+     * (organisation, board, column_key), so a binned column still holds its key
+     * and a new column with the same title is given a suffixed one. That is
+     * what makes a restore thirty days later safe rather than a constraint
+     * violation.
+     */
+    deletedAt: text("deleted_at"),
+    deletedBy: text("deleted_by"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },

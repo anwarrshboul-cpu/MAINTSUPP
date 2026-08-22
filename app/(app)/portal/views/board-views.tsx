@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Icon } from "../../../components";
+import { formatMonthYear } from "../../../lib/format-date";
 import { chipStyle as sharedChipStyle } from "../chip-ink";
 import { maintenanceFormSpec } from "../../../../db/monday-board-spec";
 import { uploadEvidenceFile } from "../../../lib/client-upload";
@@ -168,11 +169,7 @@ export function CalendarView({
 
     return {
       cells: built,
-      monthLabel: new Intl.DateTimeFormat("en-GB", {
-        month: "long",
-        year: "numeric",
-        timeZone: "UTC",
-      }).format(first),
+      monthLabel: formatMonthYear(first, { timeZone: "UTC" }),
     };
   }, [cursor, items, dateField]);
 

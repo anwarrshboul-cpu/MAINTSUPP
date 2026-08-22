@@ -145,6 +145,9 @@ export function systemColumnSortValue(
         ? new Date(request.completedAt).getTime()
         : Number.NEGATIVE_INFINITY;
     case "timeline":
+    // Due Date and Timeline read the same field; only what they draw differs,
+    // so they must order rows identically.
+    case "dueDate":
       return request.dueAt
         ? new Date(request.dueAt).getTime()
         : Number.NEGATIVE_INFINITY;

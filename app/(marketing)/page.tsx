@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 
 /*
- * TEN SECTIONS, IN THIS ORDER, EACH EXACTLY ONCE.
+ * ELEVEN SECTIONS, IN THIS ORDER, EACH EXACTLY ONCE.
+ *
+ * Was ten. The v2 positioning edit moved Report a Job from second to fourth and
+ * added "Who runs Maintsupp" between the case study and the portal — so the
+ * page now argues who it is for, what it covers, and only then asks for the
+ * form, and closes by naming the person accountable before showing the tool.
  *
  * The page was sixteen: hero, proof, process, trades, problem, services, an
  * early CTA band, how it works, portal, packages, calculator, sectors,
@@ -34,6 +39,7 @@ import { Problem } from "./_sections/problem";
 import { Workflow as HowItWorks } from "./_sections/workflow";
 import { Pricing } from "./_sections/pricing";
 import { CaseStudy } from "./_sections/case-study";
+import { Founder } from "./_sections/founder";
 import { Portal } from "./_sections/portal";
 import { FinalCta, TrustStrip } from "./_sections/final-cta";
 
@@ -57,13 +63,19 @@ export default function HomePage() {
   return (
     <main id="top">
       <Hero />
-      <ReportJob />
       <WhoWeHelp />
       <Services />
+      {/* Moved down from second. The fold now opens on who this is for and what
+          it covers, and the eleven-field form is met after the reader has a
+          reason to fill it in. Its #report anchor travels with it, so the nav
+          button and the hero's secondary CTA land on the form in its new
+          position without either of them changing. */}
+      <ReportJob />
       <Problem />
       <HowItWorks />
       <Pricing />
       <CaseStudy />
+      <Founder />
       <Portal />
       {/* Section 10 is the trust strip and the CTA panel — one section of the
           ten, in two components because one is a dark full-bleed band and the

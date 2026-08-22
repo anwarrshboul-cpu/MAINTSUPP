@@ -24,14 +24,19 @@ export const photoAlt: Record<string, string> = {
   "evidence-closeout":
     "An engineer photographing completed work on a phone as close-out evidence",
 
-  /* Six of the eight faults in section 4. `trade-glazing` and `trade-drainage`
-     have no photograph in the repo and draw generated artwork instead, so they
-     have no entry here — the section passes their alt text explicitly. */
+  /* All eight faults in section 4. Glazing and drainage were the last two
+     without a photograph and are supplied now, so they are described here like
+     the rest — `services.tsx` happens to pass its own alt for every tile, but
+     this registry is what guarantees no photograph can reach the page
+     undescribed, and an entry missing from it is a gap waiting for a caller
+     that forgets. */
   "trade-electrical": "An electrician working at a distribution board",
   "trade-doors": "A roller shutter being serviced at a retail unit",
   "trade-leaks": "A plumber tracing a leak in a commercial ceiling void",
   "trade-hvac": "An engineer servicing air conditioning plant",
+  "trade-glazing": "A technician fitting a glass panel into a commercial shopfront",
   "trade-signage": "Illuminated shopfront signage being repaired from an access platform",
+  "trade-drainage": "A technician clearing a blocked floor drain with a drain machine",
   "trade-fabric": "General building fabric repairs under way on a commercial unit",
 
   "workflow-1-report": "A store manager photographing a fault on a phone",

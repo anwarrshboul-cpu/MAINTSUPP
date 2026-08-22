@@ -10,25 +10,45 @@ import { useState } from "react";
  * in-house team costs, which is a persuasion device, not a price.
  *
  * WHAT THE PAGE NOW SAYS: three products, three portfolio bands, and the actual
- * numbers. The band is a toggle rather than three columns of nine figures,
- * because a reader knows how many stores they have and only one row is theirs.
+ * numbers — including on 26+, which used to be a "Custom" card and a button.
  *
- * THE SAVING IS COMPUTED, NOT TYPED. "Most popular — save £20 per store" is
- * true at 1–10 (£65 + £55 = £120 against £100) and at 11–25 (£60 + £50 = £110
- * against £90). Deriving it means the badge cannot come to contradict the cards
- * above it after a price change, and it is why the badge does not appear on the
- * 26+ band at all: there is no number there to subtract.
+ * THE READER GIVES ONE NUMBER. A slider for how many stores they have; the band
+ * follows, the per-store rate follows, and each card shows what that actually
+ * costs them per month. Asking someone to pick a band first asks them to work
+ * out which band 14 stores is in, which is the calculator's job.
+ *
+ * THE SAVING IS COMPUTED, NOT TYPED. "Most popular — save £N per store" is
+ * Coordination + Compliance − Total Care at whatever band is showing: £20 at
+ * 1–10 (65 + 55 − 100), £18 at 11–25 (58 + 48 − 88), £16 at 26+ (52 + 42 − 78).
+ * Deriving it means the badge cannot come to contradict the cards above it
+ * after a price change. The struck-through "was" price is derived the same way,
+ * from the entry band, and only renders once the reader is past it.
  *
  * Every price carries "+ VAT", which is a rule of the brief and not a detail.
  */
 
+/*
+ * The three bands, at the rates the approved pricing reference carries.
+ *
+ * The top band used to hold no numbers — "the answer is a conversation" — and
+ * the middle band was £60/£50/£90. Both are superseded: 26+ is a published
+ * rate now, and the middle band came down to £58/£48/£88, so a reader can size
+ * their own portfolio without booking a call to find out whether they can
+ * afford one.
+ */
 const BANDS = [
-  { id: "small", label: "1–10 stores", coordination: 65, compliance: 55, total: 100 },
-  { id: "mid", label: "11–25 stores", coordination: 60, compliance: 50, total: 90 },
-  /* No numbers on the top band — the answer is a conversation, so the card
-     carries the button instead of a figure. */
-  { id: "large", label: "26+ stores", coordination: null, compliance: null, total: null },
+  { id: "small", label: "1–10 stores", max: 10, coordination: 65, compliance: 55, total: 100 },
+  { id: "mid", label: "11–25 stores", max: 25, coordination: 58, compliance: 48, total: 88 },
+  { id: "large", label: "26+ stores", max: Infinity, coordination: 52, compliance: 42, total: 78 },
 ] as const;
+
+/** The band a portfolio of `count` stores falls in. */
+function bandForCount(count: number) {
+  return BANDS.find((entry) => count <= entry.max) ?? BANDS[BANDS.length - 1];
+}
+
+const SLIDER_MIN = 1;
+const SLIDER_MAX = 40;
 
 type Band = (typeof BANDS)[number];
 
@@ -51,19 +71,20 @@ function Tick() {
   );
 }
 
-/** The price line, or the button that stands in for one. */
-function Price({ amount }: { amount: number | null }) {
-  if (amount === null) {
-    return (
-      <div className="pkg__price pkg__price--custom">
-        <span className="pkg__num">Custom</span>
-        <span className="pkg__per">priced at your portfolio review</span>
-      </div>
-    );
-  }
+/**
+ * The price line. `was` is the same plan's entry-band rate, shown struck
+ * through only once the reader has actually moved past that band — a
+ * "was £65" beside £65 is noise, and beside £52 it is the discount.
+ */
+function Price({ amount, was }: { amount: number; was: number }) {
   return (
     <div className="pkg__price">
       <span className="pkg__num">£{amount}</span>
+      {was > amount && (
+        <s className="pkg__was" aria-label={`Down from £${was} per store`}>
+          £{was}
+        </s>
+      )}
       <span className="pkg__per">
         per store / month
         <br />+ VAT
@@ -128,14 +149,31 @@ const PLANS = [
 ];
 
 export function Pricing() {
-  const [bandId, setBandId] = useState<Band["id"]>("small");
-  const band = BANDS.find((entry) => entry.id === bandId) ?? BANDS[0];
+  /*
+   * The store count is the single input, and the band follows from it.
+   *
+   * Previously the three bands were buttons and the reader picked one, which
+   * asks them to know which band 14 stores lands in. The approved reference
+   * turns it round: a slider for the number they actually have, and the band
+   * lights up on its own. The buttons stay as a keyboard-friendly way to jump
+   * between bands, and setting one moves the slider to that band's low end so
+   * the two controls can never disagree.
+   */
+  const [storeCount, setStoreCount] = useState(8);
+  const band = bandForCount(storeCount);
+  const bandId = band.id;
+  const setBandId = (id: Band["id"]) => {
+    const target = BANDS.find((entry) => entry.id === id) ?? BANDS[0];
+    const index = BANDS.indexOf(target);
+    const low = index === 0 ? SLIDER_MIN : (BANDS[index - 1]!.max as number) + 1;
+    setStoreCount(low);
+  };
 
-  /* Only claimable where both parts have a price. */
-  const saving =
-    band.coordination !== null && band.compliance !== null && band.total !== null
-      ? band.coordination + band.compliance - band.total
-      : null;
+  /* Both parts bought separately, against Total Care — computed, never typed. */
+  const saving = band.coordination + band.compliance - band.total;
+  /* What the same plan costs at the entry band, so a discount can be shown as
+     a discount rather than asserted. */
+  const entryBand = BANDS[0];
 
   return (
     <section className="section section--tint" id="pricing">
@@ -146,6 +184,34 @@ export function Pricing() {
           <p className="lede">
             Contractors invoice you directly at their agreed rates — we never mark up
             trades. You pay one clear coordination fee.
+          </p>
+        </div>
+
+        {/* The calculator: one number in, every price on the section follows. */}
+        <div className="pricing__calc reveal">
+          <div className="pricing__calc-top">
+            <label htmlFor="pricing-store-count">How many stores do you have?</label>
+            <p className="pricing__readout">
+              <strong>{storeCount}</strong>
+              <span>{storeCount === 1 ? "store" : "stores"}</span>
+            </p>
+          </div>
+          <input
+            id="pricing-store-count"
+            className="pricing__slider"
+            type="range"
+            min={SLIDER_MIN}
+            max={SLIDER_MAX}
+            value={storeCount}
+            onChange={(event) => setStoreCount(Number(event.target.value))}
+            aria-describedby="pricing-band-note"
+          />
+          <p id="pricing-band-note" className="pricing__band-note">
+            {band.id === "small"
+              ? `At ${storeCount} ${storeCount === 1 ? "store" : "stores"} you are on the ${band.label} rate.`
+              : `You have unlocked the ${band.label} rate — save £${
+                  entryBand.total - band.total
+                } per store on Total Care.`}
           </p>
         </div>
 
@@ -173,10 +239,10 @@ export function Pricing() {
             const isTotal = plan.key === "total";
             return (
               <article
-                className={`pkg${isTotal && saving !== null ? " is-match" : ""}`}
+                className={`pkg${isTotal ? " is-match" : ""}`}
                 key={plan.key}
               >
-                {isTotal && saving !== null && (
+                {isTotal && (
                   <span className="pkg__flag">Most popular — save £{saving} per store</span>
                 )}
                 <span className="pkg__icon">
@@ -195,7 +261,13 @@ export function Pricing() {
                 </span>
                 <h3>{plan.title}</h3>
                 <p className="pkg__for">{plan.for}</p>
-                <Price amount={amount} />
+                <Price amount={amount} was={entryBand[plan.key]} />
+                {/* What it actually costs this reader, which is the number
+                    they came for. Computed from the same rate above. */}
+                <p className="pkg__total">
+                  ≈ <strong>£{(amount * storeCount).toLocaleString("en-GB")}</strong>
+                  /month for {storeCount} {storeCount === 1 ? "store" : "stores"}
+                </p>
                 <ul className="pkg__list">
                   {plan.points.map((point) => (
                     <li key={point}>
@@ -205,11 +277,6 @@ export function Pricing() {
                   ))}
                 </ul>
                 {plan.footnote && <p className="pkg__setup">{plan.footnote}</p>}
-                {amount === null && (
-                  <a className="btn btn--primary btn--block pkg__cta" href="#review">
-                    Book a Portfolio Review
-                  </a>
-                )}
               </article>
             );
           })}

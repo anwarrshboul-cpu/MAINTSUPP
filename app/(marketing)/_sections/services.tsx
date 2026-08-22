@@ -17,14 +17,17 @@ import { PhotoSlot } from "./photo";
  * `trade-fabric` are the files that were already in the repo, reused as they
  * are — the brief forbids adding or replacing any.
  *
- * TWO OF THE EIGHT LABELS HAVE NO PHOTOGRAPH. There has never been a glazing or
- * a drainage picture in the assets folder, and inventing one is exactly what
- * the brief rules out; putting the refrigeration or CCTV photograph under a
- * "Glazing" label would be worse, because it would be a caption that lies.
- * Those two slots therefore fall through to `PhotoSlot`'s generated artwork,
- * which is the behaviour it was built for and what every slot shows before its
- * photograph loads. Drop a `trade-glazing` / `trade-drainage` file into
- * `public/assets/photos` and each picks it up with no code change.
+ * ALL EIGHT LABELS NOW HAVE A PHOTOGRAPH. Glazing and drainage were the two
+ * that did not — for a long time there was no picture of either in the assets
+ * folder, and inventing one was exactly what the brief ruled out, so both fell
+ * through to `PhotoSlot`'s generated artwork rather than borrowing the
+ * refrigeration or CCTV photograph under a label that would then have lied.
+ *
+ * Both were supplied in the approved pack and installed by
+ * `scripts/install-trade-photos.mjs`, through the same slot convention as the
+ * other six — which is why nothing in this file changed to adopt them. The
+ * fallback stays where it is: it is still what every tile shows before its
+ * photograph decodes.
  */
 
 /** Icon path markup, in the source's raw-string form. */
@@ -93,7 +96,8 @@ const SERVICES = [
  * The eight faults, each pointing at the photograph that actually shows it.
  *
  * `slot` is the file stem in `public/assets/photos`. Where it names a file that
- * is not there — glazing, drainage — the slot draws its artwork instead.
+ * is not there, the slot draws its artwork instead — which is now only the
+ * moment before a photograph decodes, since all eight are supplied.
  */
 const TRADES = [
   { slot: "trade-electrical", label: "Electrical & lighting", glyph: P.bolt, c1: "#F59E0B", c2: "#B45309" },

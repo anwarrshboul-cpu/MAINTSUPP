@@ -163,6 +163,10 @@ type BinEntry = {
 
 type BinPayload = {
   recoverable: boolean;
+  /** Whether this reader may restore. A client may read the bin and not act. */
+  canRestore?: boolean;
+  /** Whether this reader may purge. `data.delete`, which admin lacks by default. */
+  canPurge?: boolean;
   retentionDays: number;
   entries: BinEntry[];
   total: number;
@@ -198,17 +202,40 @@ type TrashPayload = {
 /** How many deletions the screen shows before asking to be expanded. */
 const TRASH_PAGE = 25;
 
-/** What each `entity_type` in the bin is called on screen. */
+/**
+ * What each `entity_type` in the bin is called on screen.
+ *
+ * A kind with no entry here fell back to its raw database value, so a restored
+ * board view read as "board_view" in the one screen whose job is to be legible
+ * under pressure. Every kind `sendToBin` can write has a name here.
+ */
 const BIN_KIND_LABEL: Record<string, string> = {
   job: "Job",
   group: "Board group",
+  board_view: "Board view",
+  column: "Board column",
 };
 
+/**
+ * The recycle bin: what was deleted, what can be brought back, and what is
+ * about to expire.
+ *
+ * IT TAKES A TIME ZONE, NOT AN ACCOUNT.
+ *
+ * The panel used to take the whole `AccountSnapshot` and read one field out of
+ * it. That single field was what confined it to the account area, and being
+ * confined there is why the bin was reported as unreachable: it sat nine items
+ * down a menu behind an avatar, and nothing in the portal linked to it. It is
+ * now mounted twice — here, under the account rail, and as "Recycle Bin" in the
+ * portal sidebar — from one component, over one API, with one retention model.
+ * A second implementation is exactly what must not exist.
+ */
 export function AccountTrashPanel({
-  snapshot,
+  timezone,
   onNotify,
 }: {
-  snapshot: AccountSnapshot;
+  /** For rendering deletion and expiry times. Absent means the browser's own. */
+  timezone?: string;
   onNotify: (message: string) => void;
 }) {
   const [bin, setBin] = useState<BinPayload | null>(null);
@@ -470,7 +497,7 @@ export function AccountTrashPanel({
                           {entry.boardId && <small>{entry.boardId}</small>}
                         </td>
                         <td>{entry.deletedBy ?? "—"}</td>
-                        <td>{formatMoment(entry.deletedAt, snapshot.profile.timezone)}</td>
+                        <td>{formatMoment(entry.deletedAt, timezone)}</td>
                         <td>
                           {/*
                             Days rather than a date, because "4 days left" is the
@@ -480,7 +507,7 @@ export function AccountTrashPanel({
                           */}
                           <span
                             className={`account-tag${entry.daysLeft <= 7 ? " account-tag--off" : " account-tag--on"}`}
-                            title={formatMoment(entry.expiresAt, snapshot.profile.timezone)}
+                            title={formatMoment(entry.expiresAt, timezone)}
                           >
                             {entry.expired
                               ? "Due to be purged"
@@ -488,22 +515,41 @@ export function AccountTrashPanel({
                           </span>
                         </td>
                         <td>
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            disabled={busy !== null}
-                            onClick={() => void restore(entry)}
-                          >
-                            {busy === entry.id ? "Working…" : "Restore"}
-                          </button>{" "}
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            disabled={busy !== null}
-                            onClick={() => void purge(entry)}
-                          >
-                            Delete for good
-                          </button>
+                          {/*
+                            A button that can only answer 403 is worse than no
+                            button: it reads as a fault in the product rather
+                            than as a permission. Restoring needs `board.edit`
+                            and purging needs `data.delete`; the route says
+                            which of them this reader holds.
+                          */}
+                          {bin.canRestore === false && bin.canPurge === false ? (
+                            <span className="account-hint">
+                              Ask an admin to restore this.
+                            </span>
+                          ) : (
+                            <>
+                              {bin.canRestore !== false && (
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  disabled={busy !== null}
+                                  onClick={() => void restore(entry)}
+                                >
+                                  {busy === entry.id ? "Working…" : "Restore"}
+                                </button>
+                              )}{" "}
+                              {bin.canPurge !== false && (
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  disabled={busy !== null}
+                                  onClick={() => void purge(entry)}
+                                >
+                                  Delete for good
+                                </button>
+                              )}
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -615,7 +661,7 @@ export function AccountTrashPanel({
                       : data.deletions.slice(0, TRASH_PAGE)
                     ).map((entry) => (
                       <tr key={`${entry.source}-${entry.id}`}>
-                        <td>{formatMoment(entry.createdAt, snapshot.profile.timezone)}</td>
+                        <td>{formatMoment(entry.createdAt, timezone)}</td>
                         <td>
                           {entry.summary || entry.entityId}
                           <small>{entry.entityType}</small>

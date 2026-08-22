@@ -32,8 +32,178 @@ import {
   dateRangeSummary,
   displayedBoardColumnWidth,
   filledSummary,
+  summaryDate,
 } from "./board-format";
+import { stickyZIndex, type StickyColumn } from "./board-pinning";
 import type { BoardOptionColumn, MaintenanceRequest } from "../../lib/types";
+/**
+ * The stored summary choice, if the column carries one.
+ *
+ * `maintenance_board_columns.summary` has been written and server-validated
+ * since Stage 1 — the seed itself sets "battery" on Status and Priority, "sum"
+ * on Cost of Works and "min"/"max" on the two dates — and the board payload
+ * never returned it, so this strip has always drawn whatever the column's TYPE
+ * or KEY implies and ignored what anybody actually chose.
+ *
+ * The default behaviour below is unchanged and is what runs when no choice is
+ * stored, which is every column on a board nobody has configured. This only
+ * takes over when a choice exists, which is what makes the "Summarise by"
+ * control in the column menu mean something.
+ */
+function numericValues(
+  entry: BoardDisplayColumn,
+  rows: MaintenanceRequest[],
+  customCells: Record<string, string>,
+  customFileCounts: Record<string, number>,
+): number[] {
+  const readOne = (request: MaintenanceRequest): number | null => {
+    if (entry.kind === "custom") {
+      const raw = customCells[customCellKey(request.id, entry.column.id)] ?? "";
+      if (entry.column.type === "files") {
+        return customFileCounts[customCellKey(request.id, entry.column.id)] ?? 0;
+      }
+      const parsed = Number(raw.replaceAll(",", ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    switch (entry.key) {
+      case "cost":
+        return request.cost ?? null;
+      case "tier":
+        return request.tier ?? null;
+      case "files":
+        return request.attachmentCount;
+      case "completedPictures":
+        return request.completedAttachmentCount ?? 0;
+      case "issuePictures":
+        return (
+          request.issueAttachmentCount ??
+          Math.max(
+            request.attachmentCount -
+              (request.completedAttachmentCount ?? 0) -
+              (request.generalAttachmentCount ?? 0),
+            0,
+          )
+        );
+      default:
+        return null;
+    }
+  };
+  return rows
+    .map(readOne)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+}
+
+/** The dates a column holds, as `YYYY-MM-DD`, for min/max over a date column. */
+function dateValues(
+  entry: BoardDisplayColumn,
+  rows: MaintenanceRequest[],
+  customCells: Record<string, string>,
+): string[] {
+  const readOne = (request: MaintenanceRequest): string | null => {
+    if (entry.kind === "custom") {
+      return customCells[customCellKey(request.id, entry.column.id)] ?? null;
+    }
+    switch (entry.key) {
+      case "requested":
+        return request.requestedAt;
+      case "completed":
+        return request.completedAt ?? null;
+      case "nextUpdate":
+        return request.nextUpdateAt ?? null;
+      case "dueDate":
+      case "timeline":
+        return request.dueAt ?? null;
+      default:
+        return null;
+    }
+  };
+  return rows
+    .map(readOne)
+    .map((value) => (value ? summaryDate(value) : ""))
+    .filter(Boolean);
+}
+
+/**
+ * How a number reads in THIS column.
+ *
+ * Cost of Works is money and the default strip has always drawn it as money;
+ * honouring a stored "sum" must not quietly turn £5,545.00 into 5,545. A
+ * workspace `number` column is a quantity and keeps the plain form.
+ */
+function summaryNumber(entry: BoardDisplayColumn, value: number) {
+  const money = entry.kind === "system" && entry.key === "cost";
+  return money
+    ? new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: "GBP",
+        maximumFractionDigits: 2,
+      }).format(value)
+    : compactNumber(value);
+}
+
+/** What the chosen summary prints, or null to fall through to the default. */
+function chosenSummaryText(
+  entry: BoardDisplayColumn,
+  rows: MaintenanceRequest[],
+  customCells: Record<string, string>,
+  customFileCounts: Record<string, number>,
+): string | null {
+  const summary = entry.column.summary;
+  // "battery" is a distribution bar rather than a line of text, and it is what
+  // the default already draws for every option-backed column, so it falls
+  // through rather than being reimplemented here.
+  if (!summary || summary === "battery") return null;
+
+  if (summary === "count") {
+    const filled =
+      entry.kind === "custom"
+        ? rows.filter((request) =>
+            (customCells[customCellKey(request.id, entry.column.id)] ?? "").trim(),
+          ).length
+        : numericValues(entry, rows, customCells, customFileCounts).length ||
+          dateValues(entry, rows, customCells).length;
+    return `${filled} filled`;
+  }
+
+  const dates = dateValues(entry, rows, customCells);
+  if (dates.length && (summary === "min" || summary === "max")) {
+    const sorted = [...dates].sort();
+    return summary === "min"
+      ? `Earliest ${sorted[0]}`
+      : `Latest ${sorted[sorted.length - 1]}`;
+  }
+
+  const numbers = numericValues(entry, rows, customCells, customFileCounts);
+  // A chosen summary with nothing to summarise says so rather than printing a
+  // zero, which would read as a real total of nothing.
+  if (!numbers.length) return "No values";
+
+  const format = (value: number) => summaryNumber(entry, value);
+  switch (summary) {
+    case "sum":
+      return `Total ${format(numbers.reduce((total, value) => total + value, 0))}`;
+    case "average":
+      return `Average ${format(
+        numbers.reduce((total, value) => total + value, 0) / numbers.length,
+      )}`;
+    case "min":
+      return `Lowest ${format(Math.min(...numbers))}`;
+    case "max":
+      return `Highest ${format(Math.max(...numbers))}`;
+    case "median": {
+      const sorted = [...numbers].sort((left, right) => left - right);
+      const middle = Math.floor(sorted.length / 2);
+      const median =
+        sorted.length % 2 === 0
+          ? (sorted[middle - 1] + sorted[middle]) / 2
+          : sorted[middle];
+      return `Median ${format(median)}`;
+    }
+    default:
+      return null;
+  }
+}
+
 export default function BoardColumnSummary({
   entry,
   rows,
@@ -41,6 +211,7 @@ export default function BoardColumnSummary({
   assigneeOptions,
   customCells,
   customFileCounts,
+  sticky,
 }: {
   entry: BoardDisplayColumn;
   rows: MaintenanceRequest[];
@@ -48,6 +219,8 @@ export default function BoardColumnSummary({
   assigneeOptions: Option[];
   customCells: Record<string, string>;
   customFileCounts: Record<string, number>;
+  /** Where this column is frozen, when it is — see board-pinning.ts. */
+  sticky?: StickyColumn;
 }) {
   const column = entry.column;
   const mobile = useContext(MobileBoardContext);
@@ -57,7 +230,27 @@ export default function BoardColumnSummary({
     minWidth: displayedWidth,
     maxWidth: displayedWidth,
   };
-  const className = `sheet-summary-cell sheet-summary-cell--${column.type}`;
+  if (sticky) {
+    style.left = sticky.left;
+    style.zIndex = stickyZIndex(sticky.order, false);
+  }
+  const className =
+    `sheet-summary-cell sheet-summary-cell--${column.type}` +
+    (column.pinned === true ? " is-pinned-column" : "");
+
+  /*
+   * An explicitly chosen summary wins over the one this column's type implies.
+   * Everything below is the default and is what runs when nothing is stored,
+   * which is every column on a board nobody has configured.
+   */
+  const chosen = chosenSummaryText(entry, rows, customCells, customFileCounts);
+  if (chosen !== null) {
+    return (
+      <td className={className} style={style}>
+        <span className="sheet-summary-text">{chosen}</span>
+      </td>
+    );
+  }
 
   if (entry.kind === "custom") {
     const values = rows.map(

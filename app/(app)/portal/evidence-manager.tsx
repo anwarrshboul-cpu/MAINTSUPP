@@ -565,18 +565,19 @@ const OVERFLOW_ROW_HEIGHT = 40;
 const FILE_MENU_WIDTH = 180;
 const FILE_MENU_ESTIMATE = 148;
 /**
- * The strip's geometry, shared with the CSS: 38×28 tiles with a 4px gap, and
- * a 22px "+N" circle plus its gap — measured off the reference screenshots,
- * where a tile is ~1.7× the badge's diameter. monday does not draw a fixed
- * number of thumbnails — it fits as many as the column's width allows and
+ * The strip's geometry, shared with the CSS: 32×24 tiles with a 4px gap, and
+ * a 20px "+N" circle plus its gap — measured off the reference screenshots,
+ * then trimmed once seen on the board, where they sat heavier than monday's.
+ * monday does not draw a fixed number of thumbnails — it fits as many as the
+ * column's width allows and
  * folds the rest into "+N" (three at the default width, which this geometry
  * reproduces on the default 175px photo column). The strip measures itself
  * and applies the same rule, so resizing a photo column refits the tiles
  * live.
  */
-const TILE_WIDTH = 38;
+const TILE_WIDTH = 32;
 const TILE_GAP = 4;
-const BADGE_RESERVE = 26;
+const BADGE_RESERVE = 24;
 
 /*
  * ONE ResizeObserver for every strip on the board. Two photo columns across
@@ -1034,8 +1035,8 @@ export function FileHoverPreview({
                         // Measured: 146 KB of JPEG becomes 1.1 KB of WebP.
                         src={`/api/files/${file.id}?thumb=1`}
                         alt=""
-                        width={38}
-                        height={28}
+                        width={32}
+                        height={24}
                         loading="lazy"
                         decoding="async"
                       />
@@ -1083,8 +1084,16 @@ export function FileHoverPreview({
                 )}
               </>
             ) : (
-              <span className="sheet-file-cell__media-add">
-                <Icon name="plus" size={14} />
+              /*
+                An empty cell is EMPTY, the way monday's is. No dashed box, no
+                standing plus, no "Add" — the column reads as a column of
+                photographs with gaps in it, rather than a column of buttons.
+                The affordance arrives on hover (and stays put on touch, where
+                there is no hover to arrive) — see the CSS for the reveal.
+              */
+              <span className="sheet-file-cell__media-add" aria-hidden="true">
+                <Icon name="plus" size={11} />
+                <Icon name="document" size={13} />
               </span>
             )}
           </span>

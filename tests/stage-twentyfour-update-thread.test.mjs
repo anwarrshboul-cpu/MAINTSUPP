@@ -375,7 +375,21 @@ test("comment times are relative on the card and exact, with the year, on hover"
     panel.indexOf("function exactMoment"),
     panel.indexOf("function exactMoment") + 600,
   );
-  assert.match(exact, /year: "numeric"/, "the year is the whole point on a 2023–2026 archive");
+  /*
+   * The year is the whole point on a 2023–2026 archive. It used to be an
+   * `Intl` option spelled out here; the thread now writes its dates through
+   * app/lib/format-date.ts like every other screen, and `formatLongDate` is the
+   * form that carries the year in words — "24 November 2026". Asserting the
+   * call rather than the option keeps the property and stops this failing on
+   * the next legitimate move of where the option is written.
+   */
+  assert.match(exact, /formatLongDate\(/, "the year is the whole point on a 2023–2026 archive");
+  const shared = await read("app/lib/format-date.ts");
+  assert.match(
+    shared.slice(shared.indexOf("  long:")),
+    /^ {2}long: \{ day: "numeric", month: "long", year: "numeric" \},/m,
+    "and formatLongDate must actually carry it",
+  );
 
   // Both comment call sites — the parent card and the reply card — pair them.
   const pairings = [...panel.matchAll(

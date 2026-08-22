@@ -76,7 +76,24 @@ test("money is formatted from pounds in GBP, not divided", async () => {
 });
 
 test("dates are rendered in UK order", async () => {
-  const source = await read("app/(app)/portal/views/view-model.ts");
+  /*
+   * The rule this pins — en-GB, day before month, and a bare `YYYY-MM-DD` never
+   * passed through `Date` where a zone could shift it — moved to
+   * app/lib/format-date.ts, which every screen now shares. It was worked out
+   * here and then worked out again, separately, in expiry-status.ts; a
+   * completion audit counted nine independent date formatters across the
+   * portal, four of them asking `Intl` for en-US.
+   *
+   * So the assertions follow the code. view-model still exports `formatDate`,
+   * and that it delegates rather than keeping a tenth copy is asserted too.
+   */
+  const source = await read("app/lib/format-date.ts");
+  const views = await read("app/(app)/portal/views/view-model.ts");
+  assert.match(
+    views,
+    /export const formatDate = sharedFormatDate;/,
+    "the board views must not keep a date formatter of their own",
+  );
 
   /*
    * This used to slice the first 400 characters off `formatDate` and look for
@@ -94,10 +111,13 @@ test("dates are rendered in UK order", async () => {
   assert.match(source, /new Intl\.DateTimeFormat\(\s*"en-GB"/);
   assert.match(source, /day: "2-digit"/);
 
-  const formatter = source.slice(source.indexOf("export function formatDate"));
+  // A date-only value is split into three numbers and formatted in UTC, so no
+  // viewer's zone can reach it — the branch that stops "2026-11-24" rendering
+  // as the 23rd for anybody west of Greenwich.
+  const formatter = source.slice(source.indexOf("function render("));
   assert.match(
-    formatter.slice(0, 400),
-    /\$\{day\}\/\$\{month\}\/\$\{year\}/,
+    formatter.slice(0, 700),
+    /Date\.UTC\(Number\(year\), Number\(month\) - 1, Number\(day\)\)/,
     "a YYYY-MM-DD value must render day-first without going through Date",
   );
 });

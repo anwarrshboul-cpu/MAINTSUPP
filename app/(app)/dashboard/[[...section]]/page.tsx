@@ -4,6 +4,17 @@ import PortalApp, { type Section } from "../../portal/portal-app";
 
 export const dynamic = "force-dynamic";
 
+/*
+ * URL segment to section, on the SERVER.
+ *
+ * This is the second copy of a map `portal-app.tsx` also holds as
+ * `sectionRoutes`, and the two must agree: this one decides what a typed URL,
+ * a reload or a shared link resolves to, while that one decides what the
+ * address bar says after a click in the sidebar. A section added to one and
+ * not the other works until somebody reloads, and then quietly lands on
+ * Overview — which is exactly what the recycle bin did on the day it was added.
+ * `tests/column-drag-and-recovery.test.mjs` now holds them level.
+ */
 const routes: Record<string, Section> = {
   overview: "overview",
   jobs: "maintenance",
@@ -18,6 +29,8 @@ const routes: Record<string, Section> = {
   settings: "settings",
   team: "team",
   admin: "admin-users",
+  audit: "audit",
+  "recycle-bin": "recycle-bin",
   "admin/roles": "admin-roles",
   "admin/clients": "admin-clients",
 };

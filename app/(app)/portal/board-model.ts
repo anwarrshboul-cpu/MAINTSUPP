@@ -79,7 +79,13 @@ export type ColumnKey =
   | "storeLocation"
   | "formView"
   | "subitems"
-  | "move";
+  | "move"
+  /*
+   * The job deadline. MAINTSUPP's own column over the canonical
+   * `maintenance_requests.due_at` — see `maintenanceUiColumns` in
+   * db/monday-board-spec.ts for why it is not one of monday's 25.
+   */
+  | "dueDate";
 
 export type ThemePreference = "system" | "light" | "dark";
 
@@ -281,6 +287,7 @@ export const mobileSystemColumnDefaultWidths: Partial<Record<ColumnKey, number>>
   storeLocation: 160,
   formView: 120,
   move: 145,
+  dueDate: 130,
 };
 
 export const fallbackSystemColumns: MaintenanceBoardColumn[] = columnLabels.map(
@@ -293,6 +300,8 @@ export const fallbackSystemColumns: MaintenanceBoardColumn[] = columnLabels.map(
     width: column.width,
     settings: { wrap: false },
     system: true,
+    // Drawn by default; only a saved `visible: false` hides a column.
+    visible: true,
   }),
 );
 

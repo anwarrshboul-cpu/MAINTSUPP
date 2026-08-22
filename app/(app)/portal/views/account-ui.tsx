@@ -11,6 +11,7 @@
 
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "../../../components";
+import { formatShortDateTime } from "../../../lib/format-date";
 
 export function AccountHeading({
   eyebrow,
@@ -167,12 +168,10 @@ export function formatMoment(value: string | null | undefined, timezone?: string
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return value;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: timezone || "Europe/London",
-    }).format(date);
+    return formatShortDateTime(date, { timeZone: timezone || "Europe/London" });
   } catch {
+    // An invalid IANA zone from a stored profile throws inside `Intl`. Falling
+    // back to the ISO stamp is honest about what is known.
     return date.toISOString().slice(0, 16).replace("T", " ");
   }
 }

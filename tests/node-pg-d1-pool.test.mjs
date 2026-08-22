@@ -137,3 +137,34 @@ test("the default pool is 4 on a long-lived host and 2 on Vercel", async () => {
     /max: positiveInteger\(env\["PG_D1_POOL"\], defaultPoolSize\(env\)\)/,
   );
 });
+
+test("an idle connection is given back, so instances stop hoarding the pooler", async () => {
+  /*
+   * `max` bounds what ONE instance holds and says nothing about how many
+   * instances hold that much. postgres.js keeps a socket for the life of the
+   * process by default, and Vercel keeps an instance warm long after its
+   * deployment is superseded — so instances from several deployments
+   * accumulate against one shared pooler until it refuses:
+   *
+   *   PostgresError: (EMAXCONNSESSION) max clients reached in session mode -
+   *   max clients are limited to pool_size: 30
+   *
+   * Observed on the preview after a run of deployments: /api/context answered
+   * 500 on the first request a browser made, with nothing wrong in the code
+   * path it named. The retry above handles a momentary refusal; releasing idle
+   * sockets is what stops the refusals happening.
+   */
+  const source = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../db/node-pg-d1.ts", import.meta.url), "utf8"),
+  );
+  assert.match(
+    source,
+    /idle_timeout: positiveInteger\(env\["PG_D1_IDLE_TIMEOUT"\], 20\)/,
+    "an idle socket must be returned, not held for the life of the instance",
+  );
+  assert.match(
+    source,
+    /max_lifetime: positiveInteger\(env\["PG_D1_MAX_LIFETIME"\], 60 \* 30\)/,
+    "and even a busy one is recycled, so a socket the pooler dropped is not held for ever",
+  );
+});

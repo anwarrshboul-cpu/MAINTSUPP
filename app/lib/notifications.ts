@@ -12,7 +12,14 @@ export type NotificationRequest = {
   /** What happened — used for filtering the log and for per-event preferences. */
   event: string;
   /** What the message is about, so the log can be traced back to a record. */
-  subjectType: "lead" | "job" | "compliance" | "system";
+  /*
+   * "contractor-application" joins the four when the public /contractors page
+   * gained a form. It is not a "lead": a lead is a prospective client and this
+   * is a prospective supplier, they are read by different people, and the
+   * subject id points at a different table. Labelling it "lead" would have made
+   * the notification log lie about what the row is.
+   */
+  subjectType: "lead" | "job" | "compliance" | "system" | "contractor-application";
   subjectId?: string | null;
   to: string;
   subject: string;

@@ -4370,6 +4370,41 @@ a {
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   background: white;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+/*
+ * THE ROW SCROLLS RATHER THAN PUSHING THE PAGE.
+ *
+ * `.live-board-toolbar` is a flex row with the default `nowrap`, so once its
+ * controls are wider than the column they widen the DOCUMENT. block 9 of
+ * brand-overrides.css hit that between 761 and 768px and wrote down what it
+ * meant at the time: "any future control added to that row would have done the
+ * same thing". Batch 1A added two — the sort panel's chevron and Filter — and
+ * the row went 18px past a 1024px viewport.
+ *
+ * The containment the phone already had is therefore extended to every width,
+ * rather than a control being taken away. Where the row already fits, an
+ * `auto` overflow is a no-op.
+ *
+ * THE GUARD IS LOAD-BEARING. A scroll container clips its children, so an open
+ * dropdown would be cut off at the toolbar's own edge. `.board-rules` — the
+ * sort and filter panels — is listed beside `.live-board-menu` for exactly the
+ * reason that rule lists it, and without it the two new panels would have been
+ * clipped on a phone by the rule that was already there.
+ */
+.live-board-toolbar:not(:has(.live-board-menu, .board-rules)) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.live-board-toolbar:has(.live-board-menu, .board-rules) {
+  overflow: visible;
+}
+
+.live-board-toolbar::-webkit-scrollbar {
+  display: none;
 }
 
 .live-board-split {
@@ -6511,6 +6546,13 @@ th.sheet-column--name {
   background: var(--teal-100);
 }
 
+/* A certificate renewal, so it reads as a deadline of a different kind from a
+   job. Theme tokens, not a hard-coded pale ground — see the note above. */
+.calendar-event--renewal {
+  border-color: var(--purple-600);
+  background: var(--purple-100);
+}
+
 .calendar-event strong,
 .calendar-event small {
   overflow: hidden;
@@ -7193,6 +7235,22 @@ th.sheet-column--name {
   background: white;
 }
 
+/*
+ * The summary card at the top of a site / compliance drawer.
+ *
+ * It used to be `--navy-950` with white text — a token that is deliberately
+ * ALWAYS dark, because it belongs to the navigation rail. Inside a white
+ * drawer that is a black rectangle the width of the panel, which is what the
+ * Compliance screenshots caught: the store name and address arriving as a slab
+ * of night in an otherwise light interface.
+ *
+ * A summary block still has to read as distinct from the sections under it,
+ * so it keeps a tinted ground and a border rather than becoming invisible —
+ * but the tint is `--teal-100`, the wash that is redefined per theme
+ * (#dff5f2 light, #123c3a dark) and already carries `--accent-fg` as its ink.
+ * Light mode gets a brand-tinted card; dark mode keeps a dark one, without a
+ * second rule to remember.
+ */
 .site-profile-banner {
   display: grid;
   grid-template-columns: 43px 1fr;
@@ -7200,9 +7258,10 @@ th.sheet-column--name {
   align-items: center;
   min-height: 76px;
   padding: 13px;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--navy-950);
-  color: white;
+  background: var(--teal-100);
+  color: var(--ink);
 }
 
 .site-profile-banner > span {
@@ -7211,8 +7270,8 @@ th.sheet-column--name {
   width: 42px;
   height: 42px;
   border-radius: 10px;
-  background: rgba(18, 181, 170, 0.15);
-  color: #6bd6cc;
+  background: var(--paper);
+  color: var(--accent-fg);
 }
 
 .site-profile-banner > div {
@@ -7226,7 +7285,9 @@ th.sheet-column--name {
 }
 
 .site-profile-banner small {
-  color: #9cb1bd;
+  /* Was #9cb1bd — a grey chosen to sit on the old near-black ground, and
+     1.9:1 against the light card that replaced it. */
+  color: var(--muted);
   font-size: 8px;
   line-height: 1.4;
 }
@@ -10176,6 +10237,24 @@ th.sheet-column--name {
   transform: none;
 }
 
+/*
+ * QUICK SORT on the column header — monday's, and the same control in three
+ * states rather than three controls.
+ *
+ * IDLE on an unsorted column: present but invisible. `opacity` and not
+ * `display`, because the header is a flex row and removing a 22px child on
+ * hover would shift the title and the `...` sideways every time the pointer
+ * crossed a header. Nothing about the header's height or the column's width
+ * depends on this element's visibility.
+ *
+ * HOVER (or keyboard focus anywhere in the header): the neutral up/down glyph
+ * fades in, so the affordance is discoverable without 26 headers advertising
+ * it at once.
+ *
+ * ACTIVE: the arrow stays, in the board's blue, whether or not the pointer is
+ * anywhere near — the one question this control has to answer at a glance is
+ * "which column is this board sorted by, and which way".
+ */
 .column-sort-indicator {
   display: grid;
   width: 22px !important;
@@ -10185,12 +10264,48 @@ th.sheet-column--name {
   padding: 0;
   border: 0;
   border-radius: 50% !important;
+  background: transparent !important;
+  color: var(--muted, #5c6b74) !important;
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+  cursor: pointer;
+}
+
+.custom-column-header:hover .column-sort-indicator,
+.custom-column-header:focus-within .column-sort-indicator,
+.column-sort-indicator:focus-visible {
+  opacity: 1;
+}
+
+.custom-column-header:hover .column-sort-indicator:hover {
+  background: var(--surface-hover, #eef3f5) !important;
+  color: var(--ink, #132537) !important;
+}
+
+/* Sorted: always visible, and unmistakably the active one. */
+.column-sort-indicator.is-active {
+  opacity: 1;
   background: #0073ea !important;
   color: white !important;
 }
 
 .column-sort-indicator svg {
   transform: none !important;
+}
+
+/*
+ * A finger has no hover. Sorting still has to be reachable, and the `...`
+ * menu is the guaranteed path, but leaving the arrow visible on touch costs
+ * nothing and saves a trip through the menu.
+ */
+@media (hover: none) {
+  .column-sort-indicator {
+    opacity: 0.55;
+  }
+
+  .column-sort-indicator.is-active {
+    opacity: 1;
+  }
 }
 
 .custom-column-menu {
@@ -10564,12 +10679,14 @@ th.sheet-column--name {
     -webkit-overflow-scrolling: touch;
   }
 
-  .live-board-toolbar:not(:has(.live-board-menu)) {
+  /* The same pair as the top-level rule, restated here only because this block
+     also changes the toolbar's position and padding. See the note there. */
+  .live-board-toolbar:not(:has(.live-board-menu, .board-rules)) {
     overflow-x: auto;
     overflow-y: hidden;
   }
 
-  .live-board-toolbar:has(.live-board-menu) {
+  .live-board-toolbar:has(.live-board-menu, .board-rules) {
     overflow: visible;
   }
 
@@ -13530,13 +13647,15 @@ body[data-theme="dark"] {
 }
 
 /*
- * monday's cell shows the photographs alone — no count beside them — so once
- * a cell HAS files its textual label steps down to screen readers only. The
- * visually-hidden pattern rather than `display: none`, because the custom
- * file columns do not pass a `columnTitle` and the label is then the
- * button's only accessible name.
+ * monday's cell shows the photographs alone — no count beside them, and no
+ * "Add" on the empty ones — so the textual label steps down to screen readers
+ * only. The visually-hidden pattern rather than `display: none`, because the
+ * custom file columns do not pass a `columnTitle` and the label is then the
+ * button's only accessible name: a sighted person gets the hover affordance
+ * below, a screen-reader user still hears "Add a file to Picture of completed
+ * works".
  */
-.sheet-file-cell.is-monday-media.has-files .sheet-file-cell__label {
+.sheet-file-cell.is-monday-media .sheet-file-cell__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -13559,9 +13678,9 @@ body[data-theme="dark"] {
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-tile {
   position: relative;
   display: grid;
-  width: 38px;
-  height: 28px;
-  flex: 0 0 38px;
+  width: 32px;
+  height: 24px;
+  flex: 0 0 32px;
   place-items: center;
   overflow: hidden;
   border-radius: 4px;
@@ -13602,8 +13721,8 @@ body[data-theme="dark"] {
 .sheet-file-cell.is-monday-media .sheet-file-cell__media > .sheet-file-cell__media-more {
   display: grid;
   place-items: center;
-  min-width: 22px;
-  height: 22px;
+  min-width: 20px;
+  height: 20px;
   padding: 0 4px;
   border: 0;
   border-radius: 999px;
@@ -13618,14 +13737,55 @@ body[data-theme="dark"] {
   background: #4b4b57;
 }
 
+/*
+ * THE EMPTY CELL IS EMPTY.
+ *
+ * It used to carry a dashed box and a plus at rest, on every row with no
+ * photograph — which on a 745-row board is a column of buttons pretending to
+ * be a column of pictures. monday shows nothing until the pointer arrives.
+ *
+ * The affordance is still in the DOM at rest (it is the button's own child, so
+ * removing it would cost a layout on every hover and make the cell twitch); it
+ * is merely invisible and non-interactive until the cell is hovered or
+ * something inside it takes focus. `visibility` rather than `display` keeps the
+ * row height fixed, which is the whole reason the strip does not jump.
+ */
 .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
-  display: grid;
-  width: 22px;
-  height: 26px;
-  place-items: center;
-  border-radius: 3px;
-  border: 1px dashed rgba(120, 140, 155, 0.5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 4px;
   color: var(--muted, #5c6b74);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 90ms ease-out;
+}
+
+.sheet-file-wrap:hover .sheet-file-cell.is-monday-media .sheet-file-cell__media-add,
+.sheet-file-cell.is-monday-media:hover .sheet-file-cell__media-add,
+.sheet-file-cell.is-monday-media:focus-visible .sheet-file-cell__media-add,
+.sheet-file-wrap:focus-within .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sheet-file-cell.is-monday-media:hover .sheet-file-cell__media-add {
+  background: var(--surface-hover, #eef3f5);
+}
+
+/*
+ * Touch has no hover, so the affordance has to stand still there or the cell
+ * becomes a control nobody can find. Same treatment monday gives a phone.
+ */
+@media (hover: none) {
+  .sheet-file-cell.is-monday-media .sheet-file-cell__media-add {
+    opacity: 1;
+    visibility: visible;
+    border: 1px dashed rgba(120, 140, 155, 0.45);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -14019,4 +14179,404 @@ body[data-theme="dark"] {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+/* ── Batch 1A — the board's sort, filter, pin and reorder chrome ─────────────
+ *
+ * Four features that share one 35px header row and one toolbar, so their
+ * styling is kept together rather than scattered among the rules each one
+ * happens to sit beside. Everything here is additive: no existing selector is
+ * redefined, and the Items column's own sticky rules are untouched.
+ */
+
+/* The Sort/Filter split buttons in the toolbar. */
+.live-board-rules-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.live-board-tool--adjacent {
+  min-width: 0;
+  margin-left: -6px;
+  padding: 0 6px;
+}
+
+.live-board-tool.is-active {
+  border-color: #0073ea;
+  background: #eaf3fe;
+  color: #0073ea;
+}
+
+/* How many rules are set, so a collapsed panel still says it is doing something. */
+.live-board-tool__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #0073ea;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+/* ── The panels ──────────────────────────────────────────────────────────── */
+
+.board-rules {
+  position: absolute;
+  z-index: 71;
+  top: calc(100% + 7px);
+  left: 0;
+  display: grid;
+  gap: 10px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 16px 40px rgba(7, 24, 38, 0.18);
+  color: #1f3a4a;
+  font-size: 12px;
+}
+
+.board-rules__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.board-rules__head strong {
+  font-size: 13px;
+}
+
+.board-rules__head > button:last-child {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #61717c;
+}
+
+.board-rules__hint {
+  color: #61717c;
+  font-size: 11px;
+}
+
+.board-rules__join {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.board-rules__join button {
+  padding: 4px 9px;
+  border: 0;
+  background: white;
+  color: #465b68;
+  font-size: 11px;
+}
+
+.board-rules__join button.is-active {
+  background: #0073ea;
+  color: white;
+}
+
+.board-rules__empty {
+  margin: 0;
+  padding: 6px 2px;
+  color: #61717c;
+}
+
+.board-rules__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-rules__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fa;
+}
+
+.board-rules__rank {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #0073ea;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.board-rules__label {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-rules__row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: #465b68;
+  font-size: 11px;
+}
+
+.board-rules__row button:disabled {
+  opacity: 0.4;
+}
+
+/* The two priority arrows are the same glyph; one is turned over. */
+.board-rules__row button[aria-label*="higher sort priority"] svg {
+  transform: rotate(180deg);
+}
+
+.board-rules__row select,
+.board-rules__foot select,
+.board-rules__row input {
+  min-height: 28px;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: inherit;
+  font-size: 11px;
+}
+
+.board-rules__values {
+  display: flex;
+  flex: 1 1 180px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.board-rules__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 11px;
+  background: #e5effa;
+  color: #16436b;
+  font-size: 11px;
+}
+
+.board-rules__chip button {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.board-rules__and {
+  color: #61717c;
+}
+
+.board-rules__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.board-rules__foot label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.board-rules__foot-label {
+  color: #61717c;
+}
+
+.board-rules__clear {
+  margin-left: auto;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: #c83e3e;
+  font-size: 11px;
+}
+
+.board-rules__count {
+  margin: 0;
+  color: #61717c;
+  font-size: 11px;
+}
+
+/* ── Header indicators ───────────────────────────────────────────────────── */
+
+/*
+ * The 1/2/3 badge on a sorted heading. Drawn only when the board carries more
+ * than one rule — see the header component — so an ordinary single sort keeps
+ * the bare arrow it has always had.
+ */
+.column-sort-rank {
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: #0073ea;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 12px;
+}
+
+.column-filter-indicator {
+  display: inline-grid;
+  place-items: center;
+  color: #0073ea;
+}
+
+/*
+ * DRAGGING A COLUMN HEADER.
+ *
+ * The grab area is the CELL. The title inside it is an absolutely positioned
+ * centring overlay with `pointer-events: none` — it cannot take a cursor and it
+ * cannot start a drag, which is exactly why the first attempt at this never
+ * fired. See board-column-drag.ts.
+ *
+ * The three controls that sit on the header keep their own cursors, so the one
+ * thing a person can tell from the pointer is which of the four they are about
+ * to use.
+ */
+.live-sheet thead th[data-column-id] {
+  cursor: grab;
+}
+
+/*
+ * Columns drawn before the snapshot lands are the client-side fallback, and
+ * their ids are invented. They cannot be reordered, so they do not offer to be.
+ */
+.live-sheet.is-syncing thead th[data-column-id] {
+  cursor: progress;
+}
+
+.live-sheet thead th[data-column-id] .column-resize-handle {
+  cursor: col-resize;
+}
+
+.live-sheet thead th[data-column-id] .column-sort-indicator,
+.live-sheet thead th[data-column-id] .custom-column-header__more,
+.live-sheet thead th[data-column-id] .custom-column-menu {
+  cursor: default;
+}
+
+/* The column being carried. Faded, so the board underneath stays readable. */
+.live-sheet th.is-column-dragging {
+  cursor: grabbing;
+  opacity: 0.45;
+}
+
+/*
+ * Where it would land. A 3px rule down the edge of the gap, drawn INSIDE the
+ * cell so it cannot widen the table and set off a horizontal scroll of its own.
+ */
+.live-sheet th.is-column-drop-before {
+  box-shadow: inset 3px 0 0 #0073ea;
+}
+
+.live-sheet th.is-column-drop-after {
+  box-shadow: inset -3px 0 0 #0073ea;
+}
+
+/*
+ * While a drag is running the whole board takes the grabbing cursor and stops
+ * selecting text. Both are on `body` because the pointer is captured by one
+ * cell and may be anywhere on screen.
+ */
+body.is-dragging-board-column,
+body.is-dragging-board-column .live-sheet th {
+  cursor: grabbing;
+}
+
+body.is-dragging-board-column {
+  user-select: none;
+}
+
+/* ── Frozen columns ──────────────────────────────────────────────────────── */
+
+/*
+ * A pinned cell has to be OPAQUE, because the rows it covers scroll underneath
+ * it. In dark mode `.live-sheet td` and `.live-sheet th` already carry an
+ * explicit background (brand-overrides.css), so only the light palette needs
+ * saying here. The `left` and `z-index` come from the element's inline style —
+ * they are the running width of everything frozen ahead, which is data. See
+ * board-pinning.ts.
+ */
+.live-sheet td.is-pinned-column,
+.live-sheet th.is-pinned-column,
+.sheet-summary-cell.is-pinned-column {
+  position: sticky;
+  background: white;
+  box-shadow: 1px 0 0 rgba(7, 24, 38, 0.08);
+}
+
+.live-sheet th.is-pinned-column,
+.sheet-summary-cell.is-pinned-column {
+  background: #f7f9fa;
+}
+
+.live-sheet tbody tr:hover td.is-pinned-column {
+  background: #eef6fc;
+}
+
+.live-sheet tbody tr.is-selected td.is-pinned-column {
+  background: #d9edff;
+}
+
+@media (max-width: 760px) {
+  /*
+   * NOTHING IS FROZEN ON A PHONE, and that is deliberate rather than an
+   * oversight. The stylesheet already unsticks the checkbox gutter and the
+   * Items column below 760px — two frozen columns on a 390px screen leave
+   * nothing to scroll — so a pinned column follows the same rule. The pin is
+   * remembered and applies again on a wider screen.
+   */
+  .live-sheet td.is-pinned-column,
+  .live-sheet th.is-pinned-column,
+  .sheet-summary-cell.is-pinned-column {
+    position: relative !important;
+    left: auto !important;
+    z-index: auto !important;
+    box-shadow: none;
+  }
+
+  .board-rules {
+    left: auto;
+    right: 0;
+    width: min(420px, calc(100vw - 24px));
+  }
+
+  .board-rules__row {
+    align-items: stretch;
+  }
 }
