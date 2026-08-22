@@ -178,6 +178,26 @@ test("the board says so when the frozen rule overrides the gesture", () => {
   assert.match(board, /withFrozenColumnsLeading\(/, "and the rule is applied");
 });
 
+test("freezing a column moves it, because a gap in the run cannot be drawn", () => {
+  /*
+   * The drag was not the only way into an illegal arrangement. Freezing a
+   * column in the middle of the board left the sticky offsets on columns 0 and
+   * 2 with column 1 underneath the second of them — measured on the Preview.
+   * Pinning ends in the same rule the drag does.
+   */
+  const pin = board.slice(
+    board.indexOf("const toggleColumnPinned"),
+    board.indexOf("const setColumnSummary"),
+  );
+  assert.match(pin, /withFrozenColumnsLeading\(/, "the rule is applied on pin");
+  assert.match(pin, /await applyColumnOrder\(requested\)/, "and the order is saved");
+  assert.match(
+    pin,
+    /if \(moved\)/,
+    "only when it actually changes something — unfreezing leaves the column alone",
+  );
+});
+
 /* ── The drop indicator ──────────────────────────────────────────────────── */
 
 test("the indicator names the header it would land before", () => {

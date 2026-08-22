@@ -1915,6 +1915,22 @@ export function LiveMaintenanceBoard({
    * the failure puts it back, because a column that looks pinned and is not is
    * worse than one that refused to pin.
    */
+  /**
+   * Freeze or unfreeze a column — which MOVES it, because it has to.
+   *
+   * A frozen column is drawn against the left edge while the rest of the board
+   * scrolls underneath. Freezing one in the middle of the board and leaving it
+   * there produces a frozen set that is not contiguous, and there is no
+   * arrangement of offsets that draws that correctly: the frozen column is
+   * painted at the left edge on top of whatever has scrolled beneath it, and
+   * the columns between vanish behind it. Measured on the Preview before this
+   * was fixed — freezing the third column left sticky offsets on columns 0 and
+   * 2, with column 1 underneath the second of them.
+   *
+   * The drag already ends in `withFrozenColumnsLeading` for exactly this
+   * reason. Pinning is the other way into the same illegal arrangement, so it
+   * ends there too: the flag is written, then the order that flag implies.
+   */
   const toggleColumnPinned = async (entry: BoardDisplayColumn) => {
     const next = entry.column.pinned !== true;
     setColumnMenuInstance(null);
@@ -1931,6 +1947,26 @@ export function LiveMaintenanceBoard({
           ? `${entry.column.title} is frozen to the left.`
           : `${entry.column.title} scrolls with the board again.`,
       );
+
+      /*
+       * The order the new flag implies. Computed from the columns as they are
+       * about to be rather than from state, which has only just been asked to
+       * change and has not re-rendered yet.
+       */
+      const requested = withFrozenColumnsLeading(
+        visibleBoardColumns.map((item) =>
+          item.column.id === entry.column.id
+            ? ({ ...item, column: { ...item.column, pinned: next } } as BoardDisplayColumn)
+            : item,
+        ),
+      );
+      const moved = requested.some(
+        (item, index) => item.column.id !== visibleBoardColumns[index]?.column.id,
+      );
+      // Unfreezing leaves the column where it is: the run is still contiguous
+      // without it, and a column that jumps back across the board when it is
+      // released is not what anybody asked for.
+      if (moved) await applyColumnOrder(requested);
     } catch (error) {
       if (entry.column.system) setSystemColumns(apply(!next));
       else setCustomColumns(apply(!next));
