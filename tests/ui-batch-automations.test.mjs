@@ -303,3 +303,32 @@ test("the time-based sweep says how it runs, and dedupes by day", async () => {
   const route = await read("app/api/automations/route.ts");
   assert.match(route, /sweepTimeBasedRules\(automationContext\(scope, request\)\)/, "opening the board is what runs the sweep");
 });
+
+test("a write that fires a rule answers with the row the rule left behind, not the caller's own", async () => {
+  /*
+   * The board applies the PATCH response over its optimistic cell. When a rule
+   * writes the same row again — "when status changes, change status to X" — the
+   * row returned by the caller's own `.returning()` is already out of date, and
+   * answering with it makes the grid show the pre-automation value until the
+   * page is reloaded. Observed on the Vercel Preview: 30s after the rule wrote
+   * "Job Scheduled" the grid still read "Pending Scheduling".
+   */
+  const route = await read("app/api/maintenance/route.ts");
+  const patch = route.slice(route.indexOf("export async function PATCH"));
+  assert.match(
+    patch,
+    /const ran = await dispatchAutomationEvents\(/,
+    "the PATCH must keep the number of rules that ran",
+  );
+  assert.match(
+    patch,
+    /if \(ran > 0\) \{[\s\S]{0,600}?\.from\(maintenanceRequests\)/,
+    "when a rule ran, the row is read again before it is returned",
+  );
+  assert.match(patch, /return Response\.json\(\{ request: exposeRequest\(latest\) \}\)/);
+  assert.doesNotMatch(
+    patch,
+    /await dispatchAutomationEvents\([\s\S]{0,400}?\);\s*\}\s*return Response\.json\(\{ request: exposeRequest\(updated\) \}\)/,
+    "the stale row must not be the answer",
+  );
+});

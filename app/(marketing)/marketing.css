@@ -1032,10 +1032,22 @@ fieldset.field:focus{outline:none}
    the calculator card grew by a line the moment 11–25 or 26+ was pressed and
    the band buttons moved 21px down under the thumb that had just pressed them
    (measured in WebKit on an iPhone 14 descriptor: 390px and 430px both +21px,
-   320px +24px). */
+   320px +24px).
+
+   Both breakpoints came from those two measurements and both sat one step too
+   low; a 320-800px sweep in both engines found the row still moving +21px in
+   two windows, because what a band note actually needs is three lines to 384px,
+   two lines to 722px, and one above that:
+
+     361-384px  reserved two lines, needed three  — 375px is iPhone SE 2/3,
+                6/7/8, X/XS and 13 mini, the phone the report came from
+     701-722px  reserved one line, needed two     — tablet portrait, split view
+
+   0px at every other width from 320 to 800. Reserve by what the longest note
+   wraps to at that width, not by what it wraps to at 390. */
 .pricing__band-note{margin:0;font-size:.82rem;color:var(--slate);min-height:1.6em;line-height:1.6}
-@media (max-width:700px){.pricing__band-note{min-height:3.2em}}
-@media (max-width:360px){.pricing__band-note{min-height:4.8em}}
+@media (max-width:722px){.pricing__band-note{min-height:3.2em}}
+@media (max-width:384px){.pricing__band-note{min-height:4.8em}}
 /* A horizontal drag must reach the slider; vertical swipes still scroll. */
 .pricing__slider{touch-action:pan-y}
 

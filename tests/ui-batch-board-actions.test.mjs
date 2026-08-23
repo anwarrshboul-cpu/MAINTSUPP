@@ -104,6 +104,24 @@ test("every board option is wired to a real destination or disabled with a reaso
   assert.match(panels, /key: "archive"/);
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(portal, /params\.get\("manage"\) !== "import"/, "?manage=import opens the importer");
+  /*
+   * Notifications has two routes to one panel, and firing both in one tick
+   * cancels itself: the listener sets the state true, the top-bar button
+   * TOGGLES it, and React applies both against the same state — so the panel
+   * opened and shut again and the menu item appeared to do nothing. The
+   * button press must be deferred and conditional on the panel still being
+   * shut, which `aria-expanded` reports.
+   */
+  assert.match(portal, /addEventListener\("maintsupp:open-notifications"/, "the portal listens for the event");
+  assert.match(portal, /setNotificationsOpen\(\(open\) => !open\)/, "the top-bar button toggles, so the click cannot be unconditional");
+  const opener = menu.slice(menu.indexOf("function openNotifications"), menu.indexOf("function toggleFullscreen"));
+  assert.match(opener, /dispatchEvent\(new Event\("maintsupp:open-notifications"\)\)/, "the event is still the first route");
+  assert.match(opener, /aria-expanded/, "the button press is guarded by the panel's own state");
+  assert.doesNotMatch(
+    opener,
+    /\n\s*button\.click\(\);\n\s*return true;/,
+    "the button must not be pressed in the same tick as the event — that cancels the open",
+  );
   // Nothing invented.
   // The doc comment names what was left out; no ITEM may carry those labels.
   const labels = (menu.match(/label: "[^"]+"/g) ?? []).join("\n");

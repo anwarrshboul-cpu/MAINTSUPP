@@ -806,14 +806,40 @@ export async function PATCH(request: Request) {
 
     // Every board column that moved is one event; a rule reads them by the
     // board's own column keys. Told after the write, never before.
+    let latest = updated;
     if (stage || fields) {
-      await dispatchAutomationEvents(
+      const ran = await dispatchAutomationEvents(
         automationContext(guard.scope, request),
         requestFieldEvents("maintenance", before, updated),
       );
+      /*
+       * A rule may have written this same row again — "when status changes,
+       * change status to X" is the ordinary case, and every Change status /
+       * Set date / Move to group action does it too.
+       *
+       * `updated` is what the CALLER's own write returned, so answering with
+       * it hands the board a value the database no longer holds: the grid
+       * applies the response over its optimistic cell and goes on showing the
+       * pre-automation value until somebody reloads. Re-read the row instead —
+       * but only when a rule actually ran, so the ordinary edit still costs
+       * one query.
+       */
+      if (ran > 0) {
+        const [after] = await db
+          .select()
+          .from(maintenanceRequests)
+          .where(
+            and(
+              eq(maintenanceRequests.id, id),
+              eq(maintenanceRequests.organisationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (after) latest = after;
+      }
     }
 
-    return Response.json({ request: exposeRequest(updated) });
+    return Response.json({ request: exposeRequest(latest) });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);

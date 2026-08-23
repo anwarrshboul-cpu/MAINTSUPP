@@ -2428,6 +2428,7 @@ export function LiveMaintenanceBoard({
       });
       const payload = (await response.json()) as {
         cell?: MaintenanceBoardCell;
+        automationsRan?: number;
         error?: string;
       };
       if (!response.ok || !payload.cell) {
@@ -2437,6 +2438,15 @@ export function LiveMaintenanceBoard({
         ...current,
         [key]: payload.cell!.value,
       }));
+      /*
+       * An automation fired on this edit, so cells this response does not name
+       * may have changed too. Refetch rather than keep values the database no
+       * longer holds — the board showed the pre-automation value until a manual
+       * reload otherwise.
+       */
+      if (payload.automationsRan) {
+        window.dispatchEvent(new Event("maintsupp:refresh-board"));
+      }
     } catch (error) {
       setCustomCells((current) => ({ ...current, [key]: before }));
       onNotify(

@@ -164,15 +164,25 @@ test("the pricing band buttons do not move under the thumb that pressed them", a
    * slider and the prices in both Chromium and WebKit. What moved was the
    * row itself — the note above it is one line on 1–10 and two lines on the
    * other two bands, so the card grew by a line the moment 11–25 or 26+ was
-   * pressed (+21px at 390 and 430, measured). Two lines are reserved now,
-   * three below 360, and the note reads the same shape for every band.
+   * pressed (+21px at 390 and 430, measured). The note reads the same shape
+   * for every band now, and the room it takes is reserved.
+   *
+   * 722 and 384, not 700 and 360: both breakpoints were set from those two
+   * measurements alone, and a 320-800px sweep in both engines against the
+   * preview found the row still moving +21px wherever the reservation was a
+   * line short of what the longest note actually wraps to — 361-384px (which
+   * includes 375px: iPhone SE 2/3, 6/7/8, X/XS and 13 mini, the phone the
+   * report came from) and 701-722px (tablet portrait). Three lines to 384,
+   * two to 722, one above.
    */
   const css = await read("app/(marketing)/marketing.css");
   /* 3.2em is two lines at the note's line-height of 1.6 — not 2.4em, which
      is two lines of glyphs and not two lines of text. */
   assert.match(css, /\.pricing__band-note\{[^}]*line-height:1\.6\}/);
-  assert.match(css, /@media \(max-width:700px\)\{\.pricing__band-note\{min-height:3\.2em\}\}/);
-  assert.match(css, /@media \(max-width:360px\)\{\.pricing__band-note\{min-height:4\.8em\}\}/);
+  assert.match(css, /@media \(max-width:722px\)\{\.pricing__band-note\{min-height:3\.2em\}\}/);
+  /* 384, not 360 — the widths in between are where the note takes a third
+     line, and they are the common iPhone widths. */
+  assert.match(css, /@media \(max-width:384px\)\{\.pricing__band-note\{min-height:4\.8em\}\}/);
   assert.match(css, /\.switcher button\{touch-action:manipulation\}/, "a tap is a tap, not half a double-tap");
 
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");

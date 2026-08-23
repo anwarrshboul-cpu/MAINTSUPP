@@ -2429,6 +2429,7 @@ export async function PATCH(request: Request) {
       // One writer for cells — `setBoardCell` — shared with the automation
       // engine, which needs the previous value so the change can be named.
       const { before, after } = await setBoardCell(db, orgId, boardId, requestId, columnId, value);
+      let ran = 0;
       if (!column.system) {
         const event = cellChangedEvent(
           boardId,
@@ -2440,10 +2441,24 @@ export async function PATCH(request: Request) {
           after,
         );
         if (event) {
-          await dispatchAutomationEvents(automationContext(guard.scope, request), [event]);
+          ran = await dispatchAutomationEvents(
+            automationContext(guard.scope, request),
+            [event],
+          );
         }
       }
-      return Response.json({ cell: { requestId, columnId, value: after } });
+      /*
+       * `after` is the value THIS request wrote. A rule that ran because of it
+       * may have written other cells on the same row — Change status, Set date,
+       * Move to group all do — and the board cannot know which from a response
+       * that names one cell. So say that rules ran and let the grid refetch;
+       * an ordinary edit, which is nearly every edit, still says nothing extra
+       * and costs nothing. See the same treatment in /api/maintenance PATCH.
+       */
+      return Response.json({
+        cell: { requestId, columnId, value: after },
+        ...(ran > 0 ? { automationsRan: ran } : {}),
+      });
     }
 
     if (action === "update_column") {

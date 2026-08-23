@@ -63,17 +63,27 @@ async function exportWholeBoard(boardId: string) {
  *
  * The panel and its button live in `portal-app.tsx`, which this batch does
  * not edit, so two routes are taken: a `maintsupp:open-notifications` event
- * for the listener the integration request adds, and — so the item works
- * today — a press on the top bar's own Notifications button, found by the
- * accessible name it already carries.
+ * for the listener that file carries, and — for any screen that has the
+ * button but not the listener — a press on the top bar's own Notifications
+ * button, found by the accessible name it already carries.
+ *
+ * THE TWO ROUTES MUST NOT BOTH RUN. The listener does `setOpen(true)`; the
+ * button's own handler TOGGLES (`setOpen((open) => !open)`). Fired in the
+ * same tick, React applies them in order against one state — true, then
+ * !true — and the panel is opened and shut again in a single batch, which
+ * is exactly the "the item does nothing" defect this replaces. So the event
+ * goes first, and the button is pressed on the NEXT macrotask only if the
+ * panel is still shut, which `aria-expanded` reports honestly.
  */
 function openNotifications(): boolean {
-  window.dispatchEvent(new Event("maintsupp:open-notifications"));
   const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button[aria-label]")).find((node) =>
     /^Notifications\b/.test(node.getAttribute("aria-label") ?? ""),
   );
+  window.dispatchEvent(new Event("maintsupp:open-notifications"));
   if (!button) return false;
-  button.click();
+  window.setTimeout(() => {
+    if (button.getAttribute("aria-expanded") !== "true") button.click();
+  }, 0);
   return true;
 }
 

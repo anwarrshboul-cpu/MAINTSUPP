@@ -467,8 +467,12 @@ export async function PATCH(request: Request) {
         existing?.value ?? "",
         value,
       );
-      if (event) await dispatchAutomationEvents(automationContext(guard.scope, request), [event]);
-      return Response.json({ ok: true, value });
+      // Rules may have written cells this request never named — see the note
+      // on the same response in /api/board's update_cell.
+      const ran = event
+        ? await dispatchAutomationEvents(automationContext(guard.scope, request), [event])
+        : 0;
+      return Response.json({ ok: true, value, ...(ran > 0 ? { automationsRan: ran } : {}) });
     }
 
     // O7 — move items between or within groups.
