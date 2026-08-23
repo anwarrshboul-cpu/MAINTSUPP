@@ -58,8 +58,6 @@ import { JobsMeterToggle, useCollapsingMeters } from "./jobs-meter-strip";
 
 import {
   type BoardDisplayColumn,
-  type BoardDragItem,
-  type BoardDropTarget,
   type BoardResponse,
   type ColumnKey,
   type CompactBoardResponse,
@@ -79,6 +77,14 @@ import {
   moveBoardItemPlacement,
   systemColumnSortValue,
 } from "./board-ordering";
+import { useBoardRowDrag } from "./board-row-drag-gesture";
+/*
+ * The phone's layout preference is VERSIONED, and the reader that knows why
+ * lives in its own file — an unversioned stored "cards" outlived the default it
+ * was chosen against and kept opening Jobs on the cards. Read that file's
+ * header before touching either call below.
+ */
+import { readMobileLayout, writeMobileLayout } from "./board-mobile-layout";
 import {
   customCellKey,
   choiceList,
@@ -165,26 +171,6 @@ const COLLAPSED_COLUMN_WIDTH = 44;
 function boardUrl(path: string, boardId: string) {
   if (boardId === "maintenance") return path;
   return `${path}${path.includes("?") ? "&" : "?"}board=${encodeURIComponent(boardId)}`;
-}
-
-/**
- * The layout this board was last read in on a phone. A stored choice wins;
- * otherwise the Jobs board opens on the TABLE (the owner's ask) and every
- * other board keeps the cards a 390px screen was given in Stage 23.
- */
-function readMobileLayout(boardId: string): {
-  boardId: string;
-  layout: "cards" | "grid";
-} {
-  try {
-    const stored = window.localStorage.getItem(
-      `maintsupp:board:${boardId}:mobile-layout`,
-    );
-    if (stored === "cards" || stored === "grid") return { boardId, layout: stored };
-  } catch {
-    // Private browsing, or storage disabled.
-  }
-  return { boardId, layout: boardId === "maintenance" ? "grid" : "cards" };
 }
 
 /** The anchor a group the memo never saw gets: nothing to measure against. */
@@ -298,11 +284,7 @@ export function LiveMaintenanceBoard({
   const chooseMobileLayout = useCallback(
     (layout: "cards" | "grid") => {
       setLayoutFor({ boardId, layout });
-      try {
-        window.localStorage.setItem(`maintsupp:board:${boardId}:mobile-layout`, layout);
-      } catch {
-        // A preference that cannot be saved is still a preference for now.
-      }
+      writeMobileLayout(boardId, layout);
     },
     [boardId],
   );
@@ -391,24 +373,6 @@ export function LiveMaintenanceBoard({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingBoard, setLoadingBoard] = useState(true);
-  const [draggingRequestId, setDraggingRequestId] = useState<string | null>(
-    null,
-  );
-  const [dropTarget, setDropTarget] = useState<BoardDropTarget | null>(null);
-  const dragItemRef = useRef<BoardDragItem | null>(null);
-  const dropTargetRef = useRef<BoardDropTarget | null>(null);
-  const pointerDragRef = useRef<{
-    pointerId: number;
-    pointerType: string;
-    startX: number;
-    startY: number;
-    clientX: number;
-    clientY: number;
-    active: boolean;
-    holdTimer: number | null;
-    element: HTMLTableRowElement;
-    item: BoardDragItem;
-  } | null>(null);
 
   /*
    * The board no longer keeps its own theme.
@@ -1938,6 +1902,29 @@ export function LiveMaintenanceBoard({
     [visibleBoardColumns, isMobile],
   );
 
+  /*
+   * THE ADD-ITEM ROW WAS THE ONE ROW NOBODY GAVE THE FROZEN OFFSETS TO.
+   *
+   * The header, the body cells and the summary cells are all handed
+   * `stickyOffsets.get(column.id)`. The "+ Add item" cell at the foot of every
+   * group never was, and got away with it because `.sheet-column--name` hard-
+   * codes `left: 72px` — which is exactly what `stickyColumnOffsets` computes
+   * for Items when Items is the first frozen column, so the two agreed by
+   * coincidence. Pin a column, or drag a pinned column ahead of Items, and the
+   * coincidence ends: the rest of the frozen edge moves to its new offset and
+   * the last row of every group stays behind at 72, so the bottom of each
+   * group visibly detaches from the column above it partway through a scroll.
+   */
+  const stickyCellStyle = (columnId: string): CSSProperties => {
+    const sticky = stickyOffsets.get(columnId);
+    if (!sticky) return {};
+    return {
+      position: "sticky",
+      left: sticky.left,
+      zIndex: stickyZIndex(sticky.order, false),
+    };
+  };
+
   /**
    * Freeze a column against the left edge, or release it.
    *
@@ -2890,220 +2877,34 @@ export function LiveMaintenanceBoard({
     }
   };
 
-  const setBoardDropTarget = (target: BoardDropTarget | null) => {
-    dropTargetRef.current = target;
-    setDropTarget((current) =>
-      current?.groupId === target?.groupId &&
-      current?.beforeRequestId === target?.beforeRequestId
-        ? current
-        : target,
-    );
-  };
-
-  const clearBoardDrag = () => {
-    const pointer = pointerDragRef.current;
-    if (pointer && pointer.holdTimer !== null) {
-      window.clearTimeout(pointer.holdTimer);
-    }
-    if (pointer?.element.hasPointerCapture(pointer.pointerId)) {
-      pointer.element.releasePointerCapture(pointer.pointerId);
-    }
-    dragItemRef.current = null;
-    pointerDragRef.current = null;
-    setDraggingRequestId(null);
-    setBoardDropTarget(null);
-  };
-
-  const startBoardDrag = (item: BoardDragItem) => {
-    dragItemRef.current = item;
-    setDraggingRequestId(item.request.id);
-    setBoardDropTarget(null);
-    setRowMenuId(null);
-    setGroupMenuId(null);
-    setColumnMenuInstance(null);
-    setColumnPickerGroupId(null);
-  };
-
-  const resolveBoardDropTarget = (
-    clientX: number,
-    clientY: number,
-    fallbackGroupId?: string,
-  ) => {
-    const element = document.elementFromPoint(clientX, clientY);
-    const row = element?.closest<HTMLElement>("[data-board-row-id]");
-    const group = element?.closest<HTMLElement>("[data-board-group-id]");
-    const groupId =
-      row?.dataset.boardRowGroupId ??
-      group?.dataset.boardGroupId ??
-      fallbackGroupId ??
-      null;
-    if (!groupId) {
-      setBoardDropTarget(null);
-      return;
-    }
-
-    let beforeRequestId: string | null = null;
-    if (row?.dataset.boardRowId) {
-      const rect = row.getBoundingClientRect();
-      if (clientY <= rect.top + rect.height / 2) {
-        beforeRequestId = row.dataset.boardRowId;
-      } else {
-        let sibling = row.nextElementSibling;
-        while (
-          sibling instanceof HTMLElement &&
-          !sibling.dataset.boardRowId
-        ) {
-          sibling = sibling.nextElementSibling;
-        }
-        beforeRequestId =
-          sibling instanceof HTMLElement
-            ? sibling.dataset.boardRowId ?? null
-            : null;
-      }
-    }
-    setBoardDropTarget({ groupId, beforeRequestId });
-  };
-
-  const autoScrollBoardForDrag = (clientX: number, clientY: number) => {
-    const scroller = document.querySelector<HTMLElement>(".live-board-scroll");
-    if (!scroller) return;
-    const rect = scroller.getBoundingClientRect();
-    const edge = 58;
-    const verticalStep = 18;
-    const horizontalStep = 24;
-    if (clientY < rect.top + edge) scroller.scrollBy(0, -verticalStep);
-    else if (clientY > rect.bottom - edge) scroller.scrollBy(0, verticalStep);
-    if (clientX < rect.left + edge) scroller.scrollBy(-horizontalStep, 0);
-    else if (clientX > rect.right - edge) scroller.scrollBy(horizontalStep, 0);
-  };
-
-  const finishBoardDrag = () => {
-    const item = dragItemRef.current;
-    const target = dropTargetRef.current;
-    clearBoardDrag();
-    if (!item || !target) return;
-    void moveItem(
-      item.request,
-      target.groupId,
-      target.beforeRequestId,
-    );
-  };
-
-  const activatePointerDrag = (
-    pointer: NonNullable<typeof pointerDragRef.current>,
-  ) => {
-    if (pointer.active) return;
-    pointer.active = true;
-    if (pointer.holdTimer !== null) {
-      window.clearTimeout(pointer.holdTimer);
-      pointer.holdTimer = null;
-    }
-    try {
-      pointer.element.setPointerCapture(pointer.pointerId);
-    } catch {
-      // The pointer may already have ended while the hold timer was firing.
-    }
-    startBoardDrag(pointer.item);
-    if (pointer.pointerType !== "mouse" && "vibrate" in navigator) {
-      navigator.vibrate(12);
-    }
-  };
-
-  const onPointerDragStart = (
-    item: BoardDragItem,
-    event: ReactPointerEvent<HTMLTableRowElement>,
-  ) => {
-    if (!event.isPrimary || event.button !== 0) return;
-    if (
-      event.target instanceof Element &&
-      event.target.closest("[data-board-drag-ignore]")
-    ) {
-      return;
-    }
-
-    const pointer: NonNullable<typeof pointerDragRef.current> = {
-      pointerId: event.pointerId,
-      pointerType: event.pointerType,
-      startX: event.clientX,
-      startY: event.clientY,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      active: false,
-      holdTimer: null,
-      element: event.currentTarget,
-      item,
-    };
-    pointerDragRef.current = pointer;
-    const pointerId = event.pointerId;
-    pointer.holdTimer = window.setTimeout(
-      () => {
-        const current = pointerDragRef.current;
-        if (!current || current.pointerId !== pointerId) return;
-        activatePointerDrag(current);
-      },
-      event.pointerType === "mouse" ? 170 : 300,
-    );
-  };
-
-  const onPointerDragMove = (
-    event: ReactPointerEvent<HTMLTableRowElement>,
-  ) => {
-    const pointer = pointerDragRef.current;
-    if (!pointer || pointer.pointerId !== event.pointerId) return false;
-    pointer.clientX = event.clientX;
-    pointer.clientY = event.clientY;
-
-    if (!pointer.active) {
-      const distance = Math.hypot(
-        event.clientX - pointer.startX,
-        event.clientY - pointer.startY,
-      );
-      if (pointer.pointerType === "mouse") {
-        if (distance < 4 || event.buttons !== 1) return false;
-        activatePointerDrag(pointer);
-      } else {
-        if (distance < 10) return false;
-        if (pointer.holdTimer !== null) {
-          window.clearTimeout(pointer.holdTimer);
-        }
-        pointerDragRef.current = null;
-        return false;
-      }
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    resolveBoardDropTarget(event.clientX, event.clientY);
-    autoScrollBoardForDrag(event.clientX, event.clientY);
-    return true;
-  };
-
-  const onPointerDragEnd = (
-    event: ReactPointerEvent<HTMLTableRowElement>,
-  ) => {
-    const pointer = pointerDragRef.current;
-    if (!pointer || pointer.pointerId !== event.pointerId) return false;
-    const wasActive = pointer.active;
-    if (pointer.holdTimer !== null) {
-      window.clearTimeout(pointer.holdTimer);
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    pointerDragRef.current = null;
-    if (wasActive) {
-      event.preventDefault();
-      event.stopPropagation();
-      finishBoardDrag();
-    }
-    return wasActive;
-  };
-
-  const onPointerDragCancel = (
-    event: ReactPointerEvent<HTMLTableRowElement>,
-  ) => {
-    if (pointerDragRef.current?.pointerId !== event.pointerId) return;
-    clearBoardDrag();
-  };
+  /*
+   * THE ROW DRAG LIVES IN `board-row-drag-gesture.ts` NOW.
+   *
+   * It used to be two hundred lines here: a hold timer that armed on any press
+   * anywhere in a row, a hit test on every pointer move, and a scroll that
+   * jumped the board 24px per event. Between them they made a sideways swipe on
+   * a phone a coin toss between a pan and a half-lifted row that died to
+   * `pointercancel`. That file is where the fix and its reasoning live.
+   *
+   * What stays here is the only part of the drag the BOARD owns: what a drop
+   * means. `moveItem` above is untouched, optimistic apply and rollback
+   * included — the persistence was never the defect.
+   */
+  const {
+    onRowPointerDown,
+    onRowPointerMove,
+    onRowPointerUp,
+    onRowPointerCancel,
+  } = useBoardRowDrag({
+    onDrop: (item, target) =>
+      void moveItem(item.request, target.groupId, target.beforeRequestId),
+    onDragStart: () => {
+      setRowMenuId(null);
+      setGroupMenuId(null);
+      setColumnMenuInstance(null);
+      setColumnPickerGroupId(null);
+    },
+  });
 
   const setRowsSelected = (requestIds: string[], selected: boolean) => {
     setSelectedIds((current) => {
@@ -3818,16 +3619,17 @@ export function LiveMaintenanceBoard({
             {displayGroups.map(({ group, synthetic }) => {
               const rows = groupRows(group.id);
               const isCollapsed = collapsed.has(group.id);
-              const isDropTarget =
-                Boolean(draggingRequestId) && dropTarget?.groupId === group.id;
+              /*
+               * `is-drop-target` and `is-drop-at-end` are NOT computed here.
+               * The drag paints them straight onto this element — see the note
+               * in board-row-drag-gesture.ts. Recomputing them in the render
+               * meant one full pass over 38 groups for every gap a drag
+               * crossed, which measured at 517ms.
+               */
               return (
                 <section
                   className={`sheet-group${
                     isCollapsed ? "" : ` ${DEFERRED_GROUP_CLASS}`
-                  }${isDropTarget ? " is-drop-target" : ""}${
-                    isDropTarget && dropTarget?.beforeRequestId === null
-                      ? " is-drop-at-end"
-                      : ""
                   }`}
                   key={group.id}
                   data-board-group-id={group.id}
@@ -4151,11 +3953,6 @@ export function LiveMaintenanceBoard({
                             currentGroupId={group.id}
                             selected={selectedIds.has(request.id)}
                             menuOpen={rowMenuId === request.id}
-                            dragging={draggingRequestId === request.id}
-                            dropBefore={
-                              dropTarget?.groupId === group.id &&
-                              dropTarget.beforeRequestId === request.id
-                            }
                             columns={visibleBoardColumns}
                             stickyOffsets={stickyOffsets}
                             onOpen={() => {
@@ -4185,17 +3982,14 @@ export function LiveMaintenanceBoard({
                             }}
                             onMenuClose={() => setRowMenuId(null)}
                             onPointerDragStart={(event) =>
-                              onPointerDragStart(
-                                {
-                                  request,
-                                  sourceGroupId: group.id,
-                                },
+                              onRowPointerDown(
+                                { request, sourceGroupId: group.id },
                                 event,
                               )
                             }
-                            onPointerDragMove={onPointerDragMove}
-                            onPointerDragEnd={onPointerDragEnd}
-                            onPointerDragCancel={onPointerDragCancel}
+                            onPointerDragMove={onRowPointerMove}
+                            onPointerDragEnd={onRowPointerUp}
+                            onPointerDragCancel={onRowPointerCancel}
                             onDuplicate={() =>
                               runBulkAction("duplicate_items", [request.id])
                             }
@@ -4324,6 +4118,7 @@ export function LiveMaintenanceBoard({
                                     column,
                                     isMobile,
                                   ),
+                                  ...stickyCellStyle(column.id),
                                 }}
                               >
                                 <button
@@ -5148,8 +4943,6 @@ function BoardRow({
   currentGroupId,
   selected,
   menuOpen,
-  dragging,
-  dropBefore,
   columns,
   stickyOffsets,
   onOpen,
@@ -5195,8 +4988,6 @@ function BoardRow({
   currentGroupId: string;
   selected: boolean;
   menuOpen: boolean;
-  dragging: boolean;
-  dropBefore: boolean;
   columns: BoardDisplayColumn[];
   /**
    * Where each frozen column sits, keyed by column id.
@@ -5774,13 +5565,17 @@ function BoardRow({
 
   return (
     <tr
-      className={`${selected ? "is-selected" : ""}${
-        dragging ? " is-dragging" : ""
-      }${dropBefore ? " is-drop-before" : ""}`.trim()}
+      /*
+       * `is-dragging` and `is-drop-before` are missing on purpose: the drag
+       * writes both directly. Leaving them out of this string is also what
+       * keeps them there — React only rewrites `className` when its own value
+       * changes, and this one now never changes during a drag, so nothing the
+       * gesture painted can be wiped by a render.
+       */
+      className={selected ? "is-selected" : ""}
       data-board-row-id={request.id}
       data-board-row-group-id={currentGroupId}
-      aria-grabbed={dragging}
-      title="Hold and drag any cell to move this row"
+      title="Drag to move this row; on a touch screen, press and hold first"
       onClickCapture={(event) => {
         if (!suppressRowClickRef.current) return;
         suppressRowClickRef.current = false;
@@ -5788,7 +5583,9 @@ function BoardRow({
         event.stopPropagation();
       }}
       onContextMenu={(event) => {
-        if (dragging) event.preventDefault();
+        if (event.currentTarget.classList.contains("is-dragging")) {
+          event.preventDefault();
+        }
       }}
       onPointerDownCapture={onPointerDragStart}
       onPointerMoveCapture={(event) => {
@@ -5810,6 +5607,44 @@ function BoardRow({
       }}
     >
       <td className="sheet-check" data-board-popover>
+        {/*
+          THE ONLY WAY TO DRAG A ROW WITH A FINGER.
+          Everywhere else on a row a touch is a scroll, decided before anything
+          of ours runs — see `THE TOUCH STORY` in board-row-drag.ts. This is the
+          one spot that says `touch-action: none`, so it is the one spot the
+          compositor will not take a gesture back from. It is drawn only on a
+          phone because a desktop has the whole row, and it is styled here
+          rather than in the sheet: `touch-action` is the load-bearing part and
+          it must not be able to go missing.
+        */}
+        {mobile && (
+        <button
+          type="button"
+          className="sheet-row-grip"
+          data-board-row-handle
+          aria-label={"Drag " + request.id + " to reorder"}
+          title="Drag to move this row"
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: 0,
+            display: "grid",
+            placeItems: "center",
+            width: 18,
+            height: 40,
+            padding: 0,
+            border: 0,
+            borderRadius: 5,
+            background: "transparent",
+            color: "var(--muted, #60727d)",
+            transform: "translateY(-50%)",
+            touchAction: "none",
+            cursor: "grab",
+          }}
+        >
+          <Icon name="menu" size={14} />
+        </button>
+        )}
         {/* No gutter trigger on a phone: the item's actions are behind the
             "⋮" at the top right of the item drawer instead. */}
         {!mobile && (
@@ -5817,6 +5652,13 @@ function BoardRow({
           ref={moreRef}
           className="sheet-row-more"
           type="button"
+          /*
+           * ALSO THE GRAB HANDLE, on a pointer that has one. It already carries
+           * `touch-action: none`, so a drag started here can never be taken
+           * away by the compositor. A press still has to travel before it lifts
+           * anything, which is what keeps this a button you can click.
+           */
+          data-board-row-handle
           aria-label={"Actions for " + request.id}
           aria-expanded={menuOpen}
           title="Click for item actions"
@@ -5829,6 +5671,8 @@ function BoardRow({
           type="checkbox"
           aria-label={"Select " + request.id}
           checked={selected}
+          /* Out of the grip's way; the phone gutter is 42px and holds both. */
+          style={mobile ? { marginLeft: 10 } : undefined}
           onChange={(event) => onSelected(event.target.checked)}
         />
         <AnchoredPopover

@@ -91,9 +91,27 @@ test("the layout preference is read without a flash", async () => {
     /if \(layoutFor\.boardId !== boardId\) setLayoutFor\(readMobileLayout\(boardId\)\);/,
   );
   assert.match(board, /useState\(\(\) => readMobileLayout\(boardId\)\)/);
-  assert.match(board, /function readMobileLayout\(boardId: string\)/);
+
+  /*
+   * The resolver moved out of this file, and the key it reads gained a version.
+   *
+   * An unversioned preference records WHICH layout was chosen and nothing about
+   * which default it was chosen against, so the moment the Jobs default moved
+   * from cards to the table every phone that had ever tapped "Cards" — when
+   * that meant "stay where I am" — started reading as a deliberate override.
+   * `board-mobile-layout.ts` carries the whole argument; what belongs here is
+   * that the board no longer resolves this for itself, and no longer touches
+   * the key that cannot be interpreted.
+   */
+  assert.match(
+    board,
+    /import \{ readMobileLayout, writeMobileLayout \} from "\.\/board-mobile-layout";/,
+  );
+  assert.doesNotMatch(board, /function readMobileLayout\(boardId: string\)/);
+  assert.doesNotMatch(board, /`maintsupp:board:\$\{boardId\}:mobile-layout`/);
   // Per board: a choice made on the job board must not follow you to another.
-  assert.match(board, /`maintsupp:board:\$\{boardId\}:mobile-layout`/);
+  const resolver = await read("app/(app)/portal/board-mobile-layout.ts");
+  assert.match(resolver, /`maintsupp:board:\$\{boardId\}:mobile-layout:v2`/);
 });
 
 test("subitems belong to their parent's card, not beside it", async () => {

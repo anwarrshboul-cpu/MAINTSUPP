@@ -5736,9 +5736,28 @@ body[data-theme="light"] .data-table td {
  * tokens; the light skin belongs to the content area. Every drawer, modal and
  * toast in the portal renders inside `.portal-main`, so nothing else moves.
  */
+/*
+ * AND NOT A FIELD THAT IS HALF OF A COMPOSITE CONTROL.
+ *
+ * The board toolbar's search is an icon and an <input> inside one rounded
+ * label, and its Person / Priority / Group by tools are an icon and a <select>
+ * inside one. The wrapper carries the ground, the border and the radius; the
+ * field inside it must carry none, or you get a square white rectangle sitting
+ * inside a rounded grey control. That is measurable: at 1280 in the light
+ * theme, wrapper #eef2f5, input #ffffff.
+ *
+ * This is the same exclusion the checkbox already has, for the same reason — a
+ * blanket about the appearance of form FIELDS has no business reaching a part
+ * of a control rather than a control. It is written here rather than fought
+ * with a longer selector because this rule is (0,4,2) and the un-painting rule
+ * at the end of this file is (0,4,1): the toolbar fix looked correct, was
+ * correct in the dark theme, and silently lost in the light one.
+ */
 body[data-theme="light"]
   :is(.portal-main, .workspace-manager, .workspace-record-editor)
-  :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+  :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not(
+    .live-board-toolbar *
+  ) {
   border-color: var(--line);
   background: var(--paper);
   color: var(--ink);
@@ -6238,14 +6257,16 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
  * `label.live-board-tool { min-width: 0 }` was added to cure a 289px overflow
  * from `min-width: max-content`, which it did — but it left no floor, so inside
  * the squeezed flex row these two shrank to their icon and became unhittable.
- * 44px is the touch minimum, and it is a floor rather than a width, so the
- * overflow fix still holds.
+ * A 44px floor was put here, and it was the wrong floor: 44px is a TOUCH
+ * minimum, and these controls are not icons, they are values. The label held
+ * 44px while the <select> inside it stayed 125px and painted across the two
+ * controls beside it — the "A" fragment and the half-eaten "Newe" the owner
+ * photographed. The floor now comes from the content, and it comes with the
+ * bound on the select that makes `max-content` a safe thing to ask for again:
+ * see "The board control bar, as one responsive system" at the end of this
+ * file. Nothing is left here, because a 44px floor under a `max-content` one
+ * is a rule that can never apply.
  */
-@media (max-width: 768px) {
-  label.live-board-tool {
-    min-width: 44px;
-  }
-}
 
 /* ---- Contractor contact details ---------------------------------------- */
 
@@ -7301,4 +7322,243 @@ body[data-theme="dark"] :is(
 
 body[data-theme="dark"] .live-sheet tbody tr:hover td.is-pinned-column {
   background: #203740 !important;
+}
+
+/* ---- The board control bar, as one responsive system --------------------- */
+/*
+ * WHAT WAS ON SCREEN, measured on a 390px phone in the dark theme — the theme
+ * the owner's screenshots are in, and the reason the last pass missed two of
+ * these three:
+ *
+ *   .live-board-search   wrapper #182830, its <input> #101820. A darker, square
+ *                        block sitting inside a rounded control. In the light
+ *                        theme both are white, so it was invisible.
+ *   label.live-board-tool  44px wide, containing a <select> 125px wide. The
+ *                        select painted 117px OUTSIDE its own control, across
+ *                        the two controls beside it. That is the screenshot
+ *                        with an "A" fragment and a half-eaten "Newe": Person
+ *                        bleeding under Priority, Priority bleeding under
+ *                        Newest. It is not a phone-only fault — at 1280 the
+ *                        same three labels bleed 73.5px each.
+ *
+ * WHY THE SELECT COULD NOT SHRINK. A <select>'s automatic minimum size is its
+ * min-content, which Chrome measures from its LONGEST OPTION — 26 column titles
+ * on the maintenance board. Block 6 above met that as 289px of page overflow
+ * and cured it with `label.live-board-tool { min-width: 0 }`, which let the
+ * LABEL shrink; nothing let the select shrink with it, so the label collapsed
+ * to the 44px touch floor and the select kept its full width and hung out of
+ * the box. Both halves have to be told, or the pair comes apart.
+ *
+ * THE FIX IS THREE RULES AND THEY BELONG TOGETHER.
+ *
+ *   1. The field inside a composite control paints nothing of its own. A
+ *      search, or a tool wrapping a select, is ONE control: the wrapper carries
+ *      the ground, the border and the radius, and the field inside it is
+ *      transparent. Exactly the precedent `.search-field input { background:
+ *      transparent }` sets two hundred lines up, for the same reason.
+ *
+ *   2. The select is BOUNDED explicitly — `min-width` in pixels rather than
+ *      `auto`. That is what takes the longest option out of the layout for
+ *      good, and it is what makes 3 safe.
+ *
+ *   3. With the select bounded, `min-width: max-content` on the label is now a
+ *      small number (the label plus a capped select, ~130px), not the 1,000px
+ *      that caused the 289px overflow. So the label can be told never to shrink
+ *      below its own content — which is exactly what the button tools beside it
+ *      already do, and why Filter, Hide and Export never had this fault.
+ *
+ * `field-sizing: content` is the reward: Chrome then sizes the CLOSED control
+ * to the value it is showing rather than to its longest option, so "All" is a
+ * short control and the rail stays as narrow as it can honestly be. Where it is
+ * not supported the two bounds still hold and the bar is merely wider.
+ *
+ * The rail is NOT rebuilt. `overflow-x: auto` was already on this row at every
+ * width (globals.css, and block 9 above) and it is doing its job: with the
+ * controls no longer overlapping, the row is honestly wider than a phone and
+ * says so by scrolling, instead of pretending to fit by painting on top of
+ * itself.
+ */
+
+/* 1 — one control, one ground. */
+.portal-shell .live-board-toolbar .live-board-search input[type="search"],
+.portal-shell .live-board-toolbar .live-board-tool select {
+  border-color: transparent;
+  background: transparent;
+}
+
+/*
+ * The search field reads as a control at rest, in both themes.
+ *
+ * It had no resting ground at all on a desktop: the wrapper was transparent and
+ * the only thing you could see was the <input>'s own white rectangle, which on
+ * a white toolbar is nothing. With the input transparent it would have been an
+ * icon and a caret floating in the row, so the ground moves to the wrapper —
+ * where the border and the radius already were.
+ */
+.live-board-search {
+  border-color: var(--line-strong);
+  background: var(--surface-sunken);
+}
+
+/*
+ * A focus ring the phone block cannot repaint. `.live-board-search` carries
+ * `background` and `border-color` as `!important` below 768px, so a focus state
+ * built out of either is silently dropped exactly where it is needed most.
+ * `box-shadow` is untouched by every other rule that reaches this control.
+ */
+.portal-shell .live-board-search:focus-within {
+  box-shadow: 0 0 0 2px var(--brand-bright);
+}
+
+/*
+ * The placeholder, against the ground the wrapper now paints.
+ *
+ * Measured: #81949f on the light theme's --surface-sunken is 4.45:1, which is
+ * under AA for body text by a margin small enough to be invisible in review and
+ * large enough to fail. --muted is 5.85:1 there and 6.60:1 on the dark card,
+ * and it is the token every other secondary string on this bar already uses.
+ */
+.portal-shell .live-board-toolbar .live-board-search input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/*
+ * 2 — the select is bounded, so its longest option leaves the layout.
+ *
+ * 56px is a floor, not a width: with `field-sizing` the closed control is as
+ * wide as "All" needs and no wider, and the floor only stops a one-word value
+ * from becoming a target nobody can hit. It is measured, not chosen — at 72px
+ * the Jobs bar was 1,104px against a 1,078px column at 1440 and scrolled for
+ * the sake of 26px of air inside three controls.
+ */
+.live-board-tool select {
+  min-width: 56px;
+  max-width: 150px;
+  field-sizing: content;
+  text-overflow: ellipsis;
+}
+
+/* 3 — and the label around it never shrinks below what it is showing. */
+label.live-board-tool {
+  min-width: max-content;
+}
+
+/*
+ * The rail on a phone and a small tablet.
+ *
+ * Every control keeps its own size and the row scrolls, rather than nine
+ * controls each giving up a third of themselves. `flex: 0 0 auto` says that
+ * once; the heights say it consistently, because at 768 the row was mixing 44px
+ * and 36px controls in the same line.
+ */
+@media (max-width: 768px) {
+  .live-board-toolbar > * {
+    flex: 0 0 auto;
+  }
+
+  .live-board-toolbar > *,
+  .live-board-toolbar > * > button,
+  .live-board-toolbar > .live-board-tool {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  /*
+   * A select tool is the icon, the value and the caret. 108px is the widest
+   * value these three carry as shipped — "Board groups" is 95.7px at the phone
+   * type size — plus the native caret's 20px reservation, so nothing on the bar
+   * opens truncated.
+   */
+  .live-board-tool select {
+    min-width: 108px;
+    max-width: 168px;
+  }
+}
+
+/*
+ * The desktop pair, on one line.
+ *
+ * "New item" and its caret carry `min-height: 37px` from globals while every
+ * tool beside them is 36px, so the row has sat 5px out of alignment at every
+ * desktop width. Scoped to this toolbar: `.primary-button` is the whole app's
+ * button and has no business being resized from here.
+ */
+/* `not all and (max-width: 768px)` rather than `min-width: 769px`: it is the
+   same range, and stage-five-board-chrome pins this section's breakpoints to
+   640/767/768/1024/1280. `min-width: 768px` would NOT do — at exactly 768px
+   the mobile block above still applies 44px to every neighbouring control,
+   and this button would drop to 36px alone, which is the misalignment the
+   rule exists to remove. */
+@media not all and (max-width: 768px) {
+  .live-board-toolbar > .live-board-split > .primary-button,
+  .live-board-toolbar > .live-board-split > button {
+    min-height: 36px;
+    height: 36px;
+  }
+}
+
+/*
+ * THE MENU THAT TOOK THE PAGE WITH IT.
+ *
+ * Measured on the deployed bar, before any of the above, at 390px: tap the sort
+ * chevron and `document.scrollWidth` goes from 390 to 895 — the whole page
+ * gains 505px of sideways scroll — the rail jumps back to its start, and the
+ * panel lands at x=-94, half of it off the left edge. At 320 it is 556px and
+ * x=-98. Every toolbar menu does it, including "New item"'s caret.
+ *
+ * IT IS NOT THE MENU, IT IS THE RAIL. `:has(.live-board-menu, .board-rules)`
+ * turns the toolbar's `overflow-x: auto` off so the panel is not clipped at the
+ * toolbar's own edge — and the same instant, 1,218px of controls in a 336px
+ * column stop being clipped too, and push the document. The scroll container
+ * disappearing is also what throws the rail back to zero and takes the panel's
+ * anchor with it.
+ *
+ * So the rail keeps clipping, and the panel escapes by being FIXED: `overflow`
+ * clips descendants, but it does not clip a fixed-position one.
+ *
+ * IT IS A SHEET ON A PHONE, not a dropdown, and both halves of that are forced
+ * rather than chosen. Horizontally: a 296px panel hanging off a control the
+ * reader has scrolled to the far right of a 1,200px rail has nowhere to be and
+ * still be readable, so it spans the screen. Vertically: `top: auto` on a fixed
+ * box resolves to its STATIC position, which for a panel inside a sticky,
+ * scrolled rail measured 851px down a 844px screen — off the bottom, and one
+ * of them landed under the topbar instead. There is no reliable anchor to
+ * compute from in CSS, and there is a reliable one to pin to, so it pins to the
+ * bottom of the screen, which is under the thumb.
+ *
+ * `max-height` with its own scroll because a fixed panel cannot lengthen the
+ * page to make room for itself: the sort rules list would otherwise run off the
+ * bottom of the screen with no way to reach the end of it.
+ *
+ * THE HIDE MENU IS NOT TOUCHED, and the selector is why. Hide already opens
+ * through `AnchoredPopover`, which portals it onto the shared overlay layer —
+ * out of the toolbar, so `.live-board-toolbar .live-board-menu` cannot reach
+ * it, and it goes on being anchored and correct. These three are the ones still
+ * rendered inline. The proper cure is to move them onto that same layer; this
+ * is the whole of what can be done from a stylesheet, and it removes the page
+ * overflow either way.
+ *
+ * The desktop is untouched: there the rail all but fits, and the panels stay
+ * absolutely positioned against their own trigger.
+ */
+@media (max-width: 768px) {
+  .live-board-toolbar:has(.live-board-menu, .board-rules) {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .live-board-toolbar .live-board-menu,
+  .live-board-toolbar .board-rules {
+    position: fixed;
+    top: auto;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    min-width: 0;
+    max-width: none;
+    max-height: min(58dvh, 420px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }

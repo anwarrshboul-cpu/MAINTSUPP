@@ -84,13 +84,44 @@ export function stickyColumnOffsets(
  *
  * Later sticky columns pass UNDER earlier ones as the grid scrolls, so z-index
  * descends with `order`. Header cells sit above body cells because the header
- * is also sticky vertically and has to cover the rows sliding beneath it. The
- * two bases are chosen to sit under the Items column's own `!important` values
- * (12 for a cell, 17 for a header), which keeps Name on top of everything
- * pinned after it without restating those numbers here.
+ * is also sticky vertically and has to cover the rows sliding beneath it.
+ *
+ * THE HEADER BASE WAS 15 AND THAT WAS WRONG BY 26.
+ *
+ * The comment this replaces said the bases sat "under the Items column's own
+ * `!important` values (12 for a cell, 17 for a header)". Those numbers are not
+ * what the stylesheet holds and have not been for some time. What it holds is
+ * `--z-sticky: 40`, and every rule that matters is expressed against it:
+ *
+ *     .live-sheet th                     → calc(var(--z-sticky) + 1)  = 41
+ *     .sheet-column--name                → calc(var(--z-sticky) + 2)  = 42  !important
+ *     .sheet-check                       → calc(var(--z-sticky) + 3)  = 43  !important
+ *     .live-sheet thead .sheet-column--name → calc(var(--z-sticky) + 6) = 46 !important
+ *     .live-sheet thead .sheet-check     → calc(var(--z-sticky) + 7)  = 47  !important
+ *
+ * Name and the checkbox gutter carry `!important`, so a stylesheet rule beats
+ * the inline number and they were never affected. A PINNED column carries no
+ * such rule, so it took the inline 15 — and ORDINARY headers sit at 41. Every
+ * unpinned header therefore painted OVER the pinned header it was supposed to
+ * slide beneath, which is the "the left edge goes wrong halfway through a
+ * scroll" report: the frozen header vanished under the traffic while its own
+ * body cells (which only compete with unpositioned `td`s, and so won at 10)
+ * stayed put. Header and body disagreed by exactly the width of the bug.
+ *
+ * The band is therefore 42–45: above every ordinary header, below the two
+ * `!important` thead rules so Items and the gutter stay on top of everything
+ * frozen after them. Four slots is more than the pin count the toolbar can
+ * produce in practice; past that the floor makes later pins TIE rather than
+ * fall through the ordinary headers, and a tie between two frozen columns is
+ * invisible because they occupy disjoint left offsets and never overlap.
+ *
+ * The body base keeps its long-standing 10 — an unpositioned `td` paints below
+ * every positioned box regardless — with a floor of its own, because at eleven
+ * pins the old expression went negative and a negative z-index would have
+ * dropped a frozen cell BEHIND the rows scrolling under it.
  */
 export function stickyZIndex(order: number, header: boolean) {
-  return (header ? 15 : 10) - order;
+  return header ? Math.max(42, 45 - order) : Math.max(1, 10 - order);
 }
 
 /** How many columns are frozen, Items included. Used for the toolbar's label. */

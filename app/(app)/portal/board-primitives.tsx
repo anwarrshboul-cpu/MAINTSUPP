@@ -115,7 +115,36 @@ export function useRevealBoardPopover(
       const popover = ref.current?.querySelector<HTMLElement>(
         ".sheet-option-popover, .sheet-timeline-popover",
       );
-      popover?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      if (!popover) return;
+      /*
+       * ONLY WHEN IT IS ACTUALLY OUT OF VIEW.
+       *
+       * This ran unconditionally, and it re-runs on every change of
+       * `layoutKey` — which for the option popovers is the editing flag, so it
+       * fires again while a popover is merely being typed into. An
+       * unconditional `scrollIntoView({ inline: "nearest" })` is not a no-op
+       * for something already visible: `.live-board-scroll` carries
+       * `scroll-padding: 24px 24px 320px`, and "nearest" resolves against the
+       * PADDED box, so a popover sitting comfortably on screen but within
+       * 24px of the scroller's left edge gets scrolled to satisfy the padding.
+       * Mid-drag or mid-scroll that reads as the board snapping back by
+       * itself. Measuring first turns the common case — already visible —
+       * into nothing at all.
+       */
+      const scroller = popover.closest<HTMLElement>(".live-board-scroll");
+      if (scroller) {
+        const box = scroller.getBoundingClientRect();
+        const rect = popover.getBoundingClientRect();
+        if (
+          rect.left >= box.left &&
+          rect.right <= box.right &&
+          rect.top >= box.top &&
+          rect.bottom <= box.bottom
+        ) {
+          return;
+        }
+      }
+      popover.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [layoutKey, ref, visible]);
