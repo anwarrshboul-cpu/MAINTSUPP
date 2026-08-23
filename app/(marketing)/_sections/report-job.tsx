@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
-import type { DragEvent, FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { DragEvent, FormEvent, KeyboardEvent, RefObject } from "react";
 
 /**
  * SECTION 2 — Report a Job.
@@ -205,6 +205,104 @@ export function ReportJob() {
     [],
   );
 
+  /*
+   * THE "+ ADD" MENU.
+   *
+   * The three sources — camera, video, file picker — used to be three
+   * permanent dashed boxes side by side. On a phone that was three labelled
+   * tiles for one decision, and the row was the tallest thing on the form.
+   * One button opens a menu of the three; the hidden inputs behind them, the
+   * previews, the validation and the upload are untouched.
+   *
+   * Desktop: a small popover under the button. Phone (<=760px): a bottom
+   * sheet over a backdrop, which is where a thumb expects a source picker to
+   * be. Both are the same markup — CSS decides the shape.
+   */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  function closeMenu(refocus = true) {
+    setMenuOpen(false);
+    if (refocus) addRef.current?.focus({ preventScroll: true });
+  }
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+
+    /* A press anywhere outside the menu or its button dismisses it. */
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || addRef.current?.contains(target)) return;
+      /*
+       * The backdrop closes itself, on click. Closing it from here — on the
+       * pointerdown, before the finger lifts — removed it from the page
+       * while the tap was still in flight, and the tap's click was then
+       * hit-tested against whatever lay beneath: on a phone that was the
+       * header, and the link under the thumb took the press (and the
+       * focus) that was meant to dismiss the sheet.
+       */
+      if ((target as Element).closest?.(".upload__backdrop")) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+
+    /* The bottom sheet sits over the page, so the page must not scroll
+       underneath it while it is up. Desktop popovers leave the page alone. */
+    const phone = window.matchMedia("(max-width: 760px)").matches;
+    const previous = document.body.style.overflow;
+    if (phone) document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      if (phone) document.body.style.overflow = previous;
+    };
+  }, [menuOpen]);
+
+  /** Menu-button keyboard pattern: arrows move, Home/End jump, Escape and Tab close. */
+  function onMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    switch (event.key) {
+      case "Escape":
+        event.preventDefault();
+        closeMenu();
+        break;
+      case "Tab":
+        event.preventDefault();
+        closeMenu();
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        items[(index + 1) % items.length]?.focus();
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        items[(index - 1 + items.length) % items.length]?.focus();
+        break;
+      case "Home":
+        event.preventDefault();
+        items[0]?.focus();
+        break;
+      case "End":
+        event.preventDefault();
+        items[items.length - 1]?.focus();
+        break;
+      default:
+    }
+  }
+
+  /** Opens the chosen hidden input. Called from a click, so the file dialog
+      is allowed to open; the menu closes and focus goes back to the button. */
+  function pick(input: RefObject<HTMLInputElement | null>) {
+    setMenuOpen(false);
+    input.current?.click();
+    addRef.current?.focus({ preventScroll: true });
+  }
+
   function commit(next: Picked[]) {
     pickedRef.current = next;
     setPicked(next);
@@ -282,10 +380,7 @@ export function ReportJob() {
        */
       const first = CHECKS.map(([name]) => name).find((name) => found[name]);
       if (first) {
-        const target =
-          first === "rjUrgency"
-            ? form.querySelector<HTMLElement>("#rjUrgency")
-            : form.querySelector<HTMLElement>(`#${first}`);
+        const target = form.querySelector<HTMLElement>(`#${first}`);
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         target?.focus({ preventScroll: true });
       }
@@ -529,43 +624,38 @@ export function ReportJob() {
             </div>
 
             {/*
-              Urgency is radios, not a dropdown.
+              Urgency is a dropdown.
 
-              Four options whose wording is the whole point — "site unsafe or
-              cannot trade" against "trading impaired" — and a collapsed select
-              hides three of the four at the moment the reader is deciding
-              between them. `.chipgroup` is the page's existing radio pattern.
+              It was four pill radios. On a phone the four wrapped into a
+              ragged stack of pills the height of three fields, and the
+              reviewer asked for one control. The four values and their
+              wording are exactly what the radios carried — the P-code is
+              what triage reads and what maps to the board's priority — and
+              a required select with a "Select urgency" placeholder is the
+              same pattern the fault category already uses two fields up.
             */}
-            <fieldset
-              className={`field${errors.rjUrgency ? " is-invalid" : ""}`}
-              id="rjUrgency"
-              tabIndex={-1}
-              aria-invalid={invalid("rjUrgency")}
-              aria-describedby={errors.rjUrgency ? "rjUrgency-err" : undefined}
-            >
-              <legend className="lbl">Urgency {req}</legend>
-              {/* Input then label, as direct children — `.chipgroup` styles the
-                  checked state through `input:checked + label`, so a wrapper
-                  element between them switches the whole pattern off. */}
-              <div className="chipgroup">
+            <div className={fieldClass("rjUrgency")}>
+              <label htmlFor="rjUrgency">Urgency {req}</label>
+              <select
+                id="rjUrgency"
+                name="urgency"
+                required
+                value={urgency}
+                onChange={(event) => setUrgency(event.target.value)}
+                aria-invalid={invalid("rjUrgency")}
+                aria-describedby={errors.rjUrgency ? "rjUrgency-err" : undefined}
+              >
+                <option value="">Select urgency</option>
                 {URGENCIES.map((entry) => (
-                  <Fragment key={entry.id}>
-                    <input
-                      type="radio"
-                      id={`rjUrgency-${entry.id}`}
-                      name="urgency"
-                      value={entry.code}
-                      checked={urgency === entry.code}
-                      onChange={() => setUrgency(entry.code)}
-                    />
-                    <label htmlFor={`rjUrgency-${entry.id}`}>{entry.label}</label>
-                  </Fragment>
+                  <option key={entry.id} value={entry.code}>
+                    {entry.label}
+                  </option>
                 ))}
-              </div>
+              </select>
               <p className="field__err" id="rjUrgency-err" hidden={!errors.rjUrgency}>
                 {errors.rjUrgency}
               </p>
-            </fieldset>
+            </div>
 
             <div className={fieldClass("rjDesc")}>
               <label htmlFor="rjDesc">
@@ -609,69 +699,138 @@ export function ReportJob() {
                   if (event.dataTransfer?.files) accept(event.dataTransfer.files);
                 }}
               >
-                <button
-                  type="button"
-                  className="upload__btn"
-                  data-capture="camera"
-                  onClick={() => cameraRef.current?.click()}
-                >
-                  <svg
-                    className="ic ic--sm"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+                <div className="upload__anchor">
+                  <button
+                    type="button"
+                    id="rjAddMedia"
+                    ref={addRef}
+                    className="upload__add"
+                    aria-label="Add photos or video"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    aria-controls={menuOpen ? "rjMediaMenu" : undefined}
+                    onClick={() => setMenuOpen((open) => !open)}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setMenuOpen(true);
+                      }
+                    }}
                   >
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
-                    <circle cx="12" cy="13" r="4" />
-                  </svg>
-                  Take a photo
-                </button>
-                <button
-                  type="button"
-                  className="upload__btn"
-                  data-capture="video"
-                  onClick={() => videoRef.current?.click()}
-                >
-                  <svg
-                    className="ic ic--sm"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m23 7-7 5 7 5V7Z" />
-                    <rect x="1" y="5" width="15" height="14" rx="2" />
-                  </svg>
-                  Record video
-                </button>
-                <button
-                  type="button"
-                  className="upload__btn"
-                  data-capture="library"
-                  onClick={() => libraryRef.current?.click()}
-                >
-                  <svg
-                    className="ic ic--sm"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <path d="m7 9 5-5 5 5M12 4v12" />
-                  </svg>
-                  Choose files
-                </button>
+                    <svg
+                      className="ic ic--sm"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                    Add
+                  </button>
+                  {menuOpen && (
+                    <>
+                      {/* Only drawn on a phone (CSS) — the backdrop behind the
+                          bottom sheet. A tap on it closes the sheet. */}
+                      <div
+                        className="upload__backdrop"
+                        aria-hidden="true"
+                        onClick={() => closeMenu()}
+                      />
+                      <div
+                        className="upload__menu"
+                        id="rjMediaMenu"
+                        role="menu"
+                        aria-labelledby="rjAddMedia"
+                        ref={menuRef}
+                        onKeyDown={onMenuKeyDown}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="upload__item"
+                          data-capture="camera"
+                          onClick={() => pick(cameraRef)}
+                        >
+                          <svg
+                            className="ic ic--sm"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                            <circle cx="12" cy="13" r="4" />
+                          </svg>
+                          Take a photo
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="upload__item"
+                          data-capture="video"
+                          onClick={() => pick(videoRef)}
+                        >
+                          <svg
+                            className="ic ic--sm"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="m23 7-7 5 7 5V7Z" />
+                            <rect x="1" y="5" width="15" height="14" rx="2" />
+                          </svg>
+                          Record a video
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="upload__item"
+                          data-capture="library"
+                          onClick={() => pick(libraryRef)}
+                        >
+                          <svg
+                            className="ic ic--sm"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <path d="m7 9 5-5 5 5M12 4v12" />
+                          </svg>
+                          Choose files
+                        </button>
+                        {/* Phone only (CSS): a sheet needs a way out that is
+                            not "tap the dark bit". */}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="upload__item upload__cancel"
+                          onClick={() => closeMenu()}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <p className="upload__hint">
+                  Photos or a short video of the fault. Drag files here, or press Add.
+                </p>
               </div>
 
               <input

@@ -20,7 +20,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 
 /*
  * Four links, and every one of them lands on a section that exists.
@@ -122,6 +122,38 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const drawer = useRef<HTMLDivElement>(null);
   const burger = useRef<HTMLButtonElement>(null);
+  /*
+   * An in-page destination chosen from the drawer, carried across the close.
+   *
+   * The page is locked with `position: fixed` while the drawer is open, and
+   * the lock hands the scroll offset back when it releases. A plain anchor
+   * click would scroll to its target first and then have that scroll undone
+   * by the release a frame later — so the anchor's default is prevented, the
+   * target is noted here, and the release itself performs the jump once the
+   * page is scrollable again.
+   */
+  const pendingHash = useRef<string | null>(null);
+
+  /** Closes the drawer and puts focus back on the button that opened it. */
+  const close = () => {
+    setOpen(false);
+    burger.current?.focus({ preventScroll: true });
+  };
+
+  /**
+   * A drawer link: close first, then go. Route links (`/portal`) navigate as
+   * normal. One handler reading the anchor's own `href`, not a factory called
+   * once per link during render — a function that touches a ref must only run
+   * from an event (react-hooks/refs).
+   */
+  const onDrawerLink = (event: MouseEvent<HTMLAnchorElement>) => {
+    const href = event.currentTarget.getAttribute("href") ?? "";
+    if (href.startsWith("#")) {
+      event.preventDefault();
+      pendingHash.current = href;
+    }
+    close();
+  };
 
   useEffect(() => {
     const onScroll = () => setStuck((window.pageYOffset || 0) > 60);
@@ -133,14 +165,37 @@ export function SiteHeader() {
   // Body scroll lock, Escape to close, and a focus trap while the drawer is up.
   useEffect(() => {
     if (!open) return;
-    const previous = document.body.style.overflow;
+    /*
+     * The lock takes the body out of flow rather than only hiding overflow:
+     * on iOS Safari `overflow: hidden` on the body does not stop a touch-drag
+     * or a fling reaching the page behind the drawer, and `position: fixed`
+     * does. Fixing the body resets its scroll to 0, so the offset is frozen
+     * into `top` and handed back — instantly, because `html` scrolls smoothly
+     * and an animated restore would visibly run the length of the page.
+     * The scrollbar's width goes into padding so nothing shifts sideways on
+     * a desktop browser where the drawer also appears below 1120px.
+     */
+    const scrollY = window.scrollY;
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    const saved = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+      paddingRight: document.body.style.paddingRight,
+    };
+    // `document.body` each time, not a local alias: the compiler lint treats
+    // an alias taken in the effect as a frozen value and refuses the writes.
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
     document.body.style.overflow = "hidden";
+    if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
     drawer.current?.querySelector<HTMLElement>("a,button")?.focus();
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
-        burger.current?.focus();
+        close();
         return;
       }
       if (event.key !== "Tab" || !drawer.current) return;
@@ -161,8 +216,29 @@ export function SiteHeader() {
 
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = previous;
+      document.body.style.position = saved.position;
+      document.body.style.top = saved.top;
+      document.body.style.width = saved.width;
+      document.body.style.overflow = saved.overflow;
+      document.body.style.paddingRight = saved.paddingRight;
+      window.scrollTo({ top: scrollY, left: 0, behavior: "instant" as ScrollBehavior });
       document.removeEventListener("keydown", onKey);
+
+      const target = pendingHash.current;
+      pendingHash.current = null;
+      if (target) {
+        const destination = document.querySelector<HTMLElement>(target);
+        if (destination) {
+          const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+          /* `scrollIntoView` honours the page's `scroll-padding-top`, so the
+             section lands below the sticky header exactly as a native anchor
+             jump would. */
+          destination.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+          window.history.pushState(null, "", target);
+        } else {
+          window.location.hash = target;
+        }
+      }
     };
   }, [open]);
 
@@ -252,7 +328,8 @@ export function SiteHeader() {
           className="drawer is-open"
           id="drawer"
           onClick={(event) => {
-            if (event.target === event.currentTarget) setOpen(false);
+            /* The backdrop: a press on the dark area outside the panel. */
+            if (event.target === event.currentTarget) close();
           }}
         >
           <div className="drawer__panel" role="dialog" aria-modal="true" aria-label="Menu" ref={drawer}>
@@ -263,13 +340,13 @@ export function SiteHeader() {
                 <LogoMark />
                 <LogoText />
               </Link>
-              <button type="button" className="drawer__close" aria-label="Close menu" onClick={() => setOpen(false)}>
+              <button type="button" className="drawer__close" aria-label="Close menu" onClick={close}>
                 <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
                   <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <a className="btn btn--primary btn--block" href="#report" onClick={() => setOpen(false)}>
+            <a className="btn btn--primary btn--block" href="#report" onClick={onDrawerLink}>
               Report a Job
             </a>
             <Link className="btn btn--ghost btn--block" href="/portal" onClick={() => setOpen(false)}>
@@ -279,14 +356,14 @@ export function SiteHeader() {
               <ul className="drawer__list">
                 {NAV.map(([href, label]) => (
                   <li key={href}>
-                    <a href={href} onClick={() => setOpen(false)}>
+                    <a href={href} onClick={onDrawerLink}>
                       {label}
                     </a>
                   </li>
                 ))}
               </ul>
             </nav>
-            <a className="btn btn--primary btn--block" href="#review" onClick={() => setOpen(false)}>
+            <a className="btn btn--primary btn--block" href="#review" onClick={onDrawerLink}>
               Book a Portfolio Review
             </a>
           </div>

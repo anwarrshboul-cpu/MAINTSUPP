@@ -583,11 +583,25 @@ body.slots-enabled .slotbtn{display:inline-flex}
   .hdr__cta{order:0}
   .hdr__inner{gap:12px}
 }
-.drawer{position:fixed;inset:0;z-index:var(--z-drawer);background:rgba(3,18,28,.6)}
-.drawer__panel{position:absolute;inset:0 0 0 auto;width:min(400px,92vw);background:#fff;padding:22px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;animation:slideIn var(--t-slow) var(--ease)}
-@keyframes slideIn{from{transform:translateX(100%)}}
-.drawer__top{display:flex;justify-content:space-between;align-items:center}
-.drawer__close{width:46px;height:46px;background:none;border:1px solid var(--border);border-radius:var(--r-sm);color:var(--navy);cursor:pointer}
+/* The drawer opens from the LEFT — the same edge the menu button sits on
+   below the nav breakpoint — over a backdrop that closes it on tap. The panel
+   is pinned to the viewport's full height (the fixed backdrop is its box), so
+   on a short phone the list scrolls inside the panel rather than the page. */
+.drawer{position:fixed;inset:0;z-index:var(--z-drawer);background:rgba(3,18,28,.6);animation:fadein var(--t-base) var(--ease)}
+@keyframes fadein{from{opacity:0}}
+.drawer__panel{position:absolute;inset:0 auto 0 0;width:min(360px,88vw);background:#fff;
+  padding:16px 20px calc(20px + env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:16px;box-shadow:var(--sh-lg);
+  animation:slideIn var(--t-slow) var(--ease)}
+@keyframes slideIn{from{transform:translateX(-100%)}}
+.drawer__top{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:46px}
+.drawer__top .logo{min-width:0}
+.drawer__top .logo__mark{width:32px;height:32px}
+.drawer__top .logo__text strong{font-size:1.08rem}
+.drawer__top .logo__text em{font-size:.48rem;letter-spacing:.18em}
+.drawer__close{flex:none;width:46px;height:46px;background:none;border:1px solid var(--border);border-radius:var(--r-sm);color:var(--navy);cursor:pointer}
+.drawer nav{flex:1 1 auto}
+@media (max-height:600px){.drawer__panel{gap:10px;padding-top:12px}.drawer__list a{padding:11px 2px}}
 .drawer__list{list-style:none;border-top:1px solid var(--border)}
 .drawer__list li{border-bottom:1px solid var(--border)}
 .drawer__list a{display:block;padding:14px 2px;font-size:1rem;font-weight:600;color:var(--navy);text-decoration:none}
@@ -629,6 +643,13 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .hero__feed{font-size:.82rem;color:#C2D2D9;min-width:0}
 .hero__feed strong{color:#fff;display:block;font-family:var(--font-display);font-size:.86rem}
 .hero__feed span{display:block;color:#8AA2AC;font-size:.76rem}
+/* The feed rotates every 4.2s between items whose detail line is one line and
+   items whose detail line is two on a phone — measured at 390px the box
+   alternated 85px / 104px and the whole page below it moved 19px with it,
+   every few seconds. Two lines are reserved for the detail, three below 360,
+   so a short item and a long one take the same room. */
+@media (max-width:620px){.hero__feed span{min-height:3.2em;line-height:1.6}}
+@media (max-width:360px){.hero__feed span{min-height:4.8em}}
 .feedline{animation:feedin .5s var(--ease)}
 @keyframes feedin{from{opacity:0;transform:translateY(7px)}}
 
@@ -669,15 +690,46 @@ fieldset.field:focus{outline:none}
 .formstatus{margin:12px 0 0;font-size:.85rem;min-height:1.2em}
 .formstatus.is-error{color:var(--critical)}
 .formstatus.is-ok{color:var(--success);font-weight:600}
-/* ------------------------------------------------------- photo / video */
-.upload{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px}
-.upload__btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
-  min-height:74px;padding:11px 8px;background:var(--cloud);border:1.5px dashed var(--border);
-  border-radius:var(--r-sm);font-size:.73rem;font-weight:600;color:var(--navy);cursor:pointer;
-  transition:border-color var(--t-base) var(--ease),background var(--t-base) var(--ease),color var(--t-base) var(--ease);text-align:center}
-.upload__btn:hover{border-color:var(--steel);background:var(--steel-soft)}
-.upload__btn .ic{color:var(--steel)}
-.upload__btn:active{transform:translateY(1px)}
+/* ------------------------------------------------------- photo / video
+   One "+ Add" button in a dashed drop zone. Pressing it opens a menu with
+   the three sources (camera, video, files); on a desktop that is a small
+   popover under the button, on a phone (<=760px) it is a bottom sheet over a
+   backdrop. The three hidden <input type=file> elements are unchanged — the
+   menu only decides which one to click. */
+.upload{position:relative;display:grid;justify-items:center;gap:8px;padding:18px 14px;background:var(--cloud);
+  border:1.5px dashed var(--border);border-radius:var(--r-sm);text-align:center;
+  transition:border-color var(--t-base) var(--ease),background var(--t-base) var(--ease)}
+.upload.is-over{border-color:var(--steel);background:var(--steel-soft)}
+.upload__anchor{position:relative;display:inline-block}
+.upload__add{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:11px 24px;
+  background:#fff;border:1.5px solid var(--border);border-radius:var(--r-pill);font-size:.92rem;font-weight:700;
+  color:var(--navy);cursor:pointer;touch-action:manipulation;
+  transition:border-color var(--t-base) var(--ease),background var(--t-base) var(--ease),color var(--t-base) var(--ease)}
+.upload__add:hover,.upload__add[aria-expanded=true]{border-color:var(--steel);color:var(--teal-text)}
+.upload__add .ic{color:var(--steel)}
+.upload__hint{margin:0;font-size:.76rem;color:var(--slate)}
+.upload__backdrop{display:none}
+.upload__menu{position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);z-index:var(--z-modal);
+  min-width:236px;padding:6px;margin:0;background:#fff;border:1px solid var(--border);border-radius:var(--r-md);
+  box-shadow:var(--sh-lg);text-align:left;animation:feedin var(--t-fast) var(--ease)}
+.upload__item{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:10px 12px;background:none;
+  border:0;border-radius:var(--r-sm);font-size:.9rem;font-weight:600;color:var(--navy);cursor:pointer;text-align:left;
+  touch-action:manipulation}
+.upload__item:hover{background:var(--cloud);color:var(--teal-text)}
+.upload__item:focus-visible{outline:none;background:var(--cloud);box-shadow:inset 0 0 0 2px var(--amber)}
+.upload__item .ic{color:var(--steel)}
+.upload__cancel{display:none}
+@media (max-width:760px){
+  .upload__backdrop{display:block;position:fixed;inset:0;z-index:calc(var(--z-modal) - 1);background:rgba(3,18,28,.55);
+    animation:feedin var(--t-base) var(--ease)}
+  .upload__menu{position:fixed;left:0;right:0;bottom:0;top:auto;transform:none;min-width:0;width:auto;
+    padding:10px 12px calc(12px + env(safe-area-inset-bottom));border:0;border-radius:var(--r-xl) var(--r-xl) 0 0;
+    animation:sheetup var(--t-slow) var(--ease)}
+  .upload__menu::before{content:"";display:block;width:40px;height:4px;margin:0 auto 10px;border-radius:2px;background:var(--border)}
+  .upload__item{min-height:52px;font-size:1rem}
+  .upload__cancel{display:flex;justify-content:center;margin-top:6px;border-top:1px solid var(--border-soft);border-radius:0;color:var(--slate)}
+}
+@keyframes sheetup{from{transform:translateY(100%)}}
 .thumbs{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:8px;margin-top:10px}
 .thumbs:empty{display:none}
 .thumbs li{position:relative;aspect-ratio:1;border-radius:var(--r-sm);overflow:hidden;background:var(--muted-bg);border:1px solid var(--border)}
@@ -714,13 +766,54 @@ fieldset.field:focus{outline:none}
 .switcher{display:inline-flex;padding:4px;background:var(--muted-bg);border-radius:var(--r-pill);gap:4px}
 .switcher button{padding:9px 20px;min-height:42px;border:0;background:none;border-radius:var(--r-pill);font-size:.87rem;font-weight:600;color:var(--slate);cursor:pointer;transition:background var(--t-base) var(--ease),color var(--t-base) var(--ease)}
 .switcher button.is-on{background:#fff;color:var(--navy);box-shadow:var(--sh-xs)}
-.compare{display:grid;gap:14px;margin-top:30px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-.compare__card{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:22px;display:grid;gap:9px;align-content:start;animation:feedin .35s var(--ease)}
-.compare__card .ic{width:34px;height:34px;padding:7px;border-radius:var(--r-sm)}
-.compare__card--pain .ic{background:var(--critical-bg);color:var(--critical)}
-.compare__card--gain .ic{background:var(--success-bg);color:var(--success)}
-.compare__card h3{font-size:1rem;margin:0}
-.compare__card p{margin:0;font-size:.87rem;color:var(--slate)}
+/* A tap on a band must be a tap, never the first half of a double-tap zoom. */
+.switcher button{touch-action:manipulation}
+
+/* ------------------------------------------------ without vs with (table)
+   Two columns at EVERY width — see the note in problem.tsx. The icon has a
+   fixed track inside each cell (`.comparetable__inner` is a 2-column grid)
+   so it can never land on the text. `table-layout:fixed` splits the width
+   50/50 whatever the copy does; `overflow-wrap:anywhere` is the safety net
+   for a long word in a 120px column at 320px. The "with" column is the
+   logo's cyan, the "without" column the page's critical red; both are also
+   named in the header row and shaped differently in the icon, so colour is
+   never the only distinction. */
+.comparetable-wrap{margin-top:26px;max-width:100%}
+.comparetable{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;background:#fff;
+  border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.comparetable th,.comparetable td{width:50%;padding:0;vertical-align:top;text-align:left}
+.comparetable__inner{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:start;padding:14px 16px}
+.comparetable__th .comparetable__inner{align-items:center;padding:12px 16px}
+.comparetable__th{font-family:var(--font-display);font-size:.92rem;font-weight:800;letter-spacing:.01em;
+  border-bottom:1px solid var(--border)}
+.comparetable__th--pain{background:var(--critical-bg);color:var(--critical)}
+.comparetable__th--gain{background:var(--steel-soft);color:var(--teal-deep)}
+.comparetable__th--gain,.comparetable__cell--gain{border-left:1px solid var(--border)}
+.comparetable tbody tr + tr td{border-top:1px solid var(--border-soft)}
+.comparetable__ic{display:grid;place-items:center;width:28px;height:28px;border-radius:var(--r-sm)}
+.comparetable__ic .ic{width:16px;height:16px}
+.comparetable__cell--pain .comparetable__ic{background:var(--critical-bg);color:var(--critical)}
+.comparetable__cell--gain .comparetable__ic{background:var(--steel-soft);color:var(--teal-text)}
+.comparetable__th--pain .comparetable__ic{background:rgba(168,42,28,.13);color:var(--critical)}
+.comparetable__th--gain .comparetable__ic{background:rgba(13,161,169,.18);color:var(--teal-deep)}
+.comparetable__text{font-size:.93rem;line-height:1.45;color:var(--charcoal);overflow-wrap:anywhere;hyphens:auto}
+.comparetable__cell--gain .comparetable__text{font-weight:600;color:var(--navy)}
+@media (max-width:620px){
+  .comparetable-wrap{margin-top:20px}
+  .comparetable__inner{grid-template-columns:24px minmax(0,1fr);gap:8px;padding:11px 10px}
+  .comparetable__th .comparetable__inner{padding:10px}
+  .comparetable__th{font-size:.78rem}
+  .comparetable__ic{width:24px;height:24px}
+  .comparetable__ic .ic{width:14px;height:14px}
+  .comparetable__text{font-size:.84rem;line-height:1.4}
+}
+@media (max-width:360px){
+  .comparetable__inner{grid-template-columns:22px minmax(0,1fr);gap:6px;padding:10px 8px}
+  .comparetable__th .comparetable__inner{padding:9px 8px}
+  .comparetable__th{font-size:.72rem;letter-spacing:0}
+  .comparetable__ic{width:22px;height:22px}
+  .comparetable__text{font-size:.8rem}
+}
 
 /* -------------------------------------------------------- trade gallery */
 .trades{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:26px}
@@ -751,21 +844,18 @@ fieldset.field:focus{outline:none}
 .svcphoto{aspect-ratio:16/10;border-radius:var(--r-lg);overflow:hidden}
 
 /* -------------------------------------------------------------- workflow */
+/* One column: the stage card takes the full width. The left-hand list of the
+   seven stages is gone (it repeated every heading the card already shows),
+   so there is no second column to leave empty — the card, bar and arrows
+   are the whole component at every width. */
 .wf{display:grid;gap:24px}
-@media(min-width:1000px){.wf{grid-template-columns:286px 1fr;gap:36px}}
-.wf__steps{list-style:none;display:grid;gap:6px}
-.wf__steps button{display:flex;align-items:center;gap:13px;width:100%;padding:12px;background:#fff;border:1.5px solid var(--border);border-radius:var(--r-md);cursor:pointer;text-align:left;transition:all var(--t-base) var(--ease)}
-.wf__steps button:hover{border-color:var(--steel-mid)}
-.wf__steps button[aria-selected=true]{border-color:var(--navy);background:var(--navy);color:#fff;box-shadow:var(--sh-md)}
-.wf__num{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;
-  background:var(--steel-soft);color:var(--teal-text);font-family:var(--font-display);font-weight:800;
-  font-size:.9rem;line-height:1;font-variant-numeric:tabular-nums;padding-bottom:1px}
-.wf__steps button[aria-selected=true] .wf__num{background:var(--teal);color:#04222A}
-.wf__steps strong{display:block;font-family:var(--font-display);font-size:.93rem}
-.wf__steps span{display:block;font-size:.75rem;opacity:.72}
 .wf__stage{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.wf__stage:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
 .wf__photo{aspect-ratio:21/9}
 .wf__body{padding:clamp(20px,3vw,30px)}
+.wf__title{font-size:var(--fs-h3);margin:12px 0 .7rem;max-width:40ch}
+/* Only the stage's name is red; the explanation after the dash stays navy. */
+.wf__stage-name{color:var(--critical)}
 .wf__meta{display:grid;gap:13px;margin-top:20px}
 @media(min-width:620px){.wf__meta{grid-template-columns:1fr 1fr}}
 .wf__meta div{background:var(--cloud);border-radius:var(--r-md);padding:14px}
@@ -937,12 +1027,23 @@ fieldset.field:focus{outline:none}
 /* A 26px target is below the 44px touch floor on its own, so the padding on the
    card carries the rest of it; the thumb itself is what a finger aims at. */
 .pricing__slider::-webkit-slider-thumb{width:22px;height:22px}
-.pricing__band-note{margin:0;font-size:.82rem;color:var(--slate);min-height:1.2em}
+/* Two lines are reserved on a phone whatever the band says. The 1–10 note is
+   one line and the other two bands' notes are two, so without the reservation
+   the calculator card grew by a line the moment 11–25 or 26+ was pressed and
+   the band buttons moved 21px down under the thumb that had just pressed them
+   (measured in WebKit on an iPhone 14 descriptor: 390px and 430px both +21px,
+   320px +24px). */
+.pricing__band-note{margin:0;font-size:.82rem;color:var(--slate);min-height:1.6em;line-height:1.6}
+@media (max-width:700px){.pricing__band-note{min-height:3.2em}}
+@media (max-width:360px){.pricing__band-note{min-height:4.8em}}
+/* A horizontal drag must reach the slider; vertical swipes still scroll. */
+.pricing__slider{touch-action:pan-y}
 
 /* What the reader actually pays, under each plan's per-store rate. */
 .pkg__total{margin:-6px 0 14px;font-size:.84rem;color:var(--slate)}
 .pkg__total strong{color:var(--navy);font-weight:700}
-.pkg__was{color:var(--slate);opacity:.75;font-size:1rem}
+/* No opacity: slate at 75% fails contrast on white (axe flagged all three). */
+.pkg__was{color:var(--slate);font-size:1rem}
 .pkg__setup{margin:12px 0 0;font-size:.76rem;color:var(--slate)}
 .pkg__cta{margin-top:16px}
 .pricing__notes{list-style:none;display:grid;gap:8px;margin:0;font-size:.82rem;
@@ -1157,7 +1258,11 @@ fieldset.field:focus{outline:none}
 @media(min-width:780px){.ftr__legal{grid-template-columns:1fr auto;align-items:center}}
 .ftr__legal p{margin:0}
 
-.cookie{position:fixed;inset:auto 0 0;z-index:var(--z-toast);background:var(--navy-ink);color:#D6E3E7;box-shadow:0 -6px 24px rgba(0,0,0,.28)}
+/* Page furniture, not a toast: above the sticky header, BELOW the drawer
+   (300) and the + Add sheet (400). At --z-toast it sat over both — on a first
+   visit the sheet's Cancel row and the foot of the drawer were under the
+   cookie bar, and a tap there hit "Reject non-essential" instead. */
+.cookie{position:fixed;inset:auto 0 0;z-index:calc(var(--z-sticky) + 50);background:var(--navy-ink);color:#D6E3E7;box-shadow:0 -6px 24px rgba(0,0,0,.28)}
 .cookie__inner{display:grid;gap:13px;padding-block:15px;align-items:center}
 @media(min-width:820px){.cookie__inner{grid-template-columns:1fr auto}}
 .cookie p{margin:0;font-size:.83rem}.cookie a{color:#7FD2D8}
@@ -1200,8 +1305,6 @@ fieldset.field:focus{outline:none}
   .claim{border-left:0;padding-left:0}
   .proof__item{border-left:0;padding-left:0}
   .proof__inner{gap:14px}
-  .compare{gap:10px}
-  .compare__card{padding:18px}
   .tradedetail,.sectordetail{padding:18px;gap:18px}
   .boundary{padding:16px;gap:12px;flex-direction:column}
   .boundary__ic{width:40px;height:40px}
@@ -1324,7 +1427,7 @@ img,svg,table{max-width:100%}
 
 /* nothing meaningful drops below 12px on a phone */
 @media (max-width:620px){
-  .upload__btn{font-size:.78rem}
+  .upload__hint{font-size:.78rem}
   .qj__note{font-size:.78rem}
   .trade__cap,.tile__cap{font-size:.78rem}
   .dashhint{font-size:.74rem}
@@ -1378,46 +1481,25 @@ img,svg,table{max-width:100%}
 .ph picture { position: absolute; inset: 0; display: block; }
 img.ph__img { width: 100%; height: 100%; object-fit: cover; }
 
-/* ------------------------------------------------ without vs with (paired)
-   Both sides visible with no control to find — see the note in problem.tsx.
-   Desktop puts the pain and its answer on one row with an arrow between; a
-   phone stacks them, and the small side labels are what keep the pairing
-   readable once they are one above the other rather than side by side. */
-.compare--paired{display:grid;gap:14px;margin-top:22px;list-style:none;padding:0}
-.comparepair{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch}
-.comparepair__arrow{display:grid;place-items:center;color:var(--steel);opacity:.55}
-.comparepair__side{font-size:.68rem;font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--slate);opacity:.75}
-.compare--paired .compare__card{display:grid;gap:7px;align-content:start}
-
-@media (max-width:760px){
-  /* Stacked pairs: the arrow turns downward so the relationship still reads
-     top-to-bottom rather than becoming two unrelated cards. */
-  .comparepair{grid-template-columns:1fr;gap:8px}
-  .comparepair__arrow{transform:rotate(90deg);padding:2px 0}
-  .comparepair + .comparepair{margin-top:8px;padding-top:14px;border-top:1px solid var(--border)}
-}
-
 /* ------------------------------------------------ who runs maintsupp (section 9)
-   Photo left, text right; stacked photo-first on a phone, which is what the
-   source order already gives — so the mobile rule is simply one column. */
-.founder{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:32px;align-items:center}
+   Text only until the photograph is supplied: one column, the copy at a
+   readable measure. `.founder--photo` is added by the component once the
+   file exists and brings the photo-left / text-right layout with it. There is
+   no placeholder box — see the note in founder.tsx. */
+.founder{display:grid;gap:12px}
+.founder--photo{grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:32px;align-items:center}
 .founder__media{position:relative}
 .founder__photo{display:block;width:100%;height:auto;aspect-ratio:9/11;object-fit:cover;
   border-radius:var(--r-lg);border:1px solid var(--border)}
-/* The empty frame the photograph will occupy — same box, same radius, so
-   dropping the file in changes nothing about the layout around it. */
-.founder__frame{aspect-ratio:9/11;display:grid;place-items:center;border-radius:var(--r-lg);
-  border:1px dashed var(--border);background:var(--steel-soft);color:var(--steel);opacity:.65}
-.founder__frame .ic{width:44px;height:44px}
-.founder__body{display:grid;gap:12px;align-content:start}
+.founder__body{display:grid;gap:12px;align-content:start;max-width:76ch}
+.founder__body .lede{max-width:70ch}
 .founder__name{margin:0;font-weight:700;color:var(--navy)}
 .founder__chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 0;padding:0;list-style:none}
 
 @media (max-width:860px){
-  .founder{grid-template-columns:1fr;gap:22px}
+  .founder--photo{grid-template-columns:1fr;gap:22px}
   .founder__media{max-width:320px}
-  .founder__photo,.founder__frame{aspect-ratio:4/3}
+  .founder__photo{aspect-ratio:4/3}
 }
 
 /* ------------------------------------------------ contractor application (/contractors)

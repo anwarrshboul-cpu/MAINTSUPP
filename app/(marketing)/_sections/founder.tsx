@@ -7,13 +7,14 @@
  *
  * THE PHOTOGRAPH IS NOT SUPPLIED YET. The brief names the file —
  * /assets/photos/founder-anwar.jpg — and is explicit that no AI face and no
- * stock substitute may stand in for it, so the frame below renders empty until
- * that file exists. An empty frame is the honest state: it shows the layout the
- * photograph will occupy and says plainly that a photograph is coming, rather
- * than borrowing somebody else's face to fill the space.
+ * stock substitute may stand in for it. Until that file exists NOTHING renders
+ * in its place: an earlier version drew an empty dashed frame with a picture
+ * icon, which on the page read as a broken image above the heading rather than
+ * as a promise of one. The text takes the full width instead.
  *
- * Dropping `founder-anwar.jpg` into `public/assets/photos` is the whole of the
- * change needed later — `FOUNDER_PHOTO_SUPPLIED` below is the one switch.
+ * Dropping `founder-anwar.jpg` into `public/assets/photos` and flipping the
+ * constant below is the whole of the change needed later — the two-column
+ * layout comes back with it (`.founder--photo`).
  */
 
 /**
@@ -36,9 +37,9 @@ export function Founder() {
   return (
     <section className="section" id="founder">
       <div className="wrap">
-        <div className="founder reveal">
-          <div className="founder__media">
-            {FOUNDER_PHOTO_SUPPLIED ? (
+        <div className={`founder${FOUNDER_PHOTO_SUPPLIED ? " founder--photo" : ""} reveal`}>
+          {FOUNDER_PHOTO_SUPPLIED && (
+            <div className="founder__media">
               <img
                 className="founder__photo"
                 src="/assets/photos/founder-anwar.jpg"
@@ -48,26 +49,8 @@ export function Founder() {
                 loading="lazy"
                 decoding="async"
               />
-            ) : (
-              /* aria-hidden: it is a placeholder for a picture, and a screen
-                 reader gains nothing from being told a photograph is pending. */
-              <div className="founder__frame" aria-hidden="true">
-                <svg
-                  className="ic"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect x="3" y="4" width="18" height="16" rx="2" />
-                  <circle cx="8.5" cy="9.5" r="1.8" />
-                  <path d="m21 15-4.5-4.5L6 21" />
-                </svg>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="founder__body">
             {/* No eyebrow above it. Every other section has one, but the

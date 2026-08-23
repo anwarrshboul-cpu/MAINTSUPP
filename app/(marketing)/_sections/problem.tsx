@@ -72,54 +72,76 @@ export function Problem() {
         </div>
 
         {/*
-          BOTH SIDES, ALWAYS, WITH NO CONTROL TO FIND.
+          A TABLE, ON EVERY WIDTH.
 
-          This was a two-button switcher: "Without Maintsupp" or "With
-          Maintsupp", one at a time. A comparison that shows one side at a time
-          is not a comparison — the reader had to hold five statements in their
-          head, press a button, and match them up from memory, and nothing on
-          screen said the two lists were even the same five items in the same
-          order. On a phone the switcher was also the only hint that a second
-          half existed at all.
+          Two earlier shapes were tried and both were rejected on a phone. A
+          two-button switcher showed one side at a time, which is not a
+          comparison. Then paired cards — pain, arrow, answer — stacked on a
+          phone into a column of alternating red and green boxes with an icon
+          floating beside each line, and the reader had to work out from the
+          rhythm which box answered which.
 
-          Paired rows instead: each pain sits beside the thing that answers it,
-          side by side on desktop and stacked as a labelled pair on a phone. The
-          five pairs are the same five, in the same order.
+          A comparison is a table: two columns with a heading each, five rows,
+          and the answer to a problem sits on the same row as the problem at
+          every width. Real <table> semantics, so a screen reader announces
+          "Without Maintsupp, column 1 of 2" on the cell rather than leaving the
+          pairing to be inferred. The column is never told by colour alone: the
+          heading names it, the icon shape differs, and the header row stays.
+
+          The "with" column is the logo's cyan — `--teal` / `--teal-text` — not
+          a generic green, because this is the page saying "the Maintsupp way".
         */}
-        <ul className="compare compare--paired reveal">
-          {PAIRS.map((pair) => (
-            <li className="comparepair" key={pair.before}>
-              <div className="compare__card compare__card--pain">
-                {/* The column headings live on the first pair only — repeating
-                    "Without / With" five times is noise once the pattern is
-                    established, and `aria-hidden` keeps the repeat out of the
-                    accessible name too. Each card still names its own side for
-                    a screen reader via the visually-hidden span below. */}
-                <span className="comparepair__side">Without Maintsupp</span>
-                <Ic path={P.alert} />
-                <h3>{pair.before}</h3>
-              </div>
-              <span className="comparepair__arrow" aria-hidden="true">
-                <svg
-                  className="ic ic--sm"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </span>
-              <div className="compare__card compare__card--gain">
-                <span className="comparepair__side">With Maintsupp</span>
-                <Ic path={P.checkc} />
-                <h3>{pair.after}</h3>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="comparetable-wrap reveal">
+          <table className="comparetable">
+            <thead>
+              <tr>
+                {/* `.comparetable__inner` is a two-column grid INSIDE the cell
+                    — icon track, then text — so the <th>/<td> keep their
+                    table display (and therefore their table semantics) while
+                    the icon can never sit on top of the text however narrow
+                    the column gets. */}
+                <th scope="col" className="comparetable__th comparetable__th--pain">
+                  <span className="comparetable__inner">
+                    <span className="comparetable__ic" aria-hidden="true">
+                      <Ic path={P.alert} cls="ic--sm" />
+                    </span>
+                    <span>Without Maintsupp</span>
+                  </span>
+                </th>
+                <th scope="col" className="comparetable__th comparetable__th--gain">
+                  <span className="comparetable__inner">
+                    <span className="comparetable__ic" aria-hidden="true">
+                      <Ic path={P.checkc} cls="ic--sm" />
+                    </span>
+                    <span>With Maintsupp</span>
+                  </span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {PAIRS.map((pair) => (
+                <tr key={pair.before}>
+                  <td className="comparetable__cell comparetable__cell--pain">
+                    <span className="comparetable__inner">
+                      <span className="comparetable__ic" aria-hidden="true">
+                        <Ic path={P.alert} cls="ic--sm" />
+                      </span>
+                      <span className="comparetable__text">{pair.before}</span>
+                    </span>
+                  </td>
+                  <td className="comparetable__cell comparetable__cell--gain">
+                    <span className="comparetable__inner">
+                      <span className="comparetable__ic" aria-hidden="true">
+                        <Ic path={P.checkc} cls="ic--sm" />
+                      </span>
+                      <span className="comparetable__text">{pair.after}</span>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );

@@ -7,10 +7,18 @@ import { ApprovedPhoto } from "./approved-photo";
  * How it works — the seven-stage stepper, ported from the standalone landing
  * page. Markup, class names and copy are the source's; only the plumbing
  * (innerHTML strings, manual class toggling) becomes React state.
+ *
+ * ONE CARD, NO LIST. The port carried the source's left-hand rail of seven
+ * tab buttons beside the stage card. On a desktop that rail repeated every
+ * stage name and heading the card was about to show, and on a phone it became
+ * a strip above the card that nobody used because the card has its own
+ * arrows and takes a swipe. It is gone, and the card takes the full width.
+ * Keyboard users lost nothing: the card itself is focusable and the arrow
+ * keys move between stages on it, exactly as they did on the rail.
  */
 
 type Stage = {
-  /** Rail label. Note stages 1 and 7 are both "Report". */
+  /** The stage's name — the one red word. Note stages 1 and 7 are both "Report". */
   name: string;
   heading: string;
   lede: string;
@@ -110,7 +118,6 @@ const WORKFLOW_PHOTOS = [
 
 export function Workflow() {
   const [active, setActive] = useState(0);
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   // Swipe across the panel. Listeners are attached natively rather than as
@@ -149,22 +156,24 @@ export function Workflow() {
     };
   }, []);
 
-  /** The rail is a column on desktop and a strip on narrow screens, so both
-      axes move between stages — exactly as the source's handler does. */
-  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+  /**
+   * Arrow keys on the card (or on either arrow button, which bubble up to
+   * it) move between stages; Home and End jump to the first and last. The
+   * rail used to own this handler; the card does now, so a keyboard user
+   * still has every move the rail gave them.
+   */
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const key = event.key;
     let next: number | null = null;
 
-    if (key === "ArrowDown" || key === "ArrowRight") next = index + 1;
-    else if (key === "ArrowUp" || key === "ArrowLeft") next = index - 1;
+    if (key === "ArrowRight" || key === "ArrowDown") next = active + 1;
+    else if (key === "ArrowLeft" || key === "ArrowUp") next = active - 1;
     else if (key === "Home") next = 0;
     else if (key === "End") next = COUNT - 1;
 
     if (next === null) return;
     event.preventDefault();
-    const target = wrap(next);
-    setActive(target);
-    tabRefs.current[target]?.focus();
+    setActive(wrap(next));
   }
 
   const stage = STAGES[active];
@@ -194,134 +203,120 @@ export function Workflow() {
           */}
           <p className="lede">
             Follow every job from report to result — reporting, assignment, tracking and
-            analysis in one place. Select any stage to see who does what and what the
-            system records.
+            analysis in one place. Step through the seven stages to see who does what and
+            what the system records.
           </p>
         </div>
         <div className="wf reveal">
-          <ul className="wf__steps" role="tablist" aria-label="Workflow stages" id="wfSteps">
-            {STAGES.map((item, index) => (
-              // Keyed on index: two stages share the name "Report".
-              <li key={index} role="presentation">
-                <button
-                  ref={(node) => {
-                    tabRefs.current[index] = node;
-                  }}
-                  type="button"
-                  role="tab"
-                  id={`wfTab${index}`}
-                  aria-controls="wfPanel"
-                  aria-selected={index === active}
-                  tabIndex={index === active ? 0 : -1}
-                  onClick={() => setActive(index)}
-                  onKeyDown={(event) => handleKeyDown(event, index)}
-                >
-                  <span className="wf__num">{index + 1}</span>
-                  <span>
-                    <strong>{item.name}</strong>
-                    <span>{item.heading}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <div>
-            <div className="wf__stage" ref={stageRef}>
-              {/*
-                The approved photograph for this stage. `key` remounts it on a
-                stage change so the browser starts the next picture cleanly
-                rather than showing the previous one until the new one decodes.
+          {/*
+            The card is the stepper. `role="group"` with a name that changes
+            with the stage gives a screen reader the "Stage 2 of 7: Triage"
+            context the tab list used to supply, and `aria-live` on the body
+            announces the new stage when the arrows, a swipe or a key move it.
+            The old `role="tabpanel"` / `aria-labelledby="wfTab…"` went with
+            the tabs they pointed at — a tabpanel with no tab is an ARIA error.
+          */}
+          <div
+            className="wf__stage"
+            ref={stageRef}
+            tabIndex={0}
+            role="group"
+            aria-roledescription="stage"
+            aria-label={`Stage ${active + 1} of ${COUNT}: ${stage.name}. Use the arrow keys to move between stages.`}
+            onKeyDown={handleKeyDown}
+          >
+            {/*
+              The approved photograph for this stage. `key` remounts it on a
+              stage change so the browser starts the next picture cleanly
+              rather than showing the previous one until the new one decodes.
 
-                The first stage loads eagerly: it is what is on screen when the
-                section is reached, and lazy-loading the visible image is the
-                one case where the attribute costs more than it saves.
-              */}
-              <ApprovedPhoto
-                key={approved}
-                src={approved}
-                alt={stage.alt}
-                loading={active === 0 ? "eager" : "lazy"}
-                sizes="(min-width: 1100px) 640px, (min-width: 700px) 60vw, 92vw"
-                className="wf__photo"
-              />
-              <div
-                className="wf__body"
-                id="wfPanel"
-                role="tabpanel"
-                tabIndex={0}
-                aria-labelledby={`wfTab${active}`}
-              >
-                <span className="badge badge--amber">
-                  Stage {active + 1} of {COUNT}
-                </span>
-                <h3 style={{ marginTop: 12 }}>
-                  {stage.name} — {stage.heading}
-                </h3>
-                <p className="lede">{stage.lede}</p>
-                <dl className="wf__meta">
-                  <div>
-                    <dt>What you do</dt>
-                    <dd>{stage.you}</dd>
-                  </div>
-                  <div>
-                    <dt>What we record on your file</dt>
-                    <dd>{stage.records}</dd>
-                  </div>
-                </dl>
-              </div>
-            </div>
-            <div className="wf__bar" id="wfBar" aria-hidden="true">
-              {STAGES.map((_, index) => (
-                <i key={index} className={index <= active ? "is-done" : undefined} />
-              ))}
-            </div>
-            <div className="wf__ctl">
-              <button
-                className="btn btn--ghost btn--sm"
-                type="button"
-                id="wfPrev"
-                onClick={() => setActive((current) => wrap(current - 1))}
-              >
-                <svg
-                  className="ic ic--xs"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M19 12H5M11 18l-6-6 6-6" />
-                </svg>
-                Previous
-              </button>
-              <span className="wf__count" id="wfCount" aria-hidden="true">
-                {active + 1} / {COUNT}
+              The first stage loads eagerly: it is what is on screen when the
+              section is reached, and lazy-loading the visible image is the
+              one case where the attribute costs more than it saves.
+            */}
+            <ApprovedPhoto
+              key={approved}
+              src={approved}
+              alt={stage.alt}
+              loading={active === 0 ? "eager" : "lazy"}
+              sizes="(min-width: 1360px) 1240px, 92vw"
+              className="wf__photo"
+            />
+            <div className="wf__body" id="wfPanel" aria-live="polite">
+              <span className="badge badge--amber">
+                Stage {active + 1} of {COUNT}
               </span>
-              <button
-                className="btn btn--ghost btn--sm"
-                type="button"
-                id="wfNext"
-                onClick={() => setActive((current) => wrap(current + 1))}
-              >
-                Next
-                <svg
-                  className="ic ic--xs"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </button>
+              {/* Only the stage's NAME is red. The dash and the explanation
+                  after it keep the heading colour. */}
+              <h3 className="wf__title">
+                <span className="wf__stage-name">{stage.name}</span> — {stage.heading}
+              </h3>
+              <p className="lede">{stage.lede}</p>
+              <dl className="wf__meta">
+                <div>
+                  <dt>What you do</dt>
+                  <dd>{stage.you}</dd>
+                </div>
+                <div>
+                  <dt>What we record on your file</dt>
+                  <dd>{stage.records}</dd>
+                </div>
+              </dl>
             </div>
-            <p className="wf__swipe">Swipe the panel, or use the arrows.</p>
           </div>
+          <div className="wf__bar" id="wfBar" aria-hidden="true">
+            {STAGES.map((_, index) => (
+              <i key={index} className={index <= active ? "is-done" : undefined} />
+            ))}
+          </div>
+          <div className="wf__ctl">
+            <button
+              className="btn btn--ghost btn--sm"
+              type="button"
+              id="wfPrev"
+              aria-label="Previous stage"
+              onClick={() => setActive((current) => wrap(current - 1))}
+            >
+              <svg
+                className="ic ic--xs"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M19 12H5M11 18l-6-6 6-6" />
+              </svg>
+              Previous
+            </button>
+            <span className="wf__count" id="wfCount" aria-hidden="true">
+              {active + 1} / {COUNT}
+            </span>
+            <button
+              className="btn btn--ghost btn--sm"
+              type="button"
+              id="wfNext"
+              aria-label="Next stage"
+              onClick={() => setActive((current) => wrap(current + 1))}
+            >
+              Next
+              <svg
+                className="ic ic--xs"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </button>
+          </div>
+          <p className="wf__swipe">Swipe the panel, or use the arrows.</p>
         </div>
       </div>
     </section>

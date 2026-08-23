@@ -206,12 +206,18 @@ export function Pricing() {
             onChange={(event) => setStoreCount(Number(event.target.value))}
             aria-describedby="pricing-band-note"
           />
+          {/*
+            The same sentence shape for every band. The two bigger bands used to
+            say "save £12 per store on Total Care" while the Total Care card
+            beside them said "save £18 per store" — both true (one is the drop
+            from the entry rate, the other the bundle saving) and, read
+            together, a contradiction. The figure here now says what it is.
+          */}
           <p id="pricing-band-note" className="pricing__band-note">
+            {`At ${storeCount} ${storeCount === 1 ? "store" : "stores"} you are on the ${band.label} rate`}
             {band.id === "small"
-              ? `At ${storeCount} ${storeCount === 1 ? "store" : "stores"} you are on the ${band.label} rate.`
-              : `You have unlocked the ${band.label} rate — save £${
-                  entryBand.total - band.total
-                } per store on Total Care.`}
+              ? "."
+              : ` — £${entryBand.total - band.total} per store below the ${entryBand.label} rate on Total Care.`}
           </p>
         </div>
 

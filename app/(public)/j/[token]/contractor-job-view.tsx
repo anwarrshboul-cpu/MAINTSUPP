@@ -233,6 +233,38 @@ export default function ContractorJobView({ token }: { token: string }) {
     }
   }
 
+  /**
+   * THE ONE SUBMIT.
+   *
+   * The page used to offer "Send this update" (the note path) beside "Mark
+   * work complete" (the completion path), and an engineer writing the job up
+   * on a phone had to decide which of two buttons the same form belonged to.
+   * There is one button now. On a link that may request completion — the
+   * normal contractor link — it IS the completion path: the server records
+   * the note, the finish date and the signature together with the request,
+   * so nothing the note button used to send is lost (see `completionUpdate`
+   * in the route, which folds the note and the date into the comment). On a
+   * comment-only link, where completion was never offered, the same button
+   * sends the note as before.
+   *
+   * The evidence rule is the server's and is unchanged — a completion with
+   * no photograph of the finished work is refused with the same message. The
+   * page checks first only to save the round trip; the server is the rule.
+   */
+  async function submit() {
+    if (!data) return;
+    if (data.permissions.canRequestCompletion) {
+      const sentCompletion = (uploads.completion ?? []).some((entry) => entry.status === "done");
+      if (data.completionPhotos.length === 0 && !sentCompletion) {
+        setError("Please upload a photo of the completed work before marking this done.");
+        return;
+      }
+      await send("complete");
+      return;
+    }
+    await send("note");
+  }
+
   async function send(intent: "note" | "complete" | "blocked") {
     setBusy(true);
     setError(null);
@@ -507,14 +539,6 @@ export default function ContractorJobView({ token }: { token: string }) {
                   onChange={(event) => setNote(event.target.value)}
                   placeholder="Anything the coordinator should know"
                 />
-                <button
-                  type="button"
-                  className="job-link__secondary"
-                  disabled={busy || (!note.trim() && !completedOn)}
-                  onClick={() => void send("note")}
-                >
-                  Send this update
-                </button>
               </>
             )}
           </section>
@@ -526,14 +550,16 @@ export default function ContractorJobView({ token }: { token: string }) {
           )}
 
           <div className="job-link__actions">
-            {permissions.canRequestCompletion && (
+            {/* One primary action. The note, the date, the signature and the
+                photographs all travel with it — see `submit` above. */}
+            {(permissions.canRequestCompletion || permissions.canComment) && (
               <button
                 type="button"
                 className="job-link__primary"
                 disabled={busy}
-                onClick={() => void send("complete")}
+                onClick={() => void submit()}
               >
-                Mark work complete
+                Submit
               </button>
             )}
             <button

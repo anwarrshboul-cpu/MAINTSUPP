@@ -34,6 +34,30 @@ body {
   color: #101820;
 }
 
+/*
+ * BORDER-BOX, SAID EXPLICITLY.
+ *
+ * This route group loads no reset, so every element here was the user
+ * agent's `content-box`. Each control below is `width: 100%` AND carries its
+ * own padding and border — so the file pickers (100% + 20px padding + 2px
+ * border) and the typed inputs (100% + 24px + 2px) ran 22–26px past the
+ * right edge of the card they sit in, on every width. The fix is the box
+ * model, not a narrower width: a width that happens to fit at one padding
+ * breaks at the next.
+ */
+.job-link,
+.job-link *,
+.job-link *::before,
+.job-link *::after {
+  box-sizing: border-box;
+}
+
+.job-link__card {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .job-link__head {
   padding: 8px 0 16px;
 }
@@ -174,12 +198,18 @@ body {
 .job-link input[type="file"] {
   display: block;
   width: 100%;
+  max-width: 100%;
   min-height: 44px;
   padding: 10px;
   border: 1px dashed #a9b6bd;
   border-radius: 9px;
   background: #f7f9fa;
   font-size: 16px;
+}
+
+/* A long filename must wrap inside the card, not push it wider. */
+.job-link__uploads li {
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -199,6 +229,7 @@ body {
 .job-link select {
   display: block;
   width: 100%;
+  max-width: 100%;
   min-height: 44px;
   margin-bottom: 14px;
   padding: 11px 12px;

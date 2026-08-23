@@ -1,0 +1,197 @@
+/**
+ * UI batch — the landing page review, pinned.
+ *
+ * Each of these came from a screenshot review on a phone: the comparison
+ * became a table, the urgency pills became a select, the three upload tiles
+ * became one "+ Add" button with a menu, the stage list left the stepper,
+ * the founder placeholder went, the drawer opens from the left, and the
+ * pricing band buttons stopped moving under the thumb that pressed them.
+ * Source pins, so the decisions survive the next tidy-up.
+ */
+
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const read = (file) => readFile(path.join(root, file), "utf8");
+const stripComments = (source) =>
+  source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+/** The declaration block for the first rule whose selector contains `selector`. */
+function ruleFor(css, selector) {
+  const at = css.indexOf(selector);
+  if (at === -1) return null;
+  const open = css.indexOf("{", at);
+  const close = css.indexOf("}", open);
+  return css.slice(open + 1, close);
+}
+
+test("urgency is one required select carrying the four approved values", async () => {
+  const form = stripComments(await read("app/(marketing)/_sections/report-job.tsx"));
+  const field = form.slice(form.indexOf('id="rjUrgency"') - 80, form.indexOf('id="rjUrgency-err"'));
+  assert.match(field, /<select\s+id="rjUrgency"/, "a select, not radios");
+  assert.match(field, /required/);
+  assert.match(field, /<option value="">Select urgency<\/option>/, "the placeholder option");
+  assert.match(field, /value=\{entry\.code\}/, "the option value is the P-code the server maps");
+  assert.match(field, /aria-invalid=\{invalid\("rjUrgency"\)\}/);
+  assert.ok(!form.includes('type="radio"'), "no radio inputs remain in the form");
+  assert.ok(!form.includes("chipgroup"), "and the pill pattern is gone from it");
+
+  /* The four values and their wording are unchanged, and still carry no SLA. */
+  for (const label of [
+    "P1 — Critical, site unsafe or cannot trade",
+    "P2 — Urgent, trading impaired",
+    "P3 — Routine",
+    "P4 — Cosmetic / quote request",
+  ]) {
+    assert.ok(form.includes(label), `urgency wording changed: ${label}`);
+  }
+  assert.ok(!/Within \d+ hrs|Next working day|working days/.test(form), "no response-time promise");
+});
+
+test("media is one + Add button opening a menu over the same three inputs", async () => {
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+  assert.match(form, /id="rjAddMedia"/, "the single Add button");
+  assert.match(form, /aria-haspopup="menu"/);
+  assert.match(form, /aria-expanded=\{menuOpen\}/);
+  assert.match(form, /role="menu"/);
+  /* Four menu items in the JSX — the two `[role="menuitem"]` querySelector
+     strings that drive focus are not items. */
+  assert.equal((stripComments(form).match(/(?<!\[)role="menuitem"(?!\])/g) ?? []).length, 4, "three sources and a Cancel");
+  assert.ok(!form.includes('className="upload__btn"'), "the three permanent tiles are gone");
+
+  /* The same three hidden inputs, with the same capture behaviour. */
+  assert.match(form, /id="rjCamera"[\s\S]{0,120}accept="image\/\*"\s+capture="environment"/);
+  assert.match(form, /id="rjVideo"[\s\S]{0,120}accept="video\/\*"\s+capture="environment"/);
+  assert.match(form, /id="rjLibrary"[\s\S]{0,120}accept="image\/\*,video\/\*"/);
+  assert.match(form, /pick\(cameraRef\)/);
+  assert.match(form, /pick\(videoRef\)/);
+  assert.match(form, /pick\(libraryRef\)/);
+
+  /* Keyboard: Escape closes and focus returns to the button. */
+  assert.match(form, /case "Escape":\s*event\.preventDefault\(\);\s*closeMenu\(\);/);
+  assert.match(form, /addRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  /* The drop zone stays on the container: four drag handlers sit between the
+     id and onDrop, so the window is wide enough to hold them. */
+  assert.match(form, /id="rjUpload"[\s\S]{0,900}onDrop=/);
+
+  const css = await read("app/(marketing)/marketing.css");
+  const mobile = css.slice(css.indexOf(".upload__backdrop{display:none}"));
+  assert.match(mobile, /@media \(max-width:760px\)\{\s*\.upload__backdrop\{display:block;position:fixed;inset:0/, "a backdrop on a phone");
+  assert.match(mobile, /\.upload__menu\{position:fixed;left:0;right:0;bottom:0/, "and the menu is a bottom sheet there");
+
+  /* The sheet sits ABOVE the cookie notice. At --z-toast (500) the notice
+     covered the sheet's Cancel row — and the foot of the drawer — on a first
+     visit, and a tap there pressed "Reject non-essential" instead. A cookie
+     bar is page furniture: above the sticky header, below every overlay. */
+  assert.match(css, /\.cookie\{position:fixed;inset:auto 0 0;z-index:calc\(var\(--z-sticky\) \+ 50\);/);
+  /* The backdrop owns its dismissal. The outside-press closer used to remove
+     it on pointerdown, before the finger lifted, so the tap's click was
+     hit-tested against the header beneath and a link took the press. */
+  assert.match(form, /if \(\(target as Element\)\.closest\?\.\("\.upload__backdrop"\)\) return;/);
+  assert.match(form, /className="upload__backdrop"[\s\S]{0,120}onClick=\{\(\) => closeMenu\(\)\}/, "closing from the backdrop's own click returns focus to + Add");
+});
+
+test("the stage list is gone and only the stage name is red", async () => {
+  /* Comments out: the file explains what it removed, by name. */
+  const workflow = stripComments(await read("app/(marketing)/_sections/workflow.tsx"));
+  assert.ok(!workflow.includes("wf__steps"), "the left-hand list is gone");
+  assert.ok(!workflow.includes('role="tablist"'), "and its tab semantics with it");
+  assert.ok(!workflow.includes('role="tabpanel"'), "a tabpanel with no tab is an ARIA error");
+  assert.ok(!workflow.includes("aria-labelledby"), "nothing points at a tab that no longer exists");
+  assert.match(
+    workflow,
+    /<span className="wf__stage-name">\{stage\.name\}<\/span> — \{stage\.heading\}/,
+    "the name is its own span; the dash and heading are outside it",
+  );
+  /* Keyboard access moved to the card. */
+  assert.match(workflow, /className="wf__stage"[\s\S]{0,200}tabIndex=\{0\}/);
+  assert.match(workflow, /onKeyDown=\{handleKeyDown\}/);
+  assert.match(workflow, /key === "ArrowRight"/);
+  assert.match(workflow, /key === "ArrowLeft"/);
+  assert.match(workflow, /aria-live="polite"/);
+  /* Everything the card carried is still there. */
+  for (const kept of ["Stage {active + 1} of {COUNT}", "What you do", "What we record on your file", "wf__bar", "wfPrev", "wfNext", "Swipe the panel, or use the arrows."]) {
+    assert.ok(workflow.includes(kept), `lost from the stepper: ${kept}`);
+  }
+  assert.equal((workflow.match(/name: "/g) ?? []).length, 7, "seven stages");
+
+  const css = await read("app/(marketing)/marketing.css");
+  assert.ok(!css.includes(".wf__steps"), "the list's styles went with it");
+  assert.ok(!/\.wf\{[^}]*grid-template-columns/.test(css), "no second column is reserved");
+  assert.match(css, /\.wf__stage-name\{color:var\(--critical\)\}/, "red is the page's critical token");
+});
+
+test("the drawer opens from the left edge and locks the page without shifting it", async () => {
+  const css = await read("app/(marketing)/marketing.css");
+  const panel = ruleFor(css, ".drawer__panel{");
+  assert.match(panel, /inset:0 auto 0 0/, "pinned to the left edge");
+  assert.match(css, /@keyframes slideIn\{from\{transform:translateX\(-100%\)\}\}/, "and slides in from it");
+  assert.match(panel, /overflow-y:auto/, "the list scrolls inside the panel on a short phone");
+  assert.match(panel, /overscroll-behavior:contain/);
+
+  const chrome = await read("app/(marketing)/_sections/chrome.tsx");
+  assert.match(chrome, /body\.style\.position = "fixed";/, "overflow:hidden alone does not hold on iOS");
+  assert.match(chrome, /body\.style\.top = `-\$\{scrollY\}px`;/);
+  assert.match(chrome, /body\.style\.paddingRight = `\$\{scrollbar\}px`;/, "the scrollbar width is kept, so nothing shifts sideways");
+  assert.match(chrome, /window\.scrollTo\(\{ top: scrollY, left: 0, behavior: "instant"/, "the position is handed back instantly");
+  /* Closes via ×, via the backdrop, and after navigating; Escape and the trap stay. */
+  assert.match(chrome, /className="drawer__close"[^>]*onClick=\{close\}/);
+  assert.match(chrome, /if \(event\.target === event\.currentTarget\) close\(\);/);
+  assert.match(chrome, /*
+     * One handler reading the anchor's own href (not a `follow(href)` factory
+     * called during render — react-hooks/refs forbids a ref-touching function
+     * from running in render). The behaviour is identical: close, then follow.
+     */
+    /<a href=\{href\} onClick=\{onDrawerLink\}>/);
+  /* An anchor chosen from the drawer is followed AFTER the lock releases —
+     otherwise the release's scroll restore undoes the jump a frame later. */
+  assert.match(chrome, /pendingHash\.current = href;/);
+  assert.match(chrome, /destination\.scrollIntoView\(\{ behavior: reduced \? "auto" : "smooth", block: "start" \}\);/);
+  assert.match(chrome, /event\.key === "Escape"/);
+  assert.match(chrome, /event\.shiftKey && document\.activeElement === first/);
+  for (const item of ["Report a Job", "Portal Login", "Services", "How It Works", "Pricing", "Case Study", "Book a Portfolio Review"]) {
+    assert.ok(chrome.includes(item), `drawer item missing: ${item}`);
+  }
+});
+
+test("the pricing band buttons do not move under the thumb that pressed them", async () => {
+  /*
+   * The handler was never the defect: a tap on any band moved the pill, the
+   * slider and the prices in both Chromium and WebKit. What moved was the
+   * row itself — the note above it is one line on 1–10 and two lines on the
+   * other two bands, so the card grew by a line the moment 11–25 or 26+ was
+   * pressed (+21px at 390 and 430, measured). Two lines are reserved now,
+   * three below 360, and the note reads the same shape for every band.
+   */
+  const css = await read("app/(marketing)/marketing.css");
+  /* 3.2em is two lines at the note's line-height of 1.6 — not 2.4em, which
+     is two lines of glyphs and not two lines of text. */
+  assert.match(css, /\.pricing__band-note\{[^}]*line-height:1\.6\}/);
+  assert.match(css, /@media \(max-width:700px\)\{\.pricing__band-note\{min-height:3\.2em\}\}/);
+  assert.match(css, /@media \(max-width:360px\)\{\.pricing__band-note\{min-height:4\.8em\}\}/);
+  assert.match(css, /\.switcher button\{touch-action:manipulation\}/, "a tap is a tap, not half a double-tap");
+
+  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  assert.match(pricing, /you are on the \$\{band\.label\} rate`\}/, "one sentence shape for every band");
+  assert.ok(!pricing.includes("You have unlocked"), "the contradictory 'save £N' note is gone");
+  assert.match(pricing, /below the \$\{entryBand\.label\} rate on Total Care/, "the figure says what it is");
+  /* The approved numbers, untouched. */
+  assert.match(pricing, /coordination: 65, compliance: 55, total: 100/);
+  assert.match(pricing, /coordination: 58, compliance: 48, total: 88/);
+  assert.match(pricing, /coordination: 52, compliance: 42, total: 78/);
+});
+
+test("the hero feed keeps one height, so the page below it stops jumping", async () => {
+  /*
+   * Measured at 390px: the rotating feed line alternated between 85px and
+   * 104px every 4.2 seconds, and everything beneath it — the pricing band
+   * buttons included — shifted 19px with it. Two lines are reserved for the
+   * detail line, so a one-line item and a two-line item take the same room.
+   */
+  const css = await read("app/(marketing)/marketing.css");
+  assert.match(css, /\.hero__feed span\{[^}]*min-height:3\.2em;line-height:1\.6/, "two lines reserved for the detail line");
+});

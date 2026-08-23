@@ -172,12 +172,33 @@ test("the comparison shows both sides with nothing to press", async () => {
   const problem = await read("app/(marketing)/_sections/problem.tsx");
   assert.ok(!problem.includes("aria-pressed"), "the switcher is gone");
   assert.ok(!problem.includes("useState"), "and so is the state behind it");
-  assert.match(problem, /className="comparepair"/, "paired rows instead");
   assert.equal((problem.match(/before: "/g) ?? []).length, 5, "the same five pairs");
 
+  /*
+   * A TABLE, ON EVERY WIDTH — this pin changed with the UI batch.
+   *
+   * It used to require `.comparepair` rows that were "side by side on desktop"
+   * and "stacked on a phone". The stacked form was reviewed on a phone and
+   * rejected: a column of alternating red and green cards, each with an icon
+   * floating beside the text, is not a comparison. The approved shape is a
+   * real <table> with two column headers and five rows, two columns at every
+   * width down to 320px, and an icon track inside each cell so the icon can
+   * never sit on the text.
+   */
+  assert.match(problem, /<table className="comparetable">/, "real table semantics");
+  assert.equal((problem.match(/<th scope="col"/g) ?? []).length, 2, "two column headers");
+  assert.match(problem, /Without Maintsupp/);
+  assert.match(problem, /With Maintsupp/);
+  assert.ok(!problem.includes("comparepair"), "the stacked pairs are gone");
+
   const css = await read("app/(marketing)/marketing.css");
-  assert.match(css, /\.comparepair\{[^}]*grid-template-columns:1fr auto 1fr/, "side by side on desktop");
-  assert.match(css, /@media \(max-width:760px\)\{[\s\S]{0,200}\.comparepair\{grid-template-columns:1fr/, "stacked on a phone");
+  assert.match(css, /\.comparetable\{[^}]*table-layout:fixed/, "the columns split 50/50 whatever the copy does");
+  assert.match(css, /\.comparetable__inner\{display:grid;grid-template-columns:2[0-9]px minmax\(0,1fr\)/, "a fixed icon track inside each cell");
+  assert.ok(!/\.comparetable[^{]*\{[^}]*grid-template-columns:1fr\}/.test(css), "never collapses to one column");
+  /* The "with" column is the logo's cyan, the "without" column the critical red. */
+  assert.match(css, /\.comparetable__th--gain\{background:var\(--steel-soft\);color:var\(--teal-deep\)\}/);
+  assert.match(css, /\.comparetable__th--pain\{background:var\(--critical-bg\);color:var\(--critical\)\}/);
+  assert.ok(!/\.comparetable[^{]*\{[^}]*--success/.test(css), "cyan, not green, for the Maintsupp column");
 });
 
 test("the review CTA has one name however the CSS behaves", async () => {
@@ -215,14 +236,26 @@ test("the footer renames the portal link and adds the contractor route, nav unto
   assert.match(chrome, /Maintsupp is a trading name of Maintauk Ltd\. Registered in England &amp; Wales,/);
 });
 
-test("the founder section renders a frame rather than somebody else's face", async () => {
+test("the founder section renders nothing in place of the photograph", async () => {
   const founder = await read("app/(marketing)/_sections/founder.tsx");
   assert.match(founder, /Who runs Maintsupp/);
   assert.match(founder, /Anwar Shboul — Founder &amp; Director/);
   assert.match(founder, /Maintsupp is founder-led\./);
   assert.match(founder, /\/assets\/photos\/founder-anwar\.jpg/, "the named slot is the only source");
   assert.match(founder, /const FOUNDER_PHOTO_SUPPLIED = false;/, "and it is not supplied yet");
-  assert.match(founder, /className="founder__frame"/, "so an empty frame stands in its place");
+  /*
+   * CHANGED WITH THE UI BATCH. This used to require `.founder__frame` — an
+   * empty dashed box with a picture icon where the photograph will go. On the
+   * page it read as a broken image above the heading and was struck through
+   * in review. Nothing renders until the file is supplied; the text takes the
+   * width. The <img> path is kept behind the constant so the photograph is a
+   * one-line change when it arrives.
+   */
+  assert.ok(!founder.includes("founder__frame"), "no placeholder frame, no picture icon");
+  assert.match(founder, /\{FOUNDER_PHOTO_SUPPLIED && \(/, "the photograph renders only when supplied");
+  assert.match(founder, /FOUNDER_PHOTO_SUPPLIED \? " founder--photo" : ""/, "and brings its two-column layout with it");
+  const css = await read("app/(marketing)/marketing.css");
+  assert.ok(!css.includes(".founder__frame"), "the frame's styles went with it");
   for (const chip of ["Founder-led", "One named coordinator per portfolio", "Mon–Fri, 8:30am–5:30pm"]) {
     assert.ok(founder.includes(chip), `missing chip: ${chip}`);
   }
