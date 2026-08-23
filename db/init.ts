@@ -78,6 +78,7 @@ async function initialize() {
   await renameComplianceKinds(d1);
   await ensureStageNineContractorLinks(d1);
   await ensureStageTwentyThreeRecycleBin(d1);
+  await ensureBoardAutomations(d1);
 }
 
 type D1DatabaseLike = Awaited<ReturnType<typeof getD1>>;
@@ -2688,6 +2689,69 @@ async function ensureStageTwentyThreeRecycleBin(d1: D1DatabaseLike) {
     d1.prepare(
       `CREATE INDEX IF NOT EXISTS maintenance_requests_live_idx
          ON maintenance_requests(organisation_id, archived) WHERE deleted_at IS NULL`,
+    ),
+  ]);
+}
+
+/**
+ * Board automations — mirrors drizzle/0020 for databases created before it.
+ *
+ * Two tables, both additive, both `IF NOT EXISTS`. No integer booleans and no
+ * `DEFAULT CURRENT_TIMESTAMP`: `enabled` is 'on'/'off' text and every stamp is
+ * an ISO string the application writes, so the Postgres adapter — which
+ * translates booleans and timestamps per column against the converted
+ * production schema — has nothing to translate here and the two databases
+ * behave the same. See the note on `boardAutomations` in db/schema.ts.
+ */
+async function ensureBoardAutomations(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS board_automations (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         name TEXT NOT NULL,
+         trigger_type TEXT NOT NULL,
+         trigger_config TEXT NOT NULL DEFAULT '{}',
+         action_type TEXT NOT NULL,
+         action_config TEXT NOT NULL DEFAULT '{}',
+         enabled TEXT NOT NULL DEFAULT 'on',
+         importance TEXT NOT NULL DEFAULT 'minor',
+         description TEXT,
+         created_by TEXT,
+         run_count INTEGER NOT NULL DEFAULT 0,
+         last_run_at TEXT,
+         last_sweep_at TEXT,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS board_automations_board_idx ON board_automations(organisation_id, board_id)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS automation_runs (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         automation_id TEXT NOT NULL,
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         request_id TEXT,
+         status TEXT NOT NULL,
+         trigger_summary TEXT,
+         action_summary TEXT,
+         error TEXT,
+         depth INTEGER NOT NULL DEFAULT 0,
+         chain_id TEXT,
+         dedupe_key TEXT,
+         actor_email TEXT,
+         created_at TEXT NOT NULL
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS automation_runs_board_idx ON automation_runs(organisation_id, board_id, created_at)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS automation_runs_rule_idx ON automation_runs(organisation_id, automation_id, dedupe_key)",
     ),
   ]);
 }

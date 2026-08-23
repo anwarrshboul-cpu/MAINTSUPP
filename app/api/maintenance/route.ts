@@ -21,6 +21,13 @@ import {
 import { configuredValue } from "../../lib/options-repository";
 import { priorityRule } from "../../lib/priority-rules";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
+import { requestFieldValues } from "../../lib/request-fields";
+import {
+  automationContext,
+  dispatchAutomationEvents,
+  itemCreatedEvent,
+  requestFieldEvents,
+} from "../../lib/automations";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 function databaseError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
@@ -490,6 +497,12 @@ export async function POST(request: Request) {
       })
       .where(eq(maintenanceRequests.id, id));
 
+    // The job exists and its alert is logged; now the board's rules may run.
+    // A rule that fails cannot undo either — see `dispatchAutomationEvent`.
+    await dispatchAutomationEvents(automationContext(guard.scope, request), [
+      itemCreatedEvent("maintenance", id, null),
+    ]);
+
     return Response.json(
       {
         request: exposeRequest(created),
@@ -672,71 +685,12 @@ export async function PATCH(request: Request) {
     }
 
     if (fields) {
-      if (fields.source === "Portal form" || fields.source === "Manual") {
-        values.source = fields.source;
-      }
-      if (typeof fields.description === "string") {
-        const description = trimString(fields.description, 1200);
-        if (description) {
-          values.description = description;
-          values.title = requestTitle(description);
-        }
-      }
-      if (typeof fields.location === "string") {
-        const location = trimString(fields.location, 160);
-        if (location) values.location = location;
-      }
-      if (typeof fields.requester === "string") {
-        const requester = trimString(fields.requester, 120);
-        if (requester) values.requester = requester;
-      }
-      if (typeof fields.contact === "string") {
-        const contact = trimString(fields.contact, 80);
-        if (contact) values.contact = contact;
-      }
-      if (typeof fields.category === "string") {
-        const category = trimString(fields.category, 80);
-        if (category) values.category = category;
-      }
-      if (typeof fields.engineer === "string") {
-        const engineer = trimString(fields.engineer, 80);
-        if (engineer) values.engineer = engineer;
-      }
-      if (typeof fields.priority === "string") {
-        const priority = trimString(fields.priority, 80);
-        if (priority) values.priority = priority;
-      }
-      if (typeof fields.status === "string") {
-        const status = trimString(fields.status, 100);
-        if (status) values.status = status;
-      }
-      if (
-        typeof fields.tier === "number" &&
-        Number.isInteger(fields.tier) &&
-        fields.tier >= 1 &&
-        fields.tier <= 20
-      ) {
-        values.tier = fields.tier;
-      }
-      if (typeof fields.contractor === "string" || fields.contractor === null) {
-        values.contractor = trimString(fields.contractor, 120) || null;
-      }
-      if (typeof fields.assignee === "string" || fields.assignee === null) {
-        values.assignee = trimString(fields.assignee, 120) || null;
-      }
-      if (typeof fields.approvedBy === "string" || fields.approvedBy === null) {
-        values.approvedBy = trimString(fields.approvedBy, 120) || null;
-      }
-      if (typeof fields.invoice === "string" || fields.invoice === null) {
-        values.invoice = trimString(fields.invoice, 160) || null;
-      }
-      if (typeof fields.formUrl === "string" || fields.formUrl === null) {
-        values.formUrl = trimString(fields.formUrl, 600) || null;
-      }
-      if (typeof fields.title === "string") {
-        const title = trimString(fields.title, 200);
-        if (title) values.title = title;
-      }
+      /*
+       * One normaliser for a job's own columns — `requestFieldValues` in
+       * app/lib/request-fields.ts — shared with the automation engine so a rule
+       * that sets Priority applies the same trimming and caps this route does.
+       */
+      Object.assign(values, requestFieldValues(fields));
 
       // Re-parenting — "convert to subitem" and "move out of a subitem".
       //
@@ -791,28 +745,18 @@ export async function PATCH(request: Request) {
         }
         values.parentId = parentId;
       }
-      if (typeof fields.cost === "number" && Number.isFinite(fields.cost)) {
-        values.cost = Math.max(0, fields.cost);
-      } else if (fields.cost === null || fields.cost === "") {
-        values.cost = null;
-      }
-
-      for (const key of [
-        "requestedAt",
-        "completedAt",
-        "dueAt",
-        "nextUpdateAt",
-      ] as const) {
-        if (!(key in fields)) continue;
-        const value = optionalIsoDate(fields[key]);
-        if (value === undefined) continue;
-        if (key === "requestedAt") {
-          if (value) values.requestedAt = value;
-        } else {
-          values[key] = value;
-        }
-      }
     }
+
+    const [before] = await db
+      .select()
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.id, id),
+          eq(maintenanceRequests.organisationId, orgId),
+        ),
+      )
+      .limit(1);
 
     let updated;
     if (stage || fields) {
@@ -859,6 +803,15 @@ export async function PATCH(request: Request) {
       actorEmail: actor.email,
       detail: JSON.stringify(note ? { note } : fields ? { fields } : { stage }),
     });
+
+    // Every board column that moved is one event; a rule reads them by the
+    // board's own column keys. Told after the write, never before.
+    if (stage || fields) {
+      await dispatchAutomationEvents(
+        automationContext(guard.scope, request),
+        requestFieldEvents("maintenance", before, updated),
+      );
+    }
 
     return Response.json({ request: exposeRequest(updated) });
   } catch (error) {

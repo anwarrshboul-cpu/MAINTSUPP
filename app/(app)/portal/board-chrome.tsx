@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import BoardHeader from "./board-header";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BoardActionsHost } from "./board-actions/board-actions-host";
+import { viewFromSearch } from "./board-actions/board-link";
+import { AddViewMenu, ViewOverflowMenu, ViewTabMenu } from "./board-actions/view-menus";
 import { fetchLandingView, rememberLandingView } from "./board-view-memory";
-import { iconFor, TabGlyph } from "./board-tab-glyph";
+import { TabGlyph } from "./board-tab-glyph";
 import { Icon } from "../../components";
 import BoardViewPane from "./board-view-pane";
 import { useScrollOverflow } from "./views/scroll-affordance";
@@ -56,6 +58,12 @@ type Props = {
   boardName?: string;
   /** Rendered inside row 3 — the existing live-board toolbar. */
   children?: React.ReactNode;
+  /**
+   * Ignored. The header reads its count from `/api/automations` itself
+   * (`board-actions/board-actions-host.tsx`); a number passed in here was a
+   * placeholder and is never shown. Kept in the type so the one call site
+   * that still passes it compiles until the integrator removes it.
+   */
   automationCount?: number;
   onViewChange?: (view: BoardView) => void;
   /** Items already filtered by the table's own controls. */
@@ -82,7 +90,6 @@ export default function BoardChrome({
   sectionKey,
   boardName,
   children,
-  automationCount = 1,
   onViewChange,
   items = [],
   palette = {},
@@ -101,6 +108,16 @@ export default function BoardChrome({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renaming, setRenaming] = useState(false);
+
+  // Anchors for the strip's three menus — see board-actions/view-menus.tsx.
+  // One RefObject per tab, made together whenever the view list changes.
+  const tabMenuRefs = useMemo(
+    () => new Map<string, React.RefObject<HTMLButtonElement | null>>(views.map((view) => [view.id, { current: null }])),
+    [views],
+  );
+  const tabMenuRef = (id: string) => tabMenuRefs.get(id) ?? { current: null };
+  const overflowRef = useRef<HTMLButtonElement | null>(null);
+  const addRef = useRef<HTMLButtonElement | null>(null);
 
   // One closer for all three strip menus — "All", "+" and a tab's own "…".
   // See `useDismissOnOutside` for why the strip needed this at all, and the
@@ -159,8 +176,26 @@ export default function BoardChrome({
    * strip out from under somebody mid-click.
    */
   const section = sectionKey ?? boardId;
+  /*
+   * A shared link names its view: `?view=<key>`, written by "Copy link".
+   * Read once, on this load only, and it wins over the remembered landing
+   * view — that is what following a link to a view means — but only when
+   * the key is a tab this board actually has. Consumed after use so a later
+   * re-fetch of the views cannot drag the strip back to it.
+   */
+  const linkedView = useRef<string | null>(
+    typeof window === "undefined" ? null : viewFromSearch(window.location.search),
+  );
   useEffect(() => {
     if (!views.length) return;
+    const wanted = linkedView.current;
+    if (wanted) {
+      linkedView.current = null;
+      if (views.some((view) => view.key === wanted)) {
+        setActiveKey(wanted);
+        return;
+      }
+    }
     let cancelled = false;
     void fetchLandingView(section).then((landing) => {
       if (!landing || cancelled) return;
@@ -237,9 +272,10 @@ export default function BoardChrome({
     <>
     <div className={`board-chrome${collapsed ? " is-collapsed" : ""}`}>
       {/* ── Row 1 — board header (AA1) ───────────────────────────────── */}
-      <BoardHeader
+      <BoardActionsHost
+        boardId={boardId}
         boardName={boardName ?? board?.name ?? "Board"}
-        automationCount={automationCount}
+        activeKey={activeKey}
       />
 
       {error && (
@@ -303,8 +339,13 @@ export default function BoardChrome({
                 {isActive && (
                   <button
                     type="button"
+                    ref={(node) => {
+                      tabMenuRef(view.id).current = node;
+                    }}
                     className="board-views__tab-menu"
                     aria-label={`Options for ${view.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === view.id}
                     onClick={() => {
                       setMenuFor(menuFor === view.id ? null : view.id);
                       setOverflowOpen(false);
@@ -315,40 +356,20 @@ export default function BoardChrome({
                   </button>
                 )}
 
-                {menuFor === view.id && (
-                  <div className="board-views__menu" role="menu">
-                    <button type="button" onClick={() => { setMenuFor(null); setRenaming(true); }}>
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setMenuFor(null); void send("PATCH", { id: view.id, isDefault: true }); }}
-                    >
-                      Set as default
-                    </button>
-                    {/* monday distinguishes the two: the board's default, and
-                        the view everyone lands on in THIS section. The second
-                        is what an owner adding a section actually wants. */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuFor(null);
-                        rememberLandingView(section, view.key, "workspace");
-                      }}
-                    >
-                      Set as the view everyone lands on
-                    </button>
-                    <button
-                      type="button"
-                      className="is-destructive"
-                      disabled={view.system}
-                      title={view.system ? "The main table cannot be removed" : undefined}
-                      onClick={() => void removeView(view)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                )}
+                {/* The tab's menu, on the shared layer — board-actions/view-menus.tsx. */}
+                <ViewTabMenu
+                  view={view}
+                  open={menuFor === view.id}
+                  anchorRef={tabMenuRef(view.id)}
+                  onClose={() => setMenuFor(null)}
+                  onRename={() => { setMenuFor(null); setRenaming(true); }}
+                  onSetDefault={() => { setMenuFor(null); void send("PATCH", { id: view.id, isDefault: true }); }}
+                  onSetLanding={() => {
+                    setMenuFor(null);
+                    rememberLandingView(section, view.key, "workspace");
+                  }}
+                  onDelete={() => void removeView(view)}
+                />
               </div>
             );
           })}
@@ -362,6 +383,9 @@ export default function BoardChrome({
             <div className="board-views__overflow" data-board-popover>
               <button
                 type="button"
+                ref={overflowRef}
+                aria-haspopup="menu"
+                aria-expanded={overflowOpen}
                 onClick={() => {
                   setOverflowOpen(!overflowOpen);
                   // One menu at a time, as monday does — otherwise "All" and
@@ -372,29 +396,26 @@ export default function BoardChrome({
               >
                 All <Icon name="chevron" size={14} />
               </button>
-              {overflowOpen && (
-                <div className="board-views__menu" role="menu">
-                  {overflowTabs.map((view) => (
-                    <button
-                      key={view.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveKey(view.key);
-                        rememberView(view.key);
-                        setOverflowOpen(false);
-                      }}
-                    >
-                      {view.name}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <ViewOverflowMenu
+                views={overflowTabs}
+                open={overflowOpen}
+                anchorRef={overflowRef}
+                onClose={() => setOverflowOpen(false)}
+                onPick={(view) => {
+                  setActiveKey(view.key);
+                  rememberView(view.key);
+                  setOverflowOpen(false);
+                }}
+              />
             </div>
           )}
 
           <div className="board-views__add" data-board-popover>
             <button
               type="button"
+              ref={addRef}
+              aria-haspopup="menu"
+              aria-expanded={addOpen}
               onClick={() => {
                 setAddOpen(!addOpen);
                 setOverflowOpen(false);
@@ -404,17 +425,13 @@ export default function BoardChrome({
             >
               <Icon name="plus" size={16} />
             </button>
-            {addOpen && (
-              <div className="board-views__menu" role="menu">
-                {types.map((type) => (
-                  <button key={type.key} type="button" onClick={() => void addView(type)}>
-                    <Icon name={iconFor(type.icon)} size={15} />
-                    {type.label}
-                    {!type.built && <em className="board-views__soon">soon</em>}
-                  </button>
-                ))}
-              </div>
-            )}
+            <AddViewMenu
+              types={types}
+              open={addOpen}
+              anchorRef={addRef}
+              onClose={() => setAddOpen(false)}
+              onAdd={(type) => void addView(type)}
+            />
           </div>
         </div>
       </nav>

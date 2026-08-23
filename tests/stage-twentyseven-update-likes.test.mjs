@@ -128,7 +128,16 @@ test("the like is confined to the workspace, and to a job that is not binned", a
   const route = await read(ROUTE);
   const put = route.slice(route.indexOf("export async function PUT(request: Request)"));
 
-  const lookup = put.slice(put.indexOf("const [target]"), put.indexOf("const [existing]"));
+  /*
+   * `let [target]`, not `const`, since the UI batch: the board Discussion
+   * (board-actions/board-discussion.tsx) reuses this table with
+   * `request_id = "board:<boardId>"`, and PUT falls back to that board-level
+   * row when no job joins. The workspace and not-binned guards below are
+   * unchanged — they are what this test is for.
+   */
+  const start = put.search(/(?:const|let) \[target\]/);
+  const lookup = put.slice(start, put.indexOf("const [existing]"));
+  assert.ok(start >= 0, "the PUT handler must look the target update up first");
   assert.match(lookup, /eq\(maintenanceRequests\.organisationId, orgId\)/);
   assert.match(
     lookup,

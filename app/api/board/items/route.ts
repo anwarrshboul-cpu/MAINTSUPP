@@ -10,6 +10,14 @@ import {
 } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { nextReference, resolveBoard } from "../../../lib/board-registry";
+import {
+  automationContext,
+  cellChangedEvent,
+  dispatchAutomationEvents,
+  itemCreatedEvent,
+  itemMovedEvent,
+  requestFieldEvents,
+} from "../../../lib/automations";
 import { getColumnType, normaliseCellValue } from "../../../lib/column-types";
 import { chunkIds, selectInChunks } from "../../../lib/sql-batching";
 
@@ -249,6 +257,9 @@ export async function POST(request: Request) {
       }
 
       await recordActivity(db, orgId, board.key, id, who, "duplicated", undefined, sourceId, id);
+      await dispatchAutomationEvents(automationContext(guard.scope, request), [
+        itemCreatedEvent(board.key, id, source.parentId ?? null, placement?.groupId ?? null),
+      ]);
       return Response.json({ id, reference }, { status: 201 });
     }
 
@@ -348,6 +359,11 @@ export async function POST(request: Request) {
         and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
       );
 
+    // A subitem when `parentId` is set — the engine tells the two apart.
+    await dispatchAutomationEvents(automationContext(guard.scope, request), [
+      itemCreatedEvent(board.key, id, parentId, groupId || null),
+    ]);
+
     return Response.json({ id, reference, title, item: created ?? null }, { status: 201 });
   } catch (error) {
     return unavailable(error);
@@ -432,6 +448,26 @@ export async function PATCH(request: Request) {
         db, orgId, board.key, requestId, who, "changed",
         column.key, existing?.value ?? null, value,
       );
+      /*
+       * Named by column KEY for a system column and by id for a custom one —
+       * the same handles the automation builder offers, so a rule on "Status"
+       * matches whether the change came through here or through the board.
+       */
+      const [owner] = await db
+        .select({ parentId: maintenanceRequests.parentId })
+        .from(maintenanceRequests)
+        .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
+        .limit(1);
+      const event = cellChangedEvent(
+        board.key,
+        requestId,
+        owner?.parentId ?? null,
+        column.system ? column.key : column.id,
+        column.type,
+        existing?.value ?? "",
+        value,
+      );
+      if (event) await dispatchAutomationEvents(automationContext(guard.scope, request), [event]);
       return Response.json({ ok: true, value });
     }
 
@@ -499,6 +535,10 @@ export async function PATCH(request: Request) {
         }
         await recordActivity(db, orgId, board.key, itemId, who, "moved", undefined, null, groupId);
       }
+      await dispatchAutomationEvents(
+        automationContext(guard.scope, request),
+        itemIds.map((itemId) => itemMovedEvent(board.key, itemId, null, groupId)),
+      );
       return Response.json({ ok: true, moved: itemIds.length });
     }
 
@@ -525,10 +565,27 @@ export async function PATCH(request: Request) {
       patch.title = title;
     }
 
+    // Read before writing, so each column that moved can be named to the
+    // automation engine afterwards. Bounded by the batch, like the write.
+    const beforeRows = new Map<string, typeof maintenanceRequests.$inferSelect>();
+    for (const chunk of chunkIds(itemIds)) {
+      const rows = await db
+        .select()
+        .from(maintenanceRequests)
+        .where(
+          and(
+            eq(maintenanceRequests.organisationId, orgId),
+            inArray(maintenanceRequests.id, chunk),
+          ),
+        );
+      for (const row of rows) beforeRows.set(row.id, row);
+    }
+
     // Chunked — a batch update from "select all" on a large board otherwise
     // exceeds D1's bound-variable limit.
+    const afterRows: Array<typeof maintenanceRequests.$inferSelect> = [];
     for (const chunk of chunkIds(itemIds)) {
-      await db
+      const rows = await db
         .update(maintenanceRequests)
         .set(patch)
         .where(
@@ -536,12 +593,19 @@ export async function PATCH(request: Request) {
             eq(maintenanceRequests.organisationId, orgId),
             inArray(maintenanceRequests.id, chunk),
           ),
-        );
+        )
+        .returning();
+      afterRows.push(...rows);
     }
 
     for (const itemId of itemIds) {
       await recordActivity(db, orgId, board.key, itemId, who, action);
     }
+
+    await dispatchAutomationEvents(
+      automationContext(guard.scope, request),
+      afterRows.flatMap((row) => requestFieldEvents(board.key, beforeRows.get(row.id), row)),
+    );
 
     return Response.json({ ok: true, updated: itemIds.length });
   } catch (error) {

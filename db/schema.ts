@@ -1659,3 +1659,78 @@ export const recycleBin = sqliteTable(
     ),
   ],
 );
+
+/**
+ * Board automations — "When this happens, then do this".
+ *
+ * One row per rule. The trigger and the action are each a type key from
+ * `app/lib/automations/catalog.ts` plus a JSON config, so a new kind of rule
+ * needs no migration. `name` is the sentence the board shows and is composed
+ * on the server from the same config, never trusted from the client.
+ *
+ * `enabled` is TEXT 'on'/'off' rather than an integer boolean, and every
+ * timestamp is an ISO string written by the application rather than a column
+ * default — both deliberately. `db/sqlite-to-postgres.ts` translates booleans
+ * and timestamps per column against a converted production schema it knows
+ * about; a column this adapter has never heard of has to be plain text on both
+ * databases to behave the same on both.
+ */
+export const boardAutomations = sqliteTable(
+  "board_automations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    boardId: text("board_id").notNull().default("maintenance"),
+    name: text("name").notNull(),
+    triggerType: text("trigger_type").notNull(),
+    triggerConfig: text("trigger_config").notNull().default("{}"),
+    actionType: text("action_type").notNull(),
+    actionConfig: text("action_config").notNull().default("{}"),
+    enabled: text("enabled").notNull().default("on"),
+    importance: text("importance").notNull().default("minor"),
+    description: text("description"),
+    createdBy: text("created_by"),
+    runCount: integer("run_count").notNull().default(0),
+    lastRunAt: text("last_run_at"),
+    /** Time-based rules only: when the sweep last evaluated this rule. */
+    lastSweepAt: text("last_sweep_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [index("board_automations_board_idx").on(table.organisationId, table.boardId)],
+);
+
+/**
+ * Every time a rule fired, or was considered and did not — the Run history.
+ *
+ * `status` is success / failed / skipped, and a skipped row always carries the
+ * reason in `error`, because "it did not run" with no explanation is the
+ * question an operator opens this screen to answer. `depth` and `chain_id`
+ * are the loop guard's own bookkeeping: an action that changes the board
+ * raises events of its own, and those carry depth + 1 until the engine stops
+ * following them. `dedupe_key` is what keeps a date rule from firing twice for
+ * the same item on the same day across two sweeps.
+ */
+export const automationRuns = sqliteTable(
+  "automation_runs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    automationId: text("automation_id").notNull(),
+    boardId: text("board_id").notNull().default("maintenance"),
+    requestId: text("request_id"),
+    status: text("status").notNull(),
+    triggerSummary: text("trigger_summary"),
+    actionSummary: text("action_summary"),
+    error: text("error"),
+    depth: integer("depth").notNull().default(0),
+    chainId: text("chain_id"),
+    dedupeKey: text("dedupe_key"),
+    actorEmail: text("actor_email"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("automation_runs_board_idx").on(table.organisationId, table.boardId, table.createdAt),
+    index("automation_runs_rule_idx").on(table.organisationId, table.automationId, table.dedupeKey),
+  ],
+);

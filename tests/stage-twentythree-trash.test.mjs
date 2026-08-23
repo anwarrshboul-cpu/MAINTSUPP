@@ -177,13 +177,26 @@ test("ensureBoardState will not re-place a job that is in the bin", async () => 
  * "fix" them into bugs.
  */
 test("the id generator and the import identity map still see binned rows", async () => {
-  const board = await read(BOARD_API);
-  const generators = [...board.matchAll(/coalesce\(max\(cast\(substr\(/g)];
-  assert.equal(generators.length, 2, "both MN-… generators must still be here");
+  /*
+   * The two inline `MN-…` generators — one under create_item, one under
+   * duplicate_items — became ONE function, `nextItemNumber` in
+   * app/lib/board-mutations.ts, when the automation engine needed the same
+   * writes the route makes. Same query, same deliberate lack of a
+   * `deleted_at` filter, now written once and read from both.
+   */
+  const mutations = await read("app/lib/board-mutations.ts");
+  const generators = [...mutations.matchAll(/coalesce\(max\(cast\(substr\(/g)];
+  assert.equal(generators.length, 1, "the one MN-… generator create and duplicate share");
   assert.match(
-    board,
+    mutations,
     /DELIBERATELY UNFILTERED/,
     "the reason must be written down where the query is",
+  );
+  const board = await read(BOARD_API);
+  assert.doesNotMatch(
+    board,
+    /coalesce\(max\(cast\(substr\(/,
+    "the route must not grow a second generator beside the shared one",
   );
 
   const importer = await read("app/api/import/route.ts");

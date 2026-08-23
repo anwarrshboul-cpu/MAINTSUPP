@@ -107,7 +107,14 @@ test("the pinned form and the two monday apps carry their own glyph", async () =
   assert.match(glyphs, /if \(!glyph\) return <Icon name=\{iconFor\(view\.icon\)\}/);
   // And the chrome still uses it, or the file above would be dead code.
   const chrome = await read(CHROME);
-  assert.match(chrome, /import \{ iconFor, TabGlyph \} from "\.\/board-tab-glyph"/);
+  /*
+   * Since the UI batch the strip's "+" and "All" menus live in
+   * board-actions/view-menus.tsx (on the shared popover layer), and that is
+   * where `iconFor` is consumed; board-chrome keeps TabGlyph for the tabs.
+   */
+  assert.match(chrome, /import \{ TabGlyph \} from "\.\/board-tab-glyph"/);
+  const viewMenus = await read("app/(app)/portal/board-actions/view-menus.tsx");
+  assert.match(viewMenus, /import \{ iconFor \} from "\.\.\/board-tab-glyph"/);
 });
 
 test("every seeded view type has somewhere to render", async () => {

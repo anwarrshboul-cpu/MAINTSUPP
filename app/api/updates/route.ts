@@ -7,6 +7,12 @@ import {
   maintenanceRequests,
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
+import {
+  automationContext,
+  dispatchAutomationEvents,
+  updateCreatedEvent,
+} from "../../lib/automations";
+import { isBoardDiscussionId } from "../board/discussion/discussion-store";
 
 export const dynamic = "force-dynamic";
 
@@ -453,6 +459,11 @@ export async function POST(request: Request) {
       ),
     );
 
+  // The comment is written and counted; now the board's rules may react to it.
+  await dispatchAutomationEvents(automationContext(guard.scope, request), [
+    updateCreatedEvent("maintenance", requestId, null),
+  ]);
+
   // `attached` is reported rather than assumed: if a file was claimed by an
   // earlier comment the caller should be able to see that fewer landed than
   // were offered.
@@ -515,7 +526,7 @@ export async function PUT(request: Request) {
    * write inside the tenant — but a like on a comment attached to a deleted job
    * would be a row nobody can ever see or remove, and the join costs one query.
    */
-  const [target] = await db
+  let [target] = await db
     .select({ id: itemUpdates.id })
     .from(itemUpdates)
     .innerJoin(
@@ -528,6 +539,20 @@ export async function PUT(request: Request) {
     )
     .where(and(eq(itemUpdates.id, updateId), eq(itemUpdates.organisationId, orgId)))
     .limit(1);
+  /*
+   * A Board Discussion update has no job behind it — its `request_id` is
+   * `board:<boardId>` (see app/api/board/discussion) — so the join above
+   * cannot find it. The same workspace check applies; the bin check has
+   * nothing to apply to.
+   */
+  if (!target) {
+    const [boardUpdate] = await db
+      .select({ id: itemUpdates.id, requestId: itemUpdates.requestId })
+      .from(itemUpdates)
+      .where(and(eq(itemUpdates.id, updateId), eq(itemUpdates.organisationId, orgId)))
+      .limit(1);
+    if (boardUpdate && isBoardDiscussionId(boardUpdate.requestId)) target = { id: boardUpdate.id };
+  }
   if (!target) {
     return Response.json({ error: "That update is not on this board." }, { status: 404 });
   }

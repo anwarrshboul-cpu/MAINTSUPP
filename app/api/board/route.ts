@@ -57,6 +57,28 @@ import {
   sendGroupToBin,
   sendJobsToBin,
 } from "../../lib/recycle-bin";
+import { statusForStage } from "../../lib/stage-status";
+import {
+  createBoardItem,
+  duplicateBoardItems,
+  findOrCreateArchivedGroup,
+  moveItemsToGroup,
+  setBoardCell,
+} from "../../lib/board-mutations";
+import {
+  BOARD_COLUMN_TYPES,
+  BOARD_DATE_ICON_IDS,
+  dateDecorationValue as sharedDateDecorationValue,
+  normalizeBoardCellValue,
+} from "../../lib/board-cell-values";
+import {
+  automationContext,
+  cellChangedEvent,
+  dispatchAutomationEvents,
+  itemCreatedEvent,
+  itemMovedEvent,
+  requestFieldEvents,
+} from "../../lib/automations";
 
 /*
  * Which board a request is for.
@@ -237,39 +259,8 @@ const optionColors = new Set([
   ...maintenanceGroupSeeds.map((group) => group.colour),
 ]);
 
-const boardColumnTypes = new Set<BoardColumnType>([
-  "status",
-  "dropdown",
-  "text",
-  "long_text",
-  "date",
-  "people",
-  "number",
-  "files",
-  "timeline",
-  "checkbox",
-  "email",
-  "phone",
-  "link",
-  "subitems",
-]);
-
-const boardDateIconIds = new Set([
-  "clock-green",
-  "notice-green",
-  "check-green",
-  "arrow-green",
-  "help-green",
-  "clock-red",
-  "warning-red",
-  "back-red",
-  "close-red",
-  "bolt-blue",
-  "warning-orange",
-  "rocket-blue",
-  "smile-grey",
-  "important-grey",
-]);
+// Shared with the automation engine — see app/lib/board-cell-values.ts.
+const boardColumnTypes = BOARD_COLUMN_TYPES;
 
 const boardColumnDefaults: Record<
   BoardColumnType,
@@ -619,90 +610,39 @@ function columnPayload(
  * Returns the value to store, "" to clear it, or null when the payload is not a
  * decoration at all — in which case the caller refuses exactly as before.
  */
-function dateDecorationValue(type: BoardColumnType, value: unknown): string | null {
+/*
+ * The storage rules themselves live in app/lib/board-cell-values.ts, so a
+ * rule (the automation engine) stores a cell through the board's own
+ * validation. The route keeps its three refusals HERE, ahead of the shared
+ * helper — only a date column has a marker; a decoration carrying a date is
+ * not a decoration; the marker must be a real one — because they are the
+ * route's own contract with `update_cell`, pinned by batch-1a, and must not
+ * quietly depend on where the helper moves next. The helper applies the same
+ * three rules again; agreeing twice costs nothing and disagreeing is caught.
+ */
+const boardDateIconIds = BOARD_DATE_ICON_IDS;
+
+function dateDecorationValue(type: BoardColumnType, raw: unknown): string | null {
   if (type !== "date") return null;
-  const text = trimString(value, 200);
-  if (!text) return "";
-  if (!text.startsWith("{")) return null;
-  let record: Record<string, unknown>;
-  try {
-    record = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return null;
+  const text = trimString(raw, 200);
+  if (text && text.startsWith("{")) {
+    let record: Record<string, unknown>;
+    try {
+      record = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+    if (trimString(record.date, 10)) return null;
+    const icon = trimString(record.icon, 40);
+    if (icon && !boardDateIconIds.has(icon)) {
+      throw new Error("Choose a valid date icon.");
+    }
   }
-  // A decoration must NOT carry a date. That is the field's, and a cell holding
-  // one is precisely the shadow the guard exists to prevent.
-  if (trimString(record.date, 10)) return null;
-  const time = trimString(record.time, 5);
-  const icon = trimString(record.icon, 40);
-  if (time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
-    throw new Error("Choose a valid time.");
-  }
-  if (icon && !boardDateIconIds.has(icon)) {
-    throw new Error("Choose a valid date icon.");
-  }
-  return time || icon ? JSON.stringify({ time, icon }) : "";
+  return sharedDateDecorationValue(type, raw);
 }
 
-function normalizeCellValue(type: BoardColumnType, value: unknown) {
-  if (type === "files") return "";
-  if (type === "checkbox") {
-    return value === true || value === "true" ? "true" : "";
-  }
-  if (type === "number") {
-    const text = trimString(value, 100);
-    if (!text) return "";
-    const number = Number(text.replaceAll(",", ""));
-    if (!Number.isFinite(number)) throw new Error("Enter a valid number.");
-    return String(number);
-  }
-  if (type === "date") {
-    const text = trimString(value, 500);
-    if (!text) return "";
-    if (text.startsWith("{")) {
-      let record: Record<string, unknown>;
-      try {
-        record = JSON.parse(text) as Record<string, unknown>;
-      } catch {
-        throw new Error("Choose a valid date.");
-      }
-      const date = trimString(record.date, 10);
-      const time = trimString(record.time, 5);
-      const icon = trimString(record.icon, 40);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        throw new Error("Choose a valid date.");
-      }
-      if (time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
-        throw new Error("Choose a valid time.");
-      }
-      if (icon && !boardDateIconIds.has(icon)) {
-        throw new Error("Choose a valid date icon.");
-      }
-      return JSON.stringify({ date, time, icon });
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-      throw new Error("Choose a valid date.");
-    }
-    return text;
-  }
-  if (type === "timeline") {
-    const record =
-      value && typeof value === "object"
-        ? (value as Record<string, unknown>)
-        : typeof value === "string"
-          ? (JSON.parse(value || "{}") as Record<string, unknown>)
-          : {};
-    const start = trimString(record.start, 10);
-    const end = trimString(record.end, 10);
-    if (
-      (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) ||
-      (end && !/^\d{4}-\d{2}-\d{2}$/.test(end))
-    ) {
-      throw new Error("Choose valid timeline dates.");
-    }
-    return start || end ? JSON.stringify({ start, end }) : "";
-  }
-  return trimString(value, type === "long_text" ? 5000 : 1000);
+function normalizeCellValue(type: BoardColumnType, raw: unknown): string {
+  return normalizeBoardCellValue(type, raw);
 }
 
 async function deleteFilesForColumn(db: BoardDb, orgId: string, columnId: string) {
@@ -770,21 +710,8 @@ function requestIdsFrom(payload: Record<string, unknown>) {
   ).slice(0, 100);
 }
 
-/**
- * Maps a stage onto the status chip a job takes when it is moved there.
- *
- * Every value must be a label the board actually carries. "Triage in progress"
- * was not one — it was among six statuses that existed only in this codebase,
- * so moving a job into Incoming set it to a chip that could not be rendered.
- */
-function statusForStage(stage: RequestStage) {
-  return {
-    Incoming: "Pending Approval",
-    Booked: "Job Scheduled",
-    Attention: "Waiting for decisions",
-    Completed: "Job Completed",
-  }[stage];
-}
+// `statusForStage` moved to app/lib/stage-status.ts so the automation engine
+// and this route read one map. See the note there.
 
 async function seedRequestsIfEmpty(db: BoardDb, orgId: string) {
   const [result] = await db
@@ -1598,98 +1525,16 @@ export async function POST(request: Request) {
 
     if (action === "create_item") {
       const groupId = trimString(payload.groupId, 80);
-      const [group] = await db
-        .select()
-        .from(maintenanceGroups)
-        .where(
-          and(
-            eq(maintenanceGroups.boardId, boardId),
-            eq(maintenanceGroups.id, groupId),
-            eq(maintenanceGroups.organisationId, orgId),
-            isNull(maintenanceGroups.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (!group) {
+      // The write itself lives in `board-mutations.ts`, shared with the
+      // automation engine so a rule's "create item" is this exact operation.
+      const created = await createBoardItem(db, orgId, boardId, actor, groupId);
+      if (!created) {
         return Response.json({ error: "Group not found." }, { status: 404 });
       }
-
-      /*
-       * Stage 23 — DELIBERATELY UNFILTERED. Do not add `isNull(deletedAt)`.
-       *
-       * This is the `MN-…` id generator, and a job sitting in the recycle bin
-       * still owns its id. Excluding binned rows would hand the same reference
-       * to a new job, and the collision would only surface when somebody
-       * restored the old one — the worst possible moment to discover it.
-       */
-      const [latest] = await db
-        .select({
-          maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
-        })
-        .from(maintenanceRequests)
-        .where(eq(maintenanceRequests.organisationId, orgId));
-      const [last] = await db
-        .select({ value: max(maintenanceGroupItems.position) })
-        .from(maintenanceGroupItems)
-        .where(and(eq(maintenanceGroupItems.groupId, group.id), eq(maintenanceGroupItems.organisationId, orgId)));
-      const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
-      const requestedAt = new Date().toISOString();
-      const stage =
-        (group.stageKey as RequestStage | null) ?? ("Incoming" as const);
-      const [created] = await db
-        .insert(maintenanceRequests)
-        .values({
-          id,
-          organisationId: orgId,
-          siteId: "site-unassigned",
-          source: "Manual",
-          title: newItemTitle(boardId),
-          description: newItemTitle(boardId),
-          location: "Choose a location",
-          requester: actor.displayName || actor.email,
-          contact: "Not provided",
-          category: "Other",
-          engineer: "Handyman",
-          tier: 3,
-          priority: "Medium",
-          stage,
-          status: statusForStage(stage),
-          contractor: null,
-          assignee: null,
-          requestedAt,
-          dueAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
-          completedAt: null,
-          nextUpdateAt: null,
-          cost: null,
-          attachmentCount: 0,
-          issueAttachmentCount: 0,
-          completedAttachmentCount: 0,
-          generalAttachmentCount: 0,
-          commentCount: 0,
-          createdByEmail: actor.email,
-        })
-        .returning();
-      const [item] = await db
-        .insert(maintenanceGroupItems)
-        .values({
-          requestId: id,
-          organisationId: orgId,
-          boardId: boardId,
-          groupId: group.id,
-          position: Number(last.value ?? -1) + 1,
-        })
-        .returning();
-
-      await db.insert(activityLog).values({
-        id: crypto.randomUUID(),
-        organisationId: orgId,
-        entityType: "maintenance_request",
-        entityId: id,
-        action: "request.created_inline",
-        actorEmail: actor.email,
-        detail: JSON.stringify({ groupId: group.id }),
-      });
-      return Response.json({ request: created, item }, { status: 201 });
+      await dispatchAutomationEvents(automationContext(guard.scope, request), [
+        itemCreatedEvent(boardId, created.request.id, null, created.group.id),
+      ]);
+      return Response.json({ request: created.request, item: created.item }, { status: 201 });
     }
 
     if (action === "create_column") {
@@ -2009,162 +1854,17 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      // Stage 23 — a job in the recycle bin cannot be duplicated. Restore it
-      // first; duplicating one would put a copy on the board while the original
-      // stayed invisible in the bin.
-      const sourceRows = await selectInChunks(requestIds, (chunk) =>
-        db
-          .select()
-          .from(maintenanceRequests)
-          .where(
-            and(
-              inArray(maintenanceRequests.id, chunk),
-              eq(maintenanceRequests.organisationId, orgId),
-              isNull(maintenanceRequests.deletedAt),
-            ),
-          ),
+      // Stage 23 — a job in the recycle bin cannot be duplicated; the helper
+      // reads live rows only. See `duplicateBoardItems`.
+      const outcome = await duplicateBoardItems(db, orgId, boardId, actor, requestIds);
+      await dispatchAutomationEvents(
+        automationContext(guard.scope, request),
+        outcome.requests.map((created, index) =>
+          itemCreatedEvent(boardId, created.id, created.parentId ?? null, outcome.items[index]?.groupId),
+        ),
       );
-      const sourceById = new Map(sourceRows.map((row) => [row.id, row]));
-      const sourceItems = await selectInChunks(requestIds, (chunk) =>
-        db
-          .select()
-          .from(maintenanceGroupItems)
-          .where(and(inArray(maintenanceGroupItems.requestId, chunk), eq(maintenanceGroupItems.organisationId, orgId))),
-      );
-      const itemByRequest = new Map(
-        sourceItems.map((item) => [item.requestId, item]),
-      );
-      const sourceCells = await selectInChunks(requestIds, (chunk) =>
-        db
-          .select()
-          .from(maintenanceBoardCells)
-          .where(and(inArray(maintenanceBoardCells.requestId, chunk), eq(maintenanceBoardCells.organisationId, orgId))),
-      );
-      /*
-       * Stage 23 — DELIBERATELY UNFILTERED. Do not add `isNull(deletedAt)`.
-       *
-       * This is the `MN-…` id generator, and a job sitting in the recycle bin
-       * still owns its id. Excluding binned rows would hand the same reference
-       * to a new job, and the collision would only surface when somebody
-       * restored the old one — the worst possible moment to discover it.
-       */
-      const [latest] = await db
-        .select({
-          maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
-        })
-        .from(maintenanceRequests)
-        .where(eq(maintenanceRequests.organisationId, orgId));
-      let nextNumber = Number(latest.maxNumber ?? 1048) + 1;
-      const nextPositions = new Map<string, number>();
-      const createdRequests: Array<typeof maintenanceRequests.$inferSelect> = [];
-      const createdItems: Array<typeof maintenanceGroupItems.$inferSelect> = [];
-      const createdCells: Array<{
-        requestId: string;
-        columnId: string;
-        value: string;
-      }> = [];
-
-      for (const sourceId of requestIds) {
-        const source = sourceById.get(sourceId);
-        if (!source) continue;
-        const sourceItem = itemByRequest.get(sourceId);
-        const groupId = sourceItem?.groupId ?? tenantSeedId("group-incoming", orgId);
-        let position = nextPositions.get(groupId);
-        if (position === undefined) {
-          const [last] = await db
-            .select({ value: max(maintenanceGroupItems.position) })
-            .from(maintenanceGroupItems)
-            .where(and(eq(maintenanceGroupItems.groupId, groupId), eq(maintenanceGroupItems.organisationId, orgId)));
-          position = Number(last.value ?? -1) + 1;
-        }
-        nextPositions.set(groupId, position + 1);
-        const id = `MN-${nextNumber}`;
-        nextNumber += 1;
-        const now = new Date().toISOString();
-        const [created] = await db
-          .insert(maintenanceRequests)
-          .values({
-            id,
-            organisationId: orgId,
-            siteId: source.siteId,
-            source: source.source,
-            title: `${source.title} (copy)`.slice(0, 180),
-            description: source.description,
-            location: source.location,
-            requester: source.requester,
-            contact: source.contact,
-            category: source.category,
-            engineer: source.engineer,
-            tier: source.tier,
-            priority: source.priority,
-            stage: source.stage,
-            status: source.status,
-            contractor: source.contractor,
-            assignee: source.assignee,
-            requestedAt: source.requestedAt,
-            dueAt: source.dueAt,
-            completedAt: source.completedAt,
-            nextUpdateAt: source.nextUpdateAt,
-            cost: source.cost,
-            approvedBy: source.approvedBy,
-            invoice: source.invoice,
-            attachmentCount: 0,
-            issueAttachmentCount: 0,
-            completedAttachmentCount: 0,
-            generalAttachmentCount: 0,
-            formUrl: null,
-            publicUploadTokenHash: null,
-            publicUploadTokenExpiresAt: null,
-            commentCount: 0,
-            createdByEmail: actor.email,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning();
-        const [item] = await db
-          .insert(maintenanceGroupItems)
-          .values({
-            requestId: id,
-            organisationId: orgId,
-            boardId: boardId,
-            groupId,
-            position,
-          })
-          .returning();
-        for (const sourceCell of sourceCells.filter(
-          (cell) => cell.requestId === sourceId,
-        )) {
-          const [cell] = await db
-            .insert(maintenanceBoardCells)
-            .values({
-              id: `cell-${crypto.randomUUID()}`,
-              organisationId: orgId,
-              boardId: boardId,
-              requestId: id,
-              columnId: sourceCell.columnId,
-              value: sourceCell.value,
-            })
-            .returning();
-          createdCells.push({
-            requestId: cell.requestId,
-            columnId: cell.columnId,
-            value: cell.value,
-          });
-        }
-        await db.insert(activityLog).values({
-          id: crypto.randomUUID(),
-          organisationId: orgId,
-          entityType: "maintenance_request",
-          entityId: id,
-          action: "request.duplicated",
-          actorEmail: actor.email,
-          detail: JSON.stringify({ sourceRequestId: sourceId, groupId }),
-        });
-        createdRequests.push(created);
-        createdItems.push(item);
-      }
       return Response.json(
-        { requests: createdRequests, items: createdItems, cells: createdCells },
+        { requests: outcome.requests, items: outcome.items, cells: outcome.cells },
         { status: 201 },
       );
     }
@@ -2178,7 +1878,7 @@ export async function POST(request: Request) {
         );
       }
 
-      let group =
+      const group =
         action === "move_items"
           ? (
               await db
@@ -2187,103 +1887,45 @@ export async function POST(request: Request) {
                 .where(and(eq(maintenanceGroups.id, trimString(payload.groupId, 80)), eq(maintenanceGroups.organisationId, orgId)))
                 .limit(1)
             )[0]
-          : (
-              await db
-                .select()
-                .from(maintenanceGroups)
-                .where(
-                  and(
-                    eq(maintenanceGroups.boardId, boardId),
-                    eq(maintenanceGroups.name, "Archived"),
-                    eq(maintenanceGroups.organisationId, orgId),
-            isNull(maintenanceGroups.deletedAt),
-                  ),
-                )
-                .limit(1)
-            )[0];
-
-      if (!group && action === "archive_items") {
-        const [lastGroup] = await db
-          .select({ value: max(maintenanceGroups.position) })
-          .from(maintenanceGroups)
-          .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
-            isNull(maintenanceGroups.deletedAt),));
-        [group] = await db
-          .insert(maintenanceGroups)
-          .values({
-            id: `group-${crypto.randomUUID()}`,
-            organisationId: orgId,
-            boardId: boardId,
-            name: "Archived",
-            color: "#808080",
-            stageKey: null,
-            position: Number(lastGroup.value ?? -1) + 1,
-          })
-          .returning();
-      }
+          : await findOrCreateArchivedGroup(db, orgId, boardId);
       if (!group) {
         return Response.json({ error: "Group not found." }, { status: 404 });
       }
 
-      const [last] = await db
-        .select({ value: max(maintenanceGroupItems.position) })
-        .from(maintenanceGroupItems)
-        .where(and(eq(maintenanceGroupItems.groupId, group.id), eq(maintenanceGroupItems.organisationId, orgId)));
-      let position = Number(last.value ?? -1) + 1;
-      const movedItems: Array<typeof maintenanceGroupItems.$inferSelect> = [];
-      const updatedRequests: Array<typeof maintenanceRequests.$inferSelect> = [];
-
-      for (const requestId of requestIds) {
-        const [existing] = await db
-          .select()
-          .from(maintenanceGroupItems)
-          .where(and(eq(maintenanceGroupItems.requestId, requestId), eq(maintenanceGroupItems.organisationId, orgId)))
-          .limit(1);
-        if (!existing) continue;
-        const [item] = await db
-          .update(maintenanceGroupItems)
-          .set({
-            groupId: group.id,
-            position,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(and(eq(maintenanceGroupItems.requestId, requestId), eq(maintenanceGroupItems.organisationId, orgId)))
-          .returning();
-        position += 1;
-        movedItems.push(item);
-
-        if (group.stageKey) {
-          const stage = group.stageKey as RequestStage;
-          const [updated] = await db
-            .update(maintenanceRequests)
-            .set({
-              stage,
-              status: statusForStage(stage),
-              completedAt:
-                stage === "Completed" ? new Date().toISOString() : null,
-              updatedAt: new Date().toISOString(),
-            })
-            .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
-            .returning();
-          if (updated) updatedRequests.push(updated);
-        }
-        await db.insert(activityLog).values({
-          id: crypto.randomUUID(),
-          organisationId: orgId,
-          entityType: "maintenance_request",
-          entityId: requestId,
-          action:
-            action === "archive_items"
-              ? "request.archived"
-              : "request.group_changed",
-          actorEmail: actor.email,
-          detail: JSON.stringify({ groupId: group.id, groupName: group.name }),
+      const outcome = await moveItemsToGroup(
+        db,
+        orgId,
+        boardId,
+        actor,
+        group,
+        requestIds,
+        action === "archive_items",
+      );
+      /*
+       * Told after the fact, never before: the move has been written, and a
+       * rule that fails cannot undo it. A group with a stage also changed the
+       * Status chip, and that is its own event.
+       */
+      const events = outcome.movedFrom.map((moved) =>
+        itemMovedEvent(boardId, moved.requestId, null, group.id, group.name),
+      );
+      for (const change of outcome.statusChanges) {
+        events.push({
+          type: "column_changed",
+          boardId,
+          requestId: change.requestId,
+          column: "status",
+          columnType: "status",
+          from: change.from,
+          to: change.to,
+          summary: `status: ${change.from} → ${change.to}`,
         });
       }
+      await dispatchAutomationEvents(automationContext(guard.scope, request), events);
       return Response.json({
         group,
-        items: movedItems,
-        requests: updatedRequests,
+        items: outcome.items,
+        requests: outcome.requests,
       });
     }
 
@@ -2717,7 +2359,7 @@ export async function PATCH(request: Request) {
         )
         .limit(1);
       const [workOrder] = await db
-        .select({ id: maintenanceRequests.id })
+        .select({ id: maintenanceRequests.id, parentId: maintenanceRequests.parentId })
         .from(maintenanceRequests)
         .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
         .limit(1);
@@ -2784,48 +2426,24 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
-      if (!value) {
-        await db
-          .delete(maintenanceBoardCells)
-          .where(
-            and(
-              eq(maintenanceBoardCells.boardId, boardId),
-              eq(maintenanceBoardCells.requestId, requestId),
-              eq(maintenanceBoardCells.columnId, columnId),
-              eq(maintenanceBoardCells.organisationId, orgId),
-            ),
-          );
-        return Response.json({ cell: { requestId, columnId, value: "" } });
-      }
-      const now = new Date().toISOString();
-      const [cell] = await db
-        .insert(maintenanceBoardCells)
-        .values({
-          id: `cell-${crypto.randomUUID()}`,
-          organisationId: orgId,
-          boardId: boardId,
+      // One writer for cells — `setBoardCell` — shared with the automation
+      // engine, which needs the previous value so the change can be named.
+      const { before, after } = await setBoardCell(db, orgId, boardId, requestId, columnId, value);
+      if (!column.system) {
+        const event = cellChangedEvent(
+          boardId,
           requestId,
+          workOrder.parentId ?? null,
           columnId,
-          value,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [
-            maintenanceBoardCells.organisationId,
-            maintenanceBoardCells.boardId,
-            maintenanceBoardCells.requestId,
-            maintenanceBoardCells.columnId,
-          ],
-          set: { value, updatedAt: now },
-        })
-        .returning();
-      return Response.json({
-        cell: {
-          requestId: cell.requestId,
-          columnId: cell.columnId,
-          value: cell.value,
-        },
-      });
+          type,
+          before,
+          after,
+        );
+        if (event) {
+          await dispatchAutomationEvents(automationContext(guard.scope, request), [event]);
+        }
+      }
+      return Response.json({ cell: { requestId, columnId, value: after } });
     }
 
     if (action === "update_column") {
@@ -3115,8 +2733,14 @@ export async function PATCH(request: Request) {
       }
 
       let updatedRequest = null;
+      let requestBefore: typeof maintenanceRequests.$inferSelect | undefined;
       if (existingItem.groupId !== groupId && group.stageKey) {
         const stage = group.stageKey as RequestStage;
+        [requestBefore] = await db
+          .select()
+          .from(maintenanceRequests)
+          .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
+          .limit(1);
         [updatedRequest] = await db
           .update(maintenanceRequests)
           .set({
@@ -3146,6 +2770,12 @@ export async function PATCH(request: Request) {
           beforeRequestId,
         }),
       });
+      if (existingItem.groupId !== groupId) {
+        await dispatchAutomationEvents(automationContext(guard.scope, request), [
+          itemMovedEvent(boardId, requestId, requestBefore?.parentId ?? null, group.id, group.name),
+          ...(updatedRequest ? requestFieldEvents(boardId, requestBefore, updatedRequest) : []),
+        ]);
+      }
       return Response.json({
         item,
         items: changedItems,
