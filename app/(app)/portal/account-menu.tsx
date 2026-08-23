@@ -26,6 +26,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar, Icon, type IconName } from "../../components";
+import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
 
 /** The working statuses `/api/account` will persist to `users.working_status`. */
@@ -151,7 +152,26 @@ export function AccountMenu({
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusListOpen, setStatusListOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * The panel renders through the shared layer portal on <body> and is
+   * positioned from the avatar's CURRENT rect on every open, in viewport
+   * coordinates — see overlay/anchored.tsx. It used to be an absolute child of
+   * the top bar, and `position: fixed; bottom: 8px` on a phone: both
+   * `.portal-topbar` and `.account-topbar` carry `backdrop-filter`, which
+   * makes the bar the containing block for fixed descendants, so on
+   * /dashboard/account the panel resolved `bottom: 8px` against the 60px bar
+   * and sat 632px above the screen with only "Get help" showing.
+   */
+  const {
+    ref: panelRef,
+    style: panelStyle,
+    ready: panelReady,
+  } = useAnchoredPosition({
+    open,
+    anchorRef: triggerRef,
+    placement: "bottom-end",
+    offset: 10,
+  });
   const panelId = useId();
 
   const notify = useCallback(
@@ -609,17 +629,23 @@ export function AccountMenu({
       </button>
 
       {open && (
+        <LayerPortal layer="popover">
         <div
           ref={panelRef}
           id={panelId}
           className="account-menu__panel"
+          style={panelStyle}
+          data-ready={panelReady ? "true" : "false"}
           role="menu"
           aria-label="Account"
           onKeyDown={onPanelKeyDown}
         >
           {/* monday's header: workspace name on the left, credits pill on the
               right. Ours is the workspace and its plan tier. */}
-          <header className="account-menu__header">
+          {/* A <div>, not a <header>: the panel now renders on the body-level
+              layer host, where a <header> would be a second page banner
+              beside the top bar (axe: landmark-no-duplicate-banner). */}
+          <div className="account-menu__header">
             <div className="account-menu__workspace">
               <strong>{snapshot?.workspace.name ?? "Workspace"}</strong>
               <span>{displayEmail}</span>
@@ -636,7 +662,7 @@ export function AccountMenu({
             >
               {snapshot ? planLabel(snapshot.workspace.planTier) : "Plan"}
             </Link>
-          </header>
+          </div>
 
           {loadError && (
             <p className="account-menu__error" role="status">
@@ -656,7 +682,10 @@ export function AccountMenu({
           </div>
 
           {/* monday's bottom row: "Do not disturb", On / Off, More. */}
-          <footer className="account-menu__status" data-menu-column="status">
+          {/* A <div>, not a <footer>: on the body-level layer host a <footer>
+              would be a contentinfo landmark inside the host's region
+              landmark (axe: landmark-contentinfo-is-top-level). */}
+          <div className="account-menu__status" data-menu-column="status">
             <span className="account-menu__status-label">
               <Icon name="clock" size={16} />
               {workingStatus
@@ -696,7 +725,7 @@ export function AccountMenu({
             >
               <Icon name="more" size={16} />
             </button>
-          </footer>
+          </div>
 
           {statusListOpen && (
             <div className="account-menu__status-list" data-menu-column="status">
@@ -727,6 +756,7 @@ export function AccountMenu({
             </div>
           )}
         </div>
+        </LayerPortal>
       )}
     </div>
   );

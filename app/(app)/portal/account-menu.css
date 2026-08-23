@@ -82,15 +82,18 @@ a.topbar-icon.icon-button {
 .account-menu__status-dot--on-site { background: #5c82af; }
 .account-menu__status-dot--out-of-office { background: #7d5ba6; }
 
+/*
+ * Position, z-index and max-height arrive inline from `useAnchoredPosition`
+ * (overlay/anchored.tsx): the panel is a portalled, viewport-positioned
+ * surface hung under the avatar, flipped above it when there is no room and
+ * clamped 8px inside every edge. Nothing here may re-anchor it.
+ */
 .account-menu__panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: var(--z-notifications, 320);
   display: grid;
   gap: 0;
-  width: min(560px, calc(100vw - 32px));
-  overflow: hidden;
+  width: min(560px, calc(100vw - 16px));
+  overflow: hidden auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: var(--radius, 13px);
   background: var(--surface-card);
@@ -361,17 +364,14 @@ a.topbar-icon.icon-button {
   cursor: not-allowed;
 }
 
-/* The panel is a full-width sheet on a phone, as monday's is. */
+/*
+ * One column on a phone, still hung under the avatar. The panel spans the
+ * viewport less the 8px the positioning hook keeps clear on each side; its
+ * height is whatever room is left below the avatar, and it scrolls inside that.
+ */
 @media (max-width: 760px) {
   .account-menu__panel {
-    position: fixed;
-    top: auto;
-    right: 8px;
-    left: 8px;
-    bottom: 8px;
-    width: auto;
-    max-height: 82dvh;
-    overflow-y: auto;
+    width: calc(100vw - 16px);
   }
 
   .account-menu__columns {

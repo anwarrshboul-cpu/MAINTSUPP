@@ -42,6 +42,7 @@
 
 import {
   useContext,
+  useRef,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -57,6 +58,7 @@ import {
 import { displayedBoardColumnWidth } from "./board-format";
 import { MobileBoardContext } from "./board-primitives";
 import { stickyZIndex, type StickyColumn } from "./board-pinning";
+import { AnchoredPopover } from "./overlay/anchored";
 
 /** How a summary function reads to a person. Server vocabulary, human words. */
 const SUMMARY_LABELS: Record<string, string> = {
@@ -92,6 +94,8 @@ export type ColumnHeaderProps = {
   /** Which edge of this header the drop indicator sits on, if any. */
   dropSide: "before" | "after" | null;
   onMenuToggle: () => void;
+  /** Closes the menu outright — the popover's dismissal, not a toggle. */
+  onMenuClose: () => void;
   onConfigure?: () => void;
   onRename: () => void;
   onToggleWrap: () => void;
@@ -149,6 +153,7 @@ export function BoardColumnHeader({
   dragging,
   dropSide,
   onMenuToggle,
+  onMenuClose,
   onConfigure,
   onRename,
   onToggleWrap,
@@ -176,6 +181,8 @@ export function BoardColumnHeader({
   onColumnPointerCancel,
   onColumnClickCapture,
 }: ColumnHeaderProps) {
+  /* The "…" the options menu hangs off — measured live by the popover. */
+  const moreRef = useRef<HTMLButtonElement | null>(null);
   const mobile = useContext(MobileBoardContext);
   const displayedWidth = displayedBoardColumnWidth(column, mobile);
   const definition =
@@ -311,14 +318,33 @@ export function BoardColumnHeader({
           )}
         </button>
         <button
+          ref={moreRef}
           className="custom-column-header__more"
           type="button"
           aria-label={`Actions for ${column.title}`}
+          aria-expanded={menuOpen}
           onClick={onMenuToggle}
         >
           <Icon name="more" size={15} />
         </button>
-        {menuOpen && (
+        {/*
+          On the shared layer (overlay/anchored.tsx): portalled, anchored to the
+          "…" button's live rect, flipped and clamped inside the viewport — the
+          old absolute box ran 85px past a 768px-tall window on the last rows.
+          The popover's own dismissal (Escape, outside press) calls `onMenuClose`,
+          which sets the board's menu state to null — idempotent, so it cannot
+          race the board's own outside-press closer the way a toggle would
+          (close + toggle = reopened). The layer host carries
+          `data-board-popover`, so a press inside the menu is "inside" to both.
+        */}
+        <AnchoredPopover
+          open={menuOpen}
+          anchorRef={moreRef}
+          onClose={onMenuClose}
+          placement="bottom-end"
+          role="dialog"
+          label={`Options for ${column.title}`}
+        >
           <div className="custom-column-menu" data-column-drag-ignore>
             <small>{kind === "system" ? "Board" : definition.label} column</small>
             {onConfigure && (
@@ -443,7 +469,7 @@ export function BoardColumnHeader({
               </button>
             )}
           </div>
-        )}
+        </AnchoredPopover>
         <ColumnResizeHandle
           column={column}
           displayedWidth={displayedWidth}

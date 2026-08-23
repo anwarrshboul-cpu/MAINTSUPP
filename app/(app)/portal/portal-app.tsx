@@ -69,6 +69,9 @@ import { RaiseTicketButton } from "./raise-ticket";
 // The Updates panel, built against monday's — see update-thread.tsx.
 import { UpdateThread, type ComposerHandle } from "./update-thread";
 import "./update-thread.css";
+import { useBodyScrollLock } from "./overlay/scroll-lock";
+import { AnchoredPopover } from "./overlay/anchored";
+import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
 import { installSessionGuard } from "./session-guard";
 import { publishedBoardOptions } from "../../lib/board-option-registry";
 import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
@@ -595,31 +598,11 @@ function useCurrentTime() {
  * `instant`: `html` carries `scroll-behavior: smooth` (globals.css), so a
  * default-behaviour restore would animate 90,000px back into place.
  */
-let scrollLockDepth = 0;
-let scrollLockOffset = 0;
-
 function useScrollLock(active: boolean) {
-  useEffect(() => {
-    if (!active) return undefined;
-
-    if (scrollLockDepth === 0) {
-      scrollLockOffset = window.scrollY;
-      document.body.style.setProperty(
-        "--scroll-lock-offset",
-        `-${scrollLockOffset}px`,
-      );
-      document.body.classList.add("is-scroll-locked");
-    }
-    scrollLockDepth += 1;
-
-    return () => {
-      scrollLockDepth = Math.max(0, scrollLockDepth - 1);
-      if (scrollLockDepth > 0) return;
-      document.body.classList.remove("is-scroll-locked");
-      document.body.style.removeProperty("--scroll-lock-offset");
-      window.scrollTo({ top: scrollLockOffset, left: 0, behavior: "instant" });
-    };
-  }, [active]);
+  // The counter itself now lives in overlay/scroll-lock.ts, where the shared
+  // popover primitive can take the same lock; this name is kept so the three
+  // call sites below read as they always have.
+  useBodyScrollLock(active);
 }
 
 /**
@@ -966,6 +949,19 @@ export default function PortalApp({
     return () => media.removeEventListener("change", sync);
   }, []);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  /*
+   * The board's "⋯ › Notifications" item lives in board-actions, which does
+   * not own this state, so it asks for the panel by event rather than by
+   * pressing the top-bar button on the user's behalf.
+   */
+  useEffect(() => {
+    const open = () => setNotificationsOpen(true);
+    window.addEventListener("maintsupp:open-notifications", open);
+    return () => window.removeEventListener("maintsupp:open-notifications", open);
+  }, []);
+  const notificationsButtonRef = useRef<HTMLButtonElement | null>(null);
+  /* The open board's item verbs, for the drawer's "⋮" — overlay/item-actions.tsx. */
+  const [boardItemActions, setBoardItemActions] = useState<BoardItemActions | null>(null);
   const [notificationStates, setNotificationStates] = useState<
     Record<string, NotificationState>
   >({});
@@ -2087,6 +2083,7 @@ export default function PortalApp({
             </a>
             <div className="notification-wrap">
               <button
+                ref={notificationsButtonRef}
                 className="icon-button"
                 type="button"
                 aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`}
@@ -2102,7 +2099,17 @@ export default function PortalApp({
                   <span className="notification-dot" />
                 )}
               </button>
-              {notificationsOpen && (
+              {/* Portalled and anchored to the bell, so neither the top bar's
+                  backdrop-filter nor its z-index can trap or cover it. */}
+              <AnchoredPopover
+                open={notificationsOpen}
+                anchorRef={notificationsButtonRef}
+                onClose={() => setNotificationsOpen(false)}
+                placement="bottom-end"
+                role="dialog"
+                label="Notifications"
+                className="notification-layer"
+              >
                 <NotificationPanel
                   items={notificationItems}
                   states={notificationStates}
@@ -2124,7 +2131,7 @@ export default function PortalApp({
                     setNotificationsOpen(false);
                   }}
                 />
-              )}
+              </AnchoredPopover>
             </div>
             {/*
               monday's top-right icon row is notifications, inbox, invite
@@ -2268,6 +2275,7 @@ export default function PortalApp({
               onBoardSnapshotChange={setBoardSnapshot}
               onNotify={setToast}
               onOpenApps={() => setSection("settings")}
+              onItemActionsChange={setBoardItemActions}
             />
           )}
           {activeSurface === "stores" && <SitesManager onNotify={setToast} />}
@@ -2279,6 +2287,7 @@ export default function PortalApp({
                  not navigate — so a store opens over this section rather than
                  bouncing the reader to the maintenance board. */
               onOpenRequest={openRequest}
+              onItemActionsChange={setBoardItemActions}
             />
           )}
           {activeSurface === "units" && (
@@ -2424,6 +2433,7 @@ export default function PortalApp({
             setSelectedRequest(updated);
             setDataMode("live");
           }}
+          itemActions={boardItemActions}
           onNotify={setToast}
           /* The avatar beside the reply box, so the panel shows who is about to
              speak — as monday's does. `displayUserName` is the same name the
@@ -2501,7 +2511,7 @@ function NotificationPanel({
   };
 
   return (
-    <div className="notification-panel" role="dialog" aria-label="Notifications">
+    <div className="notification-panel">
       <div className="notification-panel__header">
         <div>
           <strong>Notifications</strong>
@@ -5777,6 +5787,7 @@ function RequestDrawer({
   onRequestChange,
   onNotify,
   currentUserName,
+  itemActions,
 }: {
   request: MaintenanceRequest;
   boardSnapshot: MaintenanceBoardSnapshot | null;
@@ -5807,6 +5818,11 @@ function RequestDrawer({
   onNotify: (message: string) => void;
   /** Drawn on the reply composer's avatar. Null before the context arrives. */
   currentUserName: string | null;
+  /**
+   * The board's item verbs for the header's "⋮" — the row menu's actions,
+   * relocated to where monday keeps them. Null when no board is mounted.
+   */
+  itemActions?: BoardItemActions | null;
 }) {
   /*
    * The drawer only exists while it is open, so the lock is unconditional
@@ -6168,14 +6184,19 @@ function RequestDrawer({
               {request.source === "Manual" ? "Manual" : "Incoming form answer"}
             </h2>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={onClose}
-            aria-label="Close details"
-          >
-            <Icon name="close" size={20} />
-          </button>
+          <div className="detail-drawer__actions">
+            {itemActions && (
+              <ItemActionsMenu request={request} actions={itemActions} />
+            )}
+            <button
+              className="icon-button"
+              type="button"
+              onClick={onClose}
+              aria-label="Close details"
+            >
+              <Icon name="close" size={20} />
+            </button>
+          </div>
         </div>
 
         <nav className="detail-drawer__tabs" aria-label="Item details sections">

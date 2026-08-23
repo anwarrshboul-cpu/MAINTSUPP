@@ -6,6 +6,7 @@ import {
   useDeferredValue,
   useEffect,
   useContext,
+  createRef,
   useMemo,
   useRef,
   useState,
@@ -87,7 +88,15 @@ import {
   shouldCenterBoardCell,
   displayedBoardColumnWidth,
 } from "./board-format";
-import { useBoardMenuFit } from "./board-menu-fit";
+import { AnchoredPopover } from "./overlay/anchored";
+import { GroupActionMenu } from "./overlay/group-action-menu";
+import {
+  MoveToGroupSelect,
+  buildBoardItemActions,
+  convertToSubitemTitle,
+  type BoardItemActionSources,
+  type BoardItemActions,
+} from "./overlay/item-actions";
 import {
   MobileBoardContext,
   MobileCellSheet,
@@ -159,8 +168,9 @@ function boardUrl(path: string, boardId: string) {
 }
 
 /**
- * The layout this board was last read in on a phone. Cards unless told
- * otherwise — that is what a 390px screen is for.
+ * The layout this board was last read in on a phone. A stored choice wins;
+ * otherwise the Jobs board opens on the TABLE (the owner's ask) and every
+ * other board keeps the cards a 390px screen was given in Stage 23.
  */
 function readMobileLayout(boardId: string): {
   boardId: string;
@@ -174,8 +184,11 @@ function readMobileLayout(boardId: string): {
   } catch {
     // Private browsing, or storage disabled.
   }
-  return { boardId, layout: "cards" };
+  return { boardId, layout: boardId === "maintenance" ? "grid" : "cards" };
 }
+
+/** The anchor a group the memo never saw gets: nothing to measure against. */
+const DETACHED_ANCHOR = createRef<HTMLButtonElement>();
 
 export function LiveMaintenanceBoard({
   boardId = "maintenance",
@@ -189,6 +202,7 @@ export function LiveMaintenanceBoard({
   onBoardSnapshotChange,
   onNotify,
   onOpenApps,
+  onItemActionsChange,
 }: {
   boardId?: string;
   /**
@@ -212,6 +226,8 @@ export function LiveMaintenanceBoard({
   onBoardSnapshotChange?: (snapshot: MaintenanceBoardSnapshot) => void;
   onNotify: (message: string) => void;
   onOpenApps: () => void;
+  /** The item verbs the drawer's "⋮" offers — see overlay/item-actions.tsx. */
+  onItemActionsChange?: (actions: BoardItemActions | null) => void;
 }) {
   const [isMobile, setIsMobile] = useState(false);
   /* The shared store, not a private copy — see the note above the removed
@@ -346,9 +362,8 @@ export function LiveMaintenanceBoard({
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [actionsOpen, setActionsOpen] = useState(false);
   const [hideOpen, setHideOpen] = useState(false);
-  // The columns panel hangs off a toolbar button, and the toolbar scrolls
-  // sideways on a phone — see `useBoardMenuFit` for what that did to it.
-  const hideMenuRef = useBoardMenuFit(hideOpen);
+  // The columns panel is anchored to this button through the layer portal.
+  const hideButtonRef = useRef<HTMLButtonElement | null>(null);
   const [columnPickerGroupId, setColumnPickerGroupId] = useState<string | null>(
     null,
   );
@@ -372,9 +387,6 @@ export function LiveMaintenanceBoard({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rowMenuId, setRowMenuId] = useState<string | null>(null);
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
-  // Only one group menu is ever open, so one ref serves whichever group opened
-  // it. See `useBoardMenuFit` for why the menus need measuring at all.
-  const groupMenuRef = useBoardMenuFit(groupMenuId !== null);
   const [selectionMoveOpen, setSelectionMoveOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1405,6 +1417,24 @@ export function LiveMaintenanceBoard({
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((group) => ({ group, synthetic: true }));
   }, [allBoardColumns, customCells, visibleRows, groupByColumn, groups]);
+
+  /*
+   * One anchor ref per drawn group, so the portalled group menu can measure
+   * the "…" that opened it. Built with `createRef` inside a memo rather than
+   * read out of a ref-held Map during render: the React compiler rule
+   * (react-hooks/refs) rejects a `.current` read while rendering, and a Map of
+   * refs rebuilt only when the drawn groups change is the same thing without
+   * the read. A group this map has never seen gets a detached ref, which the
+   * popover treats as "nothing to anchor to".
+   */
+  const groupAnchors = useMemo(
+    () =>
+      new Map(
+        displayGroups.map(({ group }) => [group.id, createRef<HTMLButtonElement>()] as const),
+      ),
+    [displayGroups],
+  );
+  const groupMoreRef = (groupId: string) => groupAnchors.get(groupId) ?? DETACHED_ANCHOR;
 
   /**
    * Children keyed by parent — monday's Subitems column.
@@ -3185,6 +3215,38 @@ export function LiveMaintenanceBoard({
     );
   };
 
+  /*
+   * The row menu's verbs, published for the item drawer's "⋮" — monday keeps
+   * an item's actions at the top right of the item, and a phone has no row
+   * gutter to put a "…" in. The handlers above are closures rebuilt every
+   * render, so a ref holds the latest set and ONE stable facade goes up on
+   * mount; the board's own renders never re-render the parent.
+   */
+  const itemActionSources = useRef<BoardItemActionSources | null>(null);
+  useEffect(() => {
+    itemActionSources.current = {
+      groups,
+      storeDocumentation: isStoreDocumentation,
+      groupIdFor: (request) => groupForRequest(request) ?? "",
+      groupRows,
+      subitemCount: (requestId) => subitemsByParent.get(requestId)?.length ?? 0,
+      openItemInNewTab,
+      copyItemLink,
+      createItemBelow,
+      addSubitem,
+      convertToSubitem,
+      moveItem,
+      runBulkAction,
+    };
+  });
+  useEffect(() => {
+    if (!onItemActionsChange) return undefined;
+    onItemActionsChange(
+      buildBoardItemActions(boardId, () => itemActionSources.current),
+    );
+    return () => onItemActionsChange(null);
+  }, [boardId, onItemActionsChange]);
+
   const identity = boardIdentity(boardId);
   const newItemLabel = isStoreDocumentation ? "New store" : "New item";
   const addItemToGroupLabel = isStoreDocumentation ? "Add store to group" : "Add item to group";
@@ -3270,7 +3332,13 @@ export function LiveMaintenanceBoard({
             </span>
             <span>
               <strong>{identity.shortName}</strong>
-              <small>{scopedRequests.length} {identity.itemNoun}</small>
+              {/* "0 live items" while the first snapshot is still on its way
+                  read as an empty board; say what is actually happening. */}
+              <small>
+                {loadingBoard && !scopedRequests.length
+                  ? "Loading…"
+                  : `${scopedRequests.length} ${identity.itemNoun}`}
+              </small>
             </span>
           </div>
           <span className="mobile-board-table-label">
@@ -3305,7 +3373,6 @@ export function LiveMaintenanceBoard({
           boardId={boardId}
           sectionKey={sectionKey}
           boardName={identity.heading}
-          automationCount={1}
           /*
            * Without this the Fix Tracker saved and nothing moved on screen.
            *
@@ -3557,8 +3624,10 @@ export function LiveMaintenanceBoard({
 
           <div className="live-board-menu-wrap" data-board-popover>
             <button
+              ref={hideButtonRef}
               className="live-board-tool"
               type="button"
+              aria-expanded={hideOpen}
               onClick={() => {
                 setHideOpen((open) => !open);
                 setActionsOpen(false);
@@ -3571,8 +3640,14 @@ export function LiveMaintenanceBoard({
               <Icon name="grid" size={16} />
               Hide
             </button>
-            {hideOpen && (
-              <div className="live-board-menu column-menu" ref={hideMenuRef}>
+            <AnchoredPopover
+              open={hideOpen}
+              anchorRef={hideButtonRef}
+              onClose={() => setHideOpen(false)}
+              role="dialog"
+              label="Visible columns"
+            >
+              <div className="live-board-menu column-menu">
                 <strong>Visible columns</strong>
                 {allBoardColumns.map((entry) => {
                   const key = visibilityKeyFor(entry);
@@ -3588,7 +3663,7 @@ export function LiveMaintenanceBoard({
                   );
                 })}
               </div>
-            )}
+            </AnchoredPopover>
           </div>
 
           {/*
@@ -3816,8 +3891,10 @@ export function LiveMaintenanceBoard({
                     {!synthetic && (
                     <div className="sheet-group__menu-wrap" data-board-popover>
                       <button
+                        ref={groupMoreRef(group.id)}
                         className="sheet-group__more"
                         type="button"
+                        aria-expanded={groupMenuId === group.id}
                         aria-label={`Actions for ${group.name}`}
                         onClick={() => {
                           setGroupMenuId((current) =>
@@ -3830,191 +3907,63 @@ export function LiveMaintenanceBoard({
                       >
                         <Icon name="more" size={17} />
                       </button>
-                      {groupMenuId === group.id && (
-                        <div className="sheet-group__menu" ref={groupMenuRef}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCollapsed((current) => {
-                                const next = new Set(current);
-                                if (isCollapsed) next.delete(group.id);
-                                else next.add(group.id);
-                                return next;
-                              });
-                              setGroupMenuId(null);
-                            }}
-                          >
-                            <Icon name="chevron" size={15} />
-                            {isCollapsed ? "Expand group" : "Collapse group"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (collapsed.size === groups.length) {
-                                setCollapsed(new Set());
-                              } else {
-                                setCollapsed(
-                                  new Set(groups.map((item) => item.id)),
-                                );
-                              }
-                              setGroupMenuId(null);
-                            }}
-                          >
-                            <Icon name="grid" size={15} />
-                            {collapsed.size === groups.length
-                              ? "Expand all groups"
-                              : "Collapse all groups"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRowsSelected(
-                                rows.map((request) => request.id),
-                                true,
-                              );
-                              setGroupMenuId(null);
-                            }}
-                          >
-                            <Icon name="check" size={15} />
-                            Select all items in group
-                          </button>
-                          {!isStoreDocumentation && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRenamingId(group.id);
-                                  setRenameValue(group.name);
-                                  setGroupMenuId(null);
-                                }}
-                              >
-                                <Icon name="settings" size={15} />
-                                Rename group
-                              </button>
-                              <button
-                                type="button"
-                                disabled={saving}
-                                onClick={() => duplicateGroup(group)}
-                              >
-                                <Icon name="grid" size={15} />
-                                Copy group and items
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  openGroupCreator();
-                                  setGroupMenuId(null);
-                                }}
-                              >
-                                <Icon name="plus" size={15} />
-                                Add group
-                              </button>
-                              <div className="sheet-group__colors">
-                                <span>Group color</span>
-                                <div>
-                                  {groupColors.map((color) => (
-                                    <button
-                                      key={color}
-                                      type="button"
-                                      aria-label={`Use ${color} for ${group.name}`}
-                                      aria-pressed={group.color === color}
-                                      style={{ "--group-choice": color } as CSSProperties}
-                                      onClick={() => updateGroupColor(group, color)}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => sortGroup(group, "alphabetical")}
-                              >
-                                <Icon name="activity" size={15} />
-                                Sort items A–Z
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => sortGroup(group, "newest")}
-                              >
-                                <Icon name="activity" size={15} />
-                                Sort newest first
-                              </button>
-                              <button
-                                type="button"
-                                disabled={groups[0]?.id === group.id}
-                                onClick={() => moveGroup(group, "up")}
-                              >
-                                <Icon name="arrow" size={15} />
-                                Move group up
-                              </button>
-                              <button
-                                type="button"
-                                disabled={groups.at(-1)?.id === group.id}
-                                onClick={() => moveGroup(group, "down")}
-                              >
-                                <Icon name="arrow" size={15} />
-                                Move group down
-                              </button>
-                            </>
-                          )}
-                          {canExport !== false && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void exportRowsToCsv(rows);
-                                setGroupMenuId(null);
-                              }}
-                            >
-                              <Icon name="download" size={15} />
-                              Export group
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              createItem(group.id);
-                              setGroupMenuId(null);
-                            }}
-                          >
-                            <Icon name="plus" size={15} />
-                            {addItemToGroupLabel}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onNotify(
-                                "Board apps are ready for the next integration.",
-                              );
-                              setGroupMenuId(null);
-                            }}
-                          >
-                            <Icon name="settings" size={15} />
-                            Apps
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!rows.length || bulkBusy}
-                            onClick={() => {
-                              setGroupMenuId(null);
-                              runBulkAction(
-                                "archive_items",
-                                rows.map((request) => request.id),
-                              );
-                            }}
-                          >
-                            <Icon name="folder" size={15} />
-                            Archive group items
-                          </button>
-                          <button
-                            className="is-danger"
-                            type="button"
-                            disabled={groups.length < 2}
-                            onClick={() => deleteGroup(group)}
-                          >
-                            <Icon name="close" size={15} />
-                            Delete group
-                          </button>
-                        </div>
-                      )}
+                      <GroupActionMenu
+                        open={groupMenuId === group.id}
+                        anchorRef={groupMoreRef(group.id)}
+                        onClose={() => setGroupMenuId(null)}
+                        group={group}
+                        rowCount={rows.length}
+                        colors={groupColors}
+                        isCollapsed={isCollapsed}
+                        allCollapsed={collapsed.size === groups.length}
+                        isFirst={groups[0]?.id === group.id}
+                        isLast={groups.at(-1)?.id === group.id}
+                        storeDocumentation={isStoreDocumentation}
+                        canExport={canExport !== false}
+                        canDelete={groups.length >= 2}
+                        saving={saving}
+                        busy={bulkBusy}
+                        addItemLabel={addItemToGroupLabel}
+                        onToggleCollapse={() =>
+                          setCollapsed((current) => {
+                            const next = new Set(current);
+                            if (isCollapsed) next.delete(group.id);
+                            else next.add(group.id);
+                            return next;
+                          })
+                        }
+                        onToggleCollapseAll={() =>
+                          setCollapsed(
+                            collapsed.size === groups.length
+                              ? new Set()
+                              : new Set(groups.map((item) => item.id)),
+                          )
+                        }
+                        onSelectAll={() =>
+                          setRowsSelected(rows.map((request) => request.id), true)
+                        }
+                        onRename={() => {
+                          setRenamingId(group.id);
+                          setRenameValue(group.name);
+                        }}
+                        onDuplicate={() => void duplicateGroup(group)}
+                        onAddGroup={openGroupCreator}
+                        onColor={(color) => void updateGroupColor(group, color)}
+                        onSort={(order) => void sortGroup(group, order)}
+                        onMoveGroup={(direction) => void moveGroup(group, direction)}
+                        onExport={() => void exportRowsToCsv(rows)}
+                        onAddItem={() => createItem(group.id)}
+                        onApps={() =>
+                          onNotify("Board apps are ready for the next integration.")
+                        }
+                        onArchiveItems={() =>
+                          runBulkAction(
+                            "archive_items",
+                            rows.map((request) => request.id),
+                          )
+                        }
+                        onDelete={() => void deleteGroup(group)}
+                      />
                     </div>
                     )}
                   </header>
@@ -4079,6 +4028,7 @@ export function LiveMaintenanceBoard({
                                   setRowMenuId(null);
                                   setColumnPickerGroupId(null);
                                 }}
+                                onMenuClose={() => setColumnMenuInstance(null)}
                                 onConfigure={
                                   entry.kind === "custom"
                                     ? () => {
@@ -4223,6 +4173,7 @@ export function LiveMaintenanceBoard({
                               setColumnMenuInstance(null);
                               setColumnPickerGroupId(null);
                             }}
+                            onMenuClose={() => setRowMenuId(null)}
                             onPointerDragStart={(event) =>
                               onPointerDragStart(
                                 {
@@ -5195,6 +5146,7 @@ function BoardRow({
   onOpenUpdates,
   onSelected,
   onMenuToggle,
+  onMenuClose,
   onPointerDragStart,
   onPointerDragMove,
   onPointerDragEnd,
@@ -5248,6 +5200,8 @@ function BoardRow({
   onOpenUpdates: () => void;
   onSelected: (selected: boolean) => void;
   onMenuToggle: () => void;
+  /** Closes the row menu outright — the popover's dismissal, not a toggle. */
+  onMenuClose: () => void;
   onPointerDragStart: (
     event: ReactPointerEvent<HTMLTableRowElement>,
   ) => void;
@@ -5313,9 +5267,8 @@ function BoardRow({
 }) {
   const mobile = useContext(MobileBoardContext);
   const suppressRowClickRef = useRef(false);
-  // A row near the bottom of the screen has no room to open a 376px menu
-  // downward. See `useBoardMenuFit`.
-  const rowMenuRef = useBoardMenuFit(menuOpen);
+  // The "…" the portalled row menu is anchored to.
+  const moreRef = useRef<HTMLButtonElement | null>(null);
   // Move column: 38 groups x 744 rows = 28,272 <option>s. Build them on focus.
   const [moveListOpen, setMoveListOpen] = useState(false);
   const columnStyle = (column: MaintenanceBoardColumn): CSSProperties => {
@@ -5847,23 +5800,34 @@ function BoardRow({
       }}
     >
       <td className="sheet-check" data-board-popover>
+        {/* No gutter trigger on a phone: the item's actions are behind the
+            "⋮" at the top right of the item drawer instead. */}
+        {!mobile && (
         <button
+          ref={moreRef}
           className="sheet-row-more"
           type="button"
           aria-label={"Actions for " + request.id}
+          aria-expanded={menuOpen}
           title="Click for item actions"
           onClick={onMenuToggle}
         >
           <Icon name="more" size={15} />
         </button>
+        )}
         <input
           type="checkbox"
           aria-label={"Select " + request.id}
           checked={selected}
           onChange={(event) => onSelected(event.target.checked)}
         />
-        {menuOpen && (
-          <div className="sheet-row-menu" data-board-drag-ignore ref={rowMenuRef}>
+        <AnchoredPopover
+          open={menuOpen}
+          anchorRef={moreRef}
+          onClose={onMenuClose}
+          label={"Actions for " + request.id}
+        >
+          <div className="sheet-row-menu" data-board-drag-ignore>
             <button type="button" onClick={onOpen}>
               <Icon name="document" size={15} />
               Open item
@@ -5884,6 +5848,9 @@ function BoardRow({
               <Icon name="plus" size={15} />
               Create new item below
             </button>
+            {/* Subitems are a Jobs-board concept; a store has none. */}
+            {boardId !== "store-documentation" && (
+            <>
             <button type="button" onClick={onAddSubitem}>
               <Icon name="list" size={15} />
               Add subitem
@@ -5891,35 +5858,23 @@ function BoardRow({
             <button
               type="button"
               disabled={!canConvertToSubitem}
-              title={
-                canConvertToSubitem
-                  ? "Make this a child of the item above it"
-                  : "There is no item above this one to become its parent"
-              }
+              title={convertToSubitemTitle(canConvertToSubitem)}
               onClick={onConvertToSubitem}
             >
               <Icon name="arrow" size={15} />
               Convert to subitem
             </button>
-            <label>
-              <span>
-                <Icon name="arrow" size={15} />
-                Move to
-              </span>
-              <select
-                value={currentGroupId}
-                onChange={(event) => {
-                  onMove(event.target.value);
-                  onMenuToggle();
-                }}
-              >
-                {groups.map((group) => (
-                  <option value={group.id} key={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            </>
+            )}
+            <MoveToGroupSelect
+              label="Move to"
+              groups={groups}
+              value={currentGroupId}
+              onChange={(groupId) => {
+                onMove(groupId);
+                onMenuClose();
+              }}
+            />
             <button type="button" onClick={onArchive}>
               <Icon name="folder" size={15} />
               Archive item
@@ -5929,7 +5884,7 @@ function BoardRow({
               Delete item
             </button>
           </div>
-        )}
+        </AnchoredPopover>
       </td>
       {columns.map((entry) => {
         if (entry.kind === "system") {

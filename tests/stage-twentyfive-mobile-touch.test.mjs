@@ -190,8 +190,26 @@ test("the 44px select floor that broke the switcher is still there", async () =>
 
 test("an open overlay locks the page behind it, and gives the position back", async () => {
   const portal = await read(PORTAL);
+  /*
+   * The counter moved to overlay/scroll-lock.ts so the shared popover
+   * primitive (overlay/anchored.tsx) takes the SAME lock as the drawers rather
+   * than growing a second one. `useScrollLock` stays in portal-app.tsx as the
+   * name its three call sites use, and must delegate to the shared hook.
+   */
+  const lock = await read("app/(app)/portal/overlay/scroll-lock.ts");
 
   assert.match(portal, /function useScrollLock\(active: boolean\)/);
+  assert.match(
+    portal,
+    /function useScrollLock\(active: boolean\) \{[\s\S]*?useBodyScrollLock\(active\);/,
+    "portal-app's useScrollLock must delegate to the shared counter",
+  );
+  assert.match(lock, /export function useBodyScrollLock\(active: boolean\)/);
+  assert.match(
+    await read("app/(app)/portal/overlay/anchored.tsx"),
+    /export \{ useBodyScrollLock \} from "\.\/scroll-lock";/,
+    "the overlay primitive re-exports the one lock rather than inventing another",
+  );
 
   /*
    * A counter, not a boolean. Two overlays can be open at once — the nav drawer
@@ -199,24 +217,29 @@ test("an open overlay locks the page behind it, and gives the position back", as
    * would unlock the page while the other was still up, and would restore ITS
    * saved offset over the other's.
    */
-  assert.match(portal, /let scrollLockDepth = 0;/);
-  assert.match(portal, /scrollLockDepth \+= 1;/);
-  assert.match(portal, /scrollLockDepth = Math\.max\(0, scrollLockDepth - 1\);/);
+  assert.match(lock, /let scrollLockDepth = 0;/);
+  assert.match(lock, /scrollLockDepth \+= 1;/);
+  assert.match(lock, /scrollLockDepth = Math\.max\(0, scrollLockDepth - 1\);/);
   assert.match(
-    portal,
+    lock,
     /if \(scrollLockDepth > 0\) return;/,
     "the page must stay locked while any other overlay is still open",
   );
+  assert.doesNotMatch(
+    portal,
+    /let scrollLockDepth/,
+    "portal-app.tsx must not keep a counter of its own beside the shared one",
+  );
 
   // The offset is captured on the first lock and handed back on the last release.
-  assert.match(portal, /scrollLockOffset = window\.scrollY;/);
-  assert.match(portal, /--scroll-lock-offset/);
+  assert.match(lock, /scrollLockOffset = window\.scrollY;/);
+  assert.match(lock, /--scroll-lock-offset/);
   /*
    * `instant` matters: `html` carries `scroll-behavior: smooth`, so a
    * default-behaviour restore would animate ~90,000px back into place.
    */
   assert.match(
-    portal,
+    lock,
     /window\.scrollTo\(\{\s*top: scrollLockOffset,\s*left: 0,\s*behavior: "instant"\s*\}\)/,
     "the restore must be instant, or it animates the length of the document",
   );

@@ -481,11 +481,11 @@ body[data-theme="dark"] .live-sheet tbody tr.is-selected .sheet-check::before {
   .sheet-timeline-popover,
   .sheet-file-hover
 ) {
-  z-index: var(--z-dropdown) !important;
+  z-index: var(--z-popover) !important;
 }
 
 .sheet-group:has(.sheet-label-editor) {
-  z-index: calc(var(--z-dropdown) + 1) !important;
+  z-index: calc(var(--z-popover) + 1) !important;
 }
 
 .sheet-option-popover:not(.sheet-label-editor) {
@@ -1184,7 +1184,7 @@ button.analytics-metric:hover {
 .live-job-metrics {
   position: sticky;
   /* Under the top bar's 35 — this passes beneath it, not over it. */
-  z-index: 32;
+  z-index: var(--z-sticky);
   top: var(--jobs-rail-top);
 }
 
@@ -3101,7 +3101,7 @@ button.analytics-score-panel {
  */
 .workspace-manager-layer {
   position: fixed;
-  z-index: 1300;
+  z-index: var(--z-modal);
   inset: 0;
   display: grid;
   place-items: center;
@@ -3755,7 +3755,7 @@ body[data-theme="dark"] .role-chip {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-popover);
   min-width: 190px;
   padding: 6px;
   border: 1px solid var(--line);
@@ -4731,7 +4731,7 @@ body[data-theme="dark"] .role-chip {
 .fix-tracker__overlay {
   position: fixed;
   inset: 0;
-  z-index: var(--z-sheet);
+  z-index: var(--z-drawer);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -6462,9 +6462,10 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
  * phone and all of them things an engineer standing in a shop actually presses.
  */
 @media (max-width: 767px) {
+  /* Not the search input: it fills its 44px label (globals.css), and a 44px
+     floor of its own put it two pixels taller than the box around it. */
   .live-board-tool,
   .live-board-toolbar button,
-  .live-board-toolbar input[type="search"],
   .live-board-toolbar input[type="text"] {
     min-height: 44px;
   }

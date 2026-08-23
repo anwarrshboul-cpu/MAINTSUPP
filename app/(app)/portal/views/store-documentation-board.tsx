@@ -18,6 +18,7 @@ import { RaiseTicketButton } from "../raise-ticket";
 import "./store-documentation-board.css";
 import type { MaintenanceRequest, RequestDrawerTab } from "../../../lib/types";
 import { LiveMaintenanceBoard } from "../live-board";
+import type { BoardItemActions } from "../overlay/item-actions";
 import {
   StoreComplianceTracker,
   type ComplianceTrackerStore,
@@ -44,6 +45,7 @@ export function StoreDocumentationBoard({
   onNotify,
   onOpenApps,
   onOpenRequest,
+  onItemActionsChange,
 }: {
   onNotify: (message: string) => void;
   onOpenApps: () => void;
@@ -58,6 +60,8 @@ export function StoreDocumentationBoard({
    * same handler, one board wired and the other not.
    */
   onOpenRequest: (request: MaintenanceRequest, tab?: RequestDrawerTab) => void;
+  /** Passed through to the grid, so a store's drawer gets the same "⋮". */
+  onItemActionsChange?: (actions: BoardItemActions | null) => void;
 }) {
   const [tab, setTab] = useState<TabKey>("table");
   /*
@@ -233,6 +237,7 @@ export function StoreDocumentationBoard({
             onRequestsDeleted={() => void load()}
             onNotify={onNotify}
             onOpenApps={onOpenApps}
+            onItemActionsChange={onItemActionsChange}
           />
         )}
 

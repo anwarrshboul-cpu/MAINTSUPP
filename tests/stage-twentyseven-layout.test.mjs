@@ -114,6 +114,20 @@ function rulesSelecting(rules, selector) {
 }
 
 /** The single rule that names `selector` and declares `declaration`. */
+/** A rule's z-index as a number, resolving `var(--z-*)` tokens and aliases. */
+function zIndexOf(body, globals) {
+  const raw = body.match(/z-index:\s*([^;]+);/)?.[1]?.trim();
+  if (!raw) return NaN;
+  const resolve = (value, depth = 0) => {
+    if (depth > 8) return NaN;
+    const token = value.match(/^var\((--z-[a-z-]+)\)$/)?.[1];
+    if (!token) return Number(value);
+    const declared = globals.match(new RegExp(`${token}:\s*([^;]+);`))?.[1]?.trim();
+    return declared ? resolve(declared, depth + 1) : NaN;
+  };
+  return resolve(raw);
+}
+
 function ruleFor(rules, selector, declaration) {
   const matches = rulesSelecting(rules, selector).filter((rule) =>
     rule.body.includes(declaration),
@@ -238,13 +252,20 @@ test("the meters stick under the top bar and pass beneath it", async () => {
   const rule = ruleFor(declarationRules(await read(BRAND)), ".live-job-metrics", "position: sticky");
   assert.match(rule.body, /top:\s*var\(--jobs-rail-top\)/);
 
-  const layer = Number(rule.body.match(/z-index:\s*(\d+)/)?.[1]);
+  /*
+   * Both bars read the shared layering tokens since the UI batch
+   * (`--z-sticky` / `--z-topbar` in globals.css, aliases included), so the
+   * numbers are resolved through the token block rather than read literally.
+   * The invariant is the same: the strip sits UNDER the top bar.
+   */
+  const globals = await read("app/globals.css");
+  const layer = zIndexOf(rule.body, globals);
   const topbar = ruleFor(
     declarationRules(await read("app/globals.css")),
     ".portal-topbar",
     "position: sticky",
   );
-  const topbarLayer = Number(topbar.body.match(/z-index:\s*(\d+)/)?.[1]);
+  const topbarLayer = zIndexOf(topbar.body, globals);
   assert.ok(
     layer > 0 && layer < topbarLayer,
     `the strip must sit under the top bar: ${layer} vs ${topbarLayer}`,

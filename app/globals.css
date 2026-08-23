@@ -193,18 +193,44 @@
   --radius-sm: 8px;
   --radius: 13px;
   --radius-lg: 20px;
+  /*
+   * THE LAYER SCALE. One ordered set of depths, by role, and nothing in a
+   * stylesheet this product owns may write a raw number at or above 10 outside
+   * this block (tests/ui-batch-overlays.test.mjs holds the line).
+   *
+   *   base < sticky < toolbar < topbar < sidebar-backdrop < sidebar
+   *        < popover < submenu < drawer-backdrop < drawer < modal-backdrop
+   *        < modal < popover-raised < viewer < toast
+   *
+   * Popovers sit ABOVE the top bar: the old scale had dropdown (200) under
+   * topbar (300), which is exactly how a menu hung off a toolbar came to be
+   * painted behind the sticky header. Menus opened from inside a drawer or a
+   * modal render through the portal in overlay/anchored.tsx, whose wrapper
+   * comes later in the DOM than the surface that opened it; a popover that
+   * must out-rank a modal asks for the "popover-raised" layer.
+   */
+  --z-base: 0;
   --z-sticky: 40;
   --z-toolbar: 80;
-  --z-dropdown: 200;
   --z-topbar: 300;
-  --z-notifications: 320;
   --z-sidebar-backdrop: 400;
   --z-sidebar: 410;
-  --z-sheet-backdrop: 500;
-  --z-sheet: 510;
-  --z-dialog: 600;
-  --z-viewer: 700;
-  --z-toast: 800;
+  --z-popover: 1000;
+  --z-submenu: 1010;
+  --z-drawer-backdrop: 1100;
+  --z-drawer: 1110;
+  --z-modal-backdrop: 1200;
+  --z-modal: 1210;
+  --z-popover-raised: 1250;
+  --z-viewer: 1300;
+  --z-toast: 1400;
+  /* The names the stylesheets grew up with, kept as aliases of the tiers
+     they always meant. New rules use the tier names above. */
+  --z-dropdown: var(--z-popover);
+  --z-notifications: var(--z-popover);
+  --z-sheet-backdrop: var(--z-modal-backdrop);
+  --z-sheet: var(--z-modal);
+  --z-dialog: var(--z-modal);
 }
 
 /*
@@ -967,7 +993,7 @@ h1, h2, h3, .brand-word { font-family: Manrope, Inter, ui-sans-serif, system-ui,
 
   .mobile-request-field-editor {
     position: fixed;
-    z-index: calc(var(--z-dialog) + 10);
+    z-index: calc(var(--z-modal) + 10);
     inset: 0;
     display: flex;
     align-items: flex-end;
@@ -1516,7 +1542,7 @@ a {
 
 .public-nav {
   position: relative;
-  z-index: 20;
+  z-index: var(--z-sticky);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -2482,7 +2508,7 @@ a {
 
 .portal-sidebar {
   position: fixed;
-  z-index: 50;
+  z-index: var(--z-sidebar);
   top: 0;
   bottom: 0;
   left: 0;
@@ -2767,7 +2793,7 @@ a {
 
 .portal-topbar {
   position: sticky;
-  z-index: 35;
+  z-index: var(--z-topbar);
   top: 0;
   display: flex;
   align-items: center;
@@ -2930,11 +2956,12 @@ a {
   background: var(--orange-500);
 }
 
+/*
+ * Position and depth come from the layer portal (overlay/anchored.tsx): the
+ * panel is anchored to the bell in viewport coordinates, so the top bar's
+ * backdrop-filter can neither trap it nor paint over it.
+ */
 .notification-panel {
-  position: absolute;
-  z-index: 80;
-  top: 44px;
-  right: 0;
   width: 360px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -4362,7 +4389,7 @@ a {
 
 .live-board-toolbar {
   position: relative;
-  z-index: 30;
+  z-index: var(--z-toolbar);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -4520,7 +4547,7 @@ label.live-board-tool {
 
 .live-board-menu {
   position: absolute;
-  z-index: 70;
+  z-index: var(--z-popover);
   top: calc(100% + 7px);
   left: 0;
   min-width: 220px;
@@ -4604,7 +4631,7 @@ label.live-board-tool {
 
 .group-creator {
   position: relative;
-  z-index: 25;
+  z-index: calc(var(--z-sticky) + 1);
   display: grid;
   grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.3fr) auto auto 32px;
   gap: 12px;
@@ -4811,7 +4838,7 @@ label.live-board-tool {
 .sheet-group__menu,
 .sheet-row-menu {
   position: absolute;
-  z-index: 120;
+  z-index: var(--z-popover);
   display: grid;
   width: 225px;
   padding: 7px;
@@ -4900,7 +4927,7 @@ label.live-board-tool {
 .live-sheet th {
   position: sticky;
   top: 0;
-  z-index: 11;
+  z-index: calc(var(--z-sticky) + 1);
   height: 35px;
   padding: 0 8px;
   background: #f7f9fa;
@@ -4929,7 +4956,7 @@ label.live-board-tool {
 .sheet-check {
   position: sticky;
   left: 0;
-  z-index: 13 !important;
+  z-index: calc(var(--z-sticky) + 3) !important;
   width: 38px;
   min-width: 38px;
   max-width: 38px;
@@ -4982,7 +5009,7 @@ label.live-board-tool {
 .sheet-column--name {
   position: sticky;
   left: 38px;
-  z-index: 12 !important;
+  z-index: calc(var(--z-sticky) + 2) !important;
   width: 205px;
   min-width: 205px;
   max-width: 205px;
@@ -5157,7 +5184,7 @@ th.sheet-column--name {
 
 .custom-column-menu {
   position: absolute;
-  z-index: 180;
+  z-index: var(--z-popover);
   top: 31px;
   right: 0;
   display: grid;
@@ -5169,6 +5196,20 @@ th.sheet-column--name {
   box-shadow: 0 16px 40px rgba(7, 24, 38, 0.2);
   text-align: left;
 }
+
+/*
+ * Inside the shared layer (overlay/anchored.tsx) the menu is positioned by
+ * the popover from the trigger's live rect, so the absolute offsets above
+ * must not apply — they would push it 31px below the layer's own box.
+ */
+.ms-popover > .custom-column-menu,
+.ms-layer .custom-column-menu {
+  position: static;
+  top: auto;
+  right: auto;
+  max-height: none;
+}
+
 
 .custom-column-menu > small {
   padding: 7px 9px;
@@ -5235,7 +5276,7 @@ th.sheet-column--name {
 
 .column-picker {
   position: absolute;
-  z-index: 220;
+  z-index: var(--z-popover);
   top: 41px;
   right: 0;
   width: 370px;
@@ -5492,7 +5533,7 @@ th.sheet-column--name {
 
 .sheet-option-popover {
   position: absolute;
-  z-index: 90;
+  z-index: var(--z-popover);
   top: calc(100% + 6px);
   left: 50%;
   width: 190px;
@@ -5697,7 +5738,7 @@ th.sheet-column--name {
 
 .sheet-timeline-popover {
   position: absolute;
-  z-index: 90;
+  z-index: var(--z-popover);
   top: 28px;
   left: 50%;
   display: grid;
@@ -5848,7 +5889,7 @@ th.sheet-column--name {
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 12;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   min-height: 51px;
@@ -5884,7 +5925,7 @@ th.sheet-column--name {
 
 .live-selection-bar {
   position: fixed;
-  z-index: 220;
+  z-index: var(--z-topbar);
   right: 26px;
   bottom: 22px;
   left: max(276px, calc(50% - 530px));
@@ -6871,7 +6912,7 @@ th.sheet-column--name {
 .modal-scrim,
 .nav-scrim {
   position: fixed;
-  z-index: 90;
+  z-index: var(--z-drawer-backdrop);
   inset: 0;
   width: 100%;
   height: 100%;
@@ -6884,7 +6925,7 @@ th.sheet-column--name {
 
 .detail-drawer {
   position: fixed;
-  z-index: 100;
+  z-index: var(--z-drawer);
   top: 0;
   right: 0;
   bottom: 0;
@@ -7364,7 +7405,7 @@ th.sheet-column--name {
 
 .modal-wrap {
   position: fixed;
-  z-index: 120;
+  z-index: var(--z-modal);
   inset: 0;
   display: grid;
   place-items: center;
@@ -7683,7 +7724,7 @@ th.sheet-column--name {
 
 .toast {
   position: fixed;
-  z-index: 150;
+  z-index: var(--z-toast);
   right: 24px;
   bottom: 24px;
   display: flex;
@@ -8117,7 +8158,7 @@ th.sheet-column--name {
   }
 
   .portal-sidebar {
-    z-index: 2000;
+    z-index: var(--z-sidebar);
     transform: translateX(-101%);
     width: 248px;
     box-shadow: 18px 0 55px rgba(7, 24, 38, 0.25);
@@ -8133,7 +8174,7 @@ th.sheet-column--name {
   }
 
   .nav-scrim {
-    z-index: 1990;
+    z-index: var(--z-sidebar-backdrop);
   }
 
   .portal-main {
@@ -8694,7 +8735,7 @@ th.sheet-column--name {
  */
 .sheet-file-hover {
   position: fixed;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -8934,7 +8975,7 @@ th.sheet-column--name {
  */
 .sheet-file-menu {
   position: fixed;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -8986,7 +9027,7 @@ th.sheet-column--name {
 
 .evidence-manager {
   position: fixed;
-  z-index: 260;
+  z-index: var(--z-modal);
   inset: 0;
 }
 
@@ -9334,7 +9375,7 @@ th.sheet-column--name {
 
 .evidence-viewer {
   position: fixed;
-  z-index: 290;
+  z-index: var(--z-viewer);
   inset: 0;
 }
 
@@ -9811,7 +9852,7 @@ th.sheet-column--name {
 
 .column-settings-dialog {
   position: fixed;
-  z-index: 280;
+  z-index: var(--z-modal);
   inset: 0;
   display: grid;
   place-items: center;
@@ -10088,22 +10129,34 @@ th.sheet-column--name {
     font-size: 23px;
   }
 
+  /*
+   * No row gutter on a phone. The "…" that sat 30px to the left of every row
+   * opens the item menu on a desktop; on a phone it was a blank column the
+   * owner circled, and its verbs now live behind the "⋮" at the top right of
+   * the item drawer (overlay/item-actions.tsx). The table and the group
+   * header therefore start at the screen's edge.
+   */
   .sheet-group__header,
   .live-sheet {
-    margin-left: 30px;
+    margin-left: 0;
   }
 
   .sheet-group__header,
   .sheet-check {
-    left: 30px;
+    left: 0;
   }
 
   .sheet-column--name {
-    left: 68px;
+    left: 42px;
   }
 
-  .sheet-row-more {
-    left: -30px;
+  .sheet-row-more,
+  .live-sheet .sheet-check::before {
+    display: none;
+  }
+
+  .live-sheet {
+    --sheet-gutter-width: 0px;
   }
 
   .column-settings-dialog {
@@ -10178,20 +10231,20 @@ th.sheet-column--name {
     .custom-column-menu,
     .column-picker
   ) {
-  z-index: 500;
+  z-index: var(--z-popover);
 }
 
 .sheet-group__header:has(.sheet-group__menu),
 .live-sheet thead th:has(.custom-column-menu),
 .live-sheet tbody .sheet-check:has(.sheet-row-menu) {
-  z-index: 900 !important;
+  z-index: var(--z-popover) !important;
 }
 
 .sheet-group__menu,
 .sheet-row-menu,
 .custom-column-menu,
 .column-picker {
-  z-index: 1000;
+  z-index: var(--z-popover);
 }
 
 .custom-column-header {
@@ -10318,7 +10371,7 @@ th.sheet-column--name {
 
 .column-resize-handle {
   position: absolute;
-  z-index: 1050;
+  z-index: calc(var(--z-popover) + 1);
   top: -1px;
   right: -8px;
   width: 12px !important;
@@ -10516,7 +10569,7 @@ th.sheet-column--name {
 }
 
 .sheet-add-row__item {
-  z-index: 14 !important;
+  z-index: calc(var(--z-sticky) + 4) !important;
   background: #fbfcfd !important;
 }
 
@@ -10610,13 +10663,13 @@ th.sheet-column--name {
 
 .live-sheet thead .sheet-check {
   top: 0;
-  z-index: 18 !important;
+  z-index: calc(var(--z-sticky) + 7) !important;
   background: #f7f9fa;
 }
 
 .live-sheet thead .sheet-column--name {
   top: 0;
-  z-index: 17 !important;
+  z-index: calc(var(--z-sticky) + 6) !important;
   background: #f7f9fa;
 }
 
@@ -10670,7 +10723,7 @@ th.sheet-column--name {
   .live-board-toolbar {
     position: sticky;
     top: 71px;
-    z-index: 60;
+    z-index: var(--z-toolbar);
     min-height: 58px;
     flex-wrap: nowrap;
     padding: 8px 10px;
@@ -10698,8 +10751,8 @@ th.sheet-column--name {
   .live-board-split > button:nth-child(2),
   .live-board-tool,
   .live-board-search {
-    height: 42px;
-    min-height: 42px;
+    height: 44px;
+    min-height: 44px;
   }
 
   .live-board-split > .primary-button,
@@ -10708,16 +10761,50 @@ th.sheet-column--name {
     font-size: 14px;
   }
 
-  .live-board-split > button:nth-child(2) {
-    width: 38px;
+  /* "New item" / "New store" on one line: the split pair is one control. */
+  .live-board-split > .primary-button {
+    padding: 0 14px;
+    white-space: nowrap;
   }
 
+  /* The desktop pair keeps a 4px margin after the caret; on a phone that made
+     the search field 10px from the caret and 6px from the control after it. */
+  .live-board-split {
+    margin-right: 0;
+  }
+
+  .live-board-split > button:nth-child(2) {
+    width: 40px;
+  }
+
+  /*
+   * The search field shrinks with the screen instead of holding 210px: 150px
+   * at 320, ~164px at 390, ~181px at 430. Its input fills the box — it used
+   * to be 44px tall inside a 42px label, which is the misalignment the owner
+   * circled — so the icon, the text and the border share one 44px line, at
+   * the radius of the controls beside it.
+   */
   .live-board-search {
-    min-width: 210px;
+    flex: 0 0 auto;
+    width: clamp(150px, 42vw, 230px);
+    min-width: 150px;
+    gap: 2px;
+    padding: 0 10px;
+    border-radius: 9px;
+  }
+
+  .live-board-search > svg {
+    flex: 0 0 auto;
   }
 
   .live-board-search input {
-    width: 165px;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    padding: 0 6px;
+    line-height: 1;
   }
 
   .live-board-tool select {
@@ -10865,8 +10952,28 @@ th.sheet-column--name {
   }
 
   .live-board-footer {
-    min-height: 55px;
-    padding: 0 10px;
+    min-height: calc(55px + env(safe-area-inset-bottom));
+    padding: 0 10px env(safe-area-inset-bottom);
+  }
+
+  /*
+   * The bar is absolutely placed at the foot of the panel, over whatever the
+   * panel ends with. Both layouts leave the bar's height plus the safe area
+   * clear beneath their last row, so "Other (0)" and the last card scroll up
+   * past it rather than disappearing under it.
+   */
+  .live-board-panel .board-mobile {
+    padding-bottom: calc(55px + 16px + env(safe-area-inset-bottom));
+  }
+
+  .live-board-panel .live-board-scroll {
+    padding-bottom: calc(55px + 24px + env(safe-area-inset-bottom));
+  }
+
+  /* A board with no rows renders the empty line INSTEAD of .board-mobile, so
+     it needs the same room under it or the bar sits on top of the words. */
+  .live-board-panel .board-mobile__empty {
+    padding-bottom: calc(32px + 55px + env(safe-area-inset-bottom));
   }
 
   .live-board-footer > span {
@@ -10900,7 +11007,8 @@ th.sheet-column--name {
     font-size: 20px;
   }
 
-  .detail-drawer__header > button {
+  .detail-drawer__header > button,
+  .detail-drawer__actions > button {
     width: 42px;
     height: 42px;
   }
@@ -10986,13 +11094,7 @@ th.sheet-column--name {
   }
 
   .notification-panel {
-    position: fixed;
-    top: 64px;
-    right: 10px;
-    left: 10px;
-    width: auto;
-    max-height: calc(100dvh - 78px);
-    overflow-y: auto;
+    width: calc(100vw - 16px);
   }
 }
 
@@ -11056,7 +11158,7 @@ th.sheet-column--name {
     .custom-column-menu,
     .column-picker
   ) {
-  z-index: var(--z-dropdown);
+  z-index: var(--z-popover);
 }
 
 .sheet-group__header:has(.sheet-group__menu),
@@ -11069,11 +11171,11 @@ th.sheet-column--name {
 .sheet-option-popover,
 .sheet-timeline-popover,
 .live-board-menu {
-  z-index: var(--z-dropdown) !important;
+  z-index: var(--z-popover) !important;
 }
 
 .notification-panel {
-  z-index: var(--z-notifications);
+  z-index: var(--z-popover);
 }
 
 .nav-scrim {
@@ -11106,17 +11208,17 @@ th.sheet-column--name {
  * and is what applies once this override stops reaching it.
  */
 .drawer-scrim {
-  z-index: var(--z-sheet-backdrop);
+  z-index: var(--z-drawer-backdrop);
 }
 
 .detail-drawer {
-  z-index: var(--z-sheet);
+  z-index: var(--z-drawer);
 }
 
 .evidence-manager,
 .column-settings-dialog,
 .modal-wrap {
-  z-index: var(--z-dialog);
+  z-index: var(--z-modal);
 }
 
 .evidence-viewer {
@@ -11129,7 +11231,7 @@ th.sheet-column--name {
 
 .mobile-cell-sheet {
   position: fixed;
-  z-index: var(--z-dialog);
+  z-index: var(--z-modal);
   inset: 0;
   display: flex;
   align-items: flex-end;
@@ -12777,37 +12879,35 @@ body[data-theme="dark"] {
   }
 }
 
-/* Keep the selection gutter and Item column frozen on mobile, matching desktop. */
+/*
+ * Keep the selection column and Item column frozen on mobile, matching
+ * desktop — but with NO action gutter in front of them. The row "…" is not
+ * rendered on a phone (its verbs live behind the "⋮" in the item drawer), so
+ * the 30px the two frozen cells used to be offset by was a dead strip down the
+ * left of every board: the table began at x=1 and its first cell at x=31.
+ * The cells now freeze at 0 and 42, and the mask that hid scrolled cells
+ * behind the gutter has nothing to hide.
+ */
 @media (max-width: 760px) {
   .live-sheet {
-    --sheet-gutter-width: 30px;
+    --sheet-gutter-width: 0px;
   }
 
-  /*
-   * Keep horizontally-scrolled cells from showing through the action gutter.
-   * The mask already exists for desktop, but an earlier mobile rule hid it.
-   */
   .live-sheet .sheet-check::before {
-    display: block;
-    background: #fbfcfd;
-  }
-
-  body[data-theme="dark"] .live-sheet .sheet-check::before {
-    border-bottom-color: #2a3a44;
-    background: #0e171e;
+    display: none;
   }
 
   .live-sheet tbody .sheet-check,
   .live-sheet thead .sheet-check {
     position: sticky !important;
-    left: 30px !important;
+    left: 0 !important;
   }
 
   .live-sheet tbody .sheet-column--name,
   .live-sheet thead .sheet-column--name,
   .sheet-add-row__item {
     position: sticky !important;
-    left: 72px !important;
+    left: 42px !important;
   }
 
   .live-sheet tbody .sheet-check {
@@ -13809,8 +13909,10 @@ body[data-theme="dark"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
+  min-width: 0;
   min-height: 44px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--paper);
@@ -13818,12 +13920,23 @@ body[data-theme="dark"] {
   font: inherit;
   font-size: 0.86rem;
   font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+.board-mobile__switch button > svg {
+  flex: 0 0 auto;
+}
+
+/* Selected: a second inner ring rather than a heavier border, so the two
+   segments keep exactly the same box and nothing shifts when it moves. */
 .board-mobile__switch button.is-on {
   border-color: var(--teal-600);
   background: var(--teal-100);
   color: var(--teal-600);
+  box-shadow: inset 0 0 0 1px var(--teal-600);
 }
 
 .board-mobile {
@@ -14225,7 +14338,7 @@ body[data-theme="dark"] {
 
 .board-rules {
   position: absolute;
-  z-index: 71;
+  z-index: var(--z-popover);
   top: calc(100% + 7px);
   left: 0;
   display: grid;

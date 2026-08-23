@@ -1,0 +1,179 @@
+/*
+ * The shared floating layer.
+ *
+ * Every popover, submenu, drawer, modal and toast that goes through
+ * `overlay/anchored.tsx` is rendered into `#maintsupp-layers`, a host appended
+ * to `<body>`, inside one `.ms-layer` wrapper per open surface. The wrapper is
+ * a zero-sized fixed box whose only job is to carry the layer's z-index from
+ * the scale in globals.css — the surface itself is positioned in viewport
+ * coordinates by `useAnchoredPosition`, so no ancestor's `transform`,
+ * `backdrop-filter` or `overflow` can move or clip it. That is the whole point:
+ * the avatar menu used to hang off a `backdrop-filter` top bar, which made the
+ * bar the containing block for a `position: fixed` panel and sent `bottom: 8px`
+ * 632px above the screen.
+ *
+ * Only the z-index lives here. Colour, border and shadow stay with the class
+ * the surface already carries (`.sheet-row-menu`, `.account-menu__panel`…), so
+ * both themes' existing rules keep applying unchanged.
+ */
+
+/*
+ * The host is deliberately NOT positioned and carries NO z-index. Either would
+ * make it a stacking context, and then every layer inside it — including a
+ * "popover-raised" menu at 1250 — would be flattened to the host's own level
+ * and painted behind an in-DOM drawer (1110) or modal (1210). Each
+ * `.ms-layer` is `position: fixed` with its own z-index, so it takes part in
+ * the root stacking context directly and the scale in globals.css is the
+ * only thing that orders it against the drawer it was opened from.
+ */
+#maintsupp-layers {
+  position: static;
+}
+
+.ms-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: var(--z-popover);
+}
+
+.ms-layer[data-layer="submenu"] {
+  z-index: var(--z-submenu);
+}
+
+.ms-layer[data-layer="popover-raised"] {
+  z-index: var(--z-popover-raised);
+}
+
+.ms-layer[data-layer="drawer"] {
+  z-index: var(--z-drawer);
+}
+
+.ms-layer[data-layer="modal"] {
+  z-index: var(--z-modal);
+}
+
+.ms-layer[data-layer="toast"] {
+  z-index: var(--z-toast);
+}
+
+/*
+ * The positioned surface. `max-height` and `max-width` arrive inline from the
+ * hook, so a menu taller than the room it has scrolls inside itself instead of
+ * running off the screen. `overscroll-behavior: contain` keeps a fling at the
+ * end of the list from reaching the page behind.
+ */
+.ms-popover {
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+.ms-popover[data-ready="false"] {
+  visibility: hidden;
+}
+
+/*
+ * The drawer's item-actions trigger and menu.
+ *
+ * monday's item screen puts the actions behind a vertical "⋮" at the top right
+ * of the item, beside Close. The menu reuses the row menu's skin by carrying
+ * `.sheet-row-menu` too; these rules only add what that class does not have.
+ */
+.detail-drawer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.detail-drawer__header > .detail-drawer__actions > .icon-button {
+  margin-left: 0;
+}
+
+.item-actions-menu__add {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding: 4px 6px 6px;
+}
+
+.item-actions-menu__add input {
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong, #cfd9df);
+  border-radius: 7px;
+  background: var(--paper, #fff);
+  color: var(--ink, #0f1d26);
+  font: inherit;
+  font-size: 13px;
+}
+
+.item-actions-menu__add button {
+  width: auto !important;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+/*
+ * The board's menus keep their classes for the skin both themes already give
+ * them, but the POSITIONED element is now the `.ms-popover` around them, so
+ * their own `absolute` offsets, caps and nudges stand down. The popover
+ * scrolls; the menu inside it just lays out.
+ */
+.ms-popover > .sheet-row-menu,
+.ms-popover > .sheet-group__menu,
+.ms-popover > .live-board-menu {
+  position: static;
+  top: auto;
+  right: auto;
+  left: auto;
+  max-height: none;
+  overflow: visible;
+  transform: none;
+}
+
+.ms-popover.notification-layer {
+  border-radius: 12px;
+}
+
+/*
+ * "Move to" as a submenu. The trigger is an ordinary menu row with a caret
+ * at its far end; the groups open beside it and reuse the row menu's skin.
+ */
+.item-actions-menu__submenu-trigger {
+  position: relative;
+  padding-right: 26px !important;
+}
+
+.item-actions-menu__submenu-caret {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.ms-popover.item-actions-submenu {
+  min-width: 200px;
+}
+
+.item-actions-menu__groups button[aria-checked="true"] {
+  font-weight: 700;
+  opacity: 1;
+}
+
+.item-actions-menu__swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line-strong, #cfd9df);
+}
