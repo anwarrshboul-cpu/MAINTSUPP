@@ -385,6 +385,7 @@ export function useBoardRowDrag({
     move: (event: PointerEvent) => void;
     up: (event: PointerEvent) => void;
     cancel: (event: PointerEvent) => void;
+    key: (event: KeyboardEvent) => void;
   } | null>(null);
   /** True from the drop until the click it produces has been eaten. */
   const justDroppedRef = useRef(false);
@@ -479,6 +480,7 @@ export function useBoardRowDrag({
         document.removeEventListener("pointermove", listeners.move);
         document.removeEventListener("pointerup", listeners.up);
         document.removeEventListener("pointercancel", listeners.cancel);
+        document.removeEventListener("keydown", listeners.key, true);
         listenersRef.current = null;
       }
       if (!pointer) return;
@@ -732,10 +734,30 @@ export function useBoardRowDrag({
         if (pointerRef.current?.pointerId !== native.pointerId) return;
         clearDrag();
       };
-      listenersRef.current = { move, up, cancel };
+      /*
+       * Escape abandons the drag, and the row goes back where it came from.
+       *
+       * Without it the only way out of a drag you did not mean to start was to
+       * complete it — `pointerup` commits wherever the pointer happens to be,
+       * so letting go was a move, not an escape. Measured before this existed:
+       * press Escape mid-drag, release, and the row had been reordered anyway.
+       *
+       * `clearDrag()` is the same teardown `pointercancel` uses, so nothing is
+       * written; and `justDroppedRef` stays false because no drop happened.
+       */
+      const key = (native: KeyboardEvent) => {
+        if (native.key !== "Escape" || !pointerRef.current) return;
+        native.preventDefault();
+        native.stopPropagation();
+        clearDrag();
+      };
+      listenersRef.current = { move, up, cancel, key };
       document.addEventListener("pointermove", move);
       document.addEventListener("pointerup", up);
       document.addEventListener("pointercancel", cancel);
+      // Capture phase: a drag must be abandonable even while a menu or dialog
+      // elsewhere would otherwise swallow the key.
+      document.addEventListener("keydown", key, true);
     },
     [activate, clearDrag, commit],
   );
