@@ -3825,8 +3825,23 @@ function CalendarView({
    * range removed and the toolbar offers one click to clear it: a calendar that
    * quietly omits events from the month you navigated to is worse than one with
    * no range at all.
+   *
+   * AND IT NO LONGER DEFAULTS TO THE PAST.
+   *
+   * This screen inherited "Last 90 days" from the analytics pages, where a
+   * backward window is the whole point. `analyticsWindow` reads
+   * `now - 90 days … now + 1 day`, so on a planning calendar the default hid
+   * everything due the day after tomorrow or later. Measured in dev: of 28 jobs
+   * carrying a due date, 13 were drawn and 15 were hidden, most of them the
+   * FUTURE work this page exists to show. Rescheduling a job from the 11th to
+   * the 27th made it vanish from the grid the moment it was saved — correct
+   * against the range, and useless.
+   *
+   * So the calendar opens on everything and the reader narrows from there. The
+   * control is unchanged and still filters what is drawn; only which end of it
+   * this screen starts at has changed.
    */
-  const [period, setPeriod] = useState("90");
+  const [period, setPeriod] = useState("all");
   const periodWindow = resolvePeriod(period, nowMs);
   const withinPeriod = (value: string | null | undefined) => {
     if (!periodWindow) return true;

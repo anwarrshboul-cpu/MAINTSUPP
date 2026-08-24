@@ -380,6 +380,25 @@ test("the range filters days, not only records, and says what it removed", async
   assert.match(portal, /Show all dates/, "with one click to clear it");
 });
 
+test("the calendar does not open on a backward-looking range", async () => {
+  /*
+   * "Last 90 days" is `now - 90 days … now + 1 day` — right for the analytics
+   * pages this control came from, and wrong for a planning calendar, where it
+   * hid everything due after tomorrow. Rescheduling a job from the 11th to the
+   * 27th made it disappear the moment it saved.
+   */
+  const portal = await read(PORTAL);
+  const view = portal.slice(
+    portal.indexOf("function CalendarView("),
+    portal.indexOf("function CalendarDateDialog("),
+  );
+  assert.doesNotMatch(
+    view,
+    /useState\("(7|30|90|180|365|12m)"\)/,
+    "a rolling backward window must not be the calendar's starting state",
+  );
+});
+
 test("the calendar's state is its own, and does not reach other pages", async () => {
   /*
    * This product's date ranges are per page by decision. The calendar's period,
@@ -391,7 +410,7 @@ test("the calendar's state is its own, and does not reach other pages", async ()
     portal.indexOf("function CalendarView("),
     portal.indexOf("function CalendarDateDialog("),
   );
-  assert.match(view, /const \[period, setPeriod\] = useState\("90"\)/, "its own period");
+  assert.match(view, /const \[period, setPeriod\] = useState\("all"\)/, "its own period");
   assert.doesNotMatch(view, /setSection\(/, "and it does not steer the rest of the app");
   const prefs = await read(PREFS);
   assert.doesNotMatch(prefs, /maintsupp:(dashboard|reports|board):/, "no shared key");
