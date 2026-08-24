@@ -715,10 +715,17 @@ function MonthCell({
  * reachable from the keyboard, and because an empty column is otherwise
  * unreachable: there is nothing in it to tab to.
  *
- * `selectedDay` is honoured here by marking and scrolling to that column rather
- * than by rendering a second agenda underneath. The columns already carry every
- * event in full, so an agenda below them would be the same information twice on
- * the surface that has the least room for it.
+ * `selectedDay` marks and scrolls to its column, AND opens the same agenda the
+ * month surface uses beneath the grid.
+ *
+ * The agenda was left out at first, on the reasoning that the columns already
+ * carry every event in full so a second listing would be the same information
+ * twice. That was true of READING and wrong about DOING: the edit control lives
+ * on an agenda row, so Week was the one mode with no way to change a date, and
+ * a person looking at their week had to switch to Month or Day to move
+ * something in it. A column is about 152px wide, which is no place for an edit
+ * button, so the agenda is where it goes — the same gesture, in the same place,
+ * as the month grid.
  */
 function WeekView({
   anchor,
@@ -727,6 +734,7 @@ function WeekView({
   chipStyle,
   typeLabel,
   onOpen,
+  onEditDate,
   selectedDay,
   onSelectDay,
   emptyState,
@@ -823,6 +831,17 @@ function WeekView({
             );
           })}
         </div>
+      </div>
+      <div className="calendar-week__agenda">
+        <DayAgenda
+          day={selectedDay}
+          events={eventsFor(eventsByDay, selectedDay)}
+          chipStyle={chipStyle}
+          typeLabel={typeLabel}
+          onOpen={onOpen}
+          onEditDate={onEditDate}
+          heading
+        />
       </div>
       {anythingToShow ? null : <div className="calendar-surface__empty">{emptyState}</div>}
     </div>

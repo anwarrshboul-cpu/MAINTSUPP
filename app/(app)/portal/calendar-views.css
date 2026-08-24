@@ -121,6 +121,18 @@
 }
 
 /*
+ * The selected day under the week columns.
+ *
+ * The columns carry every event already, so this is not there to be read — it
+ * is there because the edit control lives on an agenda row and a 152px column
+ * is no place for one. Without it, Week was the only mode with no way to change
+ * a date.
+ */
+.calendar-week__agenda {
+  border-top: 1px solid var(--line);
+}
+
+/*
  * "Today" on the day surface.
  *
  * Month and Week both mark today and Day did not, so paging four days out and

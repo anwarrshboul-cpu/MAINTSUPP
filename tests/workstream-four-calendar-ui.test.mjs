@@ -232,6 +232,25 @@ test("there is a non-drag way to change a date, and it is in the default view", 
   );
 });
 
+test("all three modes offer the date edit, not two of them", async () => {
+  /*
+   * Week shipped without one. The columns carry every event in full, so a
+   * second listing beneath them looked like the same information twice — true
+   * of READING and wrong about DOING, because the edit control lives on an
+   * agenda row. A person looking at their week had to switch to Month or Day to
+   * move something in it. A column is about 152px wide and is no place for an
+   * edit button, so Week gets the same agenda the month grid has.
+   */
+  const views = await read(VIEWS);
+  for (const surface of ["MonthView", "WeekView", "DayView"]) {
+    const start = views.indexOf(`function ${surface}(`);
+    const body = views.slice(start, start + 4000);
+    assert.match(body, /onEditDate/, `${surface} must pass the edit callback through`);
+  }
+  assert.match(views, /className="calendar-month__agenda"/);
+  assert.match(views, /className="calendar-week__agenda"/);
+});
+
 test("the edit dialog names the record and the field before it changes anything", async () => {
   const portal = await read(PORTAL);
   assert.match(portal, /function CalendarDateDialog/);
