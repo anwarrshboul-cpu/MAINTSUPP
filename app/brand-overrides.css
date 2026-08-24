@@ -2766,16 +2766,18 @@ button.analytics-score-panel {
     box-shadow: inset 0 0 0 1px #12b4a8;
   }
 
-  body[data-theme="dark"] .detail-drawer__tabs {
-    background: #14232c;
-  }
-
-  body[data-theme="dark"] .detail-drawer__tabs > button.is-active {
-    border-color: #12b4a8;
-    background: rgba(18, 180, 168, .16);
-    color: #fff;
-    box-shadow: none;
-  }
+  /*
+   * The first teal pass wrote the dark tab strip and the dark selected pill
+   * here, in literals. Both are gone, and this note is what replaces them.
+   *
+   * `background: #14232c` never applied: the `:is(…, .detail-drawer__tabs)`
+   * list higher in this file is (0,3,1) against its (0,2,1), so the strip has
+   * been #182830 the whole time. And the pill it described was a SECOND
+   * description of a control that already had one — which is precisely how the
+   * light pill came to still be monday's #244bf3 on #eef0ff after the dark one
+   * had gone teal. Both now live in the drawer section further down, once, in
+   * tokens that resolve per theme.
+   */
 
   .detail-drawer,
   .request-modal,
@@ -3559,10 +3561,15 @@ body[data-theme="dark"] .role-chip {
 }
 
 /*
- * Dark keeps the surface the owner named — #182830, which is `--surface-card`
- * in this theme — and takes the drawer's OWN border colour rather than the
- * softer `--line`, because a 1px #2a3943 edge on a #182830 card at arm's
- * length is not an edge.
+ * Dark keeps the surface the owner named — #182830, which is what
+ * `--surface-card` resolves to in this theme.
+ *
+ * This rule is not here because dark WANTS different values; it is here to
+ * outrank one that already exists. The blanket at the top of this file paints
+ * `:is(…, .drawer-section, …)` #182830 with a #2b414b edge at (0,2,2), which
+ * beats the (0,2,0) rule above and would put the softer literal back on all
+ * four sides. Restating it at (0,3,1) is what makes the card's own tokens the
+ * ones that land.
  */
 body[data-theme="dark"] .detail-drawer__body > .drawer-section {
   border-color: var(--line-strong);
@@ -3672,6 +3679,13 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
     background: var(--surface-sunken);
   }
 
+  /*
+   * Likewise for the strip's ground, and this one genuinely differs by theme:
+   * the light strip has to sit BELOW white and the dark strip has to sit ABOVE
+   * #101820, and no single token is "one step away from the body". globals.css
+   * paints it #242424 in the dark — a neutral from monday's skin with no blue
+   * or teal in it at all — at (0,3,1).
+   */
   body[data-theme="dark"] .detail-drawer__tabs {
     background: var(--surface-card);
   }
@@ -3720,6 +3734,15 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
     color: var(--muted);
   }
 
+  /*
+   * The same three tokens again, and for the same reason as the card above:
+   * to outrank a rule that already exists. globals.css closes its phone block
+   * with `body[data-theme="dark"] .detail-drawer__tabs > button.is-active {
+   * border-color: #7180ff; background: #31354c }` — a periwinkle from monday's
+   * dark skin, at (0,3,2) against this rule's (0,2,1). Restating the SAME three
+   * tokens at matching specificity is what keeps one description of the pill
+   * instead of two, which is the split that left the light one on #244bf3.
+   */
   body[data-theme="dark"] .detail-drawer__tabs > button.is-active {
     border-color: var(--accent-fg);
     background: var(--teal-100);
