@@ -160,6 +160,16 @@ export type RowHit = {
   /** That row's top edge and height, in client coordinates. */
   rowTop: number;
   rowHeight: number;
+  /**
+   * That row's LEFT edge, in client coordinates.
+   *
+   * Only the settle animation reads it: a preview that fades out where it
+   * happened to be released has not landed anywhere, and the one thing it can
+   * land ON is the gap it was dropped into. A row can be 4,000px wide and
+   * scrolled halfway out of the scroller, so this is measured with the rest of
+   * the hit rather than assumed to be the scroller's left edge.
+   */
+  rowLeft: number;
   /** The row after it in the same group, which is what "below" drops before. */
   nextRowId: string | null;
   /** The group under the pointer, when the pointer is not over a row at all. */
@@ -314,6 +324,68 @@ export function edgeScrollVector(
 }
 
 /**
+ * HOW WIDE THE LIFTED ROW IS, AND WHY IT USED TO BE WRONG ON A PHONE.
+ *
+ * The first version of this was one line at the call site:
+ *
+ *     const width = Math.min(Math.max(rect.width, 180), 320);
+ *
+ * `rect.width` is the whole row, which on this board is about 4,200px, so the
+ * expression could only ever produce its own upper bound. Every preview, on
+ * every device, was exactly 320px. On a 1440px desktop that is 22% of the
+ * screen and looks deliberate. On a 390px phone it is 82% — a near edge-to-edge
+ * slab with one word on it, which is precisely the "long flat duplicate strip"
+ * the complaint described. A constant cannot be responsive, and nothing about
+ * the row it was measuring ever reached the answer.
+ *
+ * So the width is now three things at once:
+ *
+ *   · WHAT IS BEING CARRIED. The reference product lifts something about as
+ *     wide as the Name column, because that is the part of a row that says
+ *     which row it is. `nameWidth` is the distance from the row's left edge to
+ *     the right edge of its Name cell, measured live, so a person who has
+ *     widened that column gets a wider preview.
+ *   · A SHARE OF THE SCREEN. Clamped between 55% and 70% of the viewport, so a
+ *     phone gets something that is obviously floating over the board rather
+ *     than replacing it, and a desktop does not get a postage stamp.
+ *   · AN ABSOLUTE CEILING. 300px, because past that it stops reading as an
+ *     object and starts reading as a row again — which is the whole bug.
+ *
+ * Measured: 300px at 1440 (20.8% of the viewport) and 215–245px at 390
+ * (55–63%), against 320px (82%) before.
+ */
+export const GHOST_MIN_FRACTION = 0.55;
+export const GHOST_MAX_FRACTION = 0.7;
+export const GHOST_MAX_WIDTH = 300;
+/** Breathing room kept between the preview and the edge of a small screen. */
+export const GHOST_VIEWPORT_MARGIN = 24;
+
+export function ghostWidth(input: {
+  /** The full row, which is the fallback when the Name cell cannot be found. */
+  rowWidth: number;
+  /** Row left edge → Name cell right edge. Zero when there is no Name cell. */
+  nameWidth: number;
+  viewportWidth: number;
+}) {
+  const { rowWidth, nameWidth, viewportWidth } = input;
+  const low = Math.min(viewportWidth * GHOST_MIN_FRACTION, GHOST_MAX_WIDTH - 40);
+  const high = Math.min(viewportWidth * GHOST_MAX_FRACTION, GHOST_MAX_WIDTH);
+  const preferred = nameWidth > 0 ? nameWidth : rowWidth;
+  const clamped = Math.min(Math.max(preferred, low), Math.max(low, high));
+  return Math.round(
+    Math.max(1, Math.min(clamped, viewportWidth - GHOST_VIEWPORT_MARGIN)),
+  );
+}
+
+/**
+ * How tall it is: the row's own height, floored so an empty row is still a
+ * card and capped so a tall wrapped row does not become a second slab.
+ */
+export function ghostHeight(rowHeight: number) {
+  return Math.round(Math.min(Math.max(rowHeight, 38), 48));
+}
+
+/**
  * Where the lifted preview sits, given where the row was grabbed.
  *
  * The preview is narrower than a full board row — a row can be 4,000px wide and
@@ -331,5 +403,54 @@ export function ghostOffset(
   return {
     x: Math.min(Math.max(grabOffsetX, 12), Math.max(12, ghostWidth - 12)),
     y: Math.min(Math.max(grabOffsetY, 0), ghostHeight),
+  };
+}
+
+/**
+ * A CLIENT POINT THAT SURVIVES THE BOARD MOVING UNDER IT.
+ *
+ * The preview follows the pointer, so it needs no help. The two marks the drop
+ * draws — the caret in the gap, and the dashed slot where the row came from —
+ * are attached to the GRID, and the grid moves: the drag auto-scrolls at the
+ * edges, and a person can be dragging with one hand while the board is already
+ * scrolled 900px to the right.
+ *
+ * Re-measuring them every frame would mean a `getBoundingClientRect` per mark
+ * per frame, on the one path that must not touch the DOM more than it already
+ * does. It is also unnecessary: nothing reflows during a drag, so a point
+ * measured once moves by exactly minus the scroll that has happened since —
+ * both the scroller's own and the window's.
+ *
+ * That is why the marks are correct at `scrollLeft` 0 and at `scrollLeft` 900
+ * alike, and why neither of them assumes the board starts at its left edge.
+ */
+export type ScrollFrame = {
+  scrollLeft: number;
+  scrollTop: number;
+  pageLeft: number;
+  pageTop: number;
+};
+
+export type AnchoredPoint = { left: number; top: number; frame: ScrollFrame };
+
+export function anchorPoint(
+  left: number,
+  top: number,
+  frame: ScrollFrame,
+): AnchoredPoint {
+  return { left, top, frame };
+}
+
+/** Where an anchored point is NOW, given the board's current scroll. */
+export function anchoredAt(anchor: AnchoredPoint, frame: ScrollFrame) {
+  return {
+    x:
+      anchor.left -
+      (frame.scrollLeft - anchor.frame.scrollLeft) -
+      (frame.pageLeft - anchor.frame.pageLeft),
+    y:
+      anchor.top -
+      (frame.scrollTop - anchor.frame.scrollTop) -
+      (frame.pageTop - anchor.frame.pageTop),
   };
 }

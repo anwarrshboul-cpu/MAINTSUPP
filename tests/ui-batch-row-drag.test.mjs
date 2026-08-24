@@ -334,8 +334,12 @@ test("THE FIXED-STEP scrollBy IS GONE FROM THE BOARD", async () => {
 });
 
 test("the preview is a plain element on the body, not React state per move", () => {
-  assert.match(gesture, /document\.body\.append\(ghost\)/);
-  assert.match(gesture, /ghost\.style\.transform = /);
+  /* The preview became an OBJECT (`RowGhost`) rather than one bare div, so the
+     element that lands on the body is its `root` and the transform is written
+     through it. Same contract — a plain element on <body>, moved by transform,
+     never React state — expressed against the new shape. */
+  assert.match(gesture, /document\.body\.append\(root\)/);
+  assert.match(gesture, /ghost\.root\.style\.transform = /);
 });
 
 test("NOTHING IN THE MOVE PATH WRITES REACT STATE — the indicator is classes", () => {
@@ -357,7 +361,8 @@ test("NOTHING IN THE MOVE PATH WRITES REACT STATE — the indicator is classes",
   // changed with the mechanism.
   assert.match(gesture, /classList\.add\("is-drop-before"\)/);
   assert.match(gesture, /classList\.add\("is-drop-target"\)/);
-  assert.match(gesture, /classList\.toggle\("is-drop-at-end"/);
+  /* Formatted across lines once the call grew a third argument. */
+  assert.match(gesture, /classList\.toggle\(\s*"is-drop-at-end"/);
   // And a render that rewrites className cannot silently drop it.
   assert.match(gesture, /reassertDropTarget/);
 });
@@ -410,9 +415,16 @@ test("THE HIT TEST IS MEMOISED — a tremor inside a row costs no layout flush",
 });
 
 test("the drag is torn down on unmount, drop and cancel alike", () => {
-  assert.match(gesture, /useEffect\(\(\) => \(\) => teardown\(pointerRef\.current\), \[teardown\]\)/);
+  /* The unmount cleanup gained a sweep for stray preview elements, so it is no
+     longer a one-line effect — pin the teardown call and the sweep instead. */
+  assert.match(gesture, /useEffect\(\s*\(\) => \(\) => \{\s*teardown\(pointerRef\.current\);/);
+  assert.match(
+    gesture,
+    /\.board-row-ghost, \.board-row-drop-caret, \.board-row-drop-slot/,
+    "unmount must remove any preview element left on the body",
+  );
   assert.match(gesture, /cancelAnimationFrame\(pointer\.frame\)/);
-  assert.match(gesture, /pointer\.ghost\?\.remove\(\)/);
+  assert.match(gesture, /pointer\.ghost\?\.root\.remove\(\)/);
   assert.match(gesture, /removeEventListener\("pointermove", listeners\.move\)/);
 });
 

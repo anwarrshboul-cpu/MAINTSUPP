@@ -48,21 +48,39 @@
  * the GROUP, not the viewport, and would be clipped away the moment the group
  * scrolled out of view.
  *
- * React state is written exactly twice per drag — once when it starts, once
- * when it ends — plus once per CHANGE of drop target, which is what draws the
- * indicator.
+ * React state is not written AT ALL between picking a row up and putting it
+ * down. The preview, the caret in the gap and the dashed slot the row came out
+ * of are three plain elements on the body, moved by writing `style.transform`;
+ * the target group and row are marked with two class names. See
+ * `paintDropTarget` for what that replaced and what it cost.
+ *
+ * FOUR: THE PREVIEW IS AN OBJECT, NOT A COPY OF A ROW.
+ *
+ * It used to be a 320px bar with a 4px radius, the same height and colour
+ * family as the rows under it, which on a phone covered 82% of the screen and
+ * read as a duplicate row rather than as something in the air. It is now a card
+ * — derived width, 10px corners, an opaque surface, a two-layer shadow, and the
+ * job reference alongside the name because on this board every row is called
+ * "Manual" or "Incoming form answer". `createRowGhost` has the reasoning and
+ * `ghostWidth` next door has the numbers.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { BoardDragItem, BoardDropTarget } from "./board-model";
 import {
+  anchorPoint,
+  anchoredAt,
   edgeScrollVector,
+  ghostHeight,
   ghostOffset,
+  ghostWidth,
   rowDragDecision,
   rowDropTargetFrom,
   sameDropTarget,
+  type AnchoredPoint,
   type RowHit,
+  type ScrollFrame,
 } from "./board-row-drag";
 
 /**
@@ -100,7 +118,15 @@ type RowDragPointer = {
   fromHandle: boolean;
   element: HTMLTableRowElement;
   scroller: HTMLElement | null;
-  ghost: HTMLElement | null;
+  ghost: RowGhost | null;
+  /** The insertion mark, and where in the grid it was last placed. */
+  caret: HTMLElement | null;
+  caretAt: AnchoredPoint | null;
+  /** The dashed outline left behind at the row's own position. */
+  slot: HTMLElement | null;
+  slotAt: AnchoredPoint | null;
+  /** The colour of the group the row was lifted OUT of. */
+  sourceColor: string;
   grabX: number;
   grabY: number;
   frame: number | null;
@@ -131,49 +157,127 @@ function blockTouchScroll(event: TouchEvent) {
 }
 
 /**
- * The lifted row, built once at activation.
+ * Whether the person has asked the operating system for less movement.
+ *
+ * Read at the moment each animation would start rather than cached, because
+ * the setting can change while a tab is open and the next drag should honour
+ * the new answer. Everything guarded by this is decoration: the drag itself is
+ * identical either way, and nothing about where a row lands depends on it.
+ */
+function prefersReducedMotion() {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/** The palette the preview and its two marks are drawn from. */
+type GhostSkin = {
+  dark: boolean;
+  surface: string;
+  ink: string;
+  muted: string;
+  ring: string;
+  shadow: string;
+};
+
+function ghostSkin(): GhostSkin {
+  const dark = document.body.dataset.theme === "dark";
+  return dark
+    ? {
+        dark,
+        surface: "#223244",
+        ink: "#eaf1f9",
+        muted: "rgba(213, 228, 243, 0.62)",
+        ring: "rgba(255, 255, 255, 0.14)",
+        shadow:
+          "0 18px 34px -10px rgba(0, 0, 0, 0.72), 0 6px 12px -6px rgba(0, 0, 0, 0.6)",
+      }
+    : {
+        dark,
+        surface: "#ffffff",
+        ink: "#1f2f3d",
+        muted: "rgba(45, 68, 88, 0.6)",
+        ring: "rgba(11, 37, 58, 0.14)",
+        shadow:
+          "0 18px 32px -12px rgba(11, 37, 58, 0.35), 0 5px 12px -6px rgba(11, 37, 58, 0.22)",
+      };
+}
+
+/** The group colour a `[data-board-group-id]` element is painted with. */
+function groupColor(group: HTMLElement | null) {
+  const value = group
+    ? getComputedStyle(group).getPropertyValue("--group-color").trim()
+    : "";
+  return value || "#6b7f8f";
+}
+
+type RowGhost = {
+  root: HTMLElement;
+  /** The child that scales, so the per-frame transform write stays on `root`. */
+  lift: HTMLElement;
+  /** The group-colour spine, recoloured when the drop crosses into a group. */
+  spine: HTMLElement;
+  width: number;
+  height: number;
+  lifted: boolean;
+};
+
+/**
+ * THE LIFTED ROW, AND WHY IT IS NO LONGER A STRIP.
  *
  * A copy of the row rather than the row itself: moving the real `<tr>` out of
  * its table would collapse the column widths of every group it belongs to, and
- * a `<tr>` is not something that can be positioned anyway. What is copied is
- * what the reference shows being carried — the item's name and its group's
- * colour — on a pale plate with a shadow, which is what makes it read as
- * floating ABOVE the grid lines rather than as another row among them.
+ * a `<tr>` is not something that can be positioned anyway.
+ *
+ * What changed is what the copy LOOKS like. It was a 320px bar with a 4px
+ * corner radius and one word in it — the same height, the same colour family
+ * and very nearly the same silhouette as the rows it was floating over, which
+ * on a phone covered 82% of the screen. Read back honestly, it was a duplicate
+ * of a row rather than a thing being carried, and the complaint said exactly
+ * that. Four decisions fix it, and they are all visible in the numbers:
+ *
+ *   · WIDTH is now derived — see `ghostWidth` next door. 300px on a desktop,
+ *     55–70% of a phone, never wider than the screen minus a margin.
+ *   · SHAPE is a card: 10px corners, a hairline ring, and a two-layer shadow
+ *     with a negative spread so the elevation reads as height rather than as
+ *     a smudge. Rows have square corners and no shadow, so nothing about this
+ *     silhouette can be mistaken for one.
+ *   · SURFACE is opaque in both themes — white on light, a raised slate on
+ *     dark — because a translucent card over a grid picks up the grid lines
+ *     and immediately looks like part of it again.
+ *   · CONTENT carries identity rather than a label. On this board every row's
+ *     Name is "Manual" or "Incoming form answer", so a preview showing only
+ *     the name is genuinely ambiguous: the job reference is the only thing
+ *     that says WHICH row is in the air. It sits at the trailing edge in muted
+ *     type, and the grip glyph on the left says the same thing the reference
+ *     product's preview says — this is the handle, this is what you are
+ *     holding.
  */
-function createRowGhost(row: HTMLTableRowElement, width: number) {
-  const dark = document.body.dataset.theme === "dark";
-  const group = row.closest<HTMLElement>("[data-board-group-id]");
-  const color = group
-    ? getComputedStyle(group).getPropertyValue("--group-color").trim()
-    : "";
+function createRowGhost(
+  row: HTMLTableRowElement,
+  width: number,
+  height: number,
+): RowGhost {
+  const skin = ghostSkin();
+  const color = groupColor(row.closest<HTMLElement>("[data-board-group-id]"));
   const name =
     row.querySelector<HTMLElement>(".sheet-column--name")?.textContent?.trim() ||
     row.dataset.boardRowId ||
     "";
+  const reference = row.dataset.boardRowId ?? "";
 
-  const ghost = document.createElement("div");
-  ghost.className = "board-row-ghost";
-  ghost.setAttribute("aria-hidden", "true");
-  Object.assign(ghost.style, {
+  const root = document.createElement("div");
+  root.className = "board-row-ghost";
+  root.setAttribute("aria-hidden", "true");
+  Object.assign(root.style, {
     position: "fixed",
     top: "0",
     left: "0",
     zIndex: "1400",
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
     boxSizing: "border-box",
     width: `${width}px`,
-    height: `${Math.max(34, row.getBoundingClientRect().height)}px`,
-    padding: "0 12px",
-    borderRadius: "4px",
-    borderLeft: `4px solid ${color || "#6b7f8f"}`,
-    background: dark ? "#26364a" : "#e9eff5",
-    color: dark ? "#dbe6f2" : "#33475a",
-    font: "500 13px/1.2 inherit",
-    boxShadow: dark
-      ? "0 14px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08)"
-      : "0 14px 30px rgba(7, 24, 38, 0.26), 0 0 0 1px rgba(7, 24, 38, 0.08)",
+    height: `${height}px`,
     pointerEvents: "none",
     userSelect: "none",
     willChange: "transform",
@@ -182,16 +286,284 @@ function createRowGhost(row: HTMLTableRowElement, width: number) {
     transform: "translate3d(-9999px, -9999px, 0)",
   } satisfies Partial<CSSStyleDeclaration>);
 
+  const lift = document.createElement("div");
+  lift.className = "board-row-ghost__lift";
+  Object.assign(lift.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    boxSizing: "border-box",
+    width: "100%",
+    height: "100%",
+    paddingRight: "10px",
+    borderRadius: "10px",
+    overflow: "hidden",
+    background: skin.surface,
+    color: skin.ink,
+    /*
+     * Longhand, and this is not a style preference.
+     *
+     * The line it replaces was `font: "500 13px/1.2 inherit"`, and the `font`
+     * shorthand does not take `inherit` as its family — `inherit` is only legal
+     * as the ENTIRE value of a shorthand. So the declaration was dropped whole
+     * and the preview inherited the body's 16px/24px, which is why a 40px card
+     * looked stuffed. Set one property at a time and the family is simply never
+     * mentioned, which is the same thing the shorthand was trying to say.
+     */
+    fontWeight: "600",
+    fontSize: "13px",
+    lineHeight: "1.25",
+    boxShadow: `${skin.shadow}, 0 0 0 1px ${skin.ring}`,
+    // The scale of the lift and the settle both live here, so the frame loop
+    // can keep writing `root.style.transform` without ever fighting them.
+    transformOrigin: "18px 50%",
+    willChange: "transform",
+  } satisfies Partial<CSSStyleDeclaration>);
+
+  const spine = document.createElement("span");
+  Object.assign(spine.style, {
+    flex: "0 0 auto",
+    alignSelf: "stretch",
+    width: "4px",
+    background: color,
+    // Recoloured live when the drop target crosses into another group.
+    transition: prefersReducedMotion() ? "none" : "background 140ms ease",
+  } satisfies Partial<CSSStyleDeclaration>);
+
+  const grip = document.createElement("span");
+  Object.assign(grip.style, {
+    flex: "0 0 auto",
+    width: "6px",
+    height: "14px",
+    marginLeft: "7px",
+    opacity: "0.5",
+    // Two columns of dots, drawn rather than typed so no font can lose them.
+    backgroundImage: "radial-gradient(currentColor 0.9px, transparent 1.1px)",
+    backgroundSize: "3px 4px",
+  } satisfies Partial<CSSStyleDeclaration>);
+
   const label = document.createElement("span");
   Object.assign(label.style, {
+    flex: "1 1 auto",
+    minWidth: "0",
     overflow: "hidden",
     whiteSpace: "nowrap",
     textOverflow: "ellipsis",
   } satisfies Partial<CSSStyleDeclaration>);
   label.textContent = name;
-  ghost.append(label);
-  document.body.append(ghost);
-  return ghost;
+
+  const badge = document.createElement("span");
+  Object.assign(badge.style, {
+    flex: "0 0 auto",
+    fontWeight: "500",
+    fontSize: "11px",
+    lineHeight: "1",
+    letterSpacing: "0.02em",
+    color: skin.muted,
+    whiteSpace: "nowrap",
+  } satisfies Partial<CSSStyleDeclaration>);
+  badge.textContent = reference;
+
+  lift.append(spine, grip, label);
+  if (reference && reference !== name) lift.append(badge);
+  root.append(lift);
+  document.body.append(root);
+  return { root, lift, spine, width, height, lifted: false };
+}
+
+/**
+ * THE LIFT: a row leaves the ground, it does not teleport.
+ *
+ * Run once, on the first frame that has a real position to show — starting it
+ * at creation would animate something parked at -9999px. A Web Animation
+ * rather than a stylesheet keyframe because this element is built here and
+ * belongs to nobody else, and rather than a CSS transition because a transition
+ * cannot overshoot, and the small overshoot is what makes it read as weight.
+ *
+ * `prefers-reduced-motion: reduce` gets no transform animation at all — the
+ * card simply appears at full size.
+ */
+function beginLift(ghost: RowGhost) {
+  if (ghost.lifted) return;
+  ghost.lifted = true;
+  if (prefersReducedMotion() || typeof ghost.lift.animate !== "function") return;
+  ghost.lift.animate(
+    [
+      { transform: "scale(0.9)", opacity: 0.4 },
+      { transform: "scale(1.035)", opacity: 1, offset: 0.55 },
+      { transform: "scale(1)", opacity: 1 },
+    ],
+    { duration: 190, easing: "cubic-bezier(0.2, 0.75, 0.3, 1)" },
+  );
+}
+
+/**
+ * THE SETTLE: the preview lands in the gap instead of blinking out.
+ *
+ * The old drop removed the element on the same tick the board re-rendered, so
+ * the row vanished from under the pointer and reappeared somewhere else in the
+ * same frame — two events that are obviously one thing, shown as two. Here the
+ * preview is handed over BEFORE teardown (the pointer's reference is cleared,
+ * so nothing else will remove it) and flies to where the row is going.
+ *
+ * Every exit removes the element: the animation's finish, its cancel, and a
+ * timer well past its duration, because an orphaned fixed-position card that
+ * covers part of the board is a far worse failure than a missing flourish.
+ */
+function settleRowGhost(ghost: RowGhost, to: { x: number; y: number } | null) {
+  const root = ghost.root;
+  root.dataset.boardRowGhostSettling = "true";
+  let removed = false;
+  const finish = () => {
+    if (removed) return;
+    removed = true;
+    root.remove();
+  };
+  if (!to || prefersReducedMotion() || typeof root.animate !== "function") {
+    finish();
+    return;
+  }
+  const from = root.style.transform;
+  const animation = root.animate(
+    [
+      { transform: from, opacity: 1 },
+      { transform: `translate3d(${Math.round(to.x)}px, ${Math.round(to.y)}px, 0)`, opacity: 0 },
+    ],
+    { duration: 165, easing: "cubic-bezier(0.25, 0.8, 0.35, 1)", fill: "forwards" },
+  );
+  ghost.lift.animate([{ transform: "scale(1)" }, { transform: "scale(0.97)" }], {
+    duration: 165,
+    easing: "cubic-bezier(0.25, 0.8, 0.35, 1)",
+  });
+  animation.onfinish = finish;
+  animation.oncancel = finish;
+  window.setTimeout(finish, 420);
+}
+
+/**
+ * THE TWO MARKS THE DROP DRAWS, AND WHY THEY ARE NOT CSS.
+ *
+ * Before this there was one indicator and it was the row's own top border —
+ * `border-top: 3px solid` on every `<td>` of the target row — which on a board
+ * whose rows are 4,200px wide is a line running off both sides of the screen,
+ * plus a dashed outline around the whole target GROUP, of which a phone shows
+ * one stray edge floating in the middle of the board. Neither says "the item
+ * goes HERE"; together they say "something, somewhere, is happening".
+ *
+ * These two do say it:
+ *
+ *   · THE CARET is a rounded bar exactly as wide as the preview, with a knob on
+ *     its leading end, sitting in the gap the drop will use. It is the same
+ *     width as the thing being carried, so the two read as one gesture.
+ *   · THE SLOT is a dashed rounded outline left where the row was picked up, so
+ *     "put it back" is a visible place rather than a memory.
+ *
+ * Both are plain elements on the body for the same reason the preview is: a
+ * fixed-position child of a `content-visibility: auto` group is positioned
+ * against the GROUP and clipped when it scrolls away. Both are positioned from
+ * an anchor plus the scroll that has happened since, so neither costs a layout
+ * read per frame and neither assumes the board is scrolled to its left edge.
+ */
+function createDropCaret(): HTMLElement {
+  const caret = document.createElement("div");
+  caret.className = "board-row-drop-caret";
+  caret.setAttribute("aria-hidden", "true");
+  Object.assign(caret.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    zIndex: "1399",
+    height: "4px",
+    borderRadius: "999px",
+    pointerEvents: "none",
+    willChange: "transform",
+    opacity: "0",
+    transform: "translate3d(-9999px, -9999px, 0)",
+  } satisfies Partial<CSSStyleDeclaration>);
+  const knob = document.createElement("span");
+  Object.assign(knob.style, {
+    position: "absolute",
+    left: "-3px",
+    top: "-4px",
+    width: "12px",
+    height: "12px",
+    borderRadius: "50%",
+    background: "inherit",
+  } satisfies Partial<CSSStyleDeclaration>);
+  caret.append(knob);
+  document.body.append(caret);
+  return caret;
+}
+
+function createOriginSlot(width: number, height: number, color: string) {
+  const skin = ghostSkin();
+  const slot = document.createElement("div");
+  slot.className = "board-row-drop-slot";
+  slot.setAttribute("aria-hidden", "true");
+  Object.assign(slot.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    zIndex: "1398",
+    boxSizing: "border-box",
+    width: `${width}px`,
+    height: `${height}px`,
+    borderRadius: "10px",
+    border: `1px dashed ${color}`,
+    background: skin.dark
+      ? "rgba(255, 255, 255, 0.05)"
+      : "rgba(11, 37, 58, 0.05)",
+    pointerEvents: "none",
+    willChange: "transform",
+    opacity: "0",
+    transform: "translate3d(-9999px, -9999px, 0)",
+  } satisfies Partial<CSSStyleDeclaration>);
+  document.body.append(slot);
+  return slot;
+}
+
+/**
+ * Where the END of a group is, for a drop that lands after everything.
+ *
+ * The last row's bottom edge rather than the group's own box: a group's box
+ * includes its header, its add-item row and its summary footer, and a caret
+ * drawn at the bottom of all that points at a place no item can occupy. A group
+ * with no rows in it has no last row, and the answer is its `tbody` — which is
+ * exactly the empty band an item dropped into it will fill.
+ */
+function lastRowRectOf(group: HTMLElement | null) {
+  if (!group) return null;
+  const rows = group.querySelectorAll<HTMLElement>("tbody tr[data-board-row-id]");
+  const last = rows[rows.length - 1];
+  if (last) return last.getBoundingClientRect();
+  const body = group.querySelector<HTMLElement>("tbody");
+  return body ? body.getBoundingClientRect() : null;
+}
+
+/** The board's scroll position and the page's, read together. */
+function scrollFrameOf(scroller: HTMLElement | null): ScrollFrame {
+  return {
+    scrollLeft: scroller?.scrollLeft ?? 0,
+    scrollTop: scroller?.scrollTop ?? 0,
+    pageLeft: window.scrollX,
+    pageTop: window.scrollY,
+  };
+}
+
+/** Move a mark to where its anchor now is, and reveal it the first time. */
+function placeMark(
+  mark: HTMLElement | null,
+  anchor: AnchoredPoint | null,
+  frame: ScrollFrame,
+) {
+  if (!mark) return;
+  if (!anchor) {
+    if (mark.style.opacity !== "0") mark.style.opacity = "0";
+    return;
+  }
+  const at = anchoredAt(anchor, frame);
+  mark.style.transform = `translate3d(${Math.round(at.x)}px, ${Math.round(at.y)}px, 0)`;
+  if (mark.style.opacity !== "1") mark.style.opacity = "1";
 }
 
 /**
@@ -234,6 +606,7 @@ function rowSpanning(group: HTMLElement, clientY: number): RowHit | null {
       rowGroupId: candidate.dataset.boardRowGroupId ?? null,
       rowTop: rect.top,
       rowHeight: rect.height,
+      rowLeft: rect.left,
       nextRowId: next?.dataset.boardRowId ?? null,
       groupId: group.dataset.boardGroupId ?? null,
     };
@@ -273,6 +646,7 @@ function hitTestRow(clientX: number, clientY: number): RowHit {
       rowGroupId: null,
       rowTop: 0,
       rowHeight: 0,
+      rowLeft: 0,
       nextRowId: null,
       groupId: group?.dataset.boardGroupId ?? null,
     };
@@ -296,6 +670,7 @@ function hitTestRow(clientX: number, clientY: number): RowHit {
     rowGroupId: row.dataset.boardRowGroupId ?? null,
     rowTop: rect.top,
     rowHeight: rect.height,
+    rowLeft: rect.left,
     nextRowId:
       sibling instanceof HTMLElement ? sibling.dataset.boardRowId ?? null : null,
     groupId: group?.dataset.boardGroupId ?? null,
@@ -363,10 +738,12 @@ export function useBoardRowDrag({
   const pointerRef = useRef<RowDragPointer | null>(null);
   const targetRef = useRef<BoardDropTarget | null>(null);
   /** The two elements currently carrying the indicator, so it can be lifted. */
-  const paintedRef = useRef<{ row: HTMLElement | null; group: HTMLElement | null }>({
-    row: null,
-    group: null,
-  });
+  const paintedRef = useRef<{
+    row: HTMLElement | null;
+    group: HTMLElement | null;
+    /** Whether the group is meant to be lit at all. See `paintDropTarget`. */
+    crossing: boolean;
+  }>({ row: null, group: null, crossing: false });
   /*
    * THE GESTURE LIVES ON THE DOCUMENT, NOT ON THE ROW.
    *
@@ -401,9 +778,19 @@ export function useBoardRowDrag({
    * two elements, so it is drawn as two class names on two elements.
    *
    * The classes are the same ones the stylesheet already had — `.is-drop-before`
-   * on the row and `.is-drop-target` / `.is-drop-at-end` on the group — so
-   * nothing about how it LOOKS changed, and the browser tests that assert them
-   * still assert exactly what a person sees.
+   * on the row and `.is-drop-target` / `.is-drop-at-end` on the group — and the
+   * browser tests that assert them still assert exactly what a person sees.
+   *
+   * WHAT DID CHANGE IS WHEN THE GROUP ONE IS WORN.
+   *
+   * `.sheet-group.is-drop-target` draws a dashed outline around an entire
+   * group. Inside the group you are already in, that is decoration around
+   * something nobody is asking a question about: a phone shows one edge of it,
+   * floating in the middle of the board, attached to nothing. So it is now put
+   * on only when the drop would CROSS into a different group — which is the one
+   * case where "this whole group is the destination" is the news — and the
+   * ordinary reorder gets the caret alone. The same rule makes the cross-group
+   * case unmistakable, because it is now the only case that lights a group up.
    *
    * THE LIFTED ROW IS DRAWN THE SAME WAY, AND FOR A BIGGER REASON. Toggling
    * `.is-dragging` costs 75ms of style recalculation on its own — measured, and
@@ -434,10 +821,49 @@ export function useBoardRowDrag({
     painted.row = row;
     painted.group = group;
     row?.classList.add("is-drop-before");
+
+    const pointer = pointerRef.current;
+    const crossing =
+      Boolean(next) && next?.groupId !== pointer?.item.sourceGroupId;
     if (group) {
-      group.classList.add("is-drop-target");
-      group.classList.toggle("is-drop-at-end", next?.beforeRequestId === null);
+      group.classList.toggle("is-drop-target", crossing);
+      group.classList.toggle(
+        "is-drop-at-end",
+        crossing && next?.beforeRequestId === null,
+      );
     }
+    paintedRef.current.crossing = crossing;
+
+    /*
+     * THE CARET, PLACED FROM THE ONE RECT THIS COSTS.
+     *
+     * Measured here rather than in the frame loop because the gap only moves
+     * when the ANSWER changes, and the answer changes a dozen times in a drag
+     * rather than sixty times a second. Between changes the loop carries it by
+     * arithmetic on the scroll position — see `anchoredAt`.
+     */
+    if (!pointer?.caret) return;
+    if (!next) {
+      pointer.caretAt = null;
+      return;
+    }
+    const edge = row
+      ? row.getBoundingClientRect()
+      : lastRowRectOf(group) ?? null;
+    if (!edge) {
+      pointer.caretAt = null;
+      return;
+    }
+    const color = groupColor(group);
+    pointer.caret.style.background = color;
+    pointer.caretAt = anchorPoint(
+      edge.left,
+      (row ? edge.top : edge.bottom) - 2,
+      scrollFrameOf(pointer.scroller),
+    );
+    // The spine follows the destination, so a cross-group drag says where it is
+    // going on the thing in your hand rather than only on the board behind it.
+    if (pointer.ghost) pointer.ghost.spine.style.background = color;
   }, []);
 
   /**
@@ -450,11 +876,11 @@ export function useBoardRowDrag({
    * frame buys immunity from the whole question.
    */
   const reassertDropTarget = useCallback(() => {
-    const { row, group } = paintedRef.current;
+    const { row, group, crossing } = paintedRef.current;
     if (row && !row.classList.contains("is-drop-before")) {
       row.classList.add("is-drop-before");
     }
-    if (group && !group.classList.contains("is-drop-target")) {
+    if (group && crossing && !group.classList.contains("is-drop-target")) {
       group.classList.add("is-drop-target");
     }
     const lifted = pointerRef.current;
@@ -485,7 +911,9 @@ export function useBoardRowDrag({
       }
       if (!pointer) return;
       if (pointer.frame !== null) window.cancelAnimationFrame(pointer.frame);
-      pointer.ghost?.remove();
+      pointer.ghost?.root.remove();
+      pointer.caret?.remove();
+      pointer.slot?.remove();
       if (pointer.active) {
         pointer.element.classList.remove("is-dragging");
         pointer.element.removeAttribute("aria-grabbed");
@@ -501,26 +929,66 @@ export function useBoardRowDrag({
       }
       pointer.frame = null;
       pointer.ghost = null;
+      pointer.caret = null;
+      pointer.caretAt = null;
+      pointer.slot = null;
+      pointer.slotAt = null;
       pointer.active = false;
     },
     [],
   );
 
-  const clearDrag = useCallback(() => {
-    teardown(pointerRef.current);
-    pointerRef.current = null;
-    resetHitTest();
-    targetRef.current = null;
-    paintDropTarget(null);
-  }, [paintDropTarget, teardown]);
+  /**
+   * End the drag, optionally letting the preview fly home first.
+   *
+   * `home` is the abandon path — Escape, and a pointer the browser cancelled.
+   * The preview is detached from the pointer BEFORE teardown runs, so teardown
+   * will not remove the element it is animating, and it lands back on the
+   * dashed slot the row was lifted out of. Every other caller gets the old
+   * behaviour: gone, immediately.
+   */
+  const clearDrag = useCallback(
+    (home = false) => {
+      const pointer = pointerRef.current;
+      let flying: RowGhost | null = null;
+      let landing: { x: number; y: number } | null = null;
+      if (home && pointer?.active && pointer.ghost) {
+        flying = pointer.ghost;
+        pointer.ghost = null;
+        landing = pointer.slotAt
+          ? anchoredAt(pointer.slotAt, scrollFrameOf(pointer.scroller))
+          : null;
+      }
+      teardown(pointer);
+      pointerRef.current = null;
+      resetHitTest();
+      targetRef.current = null;
+      paintDropTarget(null);
+      if (flying) settleRowGhost(flying, landing);
+    },
+    [paintDropTarget, teardown],
+  );
 
   /*
    * A drag that outlives its component would leave a preview stranded on the
    * body and a non-passive touch listener wedged on the document, which would
    * stop the whole app scrolling. Unmounting mid-drag is not hypothetical: a
    * board switch during a drag does exactly that.
+   *
+   * A preview part-way through its settle belongs to no pointer any more, so it
+   * is swept by selector — the one case where teardown cannot reach it.
    */
-  useEffect(() => () => teardown(pointerRef.current), [teardown]);
+  useEffect(
+    () => () => {
+      teardown(pointerRef.current);
+      for (const stray of document.querySelectorAll(
+        ".board-row-ghost, .board-row-drop-caret, .board-row-drop-slot",
+      )) {
+        stray.remove();
+      }
+    },
+    [teardown],
+  );
 
   /**
    * THE LOOP. One frame's worth of work, in one read/write order.
@@ -563,14 +1031,31 @@ export function useBoardRowDrag({
       const offset = ghostOffset(
         pointer.grabX,
         pointer.grabY,
-        ghost.offsetWidth,
-        ghost.offsetHeight,
+        ghost.width,
+        ghost.height,
       );
-      ghost.style.transform = `translate3d(${Math.round(clientX - offset.x)}px, ${Math.round(
+      ghost.root.style.transform = `translate3d(${Math.round(clientX - offset.x)}px, ${Math.round(
         clientY - offset.y,
       )}px, 0)`;
-      if (ghost.style.opacity !== "1") ghost.style.opacity = "1";
+      if (ghost.root.style.opacity !== "1") {
+        ghost.root.style.opacity = "1";
+        // The first frame with a real position is the first frame worth
+        // animating, so the lift starts here rather than at construction.
+        beginLift(ghost);
+      }
     }
+
+    /*
+     * The two marks, carried by arithmetic.
+     *
+     * No `getBoundingClientRect` and no `elementFromPoint`: each is a point
+     * measured once, minus the scrolling that has happened since. That is what
+     * keeps them right while the board creeps at the edge, and what keeps this
+     * whole block off the layout-flush path.
+     */
+    const frame = scrollFrameOf(scroller);
+    placeMark(pointer.caret, pointer.caretAt, frame);
+    placeMark(pointer.slot, pointer.slotAt, frame);
 
     reassertDropTarget();
 
@@ -603,11 +1088,40 @@ export function useBoardRowDrag({
       document.addEventListener("touchmove", blockTouchScroll, { passive: false });
       document.body.classList.add("is-dragging-board-row");
 
+      /*
+       * EVERY MEASUREMENT THE DRAG WILL EVER NEED, TAKEN HERE.
+       *
+       * Two rects and one computed style, once, at the instant the row leaves
+       * the ground — after which nothing on the move path reads layout except
+       * the hit test, which is memoised. The Name cell is the second rect and
+       * it is what decides how wide the preview is; see `ghostWidth`.
+       */
       const rect = pointer.element.getBoundingClientRect();
-      const width = Math.min(Math.max(rect.width, 180), 320);
+      const nameCell = pointer.element.querySelector<HTMLElement>(
+        ".sheet-column--name",
+      );
+      const width = ghostWidth({
+        rowWidth: rect.width,
+        nameWidth: nameCell
+          ? nameCell.getBoundingClientRect().right - rect.left
+          : 0,
+        viewportWidth: window.innerWidth,
+      });
+      const height = ghostHeight(rect.height);
       pointer.grabX = pointer.clientX - rect.left;
       pointer.grabY = pointer.clientY - rect.top;
-      pointer.ghost = createRowGhost(pointer.element, width);
+      pointer.sourceColor = groupColor(
+        pointer.element.closest<HTMLElement>("[data-board-group-id]"),
+      );
+      pointer.ghost = createRowGhost(pointer.element, width, height);
+      pointer.caret = createDropCaret();
+      pointer.caret.style.width = `${width}px`;
+      pointer.slot = createOriginSlot(width, rect.height, pointer.sourceColor);
+      pointer.slotAt = anchorPoint(
+        rect.left,
+        rect.top,
+        scrollFrameOf(pointer.scroller),
+      );
       pointer.settled = false;
       resetHitTest();
 
@@ -641,11 +1155,27 @@ export function useBoardRowDrag({
        * can be one frame stale, and one frame is enough to land in the wrong gap
        * after a fast flick.
        */
-      const target = rowDropTargetFrom(
-        hitTestRow(clientX, clientY),
-        clientY,
-        item.sourceGroupId,
-      );
+      const hit = hitTestRow(clientX, clientY);
+      const target = rowDropTargetFrom(hit, clientY, item.sourceGroupId);
+
+      /*
+       * WHERE THE PREVIEW IS ABOUT TO LAND, worked out before anything is torn
+       * down. The gap the drop resolved to, in client coordinates: the top of
+       * the row it goes before, or that row's bottom when it goes after it. Off
+       * a row entirely — the end of a group — the caret is already sitting on
+       * the answer, so it is asked. With no target at all the preview has
+       * nowhere to go and simply leaves, which is what a drag released over the
+       * page chrome should look like.
+       */
+      let landing: { x: number; y: number } | null = null;
+      if (target && hit.rowId) {
+        const before = clientY <= hit.rowTop + hit.rowHeight / 2;
+        landing = { x: hit.rowLeft, y: before ? hit.rowTop : hit.rowTop + hit.rowHeight };
+      } else if (target && pointer.caretAt) {
+        landing = anchoredAt(pointer.caretAt, scrollFrameOf(pointer.scroller));
+      }
+      const flying = pointer.ghost;
+      pointer.ghost = null;
 
       justDroppedRef.current = true;
       window.setTimeout(() => {
@@ -653,6 +1183,7 @@ export function useBoardRowDrag({
       }, 0);
       clearDrag();
       if (target) onDrop(item, target);
+      if (flying) settleRowGhost(flying, landing);
     },
     [clearDrag, onDrop],
   );
@@ -686,6 +1217,11 @@ export function useBoardRowDrag({
         element: event.currentTarget,
         scroller: event.currentTarget.closest<HTMLElement>(".live-board-scroll"),
         ghost: null,
+        caret: null,
+        caretAt: null,
+        slot: null,
+        slotAt: null,
+        sourceColor: "",
         grabX: 0,
         grabY: 0,
         frame: null,
@@ -732,7 +1268,7 @@ export function useBoardRowDrag({
       };
       const cancel = (native: PointerEvent) => {
         if (pointerRef.current?.pointerId !== native.pointerId) return;
-        clearDrag();
+        clearDrag(true);
       };
       /*
        * Escape abandons the drag, and the row goes back where it came from.
@@ -744,12 +1280,16 @@ export function useBoardRowDrag({
        *
        * `clearDrag()` is the same teardown `pointercancel` uses, so nothing is
        * written; and `justDroppedRef` stays false because no drop happened.
+       *
+       * The `true` is the abandon animation: the preview flies back to the
+       * dashed slot it came from instead of blinking out where the pointer
+       * happens to be, which is the difference between "cancelled" and "lost".
        */
       const key = (native: KeyboardEvent) => {
         if (native.key !== "Escape" || !pointerRef.current) return;
         native.preventDefault();
         native.stopPropagation();
-        clearDrag();
+        clearDrag(true);
       };
       listenersRef.current = { move, up, cancel, key };
       document.addEventListener("pointermove", move);
@@ -788,7 +1328,7 @@ export function useBoardRowDrag({
   const onRowPointerCancel = useCallback(
     (event: ReactPointerEvent<HTMLTableRowElement>) => {
       if (pointerRef.current?.pointerId !== event.pointerId) return;
-      clearDrag();
+      clearDrag(true);
     },
     [clearDrag],
   );

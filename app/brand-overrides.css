@@ -3505,6 +3505,229 @@ body[data-theme="dark"] .role-chip {
   .topbar-data-button { display: none; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE ITEM DRAWER — the tab strip, and the frame its content sits in.
+
+   Two findings from the owner's phone, and they are the same finding twice:
+   nothing in the drawer looked like it had been placed, because nothing in it
+   had an edge.
+
+   1 — THE CONTENT PANEL.  `.drawer-section` measured `padding: 18px 0 0`,
+       `border-width: 1px 0 0`, `border-radius: 0`. A dark surface with a
+       hairline along its TOP edge and nothing on the other three, so Activity
+       History read as a slab of #182830 running from one side of the screen to
+       the other: the timeline dots sat ON the left edge, "17 events" was jammed
+       into the right corner, and the slab ran under the Add update / Advance
+       request bar with nothing between them. It was never a divider; it is a
+       panel, and here it is finally drawn as one — padding on all four sides, a
+       14px radius, a border all the way round, and the drawer body opened up so
+       the card is INSET from the drawer instead of filling it.
+
+   2 — THE TAB STRIP.  Correction 2 took the tabs to 44px with 10/18 padding —
+       the right direction, stopped short — and re-branded only the DARK active
+       pill to teal. The light one was still monday's #244bf3 on #eef0ff, a blue
+       that appears nowhere else in this product. Both are settled below, and
+       through tokens, so the pill is described ONCE and comes out right in both
+       themes rather than being written twice and corrected once.
+
+   Why here and not globals.css: this file loads second (app/(app)/layout.tsx),
+   and globals.css already writes `.detail-drawer__tabs` six times over. A
+   seventh copy there would be a seventh thing to keep in step. The breakpoint
+   below is 760px — the same width globals.css switches the drawer at — so there
+   is no band where half the phone rules apply and half do not.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ---- The frame ---------------------------------------------------------- */
+
+/*
+ * The body is the ground the cards sit on, so it carries the outer breathing
+ * room: a wider gutter than the 14px it had, and a bottom that clears the
+ * action bar. The bottom padding IS the clearance — the body is the scroll
+ * container, so when the timeline is scrolled to its end this is the whole of
+ * the distance between the last card and Advance request.
+ */
+.detail-drawer__body {
+  padding: 18px 20px 30px;
+}
+
+.detail-drawer__body > .drawer-section {
+  margin: 14px 0 0;
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface-card-lo);
+}
+
+/*
+ * Dark keeps the surface the owner named — #182830, which is `--surface-card`
+ * in this theme — and takes the drawer's OWN border colour rather than the
+ * softer `--line`, because a 1px #2a3943 edge on a #182830 card at arm's
+ * length is not an edge.
+ */
+body[data-theme="dark"] .detail-drawer__body > .drawer-section {
+  border-color: var(--line-strong);
+  background: var(--surface-card);
+}
+
+/*
+ * The heading row. `.drawer-label` is bumped to 11px on a phone and the count
+ * beside it was left at 8px, so "17 events" read as a footnote that had drifted
+ * up next to a heading. Same size, same line box: they centre AND baseline
+ * together, and both now stop at the card's padding rather than at the screen.
+ */
+.detail-drawer__body .drawer-section__title > span:last-child {
+  color: var(--muted);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/*
+ * Three inks the reframing exposed, all of them literals that were picked for
+ * one theme and then painted in both. axe on the drawer, before this block:
+ * `.drawer-label` at #70828e is 3.8:1 on the dark card and 3.98:1 on the light
+ * one — it fails in BOTH, on every tab; `.activity-timeline p` at #4d616f is
+ * 2.35:1 on the dark card, twenty-four nodes of it; `.drawer-history-state` at
+ * #667984 is 4.32:1. `--muted` is the secondary ink and is defined per theme,
+ * which is the whole point of it.
+ */
+.detail-drawer__body .drawer-label,
+.detail-drawer__body .activity-timeline p,
+.detail-drawer__body .drawer-history-state {
+  color: var(--muted);
+}
+
+.detail-drawer__body .activity-timeline p > strong {
+  color: var(--ink);
+}
+
+/*
+ * Activity History. The row's padding is measured from the CARD's content box
+ * now, so the dots and the rule they hang on move inward with it and stay where
+ * they were relative to their own text — 24px from dot centre to the first
+ * word, the rule still under the dots.
+ */
+.detail-drawer__body .activity-timeline > div {
+  padding: 0 2px 16px 24px;
+}
+
+/*
+ * The ring that lets a dot sit ON the rule without the rule showing through it.
+ * It was a literal `white`, which is the panel's colour in exactly one theme;
+ * in the dark it drew a white halo around every event.
+ */
+.detail-drawer__body .activity-dot {
+  border-color: var(--surface-card-lo);
+}
+
+body[data-theme="dark"] .detail-drawer__body .activity-dot {
+  border-color: var(--surface-card);
+}
+
+/* ---- The tabs, wider than a phone --------------------------------------- */
+
+/*
+ * A drawer this wide keeps the underline tab bar; it is a different shell and
+ * the right one at 760px. What it does not keep is monday's #0073ea underline,
+ * and it gets the same modest amount of extra room the phone's pills get.
+ */
+.detail-drawer__tabs {
+  min-height: 56px;
+}
+
+.detail-drawer__tabs > button {
+  min-height: 52px;
+  padding: 11px 16px;
+}
+
+.detail-drawer__tabs > button.is-active::after {
+  background: var(--accent-fg);
+}
+
+/* ---- The phone ---------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .detail-drawer__body {
+    padding: 16px 16px 34px;
+  }
+
+  .detail-drawer__body > .drawer-section {
+    padding: 16px;
+  }
+
+  .detail-drawer__body .drawer-section__title > span:last-child {
+    font-size: 11px;
+  }
+
+  /*
+   * The strip. 8px between pills and 7px around them — the tabs are separated
+   * by more than the strip's own inset, which is what makes a row of pills read
+   * as a row of pills rather than as one segmented block.
+   */
+  .detail-drawer__tabs {
+    min-height: 62px;
+    margin: 0 16px;
+    padding: 7px;
+    gap: 8px;
+    border-radius: 16px;
+    background: var(--surface-sunken);
+  }
+
+  body[data-theme="dark"] .detail-drawer__tabs {
+    background: var(--surface-card);
+  }
+
+  /*
+   * 46px tall, 20px of horizontal padding, and a 108px floor so "Files" keeps
+   * the same target as "Activity Log". The 2px border is on every tab, drawn
+   * transparent when the tab is not selected, so selecting one cannot move the
+   * row by four pixels.
+   */
+  .detail-drawer__tabs > button {
+    min-width: 108px;
+    min-height: 46px;
+    padding: 11px 20px;
+    border: 2px solid transparent;
+    border-radius: 12px;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  /*
+   * The selected pill, in ONE rule for both themes.
+   *
+   * `--accent-fg` is the accent as ink — #0a6f68 on a light strip, #5fd6cd on a
+   * dark one — so the 2px edge clears 3:1 against the strip in both, which a
+   * single pinned teal could not do: #12b4a8 is 2.1:1 on the light strip and
+   * #0b7a72 is 2.8:1 on the dark one. `--teal-100` is the wash that goes with
+   * it and `--ink` is the ink that goes on the wash.
+   */
+  .detail-drawer__tabs > button.is-active {
+    border-color: var(--accent-fg);
+    background: var(--teal-100);
+    color: var(--ink);
+    font-weight: 650;
+    box-shadow: none;
+  }
+
+  /*
+   * Dark's inactive label was #d9d9d9 — a neutral literal, and BRIGHTER than
+   * the light theme's inactive label, so on a dark strip the four tabs you have
+   * not chosen shouted louder than the one you have. `--muted` is the same
+   * secondary ink the light strip already uses, one step below `--ink`.
+   */
+  body[data-theme="dark"] .detail-drawer__tabs > button {
+    color: var(--muted);
+  }
+
+  body[data-theme="dark"] .detail-drawer__tabs > button.is-active {
+    border-color: var(--accent-fg);
+    background: var(--teal-100);
+    color: var(--ink);
+    box-shadow: none;
+  }
+}
+
 /* ── Board chrome (Stage 5, AA1–AA7) ──────────────────────────────────────
    Three stacked rows above the grid: header, view tabs, toolbar.
    Mobile-first; breakpoints 640/768/1024 only. */
