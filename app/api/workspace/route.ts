@@ -4,6 +4,7 @@ import {
   activityLog,
   complianceDocuments,
   contractors,
+  maintenanceBoardColumns,
   maintenanceRequests,
   memberships,
   plannedMaintenance,
@@ -12,7 +13,13 @@ import {
   users,
   workspaceSettings,
 } from "../../../db/schema";
-import { readComplianceRegister } from "../../lib/compliance-register";
+// The one table of Store Documentation slots. The register keys off it too; a
+// second copy here is how the calendar and the board would drift apart.
+import { storeDocumentationCertificates } from "../../../db/monday-board-spec";
+import {
+  STORE_DOCUMENTATION_BOARD_ID,
+  readComplianceRegister,
+} from "../../lib/compliance-register";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import {
@@ -324,6 +331,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     contractorJobRows,
     activities,
     register,
+    documentationColumnRows,
   ] = await Promise.all([
     db.select().from(sites).where(eq(sites.organisationId, orgId)).orderBy(sites.name),
     db.select().from(units).where(eq(units.organisationId, orgId)).orderBy(units.name),
@@ -396,6 +404,28 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       .groupBy(maintenanceRequests.contractor),
     db.select().from(activityLog).where(eq(activityLog.organisationId, orgId)).orderBy(desc(activityLog.createdAt)).limit(60),
     readComplianceRegister(db, orgId),
+    /*
+     * The Store Documentation board's own columns, id and key only.
+     *
+     * Two dozen rows on an indexed pair, read so a compliance record can carry
+     * the id of the cell its expiry lives in — see `expiryColumnId`. Deleted
+     * columns are excluded, so a slot whose column has been removed from the
+     * board resolves to null and the calendar refuses the edit honestly instead
+     * of posting an id `update_cell` would 404 on.
+     */
+    db
+      .select({
+        id: maintenanceBoardColumns.id,
+        columnKey: maintenanceBoardColumns.key,
+      })
+      .from(maintenanceBoardColumns)
+      .where(
+        and(
+          eq(maintenanceBoardColumns.organisationId, orgId),
+          eq(maintenanceBoardColumns.boardId, STORE_DOCUMENTATION_BOARD_ID),
+          isNull(maintenanceBoardColumns.deletedAt),
+        ),
+      ),
   ]);
 
   const openJobsBySite = new Map<string, number>(
@@ -422,18 +452,58 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
    * app/lib/compliance-register.ts, which the compliance digest calls too — one
    * derivation, so a screen and an email cannot disagree about whether a fire
    * alarm certificate has lapsed.
+   *
+   * `itemId`, `slotKey` and `expiryColumnKey` carry the record's PROVENANCE out
+   * with it. The register has always known which board row and which slot a
+   * document came from; this payload used to drop that on the floor, which was
+   * harmless while every screen only read the register. The calendar writes:
+   * moving a certificate expiry there has to reach the same cell the Store
+   * Documentation board writes, or the next `readComplianceRegister` recomputes
+   * the state from the untouched board cell and the operator watches their edit
+   * disappear on the next refresh. So the column key travels WITH the record
+   * rather than being re-derived from `kind` by whoever happens to need it.
    */
-  const compliance: WorkspaceComplianceRecord[] = register.entries.map((entry) => ({
-    id: entry.id,
-    siteId: entry.siteId,
-    siteName: entry.siteName,
-    kind: entry.kind,
-    state: entry.state,
-    expiry: entry.expiry,
-    fileCount: entry.fileCount,
-    siteType: entry.siteType,
-    siteAddress: entry.siteAddress,
-  }));
+  const expiryColumnBySlot = new Map(
+    storeDocumentationCertificates.map((slot) => [slot.key, slot.expiryColumn]),
+  );
+  const columnIdByKey = new Map(
+    (documentationColumnRows as Array<{ id: string; columnKey: string }>).map(
+      (column) => [column.columnKey, column.id],
+    ),
+  );
+  const compliance: WorkspaceComplianceRecord[] = register.entries.map((entry) => {
+    const expiryColumnKey = entry.slotKey
+      ? (expiryColumnBySlot.get(entry.slotKey) ?? null)
+      : null;
+    return {
+      id: entry.id,
+      siteId: entry.siteId,
+      siteName: entry.siteName,
+      kind: entry.kind,
+      state: entry.state,
+      expiry: entry.expiry,
+      fileCount: entry.fileCount,
+      siteType: entry.siteType,
+      siteAddress: entry.siteAddress,
+      itemId: entry.itemId,
+      slotKey: entry.slotKey,
+      /*
+       * Null for the three slots the board tracks no expiry on — RAMS, the Fire
+       * Risk Assessment and the store Drawing — and for a register-only row,
+       * which has no slot at all.
+       */
+      expiryColumnKey,
+      /*
+       * And null again when that column is not on this organisation's board —
+       * a workspace that has never seeded Store Documentation, or one where the
+       * column was deleted. The calendar reads this, not the key, to decide
+       * whether the expiry is writable.
+       */
+      expiryColumnId: expiryColumnKey
+        ? (columnIdByKey.get(expiryColumnKey) ?? null)
+        : null,
+    };
+  });
 
   const stores: StoreRecord[] = siteRows.map((site) => ({
     id: site.id,

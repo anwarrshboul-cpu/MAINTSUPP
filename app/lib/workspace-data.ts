@@ -34,6 +34,51 @@ export type WorkspaceComplianceRecord = {
    */
   siteType?: string | null;
   siteAddress?: string | null;
+  /**
+   * Where this record came from, so an edit can go back to the same place.
+   *
+   * The register is DERIVED: most records are read off a Store Documentation
+   * board row and only some exist solely in `compliance_documents`. Every screen
+   * so far has only read the register, so it never needed to know which — but
+   * the calendar lets somebody drag a certificate expiry to a new date, and the
+   * two kinds of record are written through two different endpoints. A
+   * board-derived expiry has to go back to the board cell it was read from
+   * (`POST /api/board` `update_cell`), because the register recomputes its state
+   * from that cell on the next read and would silently overwrite anything
+   * written to the register copy instead; a register-only record has no board
+   * cell and goes through `PATCH /api/workspace`.
+   *
+   * Optional so no existing consumer has to change. `readComplianceRegister`
+   * has carried all three on `RegisterEntry` since it was written; this is
+   * `/api/workspace` stopping dropping them on the way out.
+   */
+  /** The Store Documentation board row this is derived from, or null for a register-only row. */
+  itemId?: string | null;
+  /** The board slot key, e.g. "pat", or null. */
+  slotKey?: string | null;
+  /**
+   * The board date column key holding this expiry, e.g. "patExpiry"; null when
+   * the slot tracks no expiry. Three of the twelve slots are in that case —
+   * RAMS, the Fire Risk Assessment and the store Drawing carry a document with
+   * no date on monday — so their records can never appear on a calendar at all.
+   */
+  expiryColumnKey?: string | null;
+  /**
+   * The same column's `maintenance_board_columns.id`, resolved on the server.
+   *
+   * `update_cell` looks a column up by ID scoped to a board and answers 404 for
+   * a key, and column ids are per organisation — so a key alone is not enough
+   * to write with. The only other way for the browser to learn it would be to
+   * fetch the whole Store Documentation board (rows, cells and all) in order to
+   * reschedule one certificate, which is a lot of payload for one string. It is
+   * resolved here instead, from a ~20-row indexed lookup beside a read that was
+   * already reading that board's columns.
+   *
+   * Null wherever `expiryColumnKey` is, and also when the column has been
+   * deleted from the board — in which case the calendar refuses the edit and
+   * says so, rather than posting an id the route will reject.
+   */
+  expiryColumnId?: string | null;
 };
 
 export type WorkspaceContractor = {
