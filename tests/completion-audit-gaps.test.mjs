@@ -118,12 +118,27 @@ test("the calendar draws the compliance renewals its own heading promises", asyn
    * renewals in one schedule" and drew only the first two: `eventMap` was built
    * from `requests` alone, so every certificate expiry was invisible here.
    */
+  /*
+   * WORKSTREAM 4 moved the SHAPE, not the property.
+   *
+   * The event type, the day arithmetic, the overdue rule and the filters are
+   * now in `calendar-model.ts`, which is pure and has a test suite of its own —
+   * `portal-app.tsx` keeps the wiring. Every assertion below still proves what
+   * it always proved: one shape for both sources, renewals placed on the grid,
+   * and a click on one opening the certificate behind it. Only the address
+   * changed. (Same move, same fix, as the note at stage-twentythree-sections
+   * line 302.)
+   */
   const portal = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(portal, /type CalendarEvent = \{/, "one shape for both sources");
-  assert.match(portal, /kind: "job" \| "compliance";/);
-  assert.match(portal, /for \(const record of complianceRecords\) \{/, "renewals are placed on the grid");
-  assert.match(portal, /title: `\$\{record\.kind\} renewal`/);
+  const model = await read("app/(app)/portal/calendar-model.ts");
+  assert.match(model, /export type CalendarEvent = \{/, "one shape for both sources");
+  assert.match(model, /kind: CalendarEntity;/);
+  assert.match(model, /export type CalendarEntity = "job" \| "compliance";/);
+  assert.match(model, /for \(const record of complianceRecords\) \{/, "renewals are placed on the grid");
+  assert.match(model, /title: `\$\{record\.kind\} renewal`/);
   assert.match(portal, /onOpenCompliance\(event\.recordId \?\? null\)/, "and clicking one opens the certificate");
+  // And the page still hands the register to the grid in the first place.
+  assert.match(portal, /complianceRecords: WorkspaceSnapshot\["compliance"\]/);
 
   const css = await read("app/globals.css");
   assert.match(css, /\.calendar-event--renewal \{/, "a renewal reads differently from a job");

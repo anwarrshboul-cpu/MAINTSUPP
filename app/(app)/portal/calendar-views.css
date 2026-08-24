@@ -1,0 +1,864 @@
+/*
+ * Calendar views — month, week and day.
+ *
+ * Co-located with `calendar-views.tsx` and imported from it, the pattern
+ * `views/fix-tracker.tsx` established. Everything here is either a theme token
+ * from globals.css or a value derived from one; no literal hex appears, because
+ * the product has a dark theme and a literal cannot follow it. The failures
+ * recorded in the globals.css comments — a pale ground that stayed pale in dark
+ * while its text went light, a `--navy-900` badge whose white label vanished —
+ * all came from exactly that.
+ *
+ * THE ONE HARD RULE: NOTHING HERE MAY WIDEN THE PAGE.
+ *
+ * `.calendar-grid` in globals.css sets `min-width: 805px` with no scrolling
+ * ancestor, and that is why the old calendar pushes a phone sideways. Two
+ * defences here:
+ *
+ *   - the month is a `table-layout: fixed; width: 100%` table, so its columns
+ *     are computed from the container and never from the content;
+ *   - the week is the only thing with a floor under its column width, and that
+ *     floor lives inside `.calendar-week__scroll`, which owns the `overflow-x`.
+ *
+ * `min-width: 0` is repeated on every flex and grid child that holds text. It
+ * is not decoration: a flex item's default `min-width: auto` refuses to shrink
+ * below its content, which is the other way a long job title escapes its box.
+ *
+ * BREAKPOINT: 767/768, desktop-first, matching `form-builder.tsx` and the
+ * touch-target block in brand-overrides.css.
+ */
+
+/* ---------------------------------------------------------------------------
+   The mode switcher
+   --------------------------------------------------------------------------- */
+
+/*
+ * Sits on top of `.view-switch .view-switch--text`, which already supplies the
+ * ground, the dark override and the 44px phone touch target. This adds only
+ * what a three-way word toggle needs that a two-way one does not.
+ */
+.calendar-switcher {
+  flex: none;
+}
+
+.calendar-switcher button {
+  min-width: 62px;
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------------------
+   The range navigator
+   --------------------------------------------------------------------------- */
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/*
+ * Two classes deep on purpose. If the parent drops this navigator inside the
+ * existing `.calendar-toolbar`, `.calendar-toolbar h2` (0,1,1) would otherwise
+ * win and re-centre the heading inside a 150px box.
+ */
+.calendar-nav .calendar-nav__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 16px;
+  letter-spacing: -0.03em;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-nav__step,
+.calendar-nav__today {
+  display: grid;
+  flex: none;
+  place-items: center;
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--control-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.calendar-nav__today {
+  padding: 0 14px;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.calendar-nav__step:hover,
+.calendar-nav__today:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+/* The `chevron` glyph points right; "previous" is the same glyph turned round. */
+.calendar-nav__step--back svg {
+  transform: rotate(180deg);
+}
+
+/* ---------------------------------------------------------------------------
+   The surface
+   --------------------------------------------------------------------------- */
+
+.calendar-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.calendar-surface__empty {
+  padding: 18px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------------------
+   Month
+   --------------------------------------------------------------------------- */
+
+.calendar-month {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+/*
+ * `table-layout: fixed` is the whole defence. It sizes the seven columns from
+ * the table's own width and ignores cell content, so nothing inside a day can
+ * make the month wider than its container — at 1440px or at 320px.
+ */
+.calendar-month__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.calendar-month__head {
+  padding: 7px 4px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-head);
+  color: var(--table-head-fg);
+  font-size: 11px;
+  font-weight: 690;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.calendar-month__head:last-child {
+  border-right: 0;
+}
+
+.calendar-month__cell {
+  height: 112px;
+  padding: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  vertical-align: top;
+}
+
+.calendar-month__cell:last-child {
+  border-right: 0;
+}
+
+.calendar-month__table tbody tr:last-child .calendar-month__cell {
+  border-bottom: 0;
+}
+
+/* Days that belong to a neighbouring month. Both halves move together. */
+.calendar-month__cell.is-outside {
+  background: var(--canvas);
+}
+
+.calendar-month__cell.is-outside .calendar-month__num,
+.calendar-month__cell.is-outside .calendar-month__picknum {
+  color: var(--muted-2);
+  font-weight: 500;
+}
+
+.calendar-month__desk {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  height: 100%;
+  padding: 5px;
+}
+
+/*
+ * The day number is the day's own control, not a label.
+ *
+ * Pressing it selects the day for the agenda below the grid, which is where
+ * "Change date" lives. A month chip has roughly ninety pixels of usable width
+ * and an edit control inside one would either crowd out the title or hide
+ * behind a hover — neither of which a keyboard or a touch user can find.
+ */
+.calendar-month__num {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.calendar-month__num:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* The day whose agenda is open below the grid. A ring rather than a fill, so
+   it cannot be mistaken for today's marker, which is a fill. */
+.calendar-month__num[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--brand-solid);
+  color: var(--ink);
+}
+
+/*
+ * Today's marker. `--brand-solid`/`--on-brand-solid` and not `--navy-900`/white:
+ * the navy tokens are re-pointed in dark to #182830, which would have put a
+ * #121c24 label on it. The brand pair is pinned across both themes precisely so
+ * a filled control keeps its own foreground.
+ */
+.calendar-month__cell.is-today .calendar-month__num,
+.calendar-month__cell.is-today .calendar-month__picknum {
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  font-weight: 700;
+}
+
+.calendar-month__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * "+N more" expands the cell in place and the LIST becomes the scroll
+ * container, so a day with twenty entries grows a scrollbar of its own instead
+ * of stretching every other cell in that week row.
+ */
+.calendar-month__list.is-expanded {
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.calendar-month__more {
+  flex: none;
+  min-height: 20px;
+  padding: 1px 5px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-month__more:hover {
+  border-color: var(--accent-fg);
+  color: var(--accent-fg);
+}
+
+/* The phone tap target. Hidden — and so out of the accessibility tree — above
+   767px, where the cell carries real chips instead. */
+.calendar-month__pick {
+  display: none;
+}
+
+.calendar-month__markers {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 8px;
+}
+
+/*
+ * SHAPE, not colour. A square is a job, a circle is a compliance date and the
+ * exclamation is anything overdue — so the phone grid still says which is which
+ * for a reader who cannot separate the two hues. `box-shadow` rather than
+ * `border` or `outline` for the ring because the fill arrives as an inline
+ * style from the colour owner and inline beats a class; a shadow is the one
+ * edge treatment a `{background, color}` object cannot overwrite. It is drawn
+ * OUTSIDE the box rather than inset, so an 8px marker keeps all 8px of fill.
+ */
+.calendar-month__marker {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 1px var(--line-strong);
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.calendar-month__marker--job {
+  border-radius: 2px;
+}
+
+.calendar-month__marker--compliance {
+  border-radius: 50%;
+}
+
+.calendar-month__marker--overdue {
+  width: auto;
+  min-width: 8px;
+  padding: 0 2px;
+  border-radius: 2px;
+  box-shadow: none;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-weight: 800;
+}
+
+/*
+ * The selected day in full, under the grid, at EVERY width.
+ *
+ * It was phone-only while the desktop cells carried their own chips — but a
+ * chip only OPENS a record, so a laptop had no way to change a date without
+ * first discovering the Day tab. Pressing a day number selects it and this is
+ * where the "Change date" control lives.
+ */
+.calendar-month__agenda {
+  border-top: 1px solid var(--line);
+}
+
+/* ---------------------------------------------------------------------------
+   Week
+   --------------------------------------------------------------------------- */
+
+/*
+ * The scroller, and the ONLY element in this file allowed to scroll sideways.
+ * `position: relative` is load-bearing: it makes the scroller the offset parent
+ * of the columns, which is what lets the component centre a column by writing
+ * `scrollLeft` instead of calling `scrollIntoView` — and `scrollIntoView` would
+ * have scrolled the page as well.
+ */
+.calendar-week__scroll {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  overscroll-behavior-x: contain;
+}
+
+.calendar-week__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 100%;
+}
+
+.calendar-week__col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.calendar-week__col + .calendar-week__col {
+  border-left: 1px solid var(--line);
+}
+
+.calendar-week__col.is-selected {
+  background: var(--surface-card-lo);
+  box-shadow: inset 0 -2px 0 0 var(--accent-fg);
+}
+
+.calendar-week__head {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 6px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-head);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.calendar-week__weekday {
+  color: var(--table-head-fg);
+  font-size: 11px;
+  font-weight: 690;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.calendar-week__date {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.calendar-week__col.is-today .calendar-week__date {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+}
+
+/*
+ * Each column scrolls on its own, so one heavy Wednesday does not set the
+ * height of the whole week. `vh` with a px ceiling: the surface has a toolbar,
+ * a filter bar and a source selector stacked above it and must not run off the
+ * bottom of a laptop.
+ */
+.calendar-week__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-height: min(56vh, 460px);
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.calendar-week__none {
+  margin: 0;
+  padding: 6px 2px;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   The chip — shared by the month cells and the week columns
+   --------------------------------------------------------------------------- */
+
+/*
+ * The ground and the label here are FALLBACKS. The parent hands each chip an
+ * inline `{background, color}` and inline wins, so these two only decide what a
+ * chip looks like before a colour is supplied — a legible token pair rather
+ * than a transparent button, which is what the old `.calendar-event` got wrong
+ * by hard-coding a pale ground that stayed pale in dark.
+ */
+.calendar-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 22px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-chip__lead {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+}
+
+.calendar-chip__glyph {
+  flex: none;
+  opacity: 0.85;
+}
+
+.calendar-chip__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.calendar-chip__title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-chip__time {
+  margin-right: 4px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-chip__subtitle {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10.5px;
+  opacity: 0.82;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Week columns have the vertical room the month cells do not. */
+.calendar-chip--stacked {
+  align-items: flex-start;
+  min-height: 34px;
+  padding: 5px 6px;
+}
+
+.calendar-chip--stacked .calendar-chip__lead {
+  padding-top: 1px;
+}
+
+.calendar-chip--stacked .calendar-chip__title {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* ---------------------------------------------------------------------------
+   The agenda — the day view, and the phone half of the month view
+   --------------------------------------------------------------------------- */
+
+.calendar-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.calendar-agenda__head {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: -0.025em;
+}
+
+.calendar-agenda__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-agenda__row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.calendar-agenda__row:hover {
+  border-color: var(--line-strong);
+}
+
+.calendar-agenda__open {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/*
+ * The kind swatch. It carries the parent's colour AND the kind's glyph, and its
+ * corner radius is the third signal: a job is a rounded square, a compliance
+ * date is a circle. Same reasoning as the phone markers — the fill is an inline
+ * style this file cannot see, so the distinction has to live in geometry.
+ */
+.calendar-agenda__ink {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.calendar-agenda__ink--compliance {
+  border-radius: 50%;
+}
+
+.calendar-agenda__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.calendar-agenda__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.calendar-agenda__subtitle {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.calendar-agenda__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The tuned neutral pair: 7.4:1 light, 7.9:1 dark. */
+.calendar-agenda__type {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
+  font-weight: 650;
+}
+
+.calendar-agenda__time,
+.calendar-agenda__overdue {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.calendar-agenda__time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wash and ink restated together, the rule the tint pairs carry in globals. */
+.calendar-agenda__overdue {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-weight: 650;
+}
+
+.calendar-agenda__edit {
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-self: center;
+  width: 44px;
+  min-height: 44px;
+  margin-right: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--control-fg);
+  cursor: pointer;
+}
+
+.calendar-agenda__edit:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.calendar-agenda__empty {
+  margin: 0;
+  padding: 16px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------------------
+   Below 1024px — the week columns need a floor, and it goes on the scroller
+   --------------------------------------------------------------------------- */
+
+/*
+ * A seventh of a 1000px viewport is 140px, and a seventh of a 320px one is 45px
+ * — which is a column that can hold a date and nothing else. So below 1024px
+ * the columns take a fixed readable width and `.calendar-week__scroll` carries
+ * them sideways. The overflow is on the scroller, never on the page: at 320px
+ * this is 1064px of columns inside a 320px box, and `document.body` is
+ * untouched.
+ */
+@media (max-width: 1023px) {
+  .calendar-week__grid {
+    grid-template-columns: repeat(7, 152px);
+    min-width: 0;
+    width: max-content;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Phones — 767px and below
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 767px) {
+  /* --- The month becomes a compact picker plus an agenda --- */
+
+  .calendar-month__desk {
+    display: none;
+  }
+
+  .calendar-month__cell {
+    height: auto;
+  }
+
+  .calendar-month__pick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding: 5px 2px;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .calendar-month__picknum {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: var(--ink);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  /* Selection only means something where the agenda below is reading from it. */
+  .calendar-month__cell.is-selected {
+    background: var(--surface-active);
+  }
+
+  .calendar-month__cell.is-selected .calendar-month__picknum {
+    box-shadow: inset 0 0 0 2px var(--accent-fg);
+  }
+
+  .calendar-month__cell.is-today.is-selected .calendar-month__picknum {
+    box-shadow: inset 0 0 0 2px var(--on-brand-solid);
+  }
+
+  .calendar-month__head {
+    padding: 6px 2px;
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+
+  /* --- Touch targets --- */
+
+  .calendar-nav__step,
+  .calendar-nav__today {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .calendar-week__head {
+    min-height: 44px;
+  }
+
+  .calendar-chip--stacked {
+    min-height: 44px;
+  }
+
+  .calendar-week__list {
+    max-height: min(52vh, 380px);
+  }
+
+  /* --- The navigator gets tight; keep it on one line rather than wrapping --- */
+
+  .calendar-nav {
+    gap: 6px;
+  }
+
+  .calendar-nav .calendar-nav__heading {
+    flex: 1 1 0;
+    font-size: 14px;
+  }
+
+  .calendar-nav__today {
+    padding: 0 10px;
+    font-size: 12px;
+  }
+}
+
+/* At 360px and under the word "Today" is competing with the month name. */
+@media (max-width: 380px) {
+  .calendar-nav .calendar-nav__heading {
+    font-size: 13px;
+    letter-spacing: -0.02em;
+  }
+
+  .calendar-switcher button {
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .calendar-month__marker {
+    width: 7px;
+    height: 7px;
+  }
+}

@@ -1,0 +1,244 @@
+/*
+ * The operations calendar's own chrome — the bar above the grid, the honest
+ * silences inside it, and the "Change date" dialog.
+ *
+ * WHY THIS IS NOT IN globals.css
+ *
+ * Co-located, like fix-tracker.css and store-documentation-board.css, so the
+ * calendar's chrome travels with the calendar. The three surfaces below it
+ * (calendar-views.css) and its pickers (calendar-controls.css) already work
+ * this way; putting this one screen's remaining forty lines into a 12,000-line
+ * shared sheet would be the odd one out.
+ *
+ * WHY THE BAR IS NOT `.calendar-toolbar`
+ *
+ * That class still exists in globals.css and carries `.calendar-toolbar h2 {
+ * min-width: 150px; color: var(--navy-950); text-align: center }` — a
+ * descendant selector, so it outranks `.calendar-nav__heading` and would repaint
+ * the navigation heading in a colour that re-points to #182830 in dark and puts
+ * a near-black label on a near-black bar. A fresh class avoids the whole
+ * argument, and tokens give the dark theme for free rather than needing a
+ * `body[data-theme="dark"]` entry of their own.
+ *
+ * TOKENS ONLY. Every colour here is a custom property that is defined in both
+ * themes; there is a contrast suite that reads this file's siblings and a
+ * literal hex is how a screen ends up legible in one theme and not the other.
+ */
+
+.calendar-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 65px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-head);
+  /* Wraps rather than scrolls: the navigation and the three controls are four
+     independent things, and on a phone they belong on two lines, not on one
+     line that slides sideways under a thumb. */
+  flex-wrap: wrap;
+}
+
+.calendar-bar__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/*
+ * The range is allowed to hide events. It is not allowed to hide them SILENTLY.
+ *
+ * Paging to a month outside the selected range used to draw an empty grid with
+ * nothing on screen to explain it. This says how many were removed and offers
+ * the one click that brings them back, so "where did my job go" is answered
+ * before it is asked. `role="status"` because it appears in response to
+ * navigation the reader just performed.
+ */
+.calendar-period-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--amber-100);
+  color: var(--amber-600);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-period-notice > span {
+  min-width: 0;
+}
+
+.calendar-period-notice button {
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.calendar-period-notice button:hover {
+  background: var(--surface-hover);
+}
+
+/*
+ * Four silences, told apart.
+ *
+ * "Nothing here", "nothing matching your filters" and "you have not chosen a
+ * date field" are three different problems with three different fixes, and one
+ * shared "No events" would hide which one the reader has. None of them ever
+ * draws a sample event to fill the space.
+ */
+.calendar-empty {
+  display: flex;
+  min-height: 180px;
+  padding: 32px 24px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.calendar-empty strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.calendar-empty p {
+  max-width: 42ch;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Change date ─────────────────────────────────────────────────────────── */
+
+/*
+ * A dialog, not a popover, because this WRITES to a customer record: it names
+ * the record and the field before it changes anything, and a stray click on the
+ * grid behind it must not dismiss it half-finished. It is also the keyboard and
+ * screen-reader route to the same ability drag gives a mouse, so it is the
+ * method rather than the fallback.
+ */
+.calendar-date-dialog__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(7, 24, 38, 0.5);
+}
+
+.calendar-date-dialog {
+  position: relative;
+  z-index: var(--z-modal);
+  display: flex;
+  width: min(420px, 100%);
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-card);
+  box-shadow: 0 26px 80px rgba(7, 24, 38, 0.3);
+}
+
+.calendar-date-dialog h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.calendar-date-dialog__record {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+}
+
+.calendar-date-dialog__record strong {
+  color: var(--ink);
+  font-size: 13px;
+  /* A long job title must wrap rather than push the dialog wider than the
+     phone it is being read on. */
+  overflow-wrap: anywhere;
+}
+
+.calendar-date-dialog__record span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.calendar-date-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.calendar-date-dialog__field > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.calendar-date-dialog__field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--control-fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.calendar-date-dialog__current {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.calendar-date-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 767px) {
+  .calendar-bar {
+    padding: 10px;
+  }
+
+  .calendar-bar__controls {
+    /* Full width on its own line under the navigation, so four controls do not
+       compete for a 320px row. */
+    width: 100%;
+    margin-left: 0;
+  }
+
+  /* A write target under a thumb. 44px is the product's own phone minimum. */
+  .calendar-period-notice button,
+  .calendar-date-dialog__actions button {
+    min-height: 44px;
+  }
+
+  .calendar-date-dialog__actions button {
+    flex: 1;
+  }
+}

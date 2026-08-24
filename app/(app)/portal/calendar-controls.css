@@ -1,0 +1,584 @@
+/*
+ * The calendar's chrome — triggers, facet menus, the colour picker and the key.
+ *
+ * SCOPE. Everything here is new and prefixed `calendar-`. The grid itself
+ * (`.calendar-grid`, `.calendar-cell`, `.calendar-event`, `.calendar-panel`,
+ * `.calendar-toolbar`, `.calendar-legend`…) already exists in globals.css and
+ * is deliberately untouched: these are the controls AROUND that grid, and a
+ * second definition of a class the main stylesheet owns is the kind of quiet
+ * override that only shows up in one theme.
+ *
+ * TOKENS ONLY. Every colour is a custom property from globals.css, so both
+ * themes and the contrast suite get this for free. The one place a literal
+ * would be tempting — the event colours themselves — is not here: those are
+ * user data, they arrive as inline styles from `calendarChipStyle`, and their
+ * ink is computed rather than declared.
+ *
+ * SURFACES. A popover's box comes from the class it carries, because
+ * overlay.css deliberately gives `.ms-popover` position and nothing else. On a
+ * phone the same content is inside `.mobile-cell-sheet`, which already has its
+ * own box in both themes, so only the contents are styled below.
+ */
+
+/* ── The control row ──────────────────────────────────────────────────────── */
+
+/*
+ * Wraps, always. The row carries a date picker, six facets, a colour trigger
+ * and a key; at 320px that is six or seven lines, and the alternative — a row
+ * that does not wrap — is a page that scrolls sideways.
+ */
+.calendar-controls,
+.calendar-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.calendar-filter-bar__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.calendar-control {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ── The trigger ──────────────────────────────────────────────────────────── */
+
+/*
+ * Sits on `.secondary-button`, which already supplies the height, radius,
+ * border and both themes' colours. Only what that class has no opinion about
+ * is added: the internal gap, the ellipsis on a long label, and the badge.
+ */
+.calendar-control-trigger {
+  min-width: 0;
+  max-width: 100%;
+  gap: 7px;
+  padding: 0 12px;
+}
+
+.calendar-control-trigger__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The active count. A number, not a dot — "3" says how many, a dot does not. */
+.calendar-control-trigger__count {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: var(--navy-900);
+  color: var(--on-brand-solid);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The reason a trigger is inert, on the trigger. An empty facet used to be a
+ * menu that opened onto nothing, which reads as a broken control rather than
+ * an empty workspace.
+ */
+.calendar-control-trigger__none {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-control-trigger__caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transform: rotate(90deg);
+}
+
+.calendar-control-trigger[aria-expanded="true"] .calendar-control-trigger__caret {
+  transform: rotate(-90deg);
+}
+
+/*
+ * `aria-disabled`, not `disabled`: the trigger stays in the tab order so the
+ * note explaining why it does nothing can be reached and announced. It
+ * therefore has to LOOK inert without the `:disabled` pseudo-class.
+ */
+.calendar-control-trigger[aria-disabled="true"] {
+  background: var(--surface-sunken);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.calendar-control-trigger[aria-disabled="true"]:hover {
+  border-color: var(--line);
+  background: var(--surface-sunken);
+}
+
+/* ── The popover surface ──────────────────────────────────────────────────── */
+
+/*
+ * overlay.css positions `.ms-popover` and clamps it to `100vw - 16px`; the box
+ * is this class's job. `min-width` is expressed against the viewport so the
+ * surface can never ask for more room than a 320px phone has — below that
+ * breakpoint it is a sheet anyway, but a narrow tablet in landscape lands here.
+ */
+.ms-popover.calendar-menu-surface {
+  min-width: min(280px, calc(100vw - 24px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-md);
+  color: var(--ink);
+}
+
+.calendar-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.calendar-menu__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.calendar-menu__heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-menu__heading strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-menu__heading small,
+.calendar-menu__desc {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.calendar-menu__clear {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.calendar-menu__clear:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.calendar-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* A `<fieldset>` so the entity name is a real group label, not a bold span. */
+.calendar-menu__group {
+  min-width: 0;
+  margin: 0;
+  padding: 6px 0 0;
+  border: 0;
+}
+
+.calendar-menu__group > legend {
+  padding: 0 6px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── An option row ────────────────────────────────────────────────────────── */
+
+.calendar-menu__option {
+  display: grid;
+  align-items: center;
+  gap: 9px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 36px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.calendar-menu__option:hover {
+  background: var(--surface-hover);
+}
+
+.calendar-menu__option > input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--brand-solid);
+  cursor: pointer;
+}
+
+.calendar-menu__option-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.calendar-menu__option-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Read-only": this source shows events but dragging one will not move it. */
+.calendar-menu__tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * How many events this option accounts for. Tabular figures so a column of
+ * counts lines up, and a dimmed zero so "producing nothing" is visible at a
+ * glance — which is the question this control mostly gets opened to answer.
+ */
+.calendar-menu__count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-menu__count[data-empty="true"] {
+  opacity: 0.55;
+}
+
+/* ── Warnings ─────────────────────────────────────────────────────────────── */
+
+/*
+ * The amber pair, which the contrast suite already checks in both themes. Used
+ * for the two states the user can talk themselves into and would otherwise
+ * only discover by looking at an empty grid: no source ticked, and a colour
+ * no ink can sit on.
+ */
+.calendar-menu__warning,
+.calendar-colour-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-100);
+  color: var(--amber-600);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.calendar-menu__warning > svg,
+.calendar-colour-warning > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* ── Clear all ────────────────────────────────────────────────────────────── */
+
+.calendar-clear-all {
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.calendar-clear-all:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.calendar-clear-all__count {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Colours ──────────────────────────────────────────────────────────────── */
+
+.calendar-colours {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.calendar-colour-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  grid-template-columns: minmax(72px, auto) auto minmax(0, 1fr);
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.calendar-colour-row__label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+/*
+ * The native swatch. Left native on purpose: it is the one control that comes
+ * with a real colour picker on every platform, including an eyedropper on the
+ * desktop browsers that have one, and a hand-built replacement would be worse
+ * on a phone. Only the frame around it is ours.
+ */
+.calendar-colour-row__input {
+  width: 44px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.calendar-colour-row__input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.calendar-colour-row__input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.calendar-colour-row__input::-moz-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+/*
+ * The live chip. Its background, ink and left border all arrive inline from
+ * `calendarChipStyle`, so this is the same paint the grid will do — the point
+ * of the preview is that it is not a mock-up of the chip but the chip.
+ */
+.calendar-colour-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 9px;
+  border-left-style: solid;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.calendar-colour-preview > strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-colour-row__reset {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-size: 12px;
+}
+
+.calendar-colour-row__reset:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.calendar-colour-warning {
+  grid-column: 1 / -1;
+}
+
+/* ── The key ──────────────────────────────────────────────────────────────── */
+
+/*
+ * Deliberately NOT `.calendar-legend`, which globals.css already owns for the
+ * planned-works panel's fixed three-tone key. This one describes chips whose
+ * colours are chosen by the reader, so every entry needs a glyph and a word as
+ * well as a swatch.
+ */
+.calendar-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-key__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 620;
+  white-space: nowrap;
+}
+
+/*
+ * The swatch carries the glyph rather than sitting beside one, so the shape
+ * and the colour are the same object and a greyscale print still separates
+ * "jobs" from "compliance".
+ */
+.calendar-key__swatch {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+}
+
+/* The two timing marks, mirroring `calendarChipStyle` exactly. */
+.calendar-key__swatch--overdue {
+  border-left-width: 4px;
+}
+
+.calendar-key__swatch--done {
+  border-left-style: dashed;
+}
+
+/* ── Phones ───────────────────────────────────────────────────────────────── */
+
+/*
+ * 767 is the breakpoint brand-overrides.css uses for touch targets, and the
+ * same one `useNarrowViewport` switches the surface on, so the sizes below and
+ * the sheet arrive together rather than one at 760 and the other at 768.
+ *
+ * Everything a thumb can hit reaches 44px. The option rows matter most: they
+ * are the densest list here and the easiest to mis-tap into the wrong filter.
+ */
+@media (max-width: 767px) {
+  .calendar-control,
+  .calendar-control-trigger {
+    max-width: 100%;
+  }
+
+  .calendar-control-trigger {
+    min-height: 44px;
+    padding: 0 11px;
+  }
+
+  .calendar-clear-all {
+    min-height: 44px;
+  }
+
+  .calendar-menu__option {
+    min-height: 44px;
+    padding: 8px;
+  }
+
+  .calendar-menu__option > input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  .calendar-menu__clear,
+  .calendar-colour-row__reset {
+    min-height: 44px;
+    padding: 0 4px;
+  }
+
+  .calendar-colour-row__input {
+    width: 56px;
+    height: 44px;
+  }
+
+  /*
+   * The colour row stacks. Side by side, the label, the swatch, a chip and a
+   * "Reset to default" need about 340px, and this branch exists for screens
+   * that do not have it.
+   */
+  .calendar-colour-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px 12px;
+  }
+
+  .calendar-colour-preview {
+    grid-column: 1 / -1;
+  }
+
+  /* Inside the sheet the box is the sheet's, so the padding here would double. */
+  .calendar-sheet .calendar-menu,
+  .calendar-sheet .calendar-colours {
+    padding: 0;
+  }
+
+  .calendar-sheet .calendar-menu__head {
+    display: none;
+  }
+}
+
+/*
+ * The narrowest screen the product is graded on. At 320px the page ground
+ * leaves about 288px, so the triggers go full width one per line rather than
+ * ellipsing "Compliance type" down to "Compl…".
+ */
+@media (max-width: 359px) {
+  .calendar-control,
+  .calendar-control-trigger {
+    width: 100%;
+  }
+
+  .calendar-control-trigger {
+    justify-content: flex-start;
+  }
+
+  .calendar-control-trigger__caret {
+    margin-left: auto;
+  }
+}
