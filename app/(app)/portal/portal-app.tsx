@@ -4202,7 +4202,25 @@ function CalendarView({
               : null
           }
           selectedDay={selectedDay}
-          onSelectDay={setSelectedDay}
+          /*
+           * SELECTING A DAY MOVES THE ANCHOR TOO.
+           *
+           * They were separate at first and it broke the one promise the mode
+           * switcher makes. Select the 18th of October in the month grid, then
+           * press Week: you got the week of the 24th, because the anchor was
+           * still wherever paging had left it and only the agenda below the
+           * grid knew about the 18th. The reader had said which day they meant
+           * and the calendar answered with a different one.
+           *
+           * One value now. `calendarMonthGrid` normalises to the month that
+           * contains it, so choosing a day inside the visible month redraws
+           * nothing; choosing a trailing day from the next month pages to it,
+           * which is what a reader clicking "2" in the greyed-out tail means.
+           */
+          onSelectDay={(day) => {
+            setSelectedDay(day);
+            setAnchor(day);
+          }}
           emptyState={emptyState}
         />
       </section>

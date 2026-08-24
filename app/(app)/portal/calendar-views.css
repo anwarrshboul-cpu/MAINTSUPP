@@ -120,6 +120,28 @@
   max-width: 100%;
 }
 
+/*
+ * "Today" on the day surface.
+ *
+ * Month and Week both mark today and Day did not, so paging four days out and
+ * back left nothing on screen confirming you were home. A word rather than a
+ * tint, for the same reason the chips carry a glyph: this must survive with no
+ * colour at all.
+ */
+.calendar-surface__today {
+  display: block;
+  width: fit-content;
+  margin: 0 0 -4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .calendar-surface__empty {
   padding: 18px 16px;
   border: 1px dashed var(--line);

@@ -823,6 +823,7 @@ function WeekView({
 
 function DayView({
   anchor,
+  today,
   eventsByDay,
   chipStyle,
   typeLabel,
@@ -831,8 +832,27 @@ function DayView({
   emptyState,
 }: CalendarSurfaceProps): React.JSX.Element {
   const events = eventsFor(eventsByDay, anchor);
+  const isToday = anchor === today;
   return (
-    <div className="calendar-surface calendar-surface--day">
+    <div
+      className={`calendar-surface calendar-surface--day${isToday ? " is-today" : ""}`}
+      /*
+       * Month and Week both mark today, and Day did not — so paging four days
+       * forward and back left nothing on screen saying whether you had landed
+       * back where you started. The heading is the only place it can go here,
+       * and it goes there as a word as well as a colour.
+       */
+      {...(isToday ? { "data-calendar-today": "" } : {})}
+      aria-current={isToday ? "date" : undefined}
+    >
+      {/*
+       * A span, not a paragraph. `.portal-content p` sets `color: var(--muted)`
+       * and outranks a single class, so as a `<p>` this badge painted #4e5f6f
+       * on the brand teal — 1.5:1, which axe called out as serious. Escalating
+       * specificity would have won the argument and left the next person to
+       * have it again; an element the shell does not restyle ends it.
+       */}
+      {isToday ? <span className="calendar-surface__today">Today</span> : null}
       <DayAgenda
         day={anchor}
         events={events}
