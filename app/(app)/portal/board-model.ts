@@ -262,7 +262,22 @@ export const systemColumnDefaultWidths = new Map(
 );
 
 export const mobileSystemColumnDefaultWidths: Partial<Record<ColumnKey, number>> = {
-  name: 150,
+  /*
+   * 168, not 150, because this is the one column frozen on a phone and the
+   * drag grip now lives inside it.
+   *
+   * The grip had to move here when the checkbox gutter stopped being frozen —
+   * a grip that scrolls away is a drag that cannot be started — and its 18px
+   * came straight off the title: 87px of text before, 69px after, against the
+   * 149px "Incoming form answer" actually wants. On a board where nearly every
+   * row is called "Incoming form answer" or "Manual", that is the difference
+   * between reading a few words and reading none.
+   *
+   * 168 gives the title its 87px back and still leaves 152px of data at 320px
+   * — against 125px before the gutter was unfrozen, so the screen is ahead on
+   * both counts.
+   */
+  name: 168,
   location: 130,
   description: 180,
   tier: 112,
