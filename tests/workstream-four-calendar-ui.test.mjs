@@ -48,6 +48,20 @@ test("month, week and day are three surfaces, not one rendered three ways", asyn
   assert.match(views, /if \(props\.mode === "week"\) return <WeekView/);
 });
 
+test("an expanded busy day survives choosing that day", async () => {
+  /*
+   * "+12 more" took two presses. The expansion was keyed on the ANCHOR, and
+   * `onExpand` selects the day first — which now moves the anchor, so the state
+   * it had just written failed its own equality check on the next render. The
+   * guard was only ever about paging to another month, so it keys on the month.
+   */
+  const views = await read(VIEWS);
+  assert.match(views, /\{ month: string; day: CalendarDay \}/, "keyed by month, not anchor");
+  assert.match(views, /expanded\.month === anchorMonth/);
+  assert.doesNotMatch(views, /expanded\.anchor === anchor/, "the anchor guard is what broke");
+  assert.match(views, /setExpanded\(\{ month: day\.slice\(0, 7\), day \}\)/, "the cell's own month");
+});
+
 test("the week is Monday-first and the month grid is always six rows", async () => {
   const model = await read(MODEL);
   assert.match(model, /export function calendarWeekDays/);
@@ -235,11 +249,27 @@ test("each write goes to the endpoint that actually holds that date", async () =
   // A job's own field.
   assert.match(portal, /persistRequestUpdate\(id, \{ fields: \{ \[field\]: day \} \}\)/);
 
-  // A board-derived certificate expiry: the board cell it was read from, on
-  // the board it was read from. `update_cell` reads the board from `?board=`.
+  /*
+   * A board-derived certificate expiry: the board cell it was read from, on the
+   * board it was read from. `update_cell` reads the board from `?board=` and
+   * lives on the PATCH handler — `/api/board` splits create/delete onto POST
+   * and edit onto PATCH, and sending this one as a POST comes back 400
+   * "Unknown board action". It shipped that way and only a real certificate
+   * failing to move on a real board caught it, so the method is pinned here.
+   */
   assert.match(portal, /\/api\/board\?board=\$\{encodeURIComponent\(target\.boardId\)\}/);
   assert.match(portal, /action: "update_cell"/);
   assert.match(portal, /columnId: target\.columnId/);
+  const cellWrite = portal.slice(
+    portal.indexOf("if (target.path === \"board-cell\")"),
+    portal.indexOf("} else if (target.path === \"workspace-compliance\")"),
+  );
+  assert.match(cellWrite, /method: "PATCH"/, "update_cell is a PATCH, not a POST");
+  assert.doesNotMatch(cellWrite, /method: "POST"/);
+  // And the route really does serve it from PATCH, so this cannot drift.
+  const board = await read("app/api/board/route.ts");
+  const patchAt = board.indexOf("export async function PATCH(");
+  assert.ok(patchAt > 0 && board.indexOf('action === "update_cell"') > patchAt);
 
   // A register-only record: the register row, with the columns that PATCH
   // replaces sent back unchanged.

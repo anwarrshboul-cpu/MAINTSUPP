@@ -1735,7 +1735,15 @@ export default function PortalApp({
       const response = await fetch(
         `/api/board?board=${encodeURIComponent(target.boardId)}`,
         {
-          method: "POST",
+          /*
+           * PATCH, not POST. `/api/board` splits its actions across two
+           * handlers — POST creates and deletes, PATCH edits — and
+           * `update_cell` is on the PATCH side, exactly where
+           * `persistBoardCell` above already sends it. Sent as POST it comes
+           * back 400 "Unknown board action", which is what this did until a
+           * real certificate was moved on a real board and did not move.
+           */
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "update_cell",

@@ -395,12 +395,21 @@ function MonthView({
    * list becomes its own scroll container so one busy Tuesday cannot stretch
    * the whole week row.
    *
-   * The anchor is stored alongside the day so that paging to another month
+   * The MONTH is stored alongside the day so that paging to another month
    * collapses the cell without an effect and without a stale-focus race — the
    * expansion is DERIVED, so it simply stops being true.
+   *
+   * The month, and not the anchor. It was the anchor, and then selecting a day
+   * started moving the anchor (so that Week and Day open on the day you chose),
+   * which meant `onExpand` stored the anchor it was about to invalidate: the
+   * first press of "+12 more" set the state and then failed its own equality
+   * check, and it took a second press to open. The month is the thing this
+   * guard was ever really about — an expanded cell should survive choosing a
+   * day and should not survive paging away from it.
    */
-  const [expanded, setExpanded] = useState<{ anchor: CalendarDay; day: CalendarDay } | null>(null);
-  const expandedDay = expanded && expanded.anchor === anchor ? expanded.day : null;
+  const [expanded, setExpanded] = useState<{ month: string; day: CalendarDay } | null>(null);
+  const anchorMonth = anchor.slice(0, 7);
+  const expandedDay = expanded && expanded.month === anchorMonth ? expanded.day : null;
   const moreButtons = useRef<Map<CalendarDay, HTMLButtonElement | null>>(new Map());
   const restoreFocus = useRef<CalendarDay | null>(null);
 
@@ -463,7 +472,10 @@ function MonthView({
                     expanded={day === expandedDay}
                     onExpand={() => {
                       onSelectDay(day);
-                      setExpanded({ anchor, day });
+                      /* `day.slice(0, 7)`, not `anchorMonth`: selecting a
+                         trailing day pages to ITS month, and the expansion
+                         belongs to the month the cell is now in. */
+                      setExpanded({ month: day.slice(0, 7), day });
                     }}
                     onCollapse={() => collapse(day)}
                     registerMore={(node) => {
