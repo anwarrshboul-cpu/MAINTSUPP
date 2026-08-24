@@ -5119,6 +5119,59 @@ function BoardRow({
         );
         return (
           <td {...shared}>
+            {/*
+              THE ONLY WAY TO DRAG A ROW WITH A FINGER — AND IT IS IN THIS CELL
+              BECAUSE THIS IS THE ONE THAT DOES NOT SCROLL AWAY.
+
+              Everywhere else on a row a touch is a scroll, decided before
+              anything of ours runs — see `THE TOUCH STORY` in
+              `board-row-drag.ts`. This is the one spot that declares
+              `touch-action: none`, which is the one thing a compositor will not
+              argue with, so it is the one spot a touch drag can begin.
+
+              It sat in the 42px checkbox gutter next door until a phone was
+              given a single frozen column and the Name cell took the slot.
+              After that the grip rode away with the row: measured at x 1, −41,
+              −599 and −1999 as `scrollLeft` went 0, 42, 600, 2000 — so past
+              42px of sideways scroll there was NO WAY to start a touch drag at
+              all, on a board 3,800px wider than the screen. A handle has to
+              live in whatever is frozen. Nothing about the button changed: it
+              is still `position: absolute; left: 0`, and the `<td>` it now sits
+              in is `position: sticky`, so that resolves against the frozen cell
+              instead of the gutter.
+
+              `touch-action` stays inline rather than moving to the stylesheet
+              because it is the load-bearing part, and it must not be able to go
+              missing in a refactor of the sheet's CSS.
+            */}
+            {mobile && (
+            <button
+              type="button"
+              className="sheet-row-grip"
+              data-board-row-handle
+              aria-label={"Drag " + request.id + " to reorder"}
+              title="Drag to move this row"
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: 0,
+                display: "grid",
+                placeItems: "center",
+                width: 18,
+                height: 40,
+                padding: 0,
+                border: 0,
+                borderRadius: 5,
+                background: "transparent",
+                color: "var(--muted, #60727d)",
+                transform: "translateY(-50%)",
+                touchAction: "none",
+                cursor: "grab",
+              }}
+            >
+              <Icon name="menu" size={14} />
+            </button>
+            )}
             <div className="sheet-item-cell">
               <ItemNameEditor
                 value={itemName}
@@ -5608,43 +5661,12 @@ function BoardRow({
     >
       <td className="sheet-check" data-board-popover>
         {/*
-          THE ONLY WAY TO DRAG A ROW WITH A FINGER.
-          Everywhere else on a row a touch is a scroll, decided before anything
-          of ours runs — see `THE TOUCH STORY` in board-row-drag.ts. This is the
-          one spot that says `touch-action: none`, so it is the one spot the
-          compositor will not take a gesture back from. It is drawn only on a
-          phone because a desktop has the whole row, and it is styled here
-          rather than in the sheet: `touch-action` is the load-bearing part and
-          it must not be able to go missing.
+          THE FINGER'S DRAG HANDLE USED TO LIVE HERE, AND IT CANNOT ANY MORE.
+          This gutter is no longer frozen — a phone gets ONE frozen column and
+          the Name cell has it — so a handle drawn here rides away with the rest
+          of the row the moment the board is scrolled sideways. It is now the
+          first child of the Name cell; the note beside it says why.
         */}
-        {mobile && (
-        <button
-          type="button"
-          className="sheet-row-grip"
-          data-board-row-handle
-          aria-label={"Drag " + request.id + " to reorder"}
-          title="Drag to move this row"
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: 0,
-            display: "grid",
-            placeItems: "center",
-            width: 18,
-            height: 40,
-            padding: 0,
-            border: 0,
-            borderRadius: 5,
-            background: "transparent",
-            color: "var(--muted, #60727d)",
-            transform: "translateY(-50%)",
-            touchAction: "none",
-            cursor: "grab",
-          }}
-        >
-          <Icon name="menu" size={14} />
-        </button>
-        )}
         {/* No gutter trigger on a phone: the item's actions are behind the
             "⋮" at the top right of the item drawer instead. */}
         {!mobile && (

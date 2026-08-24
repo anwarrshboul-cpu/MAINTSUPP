@@ -24,9 +24,16 @@
  * Name is frozen before Name, which is the only reading of "pinned" that stays
  * true after a reorder.
  *
- * ON A PHONE NONE OF THIS APPLIES: the stylesheet unsticks the grid below
- * 760px, because two frozen columns on a 390px screen leave nothing to scroll.
- * `stickyColumnOffsets` is simply not consulted there.
+ * ON A PHONE NONE OF THIS APPLIES, and the reason has changed even though the
+ * behaviour of this module has not. Below 760px the stylesheet freezes exactly
+ * ONE cell — the Items column, at `left: 0` — and unfreezes everything else,
+ * the selection gutter and any column the reader pinned from the toolbar
+ * included. Measured on a 320px screen, the gutter and Items together held
+ * 192px of the display and left 125px to scroll twenty columns through;
+ * freezing one of them leaves 167px. A running total is therefore not needed
+ * and would be wrong: there is one frozen column, it is first, and its offset
+ * is the literal 0 written in `globals.css` under "ONE FROZEN COLUMN ON A
+ * PHONE". `stickyColumnOffsets` returns an empty map here and is not consulted.
  */
 
 import type { BoardDisplayColumn } from "./board-model";

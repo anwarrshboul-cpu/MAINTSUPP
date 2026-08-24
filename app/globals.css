@@ -10194,13 +10194,15 @@ th.sheet-column--name {
     padding-right: 0;
   }
 
-  .sheet-group__header,
-  .sheet-check {
+  /*
+   * The group bar starts at the screen's edge because the gutter it used to
+   * clear is gone. The two cells that sat beside it here — the selection
+   * gutter at 0 and Items at 42 — are decided in one place now: see "ONE
+   * FROZEN COLUMN ON A PHONE" further down. Those two lines outlived that
+   * decision by a thousand lines and said the opposite of it.
+   */
+  .sheet-group__header {
     left: 0;
-  }
-
-  .sheet-column--name {
-    left: 42px;
   }
 
   .sheet-row-more,
@@ -10957,21 +10959,21 @@ th.sheet-column--name {
     max-width: 42px;
   }
 
-  .sheet-column--name {
-    min-width: 230px;
-  }
-
-  .live-sheet tbody .sheet-check,
-  .live-sheet tbody .sheet-column--name {
-    position: relative !important;
-    left: auto !important;
-    z-index: auto !important;
-  }
-
-  .live-sheet thead .sheet-check,
-  .live-sheet thead .sheet-column--name {
-    left: auto !important;
-  }
+  /*
+   * The left edge of the phone's sheet is decided in ONE place — the "ONE
+   * FROZEN COLUMN ON A PHONE" block near the end of this file. Two rules used
+   * to live here: an unpin of the gutter and the Items column, and a
+   * `min-width: 230px` floor under Items.
+   *
+   * Both were dead and both read as the opposite of what shipped. The unpin
+   * was overridden a thousand lines later by the block that actually freezes
+   * the cells, so the stylesheet said "nothing is frozen on a phone" while the
+   * phone froze two columns; anyone reading top-down believed the wrong thing,
+   * and one reviewer did. The floor never applied at all: the width of a
+   * column is data, written as an inline `min-width` from
+   * `displayedBoardColumnWidth`, which is 150px for Items on a phone and beats
+   * any stylesheet value that carries no `!important`.
+   */
 
   .live-sheet .sheet-check::before {
     display: none;
@@ -12008,15 +12010,6 @@ th.sheet-column--name {
     min-width: max-content;
   }
 
-  .live-sheet tbody .sheet-check,
-  .live-sheet tbody .sheet-column--name,
-  .sheet-add-row__item,
-  .sheet-add-row__filler {
-    position: relative !important;
-    left: auto !important;
-    z-index: auto !important;
-  }
-
   .live-sheet thead th {
     position: sticky;
     top: 0;
@@ -12378,7 +12371,17 @@ th.sheet-column--name {
   .sheet-group__header {
     position: sticky;
     left: 0 !important;
-    z-index: calc(var(--z-sticky) + 2);
+    /*
+     * ABOVE THE FROZEN COLUMN, not under it. The bar's `0 1px 0` bottom rule
+     * is the line the header row of every group sits on, and at the old
+     * `+ 2` (42) the frozen Item header — which has to sit at 46 so the rows
+     * scrolling up beneath it stay beneath it — painted over the first 150px
+     * of that line. The result was a rule that started partway across the
+     * screen, at exactly the frozen cell's right edge, which reads as the
+     * left edge of the sheet being broken. Every other header already passes
+     * under this bar; + 8 is what makes the frozen one do the same.
+     */
+    z-index: calc(var(--z-sticky) + 8);
     width: 100vw;
     min-width: 100vw;
     max-width: 100vw;
@@ -12515,8 +12518,17 @@ th.sheet-column--name {
   opacity: 0.42;
 }
 
+/*
+ * A HINT BESIDE THE CARET, NOT A SECOND INDICATOR.
+ *
+ * This drew a 3px line across the whole row — 4,961px of it, running off both
+ * edges of the screen — back when it was the only thing marking the drop. The
+ * caret is the precise indicator now, so a full-strength second line competes
+ * with it and reads as a stray edge on a phone. Kept, quietly, so the target
+ * row is still legible when the caret is under the finger.
+ */
 .live-sheet tbody tr.is-drop-before > td {
-  border-top: 3px solid var(--group-color);
+  border-top: 1px solid color-mix(in srgb, var(--group-color) 45%, transparent);
 }
 
 .sheet-group.is-drop-target {
@@ -13002,13 +13014,50 @@ body[data-theme="dark"] {
 }
 
 /*
- * Keep the selection column and Item column frozen on mobile, matching
- * desktop — but with NO action gutter in front of them. The row "…" is not
- * rendered on a phone (its verbs live behind the "⋮" in the item drawer), so
- * the 30px the two frozen cells used to be offset by was a dead strip down the
- * left of every board: the table began at x=1 and its first cell at x=31.
- * The cells now freeze at 0 and 42, and the mask that hid scrolled cells
- * behind the gutter has nothing to hide.
+ * ONE FROZEN COLUMN ON A PHONE: the Item name, at the screen's own edge.
+ *
+ * Desktop freezes two cells — the selection gutter and the Items column behind
+ * it — and a phone used to copy that, freezing the gutter at 0 and Items at
+ * 42. Measured on the running board, the copy cost 192px of a 320px screen:
+ * 60% of the display held a 42px gutter (a 13px checkbox and an 18px drag
+ * grip) and a 150px name whose title had 71px to render in, and left 128px for
+ * the twenty columns a frozen name column exists to be read against. Unfreezing
+ * the gutter returns 42px at every width tested — 128 -> 170 at 320, 195 -> 237
+ * at 390, a third and a fifth more data respectively.
+ *
+ * So the gutter is unfrozen and Items freezes at 0. The gutter still leads the
+ * row at rest, and slides under the frozen cell once the reader scrolls past
+ * it, which is why that cell has to stay OPAQUE in both themes — the theme
+ * blocks above give `.sheet-column--name` the same explicit ground as an
+ * ordinary cell, and nothing here may make it translucent.
+ *
+ * THE GROUP COLOUR MOVES WITH THE FREEZE. The 5px spine that says which group
+ * a row belongs to was an inset shadow on the gutter. Left there it would have
+ * carried the row's only identity off the left of the screen the moment the
+ * gutter scrolled, while the group's own header was somewhere above the
+ * viewport. It is drawn on the frozen cell instead and taken OFF the gutter in
+ * the same breath, so there is one spine, on the column that is always there,
+ * and never two of them side by side while the gutter is still in view.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT FREEZE: a column the reader pinned from the
+ * toolbar. `.is-pinned-column` stays unfrozen below 760px — see "Frozen
+ * columns" at the end of this file. Freezing an arbitrary set of them on a
+ * 390px screen leaves nothing to scroll, which is the problem this block
+ * exists to solve rather than to repeat.
+ *
+ * The offset is the literal 0 rather than a running total from
+ * board-pinning.ts because there is exactly one frozen column here and it is
+ * first; `stickyColumnOffsets` returns an empty map on a phone and is not
+ * consulted. The z-indexes are the same tier the desktop uses (43 for a body
+ * cell, 46 for a header) and stay far below the dragged row's ghost at 1400,
+ * so a frozen cell can never paint over the row being dragged.
+ *
+ * THE ROW GRIP LIVES IN THE GUTTER (live-board.tsx renders `.sheet-row-grip`
+ * inside `td.sheet-check`), so unfreezing the gutter takes the phone's only
+ * touch drag handle — and the row checkbox — off screen once `scrollLeft`
+ * passes 42. Both are still there at rest, where a reorder and a selection
+ * both start. Moving the grip into the frozen cell is the DOM change that
+ * makes it reachable at any scroll position; it belongs to live-board.tsx.
  */
 @media (max-width: 760px) {
   .live-sheet {
@@ -13019,36 +13068,58 @@ body[data-theme="dark"] {
     display: none;
   }
 
-  .live-sheet tbody .sheet-check,
-  .live-sheet thead .sheet-check {
+  /*
+   * The gutter is an ordinary cell now: it leads the row and scrolls away with
+   * it. `position` has to be said out loud because the unmediated
+   * `.sheet-check` rule makes it sticky at `left: 0` for every width.
+   */
+  .live-sheet thead th.sheet-check,
+  .live-sheet tbody td.sheet-check {
+    position: relative !important;
+    left: auto !important;
+    z-index: auto !important;
+  }
+
+  /* The spine is the frozen cell's now — see the note above. */
+  .sheet-group .live-sheet .sheet-check {
+    box-shadow: none;
+  }
+
+  /*
+   * All three rows the sheet draws, frozen at the same offset: the header, a
+   * data row, and the combined add-item / summary row. If any one of them
+   * disagreed the left edge would step in and out as the reader scrolled.
+   */
+  .live-sheet thead .sheet-column--name,
+  .live-sheet tbody .sheet-column--name,
+  .sheet-add-row__item {
     position: sticky !important;
     left: 0 !important;
   }
 
   .live-sheet tbody .sheet-column--name,
-  .live-sheet thead .sheet-column--name,
-  .sheet-add-row__item {
-    position: sticky !important;
-    left: 42px !important;
-  }
-
-  .live-sheet tbody .sheet-check {
-    z-index: calc(var(--z-sticky) + 4) !important;
-  }
-
-  .live-sheet tbody .sheet-column--name,
   .sheet-add-row__item {
     z-index: calc(var(--z-sticky) + 3) !important;
-    box-shadow: 7px 0 10px -10px rgba(7, 24, 38, 0.55);
+    box-shadow:
+      inset 5px 0 0 var(--group-color),
+      7px 0 10px -10px rgba(7, 24, 38, 0.55);
   }
 
-  .live-sheet thead .sheet-check {
-    z-index: calc(var(--z-sticky) + 7) !important;
+  /*
+   * The drag grip moved into this cell when the gutter stopped being frozen —
+   * a grip that rides off-screen at `scrollLeft > 42` is a drag that cannot be
+   * started. It is absolutely positioned at the cell's left edge, so the cell
+   * owes it 18px or the handle's glyph sits on the first letter of the title.
+   */
+  .live-sheet tbody td.sheet-column--name:has(> .sheet-row-grip) {
+    padding-left: 18px;
   }
 
   .live-sheet thead .sheet-column--name {
     z-index: calc(var(--z-sticky) + 6) !important;
-    box-shadow: 7px 0 10px -10px rgba(7, 24, 38, 0.55);
+    box-shadow:
+      inset 5px 0 0 var(--group-color),
+      7px 0 10px -10px rgba(7, 24, 38, 0.55);
   }
 
   .column-resize-handle {

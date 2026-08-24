@@ -378,6 +378,34 @@ export function ghostWidth(input: {
 }
 
 /**
+ * WHERE A ROW STARTS, ONCE THE BOARD IS SCROLLED SIDEWAYS.
+ *
+ * `rect.left` is where the row begins in the DOCUMENT's terms, and on a board
+ * scrolled 1,933px right that is -1,620: a coordinate no pixel of the row
+ * occupies and no finger can be near. Two things were measured from it and both
+ * were wrong at any `scrollLeft` but zero:
+ *
+ *   · THE GRAB OFFSET. `clientX - rect.left` said the row had been grabbed
+ *     1,914px from its left edge, so `ghostOffset` clamped it to the preview's
+ *     own width and hung the card 288px to the LEFT of the pointer — measured:
+ *     pointer at x 349, preview at x 61. The grip that was actually pressed is
+ *     in a STICKY cell sitting at the scroller's left edge, which is the whole
+ *     reason it is still reachable at that scroll position.
+ *   · THE PREVIEW'S WIDTH. `nameCell.right - rect.left` said the Name column
+ *     was 2,185px wide, and only the clamp in `ghostWidth` hid it — on a phone
+ *     it did not hide it, and a scrolled board produced a 273px preview where
+ *     an unscrolled one produced 215px.
+ *
+ * The row's visible origin is the leftmost point of it that is on screen, which
+ * is the scroller's own left edge whenever the row extends past it. Both
+ * measurements are taken from there, and both then read the same at every
+ * scroll position.
+ */
+export function visibleRowLeft(rowLeft: number, scrollerLeft: number) {
+  return Math.max(rowLeft, scrollerLeft);
+}
+
+/**
  * How tall it is: the row's own height, floored so an empty row is still a
  * card and capped so a tall wrapped row does not become a second slab.
  */

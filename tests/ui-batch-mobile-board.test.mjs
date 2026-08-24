@@ -116,6 +116,91 @@ test("live-board reads the layout through the versioned resolver", async () => {
   );
 });
 
+/*
+ * WRITTEN AGAINST A BOARD IN A BROWSER, not against the stylesheet's intent.
+ *
+ * Measured on the running dev server at 320/360/375/390/430 in both themes:
+ * before this change the phone froze TWO cells — the 42px selection gutter at
+ * left 0 and the 150px Item column at left 42 — and left 125px of a 320px
+ * screen to scroll the other twenty columns through. After it the gutter is an
+ * ordinary cell and Item alone is frozen, at x=1 once `scrollLeft` passes 42,
+ * with 167px to scroll at 320 and 237px at 390: 42px recovered at every width
+ * tested.
+ *
+ * The assertions are structural, so a later edit that breaks the arrangement
+ * fails here rather than on somebody's phone:
+ *
+ *   ONE rule freezes the header cell, the body cell and the combined
+ *   add-item/summary cell together. Splitting them is how a left edge starts
+ *   stepping in and out mid-scroll, and that is not a thing a reader reports
+ *   clearly enough to find.
+ *
+ *   The gutter's unfreeze has to be written out. `.sheet-check` is sticky at
+ *   `left: 0` for every width from an unmediated rule, so silence here would
+ *   mean frozen, not free.
+ *
+ *   Nothing else in a phone block may say `position: relative` about the Item
+ *   column. Two dead rules used to, a thousand lines before the rule that
+ *   actually froze it, and the stylesheet therefore read as "nothing is frozen
+ *   on a phone" while the phone froze two columns. One reviewer read it that
+ *   way and briefed the work backwards.
+ */
+test("exactly one column is frozen on a phone, and it is the Item name", async () => {
+  const phone = phoneBlocks(await read(GLOBALS));
+
+  // The gutter is an ordinary cell: it leads the row and scrolls away with it.
+  assert.match(
+    phone,
+    /\.live-sheet thead th\.sheet-check,\s*\n\s*\.live-sheet tbody td\.sheet-check \{\s*\n\s*position: relative !important;\s*\n\s*left: auto !important;\s*\n\s*z-index: auto !important;/,
+  );
+
+  // Header, body and the add-item/summary row, frozen at 0 by ONE rule.
+  assert.match(
+    phone,
+    /\.live-sheet thead \.sheet-column--name,\s*\n\s*\.live-sheet tbody \.sheet-column--name,\s*\n\s*\.sheet-add-row__item \{\s*\n\s*position: sticky !important;\s*\n\s*left: 0 !important;\s*\n\s*\}/,
+  );
+
+  // No second opinion anywhere in a phone block.
+  assert.doesNotMatch(
+    phone,
+    /\.sheet-column--name[^{}]*\{[^{}]*position: relative/,
+    "a phone block must not also unfreeze the Item column",
+  );
+  assert.doesNotMatch(
+    phone,
+    /\.sheet-column--name \{\s*\n\s*min-width: 230px;/,
+    "the width of a column is data — displayedBoardColumnWidth writes an " +
+      "inline min-width of 150px on a phone, and a stylesheet floor never applied",
+  );
+  assert.doesNotMatch(
+    phone,
+    /left: 42px !important/,
+    "nothing is offset by the gutter's width any more",
+  );
+
+  /*
+   * The group bar's 1px rule has to run across the frozen cell. At the old
+   * `+ 2` the frozen header — which sits at `+ 6` so rows pass beneath it —
+   * painted over the first 150px of that line, and a rule that starts partway
+   * across the screen reads as a broken left edge.
+   */
+  assert.match(
+    phone,
+    /\.sheet-group__header \{[\s\S]*?z-index: calc\(var\(--z-sticky\) \+ 8\);/,
+  );
+
+  /*
+   * The dragged row's ghost is `z-index: 1400` (board-row-drag-gesture.ts).
+   * Every frozen cell here is in the forties, so a frozen cell can never paint
+   * over the row being dragged.
+   */
+  const tiers = [
+    ...phone.matchAll(/z-index: calc\(var\(--z-sticky\) \+ (\d+)\) !important/g),
+  ].map((match) => 40 + Number(match[1]));
+  assert.ok(tiers.length >= 2, "the frozen cells must state their tier");
+  assert.ok(Math.max(...tiers) < 1400, `a frozen cell reached ${Math.max(...tiers)}`);
+});
+
 test("the row gutter trigger is gone on a phone, gutter and all", async () => {
   const phone = phoneBlocks(await read(GLOBALS));
   assert.match(phone, /\.sheet-row-more,\s*\n\s*\.live-sheet \.sheet-check::before \{\s*display: none;/);

@@ -78,6 +78,7 @@ import {
   rowDragDecision,
   rowDropTargetFrom,
   sameDropTarget,
+  visibleRowLeft,
   type AnchoredPoint,
   type RowHit,
   type ScrollFrame,
@@ -550,11 +551,23 @@ function scrollFrameOf(scroller: HTMLElement | null): ScrollFrame {
   };
 }
 
-/** Move a mark to where its anchor now is, and reveal it the first time. */
+/**
+ * Move a mark to where its anchor now is, and reveal it the first time.
+ *
+ * `clampLeft` is the scroller's left edge, and it is not cosmetic. Both marks
+ * are as wide as the preview and start at the ROW's left edge, which on a board
+ * scrolled 1,933px right is at x -1,306 — so the caret telling you where the
+ * item is about to land was drawn entirely off the left of the screen, at every
+ * scroll position but zero. The row is still visible; what is visible of it is
+ * its sticky gutter and Name column, sitting against the scroller's left edge.
+ * That is where the marks belong, so that is where they are pinned when the row
+ * itself has slid past it.
+ */
 function placeMark(
   mark: HTMLElement | null,
   anchor: AnchoredPoint | null,
   frame: ScrollFrame,
+  clampLeft: number,
 ) {
   if (!mark) return;
   if (!anchor) {
@@ -562,7 +575,8 @@ function placeMark(
     return;
   }
   const at = anchoredAt(anchor, frame);
-  mark.style.transform = `translate3d(${Math.round(at.x)}px, ${Math.round(at.y)}px, 0)`;
+  const x = Math.max(at.x, clampLeft);
+  mark.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(at.y)}px, 0)`;
   if (mark.style.opacity !== "1") mark.style.opacity = "1";
 }
 
@@ -1014,8 +1028,10 @@ export function useBoardRowDrag({
 
     const { clientX, clientY, ghost, scroller } = pointer;
     let scrolled = false;
-    if (scroller) {
-      const box = scroller.getBoundingClientRect();
+    // One rect for the whole frame: the edge-scroll bands and the left edge the
+    // two marks are pinned to are the same box, read once.
+    const box = scroller ? scroller.getBoundingClientRect() : null;
+    if (scroller && box) {
       const velocity = edgeScrollVector(clientX, clientY, box);
       if (velocity.x || velocity.y) {
         const beforeLeft = scroller.scrollLeft;
@@ -1054,8 +1070,9 @@ export function useBoardRowDrag({
      * whole block off the layout-flush path.
      */
     const frame = scrollFrameOf(scroller);
-    placeMark(pointer.caret, pointer.caretAt, frame);
-    placeMark(pointer.slot, pointer.slotAt, frame);
+    const clampLeft = box ? box.left : 0;
+    placeMark(pointer.caret, pointer.caretAt, frame, clampLeft);
+    placeMark(pointer.slot, pointer.slotAt, frame, clampLeft);
 
     reassertDropTarget();
 
@@ -1100,15 +1117,25 @@ export function useBoardRowDrag({
       const nameCell = pointer.element.querySelector<HTMLElement>(
         ".sheet-column--name",
       );
+      /*
+       * NOT `rect.left`. See `visibleRowLeft`: a row scrolled sideways begins
+       * at a negative coordinate, and measuring either the grab or the Name
+       * column from there put the preview 288px away from the finger and,
+       * on a phone, made it 70% of the screen instead of 55%.
+       */
+      const origin = visibleRowLeft(
+        rect.left,
+        pointer.scroller?.getBoundingClientRect().left ?? rect.left,
+      );
       const width = ghostWidth({
         rowWidth: rect.width,
         nameWidth: nameCell
-          ? nameCell.getBoundingClientRect().right - rect.left
+          ? nameCell.getBoundingClientRect().right - origin
           : 0,
         viewportWidth: window.innerWidth,
       });
       const height = ghostHeight(rect.height);
-      pointer.grabX = pointer.clientX - rect.left;
+      pointer.grabX = pointer.clientX - origin;
       pointer.grabY = pointer.clientY - rect.top;
       pointer.sourceColor = groupColor(
         pointer.element.closest<HTMLElement>("[data-board-group-id]"),

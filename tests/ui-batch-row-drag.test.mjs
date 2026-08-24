@@ -275,6 +275,82 @@ test("the preview is clamped into its own width, so a wide row does not fling it
   assert.deepEqual(drag.ghostOffset(0, -50, 320, 40), { x: 12, y: 0 });
 });
 
+test("THE PREVIEW'S WIDTH IS DERIVED, AND THE 320px CONSTANT IS GONE", () => {
+  /*
+   * `Math.min(Math.max(rect.width, 180), 320)` could only ever return 320:
+   * `rect.width` is the whole row, ~4,200px on this board. So every preview on
+   * every device was the same size — 22% of a 1440 desktop and 82% of a 390
+   * phone, which is the "long flat duplicate strip" the complaint described.
+   */
+  const desktop = drag.ghostWidth({ rowWidth: 4961, nameWidth: 372, viewportWidth: 1440 });
+  const phone = drag.ghostWidth({ rowWidth: 4208, nameWidth: 192, viewportWidth: 390 });
+  assert.equal(desktop, 300, "a desktop preview is the ceiling, not the row");
+  assert.ok(desktop / 1440 < 0.25, `${desktop} is ${Math.round((desktop / 1440) * 100)}% of a desktop`);
+  assert.ok(
+    phone / 390 >= 0.55 && phone / 390 <= 0.7,
+    `${phone} is ${Math.round((phone / 390) * 100)}% of a phone, which must sit between 55% and 70%`,
+  );
+  // A person who widens the Name column gets a wider preview, up to the cap.
+  assert.ok(
+    drag.ghostWidth({ rowWidth: 4961, nameWidth: 240, viewportWidth: 1440 }) <
+      drag.ghostWidth({ rowWidth: 4961, nameWidth: 290, viewportWidth: 1440 }),
+  );
+  // And on a very small screen it never touches the edges.
+  const tiny = drag.ghostWidth({ rowWidth: 4208, nameWidth: 400, viewportWidth: 280 });
+  assert.ok(tiny <= 280 - drag.GHOST_VIEWPORT_MARGIN, `${tiny} on a 280px screen`);
+});
+
+test("the preview is as tall as its row, floored and capped", () => {
+  assert.equal(drag.ghostHeight(40), 40, "a desktop row");
+  assert.equal(drag.ghostHeight(51), 48, "a phone row, capped so it stays a card");
+  assert.equal(drag.ghostHeight(12), 38, "and a collapsed row is still a card");
+});
+
+test("A SCROLLED ROW DOES NOT START AT ITS OWN LEFT EDGE", () => {
+  /*
+   * The bug this pins: with the board scrolled 1,933px right, the row's
+   * `rect.left` is -1,620 — a coordinate no pixel of it occupies. Measuring the
+   * grab from there said the row had been grabbed 1,914px in, so `ghostOffset`
+   * clamped it to the preview's width and hung the card 288px to the LEFT of
+   * the finger. Measured before the fix: pointer at x 349, preview at x 61.
+   */
+  assert.equal(drag.visibleRowLeft(-1620, 279), 279, "the scroller's edge, once the row has slid past it");
+  assert.equal(drag.visibleRowLeft(313, 279), 313, "and the row's own edge when it has not");
+  // What that does to the grab offset, which is the number a person feels.
+  const grabbedAt = 294;
+  const bad = drag.ghostOffset(grabbedAt - -1620, 20, 300, 40).x;
+  const good = drag.ghostOffset(grabbedAt - drag.visibleRowLeft(-1620, 279), 20, 300, 40).x;
+  assert.equal(bad, 288, "the old measurement pinned the preview to its far edge");
+  assert.equal(good, 15, "the new one keeps it under the finger");
+});
+
+test("THE DROP MARKS MOVE WITH THE BOARD, WITHOUT MEASURING IT AGAIN", () => {
+  /*
+   * The caret and the origin slot are attached to the GRID, and the grid moves
+   * — the drag auto-scrolls at the edges. Re-measuring them per frame would be
+   * a `getBoundingClientRect` per mark per frame on the one path that must not
+   * touch layout. Nothing reflows during a drag, so a point measured once moves
+   * by exactly minus the scroll since.
+   */
+  const frame = { scrollLeft: 0, scrollTop: 0, pageLeft: 0, pageTop: 0 };
+  const mark = drag.anchorPoint(313, 545, frame);
+  assert.deepEqual(drag.anchoredAt(mark, frame), { x: 313, y: 545 }, "still where it was");
+  assert.deepEqual(
+    drag.anchoredAt(mark, { scrollLeft: 700, scrollTop: 0, pageLeft: 0, pageTop: 0 }),
+    { x: -387, y: 545 },
+    "the board scrolled right, so the mark went left by the same amount",
+  );
+  assert.deepEqual(
+    drag.anchoredAt(mark, { scrollLeft: 0, scrollTop: 120, pageLeft: 0, pageTop: 0 }),
+    { x: 313, y: 425 },
+  );
+  // The window scrolling counts too, and in the same direction.
+  assert.deepEqual(
+    drag.anchoredAt(mark, { scrollLeft: 0, scrollTop: 0, pageLeft: 0, pageTop: 60 }),
+    { x: 313, y: 485 },
+  );
+});
+
 /* ── The wiring a browser test cannot see the absence of ─────────────────── */
 
 test("THERE IS NO HOLD TIMER ANYWHERE IN THE ROW DRAG", async () => {
@@ -302,6 +378,32 @@ test("the handle is the only touch drag, and both handles exist", async () => {
   // The grip's `touch-action` is load-bearing, so it is written where it cannot
   // be lost to a stylesheet edit in another lane.
   assert.match(board, /touchAction: "none"/);
+});
+
+test("THE TOUCH GRIP LIVES IN THE FROZEN COLUMN, NOT IN THE GUTTER", () => {
+  /*
+   * A phone freezes ONE column and it is the Name cell. The grip used to sit in
+   * the 42px checkbox gutter beside it, which is no longer frozen — so the
+   * handle rode away with the row: measured at x 1, -41, -599 and -1999 as
+   * `scrollLeft` went 0, 42, 600, 2000. Past 42px of sideways scroll there was
+   * no way to begin a touch drag at all, on a board 3,800px wider than the
+   * screen. Whatever is frozen is where the handle has to be.
+   */
+  const grip = board.indexOf('className="sheet-row-grip"');
+  const nameCase = board.indexOf('case "name": {');
+  const itemCell = board.indexOf('<div className="sheet-item-cell">');
+  const gutter = board.indexOf('<td className="sheet-check" data-board-popover>');
+  assert.ok(grip > 0 && nameCase > 0 && itemCell > 0 && gutter > 0, "all four anchors exist");
+  assert.ok(grip > nameCase, "the grip is inside the Name cell");
+  assert.ok(grip < itemCell, "and it is the first thing in it, before the name itself");
+  assert.ok(grip < gutter, "and it is no longer in the checkbox gutter");
+  // Whatever moves, these two do not: the marker the gesture looks for and the
+  // declaration that makes a touch drag possible at all.
+  assert.match(board, /className="sheet-row-grip"\s+data-board-row-handle/);
+  assert.match(board, /touchAction: "none"/);
+  // Still exactly one grip, and still only drawn on a phone.
+  assert.equal((board.match(/sheet-row-grip/g) ?? []).length, 1);
+  assert.match(board, /\{mobile && \(\s+<button\s+type="button"\s+className="sheet-row-grip"/);
 });
 
 test("cell editing and text selection are no longer swallowed by the drag", () => {
@@ -412,6 +514,48 @@ test("THE HIT TEST IS MEMOISED — a tremor inside a row costs no layout flush",
   assert.match(gesture, /clientY <= cached\.bottom/, "so does leaving the box");
   assert.match(gesture, /function resetHitTest\(\)/, "and a new drag starts clean");
   assert.match(gesture, /hitTestRowCached\(clientX, clientY, scroller\)/);
+});
+
+test("THE TWO DROP MARKS ARE PINNED TO WHAT IS ON SCREEN", () => {
+  /*
+   * Both marks are as wide as the preview and start at the ROW's left edge,
+   * which on a board scrolled 1,933px right is x -1,306: the caret telling you
+   * where the item lands was drawn entirely off the left of the screen at every
+   * scroll position but zero. What IS visible of the row there is its sticky
+   * gutter and Name column, against the scroller's left edge, so that is the
+   * floor. Measured after: caret at x 279 = the scroller's own left edge, at
+   * scrollLeft 1,933 and 3,865 alike.
+   */
+  assert.match(gesture, /const x = Math\.max\(at\.x, clampLeft\);/);
+  assert.match(gesture, /placeMark\(pointer\.caret, pointer\.caretAt, frame, clampLeft\)/);
+  assert.match(gesture, /placeMark\(pointer\.slot, pointer\.slotAt, frame, clampLeft\)/);
+  // And the box it comes from is the one the edge-scroll bands already read,
+  // so the frame still costs exactly one rect.
+  assert.match(gesture, /const box = scroller \? scroller\.getBoundingClientRect\(\) : null;/);
+});
+
+test("a lifted row is animated, and NOT when the person asked for less motion", () => {
+  assert.match(gesture, /function prefersReducedMotion\(\)/);
+  assert.match(gesture, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+  // Both the lift and the settle bail out before they animate a transform.
+  assert.match(gesture, /if \(prefersReducedMotion\(\) \|\| typeof ghost\.lift\.animate !== "function"\) return;/);
+  assert.match(gesture, /if \(!to \|\| prefersReducedMotion\(\) \|\| typeof root\.animate !== "function"\)/);
+  /* The per-frame transform write stays on the ROOT and the scale lives on the
+     child, so a running lift can never fight the loop for one property. */
+  assert.match(gesture, /ghost\.root\.style\.transform = /);
+  assert.match(gesture, /ghost\.lift\.animate\(/);
+});
+
+test("an abandoned drag flies home, and a committed one lands in the gap", () => {
+  // Escape and pointercancel both ask for the return trip; a plain release does
+  // not, because it has a real destination to settle into.
+  assert.match(gesture, /clearDrag\(true\)/);
+  assert.match(gesture, /const clearDrag = useCallback\(\s*\(home = false\) => \{/);
+  // The preview is detached from the pointer BEFORE teardown, or teardown would
+  // remove the element the animation is running on.
+  assert.match(gesture, /const flying = pointer\.ghost;\s*pointer\.ghost = null;/);
+  // Which means a settling preview belongs to nobody, so unmount sweeps it.
+  assert.match(gesture, /\.board-row-ghost, \.board-row-drop-caret, \.board-row-drop-slot/);
 });
 
 test("the drag is torn down on unmount, drop and cancel alike", () => {
