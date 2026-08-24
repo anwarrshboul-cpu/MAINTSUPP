@@ -41,7 +41,6 @@ import { AccountMenu } from "./account-menu";
 import {
   formatDayMonth,
   formatMonthShort,
-  formatMonthYear,
   formatShortDate,
   formatShortDateTime,
   formatTimeOfDay,
@@ -163,7 +162,6 @@ import {
   DonutLegend,
   HorizontalBars,
   TrendChart,
-  analyticsPeriodOptions,
   withinAnalyticsPeriod,
   type DonutSegment,
 } from "./dashboard-analytics";
@@ -3732,6 +3730,17 @@ function ComplianceView({
 type CalendarEvent = ModelCalendarEvent;
 
 /**
+ * Every date source, as a stable array.
+ *
+ * Module-level rather than mapped inside the component: a fresh array on every
+ * render would change a `useMemo` dependency that never actually changes, and
+ * rebuild the whole event set for nothing.
+ */
+const EVERY_CALENDAR_SOURCE_ID: readonly string[] = CALENDAR_DATE_SOURCES.map(
+  (source) => source.id,
+);
+
+/**
  * The operations calendar — a VIEW over jobs and certificates, never a store.
  *
  * Every date drawn here is read from `maintenance_requests` or from the
@@ -3878,32 +3887,104 @@ function CalendarView({
     [complianceRecords, requests],
   );
 
-  const events = useMemo(
+  /*
+   * ONE BUILD, THREE ANSWERS.
+   *
+   * The screen needs what is drawn, a tally per date source for the picker, and
+   * a count of what the range removed. Each of those was its own
+   * `buildCalendarEvents` call at first — three passes over every job on every
+   * keystroke in a filter, which on a board of 753 jobs across five sources is
+   * three thousand objects built to answer two questions that are subsets of
+   * the first.
+   *
+   * So it builds ONCE, over every source, and the three answers are filters of
+   * that array. `EVERY_SOURCE_ID` is module-level rather than mapped here, so
+   * the memo's identity does not change on every render.
+   */
+  const allEvents = useMemo(
     () =>
       buildCalendarEvents({
         requests: periodRequests,
         complianceRecords: periodCompliance,
-        sourceIds,
+        sourceIds: EVERY_CALENDAR_SOURCE_ID,
         filters,
         today: todayDay,
       }),
-    [filters, periodCompliance, periodRequests, sourceIds, todayDay],
+    [filters, periodCompliance, periodRequests, todayDay],
   );
 
-  /* What the range removed, counted the only honest way there is: build it
-     again without the range and take the difference. */
+  /*
+   * THE RANGE CONSTRAINS DAYS, NOT JUST RECORDS.
+   *
+   * The prefilter above keeps a record if ANY of its selected dates is in the
+   * window, which is right — but on its own it would then draw ALL of that
+   * record's dates, including the ones outside. A job raised in January and due
+   * next week would put its January date on the grid under "Last 90 days" and
+   * the count beside the range would not know about it. So the window is
+   * applied again, to the day each event actually falls on.
+   *
+   * Whole days, deliberately: `event.day` is the calendar date, and a range on
+   * a calendar is a range of days. Comparing the underlying instant instead
+   * would put a job stored as 04:33 on one side of a boundary and the same
+   * job's date-only sibling on the other.
+   */
+  const withinPeriodDay = (day: CalendarDay) => {
+    if (!periodWindow) return true;
+    const at = Date.parse(day);
+    return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
+  };
+
+  const selectedEvents = useMemo(() => {
+    const chosen = new Set(sourceIds);
+    return allEvents.filter((event) => chosen.has(event.sourceId));
+  }, [allEvents, sourceIds]);
+
+  const events = useMemo(
+    () => selectedEvents.filter((event) => withinPeriodDay(event.day)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [period, selectedEvents],
+  );
+
+  /*
+   * What the range removed, in two parts because the range removes in two
+   * places: dates on a record that survived the prefilter, and every date on a
+   * record that did not. Both are counted rather than estimated — the notice
+   * puts this number in front of somebody who is asking where their job went,
+   * and a number that is nearly right is worse there than no number at all.
+   */
   const hiddenByPeriod = useMemo(() => {
     if (!periodWindow) return 0;
-    const all = buildCalendarEvents({
-      requests,
-      complianceRecords,
-      sourceIds,
-      filters,
-      today: todayDay,
-    });
-    return Math.max(0, all.length - events.length);
+    const fromKept = selectedEvents.length - events.length;
+    const kept = new Set(periodRequests.map((request) => request.id));
+    const keptCompliance = new Set(periodCompliance.map((record) => record.id));
+    const dropped = requests.filter((request) => !kept.has(request.id));
+    const droppedCompliance = complianceRecords.filter(
+      (record) => !keptCompliance.has(record.id),
+    );
+    if (!dropped.length && !droppedCompliance.length) return fromKept;
+    return (
+      fromKept +
+      buildCalendarEvents({
+        requests: dropped,
+        complianceRecords: droppedCompliance,
+        sourceIds,
+        filters,
+        today: todayDay,
+      }).length
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [complianceRecords, events.length, filters, period, requests, sourceIds, todayDay]);
+  }, [
+    complianceRecords,
+    events.length,
+    filters,
+    period,
+    periodCompliance,
+    periodRequests,
+    requests,
+    selectedEvents.length,
+    sourceIds,
+    todayDay,
+  ]);
 
   const eventsByDay = useMemo(() => groupCalendarEventsByDay(events), [events]);
 
@@ -3913,16 +3994,12 @@ function CalendarView({
   const sourceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const source of CALENDAR_DATE_SOURCES) counts[source.id] = 0;
-    const everything = buildCalendarEvents({
-      requests: periodRequests,
-      complianceRecords: periodCompliance,
-      sourceIds: CALENDAR_DATE_SOURCES.map((source) => source.id),
-      filters,
-      today: todayDay,
-    });
-    for (const event of everything) counts[event.sourceId] += 1;
+    for (const event of allEvents) {
+      if (withinPeriodDay(event.day)) counts[event.sourceId] += 1;
+    }
     return counts;
-  }, [filters, periodCompliance, periodRequests, todayDay]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allEvents, period]);
 
   /*
    * MAY THIS PERSON MOVE A DATE?
