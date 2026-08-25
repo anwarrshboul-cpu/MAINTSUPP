@@ -53,7 +53,7 @@ import {
   maintenanceRequests,
   recycleBin,
 } from "../../db/schema";
-import { chunkIds } from "./sql-batching";
+import { chunkIds, chunkRows } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -175,32 +175,40 @@ export async function sendJobsToBin(
       );
     const placementById = new Map(placements.map((row) => [row.requestId, row]));
 
-    await db.insert(recycleBin).values(
-      rows.map((row) => {
-        const placement = placementById.get(row.id);
-        return {
-          id: newId(),
-          organisationId: orgId,
-          entityType: "job",
-          entityId: row.id,
-          boardId: placement?.boardId ?? null,
-          title: row.title,
-          summary: row.reference ? `${row.reference} · ${row.stage}` : row.stage,
-          placement: placement
-            ? JSON.stringify({
-                groupId: placement.groupId,
-                groupName: placement.groupName,
-                position: placement.position,
-                boardId: placement.boardId,
-              } satisfies JobPlacement)
-            : null,
-          deletedByEmail: actor.email ?? null,
-          deletedByName: actor.displayName ?? null,
-          deletedAt,
-          expiresAt,
-        };
-      }),
-    );
+    /*
+     * Batched by ROW WIDTH, not by id count. This insert binds 12 variables per
+     * row, so the ids-per-statement chunk the surrounding loop uses (sized for
+     * one-variable `IN` lists) overshot the variable limit twelvefold: deleting
+     * more than eight items at once answered 503 "could not be saved" while a
+     * one-item delete sailed through. See `chunkRows`.
+     */
+    const binEntries = rows.map((row) => {
+      const placement = placementById.get(row.id);
+      return {
+        id: newId(),
+        organisationId: orgId,
+        entityType: "job",
+        entityId: row.id,
+        boardId: placement?.boardId ?? null,
+        title: row.title,
+        summary: row.reference ? `${row.reference} · ${row.stage}` : row.stage,
+        placement: placement
+          ? JSON.stringify({
+              groupId: placement.groupId,
+              groupName: placement.groupName,
+              position: placement.position,
+              boardId: placement.boardId,
+            } satisfies JobPlacement)
+          : null,
+        deletedByEmail: actor.email ?? null,
+        deletedByName: actor.displayName ?? null,
+        deletedAt,
+        expiresAt,
+      };
+    });
+    for (const entryChunk of chunkRows(binEntries, 12)) {
+      await db.insert(recycleBin).values(entryChunk);
+    }
 
     /*
      * The placement goes, the row stays.

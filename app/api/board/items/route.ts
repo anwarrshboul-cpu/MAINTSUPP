@@ -7,9 +7,12 @@ import {
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
+  sites,
 } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
-import { nextReference, resolveBoard } from "../../../lib/board-registry";
+import { isBoardNotFound, nextReference, resolveBoard } from "../../../lib/board-registry";
+import { dateDecorationValue } from "../../../lib/board-cell-values";
+import type { BoardColumnType } from "../../../lib/types";
 import {
   automationContext,
   cellChangedEvent,
@@ -37,6 +40,12 @@ function unavailable(error?: unknown) {
   // what a person fixes by signing in. See `anonymousRefusal`.
   const refusal = anonymousRefusal(error);
   if (refusal) return refusal;
+  // A request for a board that does not exist is a 404, not an outage. Without
+  // this it funnelled into the 503 below, telling a browser to retry a request
+  // no retry can fix. See `BoardNotFoundError`.
+  if (isBoardNotFound(error)) {
+    return Response.json({ error: error.message }, { status: 404 });
+  }
   // Every catch in this route funnelled into a bare 503 with no trace of what
   // failed, which is how a missing table survived to "verified". The message
   // stays generic for the caller; the cause goes to the log.
@@ -80,8 +89,12 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const board = await resolveBoard(db, orgId, url.searchParams.get("board") ?? undefined);
     const includeArchived = url.searchParams.get("archived") === "true";
-    const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
-    const cursor = Number(url.searchParams.get("cursor")) || 0;
+    // Clamped from BOTH ends: SQLite reads `LIMIT -5` as "no limit", so an
+    // unfloored value let `?limit=-5` bypass the 500-row cap. A negative
+    // OFFSET happens to be read as zero, but that is driver leniency, not a
+    // contract — clamp rather than rely on it.
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 500);
+    const cursor = Math.max(Number(url.searchParams.get("cursor")) || 0, 0);
 
     const conditions = [
       eq(maintenanceRequests.organisationId, orgId),
@@ -182,7 +195,9 @@ export async function POST(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId, actor } = guard.scope;
-    const body = await request.json().catch(() => ({}));
+    // `?? {}` because a body of literal `null` PARSES — the catch never fires,
+    // and every `body.x` below would throw straight into the 503 catch.
+    const body = (await request.json().catch(() => null)) ?? {};
     const board = await resolveBoard(db, orgId, text(body.board, 48) || undefined);
     const who = actor.displayName || "Workspace";
 
@@ -270,6 +285,30 @@ export async function POST(request: Request) {
     // detail page all depend on it, so an unassigned job is not allowed.
     const siteId = text(body.siteId, 64);
     if (!siteId) return bad("A site is required.");
+
+    /*
+     * The site must be one THIS organisation owns. The two references directly
+     * below — groupId and parentId — were org-scoped from the start, but siteId
+     * was only length-checked, so a caller could file a job in their own tenant
+     * against another tenant's site id (or an invented one). The row lands in
+     * the actor's org, but its site_id then points across the tenant boundary,
+     * which corrupts every site-joined report and compliance count.
+     *
+     * The only value that is legitimately not a site row is the "unassigned"
+     * sentinel the board's inline "Add item" writes (board-mutations.ts) and
+     * that a subitem of such a job carries up from its parent. It references no
+     * real site in any tenant, so it leaks nothing and is allowed through; every
+     * other id must resolve to a site in this organisation. This validates the
+     * existing reference — it is not the deferred canonical Site migration.
+     */
+    const UNASSIGNED_SITE_ID = "site-unassigned";
+    if (siteId !== UNASSIGNED_SITE_ID) {
+      const [site] = await db
+        .select({ id: sites.id })
+        .from(sites)
+        .where(and(eq(sites.id, siteId), eq(sites.organisationId, orgId)));
+      if (!site) return bad("Site not found.", 404);
+    }
 
     const groupId = text(body.groupId, 64);
     if (groupId) {
@@ -380,7 +419,9 @@ export async function PATCH(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId, actor } = guard.scope;
-    const body = await request.json().catch(() => ({}));
+    // `?? {}` because a body of literal `null` PARSES — the catch never fires,
+    // and every `body.x` below would throw straight into the 503 catch.
+    const body = (await request.json().catch(() => null)) ?? {};
     const board = await resolveBoard(db, orgId, text(body.board, 48) || undefined);
     const who = actor.displayName || "Workspace";
 
@@ -402,18 +443,65 @@ export async function PATCH(request: Request) {
         );
       if (!column) return bad("Column not found.", 404);
 
-      const definition = getColumnType(column.type);
-      if (!definition) return bad(`Column type "${column.type}" is not known.`, 409);
-      if (definition.readOnly) {
-        return bad(`${column.title} is calculated and cannot be edited.`, 409);
-      }
+      /*
+       * The item must exist in THIS organisation. The column above was always
+       * org-scoped, but `requestId` went straight into the insert below, so a
+       * well-formed foreign or invented id was answered 200 and left an orphan
+       * cell behind — proven against the running server. `parentId` rides along
+       * for the automation event, which used to re-query it after the write.
+       */
+      const [workOrder] = await db
+        .select({
+          id: maintenanceRequests.id,
+          parentId: maintenanceRequests.parentId,
+        })
+        .from(maintenanceRequests)
+        .where(
+          and(
+            eq(maintenanceRequests.id, requestId),
+            eq(maintenanceRequests.organisationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!workOrder) return bad("Item not found.", 404);
 
-      const value = normaliseCellValue(column.type, body.value);
-      if (value === null) {
-        return bad(`That value is not valid for a ${definition.label} column.`);
-      }
-      if (column.required && !value) {
-        return bad(`${column.title} is required.`);
+      let value: string;
+      if (column.system) {
+        /*
+         * A SYSTEM COLUMN IS A FIELD ON THE JOB, NOT A CELL — the rule
+         * `PATCH /api/board`'s update_cell already enforces. This route
+         * accepted any value for one, storing a cell that shadowed the field
+         * without setting it: a contractor written here showed on the board
+         * while `request.contractor` stayed null everywhere else. Only the
+         * date decoration — marker and time of day, never a date — may be
+         * stored, exactly as on the board route.
+         */
+        let decoration: string | null;
+        try {
+          decoration = dateDecorationValue(column.type as BoardColumnType, body.value);
+        } catch (error) {
+          return bad(error instanceof Error ? error.message : "Enter a valid value.");
+        }
+        if (decoration === null) {
+          return bad(
+            "That column is a field on the job. Use PATCH /api/maintenance with { id, fields } so every other screen sees the change.",
+          );
+        }
+        value = decoration;
+      } else {
+        const definition = getColumnType(column.type);
+        if (!definition) return bad(`Column type "${column.type}" is not known.`, 409);
+        if (definition.readOnly) {
+          return bad(`${column.title} is calculated and cannot be edited.`, 409);
+        }
+        const normalised = normaliseCellValue(column.type, body.value);
+        if (normalised === null) {
+          return bad(`That value is not valid for a ${definition.label} column.`);
+        }
+        value = normalised;
+        if (column.required && !value) {
+          return bad(`${column.title} is required.`);
+        }
       }
 
       const [existing] = await db
@@ -452,16 +540,12 @@ export async function PATCH(request: Request) {
        * Named by column KEY for a system column and by id for a custom one —
        * the same handles the automation builder offers, so a rule on "Status"
        * matches whether the change came through here or through the board.
+       * `workOrder` was resolved before the write, so no second query here.
        */
-      const [owner] = await db
-        .select({ parentId: maintenanceRequests.parentId })
-        .from(maintenanceRequests)
-        .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
-        .limit(1);
       const event = cellChangedEvent(
         board.key,
         requestId,
-        owner?.parentId ?? null,
+        workOrder.parentId ?? null,
         column.system ? column.key : column.id,
         column.type,
         existing?.value ?? "",

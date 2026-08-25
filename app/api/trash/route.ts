@@ -158,7 +158,9 @@ export async function POST(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
 
-    const body = (await request.json().catch(() => ({}))) as { id?: unknown };
+    // `?? {}` because a body of literal `null` parses — the catch never
+    // fires, and `body.id` below threw into the 503 catch instead of a 400.
+    const body = ((await request.json().catch(() => null)) ?? {}) as { id?: unknown };
     const id = typeof body.id === "string" ? body.id.slice(0, 64) : "";
     if (!id) return Response.json({ error: "A bin entry id is required." }, { status: 400 });
 

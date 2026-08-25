@@ -13,6 +13,21 @@
  */
 export const SQL_VARIABLE_CHUNK = 90;
 
+/**
+ * Chunking for multi-row `INSERT … VALUES` statements.
+ *
+ * An `IN` list binds ONE variable per element; a bulk insert binds one per
+ * COLUMN per row, so the safe row count depends on the table's width. The
+ * recycle bin writes 12 columns a row, which put a 20-row bulk delete at 240
+ * variables — far past the same limit `chunkIds` exists for — and every
+ * "Delete selected" of more than eight items answered 503. Divide the budget
+ * by the row width and the widest table still fits.
+ */
+export function chunkRows<T>(rows: readonly T[], columnsPerRow: number): T[][] {
+  const size = Math.max(1, Math.floor(SQL_VARIABLE_CHUNK / Math.max(1, columnsPerRow)));
+  return chunkIds(rows, size);
+}
+
 /** Splits a list into chunks small enough to bind in one statement. */
 export function chunkIds<T>(ids: readonly T[], size = SQL_VARIABLE_CHUNK): T[][] {
   if (ids.length <= size) return ids.length ? [[...ids]] : [];

@@ -81,6 +81,18 @@ async function nextItemNumber(db: BoardDatabase, orgId: string) {
   return Number(latest.maxNumber ?? 1048) + 1;
 }
 
+/**
+ * How many consecutive ids `createBoardItem` will try before giving up.
+ *
+ * `nextItemNumber` reads a MAX rather than reserving from an atomic counter, so
+ * simultaneous creates compute the same number and every insert after the first
+ * loses the primary key. Rather than let that surface as a 503, the insert uses
+ * `ON CONFLICT DO NOTHING` and walks to the next number when the row it wanted
+ * was taken — so a burst of creates fans out across consecutive slots. Eight
+ * covers far more simultaneous creators than a board ever has.
+ */
+const MAX_ITEM_ID_ATTEMPTS = 8;
+
 async function nextPosition(db: BoardDatabase, orgId: string, groupId: string) {
   const [last] = await db
     .select({ value: max(maintenanceGroupItems.position) })
@@ -193,45 +205,77 @@ export async function createBoardItem(
   const group = await findGroup(db, orgId, boardId, groupId);
   if (!group) return null;
 
-  const id = `MN-${await nextItemNumber(db, orgId)}`;
   const position = await nextPosition(db, orgId, group.id);
   const requestedAt = new Date().toISOString();
   const stage = (group.stageKey as RequestStage | null) ?? ("Incoming" as const);
   const title = (options.title ?? "").trim().slice(0, 180) || newItemTitle(boardId);
-  const [created] = await db
-    .insert(maintenanceRequests)
-    .values({
-      id,
-      organisationId: orgId,
-      siteId: "site-unassigned",
-      source: "Manual",
-      title,
-      description: title,
-      location: "Choose a location",
-      requester: actor.displayName || actor.email || "Workspace",
-      contact: "Not provided",
-      category: "Other",
-      engineer: "Handyman",
-      tier: 3,
-      priority: "Medium",
-      stage,
-      status: statusForStage(stage),
-      contractor: null,
-      assignee: null,
-      parentId: options.parentId ?? null,
-      requestedAt,
-      dueAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
-      completedAt: null,
-      nextUpdateAt: null,
-      cost: null,
-      attachmentCount: 0,
-      issueAttachmentCount: 0,
-      completedAttachmentCount: 0,
-      generalAttachmentCount: 0,
-      commentCount: 0,
-      createdByEmail: actor.email,
-    })
-    .returning();
+
+  // Everything about the new row except its id, which is picked per attempt.
+  const values = {
+    organisationId: orgId,
+    siteId: "site-unassigned",
+    source: "Manual",
+    title,
+    description: title,
+    location: "Choose a location",
+    requester: actor.displayName || actor.email || "Workspace",
+    contact: "Not provided",
+    category: "Other",
+    engineer: "Handyman",
+    tier: 3,
+    priority: "Medium",
+    stage,
+    status: statusForStage(stage),
+    contractor: null,
+    assignee: null,
+    parentId: options.parentId ?? null,
+    requestedAt,
+    dueAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+    completedAt: null,
+    nextUpdateAt: null,
+    cost: null,
+    attachmentCount: 0,
+    issueAttachmentCount: 0,
+    completedAttachmentCount: 0,
+    generalAttachmentCount: 0,
+    commentCount: 0,
+    createdByEmail: actor.email,
+  };
+
+  /*
+   * Pick an id and insert, walking PAST a concurrent create that took the same
+   * number first. `base` is read once; each retry tries `base + attempt`
+   * rather than re-reading the MAX, because a re-read can still see the losing
+   * value before the winner's row is visible and hand back the same number
+   * again. Walking a fixed offset means every attempt targets a definitively
+   * different id, so N simultaneous creates fan out across N consecutive slots
+   * instead of all queuing behind one. See `MAX_ITEM_ID_ATTEMPTS`.
+   *
+   * A taken id is detected with `onConflictDoNothing().returning()` — the
+   * conflict becomes an empty result, never an exception — because that is how
+   * every other writer in this codebase treats a lost insert race, and because
+   * the D1 adapters do not guarantee a typed constraint error that could be
+   * told apart from a real failure.
+   */
+  const base = await nextItemNumber(db, orgId);
+  let created: RequestRow | undefined;
+  let id = "";
+  for (let attempt = 0; attempt < MAX_ITEM_ID_ATTEMPTS; attempt++) {
+    id = `MN-${base + attempt}`;
+    const [row] = await db
+      .insert(maintenanceRequests)
+      .values({ id, ...values })
+      .onConflictDoNothing()
+      .returning();
+    if (row) {
+      created = row;
+      break;
+    }
+  }
+  if (!created) {
+    throw new Error("Could not allocate a job id; too many simultaneous creates.");
+  }
+
   const [item] = await db
     .insert(maintenanceGroupItems)
     .values({

@@ -19,6 +19,28 @@ export type BoardRecord = {
 /** The board every pre-Stage-3 row implicitly belonged to. */
 export const DEFAULT_BOARD_KEY = "maintenance";
 
+/**
+ * A caller named a board that does not exist in this organisation.
+ *
+ * This is a bad *request*, not an outage: without a type for it the generic
+ * `Error` thrown below was indistinguishable from a database failure in a
+ * route's catch, so `/api/board/items?board=<unknown>` answered 503 "temporarily
+ * unavailable" — telling a browser to retry a request no retry can fix. Routes
+ * that care can catch this and return 404 instead; those that do not keep their
+ * existing behaviour.
+ */
+export class BoardNotFoundError extends Error {
+  constructor(key: string) {
+    super(`Board "${key}" does not exist.`);
+    this.name = "BoardNotFoundError";
+  }
+}
+
+/** True when `error` is a request for a board that does not exist. */
+export function isBoardNotFound(error: unknown): error is BoardNotFoundError {
+  return error instanceof BoardNotFoundError;
+}
+
 function newId() {
   return `board_${crypto.randomUUID().replace(/-/g, "")}`;
 }
@@ -151,7 +173,7 @@ export async function resolveBoard(
   }
 
   if (wanted !== DEFAULT_BOARD_KEY) {
-    throw new Error(`Board "${wanted}" does not exist.`);
+    throw new BoardNotFoundError(wanted);
   }
 
   const id = `board_${organisationId}_${DEFAULT_BOARD_KEY}`;
@@ -229,21 +251,33 @@ export async function nextReference(
   organisationId: string,
   boardId: string,
 ): Promise<string> {
-  await db
+  /*
+   * Increment AND read the counter in ONE statement.
+   *
+   * This used to be an UPDATE `counter = counter + 1` followed by a SEPARATE
+   * SELECT of the counter. The increment is atomic; reading it back in a second
+   * statement is not, so two concurrent submissions could both run their UPDATE
+   * and then both read the same post-increment value — the exact duplicate the
+   * comment above promised was impossible. Proven against the running server: a
+   * burst of ten simultaneous creates was handed three distinct references, one
+   * of them shared by five jobs.
+   *
+   * `UPDATE … RETURNING` makes the write and the read one atomic step, so each
+   * caller sees exactly the value its own increment produced. SQLite serialises
+   * writers, so two concurrent callers get consecutive numbers, never the same
+   * one.
+   */
+  const [row] = await db
     .update(boards)
     .set({
       referenceCounter: sql`${boards.referenceCounter} + 1`,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     })
-    .where(and(eq(boards.id, boardId), eq(boards.organisationId, organisationId)));
-
-  const [row] = await db
-    .select({
+    .where(and(eq(boards.id, boardId), eq(boards.organisationId, organisationId)))
+    .returning({
       prefix: boards.referencePrefix,
       counter: boards.referenceCounter,
-    })
-    .from(boards)
-    .where(and(eq(boards.id, boardId), eq(boards.organisationId, organisationId)));
+    });
 
   const year = new Date().getUTCFullYear();
   const sequence = String(row?.counter ?? 1).padStart(4, "0");

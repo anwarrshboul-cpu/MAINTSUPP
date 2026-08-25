@@ -1476,7 +1476,20 @@ export async function POST(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId, identityEmail, session } = guard.scope;
-    const payload = (await request.json()) as Record<string, unknown>;
+    /*
+     * A body that is not a JSON object is a bad request, not an outage. The
+     * unguarded read let broken JSON throw — and a body of literal `null`
+     * parse — straight through every action into the 503 at the bottom.
+     */
+    const payload = (await request.json().catch(() => null)) as
+      | Record<string, unknown>
+      | null;
+    if (!payload || typeof payload !== "object") {
+      return Response.json(
+        { error: "The request body must be a JSON object." },
+        { status: 400 },
+      );
+    }
     const action = trimString(payload.action, 40);
     const boardId = boardIdFrom(request);
     await ensureBoardState(db, orgId, boardId);
@@ -1857,6 +1870,18 @@ export async function POST(request: Request) {
       // Stage 23 — a job in the recycle bin cannot be duplicated; the helper
       // reads live rows only. See `duplicateBoardItems`.
       const outcome = await duplicateBoardItems(db, orgId, boardId, actor, requestIds);
+      /*
+       * Nothing copied means every id was foreign, invented, or in the bin.
+       * This used to answer 201 with three empty arrays — a silent no-op that
+       * read as success, and the one place where the Stage 23 "cannot be
+       * duplicated" promise was only a comment. Refuse like delete_items does.
+       */
+      if (!outcome.requests.length) {
+        return Response.json(
+          { error: "Those items are not on this board, or are in the recycle bin." },
+          { status: 404 },
+        );
+      }
       await dispatchAutomationEvents(
         automationContext(guard.scope, request),
         outcome.requests.map((created, index) =>
@@ -1901,6 +1926,18 @@ export async function POST(request: Request) {
         requestIds,
         action === "archive_items",
       );
+      /*
+       * Nothing moved means no id named a row this organisation has on the
+       * board — foreign, invented, or binned (a binned job has no placement).
+       * Answering 200 with empty arrays here read as success for a request
+       * that did nothing; refuse the way delete_items refuses.
+       */
+      if (!outcome.items.length) {
+        return Response.json(
+          { error: "Those items are not on this board, or are in the recycle bin." },
+          { status: 404 },
+        );
+      }
       /*
        * Told after the fact, never before: the move has been written, and a
        * rule that fails cannot undo it. A group with a stage also changed the
@@ -2024,7 +2061,17 @@ export async function PATCH(request: Request) {
     // has no user id behind it was performed under the testing role switcher,
     // and a reader has to be able to tell those apart. See `auditActor`.
     const { actor, db, orgId, identityEmail, session } = guard.scope;
-    const payload = (await request.json()) as Record<string, unknown>;
+    // Same guard as POST: broken JSON and a literal-`null` body are 400s,
+    // not the 503 the bottom catch would turn the resulting throw into.
+    const payload = (await request.json().catch(() => null)) as
+      | Record<string, unknown>
+      | null;
+    if (!payload || typeof payload !== "object") {
+      return Response.json(
+        { error: "The request body must be a JSON object." },
+        { status: 400 },
+      );
+    }
     const action = trimString(payload.action, 40);
     const boardId = boardIdFrom(request);
     await ensureBoardState(db, orgId, boardId);
@@ -2190,6 +2237,25 @@ export async function PATCH(request: Request) {
     if (action === "sort_group") {
       const groupId = trimString(payload.groupId, 80);
       const requestIds = requestIdsFrom(payload);
+      /*
+       * The group must be this organisation's before anything else is said
+       * about it. Without this, a foreign group id with an empty sort order
+       * fell into the empty-group early return below and was answered 200 —
+       * a no-op, but one that read as success against somebody else's id.
+       */
+      const [sortTarget] = await db
+        .select({ id: maintenanceGroups.id })
+        .from(maintenanceGroups)
+        .where(
+          and(
+            eq(maintenanceGroups.id, groupId),
+            eq(maintenanceGroups.organisationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!sortTarget) {
+        return Response.json({ error: "Group not found." }, { status: 404 });
+      }
       const groupItems = await db
         .select()
         .from(maintenanceGroupItems)
@@ -2396,7 +2462,26 @@ export async function PATCH(request: Request) {
        */
       let value = "";
       try {
-        if (column.system) {
+        if (column.system && column.key === "name") {
+          /*
+           * THE NAME COLUMN IS THE ONE SYSTEM COLUMN WHOSE CELL *IS* THE VALUE.
+           *
+           * The refusal below exists because a system cell SHADOWS the job
+           * field it draws — assigning a contractor on the board while
+           * `request.contractor` stayed null. The name column shadows nothing:
+           * `boardItemName` (board-ordering.ts) reads the CELL first and only
+           * falls back to the title or the arrival form where no cell exists,
+           * which is precisely how renaming a row is meant to work — "The Name
+           * cell still wins where one exists", as that file puts it.
+           *
+           * Without this branch every rename surface was dead: the grid editor
+           * and the mobile sheet both save through here, took a 400, reverted,
+           * and showed the developer hint below as a toast. There is not one
+           * name cell in the database on any board, because none has ever been
+           * allowed to land.
+           */
+          value = normalizeCellValue(type, payload.value);
+        } else if (column.system) {
           /*
            * The ONE thing a system column may store as a cell: the marker and
            * the time of day a date column draws beside the job's own date. It
