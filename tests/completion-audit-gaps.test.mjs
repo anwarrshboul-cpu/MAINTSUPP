@@ -104,7 +104,14 @@ test("every analytics page owns a date range with presets and a custom span", as
   /* Each of the three that had nothing must FILTER, not just display. */
   assert.match(portal, /const inRange = files\.filter\(withinPeriod\)/, "Documents filters its register");
   assert.match(portal, /const scopedRequests = requests\.filter\(inWindow\)/, "Contractors recomputes from the window");
-  assert.match(portal, /if \(!withinPeriod\(request\.dueAt\)\) continue;/, "Planned filters what it draws");
+  /*
+   * Planned still filters — the filtering moved with the calendar into
+   * `calendar-surface.tsx`, which the board's Calendar view tab mounts too.
+   * The page keeps the PeriodPicker (counted above) and hands its window down.
+   */
+  const surface = await read("app/(app)/portal/calendar-surface.tsx");
+  assert.match(surface, /if \(!withinPeriod\(request\.dueAt\)\) continue;/, "Planned filters what it draws");
+  assert.match(portal, /periodWindow=\{/, "and the page supplies the window");
 
   /* Compliance keeps its expiry-horizon semantics but gains a custom span. */
   assert.match(portal, /\{ value: "custom", label: "Between two dates…" \}/);
@@ -128,17 +135,25 @@ test("the calendar draws the compliance renewals its own heading promises", asyn
    * and a click on one opening the certificate behind it. Only the address
    * changed. (Same move, same fix, as the note at stage-twentythree-sections
    * line 302.)
+   *
+   * ACCEPTANCE CORRECTION 1 moved it once more, and for a reason worth
+   * recording: the owner went looking for the calendar on the BOARD'S Calendar
+   * view tab and found a different component with none of this on it. The panel
+   * both hosts mount is `calendar-surface.tsx`, so the click handler lives
+   * there now while the page still supplies the register.
    */
   const portal = await read("app/(app)/portal/portal-app.tsx");
   const model = await read("app/(app)/portal/calendar-model.ts");
+  const surface = await read("app/(app)/portal/calendar-surface.tsx");
   assert.match(model, /export type CalendarEvent = \{/, "one shape for both sources");
   assert.match(model, /kind: CalendarEntity;/);
   assert.match(model, /export type CalendarEntity = "job" \| "compliance";/);
   assert.match(model, /for \(const record of complianceRecords\) \{/, "renewals are placed on the grid");
   assert.match(model, /title: `\$\{record\.kind\} renewal`/);
-  assert.match(portal, /onOpenCompliance\(event\.recordId \?\? null\)/, "and clicking one opens the certificate");
+  assert.match(surface, /onOpenCompliance\(event\.recordId \?\? null\)/, "and clicking one opens the certificate");
   // And the page still hands the register to the grid in the first place.
   assert.match(portal, /complianceRecords: WorkspaceSnapshot\["compliance"\]/);
+  assert.match(portal, /complianceRecords=\{complianceRecords\}/, "down into the panel");
 
   const css = await read("app/globals.css");
   assert.match(css, /\.calendar-event--renewal \{/, "a renewal reads differently from a job");

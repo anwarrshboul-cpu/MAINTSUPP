@@ -145,9 +145,22 @@ test("the phone's chrome is reachable with a thumb", async () => {
 test("Planned opens on the calendar", async () => {
   const portal = await read(PORTAL);
 
-  const calendar = portal.indexOf('<section className="panel calendar-panel">');
+  /*
+   * The calendar panel is `OperationsCalendarPanel` now — the board's Calendar
+   * view tab mounts the same component, which is what the owner was opening
+   * when they reported the calendar missing. The ORDER on this page is what
+   * this test is about and is unchanged: the panel is still rendered above the
+   * register.
+   */
+  const calendar = portal.indexOf("<OperationsCalendarPanel");
   const register = portal.indexOf('<section className="panel planned-register-panel">');
   assert.ok(calendar > 0 && register > 0, "both panels must still exist");
+  const surface = await read("app/(app)/portal/calendar-surface.tsx");
+  assert.match(
+    surface,
+    /<section className="panel calendar-panel">/,
+    "and the panel is still the calendar section it always was",
+  );
   assert.ok(
     calendar < register,
     "the calendar must come first — the register answers 'what is scheduled', " +

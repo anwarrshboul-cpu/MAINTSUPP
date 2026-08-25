@@ -49,46 +49,15 @@ import { chipInk } from "./chip-ink";
 /*
  * ── The calendar ─────────────────────────────────────────────────────────────
  *
- * Four files, split by what they are rather than by size: the model is pure and
+ * Five files, split by what they are rather than by size: the model is pure and
  * testable, the surfaces are presentational, the controls own their popovers,
- * and the preferences own the browser store. `CalendarView` below is the wiring
- * that joins them to this app's records and its write paths.
+ * the preferences own the browser store, and `calendar-surface.tsx` joins them
+ * into the panel that both this page and the board's Calendar view tab mount.
+ * This file keeps only what belongs to the PAGE — its heading, its own date
+ * range, and the planned register underneath.
  */
-import {
-  CALENDAR_DATE_SOURCES,
-  buildCalendarEvents,
-  calendarDayLabel,
-  calendarEditCapability,
-  calendarFilterCount,
-  calendarFilterOptions,
-  calendarJobDateValues,
-  calendarWriteTarget,
-  groupCalendarEventsByDay,
-  todayCalendarDay,
-  type CalendarDay,
-  type CalendarEvent as ModelCalendarEvent,
-  type CalendarWriteTarget,
-} from "./calendar-model";
-import {
-  CalendarNav,
-  CalendarSurface,
-  CalendarViewSwitcher,
-} from "./calendar-views";
-import {
-  CalendarColourSettings,
-  CalendarDateSourcePicker,
-  CalendarFilterBar,
-  CalendarLegend,
-} from "./calendar-controls";
-import {
-  calendarChipStyle,
-  useCalendarColours,
-  useCalendarFilters,
-  useCalendarSources,
-  useCalendarViewMode,
-} from "./calendar-preferences";
-import { useCapability } from "../../lib/client-capabilities";
-import "./calendar-page.css";
+import { OperationsCalendarPanel } from "./calendar-surface";
+import type { CalendarWriteTarget } from "./calendar-model";
 import {
   awaitingApprovalStatuses,
   awaitingPartsStatuses,
@@ -3775,46 +3744,22 @@ function ComplianceView({
 }
 
 /**
- * One thing on the operations calendar.
+ * The Planned page — the Operations calendar with its own date range above it
+ * and the shared planned-maintenance register below.
  *
- * Two sources land on the same grid — a job's response deadline and a
- * certificate's expiry — and a reader scanning a month should not have to know
- * which table a date came from. `kind` is what decides where a click goes.
+ * THE CALENDAR ITSELF IS NOT HERE ANY MORE. It is
+ * `OperationsCalendarPanel` in ./calendar-surface.tsx, because the board's
+ * Calendar view TAB mounts the same panel — the owner went looking for the
+ * calendar there, found a bare month grid with none of this on it, and was
+ * right to call the previous report unaccepted. One component now, two places
+ * that host it.
  *
- * THE SHAPE ITSELF NOW LIVES IN `./calendar-model`, with the day arithmetic,
- * the overdue rule, the filters and the write-target decision, because all of
- * that is pure and none of it wants React. What is left in this file is the
- * wiring: which records go in, which capability gates an edit, and what the
- * screen does when a write fails.
- */
-type CalendarEvent = ModelCalendarEvent;
-
-/**
- * Every date source, as a stable array.
+ * What is left in this file is what belongs to the PAGE rather than to the
+ * calendar: the heading, the page's own date range, and the register.
  *
- * Module-level rather than mapped inside the component: a fresh array on every
- * render would change a `useMemo` dependency that never actually changes, and
- * rebuild the whole event set for nothing.
- */
-const EVERY_CALENDAR_SOURCE_ID: readonly string[] = CALENDAR_DATE_SOURCES.map(
-  (source) => source.id,
-);
-
-/**
- * The operations calendar — a VIEW over jobs and certificates, never a store.
- *
- * Every date drawn here is read from `maintenance_requests` or from the
- * compliance register, and every date changed here is written straight back to
- * the field the board and the drawer read — see `calendarWriteTarget`. There is
- * deliberately no `calendar_events` table: a second copy of a due date is a
- * second answer to "when is this due", and this codebase has already paid for
- * that mistake twice (see the headers of compliance-register.ts and
- * store-documentation-register.ts).
- *
- * THE PAGE'S OWN STATE, AND NOBODY ELSE'S. The month in view, the
- * Month/Week/Day choice, the date sources and the filters belong to THIS page.
- * A range chosen here does not follow the reader to Reports, and Reports does
- * not reach in here — this product's date ranges are per page by decision.
+ * THE PAGE'S OWN STATE, AND NOBODY ELSE'S. A range chosen here does not follow
+ * the reader to Reports, and Reports does not reach in here — this product's
+ * date ranges are per page by decision.
  */
 function CalendarView({
   requests,
@@ -3848,326 +3793,25 @@ function CalendarView({
     day: string,
   ) => Promise<void>;
 }) {
-  const today = useMemo(() => new Date(), []);
-  const todayDay = useMemo(() => todayCalendarDay(today), [today]);
-  const nowMs = today.getTime();
-
-  /* Remembered per person per browser — see calendar-preferences.ts, which
-     says plainly why that is the storage and not an account setting. */
-  const [mode, setMode] = useCalendarViewMode();
-  const [sourceIds, setSourceIds] = useCalendarSources();
-  const [filters, setFilters] = useCalendarFilters();
-  const [colours, setColours] = useCalendarColours();
-
-  /*
-   * ONE ANCHOR FOR ALL THREE MODES.
-   *
-   * Month, Week and Day are three windows onto the same day, so switching must
-   * not move the reader: anchored on 24 August, Week opens the week containing
-   * the 24th and Day opens the 24th. A cursor per mode would lose the reader's
-   * place on every switch, which is the one thing that makes a three-mode
-   * calendar feel broken.
-   */
-  const [anchor, setAnchor] = useState<CalendarDay>(todayDay);
-  const [selectedDay, setSelectedDay] = useState<CalendarDay>(todayDay);
+  const nowMs = useMemo(() => Date.now(), []);
 
   /*
    * THE PAGE'S OWN RANGE, and what it is for on a calendar.
    *
    * The grid already answers "what is happening in March". The range answers a
    * different question — "show me only the next quarter's renewals" — and it
-   * filters what is DRAWN, so a reader paging through months sees a consistent
-   * slice rather than everything. Choosing a range also moves the anchor to the
-   * month the range starts in, so the answer is on screen without a second
-   * click.
+   * filters what is DRAWN. Choosing a range also moves nothing on its own; the
+   * panel says how many events it removed and offers one click to clear it, so
+   * a range can never quietly empty a month the reader navigated to.
    *
-   * It can no longer hide anything silently. `hiddenByPeriod` counts what the
-   * range removed and the toolbar offers one click to clear it: a calendar that
-   * quietly omits events from the month you navigated to is worse than one with
-   * no range at all.
-   *
-   * AND IT NO LONGER DEFAULTS TO THE PAST.
-   *
-   * This screen inherited "Last 90 days" from the analytics pages, where a
-   * backward window is the whole point. `analyticsWindow` reads
-   * `now - 90 days … now + 1 day`, so on a planning calendar the default hid
-   * everything due the day after tomorrow or later. Measured in dev: of 28 jobs
-   * carrying a due date, 13 were drawn and 15 were hidden, most of them the
-   * FUTURE work this page exists to show. Rescheduling a job from the 11th to
-   * the 27th made it vanish from the grid the moment it was saved — correct
-   * against the range, and useless.
-   *
-   * So the calendar opens on everything and the reader narrows from there. The
-   * control is unchanged and still filters what is drawn; only which end of it
-   * this screen starts at has changed.
+   * It does NOT default to the past. This screen inherited "Last 90 days" from
+   * the analytics pages, where `analyticsWindow` reads `now - 90 days … now + 1
+   * day`. On a planning calendar that hid everything due the day after tomorrow
+   * or later: of 28 jobs carrying a due date, 13 were drawn and 15 hidden, most
+   * of them the future work the page exists to show.
    */
   const [period, setPeriod] = useState("all");
   const periodWindow = resolvePeriod(period, nowMs);
-  const withinPeriod = (value: string | null | undefined) => {
-    if (!periodWindow) return true;
-    if (!value) return false;
-    const at = Date.parse(value);
-    return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
-  };
-  const choosePeriod = (next: string) => {
-    setPeriod(next);
-    const range = resolvePeriod(next, Date.now());
-    if (range) {
-      const start = new Date(range.start);
-      const month = String(start.getUTCMonth() + 1).padStart(2, "0");
-      setAnchor(`${start.getUTCFullYear()}-${month}-01`);
-    }
-  };
-
-  /*
-   * The range applied to the RECORDS, before any event is built.
-   *
-   * The Due Date pass comes first and on its own because it is the source this
-   * page has always drawn and the one the range control was written for. The
-   * second pass then admits a job kept only for another selected date: this
-   * screen now draws four job date fields, and a job whose Next Update falls in
-   * the window belongs in it even when its due date does not.
-   */
-  const periodRequests = useMemo(() => {
-    const kept: MaintenanceRequest[] = [];
-    for (const request of requests) {
-      if (!withinPeriod(request.dueAt)) continue;
-      kept.push(request);
-    }
-    const seen = new Set(kept.map((request) => request.id));
-    for (const request of requests) {
-      if (seen.has(request.id)) continue;
-      if (calendarJobDateValues(request, sourceIds).some(withinPeriod)) {
-        kept.push(request);
-      }
-    }
-    return kept;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, requests, sourceIds]);
-
-  const periodCompliance = useMemo(() => {
-    const kept: WorkspaceSnapshot["compliance"] = [];
-    for (const record of complianceRecords) {
-      if (!withinPeriod(record.expiry)) continue;
-      kept.push(record);
-    }
-    return kept;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [complianceRecords, period]);
-
-  /* Facet values are counted over EVERYTHING, not over what the range left, so
-     a filter menu does not empty itself as the range narrows. */
-  const filterOptions = useMemo(
-    () => calendarFilterOptions({ requests, complianceRecords }),
-    [complianceRecords, requests],
-  );
-
-  /*
-   * ONE BUILD, THREE ANSWERS.
-   *
-   * The screen needs what is drawn, a tally per date source for the picker, and
-   * a count of what the range removed. Each of those was its own
-   * `buildCalendarEvents` call at first — three passes over every job on every
-   * keystroke in a filter, which on a board of 753 jobs across five sources is
-   * three thousand objects built to answer two questions that are subsets of
-   * the first.
-   *
-   * So it builds ONCE, over every source, and the three answers are filters of
-   * that array. `EVERY_SOURCE_ID` is module-level rather than mapped here, so
-   * the memo's identity does not change on every render.
-   */
-  const allEvents = useMemo(
-    () =>
-      buildCalendarEvents({
-        requests: periodRequests,
-        complianceRecords: periodCompliance,
-        sourceIds: EVERY_CALENDAR_SOURCE_ID,
-        filters,
-        today: todayDay,
-      }),
-    [filters, periodCompliance, periodRequests, todayDay],
-  );
-
-  /*
-   * THE RANGE CONSTRAINS DAYS, NOT JUST RECORDS.
-   *
-   * The prefilter above keeps a record if ANY of its selected dates is in the
-   * window, which is right — but on its own it would then draw ALL of that
-   * record's dates, including the ones outside. A job raised in January and due
-   * next week would put its January date on the grid under "Last 90 days" and
-   * the count beside the range would not know about it. So the window is
-   * applied again, to the day each event actually falls on.
-   *
-   * Whole days, deliberately: `event.day` is the calendar date, and a range on
-   * a calendar is a range of days. Comparing the underlying instant instead
-   * would put a job stored as 04:33 on one side of a boundary and the same
-   * job's date-only sibling on the other.
-   */
-  const withinPeriodDay = (day: CalendarDay) => {
-    if (!periodWindow) return true;
-    const at = Date.parse(day);
-    return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
-  };
-
-  const selectedEvents = useMemo(() => {
-    const chosen = new Set(sourceIds);
-    return allEvents.filter((event) => chosen.has(event.sourceId));
-  }, [allEvents, sourceIds]);
-
-  const events = useMemo(
-    () => selectedEvents.filter((event) => withinPeriodDay(event.day)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [period, selectedEvents],
-  );
-
-  /*
-   * What the range removed, in two parts because the range removes in two
-   * places: dates on a record that survived the prefilter, and every date on a
-   * record that did not. Both are counted rather than estimated — the notice
-   * puts this number in front of somebody who is asking where their job went,
-   * and a number that is nearly right is worse there than no number at all.
-   */
-  const hiddenByPeriod = useMemo(() => {
-    if (!periodWindow) return 0;
-    const fromKept = selectedEvents.length - events.length;
-    const kept = new Set(periodRequests.map((request) => request.id));
-    const keptCompliance = new Set(periodCompliance.map((record) => record.id));
-    const dropped = requests.filter((request) => !kept.has(request.id));
-    const droppedCompliance = complianceRecords.filter(
-      (record) => !keptCompliance.has(record.id),
-    );
-    if (!dropped.length && !droppedCompliance.length) return fromKept;
-    return (
-      fromKept +
-      buildCalendarEvents({
-        requests: dropped,
-        complianceRecords: droppedCompliance,
-        sourceIds,
-        filters,
-        today: todayDay,
-      }).length
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    complianceRecords,
-    events.length,
-    filters,
-    period,
-    periodCompliance,
-    periodRequests,
-    requests,
-    selectedEvents.length,
-    sourceIds,
-    todayDay,
-  ]);
-
-  const eventsByDay = useMemo(() => groupCalendarEventsByDay(events), [events]);
-
-  /* The per-source tallies the picker prints, so "Next Update — 0" is legible
-     before somebody turns it on and wonders why nothing appeared. Counted with
-     the filters applied, because that is the number they will get. */
-  const sourceCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const source of CALENDAR_DATE_SOURCES) counts[source.id] = 0;
-    for (const event of allEvents) {
-      if (withinPeriodDay(event.day)) counts[event.sourceId] += 1;
-    }
-    return counts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allEvents, period]);
-
-  /*
-   * MAY THIS PERSON MOVE A DATE?
-   *
-   * Two capabilities, because these are two systems: a job's own date and a
-   * Store Documentation board cell are `board.edit`; the compliance register is
-   * `sites.edit`. Both are enforced on the server, on the request that does the
-   * thing — this only decides whether to DRAW the control, so nobody is offered
-   * a button that will refuse them.
-   *
-   * `null` from `useCapability` means "not answered yet", and an unanswered
-   * question is not a denial: the affordance stays until the answer arrives,
-   * rather than flashing off on every page load.
-   */
-  const mayEditBoard = useCapability("board.edit");
-  const mayEditSites = useCapability("sites.edit");
-  const mayEdit = (event: CalendarEvent) => {
-    const capability = calendarEditCapability(event);
-    if (!capability) return false;
-    return (capability === "board.edit" ? mayEditBoard : mayEditSites) !== false;
-  };
-  const canEditAnything = mayEditBoard !== false || mayEditSites !== false;
-
-  const [editing, setEditing] = useState<CalendarEvent | null>(null);
-
-  const openEvent = (event: CalendarEvent) => {
-    if (event.kind === "job" && event.request) {
-      onOpenRequest(event.request);
-      return;
-    }
-    onOpenCompliance(event.recordId ?? null);
-  };
-
-  const commitDate = async (event: CalendarEvent, day: CalendarDay) => {
-    const target = calendarWriteTarget(event);
-    if (target.path === "none") {
-      onNotify(target.reason);
-      return;
-    }
-    try {
-      if (target.path === "job") {
-        await onJobDateChange(target.id, target.field, day);
-      } else {
-        await onComplianceDateChange(target, day);
-      }
-      onNotify(
-        `${event.title} — ${event.fieldLabel} moved to ${calendarDayLabel(day)}.`,
-      );
-      setEditing(null);
-    } catch (error) {
-      /* The caller has already put the record back the way it was; all that is
-         left is to say why, and to leave the picker open on the value the
-         person chose so they can retry or cancel rather than start again. */
-      onNotify(
-        error instanceof Error ? error.message : "That date could not be saved.",
-      );
-    }
-  };
-
-  const activeFilters = calendarFilterCount(filters);
-
-  /*
-   * Four different silences, told apart.
-   *
-   * "Nothing here" and "nothing that matches what you asked for" and "you have
-   * not chosen a date field" are three different problems with three different
-   * fixes, and a single "No events" would hide which one the reader has.
-   */
-  const emptyState = !sourceIds.length ? (
-    <div className="calendar-empty">
-      <strong>No date field is selected.</strong>
-      <p>
-        Choose at least one date under <em>Dates</em> for anything to appear on
-        this calendar.
-      </p>
-    </div>
-  ) : activeFilters > 0 ? (
-    <div className="calendar-empty">
-      <strong>Nothing matches these filters.</strong>
-      <p>
-        {activeFilters} filter{activeFilters === 1 ? " is" : "s are"} applied.
-        Clearing them will show the rest of this period.
-      </p>
-    </div>
-  ) : (
-    <div className="calendar-empty">
-      <strong>Nothing is scheduled here.</strong>
-      <p>
-        Jobs appear on the dates their records carry and certificates on their
-        expiry. Nothing is shown here that is not on a record.
-      </p>
-    </div>
-  );
 
   return (
     <div className="section-stack">
@@ -4184,7 +3828,7 @@ function CalendarView({
           </p>
         </div>
         <div className="section-header__actions">
-          <PeriodPicker value={period} onChange={choosePeriod} now={nowMs} />
+          <PeriodPicker value={period} onChange={setPeriod} now={nowMs} />
           <button className="primary-button" type="button" onClick={() => onManage(null)}><Icon name="plus" size={17} />Manage planned work</button>
         </div>
       </section>
@@ -4199,99 +3843,23 @@ function CalendarView({
         a planned-maintenance screen to ask, and is how monday's calendar view
         behaves. The register keeps everything it had, one scroll down.
       */}
-      <section className="panel calendar-panel">
-        <div className="calendar-bar">
-          <CalendarNav
-            mode={mode}
-            anchor={anchor}
-            today={todayDay}
-            onAnchorChange={(next) => {
-              setAnchor(next);
-              setSelectedDay(next);
-            }}
-          />
-          <div className="calendar-bar__controls">
-            <CalendarViewSwitcher value={mode} onChange={setMode} />
-            <CalendarDateSourcePicker
-              value={sourceIds}
-              onChange={setSourceIds}
-              counts={sourceCounts}
-            />
-            <CalendarColourSettings colours={colours} onChange={setColours} />
-          </div>
-        </div>
-
-        <CalendarFilterBar
-          filters={filters}
-          options={filterOptions}
-          onChange={setFilters}
-        />
-
-        {hiddenByPeriod > 0 && (
-          <p className="calendar-period-notice" role="status">
-            <Icon name="alert" size={14} />
-            <span>
-              {hiddenByPeriod} event{hiddenByPeriod === 1 ? " is" : "s are"}{" "}
-              outside the selected date range, so they are not drawn.
-            </span>
-            <button type="button" onClick={() => setPeriod("all")}>
-              Show all dates
-            </button>
-          </p>
-        )}
-
-        <CalendarLegend colours={colours} />
-
-        <CalendarSurface
-          mode={mode}
-          anchor={anchor}
-          today={todayDay}
-          eventsByDay={eventsByDay}
-          chipStyle={(event) => calendarChipStyle(event, colours)}
-          typeLabel={(event) => (event.kind === "compliance" ? "Compliance" : "Job")}
-          onOpen={openEvent}
-          onEditDate={
-            canEditAnything
-              ? (event) => {
-                  if (!mayEdit(event)) {
-                    onNotify("You do not have permission to change this date.");
-                    return;
-                  }
-                  setEditing(event);
-                }
-              : null
-          }
-          selectedDay={selectedDay}
-          /*
-           * SELECTING A DAY MOVES THE ANCHOR TOO.
-           *
-           * They were separate at first and it broke the one promise the mode
-           * switcher makes. Select the 18th of October in the month grid, then
-           * press Week: you got the week of the 24th, because the anchor was
-           * still wherever paging had left it and only the agenda below the
-           * grid knew about the 18th. The reader had said which day they meant
-           * and the calendar answered with a different one.
-           *
-           * One value now. `calendarMonthGrid` normalises to the month that
-           * contains it, so choosing a day inside the visible month redraws
-           * nothing; choosing a trailing day from the next month pages to it,
-           * which is what a reader clicking "2" in the greyed-out tail means.
-           */
-          onSelectDay={(day) => {
-            setSelectedDay(day);
-            setAnchor(day);
-          }}
-          emptyState={emptyState}
-        />
-      </section>
-
-      {editing && (
-        <CalendarDateDialog
-          event={editing}
-          onCancel={() => setEditing(null)}
-          onSave={(day) => commitDate(editing, day)}
-        />
-      )}
+      <OperationsCalendarPanel
+        requests={requests}
+        complianceRecords={complianceRecords}
+        periodWindow={
+          periodWindow &&
+          Number.isFinite(periodWindow.start) &&
+          Number.isFinite(periodWindow.end)
+            ? { start: periodWindow.start, end: periodWindow.end }
+            : null
+        }
+        onShowAllDates={() => setPeriod("all")}
+        onOpenRequest={onOpenRequest}
+        onOpenCompliance={onOpenCompliance}
+        onNotify={onNotify}
+        onJobDateChange={onJobDateChange}
+        onComplianceDateChange={onComplianceDateChange}
+      />
 
       <section className="panel planned-register-panel">
         <div className="planned-register-panel__heading"><div><span>Shared planned maintenance</span><strong>{planned.filter((item) => item.status !== "Cancelled").length} active tasks</strong></div><button type="button" onClick={() => onManage(null)}>Open full register <Icon name="chevron" size={15} /></button></div>
@@ -4308,94 +3876,6 @@ function CalendarView({
         </div>
       </section>
 
-    </div>
-  );
-}
-
-/**
- * "Change date" — the calendar's accessible, non-drag way to move a date.
- *
- * A dialog rather than an inline popover because this is a WRITE to a customer
- * record: it names the record, names the field it is about to change, shows the
- * date the record holds now, and cannot be dismissed by a stray click on the
- * grid behind it. Drag-to-move exists as well on the month grid, but drag is
- * the convenience and this is the METHOD — somebody on a keyboard, a screen
- * reader or a small phone gets exactly the same ability as somebody with a
- * mouse and a steady hand.
- */
-function CalendarDateDialog({
-  event,
-  onCancel,
-  onSave,
-}: {
-  event: CalendarEvent;
-  onCancel: () => void;
-  onSave: (day: CalendarDay) => Promise<void> | void;
-}) {
-  const [day, setDay] = useState<CalendarDay>(event.day);
-  const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  useBodyScrollLock(true);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  return (
-    <div
-      className="calendar-date-dialog__scrim"
-      role="presentation"
-      onKeyDown={(pressed) => {
-        if (pressed.key === "Escape") onCancel();
-      }}
-    >
-      <div
-        className="calendar-date-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="calendar-date-dialog-title"
-      >
-        <h2 id="calendar-date-dialog-title">Change date</h2>
-        <p className="calendar-date-dialog__record">
-          <strong>{event.title}</strong>
-          <span>
-            {event.kind === "compliance" ? "Compliance" : "Job"} ·{" "}
-            {event.fieldLabel}
-          </span>
-        </p>
-        <label className="calendar-date-dialog__field">
-          <span>{event.fieldLabel}</span>
-          <input
-            ref={inputRef}
-            type="date"
-            value={day}
-            onChange={(changed) => setDay(changed.target.value)}
-          />
-        </label>
-        <p className="calendar-date-dialog__current">
-          This record currently reads {calendarDayLabel(event.day)}.
-        </p>
-        <div className="calendar-date-dialog__actions">
-          <button className="secondary-button" type="button" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={busy || !day || day === event.day}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await onSave(day);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? "Saving…" : "Save date"}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

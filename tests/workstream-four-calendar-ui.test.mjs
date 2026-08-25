@@ -30,6 +30,13 @@ const PORTAL = "app/(app)/portal/portal-app.tsx";
 const VIEWS = "app/(app)/portal/calendar-views.tsx";
 const CONTROLS = "app/(app)/portal/calendar-controls.tsx";
 const PREFS = "app/(app)/portal/calendar-preferences.ts";
+/*
+ * The panel both hosts mount — the Planned page and the board Calendar tab.
+ * Everything from the control bar down to the grid moved here when the owner
+ * found the board tab drawing a different calendar entirely; the assertions
+ * below follow the code and still prove the same properties.
+ */
+const SURFACE = "app/(app)/portal/calendar-surface.tsx";
 const MODEL = "app/(app)/portal/calendar-model.ts";
 
 /* ── The three surfaces ──────────────────────────────────────────────────── */
@@ -107,12 +114,12 @@ test("one anchor serves all three modes, so switching does not move the reader",
    * broken. So there is exactly one anchor and the mode only decides how it is
    * drawn.
    */
-  const portal = await read(PORTAL);
-  const anchors = [...portal.matchAll(/useState<CalendarDay>\(todayDay\)/g)];
+  const surface = await read(SURFACE);
+  const anchors = [...surface.matchAll(/useState<CalendarDay>\(todayDay\)/g)];
   assert.equal(anchors.length, 2, "one anchor and one selected day, and no third cursor");
-  assert.match(portal, /const \[anchor, setAnchor\] = useState<CalendarDay>\(todayDay\)/);
+  assert.match(surface, /const \[anchor, setAnchor\] = useState<CalendarDay>\(todayDay\)/);
   assert.doesNotMatch(
-    portal,
+    surface,
     /setAnchor\(todayDay\)[\s\S]{0,120}setMode|setMode[\s\S]{0,120}setAnchor\(todayDay\)/,
     "changing mode must not reset the anchor",
   );
@@ -136,8 +143,8 @@ test("every date source names a field the API actually writes", async () => {
 test("the picker prints a count per source, so an empty one is legible first", async () => {
   const controls = await read(CONTROLS);
   assert.match(controls, /counts\[source\.id\] \?\? 0/);
-  const portal = await read(PORTAL);
-  assert.match(portal, /counts\[event\.sourceId\] \+= 1/);
+  const surface = await read(SURFACE);
+  assert.match(surface, /counts\[event\.sourceId\] \+= 1/);
 });
 
 /* ── Preferences ─────────────────────────────────────────────────────────── */
@@ -252,14 +259,14 @@ test("all three modes offer the date edit, not two of them", async () => {
 });
 
 test("the edit dialog names the record and the field before it changes anything", async () => {
-  const portal = await read(PORTAL);
-  assert.match(portal, /function CalendarDateDialog/);
-  assert.match(portal, /role="dialog"/);
-  assert.match(portal, /aria-modal="true"/);
-  assert.match(portal, /aria-labelledby="calendar-date-dialog-title"/);
-  assert.match(portal, /\{event\.fieldLabel\}/, "the field being changed is named");
-  assert.match(portal, /calendarDayLabel\(event\.day\)/, "and the date it holds now");
-  assert.match(portal, /key === "Escape"/, "Escape cancels");
+  const surface = await read(SURFACE);
+  assert.match(surface, /function CalendarDateDialog/);
+  assert.match(surface, /role="dialog"/);
+  assert.match(surface, /aria-modal="true"/);
+  assert.match(surface, /aria-labelledby="calendar-date-dialog-title"/);
+  assert.match(surface, /\{event\.fieldLabel\}/, "the field being changed is named");
+  assert.match(surface, /calendarDayLabel\(event\.day\)/, "and the date it holds now");
+  assert.match(surface, /key === "Escape"/, "Escape cancels");
 });
 
 test("each write goes to the endpoint that actually holds that date", async () => {
@@ -319,10 +326,12 @@ test("the calendar does not bypass the audit trail or the capability check", asy
   // Job edits go through the route the board and the drawer already call, which
   // is what records the activity row and fires the automations.
   assert.match(portal, /persistRequestUpdate\(id, \{ fields:/);
-  // And the affordance asks the same question the server enforces.
-  assert.match(portal, /useCapability\("board\.edit"\)/);
-  assert.match(portal, /useCapability\("sites\.edit"\)/);
-  assert.match(portal, /calendarEditCapability\(event\)/);
+  /* And the affordance asks the same question the server enforces. That check
+     sits with the panel, which is the thing that draws the control. */
+  const surface = await read(SURFACE);
+  assert.match(surface, /useCapability\("board\.edit"\)/);
+  assert.match(surface, /useCapability\("sites\.edit"\)/);
+  assert.match(surface, /calendarEditCapability\(event\)/);
   const maintenance = await read("app/api/maintenance/route.ts");
   assert.match(maintenance, /scopedDbWithCapability\(request, "board\.edit"\)/);
 });
@@ -333,8 +342,8 @@ test("an unanswered capability is not a denial", async () => {
    * flash the edit control off on every page load, which reads as a permissions
    * bug — see the header of client-capabilities.ts.
    */
-  const portal = await read(PORTAL);
-  assert.match(portal, /!== false/, "null means unknown, and unknown is not no");
+  const surface = await read(SURFACE);
+  assert.match(surface, /!== false/, "null means unknown, and unknown is not no");
 });
 
 /* ── The DOM contract acceptance reads ───────────────────────────────────── */
@@ -392,10 +401,10 @@ test("the chrome is addressable by role rather than by its visible word", async 
 /* ── Honest silences, and no invented events ─────────────────────────────── */
 
 test("the four silences are told apart, and none of them draws an example", async () => {
-  const portal = await read(PORTAL);
-  assert.match(portal, /No date field is selected/);
-  assert.match(portal, /Nothing matches these filters/);
-  assert.match(portal, /Nothing is scheduled here/);
+  const surface = await read(SURFACE);
+  assert.match(surface, /No date field is selected/);
+  assert.match(surface, /Nothing matches these filters/);
+  assert.match(surface, /Nothing is scheduled here/);
   const views = await read(VIEWS);
   assert.match(views, /Nothing is scheduled for \{label\}/, "and one day at a time");
 });
@@ -421,12 +430,18 @@ test("the range filters days, not only records, and says what it removed", async
    * that job's dates, including the ones outside, and the count beside the
    * range knew nothing about them.
    */
+  const surface = await read(SURFACE);
+  assert.match(surface, /if \(!withinPeriod\(request\.dueAt\)\) continue;/, "the record prefilter");
+  assert.match(surface, /const withinPeriodDay/, "and the day the event falls on");
+  assert.match(surface, /selectedEvents\.filter\(\(event\) => withinPeriodDay\(event\.day\)\)/);
+  assert.match(surface, /calendar-period-notice/, "and it says how many it removed");
+  assert.match(surface, /Show all dates/, "with one click to clear it");
+  /* The range itself belongs to the HOST, so the panel takes a window rather
+     than owning a PeriodPicker — the board's Calendar tab has no such control
+     and passes null, which shows every date the records carry. */
+  assert.match(surface, /periodWindow\?: CalendarPeriodWindow/);
   const portal = await read(PORTAL);
-  assert.match(portal, /if \(!withinPeriod\(request\.dueAt\)\) continue;/, "the record prefilter");
-  assert.match(portal, /const withinPeriodDay/, "and the day the event falls on");
-  assert.match(portal, /selectedEvents\.filter\(\(event\) => withinPeriodDay\(event\.day\)\)/);
-  assert.match(portal, /calendar-period-notice/, "and it says how many it removed");
-  assert.match(portal, /Show all dates/, "with one click to clear it");
+  assert.match(portal, /<PeriodPicker value=\{period\}/, "and the Planned page supplies one");
 });
 
 test("the calendar does not open on a backward-looking range", async () => {
@@ -437,9 +452,11 @@ test("the calendar does not open on a backward-looking range", async () => {
    * 27th made it disappear the moment it saved.
    */
   const portal = await read(PORTAL);
+  /* The dialog moved to calendar-surface.tsx, so the Planned view now ends
+     where DocumentsView begins. */
   const view = portal.slice(
     portal.indexOf("function CalendarView("),
-    portal.indexOf("function CalendarDateDialog("),
+    portal.indexOf("function DocumentsView("),
   );
   assert.doesNotMatch(
     view,
@@ -455,9 +472,11 @@ test("the calendar's state is its own, and does not reach other pages", async ()
    * to the calendar; nothing here writes a shared range.
    */
   const portal = await read(PORTAL);
+  /* The dialog moved to calendar-surface.tsx, so the Planned view now ends
+     where DocumentsView begins. */
   const view = portal.slice(
     portal.indexOf("function CalendarView("),
-    portal.indexOf("function CalendarDateDialog("),
+    portal.indexOf("function DocumentsView("),
   );
   assert.match(view, /const \[period, setPeriod\] = useState\("all"\)/, "its own period");
   assert.doesNotMatch(view, /setSection\(/, "and it does not steer the rest of the app");
