@@ -206,7 +206,19 @@ export function boardSortValue(
 }
 
 function isEmptyValue(value: string | number) {
-  return value === "" || value === null || value === undefined;
+  // Custom columns spell "no value" as "" (board-format.ts customCellSortValue),
+  // but the system date and cost columns spell it as NEGATIVE_INFINITY
+  // (board-ordering.ts systemColumnSortValue) so that present values still
+  // compare numerically. Both are the SAME "missing" state, and both must sort
+  // last in either direction — otherwise reversing an ascending Due Date /
+  // Date Completed / Next Update / Cost sort floats every blank cell to the top,
+  // which the header's "empty sorts last in both directions" rule forbids.
+  return (
+    value === "" ||
+    value === null ||
+    value === undefined ||
+    value === Number.NEGATIVE_INFINITY
+  );
 }
 
 /**

@@ -176,6 +176,29 @@ function boardUrl(path: string, boardId: string) {
 /** The anchor a group the memo never saw gets: nothing to measure against. */
 const DETACHED_ANCHOR = createRef<HTMLButtonElement>();
 
+/*
+ * TIER OPTIONS STORE MONDAY'S LABELS; THE FIELD STORES THE NUMBER.
+ *
+ * `maintenance_requests.tier` has been the bare number 1–4 since Stage 1 — the
+ * SLA rules key on it — while the option registry (and the monday spec it is
+ * seeded from) stores "Tier 1"–"Tier 4" as the option VALUES. Left unmapped,
+ * that mismatch broke every tier surface at once: the cell drew the raw digit
+ * in an anonymous grey chip, picking "Tier 3" saved `Number("Tier 3")` — NaN —
+ * sorting by Tier ranked every row identically, and a Tier filter matched
+ * nothing. The two helpers below are the one bridge, used by the cell, the
+ * sort's option order and the filter's choices, so the number and the label
+ * can never disagree again.
+ */
+const tierDigits = (value: string) => value.replace(/\D+/g, "");
+
+/** The option value the tier cell should light up — "3" resolved to "Tier 3". */
+function tierCellValue(tier: string, options: Option[]): string {
+  if (options.some((option) => option.value === tier)) return tier;
+  return (
+    options.find((option) => tierDigits(option.value) === tier)?.value ?? tier
+  );
+}
+
 export function LiveMaintenanceBoard({
   boardId = "maintenance",
   sectionKey,
@@ -225,6 +248,15 @@ export function LiveMaintenanceBoard({
   const [items, setItems] = useState<MaintenanceGroupItem[]>([]);
   /** Whether the board snapshot has arrived — see `scopedRequests`. */
   const [placementsLoaded, setPlacementsLoaded] = useState(false);
+  /**
+   * Which board the columns in state were LOADED for, or null while they are
+   * still the fallback seed. The saved sort/filter seed below must wait for
+   * this: the fallback columns are non-empty from the first render, so a seed
+   * gated only on "are there columns" consumed itself against the fallbacks —
+   * reading zero rules — and the ref then blocked the real columns from ever
+   * seeding. Saved sorts and filters looked like they simply did not persist.
+   */
+  const [columnsLoadedFor, setColumnsLoadedFor] = useState<string | null>(null);
   // Options are configuration and live in the database. Starting empty means a
   // brief neutral render rather than showing labels the workspace may not have.
   const [boardOptions, setBoardOptions] = useState<BoardColumnOption[]>([]);
@@ -475,6 +507,15 @@ export function LiveMaintenanceBoard({
       setRowMenuId(null);
       setGroupMenuId(null);
       setSelectionMoveOpen(false);
+      /*
+       * The Sort and Filter panels are dialogs like every other popover here,
+       * and they were the only two this pair of closers forgot: Escape and a
+       * click on the grid left them floating over the board. Their own wrap
+       * carries `data-board-popover`, so a click INSIDE either panel still
+       * survives the pointerdown path above.
+       */
+      setSortPanelOpen(false);
+      setFilterPanelOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -486,6 +527,8 @@ export function LiveMaintenanceBoard({
       setRowMenuId(null);
       setGroupMenuId(null);
       setSelectionMoveOpen(false);
+      setSortPanelOpen(false);
+      setFilterPanelOpen(false);
     };
     document.addEventListener("pointerdown", closeMenus);
     document.addEventListener("keydown", closeOnEscape);
@@ -534,6 +577,8 @@ export function LiveMaintenanceBoard({
           setCustomColumns(
             payload.columns.filter((column) => !column.system),
           );
+          // Only now do the columns in state carry the saved sort and filter.
+          setColumnsLoadedFor(boardId);
         }
         if (payload.cells) {
           setCustomCells(
@@ -764,6 +809,12 @@ export function LiveMaintenanceBoard({
       choices.forEach((choice, index) => {
         if (choice.value) lookup.set(choice.value, index);
         if (choice.label) lookup.set(choice.label, index);
+        // The tier FIELD is the bare number; alias "3" onto "Tier 3" so a
+        // tier sort ranks rows instead of scoring them all "not in the list".
+        if (key === "tier") {
+          const digits = tierDigits(choice.value ?? "");
+          if (digits) lookup.set(digits, index);
+        }
       });
       orders.set(key, lookup);
     }
@@ -789,6 +840,15 @@ export function LiveMaintenanceBoard({
               request.location,
               request.requester,
               request.contractor ?? "",
+              // The server-assigned public reference (e.g. MS-2026-0040). A
+              // requester quoting the number from their confirmation email is
+              // the one search this box must never fail.
+              request.reference ?? "",
+              // The stored title. The Name COLUMN deliberately shows the
+              // arrival form on this board (monday parity — boardItemName),
+              // so a public submission's own title ("Leaking tap") appeared
+              // nowhere in this haystack and its exact words found nothing.
+              request.title ?? "",
               ...customColumns.map((column) =>
                 customCellDisplay(
                   column,
@@ -931,8 +991,14 @@ export function LiveMaintenanceBoard({
     const anchor = index >= 0 ? siblings[index + 1] : undefined;
 
     try {
+      /*
+       * POST, not PATCH: `create_item` lives in /api/board's POST dispatch —
+       * the PATCH handler answers 400 "Unknown board action." for it, which is
+       * exactly what "Create new item below" did from the day it shipped.
+       * `createItem` above always had the verb right; this call did not.
+       */
       const response = await fetch(boardUrl("/api/board", boardId), {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "create_item", groupId }),
       });
@@ -1149,11 +1215,19 @@ export function LiveMaintenanceBoard({
   const seededChoicesFor = useRef<string | null>(null);
   useEffect(() => {
     if (!allBoardColumns.length) return;
+    /*
+     * Wait for THIS board's real columns. The fallback columns satisfy the
+     * length check from the very first render, and seeding from them read an
+     * empty sort and an empty filter, then marked the board seeded — so the
+     * saved rules never applied and every session started from scratch. See
+     * `columnsLoadedFor` above.
+     */
+    if (columnsLoadedFor !== boardId) return;
     if (seededChoicesFor.current === boardId) return;
     seededChoicesFor.current = boardId;
     setSortRules(readSortRules(allBoardColumns));
     setFilterState(readFilterState(allBoardColumns));
-  }, [allBoardColumns, boardId]);
+  }, [allBoardColumns, boardId, columnsLoadedFor]);
 
   /**
    * Hide or show a column, and remember it.
@@ -1850,7 +1924,16 @@ export function LiveMaintenanceBoard({
       if (!optionKey) return [];
     return optionsFor(optionKey)
       .filter((option) => option.active !== false)
-      .map((option) => ({ value: option.value, label: option.label ?? option.value }));
+      .map((option) => ({
+        /* The tier RULE must store what the FIELD holds — the bare number —
+           or `any_of` compares "Tier 3" against 3 and matches nothing. The
+           label keeps the full "Tier 3" so the chip still reads properly. */
+        value:
+          entry.key === "tier"
+            ? tierDigits(option.value) || option.value
+            : option.value,
+        label: option.label ?? option.value,
+      }));
   };
 
   /**
@@ -2929,8 +3012,14 @@ export function LiveMaintenanceBoard({
     if (!requestIds.length || bulkBusy) return;
     if (
       action === "delete_items" &&
+      /*
+       * The same honesty fix the column delete got: `delete_items` is a SOFT
+       * delete into the Recycle Bin, and a confirmation that claims "this
+       * cannot be undone" about a recoverable action teaches people to click
+       * through the one that is telling the truth.
+       */
       !window.confirm(
-        `Delete ${requestIds.length} selected item${requestIds.length === 1 ? "" : "s"} and all attached files? This cannot be undone.`,
+        `Move ${requestIds.length} selected item${requestIds.length === 1 ? "" : "s"} and their files to the Recycle Bin? You can restore them from there for 30 days.`,
       )
     ) {
       return;
@@ -2980,7 +3069,7 @@ export function LiveMaintenanceBoard({
         );
         onRequestsDeleted(deletedIds);
         onNotify(
-          `${deletedIds.length} item${deletedIds.length === 1 ? "" : "s"} deleted.`,
+          `${deletedIds.length} item${deletedIds.length === 1 ? "" : "s"} moved to the Recycle Bin.`,
         );
       } else {
         if (
@@ -5248,13 +5337,21 @@ function BoardRow({
           <td {...shared}>
             <OptionCell
               title={column.title}
-              value={String(request.tier)}
+              /* "3" resolved to the "Tier 3" option so the chip lights up with
+                 the workspace's own label and colour — see `tierCellValue`. */
+              value={tierCellValue(String(request.tier), optionSets.tier)}
               options={optionSets.tier}
               editableColumn="tier"
               onCreateOption={onCreateOption}
               onUpdateOption={onUpdateOption}
               onDeleteOption={onDeleteOption}
-              onChange={(value) => onSave({ tier: Number(value) })}
+              onChange={(value) => {
+                /* The field is numeric: "Tier 3" saves 3, a bare "2" saves 2.
+                   An option with no number in it cannot be stored in a numeric
+                   field, so it is refused rather than saved as null. */
+                const tier = Number(tierDigits(value) || value);
+                if (Number.isFinite(tier) && value.trim()) onSave({ tier });
+              }}
             />
           </td>
         );
@@ -5494,9 +5591,14 @@ function BoardRow({
               value={request.cost === null ? "" : String(request.cost)}
               emptyLabel="—"
               inputMode="decimal"
-              onSave={(value) =>
-                onSave({ cost: value.trim() ? Number(value) : null })
-              }
+              onSave={(value) => {
+                /* Blank clears; a number saves; anything else is refused.
+                   Unguarded, "abc" became Number("abc") = NaN, which JSON
+                   serialises as null — so a typo DELETED the recorded cost
+                   instead of being rejected like the tier cell rejects one. */
+                const cost = value.trim() ? Number(value) : null;
+                if (cost === null || Number.isFinite(cost)) onSave({ cost });
+              }}
             />
           </td>
         );

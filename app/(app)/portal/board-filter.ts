@@ -336,7 +336,22 @@ export function applyBoardFilter(
       const field = entry ? filterFieldFor(entry) : null;
       return field ? { field, operator: rule.operator, values: rule.values } : null;
     })
-    .filter((rule): rule is NonNullable<typeof rule> => rule !== null);
+    .filter((rule): rule is NonNullable<typeof rule> => rule !== null)
+    /*
+     * A rule whose operator NEEDS values but has none yet is INCOMPLETE, not a
+     * filter. The panel commits a rule the moment a column is chosen — before
+     * any value is picked — and `any_of` with an empty list matches nothing,
+     * so that half-built rule blanked the entire board on the spot AND saved
+     * itself into the column's settings, greeting the next session with an
+     * inexplicably empty board. Until it has a value to compare against, the
+     * rule narrows nothing. `is_empty`/`is_not_empty` (arity 0) still apply
+     * with no values, exactly as before.
+     */
+    .filter(
+      (rule) =>
+        operatorArity(rule.operator) === 0 ||
+        rule.values.some((value) => value !== ""),
+    );
   if (!live.length) return rows;
 
   return rows.filter((request) => {
