@@ -5647,6 +5647,14 @@ function BoardRow({
             <InlineTextCell
               title={column.title}
               value={request.contact}
+              /*
+               * This column's type is `phone`, and the generic custom-column
+               * path above already maps `phone` to "tel" — this hard-coded
+               * system case just never said so, which is why entering a phone
+               * number on a phone raised the alphabetic keyboard. `cost` two
+               * cases up passes "decimal" for exactly the same reason.
+               */
+              inputMode="tel"
               onSave={(contact) => onSave({ contact })}
             />
           </td>
@@ -5730,7 +5738,15 @@ function BoardRow({
       className={selected ? "is-selected" : ""}
       data-board-row-id={request.id}
       data-board-row-group-id={currentGroupId}
-      title="Drag to move this row; on a touch screen, press and hold first"
+      /*
+       * NOT "press and hold first": there is no hold on either pointer.
+       * `rowDragDecision` answers "release" for ANY touch that did not begin on
+       * a drag handle, however long it rests — see `THE TOUCH STORY` in
+       * board-row-drag.ts for why the timer was deleted. This tooltip is the
+       * only instruction the product gives for the gesture, and it described the
+       * one interaction the rewrite removed.
+       */
+      title="Drag to move this row; on a touch screen, drag the grip beside the name"
       onClickCapture={(event) => {
         if (!suppressRowClickRef.current) return;
         suppressRowClickRef.current = false;

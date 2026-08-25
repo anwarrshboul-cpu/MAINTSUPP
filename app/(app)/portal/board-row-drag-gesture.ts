@@ -1032,14 +1032,38 @@ export function useBoardRowDrag({
     // two marks are pinned to are the same box, read once.
     const box = scroller ? scroller.getBoundingClientRect() : null;
     if (scroller && box) {
+      /*
+       * A ROW DRAG CREEPS VERTICALLY ONLY, AND THE HANDLE IS WHY.
+       *
+       * `edgeScrollVector` answers both axes — it is shared arithmetic and a
+       * corner is genuinely diagonal for anything that can be dropped sideways.
+       * A row cannot. `rowDropTargetFrom` resolves a drop from `clientY` alone:
+       * the answer is a group and the gap above a row, and a row spans the whole
+       * 4,000px width, so there is no horizontal position that changes where a
+       * drop lands and nothing to reveal by scrolling towards one.
+       *
+       * Left alone, the x component did not merely do nothing — it destroyed the
+       * reader's place in the board on every single phone drag. The one touch
+       * handle a phone has is `.sheet-row-grip`, drawn at `left: 0` inside the
+       * FROZEN Name cell (live-board.tsx). Once the 42px checkbox gutter has
+       * scrolled off, that cell sticks to the scroller's left edge, so the grip
+       * sits at x 1–25 — permanently 52px inside the 64px `ROW_DRAG_EDGE` band,
+       * with no way for a finger to start a drag anywhere else. Measured in
+       * Chromium at 430/390/375/360/320 with the board scrolled to `scrollLeft`
+       * 1500: a PURE VERTICAL drag by the grip drove it 1472 → 1304 → 1136 → …
+       * → 0 in about half a second, and cancelling the drag did not put it back.
+       * A coordinator reordering rows while reading Status watched the board
+       * teleport to the Name column, mid-gesture, every time.
+       *
+       * Dropping the axis here rather than in `edgeScrollVector` is deliberate:
+       * the arithmetic stays pure and honest about corners, and the decision
+       * that a ROW has no sideways drop lives with the gesture that knows it.
+       */
       const velocity = edgeScrollVector(clientX, clientY, box);
-      if (velocity.x || velocity.y) {
-        const beforeLeft = scroller.scrollLeft;
+      if (velocity.y) {
         const beforeTop = scroller.scrollTop;
-        scroller.scrollLeft += velocity.x;
         scroller.scrollTop += velocity.y;
-        scrolled =
-          scroller.scrollLeft !== beforeLeft || scroller.scrollTop !== beforeTop;
+        scrolled = scroller.scrollTop !== beforeTop;
       }
     }
 

@@ -13143,10 +13143,16 @@ body[data-theme="dark"] {
    * The drag grip moved into this cell when the gutter stopped being frozen —
    * a grip that rides off-screen at `scrollLeft > 42` is a drag that cannot be
    * started. It is absolutely positioned at the cell's left edge, so the cell
-   * owes it 18px or the handle's glyph sits on the first letter of the title.
+   * owes it exactly the grip's own width, or the handle sits on the first
+   * letter of the title. That width is 24px — the touch-target block at the
+   * end of this file raised it from 18px so a thumb can find it, and this
+   * reservation is the same number written a second time. Measured at
+   * 430/390/375/360/320 while the two disagreed: the grip overhung the title
+   * by 6px, so a tap on the first six pixels of any item name started a drag
+   * instead of opening the rename editor. Move one, move the other.
    */
   .live-sheet tbody td.sheet-column--name:has(> .sheet-row-grip) {
-    padding-left: 18px;
+    padding-left: 24px;
   }
 
   .live-sheet thead .sheet-column--name {
