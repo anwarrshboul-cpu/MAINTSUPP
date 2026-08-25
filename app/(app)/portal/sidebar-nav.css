@@ -373,3 +373,17 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/*
+ * Keyboard focus on the rail's own ground.
+ *
+ * The page-wide ring (globals.css :focus-visible) is --accent-fg, an ink tuned
+ * per THEME — but the rail is dark in BOTH themes, and the light theme's ink
+ * (#0a6f68) measures ~1.7:1 on --rail-bg: a tabbing reader lost the ring the
+ * moment it entered the sidebar. --rail-accent is the rail's own accent,
+ * ~10:1 on both rail grounds, exactly as the globals comment promises. Width
+ * and offset stay inherited so the two rings read as one system.
+ */
+.portal-sidebar :focus-visible {
+  outline-color: var(--rail-accent);
+}

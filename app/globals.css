@@ -1346,8 +1346,18 @@ a {
   color: var(--navy-950);
 }
 
+/*
+ * Keyboard focus ring. The colour was rgba(18,181,170,0.35) — a teal wash that
+ * measured 1.3:1 against white cards and 1.9:1 against the dark rail, i.e. an
+ * indicator you cannot see, failing 2.4.7 / 1.4.11. `--accent-fg` is the accent
+ * already tuned as ink for legibility in BOTH themes (#0a6f68 ≈ 5.5:1 on the
+ * light canvas, #5fd6cd ≈ 9:1 on the dark canvas), so a solid ring in it is
+ * visible on the page's own ground either way. The always-dark sidebar is the
+ * one ground the page theme does not describe; it re-points this at
+ * `--rail-accent` in sidebar-nav.css.
+ */
 :focus-visible {
-  outline: 3px solid rgba(18, 181, 170, 0.35);
+  outline: 3px solid var(--accent-fg);
   outline-offset: 2px;
 }
 
@@ -4432,6 +4442,30 @@ a {
 
 .live-board-toolbar:has(.live-board-menu, .board-rules) {
   overflow: visible;
+}
+
+/*
+ * ...AND THE PAGE MUST NOT INHERIT THAT SPILL.
+ *
+ * The rule above un-clips the toolbar so an open dropdown is not sliced off at
+ * its own edge. But the toolbar is a nowrap row WIDER than the viewport between
+ * roughly 1024 and 1370 - normally it scrolls inside itself - so un-clipping it
+ * handed the whole document a sideways scrollbar the moment Sort or Filter was
+ * opened. Measured with the panels open: controls reached x=1339 on a 1280
+ * screen and x=1311 on a 1024 one, and the dashboard grew a horizontal
+ * scrollbar it has at no other time.
+ *
+ * Clipping the PAGE while a panel is open contains that spill without
+ * re-clipping the panel, which sits inside the viewport at every desktop width
+ * thanks to the right-anchor rule further down. "clip" rather than "hidden"
+ * deliberately: it does not create a scroll container, so nothing relying on
+ * sticky positioning changes behaviour. Below 1024 this never applies - there
+ * the panel is a fixed sheet and the toolbar keeps its own scroll.
+ */
+@media (min-width: 1024px) {
+  body:has(.live-board-toolbar .board-rules) {
+    overflow-x: clip;
+  }
 }
 
 .live-board-toolbar::-webkit-scrollbar {
@@ -14548,6 +14582,27 @@ body[data-theme="dark"] {
   box-shadow: 0 16px 40px rgba(7, 24, 38, 0.18);
   color: #1f3a4a;
   font-size: 12px;
+}
+
+/*
+ * Desktop hangs the panel from the RIGHT edge of its trigger's wrap.
+ *
+ * Anchored left, a 520px panel overran the right of the viewport at every
+ * desktop width measured — Filter reached x=1459 on a 1440 screen, 1454 on
+ * 1280, 1426 on 1024; Sort cleared only 1440 — slicing off the panel's own
+ * Close button and, because nothing clips it, handing the document a
+ * sideways scrollbar. The wrap's right edge in the same measurements never
+ * passes ~1011px with the sidebar at its widest, so a right-anchored panel
+ * fits at every width this block can apply to. Below 1024 the sidebar is
+ * away and the toolbar always scrolls; there the brand-overrides sheet
+ * (position: fixed) takes over entirely, so this rule stops at 1024 rather
+ * than fight it.
+ */
+@media (min-width: 1024px) {
+  .live-board-rules-wrap .board-rules {
+    left: auto;
+    right: 0;
+  }
 }
 
 .board-rules__head {

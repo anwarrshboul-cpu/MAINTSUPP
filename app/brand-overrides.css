@@ -7785,10 +7785,22 @@ label.live-board-tool {
  * is the whole of what can be done from a stylesheet, and it removes the page
  * overflow either way.
  *
- * The desktop is untouched: there the rail all but fits, and the panels stay
- * absolutely positioned against their own trigger.
+ * THE BAND IS EVERY WIDTH THE SIDEBAR IS AWAY, NOT JUST PHONES. The first
+ * version stopped at 768px on the claim that above it "the rail all but
+ * fits". Measured, it does not: at 900 and 800 the rail is the same 1,072px
+ * of controls in a ~780px column, and opening Sort put the panel at
+ * x=547..1067 on a 900px screen — a third of it off the right edge — with
+ * 175px of document sideways scroll, exactly the disease this block cures at
+ * 390. The sheet now runs through 1024px, the widest layout that still has
+ * no sidebar; above it the panels stay absolutely positioned dropdowns and
+ * globals.css right-anchors them to their trigger's wrap so they cannot
+ * leave the viewport. 1024 is one of the agreed breakpoints (stage-five and
+ * stage-six pin the set), and the boundary resolving to this sheet is the
+ * safer of the two at the width where the rail is widest against the page.
+ * The sideways scroll the unclipped rail used to lend the document above
+ * 1024 is contained by the page-level clip in globals.css.
  */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .live-board-toolbar:has(.live-board-menu, .board-rules) {
     overflow-x: auto;
     overflow-y: hidden;
