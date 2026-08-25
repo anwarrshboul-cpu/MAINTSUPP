@@ -21,7 +21,7 @@ import {
 import { configuredValue } from "../../lib/options-repository";
 import { priorityRule } from "../../lib/priority-rules";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
-import { requestFieldValues } from "../../lib/request-fields";
+import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
 import {
   automationContext,
   dispatchAutomationEvents,
@@ -550,6 +550,32 @@ export async function PATCH(request: Request) {
     }
     if (stage && !validStages.has(stage)) {
       return Response.json({ error: "Invalid workflow stage." }, { status: 400 });
+    }
+
+    /*
+     * A value the field cannot hold is refused, not dropped.
+     *
+     * `requestFieldValues` throws malformed values away — deliberately, for
+     * the automation engine, where a rule firing with an impossible value
+     * should not take the run down. For a person's PATCH it is the wrong
+     * answer: `{ tier: "abc" }` came back 200 with the row untouched, telling
+     * the caller its edit had happened when it had not. A payload carrying one
+     * bad field beside good ones wrote the good ones and stayed silent about
+     * the rest, which is a partial write nobody asked for.
+     *
+     * Refusing the whole payload before anything is written is what makes the
+     * 200 mean something. Unknown keys are still ignored and absent keys are
+     * still absent, so every existing client is unaffected — the rules mirror
+     * the coercion exactly. See `invalidRequestFields`.
+     */
+    if (fields) {
+      const problems = invalidRequestFields(fields);
+      if (problems.length) {
+        return Response.json(
+          { error: problems.join(" "), fields: problems },
+          { status: 400 },
+        );
+      }
     }
 
     /*

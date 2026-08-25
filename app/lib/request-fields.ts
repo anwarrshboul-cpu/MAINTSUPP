@@ -129,6 +129,91 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
 }
 
 /**
+ * Which of a caller's `fields` this module would silently throw away.
+ *
+ * `requestFieldValues` DROPS anything malformed, and for the automation engine
+ * that is right: a rule firing with a value the column cannot hold should not
+ * take the run down. For a person's PATCH it is not. Sending
+ * `{ tier: "abc" }` was answered 200 with the row unchanged — the caller was
+ * told the edit succeeded and it had not happened, which is the one answer an
+ * API must never give. Worse, a payload of several fields where one was
+ * malformed wrote the others and stayed silent about the rest.
+ *
+ * So validation lives HERE, beside the coercion it mirrors, and the route
+ * refuses the whole payload before writing any of it. The engine keeps calling
+ * `requestFieldValues` and keeps its own behaviour.
+ *
+ * A key that is ABSENT is not a problem, and a key this build does not know is
+ * still ignored rather than refused — both are how every existing client
+ * already talks to this route. Only a key that is PRESENT holding a value the
+ * field cannot take is reported.
+ */
+export function invalidRequestFields(fields: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(fields, key);
+  const note = (key: string, expected: string) =>
+    problems.push(`${key} must be ${expected}.`);
+
+  if (has("source") && fields.source !== "Portal form" && fields.source !== "Manual") {
+    note("source", '"Portal form" or "Manual"');
+  }
+
+  const text: Array<[string, string]> = [
+    ["description", "text"],
+    ["location", "text"],
+    ["requester", "text"],
+    ["contact", "text"],
+    ["category", "text"],
+    ["engineer", "text"],
+    ["priority", "text"],
+    ["status", "text"],
+    ["title", "text"],
+  ];
+  for (const [key, expected] of text) {
+    if (has(key) && typeof fields[key] !== "string") note(key, expected);
+  }
+
+  // Nullable text: the null is how a caller clears it.
+  for (const key of ["contractor", "assignee", "approvedBy", "invoice", "formUrl"]) {
+    if (has(key) && typeof fields[key] !== "string" && fields[key] !== null) {
+      note(key, "text or null");
+    }
+  }
+
+  if (has("tier")) {
+    const tier = fields.tier;
+    if (
+      typeof tier !== "number" ||
+      !Number.isInteger(tier) ||
+      tier < 1 ||
+      tier > 20
+    ) {
+      note("tier", "a whole number between 1 and 20");
+    }
+  }
+
+  if (has("cost")) {
+    const cost = fields.cost;
+    const clears = cost === null || cost === "";
+    if (!clears && (typeof cost !== "number" || !Number.isFinite(cost))) {
+      note("cost", "a number, or null to clear it");
+    }
+  }
+
+  for (const key of ["requestedAt", "completedAt", "dueAt", "nextUpdateAt"]) {
+    if (has(key) && optionalIsoDate(fields[key]) === undefined) {
+      note(key, "a date, or null to clear it");
+    }
+  }
+
+  if (has("parentId") && typeof fields.parentId !== "string" && fields.parentId !== null) {
+    note("parentId", "an item id or null");
+  }
+
+  return problems;
+}
+
+/**
  * What a board column key reads from or writes to on the job row.
  *
  * The board draws system columns from `maintenance_requests` fields by key —

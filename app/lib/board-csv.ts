@@ -40,7 +40,12 @@ import type {
   MaintenanceBoardColumn,
   MaintenanceRequest,
 } from "./types";
-import { customCellDisplay, customCellKey, dateInputValue } from "../(app)/portal/board-format";
+import {
+  customCellDisplay,
+  customCellKey,
+  parseBoardDateMetadata,
+} from "../(app)/portal/board-format";
+import { formatDate } from "./format-date";
 import { boardItemName } from "../(app)/portal/board-ordering";
 
 export type BoardCsvColumn = {
@@ -68,6 +73,23 @@ export type BoardCsvInput = {
    */
   subitemCounts?: Record<string, number>;
 };
+
+/**
+ * A date as this product writes one: en-GB, `24/11/2026`.
+ *
+ * The export used to print the raw `YYYY-MM-DD` the field stores, because it
+ * reused `dateInputValue` — the helper that feeds `<input type="date">`, which
+ * REQUIRES ISO and must keep getting it. A spreadsheet is not a date input: a
+ * UK reader opening this file saw the American-looking form of every date in a
+ * product whose whole date doctrine (format-date.ts) is "en-GB, everywhere".
+ *
+ * The fallback is an empty string rather than format-date's em dash: a missing
+ * value in a spreadsheet is an empty cell, not a character to strip out later.
+ * Nothing on the wire changes — this is the file a person reads.
+ */
+function csvDate(value: string | null | undefined) {
+  return formatDate(value, { fallback: "" });
+}
 
 /**
  * What one system column prints for one row.
@@ -115,17 +137,17 @@ function systemCsvValue(
     case "assignee":
       return request.assignee ?? "";
     case "requested":
-      return dateInputValue(request.requestedAt);
+      return csvDate(request.requestedAt);
     case "completed":
-      return dateInputValue(request.completedAt);
+      return csvDate(request.completedAt);
     case "dueDate":
-      return dateInputValue(request.dueAt);
+      return csvDate(request.dueAt);
     case "timeline":
-      return `${dateInputValue(request.requestedAt)} to ${dateInputValue(request.dueAt)}`;
+      return `${csvDate(request.requestedAt)} to ${csvDate(request.dueAt)}`;
     case "requester":
       return request.requester;
     case "nextUpdate":
-      return dateInputValue(request.nextUpdateAt);
+      return csvDate(request.nextUpdateAt);
     case "issuePictures":
       return (
         request.issueAttachmentCount ??
@@ -171,7 +193,30 @@ export function boardCsvTable(input: BoardCsvInput) {
       if (entry.key) return systemCsvValue(entry.key, request, input, entry.column);
       const cellKey = customCellKey(request.id, entry.column.id);
       if (entry.column.type === "files") return input.fileCounts[cellKey] ?? 0;
-      return customCellDisplay(entry.column, input.cells[cellKey] ?? "");
+      const stored = input.cells[cellKey] ?? "";
+      /*
+       * A workspace-added date column holds the same ISO the system ones do,
+       * and `customCellDisplay` hands it back unchanged because that string
+       * feeds a date INPUT on the board. The file gets the written form
+       * instead, with the cell's optional time of day kept beside it.
+       */
+      if (entry.column.type === "date") {
+        const metadata = parseBoardDateMetadata(stored);
+        if (!metadata.date) return "";
+        return metadata.time
+          ? `${csvDate(metadata.date)} ${metadata.time}`
+          : csvDate(metadata.date);
+      }
+      if (entry.column.type === "timeline") {
+        try {
+          const timeline = JSON.parse(stored) as { start?: string; end?: string };
+          const span = [timeline.start, timeline.end].filter(Boolean).map(csvDate);
+          return span.length ? span.join(" to ") : "";
+        } catch {
+          return stored;
+        }
+      }
+      return customCellDisplay(entry.column, stored);
     }),
   );
   return { headers, rows };

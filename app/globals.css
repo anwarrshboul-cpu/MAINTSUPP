@@ -14945,3 +14945,47 @@ body.is-dragging-board-column {
     align-items: stretch;
   }
 }
+
+/*
+ * TOUCH TARGETS ON THE BOARD.
+ *
+ * Measured on the phone board at 390 and 320, the five interactive controls a
+ * finger actually has to hit were all under the 24px WCAG 2.5.8 asks for: the
+ * row and group checkbox at 13x13, the drag grip at 18 wide, the open-item
+ * button at 22x26 and the header's sort button at 22x22. On a pointer these
+ * are comfortable; on a phone the checkbox in particular is a coin-flip, and
+ * mis-hitting the grip starts a drag the reader did not ask for.
+ *
+ * The cells are NOT re-laid out — the density of this grid is the product, and
+ * the containers already have the room: the checkbox sits in a 42x38 header
+ * cell, the grip and open-item in a 168px name cell, the sort button in a
+ * 151px header. Only the controls' own boxes grow, by between 2px and 11px, so
+ * nothing reflows around them.
+ *
+ * The resize handle is deliberately left at 18px. It is not one of the
+ * controls this pass is for — it is an edge-anchored drag affordance, and
+ * widening it would push it under the neighbouring column's sort button and
+ * take bites out of the horizontal-scroll gesture the board depends on. 760px
+ * is the phone band this file already uses for the board.
+ */
+@media (max-width: 760px) {
+  .sheet-check input {
+    width: 24px;
+    height: 24px;
+  }
+
+  .sheet-row-grip {
+    min-width: 24px;
+  }
+
+  .sheet-open-item {
+    width: 24px;
+    height: 26px;
+  }
+
+  .column-sort-indicator {
+    width: 24px !important;
+    height: 24px !important;
+    flex: 0 0 24px !important;
+  }
+}
