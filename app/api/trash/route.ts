@@ -421,7 +421,46 @@ async function purgeColumn(db: Database, orgId: string, columnId: string) {
  * defensively, because a job restored and re-deleted by a racing request would
  * otherwise leave an orphan pointing at a row that no longer exists.
  */
+/**
+ * Destroy a job for good — and its subitems with it.
+ *
+ * A subitem is binned alongside its parent and carries its own bin entry, so
+ * purging only the parent would leave those entries pointing at children whose
+ * `parent_id` names a row that no longer exists: restorable in principle,
+ * invisible in practice, which is the orphan this whole path exists to stop.
+ * Permanently deleting a job deletes what hangs off it, as monday does.
+ *
+ * One level is enough — the board does not nest subitems under subitems.
+ */
 async function purgeJob(db: Database, orgId: string, requestId: string) {
+  const children = await db
+    .select({ id: maintenanceRequests.id })
+    .from(maintenanceRequests)
+    .where(
+      and(
+        eq(maintenanceRequests.parentId, requestId),
+        eq(maintenanceRequests.organisationId, orgId),
+      ),
+    );
+
+  for (const child of children) {
+    await purgeJobRow(db, orgId, child.id);
+    // Its bin entry goes too, or the bin keeps offering a row that is gone.
+    await db
+      .delete(recycleBin)
+      .where(
+        and(
+          eq(recycleBin.organisationId, orgId),
+          eq(recycleBin.entityType, "job"),
+          eq(recycleBin.entityId, child.id),
+        ),
+      );
+  }
+
+  return purgeJobRow(db, orgId, requestId);
+}
+
+async function purgeJobRow(db: Database, orgId: string, requestId: string) {
   const files = await db
     .select({ objectKey: attachments.objectKey })
     .from(attachments)

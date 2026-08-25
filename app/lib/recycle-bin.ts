@@ -123,11 +123,44 @@ export async function sendJobsToBin(
 ): Promise<string[]> {
   if (!requestIds.length) return [];
 
+  /*
+   * A SUBITEM GOES WHERE ITS PARENT GOES.
+   *
+   * This used to bin exactly the ids it was handed and never look at
+   * `parent_id`, so every child of a deleted job stayed LIVE — and invisible,
+   * because a subitem is only ever drawn underneath a parent row that no longer
+   * rendered. The row was on no board, in no bin, unreachable by search, and
+   * still counted by `/api/maintenance`, so it went on feeding the Overview's
+   * meters. Purging the parent then stranded it for ever behind a dangling
+   * `parent_id`.
+   *
+   * The children are folded into the id set here, at the top, rather than
+   * handled separately below — which means they go through exactly the same
+   * path a parent does: their placement is lifted into their own bin entry and
+   * then deleted, which is the asymmetry this file's header exists to explain.
+   * Anything else would leave a placement behind for the twenty-odd board reads
+   * that join through it.
+   */
+  const children = await db
+    .select({ id: maintenanceRequests.id })
+    .from(maintenanceRequests)
+    .where(
+      and(
+        inArray(maintenanceRequests.parentId, requestIds),
+        eq(maintenanceRequests.organisationId, orgId),
+        isNull(maintenanceRequests.deletedAt),
+      ),
+    );
+  const withChildren = [
+    ...requestIds,
+    ...children.map((child) => child.id).filter((id) => !requestIds.includes(id)),
+  ];
+
   const deletedAt = nowIso();
   const expiresAt = expiryFrom(deletedAt);
   const binned: string[] = [];
 
-  for (const chunk of chunkIds(requestIds)) {
+  for (const chunk of chunkIds(withChildren)) {
     /*
      * Only live rows. `isNull(deletedAt)` is what makes a second delete of the
      * same job a no-op instead of a unique-constraint failure on
@@ -540,7 +573,14 @@ async function restoreJob(
   entry: BinRow,
 ): Promise<RestoreOutcome> {
   const [job] = await db
-    .select({ id: maintenanceRequests.id, title: maintenanceRequests.title })
+    .select({
+      id: maintenanceRequests.id,
+      title: maintenanceRequests.title,
+      // Both kept for the subitem rules below: the stamp says which children
+      // went down with this job, and parentId says whether this IS one.
+      deletedAt: maintenanceRequests.deletedAt,
+      parentId: maintenanceRequests.parentId,
+    })
     .from(maintenanceRequests)
     .where(
       and(
@@ -561,6 +601,34 @@ async function restoreJob(
       error: "That job's row has already been removed, so there is nothing to restore.",
       status: 410,
     };
+  }
+
+  /*
+   * A subitem cannot come back before its parent.
+   *
+   * Restoring one on its own would put a live child under a job that is still
+   * deleted — which is exactly the invisible, unsearchable orphan that binning
+   * a parent used to create, arrived at from the other direction. The parent's
+   * own entry restores both.
+   */
+  if (job.parentId) {
+    const [parent] = await db
+      .select({ deletedAt: maintenanceRequests.deletedAt })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.id, job.parentId),
+          eq(maintenanceRequests.organisationId, orgId),
+        ),
+      );
+    if (parent?.deletedAt) {
+      return {
+        ok: false,
+        error:
+          "This is a subitem of a job that is also in the bin. Restore the job and this comes back with it.",
+        status: 409,
+      };
+    }
   }
 
   const placement = parsePlacement(entry.placement);
@@ -647,6 +715,64 @@ async function restoreJob(
       target: maintenanceGroupItems.requestId,
       set: { groupId, boardId, position: placement?.position ?? 0 },
     });
+
+  /*
+   * And the subitems that went down WITH this job, identified by carrying the
+   * same `deleted_at`. A child deleted on its own last week has a different
+   * stamp and stays in the bin with its own entry, which is the honest answer:
+   * this restore is undoing one delete, not every delete that ever touched the
+   * job.
+   */
+  if (job.deletedAt) {
+    const childEntries = await db
+      .select({ id: recycleBin.id, entityId: recycleBin.entityId, placement: recycleBin.placement })
+      .from(recycleBin)
+      .innerJoin(
+        maintenanceRequests,
+        eq(maintenanceRequests.id, recycleBin.entityId),
+      )
+      .where(
+        and(
+          eq(recycleBin.organisationId, orgId),
+          eq(recycleBin.entityType, "job"),
+          eq(maintenanceRequests.parentId, entry.entityId),
+          eq(maintenanceRequests.deletedAt, job.deletedAt),
+        ),
+      );
+
+    for (const child of childEntries) {
+      const childPlacement = parsePlacement(child.placement);
+      await db
+        .update(maintenanceRequests)
+        .set({ deletedAt: null, deletedBy: null, updatedAt: sql`CURRENT_TIMESTAMP` })
+        .where(
+          and(
+            eq(maintenanceRequests.id, child.entityId),
+            eq(maintenanceRequests.organisationId, orgId),
+          ),
+        );
+      if (childPlacement) {
+        await db
+          .insert(maintenanceGroupItems)
+          .values({
+            requestId: child.entityId,
+            organisationId: orgId,
+            boardId: childPlacement.boardId ?? boardId,
+            groupId: childPlacement.groupId ?? groupId,
+            position: childPlacement.position ?? 0,
+          })
+          .onConflictDoUpdate({
+            target: maintenanceGroupItems.requestId,
+            set: {
+              groupId: childPlacement.groupId ?? groupId,
+              boardId: childPlacement.boardId ?? boardId,
+              position: childPlacement.position ?? 0,
+            },
+          });
+      }
+      await db.delete(recycleBin).where(eq(recycleBin.id, child.id));
+    }
+  }
 
   await db.delete(recycleBin).where(eq(recycleBin.id, entry.id));
 
