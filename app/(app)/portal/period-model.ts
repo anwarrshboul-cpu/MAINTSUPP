@@ -609,6 +609,38 @@ export function rawPeriodBuckets(
 }
 
 /**
+ * What a merged bucket calls itself: the span it actually COVERS.
+ *
+ * It used to be `${first.label}–${last.label}`, which names the last MEMBER's
+ * start, not the merged bucket's end. Measured on the Overview at "Last 90
+ * days": three weekly buckets beginning 27 May, 1 Jun and 8 Jun merged into a
+ * column labelled "27 May–8 Jun" while holding rows through 14 Jun, and the
+ * next column began "15 Jun" — so the axis showed six days that appeared to
+ * belong to no column, and a job raised on 12 Jun was counted under a label
+ * that excludes it.
+ *
+ * Month-sized members keep first–last: a month's name already denotes the
+ * whole month, so "Jan 25–Mar 25" covers exactly what it says. Day- and
+ * week-sized members get the real last covered day (`end` is exclusive, so
+ * that is `end - 1`). Sub-day members get the exclusive end time, which is how
+ * a time range is conventionally written.
+ */
+function mergedLabel(first: PeriodBucket, last: PeriodBucket) {
+  // Month labels ("Aug", "Aug 25") start with a letter; day and hour labels
+  // with a digit. Judged from the label rather than the width because the
+  // final bucket's `end` is clamped to the window, so its width says nothing
+  // about its granularity.
+  if (/^[A-Za-z]/.test(last.label)) return `${first.label}–${last.label}`;
+  const width = last.end - last.start;
+  if (width < DAY_MS && first.label.includes(":")) {
+    const boundary = new Date(last.end);
+    return `${first.label}–${String(boundary.getHours()).padStart(2, "0")}:00`;
+  }
+  const end = new Date(last.end - 1);
+  return `${first.label}–${end.getDate()} ${SHORT_MONTHS[end.getMonth()]}`;
+}
+
+/**
  * Adjacent buckets merged until there are at most `max`, keeping every row.
  *
  * A merged bucket says which span it covers rather than borrowing the label of
@@ -624,7 +656,7 @@ function mergeBuckets(buckets: PeriodBucket[], max: number): PeriodBucket[] {
     const last = group[group.length - 1];
     merged.push({
       key: first.key,
-      label: group.length === 1 ? first.label : `${first.label}–${last.label}`,
+      label: group.length === 1 ? first.label : mergedLabel(first, last),
       start: first.start,
       end: last.end,
     });

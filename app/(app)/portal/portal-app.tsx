@@ -172,6 +172,8 @@ import {
   useStoredSortDirection,
 } from "./period-picker";
 import {
+  endOfDay,
+  parseStamp,
   periodSpendSeries,
   periodTrend,
   resolvePeriod,
@@ -834,6 +836,24 @@ function requestAgeDays(request: MaintenanceRequest, now: number) {
     0,
     Math.floor((now - new Date(request.requestedAt).getTime()) / 86_400_000),
   );
+}
+
+/**
+ * When a due date stops being a promise and starts being a breach.
+ *
+ * A due date with a time is an instant, and it is overdue the moment that
+ * instant passes — a four-hour SLA due at 09:00 is late at 09:01. A BARE date
+ * ("2026-08-25", which is what the monday import writes) means the whole day:
+ * the job is not overdue until the day is over. The old test —
+ * `new Date(dueAt) < now` — read a bare date as UTC midnight, which flagged a
+ * job "overdue" during the very day it was due, at an hour that depended on
+ * the reader's timezone. `parseStamp` reads the naive forms as local wall
+ * clock, the same doctrine the whole period model follows.
+ */
+function duePassed(dueAt: string, now: number) {
+  const bareDate = /^\d{4}-\d{2}-\d{2}$/.test(dueAt.trim());
+  const stamp = bareDate ? endOfDay(parseStamp(dueAt)) : parseStamp(dueAt);
+  return Number.isFinite(stamp) && stamp < now;
 }
 
 /**
@@ -2377,6 +2397,7 @@ export default function PortalApp({
               stores={currentStores}
               compliance={workspace?.compliance ?? []}
               units={currentUnits}
+              workspaceReady={workspace !== null}
               onOpenRequest={(request) => {
                 openRequest(request);
                 setSection("maintenance");
@@ -2760,6 +2781,7 @@ function OverviewView({
   stores: storeRows,
   compliance: complianceRecords,
   units,
+  workspaceReady,
   onNavigate,
   onOpenRequest,
 }: {
@@ -2774,6 +2796,18 @@ function OverviewView({
    */
   compliance: WorkspaceSnapshot["compliance"];
   units: WorkspaceUnit[];
+  /**
+   * Whether `/api/workspace` has answered yet.
+   *
+   * The jobs fetch and the workspace fetch land separately, and this page
+   * derives half its figures from each. Before this flag, the seconds between
+   * the two paints showed "Active units 0 — Add units to the register" and
+   * "Compliance 0% — No requirements recorded yet": definitive claims about an
+   * account that had simply not loaded, and on a failed workspace fetch they
+   * stood there permanently. Loading and empty are different states, and a
+   * dashboard must not present one as the other.
+   */
+  workspaceReady: boolean;
   onNavigate: (section: Section) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
 }) {
@@ -2821,7 +2855,10 @@ function OverviewView({
     .sort((left, right) => requestAgeDays(right, now) - requestAgeDays(left, now));
   const completed = scopedRequests.filter(isClosedRequest);
   const overdue = open.filter(
-    (request) => request.dueAt && new Date(request.dueAt).getTime() < now,
+    // Open work only, past its own target — see `duePassed` for why a bare
+    // date is not overdue until its day is over. Completed jobs cannot appear
+    // here: `open` is the canonical partition's other half.
+    (request) => request.dueAt && duePassed(request.dueAt, now),
   );
   const complianceItems = complianceRecords.filter(
     (record) =>
@@ -2889,12 +2926,20 @@ function OverviewView({
         aria-label="Portfolio metrics"
         tabIndex={0}
       >
-        <AnalyticsMetricCard label="Active units" value={String(activeUnitCount)} detail={activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} onClick={() => onNavigate("units")} />
-        <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.stage === "Attention", period, now)} onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Overdue" value={String(overdue.length)} detail="Target date passed" icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Completed" value={String(completed.length)} detail="Verified closures" icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Compliance" value={`${compliancePercent}%`} detail={complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} onClick={() => onNavigate("compliance")} />
+        {/*
+          Each sparkline names what it plots, because none of them is a history
+          — see the trend note in dashboard-meters.ts. And each trend is built
+          from the same rows as the number above it: "Requiring attention" used
+          to count open-and-urgent-or-escalated in the figure while its
+          sparkline counted `stage === "Attention"` only — the figure read 8
+          over a line that summed 2.
+        */}
+        <AnalyticsMetricCard label="Active units" value={workspaceReady ? String(activeUnitCount) : "—"} detail={!workspaceReady ? "Loading workspace…" : activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Maintenance requests raised across the selected period — not a history of the unit count; the unit register keeps none." onClick={() => onNavigate("units")} />
+        <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(attention, () => true, period, now)} trendLabel="Jobs now urgent or escalated, by the week they were raised across the selected period. Not a history of the attention count." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} trendLabel="Open jobs by the week they were raised, across the selected period. Not a history of the open count — no status history is recorded." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Overdue" value={String(overdue.length)} detail="Target date passed" icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} trendLabel="Jobs now overdue, by the week they were raised across the selected period. Not a history of the overdue count." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Completed" value={String(completed.length)} detail="Verified closures" icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} trendLabel="Completed jobs by the week they were raised — not by the week they closed, and not a history of the completed count." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Compliance" value={workspaceReady ? `${compliancePercent}%` : "—"} detail={!workspaceReady ? "Loading workspace…" : complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} trendLabel="Today's compliance score walked back through recorded certificate expiries, week by week. A view of expiry pressure, not an audit trail." onClick={() => onNavigate("compliance")} />
       </section>
 
       
@@ -2920,9 +2965,11 @@ function OverviewView({
             their requirements, the other says nobody has told us what the
             requirements are. A new site has the second problem.
           */}
-          <span>{complianceItems.length
-            ? `${complianceCounts.compliant} of ${complianceItems.length} requirements on track`
-            : "No compliance requirements recorded for these sites yet"}</span>
+          <span>{!workspaceReady
+            ? "Loading the compliance register…"
+            : complianceItems.length
+              ? `${complianceCounts.compliant} of ${complianceItems.length} requirements on track`
+              : "No compliance requirements recorded for these sites yet"}</span>
           <strong>View compliance <Icon name="chevron" size={15} /></strong>
         </button>
         <article className="analytics-panel analytics-trades-panel">
@@ -3003,17 +3050,21 @@ function OverviewView({
             key: "site-attention",
             label: "Sites needing attention",
             render: () => (
+              /*
+               * The WORKSPACE register, not `stores[].compliance`. This panel
+               * was still reading the per-store legacy list after the tile
+               * above was moved to the register (see the `compliance` prop
+               * note): two compliance sources on one page, and the legacy one
+               * only covers sites that have a `sites` row and judges a stored
+               * status string rather than a date. `complianceItems` is the
+               * same portfolio-scoped rows the tile counts, so the panel's
+               * gaps and the tile's score can no longer disagree.
+               */
               <SiteAttention
                 requests={scopedRequests}
-                compliance={scopedStores.flatMap((store) =>
-                  store.compliance.map((item) => ({
-                    ...item,
-                    id: `${store.id}-${item.kind}`,
-                    siteId: store.id,
-                    siteName: store.name,
-                  })),
-                )}
+                compliance={complianceItems}
                 stores={scopedStores}
+                loading={!workspaceReady}
               />
             ),
           },
@@ -3033,6 +3084,7 @@ function OverviewView({
                 sites={storeRows}
                 period={period}
                 now={now}
+                loading={!workspaceReady}
               />
             ),
           },

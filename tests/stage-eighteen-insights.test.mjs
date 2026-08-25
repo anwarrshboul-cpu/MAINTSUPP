@@ -90,9 +90,16 @@ test("SLA is judged against the target that applied at the time", async () => {
   const fn = source.slice(source.indexOf("export function SlaPerformance"));
   // Recomputing from today's settings would silently re-judge historic work
   // every time someone edits a target.
-  assert.match(fn.slice(0, 1800), /if \(!request\.dueAt\) continue;/);
-  // Open work is not a miss — it is not yet judged.
-  assert.match(fn.slice(0, 1800), /requests\.filter\(\(request\) => request\.completedAt\)/);
+  assert.match(fn.slice(0, 2600), /if \(!request\.dueAt \|\| !request\.completedAt\) continue;/);
+  /*
+   * "Closed" is the canonical partition (audit S2), the same predicate as the
+   * Completed tile and the board meters — a monday-imported "Job Completed"
+   * row carries no completion date, and judging closed-ness by the date had
+   * this card and the tile above it disagreeing on the same page. Open work is
+   * still not a miss: `measured` requires both stamps, so an undated closure
+   * is neither met nor missed.
+   */
+  assert.match(fn.slice(0, 2600), /requests\.filter\(isClosedRequest\)/);
 });
 
 test("panels take the clock as a prop rather than reading it in render", async () => {

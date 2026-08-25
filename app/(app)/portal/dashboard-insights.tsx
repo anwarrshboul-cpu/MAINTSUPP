@@ -39,6 +39,7 @@ import {
   periodSpendSeries,
   resolvePeriod,
 } from "./period-model";
+import { isClosedRequest, isOpenRequest } from "./dashboard-meters";
 import { TrendChart } from "./dashboard-analytics";
 
 /**
@@ -102,8 +103,14 @@ export function classifySpend(request: MaintenanceRequest): SpendClass {
   return "reactive";
 }
 
-function money(pence: number) {
-  return `£${Math.round(pence).toLocaleString("en-GB")}`;
+/**
+ * Pounds in, pounds out. `maintenance_requests.cost` is a `real` holding
+ * POUNDS — never pence — and the parameter used to be *named* `pence`, which
+ * is exactly the misreading that once had a screen divide by 100 and print
+ * £425 for £42,540. The name now states the contract the tests assert.
+ */
+function money(pounds: number) {
+  return `£${Math.round(pounds).toLocaleString("en-GB")}`;
 }
 
 function plural(count: number, one: string, many = `${one}s`) {
@@ -118,6 +125,25 @@ function daysBetween(from: string | null | undefined, to: string | null | undefi
   return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
+/**
+ * The caption for a job's priority in a split.
+ *
+ * The same judgement `tradeLabel` in views/overview-series.ts makes for the
+ * trade bars, for the same reason: the legacy importer stringified monday's
+ * blank status cells, so 22 rows carry the sixteen characters "[object
+ * Object]" where a priority would be — see the note on UNUSABLE_TRADE_VALUES
+ * there for the full provenance. A by-priority row captioned with the wreckage
+ * of a value would be the identical defect wearing a different chart.
+ */
+function priorityLabel(value: unknown): string {
+  if (typeof value !== "string") return "Priority not recorded";
+  const text = value.trim();
+  if (!text || ["[object object]", "undefined", "null"].includes(text.toLowerCase())) {
+    return "Priority not recorded";
+  }
+  return text;
+}
+
 /* ── Shared shell ────────────────────────────────────────────────────────── */
 
 export function InsightPanel({
@@ -126,6 +152,7 @@ export function InsightPanel({
   action,
   children,
   empty,
+  loading,
 }: {
   title: string;
   hint?: string;
@@ -137,6 +164,16 @@ export function InsightPanel({
    * panel rather than an empty one.
    */
   empty?: { message: string; hint?: string };
+  /**
+   * Shown instead of either while the panel's source has not answered yet.
+   *
+   * Loading and empty are different states: a panel fed by the workspace fetch
+   * used to render its empty claim — "No sites yet", "No budgets set yet" — for
+   * the seconds before that fetch landed, and permanently if it failed. A
+   * definitive statement about data nobody has read yet is the one thing an
+   * empty state must never make. Takes precedence over `empty`.
+   */
+  loading?: boolean;
 }) {
   return (
     <section className="panel insight-panel">
@@ -147,7 +184,12 @@ export function InsightPanel({
         </div>
         {action}
       </header>
-      {empty ? (
+      {loading ? (
+        <div className="insight-empty" aria-busy="true">
+          <Icon name="chart" size={22} />
+          <strong>Loading…</strong>
+        </div>
+      ) : empty ? (
         <div className="insight-empty">
           <Icon name="chart" size={22} />
           <strong>{empty.message}</strong>
@@ -176,35 +218,57 @@ export function InsightPanel({
  */
 export function SlaPerformance({ requests }: { requests: MaintenanceRequest[] }) {
   const stats = useMemo(() => {
-    const closed = requests.filter((request) => request.completedAt);
+    /*
+     * Closed by the canonical partition, so "Jobs closed" here is the same
+     * number as the Completed tile above this panel. It used to be "has a
+     * completion date", and the monday import files finished work with a
+     * "Job Completed" status and NO completion date — the tile would say 28
+     * closed while this card said 1, on the same page.
+     *
+     * A closed job without dates is still not judged: `measured` needs both a
+     * target and a completion stamp, and the close-time average is taken over
+     * the rows that carry one (`?? 0` used to pour zero-day closes into the
+     * mean for every undated row, which would have flattered it).
+     */
+    const closed = requests.filter(isClosedRequest);
     let onTime = 0;
     let measured = 0;
     let totalCloseDays = 0;
+    let timedCloses = 0;
     const byPriority = new Map<string, { met: number; total: number }>();
 
     for (const request of closed) {
-      totalCloseDays += daysBetween(request.requestedAt, request.completedAt) ?? 0;
-      if (!request.dueAt) continue;
+      const closeDays = daysBetween(request.requestedAt, request.completedAt);
+      if (closeDays !== null) {
+        totalCloseDays += closeDays;
+        timedCloses += 1;
+      }
+      if (!request.dueAt || !request.completedAt) continue;
 
       const due = new Date(request.dueAt).getTime();
-      const done = new Date(request.completedAt as string).getTime();
+      const done = new Date(request.completedAt).getTime();
       if (Number.isNaN(due) || Number.isNaN(done)) continue;
 
       measured += 1;
       const met = done <= due;
       if (met) onTime += 1;
 
-      const bucket = byPriority.get(request.priority) ?? { met: 0, total: 0 };
+      // The import wrote "[object Object]" into `priority` on 22 rows — the
+      // same wreckage `tradeLabel` catches for the trade bars. A split row
+      // must not be captioned with the stringification of an absent value.
+      const priority = priorityLabel(request.priority);
+      const bucket = byPriority.get(priority) ?? { met: 0, total: 0 };
       bucket.total += 1;
       if (met) bucket.met += 1;
-      byPriority.set(request.priority, bucket);
+      byPriority.set(priority, bucket);
     }
 
     return {
       closed: closed.length,
       measured,
       onTimePercent: measured ? Math.round((onTime / measured) * 100) : 0,
-      averageCloseDays: closed.length ? totalCloseDays / closed.length : 0,
+      averageCloseDays: timedCloses ? totalCloseDays / timedCloses : 0,
+      timedCloses,
       byPriority: [...byPriority.entries()]
         .map(([priority, bucket]) => ({
           priority,
@@ -259,7 +323,8 @@ export function SlaPerformance({ requests }: { requests: MaintenanceRequest[] })
         <dl className="insight-facts">
           <div>
             <dt>Average time to close</dt>
-            <dd>{stats.averageCloseDays.toFixed(1)} days</dd>
+            {/* A dash, not "0.0 days", when no close carries both dates. */}
+            <dd>{stats.timedCloses ? `${stats.averageCloseDays.toFixed(1)} days` : "—"}</dd>
           </div>
           <div>
             <dt>Jobs closed</dt>
@@ -318,12 +383,26 @@ export function OpenJobAgeing({
   onOpen?: (request: MaintenanceRequest) => void;
 }) {
   const { buckets, oldest, total } = useMemo(() => {
-    const open = requests.filter((request) => !request.completedAt);
+    // Open by the canonical partition, not `!completedAt`. The monday import
+    // files finished work in "… Recently completed" groups whose rows carry
+    // status "Job Completed" but no completion date and stage "Incoming" — a
+    // `!completedAt` test counts every one of them as open work still waiting,
+    // and the oldest of them tops the "waiting longest" list. `isOpenRequest`
+    // is the same signal the "Open jobs" tile and the board meters use, so this
+    // panel can no longer disagree with the number above it.
+    const open = requests.filter(isOpenRequest);
     const aged = open.map((request) => ({
       request,
+      /*
+       * FLOOR, not round: "how many days has this waited" counts whole days
+       * completed, and it must agree with the "Days" column in the attention
+       * table (`requestAgeDays` in portal-app.tsx, which floors). Rounding had
+       * the same job reading 61 days here and 60 days there on one screen —
+       * half a day old is 0 days waiting, not 1.
+       */
       days: Math.max(
         0,
-        Math.round((now - new Date(request.requestedAt).getTime()) / 86_400_000),
+        Math.floor((now - new Date(request.requestedAt).getTime()) / 86_400_000),
       ),
     }));
     return {
@@ -669,7 +748,12 @@ export function ReactiveVsPlanned({
     requests.forEach((request, index) => {
       const at = bucketFor(columns, stamps[index]);
       if (at < 0) return;
-      // The same rule the spend tiles use, so the two cannot disagree.
+      // The same rule the spend tiles use, so the two cannot disagree. Note
+      // the non-reactive stack HOLDS TWO CLASSES: "planned" (compliance work,
+      // tier 4+) and "projects" (£1,000-plus jobs). The legend and the hover
+      // text say so — a £1,142 emergency repair is in the teal stack because
+      // it is large, not because anyone scheduled it, and a bar labelled
+      // simply "planned" would claim otherwise.
       if (classifySpend(request) === "reactive") slots[at].reactive += 1;
       else slots[at].planned += 1;
     });
@@ -726,7 +810,7 @@ export function ReactiveVsPlanned({
             <div
               key={slot.key}
               className="insight-columns__slot"
-              title={`${slot.label}: ${plural(slot.reactive, "reactive job")}, ${plural(slot.planned, "planned job")}`}
+              title={`${slot.label}: ${plural(slot.reactive, "reactive job")}, ${plural(slot.planned, "planned or project job")}`}
             >
               <span className="insight-columns__value">{total || ""}</span>
               <div className="insight-columns__track">
@@ -752,7 +836,7 @@ export function ReactiveVsPlanned({
         <i style={{ background: BRAND.amber }} aria-hidden="true" />
         Reactive
         <i style={{ background: BRAND.teal }} aria-hidden="true" />
-        Planned
+        Planned / project
       </p>
     </InsightPanel>
   );
@@ -1061,10 +1145,13 @@ export function SiteAttention({
   requests,
   compliance,
   stores,
+  loading = false,
 }: {
   requests: MaintenanceRequest[];
   compliance: WorkspaceComplianceRecord[];
   stores: StoreRecord[];
+  /** True while the workspace fetch has not answered — see `InsightPanel`. */
+  loading?: boolean;
 }) {
   const rows = useMemo(() => {
     const nameById = new Map(stores.map((store) => [store.id, store.name]));
@@ -1074,7 +1161,11 @@ export function SiteAttention({
       bySite.get(site) ?? { open: 0, urgent: 0, gaps: 0 };
 
     for (const request of requests) {
-      if (request.completedAt) continue;
+      // Closed by the canonical partition, not `completedAt`: a monday-imported
+      // "Job Completed" row carries no completion date, so skipping on
+      // `completedAt` alone would count finished jobs as a site's open work and
+      // disagree with the "Open jobs" tile. Same signal as the board meters.
+      if (isClosedRequest(request)) continue;
       const site = nameById.get(request.siteId) ?? request.location ?? "Unassigned";
       const entry = ensure(site);
       entry.open += 1;
@@ -1100,11 +1191,12 @@ export function SiteAttention({
       .slice(0, 8);
   }, [compliance, requests, stores]);
 
-  if (!rows.length) {
+  if (loading || !rows.length) {
     return (
       <InsightPanel
         title="Sites needing attention"
         hint="Open work and compliance gaps together"
+        loading={loading}
         empty={{
           message: stores.length ? "Nothing outstanding" : "No sites yet",
           hint: stores.length
@@ -1209,9 +1301,12 @@ export function SpendAgainstBudget({
   sites,
   period,
   now,
+  loading = false,
 }: {
   requests: MaintenanceRequest[];
   sites: Array<{ id: string; name: string; annualBudgetPence: number | null }>;
+  /** True while the workspace fetch has not answered — see `InsightPanel`. */
+  loading?: boolean;
   /**
    * Named so the panel can say what it is comparing.
    *
@@ -1257,11 +1352,12 @@ export function SpendAgainstBudget({
 
   const unbudgeted = sites.filter((site) => site.annualBudgetPence == null).length;
 
-  if (!rows.length) {
+  if (loading || !rows.length) {
     return (
       <InsightPanel
         title="Spend against budget"
         hint="How each site is tracking against its annual maintenance budget"
+        loading={loading}
         empty={{
           message: "No budgets set yet",
           hint:

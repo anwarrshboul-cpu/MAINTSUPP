@@ -496,7 +496,9 @@ test("no insight panel builds its own fixed six months any more", async () => {
 
 test("the money helper on the reports screen takes pounds", async () => {
   const source = await read("app/(app)/portal/dashboard-insights.tsx");
-  const money = source.split("function money(pence: number) {")[1].split("}")[0];
+  // The parameter is NAMED pounds now (audit S2): it always took pounds, and a
+  // parameter called `pence` was an invitation to reintroduce the division.
+  const money = source.split("function money(pounds: number) {")[1].split("}")[0];
   assert.doesNotMatch(money, /\/\s*100/, "cost is pounds — dividing renders £425 for £42,540");
 });
 
