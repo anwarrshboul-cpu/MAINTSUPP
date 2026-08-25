@@ -6410,6 +6410,126 @@ function RequestDrawer({
   const [mobileEditorError, setMobileEditorError] = useState<string | null>(
     null,
   );
+
+  /*
+   * THE DRAWER IS A DIALOG, AND HAS TO BEHAVE LIKE ONE.
+   *
+   * It paints over the page, takes the scroll lock and puts a scrim between the
+   * reader and everything behind it — and it did all of that as a bare
+   * `<aside>`: no `role`, focus left on the row that opened it, Escape doing
+   * nothing. Verified in a browser: after opening a job, `document.activeElement`
+   * was still the board's "Open item" button, so the next Tab walked the rest of
+   * the board — a 27-column grid — before it reached the drawer, and a reader
+   * who cannot see the overlay was given no way out of it. Escape closes every
+   * other surface in this app (the evidence manager, the media viewer, every
+   * anchored popover); the one that covers the whole screen was the exception.
+   *
+   * `role="dialog"` + `aria-modal` is the markup half; the effect below is the
+   * behaviour half. The `aria-modal` claim is honest here: `useScrollLock` above
+   * already froze the page and `.drawer-scrim` already swallows the pointer.
+   *
+   * `surface.focus()` rather than the close button's: focusing the container
+   * makes a screen reader announce the dialog and its label, which is what a
+   * reader needs first; the close button is then one Tab away.
+   */
+  const drawerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const opener =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const surface = drawerRef.current;
+    if (surface && !surface.contains(document.activeElement)) {
+      surface.focus({ preventScroll: true });
+    }
+    return () => {
+      /*
+       * Focus goes back to the row that opened the drawer — but only if it
+       * would otherwise be lost. A close that happened because the reader
+       * clicked something else has already put focus somewhere deliberate,
+       * and stealing it back is the more annoying bug.
+       */
+      if (!opener || !document.contains(opener)) return;
+      const active = document.activeElement;
+      if (!active || active === document.body) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      /*
+       * Innermost surface first — the convention media-viewer.tsx and
+       * evidence-manager.tsx already follow between themselves. Those two stop
+       * the event at the window when they handle it; the two pieces of drawer
+       * state below have no listener of their own, so they are checked here.
+       */
+      if (evidenceOpen || mobileEditor) return;
+      // An anchored popover (the "⋮" menu, a status picker) owns the press.
+      if (document.querySelector(".ms-layer .ms-popover")) return;
+      /*
+       * Escape inside a box means "abandon what I am typing", everywhere else
+       * on this board — the group rename input, the add-subitem field, the
+       * reply composer in update-thread.tsx. It must not also throw the drawer
+       * away and the half-written comment with it.
+       */
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("input, textarea, select, [contenteditable='true']")
+      ) {
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [evidenceOpen, mobileEditor, onClose]);
+
+  /*
+   * HOW MANY FILES — COUNTED, not read off the row's counter.
+   *
+   * The Files tab printed `request.attachmentCount`, which is the same class of
+   * number the Updates tab beside it stopped trusting: a counter with two
+   * writers and no reconciler. db/schema.ts:976 names it — "A counter also has
+   * the `issue_attachment_count` problem — two writers, no reconciler, and it
+   * drifts. The count here is a COUNT."
+   *
+   * Verified drifted in the running workspace: MN-1043's tab header read
+   * "6 files" while the evidence panel it opens — the thing that actually reads
+   * `/api/files` — reported All files 0, Issue 0, Completed 0, Other 0. Two
+   * numbers for one fact, on two surfaces one click apart.
+   *
+   * The snapshot stays as the value shown until this answers, exactly as
+   * `commentCount` above keeps `request.commentCount` until the thread loads;
+   * it is re-read when the evidence panel closes (`evidenceRefreshToken`) and
+   * updated in place while that panel adds or removes files.
+   */
+  const [fileCount, setFileCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/files?requestId=${encodeURIComponent(request.id)}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as { files?: unknown[] };
+        if (active && Array.isArray(payload.files)) setFileCount(payload.files.length);
+      } catch {
+        // Falling back to the snapshot is the honest failure here: the panel
+        // one click away still reads the files, and an error box on a count
+        // helps nobody.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [request.id, evidenceRefreshToken]);
+
   const loadActivities = useCallback(async () => {
     setActivitiesLoading(true);
     setActivitiesError(null);
@@ -6719,7 +6839,14 @@ function RequestDrawer({
         aria-label="Close request"
         onClick={onClose}
       />
-      <aside className="detail-drawer" aria-label={`${request.id} details`}>
+      <aside
+        ref={drawerRef}
+        className="detail-drawer"
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        aria-label={`${request.id} details`}
+      >
         <div className="detail-drawer__header">
           <div>
             <span>{request.id}</span>
@@ -6908,7 +7035,12 @@ function RequestDrawer({
           >
             <div className="drawer-section__title">
               <span className="drawer-label">Files &amp; evidence</span>
-              <span>{request.attachmentCount} files</span>
+              <span>
+                {(() => {
+                  const shown = fileCount ?? request.attachmentCount;
+                  return `${shown} file${shown === 1 ? "" : "s"}`;
+                })()}
+              </span>
             </div>
             {/*
               The pair, above the way in to everything else.
@@ -7128,12 +7260,23 @@ function RequestDrawer({
             }
             setEvidenceColumn(null);
           }}
-          onFileCountChange={
-            evidenceColumn
-              ? () =>
-                  window.dispatchEvent(new Event("maintsupp:refresh-board"))
-              : undefined
-          }
+          onFileCountChange={(count) => {
+            /*
+             * The tab's header follows the panel while it is open, so adding
+             * the first photo does not leave "0 files" behind it. The board
+             * refresh stays conditional: only a workspace-column upload
+             * changes a CELL, and re-fetching the whole board for a general
+             * evidence upload would be a page-wide reload for one number.
+             */
+            if (evidenceColumn) {
+              // Opened for ONE column, so `count` is that column's files, not
+              // the job's — adopting it here would put a smaller number in a
+              // header that means "everything on this job".
+              window.dispatchEvent(new Event("maintsupp:refresh-board"));
+            } else {
+              setFileCount(count);
+            }
+          }}
           onRequestChange={onRequestChange}
           onNotify={onNotify}
         />

@@ -229,6 +229,18 @@ export function EvidenceManager({
     setError(null);
     let latestRequest = request;
     let completed = 0;
+    /*
+     * Counted here rather than read back out of the `setFiles` updater.
+     *
+     * `onFileCountChange?.(next.length)` used to sit INSIDE that updater, which
+     * React runs during the render pass — so a parent that answers by setting
+     * its own state gets "Cannot update a component while rendering a different
+     * component". It went unnoticed for as long as the only listener dispatched
+     * a window event; the drawer's file counter is a `setState`, and it printed
+     * the warning on the first upload. `files` cannot change identity while this
+     * loop is awaiting, so seeding from it and stepping per success is exact.
+     */
+    let fileCount = files.length;
     const failures: string[] = [];
     for (const [index, file] of selected.entries()) {
       try {
@@ -242,11 +254,9 @@ export function EvidenceManager({
               Math.round(((index + progress / 100) / selected.length) * 100),
             ),
         });
-        setFiles((current) => {
-          const next = [payload.file, ...current];
-          onFileCountChange?.(next.length);
-          return next;
-        });
+        setFiles((current) => [payload.file, ...current]);
+        fileCount += 1;
+        onFileCountChange?.(fileCount);
         if (payload.request) latestRequest = payload.request;
         completed += 1;
       } catch (caught) {
@@ -287,11 +297,9 @@ export function EvidenceManager({
         error?: string;
       };
       if (!response.ok) throw new Error(payload.error || "The file could not be deleted.");
-      setFiles((current) => {
-        const next = current.filter((item) => item.id !== file.id);
-        onFileCountChange?.(next.length);
-        return next;
-      });
+      // Outside the updater, for the reason spelled out in `uploadSelected`.
+      setFiles((current) => current.filter((item) => item.id !== file.id));
+      onFileCountChange?.(Math.max(files.length - 1, 0));
       if (payload.request) onRequestChange(payload.request);
       /* A removed photo must leave the board's thumbnail strip too. */
       window.dispatchEvent(new Event("maintsupp:refresh-board"));

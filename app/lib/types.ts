@@ -247,6 +247,16 @@ export interface MaintenanceRequest {
    */
   parentId?: string | null;
   source: "Portal form" | "Manual";
+  /**
+   * The public reference the board mints for a job — "MS-2026-0040".
+   *
+   * Optional because only rows created through `/api/board/items` carry one;
+   * a row added inline on the board has none until it is given one. Declared
+   * here because the API has always returned it and the board searches on it:
+   * a requester quoting the number from their confirmation email is the one
+   * search that must not fail.
+   */
+  reference?: string | null;
   title: string;
   description: string;
   location: string;

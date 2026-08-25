@@ -1536,6 +1536,19 @@ export function LiveMaintenanceBoard({
       }
       onRequestCreated(payload.item);
       setExpandedSubitems((current) => new Set(current).add(parent.id));
+      /*
+       * Said out loud, because whoever asked may not be able to SEE the panel
+       * this just expanded. The row menu's "Add subitem" opens it directly
+       * under the row; the DRAWER's menu opens it behind a full-screen overlay
+       * that has no subitems section of its own, so from there a successful
+       * add was indistinguishable from a dead button.
+       *
+       * It belongs here rather than in the menu that called it: this function
+       * RESOLVES on failure too — the catch below reports and returns — so a
+       * caller that awaited it and announced success would announce it over
+       * an error.
+       */
+      onNotify(`${trimmed} added under ${parent.id}.`);
     } catch (error) {
       onNotify(
         error instanceof Error ? error.message : "The subitem could not be added.",
@@ -3770,7 +3783,9 @@ export function LiveMaintenanceBoard({
                         {group.name}
                       </button>
                     )}
-                    <span>{rows.length} items</span>
+                    <span>
+                      {rows.length} item{rows.length === 1 ? "" : "s"}
+                    </span>
                     {/*
                       A synthetic group is a column value, not a stored group.
                       Renaming, recolouring or deleting "Urgent" cannot mean
@@ -4157,7 +4172,23 @@ export function LiveMaintenanceBoard({
                                     subitemsByParent.get(request.id) ?? []
                                   ).map((child) => ({
                                     id: child.id,
-                                    title: child.description || child.title,
+                                    /*
+                                     * TITLE FIRST, because `title` is the field
+                                     * the panel's own rename editor writes
+                                     * (board-subitems.tsx -> onSave({ title })).
+                                     * With description winning, renaming a
+                                     * subitem saved the new name and went on
+                                     * showing the old one — for ever, on every
+                                     * reload — for any child that HAS a
+                                     * description, which is every row converted
+                                     * from an existing job. It only looked
+                                     * right because a subitem created in the
+                                     * panel's own "+ Add subitem" box is sent
+                                     * without one. Description stays as the
+                                     * fallback for imported children that have
+                                     * no title of their own.
+                                     */
+                                    title: child.title || child.description,
                                     assignee: child.assignee,
                                     status: child.status,
                                     dueAt: child.dueAt,
