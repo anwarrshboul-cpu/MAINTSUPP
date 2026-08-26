@@ -124,14 +124,28 @@ export function todayCalendarDay(now: Date = new Date()): CalendarDay {
  * `HH:MM` when somebody actually CHOSE a time, "" otherwise — which today is
  * every event this product can produce.
  *
- * ONE SOURCE OF A REAL TIME, AND IT IS NOT THE TIMESTAMP.
+ * NOTHING THIS PRODUCT STORES CARRIES A CHOSEN TIME, AND THE TIMESTAMP IS NOT
+ * ONE EITHER.
  *
  * The board's date column can carry a decoration — `{"date":"2026-08-21",
- * "time":"09:15","icon":""}` — and that `time` is a thing a person typed into a
- * cell. It is the only one.
+ * "time":"09:15","icon":""}` — and that `time` is the one shape that is a thing
+ * a person typed rather than a byproduct. It is parsed here because a raw cell
+ * value can reach this function from a board caller, but it does NOT reach the
+ * calendar: `readComplianceRegister` puts every Store Documentation cell through
+ * `dateOnlyValue` before it becomes `WorkspaceComplianceRecord.expiry`
+ * (app/lib/store-documentation-register.ts, `expiry: dateOnlyValue(...) || null`),
+ * so the decoration is already flattened to `YYYY-MM-DD` by the time an event is
+ * built. Written and re-read on 2026-08-26: a cell set to
+ * `{"date":"2027-05-06","time":"09:15","icon":""}` came back from
+ * `GET /api/workspace` as the bare string `"2027-05-06"`.
  *
- * The clock component of a stored ISO instant is NOT. Two shapes reach these
- * fields and neither is a decision:
+ * So `event.time` is "" for every event this calendar can currently produce, and
+ * that is the correct answer rather than a gap to be filled. The parse stays as
+ * the honest reading of a value that does carry one, not as a promise that the
+ * calendar will ever see it.
+ *
+ * The clock component of a stored ISO instant is not a chosen time either. Two
+ * shapes reach the job date fields and neither is a decision:
  *   - `2026-08-24T00:00:00.000Z` is this product's ENCODING of a date-only
  *     value. `optionalIsoDate` in app/lib/request-fields.ts turns every
  *     `YYYY-MM-DD` the UI sends into precisely that, so reading it as "due at
@@ -142,9 +156,12 @@ export function todayCalendarDay(now: Date = new Date()): CalendarDay {
  *     would be the calendar inventing a commitment out of a row's creation
  *     time, which is worse than showing no time: an operator can act on it.
  *
- * So an instant yields "" whatever its clock says, and the decoration is the
- * seam a genuine chosen time arrives through. Callers render `time` when it is
- * non-empty and render NOTHING when it is empty — no "all day" chip, no
+ * The dev workspace's own job dates make the point: `2026-07-29T16:00:00.000Z`,
+ * `2026-07-29T13:30:00.000Z`, `2026-07-30T17:00:00.000Z`. Round hours, and every
+ * one of them a seed value rather than an appointment somebody booked.
+ *
+ * So an instant yields "" whatever its clock says. Callers render `time` when it
+ * is non-empty and render NOTHING when it is empty — no "all day" chip, no
  * placeholder — because a marker on every row that says the data is ordinary is
  * not information.
  *
@@ -423,7 +440,7 @@ export function calendarJobDateValues(
   request: MaintenanceRequest,
   sourceIds: readonly string[],
 ): Array<string | null> {
-  const selected = new Set(sourceIds);
+  const selected = new Set(sourceIds ?? []);
   return JOB_DATE_FIELDS.filter((field) => selected.has(`job:${field}`)).map(
     (field) => jobDateValue(request, field),
   );
@@ -486,11 +503,29 @@ export type CalendarEvent = {
 /**
  * Timing for a job date.
  *
- * The rule is `timingOf` in views/fix-tracker.tsx, which this deliberately
- * matches: finished work is never late, whatever its dates say. 187 of the
- * board's 673 completed jobs carry no completion date, so `completedAt` alone
- * cannot decide it — the stage is the fact and the date is the paperwork, which
- * is why `isClosedRequest` is consulted as well.
+ * The rule is `timingOf` in views/fix-tracker.tsx: finished work is never late,
+ * whatever its dates say. 187 of the board's 673 completed jobs carry no
+ * completion date, so `completedAt` alone cannot decide it — the stage is the
+ * fact and the date is the paperwork, which is why a second signal is consulted.
+ *
+ * ONE DELIBERATE DIFFERENCE FROM `timingOf`, AND IT ONLY EVER REMOVES RED.
+ *
+ * `timingOf` asks `jobState`, which reads `stage` when there is one and only
+ * falls back to the status text when there is not. This asks `isClosedRequest`
+ * (dashboard-meters.ts), which is the UNION: `stage === "Completed"` OR the
+ * status label is "Job Completed". The two disagree on exactly one population —
+ * a row whose Status column says "Job Completed" while its stage says something
+ * else — and the monday import produces that population in bulk, because the
+ * imported rows sit in "… Recently completed" groups that carry no lifecycle
+ * stage. `isClosedRequest`'s own header records the measurement: a stage-only
+ * test read 28 such jobs as open work.
+ *
+ * On those rows `timingOf` would paint a red "overdue" chip on a job the board
+ * itself says is finished. The union cannot do that, and it cannot invent
+ * lateness either — every difference is in the direction of `resolved`. The
+ * dev workspace has 0 of these rows (29 jobs, checked 2026-08-26), so the
+ * divergence is invisible there and visible on the imported estate, which is
+ * the wrong way round for a rule to be verified by eye.
  */
 function jobTiming(
   request: MaintenanceRequest,
@@ -593,7 +628,7 @@ const FILTER_FACETS: readonly (keyof CalendarFilters)[] = [
  */
 export function calendarFilterCount(filters: CalendarFilters): number {
   return FILTER_FACETS.reduce(
-    (total, facet) => total + (filters[facet]?.length ?? 0),
+    (total, facet) => total + (filters?.[facet]?.length ?? 0),
     0,
   );
 }
@@ -665,6 +700,13 @@ export function calendarFilterOptions(input: {
   requests: MaintenanceRequest[];
   complianceRecords: WorkspaceComplianceRecord[];
 }): CalendarFilterOptions {
+  /*
+   * See `buildCalendarEvents` for why both arrays are coerced rather than
+   * trusted: the board's Calendar tab is a second caller with a different
+   * shape, and it hands over one board's items with no compliance layer at all.
+   */
+  const requests = input.requests ?? [];
+  const complianceRecords = input.complianceRecords ?? [];
   const sites = new Map<string, CalendarFilterOption>();
   const statuses = new Map<string, CalendarFilterOption>();
   const priorities = new Map<string, CalendarFilterOption>();
@@ -679,13 +721,13 @@ export function calendarFilterOptions(input: {
    * and "Aldgate " on the job beside it.
    */
   const siteNameById = new Map<string, string>();
-  for (const record of input.complianceRecords) {
+  for (const record of complianceRecords) {
     if (record.siteId && record.siteName && !siteNameById.has(record.siteId)) {
       siteNameById.set(record.siteId, record.siteName);
     }
   }
 
-  for (const request of input.requests) {
+  for (const request of requests) {
     const siteId = request.siteId ?? "";
     tally(sites, siteId, siteNameById.get(siteId) || request.location || siteId);
     if (request.status) tally(statuses, request.status, request.status);
@@ -699,7 +741,7 @@ export function calendarFilterOptions(input: {
     if (request.category) tally(jobTypes, request.category, request.category);
   }
 
-  for (const record of input.complianceRecords) {
+  for (const record of complianceRecords) {
     if (record.state === "Not required") continue;
     const siteId = record.siteId ?? "";
     tally(sites, siteId, record.siteName || siteId);
@@ -762,6 +804,18 @@ function compareEvents(a: CalendarEvent, b: CalendarEvent) {
  * source produces NO event — there is no such thing as a job with an implied
  * due date, and inventing one puts work in front of somebody that nobody
  * scheduled.
+ *
+ * TWO CALLERS, TWO SHAPES, AND THE SECOND ONE HAS NO COMPLIANCE LAYER.
+ *
+ * The portal page hands over the whole workspace. The board's Calendar TAB
+ * hands over one board's items and `complianceRecords: []`, because a board
+ * knows nothing about the compliance register — and that is a legitimate call
+ * that must produce a job-only calendar rather than an empty one or a crash.
+ * Both arrays are coerced instead of trusted: the tab is exactly the surface
+ * whose absence the owner reported, and a `for…of undefined` there is a blank
+ * screen with a console error, which is the failure this correction exists to
+ * stop happening twice. The types still say the fields are required; the
+ * coercion is for the moment a caller is mid-load, not a licence to omit them.
  */
 export function buildCalendarEvents(input: {
   requests: MaintenanceRequest[];
@@ -770,8 +824,11 @@ export function buildCalendarEvents(input: {
   filters: CalendarFilters;
   today: CalendarDay;
 }): CalendarEvent[] {
-  const { requests, complianceRecords, sourceIds, filters, today } = input;
-  const selected = new Set(sourceIds);
+  const { sourceIds, today } = input;
+  const requests = input.requests ?? [];
+  const complianceRecords = input.complianceRecords ?? [];
+  const filters = input.filters ?? EMPTY_CALENDAR_FILTERS;
+  const selected = new Set(sourceIds ?? []);
   const events: CalendarEvent[] = [];
 
   const jobSources = JOB_DATE_FIELDS.map((field) =>
@@ -888,15 +945,45 @@ export function groupCalendarEventsByDay(
  *     board cell on every read, so writing the register copy instead would be
  *     overwritten by the next refresh and the operator would watch their edit
  *     vanish. It goes back to the cell it came from:
- *     `POST /api/board { action: "update_cell", requestId, columnId, value }`.
- *     Note `columnId`, not a key — the route looks the column up by id, so the
- *     caller resolves `columnKey` against the board snapshot it already holds.
+ *
+ *       PATCH /api/board?board=store-documentation
+ *       { action: "update_cell", requestId, columnId, value: "YYYY-MM-DD" }
+ *
+ *     Three details, each of which has its own way of failing quietly, and all
+ *     three were re-checked against the running route on 2026-08-26:
+ *
+ *       - PATCH, NOT POST. `/api/board` splits its actions across two handlers
+ *         and `update_cell` is on the PATCH one; POSTed, the same body comes
+ *         back `400 {"error":"Unknown board action."}`. That shipped once, and
+ *         the only thing that caught it was a real certificate not moving.
+ *       - The board comes from the QUERY STRING. `boardIdFrom` reads
+ *         `?board=`, and with it absent the write lands on the maintenance
+ *         board instead — hence `boardId` on the target, which the caller must
+ *         put in the URL and not in the body.
+ *       - `columnId`, NOT a key. The route looks the column up by its
+ *         `maintenance_board_columns.id`; sending `patExpiry` answers
+ *         `404 {"error":"The row or column no longer exists."}`, which reads to
+ *         an operator as an outage. `record.expiryColumnId` is that id,
+ *         resolved server-side by `/api/workspace`.
+ *
  *     `requestId` is the board ITEM id, which for this board is a store row.
+ *     Round-tripped end to end: writing `2027-05-05` into the `patExpiry` cell
+ *     of a Store Documentation row made the next `GET /api/workspace` return
+ *     that record with `expiry: "2027-05-05"` and `state: "Compliant"`.
  *
  *   `workspace-compliance` — a register-only requirement, with no board row
  *     behind it. `PATCH /api/workspace { entity: "compliance", id, data }`, and
  *     `data` is a FULL REPLACE of siteId, kind, state and expiry: the caller
- *     must send the other three back unchanged or it will blank them.
+ *     must send the other three back unchanged or it will blank them. `state`
+ *     carries twice — the route stores it as `status` AND derives
+ *     `notRequired: state === "Not required"` from it — so dropping it does not
+ *     merely lose a word, it silently un-marks a requirement a store has said
+ *     does not apply to it. That is why the target carries all three rather
+ *     than leaving the caller to remember.
+ *
+ *     This is the live path on a workspace whose Store Documentation board is
+ *     empty: on 2026-08-26 all 120 records on the dev workspace were
+ *     register-only, because that board had no rows to derive any from.
  *
  * `none` carries a reason so the UI can say why a date is read-only instead of
  * showing a control that fails. The honest case is a slot the board tracks no

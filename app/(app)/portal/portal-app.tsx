@@ -2416,6 +2416,31 @@ export default function PortalApp({
               onNotify={setToast}
               onOpenApps={() => setSection("settings")}
               onItemActionsChange={setBoardItemActions}
+              /*
+               * The board's Calendar view TAB — Workstream 4's calendar, not a
+               * second one. This is the fix for what the owner reported: the
+               * calendar was built on the Planned page, and the tab a person
+               * opens when they want to see this board as a calendar drew a
+               * bare month grid with none of it.
+               *
+               * The board supplies its own scoped jobs, the drawer opener and
+               * the toast. What only a HOST can supply is the compliance
+               * register and the two audited date writers, so those come from
+               * here — and they are the very same handlers the Planned page
+               * hands to `OperationsCalendarPanel`. A date moved on the board's
+               * calendar therefore takes exactly the path a date moved on
+               * /dashboard/planned takes: one write path, one audit trail, one
+               * capability check.
+               *
+               * Without this prop the tab still draws the calendar and refuses
+               * a date change out loud rather than pretending to save it.
+               */
+              calendar={{
+                complianceRecords: workspace?.compliance ?? [],
+                onOpenCompliance: (id) => openWorkspaceManager("compliance", id),
+                onJobDateChange: changeJobDate,
+                onComplianceDateChange: changeComplianceDate,
+              }}
             />
           )}
           {activeSurface === "stores" && <SitesManager onNotify={setToast} />}

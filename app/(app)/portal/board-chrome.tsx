@@ -7,7 +7,11 @@ import { AddViewMenu, ViewOverflowMenu, ViewTabMenu } from "./board-actions/view
 import { fetchLandingView, rememberLandingView } from "./board-view-memory";
 import { TabGlyph } from "./board-tab-glyph";
 import { Icon } from "../../components";
-import BoardViewPane from "./board-view-pane";
+import BoardViewPane, {
+  useActiveTabInView,
+  viewReplacesGrid,
+  type BoardCalendarWiring,
+} from "./board-view-pane";
 import { useScrollOverflow } from "./views/scroll-affordance";
 import { BoardViewsScroll, useDismissOnOutside } from "./board-views-controls";
 import type { BoardItem } from "./views/view-model";
@@ -74,6 +78,8 @@ type Props = {
   onMoveItem?: (itemId: string, value: string) => void;
   /** Fired after the Form tab creates a job, so the table can pick it up. */
   onFormSubmitted?: () => void;
+  /** The Calendar tab's own wiring — passed through unread. See the pane. */
+  calendar?: BoardCalendarWiring;
 };
 
 /**
@@ -96,6 +102,7 @@ export default function BoardChrome({
   onOpenItem,
   onMoveItem,
   onFormSubmitted,
+  calendar,
 }: Props) {
   const [board, setBoard] = useState<BoardSummary | null>(null);
   const [views, setViews] = useState<BoardView[]>([]);
@@ -133,8 +140,11 @@ export default function BoardChrome({
    * The strip holds eleven tabs and a phone shows two of them. The hook writes
    * `data-overflow` from measured scroll state, so the fade at the strip's edge
    * appears only while there is something past it — views/scroll-affordance.ts.
+   * The second hook keeps the ACTIVE tab inside that box, which the fade alone
+   * could not do — see `useActiveTabInView` for the phone it was measured on.
    */
   const tabsRef = useScrollOverflow<HTMLDivElement>();
+  useActiveTabInView(tabsRef, activeKey);
 
   useEffect(() => {
     if (boardId !== "maintenance") return;
@@ -224,6 +234,12 @@ export default function BoardChrome({
     if (activeView && onViewChange) onViewChange(activeView);
   }, [activeView, onViewChange]);
 
+  /* Is the grid what is on screen — and so, does row 3 belong here? Row 3 is
+     the TABLE's toolbar and it leaves with the thing it controls. The whole
+     account, including what happens to the collapse chevron inside it, is in
+     `viewReplacesGrid`. */
+  const gridOnScreen = !viewReplacesGrid(activeView);
+
   async function send(method: "POST" | "PATCH" | "DELETE", body?: unknown, query = "") {
     const response = await fetch(`/api/board/views${query}`, {
       method,
@@ -270,7 +286,9 @@ export default function BoardChrome({
 
   return (
     <>
-    <div className={`board-chrome${collapsed ? " is-collapsed" : ""}`}>
+    {/* Collapse is a Main-Table affordance: remembered, but applied only while
+        row 3 is drawn — `viewReplacesGrid` names the dead end otherwise. */}
+    <div className={`board-chrome${collapsed && gridOnScreen ? " is-collapsed" : ""}`}>
       {/* ── Row 1 — board header (AA1) ───────────────────────────────── */}
       <BoardActionsHost
         boardId={boardId}
@@ -437,19 +455,21 @@ export default function BoardChrome({
       </nav>
       )}
 
-      {/* ── Row 3 — the existing toolbar ─────────────────────────────── */}
-      <div className="board-chrome__toolbar">
-        {children}
-        <button
-          type="button"
-          className="board-chrome__collapse"
-          aria-label={collapsed ? "Expand board header" : "Collapse board header"}
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed(!collapsed)}
-        >
-          <Icon name="chevron" size={16} />
-        </button>
-      </div>
+      {/* ── Row 3 — the existing toolbar, on the table only ──────────── */}
+      {gridOnScreen && (
+        <div className="board-chrome__toolbar">
+          {children}
+          <button
+            type="button"
+            className="board-chrome__collapse"
+            aria-label={collapsed ? "Expand board header" : "Collapse board header"}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            <Icon name="chevron" size={16} />
+          </button>
+        </div>
+      )}
     </div>
 
       {/* ── The selected view's pane — see board-view-pane.tsx ─────────
@@ -465,6 +485,7 @@ export default function BoardChrome({
           onOpenItem={onOpenItem}
           onMoveItem={onMoveItem}
           onFormSubmitted={onFormSubmitted}
+          calendar={calendar}
         />
       )}
     </>

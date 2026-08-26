@@ -43,10 +43,20 @@ export type WorkspaceComplianceRecord = {
    * the calendar lets somebody drag a certificate expiry to a new date, and the
    * two kinds of record are written through two different endpoints. A
    * board-derived expiry has to go back to the board cell it was read from
-   * (`POST /api/board` `update_cell`), because the register recomputes its state
-   * from that cell on the next read and would silently overwrite anything
-   * written to the register copy instead; a register-only record has no board
-   * cell and goes through `PATCH /api/workspace`.
+   * (`PATCH /api/board?board=store-documentation` with `update_cell`), because
+   * the register recomputes its state from that cell on the next read and would
+   * silently overwrite anything written to the register copy instead; a
+   * register-only record has no board cell and goes through
+   * `PATCH /api/workspace`.
+   *
+   * PATCH, and the board in the QUERY STRING. This sentence said `POST` for a
+   * while and a caller followed it: `/api/board` splits its actions across two
+   * handlers — POST creates and deletes, PATCH edits — so `update_cell` sent as
+   * a POST comes back `400 {"error":"Unknown board action."}` and no
+   * certificate moves. Every unit test passed while that was live; it took
+   * moving a real expiry on a real board row to find it. The board is read from
+   * `?board=` by `boardIdFrom`, never from the body, and the column is looked up
+   * by its DB **id** — passing the column key answers 404.
    *
    * Optional so no existing consumer has to change. `readComplianceRegister`
    * has carried all three on `RegisterEntry` since it was written; this is

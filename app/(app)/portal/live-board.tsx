@@ -15,7 +15,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import BoardChrome, { type BoardView } from "./board-chrome";
-import { viewReplacesGrid } from "./board-view-pane";
+import { viewReplacesGrid, type BoardCalendarWiring } from "./board-view-pane";
 import BoardColumnSummary from "./board-column-summary";
 import { boardIdentity } from "./board-identity";
 import { DEFERRED_GROUP_CLASS, deferredGroupHeight } from "./board-visibility";
@@ -212,6 +212,7 @@ export function LiveMaintenanceBoard({
   onNotify,
   onOpenApps,
   onItemActionsChange,
+  calendar,
 }: {
   boardId?: string;
   /**
@@ -237,6 +238,21 @@ export function LiveMaintenanceBoard({
   onOpenApps: () => void;
   /** The item verbs the drawer's "⋮" offers — see overlay/item-actions.tsx. */
   onItemActionsChange?: (actions: BoardItemActions | null) => void;
+  /*
+   * The Calendar tab's wiring — only the parts a HOST holds: the compliance
+   * register and the audited date write paths, which live in `portal-app.tsx`
+   * beside the request list this board draws. The rest of the bundle is filled
+   * in below from props this board already has. Optional, and the tab is honest
+   * without it: it draws this board's jobs and refuses a date CHANGE out loud
+   * rather than dropping one. See `BoardCalendarWiring` in board-view-pane.tsx.
+   */
+  calendar?: Pick<
+    BoardCalendarWiring,
+    | "complianceRecords"
+    | "onOpenCompliance"
+    | "onJobDateChange"
+    | "onComplianceDateChange"
+  >;
 }) {
   const [isMobile, setIsMobile] = useState(false);
   /* The shared store, not a private copy — see the note above the removed
@@ -3305,6 +3321,16 @@ export function LiveMaintenanceBoard({
           onOpenItem={(item) => {
             const match = scopedRequests.find((request) => request.id === item.id);
             if (match) onOpenRequest(match, "columns");
+          }}
+          /* `requests` is `scopedRequests` with its REAL type. The same array
+             goes to `items` above through a cast, because `BoardItem` is only
+             the subset the views read; handing the calendar that subset would
+             cost it `stage` — see `boardItemsAsRequests` in the pane. */
+          calendar={{
+            ...calendar,
+            requests: scopedRequests,
+            onOpenRequest: (request) => onOpenRequest(request, "columns"),
+            onNotify,
           }}
         >
         <div className="live-board-toolbar">

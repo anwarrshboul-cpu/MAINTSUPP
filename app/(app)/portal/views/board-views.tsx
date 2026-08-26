@@ -123,6 +123,32 @@ export function KanbanView({
 
 /* ── Calendar — P4 ───────────────────────────────────────────────────────── */
 
+/*
+ * NO LONGER MOUNTED ON THE BOARD'S CALENDAR TAB.
+ *
+ * That tab now draws `OperationsCalendarPanel` — the same calendar the Planned
+ * page draws — because this one is a month grid and a month stepper, and the
+ * owner opening "Calendar" on the board expected the calendar with the view
+ * switcher, the date sources, the filters, the colours and the drag-to-move
+ * dates. See the note above the branch in `board-view-pane.tsx`.
+ *
+ * KEPT, NOT DELETED, and deliberately:
+ *
+ *   • it is a P4 renderer of the same family as `KanbanView`, `GalleryView` and
+ *     `ReportsView` beside it, all four asserted together as the board's own
+ *     lightweight views, and deleting one of the four to solve a MOUNTING
+ *     question would be answering a different question;
+ *   • it takes `BoardItem[]` and a palette and nothing else — no workspace, no
+ *     compliance register, no write paths — so it remains the calendar for any
+ *     surface that has only board items, which is what
+ *     `views/store-expiry-calendar.tsx` says in as many words it did not want
+ *     to bend this component into being.
+ *
+ * If a second surface ever needs a month-grid-only calendar, this is it. What
+ * changed is which component the board's Calendar TAB mounts, not whether this
+ * one is worth having.
+ */
+
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function CalendarView({
