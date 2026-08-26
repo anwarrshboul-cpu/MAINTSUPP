@@ -477,6 +477,34 @@ export function OperationsCalendarPanel({
                 }
               : null
           }
+          /*
+           * DRAG AND THE DIALOG ARE ONE WRITE REACHED TWO WAYS.
+           *
+           * `commitDate` is the only place this panel changes a date, and both
+           * paths end here: it routes through `calendarWriteTarget`, so a Due
+           * Date chip changes `dueAt` and nothing else however many sources are
+           * switched on; the host writes optimistically and rolls the record
+           * back if the server refuses; and the refusal is reported through
+           * `onNotify`. A drag that is rejected therefore returns to the day it
+           * came from with no phantom state anywhere, because there is no state
+           * for it to be in — nothing about a dragged date is held here.
+           *
+           * The permission test is the same two lines as the button's, on the
+           * same `canEditAnything`, because a drag and a dialog must be offered
+           * together or not at all. Neither is the enforcement: the server
+           * decides, and this only decides what to draw.
+           */
+          onMoveDate={
+            canEditAnything
+              ? (event, day) => {
+                  if (!mayEdit(event)) {
+                    onNotify("You do not have permission to change this date.");
+                    return;
+                  }
+                  void commitDate(event, day);
+                }
+              : null
+          }
           selectedDay={selectedDay}
           /*
            * SELECTING A DAY MOVES THE ANCHOR TOO.
@@ -513,9 +541,11 @@ export function OperationsCalendarPanel({
  * A dialog rather than an inline popover because this is a WRITE to a customer
  * record: it names the record, names the field it is about to change, shows the
  * date the record holds now, and cannot be dismissed by a stray click on the
- * grid behind it. Drag-to-move may exist as well, but drag is the convenience
- * and this is the METHOD — somebody on a keyboard, a screen reader or a small
- * phone gets exactly the same ability as somebody with a mouse.
+ * grid behind it. Drag-to-move now exists as well — see `calendar-event-drag.ts`
+ * — but drag is the convenience and this is the METHOD: somebody on a keyboard,
+ * a screen reader or a small phone gets exactly the same ability as somebody
+ * with a mouse, and it is the whole answer on the Day surface, which has no
+ * second date to drop onto. It is not optional and it does not go away.
  */
 function CalendarDateDialog({
   event,

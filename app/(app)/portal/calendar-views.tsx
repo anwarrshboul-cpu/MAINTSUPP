@@ -69,7 +69,7 @@
  * by the colour owner. A child element cannot be.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { Icon } from "../../components";
 import type { IconName } from "../../components";
@@ -86,6 +86,7 @@ import {
   shiftCalendarDay,
   shiftCalendarMonth,
 } from "./calendar-model";
+import { CalendarDragContext, useCalendarEventDrag } from "./calendar-event-drag";
 import "./calendar-views.css";
 
 /* -------------------------------------------------------------------------
@@ -340,6 +341,16 @@ export type CalendarSurfaceProps = {
   onOpen: (event: CalendarEvent) => void;
   /** Null when the viewer may not edit; render no edit affordance in that case. */
   onEditDate: ((event: CalendarEvent) => void) | null;
+  /**
+   * Move an event to another date by DRAGGING it there.
+   *
+   * The same write `onEditDate`'s dialog performs, reached the other way, and
+   * null on exactly the same condition — a viewer who is offered no "Change
+   * date" button is offered no grip and no draggable chip either. The dialog is
+   * the METHOD and remains the only path a keyboard or a screen reader needs;
+   * this is the convenience beside it.
+   */
+  onMoveDate: ((event: CalendarEvent, day: CalendarDay) => void) | null;
   /** Month/Week: which day the mobile agenda is showing. */
   selectedDay: CalendarDay;
   onSelectDay: (day: CalendarDay) => void;
@@ -347,7 +358,39 @@ export type CalendarSurfaceProps = {
   emptyState: ReactNode;
 };
 
+/**
+ * The dispatcher, and the one place the drag gesture is created.
+ *
+ * A context rather than a prop threaded through cells, columns, agendas and
+ * rows: the chip is three components below this one and the agenda grip is two,
+ * and every component in between is presentational and has no business carrying
+ * drag plumbing in its signature. `calendar-event-drag.ts` owns the gesture
+ * itself and its header says which measured conclusions it follows.
+ */
 export function CalendarSurface(props: CalendarSurfaceProps): React.JSX.Element {
+  const { onMoveDate } = props;
+  const move = useCallback(
+    (event: CalendarEvent, day: CalendarDay) => onMoveDate?.(event, day),
+    [onMoveDate],
+  );
+  const drag = useCalendarEventDrag({ enabled: onMoveDate !== null, onDrop: move });
+  return (
+    <CalendarDragContext.Provider value={drag}>
+      <CalendarSurfaceBody {...props} />
+    </CalendarDragContext.Provider>
+  );
+}
+
+/*
+ * The dispatch itself, kept as three plain lines in a component of its own.
+ *
+ * It could have been a ternary inside the provider above and it is deliberately
+ * not: `workstream-four-calendar-ui.test.mjs` reads these exact lines to prove
+ * that month, week and day are three surfaces rather than one rendered three
+ * ways, and that is a promise worth keeping legible — to the test and to a
+ * reader — rather than folding into an expression to save a function.
+ */
+function CalendarSurfaceBody(props: CalendarSurfaceProps): React.JSX.Element {
   if (props.mode === "day") return <DayView {...props} />;
   if (props.mode === "week") return <WeekView {...props} />;
   return <MonthView {...props} />;
@@ -526,6 +569,10 @@ function MonthView({
           onOpen={onOpen}
           onEditDate={onEditDate}
           heading
+          /* The grid above is 42 drop targets, so a grip here has somewhere to
+             go — and at 767px and below it is the ONLY touch drag on the month,
+             because the compact day grid draws no chips to grab. */
+          draggable
         />
       </div>
     </div>
@@ -856,6 +903,9 @@ function WeekView({
           onOpen={onOpen}
           onEditDate={onEditDate}
           heading
+          /* Seven columns above, each a drop target, and a column is 152px —
+             no room for a grip inside a stacked chip, plenty for one here. */
+          draggable
         />
       </div>
     </div>
@@ -866,6 +916,29 @@ function WeekView({
    Day
    ------------------------------------------------------------------------- */
 
+/**
+ * DRAG DOES NOT APPLY TO THE DAY SURFACE, AND THIS IS WHY.
+ *
+ * A drop needs a second date to land on. Day shows exactly one — there is no
+ * grid, no column strip and no `[data-calendar-day]` element anywhere on it, so
+ * a drag started here could only ever end where it began. The two ways to give
+ * it one were both worse than not having it:
+ *
+ *   · A pair of "previous day / next day" gutters would be new furniture on the
+ *     surface, invented for the gesture rather than for the reader, and it would
+ *     move a date one day per drag — slower than the dialog it is competing
+ *     with, for anything further than tomorrow.
+ *   · Rendering a strip of nearby days would make Day into a short Week, which
+ *     is the one thing this file's header says the three surfaces must not do to
+ *     each other.
+ *
+ * So Day is the mode where the "Change date" dialog is the whole answer, and it
+ * is a complete one: it names the record, names the field, shows the date the
+ * record holds and takes any date at all in one step. `draggable` is therefore
+ * not passed to the agenda below, so no grip is drawn — a gesture that cannot
+ * finish is not offered. Month and Week are where drag lives, and Day is one
+ * tab away from both.
+ */
 function DayView({
   anchor,
   today,
@@ -964,6 +1037,18 @@ function EventChip({
   stacked?: boolean;
 }): React.JSX.Element {
   const overdue = event.timing === "overdue";
+  /*
+   * A CHIP IS A MOUSE DRAG AND NEVER A TOUCH ONE.
+   *
+   * A month chip is about ninety pixels of usable width and there is no room in
+   * one for a grip, so a chip declares nothing about `touch-action` and a finger
+   * on it is a scroll — decided before it lands, which is the only way that
+   * decision can be made. See `calendar-event-drag.ts`. The touch path is the
+   * grip on the agenda row below the grid, which is why the agenda is drawn at
+   * every width.
+   */
+  const drag = useContext(CalendarDragContext);
+  const draggable = Boolean(drag?.enabled) && event.editable;
   return (
     <button
       type="button"
@@ -973,7 +1058,17 @@ function EventChip({
       style={chipStyle(event)}
       title={event.subtitle ? `${event.title} — ${event.subtitle}` : event.title}
       aria-label={eventName(event, typeLabel)}
-      onClick={() => onOpen(event)}
+      onPointerDown={
+        draggable ? (pressed) => drag?.onEventPointerDown(event, pressed) : undefined
+      }
+      /* Below the 4px threshold the gesture was never a drag, so the chip opens
+         its record exactly as it always has. Above it, the browser still fires
+         a click on release and this is where it is eaten. */
+      onClick={() => {
+        if (drag?.didDrag()) return;
+        onOpen(event);
+      }}
+      {...(draggable ? { "data-calendar-draggable": "" } : {})}
       {...eventData(event)}
     >
       <span className="calendar-chip__lead" aria-hidden="true">
@@ -1001,6 +1096,7 @@ function DayAgenda({
   onOpen,
   onEditDate,
   heading = false,
+  draggable = false,
 }: {
   day: CalendarDay;
   events: readonly CalendarEvent[];
@@ -1009,9 +1105,17 @@ function DayAgenda({
   onOpen: (event: CalendarEvent) => void;
   onEditDate: ((event: CalendarEvent) => void) | null;
   heading?: boolean;
+  /**
+   * Whether this agenda is drawn UNDER a grid of days.
+   *
+   * Month and Week are; Day is not, and a grip on a surface with one date on it
+   * would be a gesture with nowhere to finish. See `DayView`.
+   */
+  draggable?: boolean;
 }): React.JSX.Element {
   const ordered = useMemo(() => orderEvents(events), [events]);
   const label = calendarDayLabel(day);
+  const drag = useContext(CalendarDragContext);
 
   return (
     <section className="calendar-agenda" aria-label={label}>
@@ -1067,6 +1171,64 @@ function DayAgenda({
                     </span>
                   </span>
                 </button>
+                {/*
+                 * THE GRIP — the only place a FINGER can start a drag.
+                 *
+                 * Chrome decides at `touchstart` whether a touch sequence is
+                 * blocking, from `touch-action` and the listeners that exist at
+                 * that instant, so a touch drag has to begin somewhere that
+                 * already says `touch-action: none` in the stylesheet. That is
+                 * this button, and `.calendar-agenda__grip` in
+                 * calendar-views.css is where the declaration lives. The full
+                 * measurement is in `board-row-drag.ts` under `THE TOUCH STORY`
+                 * and it is not re-argued here.
+                 *
+                 * IT GOES ON THE AGENDA ROW, AND ON NOTHING ELSE. That is a
+                 * decision, not an omission, and it is a different reason for
+                 * each of the two things that did not get one:
+                 *
+                 *   · A MONTH CHIP is about ninety pixels wide, and at 767px and
+                 *     below it is not drawn at all — `.calendar-month__desk` is
+                 *     `display: none` there and the phone month is a compact day
+                 *     grid plus this agenda. So on a phone the agenda is not
+                 *     merely the better place to put a grip, it is the only
+                 *     place there is anything to grab.
+                 *   · A WEEK COLUMN CHIP is drawn on a phone, and still does not
+                 *     get one. A column is 152px, so a 44px grip inside a
+                 *     stacked chip would take a third of it away from the title;
+                 *     and `.calendar-week__list` is itself a vertical scroll
+                 *     container, so a `touch-action: none` target inside it
+                 *     would be a 44px hole a finger cannot pan the column by.
+                 *     Trading one working gesture for a broken one is not a
+                 *     trade worth making.
+                 *
+                 * The cost is that a phone drag begins by choosing a day, which
+                 * is a tap somebody has already made — the agenda only shows the
+                 * selected day, so they are looking at it because they chose it.
+                 * The gain is one gesture, in one place, in both Month and Week,
+                 * with the 44px "Change date" button still beside it.
+                 *
+                 * Pressing it — with a keyboard, or with a tap that never
+                 * became a drag — opens the same date dialog the Edit button
+                 * opens, so it is never a control that does nothing.
+                 */}
+                {canEdit && draggable ? (
+                  <button
+                    type="button"
+                    className="calendar-agenda__grip"
+                    data-calendar-drag-handle=""
+                    aria-label={`Move ${event.fieldLabel} for ${event.title} to another date`}
+                    onPointerDown={(pressed) =>
+                      drag?.onEventPointerDown(event, pressed)
+                    }
+                    onClick={() => {
+                      if (drag?.didDrag()) return;
+                      onEditDate?.(event);
+                    }}
+                  >
+                    <span className="calendar-agenda__gripdots" aria-hidden="true" />
+                  </button>
+                ) : null}
                 {canEdit ? (
                   <button
                     type="button"

@@ -997,3 +997,177 @@
     height: 7px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Drag to reschedule — the grip, the preview and the destination
+   --------------------------------------------------------------------------- */
+
+/*
+ * THE GRIP IS WHERE A TOUCH DRAG IS DECLARED, NOT WHERE IT IS DECIDED.
+ *
+ * `touch-action: none` here is the whole reason a finger can drag at all.
+ * Chrome reads `touch-action` once, at `touchstart`, and decides then whether
+ * the sequence is blocking; a value set later — or a `preventDefault()` on a
+ * `touchmove` that arrives `cancelable === false` — changes nothing, the
+ * compositor pans anyway and `pointercancel` kills the drag. That was built
+ * twice and measured, and the record of it is in `board-row-drag.ts` under
+ * `THE TOUCH STORY`. So the promise is made in the stylesheet, before the
+ * finger lands, and everywhere else on this calendar a finger is a scroll.
+ *
+ * 44px square at every width, not only on a phone: it is a real button and
+ * pressing it opens the date dialog, so it is a touch target wherever it is
+ * drawn. It sits between the row's own button and "Change date", which keeps
+ * the edit control exactly where it has always been — at the trailing edge.
+ */
+.calendar-agenda__grip {
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-self: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--control-fg);
+  touch-action: none;
+  cursor: grab;
+}
+
+.calendar-agenda__grip:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.calendar-agenda__grip:active {
+  cursor: grabbing;
+}
+
+/*
+ * Two columns of dots, drawn rather than typed: a glyph font can lose "⠿" and
+ * leave a grip with nothing in it, and this one has no text to fall back on.
+ */
+.calendar-agenda__gripdots {
+  width: 7px;
+  height: 16px;
+  background-image: radial-gradient(currentcolor 0.9px, transparent 1.1px);
+  background-size: 3.5px 4px;
+  opacity: 0.75;
+}
+
+/*
+ * A chip that can be picked up says so with the cursor.
+ *
+ * The attribute is set only when the viewer may edit AND the record is
+ * writable — the same pair the "Change date" button is drawn on — so a
+ * read-only calendar keeps the plain pointer it has always had.
+ */
+.calendar-chip[data-calendar-draggable] {
+  cursor: grab;
+}
+
+.calendar-chip[data-calendar-draggable]:active {
+  cursor: grabbing;
+}
+
+/*
+ * WHERE THE EVENT CAME FROM — A DASHED RING, AND NOT A FADE.
+ *
+ * This was `opacity: 0.45`, which reads well and fails axe: measured mid-drag
+ * at 1440, a chip title went from its normal ink to #f9fbfb on #92a7b5 — 2.4:1,
+ * one serious `color-contrast` violation that exists for as long as a finger is
+ * down. Nothing else on the page had one. A drag is not a moment when text is
+ * allowed to become unreadable, so the source keeps every bit of its contrast
+ * and says what it is with an edge instead.
+ *
+ * DASHED, where the destination is SOLID, and in `--line-strong` where the
+ * destination is `--accent-fg`: two marks that cannot be mistaken for each
+ * other, and the same vocabulary the board's row drag uses — a dashed outline
+ * is the place the thing came out of, which is also the place "put it back"
+ * means.
+ */
+.calendar-chip.is-calendar-dragging,
+.calendar-agenda__grip.is-calendar-dragging {
+  outline: 2px dashed var(--line-strong);
+  outline-offset: -2px;
+}
+
+/*
+ * While an event is in the air the whole page says so, and stops trying to
+ * select the text the pointer is being dragged across.
+ */
+body.is-dragging-calendar-event {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/*
+ * THE DESTINATION.
+ *
+ * One class on one element — the `[data-calendar-day]` under the pointer, which
+ * is a month `<td>` or a week column. Written by `classList`, never by React:
+ * nothing about a drag re-renders this surface, and a drag across a month
+ * crosses a dozen cells.
+ *
+ * An outline as well as a ground, because the ground alone is a tint and a
+ * tint is a colour-only signal. `outline-offset: -2px` draws it inside the
+ * cell, which is what keeps it visible on a `border-collapse: collapse` table
+ * where a box-shadow can be clipped by the neighbouring cell's border.
+ */
+.calendar-month__cell.is-calendar-drop,
+.calendar-week__col.is-calendar-drop {
+  background: var(--surface-active);
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
+
+/*
+ * THE PREVIEW.
+ *
+ * A plain element on `document.body`, built and moved by `calendar-event-drag.ts`
+ * — which writes geometry and nothing else, so every colour here stays a token
+ * and follows the dark theme. `position: fixed` keeps it out of the document's
+ * scrollable overflow, so carrying an event past the edge of the screen cannot
+ * widen the page.
+ *
+ * It prints the FIELD under the title because one job can be on this grid four
+ * times at once — raised, due, updated, completed — and the title alone does
+ * not say which of them is in your hand.
+ */
+.calendar-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1400;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--line-strong);
+  pointer-events: none;
+  user-select: none;
+  will-change: transform;
+}
+
+.calendar-drag-ghost__title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.calendar-drag-ghost__field {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
