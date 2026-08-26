@@ -735,6 +735,9 @@ export async function POST(request: Request) {
       const siteId = text(data.siteId, 100);
       const kind = text(data.kind, 120);
       if (!siteId || !kind) throw new Error("A site and requirement are required.");
+      // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
+      if (badReference) return badReference;
       id = newId("compliance", `${siteId}-${kind}`);
       const state = text(data.state, 40) || "Missing";
       await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: optionalText(data.expiry, 40), notRequired: state === "Not required" });
@@ -742,6 +745,9 @@ export async function POST(request: Request) {
       const name = text(data.name, 140);
       const siteId = text(data.siteId, 100);
       if (!name || !siteId) throw new Error("A unit name and site are required.");
+      // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
+      if (badReference) return badReference;
       id = newId("unit", name);
       await db.insert(units).values({ id, organisationId: orgId, siteId, name, category: text(data.category, 80) || "Asset", manufacturer: optionalText(data.manufacturer, 100), model: optionalText(data.model, 100), serialNumber: optionalText(data.serialNumber, 100), status: text(data.status, 40) || "Active", notes: optionalText(data.notes, 500) });
     } else if (entity === "contractor") {
@@ -754,8 +760,21 @@ export async function POST(request: Request) {
       const siteId = text(data.siteId, 100);
       const nextDueAt = text(data.nextDueAt, 40);
       if (!title || !siteId || !nextDueAt) throw new Error("A title, site and next due date are required.");
+      /*
+       * `unitId` and `contractorId` are optional — `referencesRefusal` skips a
+       * null, which is what "No linked unit" and "No contractor" send.
+       */
+      const unitId = optionalText(data.unitId, 100);
+      const contractorId = optionalText(data.contractorId, 100);
+      // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const badReference = await referencesRefusal(db, orgId, [
+        { kind: "site", value: siteId },
+        { kind: "unit", value: unitId },
+        { kind: "contractor", value: contractorId },
+      ]);
+      if (badReference) return badReference;
       id = newId("planned", title);
-      await db.insert(plannedMaintenance).values({ id, organisationId: orgId, siteId, unitId: optionalText(data.unitId, 100), contractorId: optionalText(data.contractorId, 100), title, category: text(data.category, 80) || "Planned maintenance", frequency: text(data.frequency, 60) || "Annual", nextDueAt, lastCompletedAt: optionalText(data.lastCompletedAt, 40), status: text(data.status, 40) || "Scheduled", reminderDays: numeric(data.reminderDays, 30, 0, 365) });
+      await db.insert(plannedMaintenance).values({ id, organisationId: orgId, siteId, unitId, contractorId, title, category: text(data.category, 80) || "Planned maintenance", frequency: text(data.frequency, 60) || "Annual", nextDueAt, lastCompletedAt: optionalText(data.lastCompletedAt, 40), status: text(data.status, 40) || "Scheduled", reminderDays: numeric(data.reminderDays, 30, 0, 365) });
     } else if (entity === "member") {
       const name = text(data.name, 120);
       const email = text(data.email, 180).toLowerCase();
@@ -797,6 +816,117 @@ function supplied<T>(
   return key in data ? { [key]: read(data[key]) } : {};
 }
 
+/**
+ * Resolve one reference to a row THIS organisation owns, or refuse.
+ *
+ * `siteId`, `unitId` and `contractorId` arrived trimmed and length-capped and
+ * nothing more, so a caller could file a unit, a compliance record or a
+ * planned visit in their OWN tenant against ANOTHER tenant's site, unit or
+ * contractor id. The row lands in the actor's organisation and its reference
+ * then points across the tenant boundary, which corrupts every site-joined
+ * report and every compliance count on both sides of it.
+ *
+ * The database does not catch this in any configuration. Three of these
+ * columns have no foreign key in the runtime DDL at all — `compliance_documents
+ * .site_id` (db/init.ts), `planned_maintenance.unit_id` and `.contractor_id` —
+ * and SQLite runs with `foreign_keys` OFF, which is its default and is never
+ * turned on here. Where the key does exist it only catches an id that exists
+ * nowhere; another tenant's real site satisfies it perfectly.
+ *
+ * Same shape as the site check on `POST /api/board/items`: one
+ * organisation-scoped SELECT, 404 on a miss.
+ *
+ * 404 for BOTH a nonexistent id and one belonging to another organisation, with
+ * a byte-identical body. A 403 for the second would be an existence oracle:
+ * site ids here are `store-<slug of the store name>-<8 hex>`, so confirming an
+ * id exists confirms the STORE NAME to a stranger in another tenant. One query
+ * carrying both predicates makes the two cases indistinguishable by
+ * construction rather than by policy, so no later edit can re-separate them.
+ */
+async function referenceRefusal(
+  db: WorkspaceDb,
+  orgId: string,
+  kind: "site" | "unit" | "contractor",
+  value: string,
+): Promise<Response | null> {
+  /*
+   * Spelled out per table rather than parameterised over one: drizzle's
+   * `.from()` does not take a union of table types, and three explicit selects
+   * read more honestly than a cast that hides which table is being asked.
+   */
+  const rows =
+    kind === "site"
+      ? await db
+          .select({ id: sites.id })
+          .from(sites)
+          .where(and(eq(sites.id, value), eq(sites.organisationId, orgId)))
+          .limit(1)
+      : kind === "unit"
+        ? await db
+            .select({ id: units.id })
+            .from(units)
+            .where(and(eq(units.id, value), eq(units.organisationId, orgId)))
+            .limit(1)
+        : await db
+            .select({ id: contractors.id })
+            .from(contractors)
+            .where(and(eq(contractors.id, value), eq(contractors.organisationId, orgId)))
+            .limit(1);
+  if (rows.length > 0) return null;
+  const label = kind === "site" ? "Site" : kind === "unit" ? "Unit" : "Contractor";
+  return Response.json({ error: `${label} not found.` }, { status: 404 });
+}
+
+/**
+ * Every reference on one record, checked before anything is written.
+ *
+ * An absent or empty value is SKIPPED, not refused. `unit_id` and
+ * `contractor_id` are nullable and the manage form sends "" for them
+ * deliberately — "No linked unit" and "No contractor" are the first option in
+ * both selects — so refusing "" would make every planned visit without a
+ * contractor unsavable. Required references are non-empty-checked at their own
+ * call site, where the message can name the missing field.
+ *
+ * Sequential rather than `Promise.all` so the first bad reference is the one
+ * reported, which is the one the operator has to fix.
+ */
+async function referencesRefusal(
+  db: WorkspaceDb,
+  orgId: string,
+  references: Array<{ kind: "site" | "unit" | "contractor"; value: string | null }>,
+): Promise<Response | null> {
+  for (const reference of references) {
+    if (!reference.value) continue;
+    const refusal = await referenceRefusal(db, orgId, reference.kind, reference.value);
+    if (refusal) return refusal;
+  }
+  return null;
+}
+
+/**
+ * A NOT NULL text column, refused when the caller explicitly sends it empty.
+ *
+ * `supplied` fixes omission. It does not fix `{ name: "" }`, and "" satisfies
+ * NOT NULL, so an explicit blank still reaches the column. The POST branches
+ * already refuse exactly these fields, so this is PATCH agreeing with POST
+ * about one rule rather than inventing a new one.
+ *
+ * A refusal rather than a silent ignore: ignoring would answer 200 and the
+ * dashboard would toast "Shared workspace updated" over an edit that did
+ * nothing. It is unreachable from the real UI — every one of these fields is
+ * `required` in the manage form — so it only ever answers an API caller, which
+ * is exactly who should be told.
+ */
+function requiredTextRefusal(
+  data: Record<string, unknown>,
+  key: string,
+  max: number,
+  message: string,
+): Response | null {
+  if (!(key in data)) return null;
+  return text(data[key], max) ? null : Response.json({ error: message }, { status: 400 });
+}
+
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
@@ -810,12 +940,117 @@ export async function PATCH(request: Request) {
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
     if (refusal) return refusal;
     if (entity === "site") {
-      await db.update(sites).set({ name: text(data.name, 120), type: text(data.type, 40), region: text(data.region, 40), lifecycle: text(data.lifecycle, 40), address: text(data.address, 300), manager: optionalText(data.manager, 120), updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+      /*
+       * Only what was sent — see `supplied`. `name`, `type`, `region`,
+       * `lifecycle` and `address` are all NOT NULL on `sites`, and "" satisfies
+       * NOT NULL, so the unconditional `text(data.x)` this replaces turned any
+       * partial PATCH into a blanked row: a caller sending `{ lifecycle:
+       * "Closed" }` erased the site's name, type, region and address and left a
+       * nameless entry in the register — the one identifier `resolveSiteByName`,
+       * the importer's index, Report-a-Job and the shared-form submit path all
+       * key on. The manage form posts every field of the record, so nothing on
+       * screen changes.
+       *
+       * `type`, `region` and `lifecycle` deliberately get no fallback even
+       * though they are NOT NULL: the code this replaces wrote whatever arrived
+       * including "", all three are fixed-option selects, and adding a default
+       * would change behaviour for the full payloads the form sends.
+       */
+      const badName = requiredTextRefusal(data, "name", 120, "A site name is required.");
+      if (badName) return badName;
+      const badAddress = requiredTextRefusal(data, "address", 300, "A site address is required.");
+      if (badAddress) return badAddress;
+      /*
+       * `lifecycle` is the only closed/open control this form has, and archiving
+       * now writes all three state columns, so writing `lifecycle` alone would
+       * leave a site the Sites screen still calls closed and this tab could
+       * never reopen. `app/api/sites/route.ts` keeps the trio in step from the
+       * other direction — it derives `lifecycle` and `active` from `status` —
+       * and this is the same rule read backwards.
+       *
+       * Reopening only clears an actually-closed site. `status` also carries
+       * 'international' and 'other', which are open states this form cannot
+       * express, so forcing 'active' on every save would quietly flatten them.
+       */
+      let lifecycleState = {};
+      if ("lifecycle" in data) {
+        if (text(data.lifecycle, 40) === "Closed") {
+          lifecycleState = { status: "closed", active: false };
+        } else {
+          const [current] = await db
+            .select({ status: sites.status })
+            .from(sites)
+            .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)))
+            .limit(1);
+          if (current?.status === "closed") lifecycleState = { status: "active", active: true };
+        }
+      }
+      await db.update(sites).set({
+        ...supplied(data, "name", (value) => text(value, 120)),
+        ...supplied(data, "type", (value) => text(value, 40)),
+        ...supplied(data, "region", (value) => text(value, 40)),
+        ...supplied(data, "lifecycle", (value) => text(value, 40)),
+        ...lifecycleState,
+        ...supplied(data, "address", (value) => text(value, 300)),
+        ...supplied(data, "manager", (value) => optionalText(value, 120)),
+        updatedAt: new Date().toISOString(),
+      }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
     } else if (entity === "compliance") {
       const state = text(data.state, 40) || "Missing";
+      /*
+       * Reference validation only. The UPDATE below names every column
+       * unconditionally on purpose — the calendar's compliance PATCH sends all
+       * four keys and depends on the full replace — so it is left exactly as it
+       * was. See tests/acceptance-correction-one-calendar-data.test.mjs.
+       */
+      /*
+       * Required UNCONDITIONALLY, unlike every other branch's guard. Those
+       * branches only write a column when it was sent, so an omitted key is
+       * harmless; this UPDATE names `site_id` and `kind` whatever arrives, so
+       * OMITTING them is the request that does the damage — a
+       * `{ state: "Valid" }` PATCH would answer 200 while blanking the
+       * document's site and its requirement name. Refusing the partial keeps
+       * the full replace the calendar depends on and closes the hole it opens.
+       */
+      if (!text(data.siteId, 100)) {
+        return Response.json({ error: "A site is required." }, { status: 400 });
+      }
+      if (!text(data.kind, 120)) {
+        return Response.json({ error: "A requirement is required." }, { status: 400 });
+      }
+      const badReference = await referencesRefusal(db, orgId, [
+        { kind: "site", value: text(data.siteId, 100) },
+      ]);
+      if (badReference) return badReference;
       await db.update(complianceDocuments).set({ siteId: text(data.siteId, 100), kind: text(data.kind, 120), status: state, expiryDate: optionalText(data.expiry, 40), notRequired: state === "Not required", updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     } else if (entity === "unit") {
-      await db.update(units).set({ siteId: text(data.siteId, 100), name: text(data.name, 140), category: text(data.category, 80), manufacturer: optionalText(data.manufacturer, 100), model: optionalText(data.model, 100), serialNumber: optionalText(data.serialNumber, 100), status: text(data.status, 40), notes: optionalText(data.notes, 500), updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
+      /*
+       * Only what was sent — see `supplied`. `siteId`, `name`, `category` and
+       * `status` are NOT NULL, so a partial PATCH used to blank them, and a
+       * blanked `site_id` detaches the unit from its site entirely. Validating
+       * the site while the same statement could silently empty it would be
+       * incoherent, so both land together.
+       */
+      const badName = requiredTextRefusal(data, "name", 140, "A unit name is required.");
+      if (badName) return badName;
+      const badSite = requiredTextRefusal(data, "siteId", 100, "A site is required.");
+      if (badSite) return badSite;
+      // Before the update, so a refusal writes nothing. See `referenceRefusal`.
+      const badReference = await referencesRefusal(db, orgId, [
+        { kind: "site", value: "siteId" in data ? text(data.siteId, 100) : null },
+      ]);
+      if (badReference) return badReference;
+      await db.update(units).set({
+        ...supplied(data, "siteId", (value) => text(value, 100)),
+        ...supplied(data, "name", (value) => text(value, 140)),
+        ...supplied(data, "category", (value) => text(value, 80)),
+        ...supplied(data, "manufacturer", (value) => optionalText(value, 100)),
+        ...supplied(data, "model", (value) => optionalText(value, 100)),
+        ...supplied(data, "serialNumber", (value) => optionalText(value, 100)),
+        ...supplied(data, "status", (value) => text(value, 40)),
+        ...supplied(data, "notes", (value) => optionalText(value, 500)),
+        updatedAt: new Date().toISOString(),
+      }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     } else if (entity === "contractor") {
       await db.update(contractors).set({
         // Only what was sent — see `supplied`. A partial PATCH used to blank
@@ -838,7 +1073,44 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
     } else if (entity === "planned") {
-      await db.update(plannedMaintenance).set({ siteId: text(data.siteId, 100), unitId: optionalText(data.unitId, 100), contractorId: optionalText(data.contractorId, 100), title: text(data.title, 160), category: text(data.category, 80), frequency: text(data.frequency, 60), nextDueAt: text(data.nextDueAt, 40), lastCompletedAt: optionalText(data.lastCompletedAt, 40), status: text(data.status, 40), reminderDays: numeric(data.reminderDays, 30, 0, 365), updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
+      /*
+       * Only what was sent — see `supplied`. Every column here except `unitId`,
+       * `contractorId` and `lastCompletedAt` is NOT NULL, so a partial PATCH
+       * used to strip a scheduled visit of its title, category, frequency AND
+       * next due date, which takes it off the calendar entirely. As with units,
+       * validating the references while the same statement could silently empty
+       * them would be incoherent, so both land together.
+       */
+      const badTitle = requiredTextRefusal(data, "title", 160, "A planned task title is required.");
+      if (badTitle) return badTitle;
+      const badSite = requiredTextRefusal(data, "siteId", 100, "A site is required.");
+      if (badSite) return badSite;
+      const badDue = requiredTextRefusal(data, "nextDueAt", 40, "A next due date is required.");
+      if (badDue) return badDue;
+      /*
+       * `unitId` and `contractorId` are nullable and "" is how the form says
+       * "none", so `referencesRefusal` skips an empty value — clearing a
+       * contractor still works.
+       */
+      const badReference = await referencesRefusal(db, orgId, [
+        { kind: "site", value: "siteId" in data ? text(data.siteId, 100) : null },
+        { kind: "unit", value: "unitId" in data ? optionalText(data.unitId, 100) : null },
+        { kind: "contractor", value: "contractorId" in data ? optionalText(data.contractorId, 100) : null },
+      ]);
+      if (badReference) return badReference;
+      await db.update(plannedMaintenance).set({
+        ...supplied(data, "siteId", (value) => text(value, 100)),
+        ...supplied(data, "unitId", (value) => optionalText(value, 100)),
+        ...supplied(data, "contractorId", (value) => optionalText(value, 100)),
+        ...supplied(data, "title", (value) => text(value, 160)),
+        ...supplied(data, "category", (value) => text(value, 80)),
+        ...supplied(data, "frequency", (value) => text(value, 60)),
+        ...supplied(data, "nextDueAt", (value) => text(value, 40)),
+        ...supplied(data, "lastCompletedAt", (value) => optionalText(value, 40)),
+        ...supplied(data, "status", (value) => text(value, 40)),
+        ...supplied(data, "reminderDays", (value) => numeric(value, 30, 0, 365)),
+        updatedAt: new Date().toISOString(),
+      }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
     } else if (entity === "member") {
       await db.update(users).set({ fullName: text(data.name, 120), email: text(data.email, 180).toLowerCase(), role: text(data.role, 60), active: booleanValue(data.active), updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     } else if (entity === "settings") {
@@ -874,7 +1146,17 @@ export async function DELETE(request: Request) {
       entity === "member" ? "deactivate" : "write",
     );
     if (refusal) return refusal;
-    if (entity === "site") await db.update(sites).set({ lifecycle: "Closed", updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+    /*
+     * All three state columns, in the order `DELETE /api/sites` writes them.
+     * Archiving here used to set `lifecycle` alone, leaving `status` at
+     * 'active' and `active` at true, so an archived site stayed in every
+     * surface that filters on those two — `app/lib/form-options.ts` offers it
+     * on the public Location dropdown, the Sites screen files it under Active
+     * and still shows a Close button, and the options tally counts it against
+     * 'active'. 'closed' is the seeded site_status option, and this is the
+     * literal `app/api/sites/route.ts` already writes.
+     */
+    if (entity === "site") await db.update(sites).set({ status: "closed", lifecycle: "Closed", active: false, updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
     else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     else if (entity === "contractor") await db.update(contractors).set({ active: false, availability: "Inactive", updatedAt: new Date().toISOString() }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
