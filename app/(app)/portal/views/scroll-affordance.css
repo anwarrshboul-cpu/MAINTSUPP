@@ -140,6 +140,31 @@
  * It rotates the shared chevron rather than asking for a second glyph — the
  * icon set has one chevron and it points right.
  */
+/*
+ * THE ARROW SITS ON TOP OF THE STRIP, SO THE STRIP MUST NOT REST UNDER IT.
+ *
+ * `.board-views__back` is `position: absolute; left: 0` with an opaque ground,
+ * which is right — it is an overlay, not a column. But once the active tab is
+ * scrolled into view (see `useActiveTabInView` in board-view-pane.tsx) the strip
+ * rests with that tab's start at the container's left edge, which is exactly
+ * where the arrow is. Measured at 320, 390 and 430: the 44px arrow covered 44px
+ * of the 102px "Calendar" tab and the reader saw a current tab labelled
+ * "alendar".
+ *
+ * `scroll-padding-inline-start` insets the SNAPPORT rather than the content, so
+ * `scroll-snap-align: start` comes to rest clear of the arrow without moving
+ * anything at `scrollLeft: 0` — where the arrow is hidden and the first tab has
+ * the edge to itself. It fixes hand-swiping and arrow-paging by the same
+ * stroke, and it works WITH the snap container rather than fighting it, which
+ * is the trap that made the first attempt at that scroll fail silently.
+ *
+ * 48px, not 44: the arrow's own width plus the strip's 2px inter-tab gap and a
+ * hair, so the tab's focus ring is not clipped either.
+ */
+.board-views__tabs {
+  scroll-padding-inline-start: 48px;
+}
+
 .board-views__back {
   display: none;
   position: absolute;

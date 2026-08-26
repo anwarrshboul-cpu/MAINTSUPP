@@ -36,13 +36,118 @@
   min-width: 0;
 }
 
+/*
+ * THE FILTER ROW IS A BAND, NOT A LOOSE ROW OF PILLS.
+ *
+ * It had no padding at all, so six buttons started 14px to the LEFT of the
+ * navigation above them and ran flush into the panel's edge — the top of the
+ * calendar read as three unrelated things stacked by accident rather than as
+ * one toolbar. The gutter matches `.calendar-bar`'s and the hairline says
+ * where the row ends, which is what makes the three of them read as bands of
+ * one control surface: go here for WHEN, here to NARROW IT, here for WHAT THE
+ * MARKS MEAN.
+ */
+.calendar-filter-bar {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-card);
+}
+
+/*
+ * A section label, in the product's own group-label voice — the same
+ * uppercase, letter-spaced, muted treatment the sidebar gives "OPERATIONS".
+ * At 12px/680 sentence case it was the same size and weight as the buttons
+ * beside it and read as a seventh, broken one.
+ */
+/*
+ * THE FOLDED BAR — one trigger, one "Clear all", one 44px row.
+ *
+ * Below 768 the six pickers live inside the sheet the `Filters` trigger opens,
+ * so the band goes from four rows to one. `nowrap` on purpose: there are
+ * exactly two children and they must never wrap, because a second row here is
+ * the whole cost this is paying to remove.
+ *
+ * Doubled class so it clears the `display: grid` the phone block below gives
+ * `.calendar-filter-bar` — that grid is still wanted for the one frame before
+ * `useNarrowViewport` reports, when the six pickers are briefly on screen.
+ */
+.calendar-filter-bar.calendar-filter-bar--folded {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-filter-bar--folded > .calendar-control {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.calendar-filter-bar--folded > .calendar-control > .calendar-control-trigger {
+  width: 100%;
+  /* Label left, count and caret right, so the row reads "Filters ..... 2 v"
+     rather than as a centred word floating in a wide box. */
+  justify-content: flex-start;
+}
+
+.calendar-filter-bar--folded .calendar-control-trigger__caret {
+  margin-left: auto;
+}
+
+.calendar-filter-bar--folded > .calendar-clear-all {
+  flex: 0 0 auto;
+}
+
+/*
+ * Inside the sheet each facet is a titled group, and a group that is doing
+ * something says how many, in its title — otherwise a reader who has scrolled
+ * past "Site" has no way of knowing they left two ticked up there.
+ */
+.calendar-menu__legend-count {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* "No sites recorded", inside the group it is about. A span, not a `<p>`. */
+.calendar-menu__desc--note {
+  display: block;
+  padding: 4px 6px 6px;
+}
+
+/*
+ * Six facets in one sheet is a long scroll — eleven sites, then statuses, then
+ * four more groups — and the reader needs to know which one they are in
+ * without scrolling back to check. A rule above every group but the first
+ * marks the joins, so the titles read as section headings rather than as small
+ * grey words that happen to sit between two checkboxes.
+ */
+.calendar-sheet .calendar-menu__group + .calendar-menu__group {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .calendar-filter-bar__label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding-right: 2px;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 680;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -112,6 +217,31 @@
 
 .calendar-control-trigger[aria-expanded="true"] .calendar-control-trigger__caret {
   transform: rotate(-90deg);
+}
+
+/*
+ * A TRIGGER THAT IS DOING SOMETHING SAYS SO WITHOUT BEING OPENED.
+ *
+ * The only sign a facet was filtering used to be the count badge, and a small
+ * dark circle beside "Status" is not a thing a first-time reader decodes. An
+ * active trigger now differs from a resting one in three ways at once — a
+ * brand-coloured border, a filled ground and the number — so it is legible to
+ * somebody who cannot separate the two colours and obvious to somebody
+ * scanning the row for "what have I got switched on".
+ *
+ * Set from `data-active` in the TSX rather than from `:has(.…__count)`,
+ * because Dates carries a count permanently and would otherwise sit lit up
+ * forever.
+ */
+.calendar-control-trigger[data-active] {
+  border-color: var(--brand-solid);
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.calendar-control-trigger[data-active]:hover {
+  border-color: var(--brand-solid);
+  background: var(--surface-sunken);
 }
 
 /*
@@ -448,6 +578,31 @@
  * colours are chosen by the reader, so every entry needs a glyph and a word as
  * well as a swatch.
  */
+/*
+ * The key's own band, on the same 14px gutter as the two rows above it, so all
+ * three line up down the left edge instead of each starting somewhere
+ * different. Sunken ground because this row is the only one that is not a
+ * control — nothing in it can be pressed, and it should not invite a press.
+ */
+.calendar-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+
+.calendar-key-row__label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .calendar-key {
   display: flex;
   flex-wrap: wrap;
@@ -503,9 +658,65 @@
  * are the densest list here and the easiest to mis-tap into the wrong filter.
  */
 @media (max-width: 767px) {
+  /*
+   * SIX FACETS IN TWO COLUMNS, WITH A HEADER LINE OF THEIR OWN.
+   *
+   * Wrapping put "FILTERS" and two pills on the first line, two more on the
+   * second, two on the third and "Clear all" alone on a fourth — four rows of
+   * ragged pills where no two lines started or ended in the same place. The
+   * same four rows declared as a grid become a header ("FILTERS … Clear all")
+   * and three tidy pairs, so the row you are looking for is where you would
+   * look for it and the label reads as a heading rather than as a stray word
+   * in front of a button.
+   *
+   * No height is spent doing it: `Clear all` moves up beside the label instead
+   * of taking a line to itself.
+   */
+  .calendar-filter-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+  }
+
+  .calendar-filter-bar__label {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .calendar-filter-bar > .calendar-clear-all {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .calendar-filter-bar > .calendar-control,
+  .calendar-filter-bar > .calendar-control > .calendar-control-trigger {
+    width: 100%;
+  }
+
   .calendar-control,
   .calendar-control-trigger {
     max-width: 100%;
+  }
+
+  /*
+   * THE KEY GOES UNDER THE CALENDAR, NOT OVER IT.
+   *
+   * Four swatch-and-word pairs plus a label is one 37px line at 390 and two
+   * lines — 86px — at 320, and every one of those pixels sat between the
+   * reader and the first row of dates. It is a legend: it is read once, when a
+   * mark is unfamiliar, and rarely again. So on a phone it keeps its band, its
+   * label and its glyphs and moves to the bottom of the panel, where a legend
+   * belongs, with its border moved to the top edge to match.
+   *
+   * `order` on a flex parent rather than a change to the JSX, because the
+   * order a laptop gets is the right one there, and the DOM order is the one
+   * the tab sequence and the screen reader should keep at either width.
+   */
+  .calendar-key-row {
+    order: 1;
+    border-top: 1px solid var(--line);
+    border-bottom: 0;
   }
 
   .calendar-control-trigger {

@@ -220,16 +220,99 @@
   gap: 8px;
 }
 
-@media (max-width: 767px) {
-  .calendar-bar {
-    padding: 10px;
-  }
-
+/*
+ * Between 768 and 1023 the four groups no longer fit on one line — the range
+ * heading is a heading now, and "Monday 24 Aug 2026" in Day view never fit
+ * even before it was. Left to wrap on its own the controls floated to the
+ * right of an empty second row, which reads as a mistake rather than as a
+ * second row. Declaring the break puts them on the same left gutter as the
+ * heading, the FILTERS row and the KEY row, so the whole toolbar lines up.
+ *
+ * 1023 is the breakpoint calendar-views.css already uses for this panel.
+ */
+@media (max-width: 1023px) {
   .calendar-bar__controls {
-    /* Full width on its own line under the navigation, so four controls do not
-       compete for a 320px row. */
     width: 100%;
     margin-left: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  /*
+   * The panel becomes a column so the key row can be sent to the end of it.
+   * `min-width: 0` on the children because a flex item is sized by its content
+   * by default, and the week surface owns a horizontal scroller whose content
+   * is wider than a phone — without this it would push the panel, and with it
+   * the page, sideways.
+   */
+  .calendar-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .calendar-panel > * {
+    min-width: 0;
+  }
+
+  .calendar-bar {
+    padding: 10px;
+    /* The bar's 12px column gap is right between the navigator and the
+       controls when they share a line; stacked, it is 12px of nothing
+       twice over, and on this screen 8px of grid is a third of a date
+       row. The column gap is left alone. */
+    row-gap: 8px;
+  }
+
+  /*
+   * A GRID, BECAUSE WRAPPING PRODUCED AN ORPHAN.
+   *
+   * Full-width-and-wrap put Month/Week/Day and Dates on one line at 390px and
+   * left Colours alone on the next, which does not read as a layout — it reads
+   * as something that broke. Three controls of three different widths will
+   * always wrap into a different-looking mess at every phone size.
+   *
+   * So the widths are declared instead of discovered. The mode switcher takes
+   * the full row because it is the most-used control on the screen and because
+   * three equal segments across the width is the clearest a segmented control
+   * ever looks; Dates and Colours split the row beneath it. Same shape at 320
+   * as at 430.
+   */
+  .calendar-bar__controls {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-left: 0;
+  }
+
+  .calendar-bar__controls > .calendar-switcher {
+    grid-column: 1 / -1;
+  }
+
+  /* Each segment takes a third of the row rather than hugging its own word, so
+     the three read as one control with three positions. */
+  .calendar-bar__controls > .calendar-switcher button {
+    flex: 1 1 0;
+  }
+
+  .calendar-bar__controls > .calendar-control,
+  .calendar-bar__controls > .calendar-control > .calendar-control-trigger {
+    width: 100%;
+  }
+
+  /* The three bands keep the 10px gutter the bar drops to on a phone, and the
+     filter band loses a pixel top and bottom — it is one 44px row now, its own
+     padding is the only thing left to give, and two pixels of month grid is
+     two pixels of month grid. The 44px target inside it is untouched. */
+  .calendar-filter-bar,
+  .calendar-key-row {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .calendar-filter-bar {
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
   /* A write target under a thumb. 44px is the product's own phone minimum. */

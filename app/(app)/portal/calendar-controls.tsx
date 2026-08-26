@@ -191,6 +191,7 @@ function ControlTrigger({
   label,
   state,
   tone,
+  active,
   inert,
   inertNote,
   onOpen,
@@ -201,6 +202,19 @@ function ControlTrigger({
   label: string;
   state?: string;
   tone?: "count" | "none";
+  /*
+   * "This one is doing something to what you are looking at" — set by the six
+   * facets when a value is ticked and by Colours when a colour is not the
+   * default. It is deliberately NOT set by Dates, whose count is always
+   * non-zero in normal use and would leave a permanently-lit trigger that
+   * stopped meaning anything.
+   *
+   * A badge alone was the only signal before, and a reader had to already know
+   * what a small dark circle meant. The border and ground that `data-active`
+   * paints are a second and third signal, and the number stays so that colour
+   * is never carrying it on its own.
+   */
+  active?: boolean;
   inert?: boolean;
   inertNote?: string;
   onOpen: () => void;
@@ -216,6 +230,7 @@ function ControlTrigger({
       type="button"
       className="secondary-button calendar-control-trigger"
       {...(testId ? { [testId]: "" } : {})}
+      {...(active && !inert ? { "data-active": "" } : {})}
       aria-expanded={inert ? undefined : open}
       aria-haspopup={inert ? undefined : "dialog"}
       aria-disabled={inert ? true : undefined}
@@ -380,6 +395,56 @@ const FACETS: readonly { key: FacetKey; label: string; empty: string }[] = [
   },
 ];
 
+/**
+ * One facet's option list. Rendered twice over: inside its own popover on a
+ * laptop, and inside the six-in-one sheet on a phone. One copy of the markup,
+ * so a checkbox cannot behave one way at 768px and another at 767px.
+ */
+function FacetOptions({
+  options,
+  selected,
+  onChange,
+}: {
+  options: CalendarFilterOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const chosen = new Set(selected);
+  const toggle = useCallback(
+    (option: string, on: boolean) => {
+      onChange(
+        on
+          ? [...selected.filter((entry) => entry !== option), option]
+          : selected.filter((entry) => entry !== option),
+      );
+    },
+    [onChange, selected],
+  );
+
+  return (
+    <div className="calendar-menu__list">
+      {options.map((option) => (
+        <label className="calendar-menu__option" key={option.value}>
+          <input
+            type="checkbox"
+            checked={chosen.has(option.value)}
+            onChange={(event) => toggle(option.value, event.target.checked)}
+          />
+          <span className="calendar-menu__option-body">
+            <span className="calendar-menu__option-label">{option.label}</span>
+          </span>
+          <span
+            className="calendar-menu__count"
+            data-empty={option.count === 0 ? "true" : undefined}
+          >
+            {option.count.toLocaleString("en-GB")}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function FacetPicker({
   facet,
   label,
@@ -398,18 +463,6 @@ function FacetPicker({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const inert = options.length === 0;
-  const chosen = new Set(selected);
-
-  const toggle = useCallback(
-    (option: string, on: boolean) => {
-      onChange(
-        on
-          ? [...selected.filter((entry) => entry !== option), option]
-          : selected.filter((entry) => entry !== option),
-      );
-    },
-    [onChange, selected],
-  );
 
   return (
     <div className="calendar-control" data-board-popover="" data-facet={facet}>
@@ -419,6 +472,7 @@ function FacetPicker({
         testId="data-calendar-filters"
         state={inert ? "None recorded" : selected.length ? String(selected.length) : undefined}
         tone={inert ? "none" : "count"}
+        active={selected.length > 0}
         inert={inert}
         inertNote={emptyNote}
         open={open}
@@ -440,26 +494,7 @@ function FacetPicker({
           </button>
         }
       >
-        <div className="calendar-menu__list">
-          {options.map((option) => (
-            <label className="calendar-menu__option" key={option.value}>
-              <input
-                type="checkbox"
-                checked={chosen.has(option.value)}
-                onChange={(event) => toggle(option.value, event.target.checked)}
-              />
-              <span className="calendar-menu__option-body">
-                <span className="calendar-menu__option-label">{option.label}</span>
-              </span>
-              <span
-                className="calendar-menu__count"
-                data-empty={option.count === 0 ? "true" : undefined}
-              >
-                {option.count.toLocaleString("en-GB")}
-              </span>
-            </label>
-          ))}
-        </div>
+        <FacetOptions options={options} selected={selected} onChange={onChange} />
       </ControlSurface>
     </div>
   );
@@ -471,6 +506,27 @@ function FacetPicker({
  * A facet with no values renders inert with the reason on it rather than
  * opening onto an empty list — an empty menu tells the user the control is
  * broken, and "No job types recorded" tells them it is not.
+ *
+ * ── AND ON A PHONE, ONE TRIGGER INSTEAD OF SIX ──────────────────────────────
+ *
+ * Six 44px pickers in two columns is three rows of pills under a header row,
+ * and that is 219px. Added to a 214px navigation band and a key row that wraps
+ * to 86px at 320, the calendar's own chrome came to 470px — so at 390x844 the
+ * month grid began at y=826 and the reader saw an 18px sliver of it, and at
+ * 320x720 they saw NO DATES AT ALL. A calendar whose first screen contains no
+ * calendar has failed at the only thing it is for, however well labelled its
+ * controls are.
+ *
+ * So below 768 the six collapse into one `Filters` trigger carrying the live
+ * count, opening one sheet that holds all six as titled groups. Nothing is
+ * removed and nothing is renamed: every facet keeps its `data-facet`, its
+ * label, its per-value counts and its "none recorded" note, and the sheet is
+ * the same `MobileCellSheet` every other narrow control on this screen already
+ * opens into. It costs one tap to reach a facet and buys back about 155px,
+ * which is three rows of dates.
+ *
+ * Above 768 nothing changes — six pickers are the right control when there is
+ * a row to put them in.
  */
 export function CalendarFilterBar({
   filters,
@@ -482,6 +538,140 @@ export function CalendarFilterBar({
   onChange: (next: CalendarFilters) => void;
 }): React.JSX.Element {
   const active = calendarFilterCount(filters);
+  const narrow = useNarrowViewport();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const clearAll = useCallback(
+    () =>
+      onChange({
+        sites: [],
+        statuses: [],
+        priorities: [],
+        contractors: [],
+        jobTypes: [],
+        complianceTypes: [],
+      }),
+    [onChange],
+  );
+
+  const clearAllButton = (
+    <button
+      type="button"
+      className="text-button calendar-clear-all"
+      disabled={active === 0}
+      onClick={clearAll}
+    >
+      Clear all
+      {active > 0 ? <span className="calendar-clear-all__count">{active}</span> : null}
+    </button>
+  );
+
+  if (narrow) {
+    return (
+      <div className="calendar-filter-bar calendar-filter-bar--folded">
+        <div className="calendar-control" data-board-popover="">
+          <ControlTrigger
+            buttonRef={triggerRef}
+            label="Filters"
+            testId="data-calendar-filters"
+            state={active ? String(active) : undefined}
+            active={active > 0}
+            open={open}
+            onOpen={() => setOpen((current) => !current)}
+          />
+          <ControlSurface
+            open={open}
+            anchorRef={triggerRef}
+            onClose={() => setOpen(false)}
+            title="Filters"
+            subtitle="Tick what you want to see"
+            action={
+              /* "Clear", not "Clear all": inside a sheet titled Filters there
+                 is nothing else it could clear, and "Clear all" wrapped onto
+                 two lines in a 390px header. Same word the six laptop popovers
+                 use, so the action reads the same at either width. */
+              <button
+                type="button"
+                className="text-button calendar-menu__clear"
+                disabled={active === 0}
+                onClick={clearAll}
+              >
+                Clear
+              </button>
+            }
+          >
+            {FACETS.map((facet) => {
+              const facetOptions = options[facet.key] ?? [];
+              const selected = filters[facet.key] ?? [];
+              return (
+                <fieldset
+                  className="calendar-menu__group"
+                  key={facet.key}
+                  data-facet={facet.key}
+                >
+                  <legend>
+                    {facet.label}
+                    {selected.length > 0 ? (
+                      <span className="calendar-menu__legend-count">{selected.length}</span>
+                    ) : null}
+                  </legend>
+                  {facetOptions.length === 0 ? (
+                    /*
+                     * A `<span>`, never a `<p>` or a `<small>`: `.portal-content
+                     * p` and `.portal-content small` set `color: var(--muted)`
+                     * at (0,1,1) and outrank a single class. Same reasoning as
+                     * `calendar-surface__today`.
+                     */
+                    <span className="calendar-menu__desc calendar-menu__desc--note">
+                      {facet.empty}
+                    </span>
+                  ) : (
+                    <FacetOptions
+                      options={facetOptions}
+                      selected={selected}
+                      onChange={(next) => onChange({ ...filters, [facet.key]: next })}
+                    />
+                  )}
+                </fieldset>
+              );
+            })}
+          </ControlSurface>
+        </div>
+        {clearAllButton}
+        {/*
+         * THE SIX FACETS STAY ADDRESSABLE WHILE THE SHEET IS SHUT.
+         *
+         * Folding them into a sheet moved their `data-facet` hooks inside a
+         * surface that only exists while it is open, so between 320 and 767 a
+         * reader of this page — acceptance, or anything else asking "which
+         * facets does this calendar have and what is set" — would have counted
+         * zero facets and concluded the control was gone. It is not gone; it
+         * is one tap away.
+         *
+         * So the collapsed bar keeps the six keys and each one's selected
+         * count. `hidden` rather than a visually-hidden class: this is state,
+         * not text, and it should be out of the accessibility tree and out of
+         * layout entirely rather than read aloud to somebody who is already
+         * being told "Filters, 2" by the button itself.
+         *
+         * Only while the sheet is SHUT. Open, the real six are on screen and a
+         * mirror would double the count for anything counting them — six
+         * facets is six facets at every width and in either state.
+         */}
+        {!open &&
+          FACETS.map((facet) => (
+            <span
+              key={facet.key}
+              hidden
+              data-facet={facet.key}
+              data-facet-selected={(filters[facet.key] ?? []).length}
+            />
+          ))}
+      </div>
+    );
+  }
+
   return (
     <div className="calendar-filter-bar">
       <span className="calendar-filter-bar__label">
@@ -499,24 +689,7 @@ export function CalendarFilterBar({
           onChange={(next) => onChange({ ...filters, [facet.key]: next })}
         />
       ))}
-      <button
-        type="button"
-        className="text-button calendar-clear-all"
-        disabled={active === 0}
-        onClick={() =>
-          onChange({
-            sites: [],
-            statuses: [],
-            priorities: [],
-            contractors: [],
-            jobTypes: [],
-            complianceTypes: [],
-          })
-        }
-      >
-        Clear all
-        {active > 0 ? <span className="calendar-clear-all__count">{active}</span> : null}
-      </button>
+      {clearAllButton}
     </div>
   );
 }
@@ -642,6 +815,7 @@ export function CalendarColourSettings({
         label="Colours"
         testId="data-calendar-colours"
         state={custom ? String(custom) : undefined}
+        active={custom > 0}
         open={open}
         onOpen={() => setOpen((current) => !current)}
       />
@@ -688,37 +862,60 @@ export function CalendarLegend({
     color: calendarInk(colours.compliance),
   };
   return (
-    <ul className="calendar-key" aria-label="What the calendar's marks mean">
-      <li className="calendar-key__item">
-        <span className="calendar-key__swatch" style={job}>
-          <Icon name="wrench" size={11} />
-        </span>
-        Jobs
-      </li>
-      <li className="calendar-key__item">
-        <span className="calendar-key__swatch" style={compliance}>
-          <Icon name="shield" size={11} />
-        </span>
-        Compliance
-      </li>
-      <li className="calendar-key__item">
-        <span
-          className="calendar-key__swatch calendar-key__swatch--overdue"
-          style={{ ...job, borderLeftColor: job.color }}
-        >
-          <Icon name="alert" size={11} />
-        </span>
-        Overdue
-      </li>
-      <li className="calendar-key__item">
-        <span
-          className="calendar-key__swatch calendar-key__swatch--done"
-          style={{ ...job, borderLeftColor: job.color }}
-        >
-          <Icon name="check" size={11} />
-        </span>
-        Done
-      </li>
-    </ul>
+    /*
+     * THE KEY SAYS IT IS A KEY.
+     *
+     * Four small swatch-and-word pairs sitting flush against the panel edge,
+     * one row under six filter buttons, read as four more controls — they are
+     * the same size and the same distance apart as the pills above them. The
+     * word "Key" costs one label and stops a reader trying to click "Overdue"
+     * to filter by it.
+     *
+     * It also gives the `Colours` trigger something to point at: somebody
+     * asking "how do I change what a Job looks like" now sees the Job swatch
+     * named, and the control that changes it is the nearest button above.
+     *
+     * A `<span>`, never a `<p>` or a `<small>`: `.portal-content p` and
+     * `.portal-content small` set `color: var(--muted)` at (0,1,1) and would
+     * outrank a single class here. That exact bug already shipped once on this
+     * screen — see `calendar-surface__today` in calendar-views.tsx.
+     */
+    <div className="calendar-key-row">
+      <span className="calendar-key-row__label" aria-hidden="true">
+        Key
+      </span>
+      <ul className="calendar-key" aria-label="What the calendar's marks mean">
+        <li className="calendar-key__item">
+          <span className="calendar-key__swatch" style={job}>
+            <Icon name="wrench" size={11} />
+          </span>
+          Jobs
+        </li>
+        <li className="calendar-key__item">
+          <span className="calendar-key__swatch" style={compliance}>
+            <Icon name="shield" size={11} />
+          </span>
+          Compliance
+        </li>
+        <li className="calendar-key__item">
+          <span
+            className="calendar-key__swatch calendar-key__swatch--overdue"
+            style={{ ...job, borderLeftColor: job.color }}
+          >
+            <Icon name="alert" size={11} />
+          </span>
+          Overdue
+        </li>
+        <li className="calendar-key__item">
+          <span
+            className="calendar-key__swatch calendar-key__swatch--done"
+            style={{ ...job, borderLeftColor: job.color }}
+          >
+            <Icon name="check" size={11} />
+          </span>
+          Done
+        </li>
+      </ul>
+    </div>
   );
 }

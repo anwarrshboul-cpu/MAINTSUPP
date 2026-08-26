@@ -442,6 +442,20 @@ function MonthView({
 
   return (
     <div className="calendar-surface calendar-surface--month">
+      {/*
+       * THE SILENCE GOES ABOVE THE GRID, NOT UNDER IT.
+       *
+       * It used to render last — after seven rows of month and after the
+       * selected-day agenda — which put it a full screen below the fold. Untick
+       * every date source at 1440 and what the reader actually saw was a blank
+       * month and no explanation anywhere on screen: the one sentence that told
+       * them why was scrolled out of sight, so the calendar read as broken
+       * rather than as unconfigured.
+       *
+       * Directly under the toolbar it lands next to the very controls it is
+       * telling them to use.
+       */}
+      {anythingToShow ? null : <div className="calendar-surface__empty">{emptyState}</div>}
       <div className="calendar-month" onKeyDown={onGridKeyDown}>
         <table className="calendar-month__table">
           <caption className="visually-hidden">{calendarRangeLabel("month", anchor)}</caption>
@@ -514,8 +528,6 @@ function MonthView({
           heading
         />
       </div>
-
-      {anythingToShow ? null : <div className="calendar-surface__empty">{emptyState}</div>}
     </div>
   );
 }
@@ -765,6 +777,9 @@ function WeekView({
 
   return (
     <div className="calendar-surface calendar-surface--week">
+      {/* Above the columns for the same reason Month puts it above the grid:
+          under the week agenda it sat below the fold on a phone. */}
+      {anythingToShow ? null : <div className="calendar-surface__empty">{emptyState}</div>}
       <div
         className="calendar-week__scroll"
         ref={scroller}
@@ -843,7 +858,6 @@ function WeekView({
           heading
         />
       </div>
-      {anythingToShow ? null : <div className="calendar-surface__empty">{emptyState}</div>}
     </div>
   );
 }
@@ -884,6 +898,9 @@ function DayView({
        * have it again; an element the shell does not restyle ends it.
        */}
       {isToday ? <span className="calendar-surface__today">Today</span> : null}
+      {/* Day has no grid to hide behind, but the agenda's own heading still
+          came first; the reason for the silence belongs above the silence. */}
+      {events.length === 0 ? <div className="calendar-surface__empty">{emptyState}</div> : null}
       <DayAgenda
         day={anchor}
         events={events}
@@ -893,7 +910,6 @@ function DayView({
         onEditDate={onEditDate}
         heading
       />
-      {events.length === 0 ? <div className="calendar-surface__empty">{emptyState}</div> : null}
     </div>
   );
 }

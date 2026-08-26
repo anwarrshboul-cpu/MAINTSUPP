@@ -46,6 +46,48 @@
   justify-content: center;
 }
 
+/*
+ * THE SELECTED MODE HAS TO BE UNMISTAKABLE, AND IT WAS WHITE ON WHITE.
+ *
+ * `.view-switch button.is-active` paints the chosen tab `white` with a 10%
+ * shadow, which works on the `#f5f7f8` ground the class was written for. In
+ * light theme brand-overrides.css then repaints the TRACK `var(--paper)` —
+ * also white — so on this screen the only thing separating "Month" from "Week"
+ * was a 2px shadow. At 1440 on a light bar the three words read as three
+ * labels, not as one control with one of them chosen.
+ *
+ * So the track goes sunken and the chosen tab takes the product's own solid
+ * brand fill. `--brand-solid` / `--on-brand-solid` are pinned across themes by
+ * design (globals.css:66), so this is one rule for both, at 5.2:1.
+ *
+ * SPECIFICITY. `body[data-theme="dark"] .view-switch button.is-active` is
+ * (0,3,2) and `body[data-theme="light"] :is(… .view-switch)` is (0,2,1); the
+ * two selectors below are (0,4,1) and (0,3,0), which clear both. Written as
+ * attribute selectors on purpose: `aria-selected` is the thing a screen reader
+ * is told, so the paint and the announcement cannot drift apart.
+ */
+.view-switch--text.calendar-switcher[role="tablist"] {
+  border-color: var(--line-strong);
+  background: var(--surface-sunken);
+}
+
+.view-switch--text.calendar-switcher button[aria-selected="true"][data-calendar-mode] {
+  border: 0;
+  background: var(--brand-solid);
+  box-shadow: none;
+  color: var(--on-brand-solid);
+  font-weight: 700;
+}
+
+.view-switch--text.calendar-switcher button[aria-selected="false"][data-calendar-mode] {
+  color: var(--control-fg);
+}
+
+.view-switch--text.calendar-switcher button[aria-selected="false"]:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
 /* ---------------------------------------------------------------------------
    The range navigator
    --------------------------------------------------------------------------- */
@@ -68,7 +110,20 @@
   margin: 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 16px;
+  /*
+   * THE LOUDEST LABEL ON THE SCREEN, BECAUSE IT ANSWERS THE FIRST QUESTION.
+   *
+   * It shipped at 16px/400 — smaller and lighter than the 13px/680 buttons
+   * flanking it, and at 320px it fell to 13px/400, which made "August 2026"
+   * the quietest text in a bar full of shouting pills. A reader glancing at
+   * this panel needs "which period am I looking at" before anything else, so
+   * it is now the only thing here set at a heading's weight.
+   *
+   * `tabular-nums` so the year does not shuffle sideways as you page.
+   */
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
   text-align: left;
   text-overflow: ellipsis;
@@ -862,28 +917,74 @@
     max-height: min(52vh, 380px);
   }
 
-  /* --- The navigator gets tight; keep it on one line rather than wrapping --- */
+  /* --- The navigator: the period takes the line, the buttons take the next ---
+
+     It used to keep all four on one row, which meant the month name was
+     rationed whatever was left after three 44px touch targets — about 110px at
+     320, so "Monday 24 Aug 2026" in Day view came out as "Monday 24 Au…". A
+     truncated answer to the only question the heading exists to answer.
+
+     Given its own full-width line it is legible at 18px in every mode, and the
+     arrows sit under it where a thumb expects them. Costs one row of height and
+     buys the label back. `order: -1` rather than reordering the JSX, so the
+     tab order stays previous → heading → next → Today. */
+
+  /* --- One row, and the heading WRAPS rather than truncates ---
+
+     Giving the heading a line of its own cost the bar a whole 44px band, and
+     the bar could not afford one: four stacked bands put the month grid below
+     the fold at 390x844 and off the screen entirely at 320x720. So it goes
+     back between the arrows — but `white-space: nowrap` is exactly what made
+     that unreadable before, ellipsising Day view's "Wednesday 26 August 2026"
+     down to "Wednesday 26 Au...".
+
+     It wraps to a second line instead. Two lines at 18px on a 1.15 line-box is
+     41px, which still fits inside the 44px the touch targets beside it already
+     impose — so the whole label costs nothing at all, and the truncated one is
+     gone. No wrapping on the FLEX row: the buttons are `flex: none` and the
+     heading is `flex: 1 1 0`, so the heading is what gives way, every time. */
 
   .calendar-nav {
+    width: 100%;
     gap: 6px;
   }
 
   .calendar-nav .calendar-nav__heading {
-    flex: 1 1 0;
-    font-size: 14px;
+    /* `0 1 auto`, not `1 1 0`: the label takes the room the words need and no
+       more, so it sits against the "previous" arrow with "next" immediately
+       after it. Growing it to fill the row pushed the two arrows to opposite
+       ends and left "next" looking like it belonged to "Today". It still
+       SHRINKS below its content — that is what wraps the Day-view label rather
+       than overflowing the bar. */
+    flex: 0 1 auto;
+    overflow: visible;
+    font-size: 18px;
+    line-height: 1.15;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .calendar-nav__today {
-    padding: 0 10px;
-    font-size: 12px;
+    /* The far end of the row, away from the two arrows, so the button that
+       jumps a month is not next to the thumb reaching for "next". */
+    margin-left: auto;
+    padding: 0 12px;
+    font-size: 13px;
   }
 }
 
 /* At 360px and under the word "Today" is competing with the month name. */
 @media (max-width: 380px) {
   .calendar-nav .calendar-nav__heading {
-    font-size: 13px;
+    /* About 122px between the arrows at 320. At 17px "Wednesday 26 August
+       2026" takes two lines and stays whole, which is the point of it. */
+    font-size: 17px;
     letter-spacing: -0.02em;
+  }
+
+  /* Reclaims ~14px for the heading beside it; "Today" is still 44px tall. */
+  .calendar-nav__today {
+    padding: 0 8px;
   }
 
   .calendar-switcher button {
