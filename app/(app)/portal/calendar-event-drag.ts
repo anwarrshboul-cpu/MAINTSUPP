@@ -189,6 +189,36 @@ export function calendarGhostWidth(sourceWidth: number, viewportWidth: number) {
   );
 }
 
+/**
+ * Where the preview's LEFT edge sits, kept inside the screen.
+ *
+ * `calendarGhostWidth` above bounds how WIDE the card may be, and `grabX` bounds
+ * where inside the card the pointer holds it — but neither bounds where the card
+ * ends up, and on a phone that is the one that shows. The grip is at the RIGHT
+ * end of an agenda row, so `clientX - grabX` puts a 132px card mostly to the
+ * left of the finger and hangs its tail off the screen: measured 15px lost at
+ * 430, 23px at 390, 26px at 375, 29px at 360 and 37px at 320, where the title
+ * was cut by the screen edge rather than by its own ellipsis. The left-hand
+ * overhang had been thought about; this end had not.
+ *
+ * Half the margin at each side, matching the 12px `grabX` already uses. The
+ * upper bound cannot cross the lower one because `calendarGhostWidth` has
+ * already guaranteed `viewportWidth - width >= CALENDAR_GHOST_VIEWPORT_MARGIN`.
+ *
+ * Nothing about the DROP depends on this — the drop is resolved from the
+ * pointer, not from the card — so this only ever moves what the reader sees.
+ */
+export function calendarGhostLeft(
+  clientX: number,
+  grabX: number,
+  ghostWidth: number,
+  viewportWidth: number,
+) {
+  const gutter = CALENDAR_GHOST_VIEWPORT_MARGIN / 2;
+  const furthest = viewportWidth - ghostWidth - gutter;
+  return Math.round(Math.max(gutter, Math.min(clientX - grabX, furthest)));
+}
+
 /* -------------------------------------------------------------------------
    The gesture — the part that needs a DOM
    ------------------------------------------------------------------------- */
@@ -607,9 +637,12 @@ export function useCalendarEventDrag({
     }
 
     if (ghost) {
-      ghost.style.transform = `translate3d(${Math.round(clientX - pointer.grabX)}px, ${Math.round(
-        clientY - pointer.grabY,
-      )}px, 0)`;
+      ghost.style.transform = `translate3d(${calendarGhostLeft(
+        clientX,
+        pointer.grabX,
+        pointer.ghostWidth,
+        window.innerWidth,
+      )}px, ${Math.round(clientY - pointer.grabY)}px, 0)`;
       if (ghost.style.opacity !== "1") ghost.style.opacity = "1";
     }
 

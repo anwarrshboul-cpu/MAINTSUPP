@@ -359,3 +359,27 @@ test("the day cells still say which day they are, which is what the drop reads",
   assert.match(views, /data-day=\{day\}/);
   assert.match(source, /closest<HTMLElement>\("\[data-calendar-day\]"\)/);
 });
+
+/* ── The preview stays on the screen ─────────────────────────────────────── */
+
+test("the drag preview cannot hang off either edge of the screen", async () => {
+  /*
+   * `calendarGhostWidth` bounds how wide the card may be and `grabX` bounds
+   * where inside it the pointer holds it, but neither bounds where the card
+   * lands. The grip sits at the RIGHT end of an agenda row, so on a phone the
+   * card hung its tail off the screen — 37px lost at 320, cutting the title with
+   * the screen edge rather than with its own ellipsis.
+   */
+  const source = await read("app/(app)/portal/calendar-event-drag.ts");
+  assert.match(source, /export function calendarGhostLeft/, "the clamp exists");
+  assert.match(
+    source,
+    /translate3d\(\$\{calendarGhostLeft\(/,
+    "and the transform actually uses it",
+  );
+  assert.doesNotMatch(
+    source,
+    /translate3d\(\$\{Math\.round\(clientX - pointer\.grabX\)/,
+    "the unclamped position must not come back",
+  );
+});
