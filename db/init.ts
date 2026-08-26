@@ -267,6 +267,16 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
     ),
+    // Kept in step with db/schema.ts, which declares this index but does not
+    // provision anything: drizzle-kit is configured for sqlite and writes to
+    // `drizzle/`, which nothing on the boot path reads, so an index declared
+    // only there exists on no database. Every contractor read is scoped
+    // `WHERE organisation_id = ?`, and without this they were sequential scans.
+    // `CREATE INDEX IF NOT EXISTS` matches on NAME, so the name here must stay
+    // byte-identical to the declaration or this creates a duplicate instead.
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractors_organisation_idx ON contractors (organisation_id)",
+    ),
     // Held in the post-0003 shape: the seven columns 0001–0003 added are
     // declared here and back-filled onto older databases by
     // `ensureLegacyColumns`.
