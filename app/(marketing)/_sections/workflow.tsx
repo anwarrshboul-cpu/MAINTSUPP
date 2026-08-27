@@ -27,71 +27,97 @@ type Stage = {
   /** Description of the photograph, carried through to the generated artwork. */
   desc: string;
   alt: string;
+  /**
+   * `object-position` for this stage's photograph, where centring it would cut
+   * the subject. The frame is far wider than the 16:9 pictures at desktop, so
+   * the crop is VERTICAL — roughly the middle half of the image survives — and
+   * a subject whose head sits in the upper third loses it to a centred crop.
+   * Left unset wherever centre is already the right band.
+   */
+  focus?: string;
 };
 
 const STAGES: readonly Stage[] = [
   {
     name: "Report",
-    heading: "Fault logged with photos, urgency and access details.",
+    heading: "Logged with the detail that matters",
     lede: "The site logs the requirement with location, photographs, urgency and access information. A reference is issued immediately.",
     you: "You tell us what, where and how urgent.",
     records: "Ticket created with reference and timestamp.",
     desc: "Store manager photographing a fault on a phone",
-    alt: "A store manager photographing a fault on a phone",
+    alt: "A store manager photographing a water-stained ceiling fault on a phone",
+    /* The fault itself is in the ceiling, at the very top of the frame — a
+       centred crop throws away the thing being reported. */
+    focus: "center top",
   },
   {
     name: "Triage",
-    heading: "Priority assigned (P1–P4) with a clear decision tree, not guesswork.",
+    heading: "Priority set by someone accountable",
     lede: "Priority, safety implications, access restrictions and the next action are assessed against the agreed framework — not by whoever shouts loudest.",
     you: "We confirm priority, trading impact and trade.",
     records: "Priority confirmed and route decided.",
     desc: "Coordinator at a desk reviewing incoming jobs",
-    alt: "A coordinator at a desk reviewing incoming maintenance jobs",
+    alt: "A coordinator in a headset reviewing incoming jobs across two monitors",
+    /* Her headset and the tops of both monitors sit above the middle band. */
+    focus: "center 30%",
   },
   {
     name: "Approve",
-    heading: "Quotes and spend limits approved in writing before work proceeds.",
+    heading: "Spend confirmed against agreed limits",
     lede: "Scope, quote and spend are checked against your approval thresholds before anyone is instructed.",
     you: "You approve quotes above the agreed threshold.",
     records: "Decision, approver and timestamp recorded.",
     desc: "Manager approving a quote on a laptop or tablet",
-    alt: "A manager approving a maintenance quote on a laptop",
+    alt: "A manager reviewing an invoice and payment screen on a laptop",
+    /* He is the tallest subject of the seven: his head starts a few per cent
+       from the top, so anything near centre decapitates him. */
+    focus: "center 10%",
   },
   {
     name: "Assign",
-    heading: "The right vetted contractor selected by trade, region and track record.",
+    heading: "The right contractor, properly briefed",
     lede: "A vetted contractor is selected by trade, region, availability and suitability, and issued a work order with scope, access and evidence conditions.",
     you: "Nothing — this is ours to run.",
     records: "Contractor, target date and work-order reference.",
     desc: "Contractor receiving a work order, van or toolbag visible",
-    alt: "A contractor reading a work order beside a van and toolbag",
+    alt: "A contractor reading a work order on a phone at an open van of toolboxes",
+    /* His cap and the loaded shelves both sit in the upper half. */
+    focus: "center 25%",
   },
   {
     name: "Attend",
-    heading: "Attendance confirmed and chased; engineer details and ETA shared.",
+    heading: "On site, with the context they need",
     lede: "The contractor attends, resolves or makes safe, and records findings with before and after photographs.",
     you: "Site provides access as arranged.",
     records: "Attendance time and findings logged.",
     desc: "Engineer working on site in a commercial unit",
-    alt: "An engineer working on site in a commercial unit",
+    alt: "A hi-vis engineer working on a wall-mounted electrical panel",
+    /* Hard hat and the panel he has his hands in are both above centre. */
+    focus: "center 25%",
   },
   {
     name: "Verify",
-    heading: "Before/after photos, reports and certificates checked against scope.",
+    heading: "Closed on evidence, not assurance",
     lede: "Evidence, certificates, costs and completion details are checked before the job is allowed to close.",
     you: "You can accept or query the closure.",
     records: "Evidence accepted, job closed, cost reconciled.",
     desc: "Completed repair being photographed and checked",
-    alt: "A completed repair being photographed and checked against the job record",
+    alt: "A hi-vis engineer photographing a completed ceiling unit in a corridor",
+    /* The completed ceiling unit — the evidence — is near the top, and the
+       raised phone and hard hat with it. */
+    focus: "center 15%",
   },
   {
     name: "Report",
-    heading: "Job closed into the portfolio record and your monthly report.",
+    heading: "A portfolio view you can act on",
     lede: "Live dashboard plus a monthly portfolio report covering jobs, compliance, spend, repeat faults and recommendations.",
     you: "You review and set priorities for next month.",
     records: "Performance measures and recommendations.",
     desc: "Operations team reviewing a report or dashboard screen",
-    alt: "An operations team reviewing a monthly portfolio report on screen",
+    alt: "Two colleagues reviewing a performance dashboard on a large monitor",
+    /* The monitor is centred left-to-right but its top edge is high; a small
+       lift keeps the whole screen and both heads. */
+    focus: "center 30%",
   },
 ];
 
@@ -105,15 +131,20 @@ function wrap(index: number) {
 /*
  * Step → file, copied from the "How it works" table in the approved pack's
  * README. The order here IS the step order, so index 0 is step 1.
+ *
+ * Steps 2-7 are the re-shot PNGs. The .webp files they replace were the ones
+ * with blurred filler strips down each side — those originals are deleted, so
+ * a path ending `-full.webp` here would now be a 404 as well as the wrong
+ * picture.
  */
 const WORKFLOW_PHOTOS = [
   "/assets/workflow/how-it-works-01-report-full.jpg",
-  "/assets/workflow/how-it-works-02-triage-full.webp",
-  "/assets/workflow/how-it-works-03-approve-full.webp",
-  "/assets/workflow/how-it-works-04-assign-full.webp",
-  "/assets/workflow/how-it-works-05-attend-full.webp",
-  "/assets/workflow/how-it-works-06-verify-full.webp",
-  "/assets/workflow/how-it-works-07-reporting-full.webp",
+  "/assets/workflow/how-it-works-02-triage-full.png",
+  "/assets/workflow/how-it-works-03-approve-full.png",
+  "/assets/workflow/how-it-works-04-assign-full.png",
+  "/assets/workflow/how-it-works-05-attend-full.png",
+  "/assets/workflow/how-it-works-06-verify-full.png",
+  "/assets/workflow/how-it-works-07-reporting-full.png",
 ] as const;
 
 export function Workflow() {
@@ -241,6 +272,7 @@ export function Workflow() {
               loading={active === 0 ? "eager" : "lazy"}
               sizes="(min-width: 1360px) 1240px, 92vw"
               className="wf__photo"
+              objectPosition={stage.focus}
             />
             <div className="wf__body" id="wfPanel" aria-live="polite">
               <span className="badge badge--amber">
@@ -258,7 +290,7 @@ export function Workflow() {
                   <dd>{stage.you}</dd>
                 </div>
                 <div>
-                  <dt>What we record on your file</dt>
+                  <dt>What the system records</dt>
                   <dd>{stage.records}</dd>
                 </div>
               </dl>

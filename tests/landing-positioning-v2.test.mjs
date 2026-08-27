@@ -92,9 +92,11 @@ test("the portal section is trimmed to exactly what the brief keeps", async () =
   assert.ok(!portal.includes("Open Client Portal"), "and so is its label");
 });
 
-test('"What we record on your file" replaces the old label everywhere', async () => {
+test('"What the system records" replaces the old label everywhere', async () => {
+  /* The owner's wording. It used to read "What we record on your file", which
+     described a filing cabinet rather than the thing the reader is being sold. */
   const workflow = await read("app/(marketing)/_sections/workflow.tsx");
-  assert.match(workflow, /<dt>What we record on your file<\/dt>/);
+  assert.match(workflow, /<dt>What the system records<\/dt>/);
 
   /* Nowhere on the site, not just in this file. */
   const offenders = [];
@@ -103,12 +105,56 @@ test('"What we record on your file" replaces the old label everywhere', async ()
       const next = `${folder}/${entry.name}`;
       if (entry.isDirectory()) await walk(next);
       else if (/\.(tsx?|css)$/.test(entry.name)) {
-        if ((await read(next)).includes("What the system records")) offenders.push(next);
+        if ((await read(next)).includes("What we record on your file")) offenders.push(next);
       }
     }
   };
   await walk("app");
   assert.deepEqual(offenders, [], `old label still present in:\n  ${offenders.join("\n  ")}`);
+});
+
+test("the seven stage headings are the approved copy", async () => {
+  const workflow = await read("app/(marketing)/_sections/workflow.tsx");
+  /* The headings the owner signed off. The old ones described the mechanism
+     ("Priority assigned (P1–P4) with a clear decision tree"); these describe
+     what the client gets, which is what was approved. */
+  for (const [step, heading] of [
+    [1, "Logged with the detail that matters"],
+    [2, "Priority set by someone accountable"],
+    [7, "A portfolio view you can act on"],
+  ]) {
+    assert.match(
+      workflow,
+      new RegExp(`heading: "${heading}"`),
+      `stage ${step} is not carrying its approved heading`,
+    );
+  }
+  /* And none of the wording they replaced. */
+  for (const gone of [
+    "Fault logged with photos, urgency and access details.",
+    "Priority assigned (P1–P4)",
+    "Job closed into the portfolio record",
+  ]) {
+    assert.ok(!workflow.includes(gone), `superseded heading still present: ${gone}`);
+  }
+});
+
+test("only the stage name carries the accent colour", async () => {
+  const workflow = await read("app/(marketing)/_sections/workflow.tsx");
+  /* The name is its own span; the em dash and the heading sit outside it, so
+     the red stops at the keyword. */
+  assert.match(
+    workflow,
+    /<span className="wf__stage-name">\{stage\.name\}<\/span> — \{stage\.heading\}/,
+  );
+
+  /* And `wf__stage-name` is the only workflow rule that reaches for the
+     critical token — colouring `.wf__title` would paint the whole line. */
+  const css = await read("app/(marketing)/marketing.css");
+  const reddened = [...css.matchAll(/(^|\n)(\.wf[\w-]*)\{([^}]*)\}/g)]
+    .filter(([, , , body]) => body.includes("var(--critical)"))
+    .map(([, , selector]) => selector);
+  assert.deepEqual(reddened, [".wf__stage-name"], "something else in the stepper is red");
 });
 
 test("all seven workflow stages survive, each with its own approved photograph", async () => {
@@ -117,13 +163,25 @@ test("all seven workflow stages survive, each with its own approved photograph",
 
   assert.deepEqual(photos, [
     "how-it-works-01-report-full.jpg",
-    "how-it-works-02-triage-full.webp",
-    "how-it-works-03-approve-full.webp",
-    "how-it-works-04-assign-full.webp",
-    "how-it-works-05-attend-full.webp",
-    "how-it-works-06-verify-full.webp",
-    "how-it-works-07-reporting-full.webp",
+    "how-it-works-02-triage-full.png",
+    "how-it-works-03-approve-full.png",
+    "how-it-works-04-assign-full.png",
+    "how-it-works-05-attend-full.png",
+    "how-it-works-06-verify-full.png",
+    "how-it-works-07-reporting-full.png",
   ], "step order, straight from the pack's README");
+
+  /*
+   * Steps 2-7 were re-shot. The `*-full.webp` files they replace were the ones
+   * with blurred filler strips down the left and right edges — the defect the
+   * owner rejected — and those originals are deleted, so a reference to one is
+   * both the wrong picture and a 404. Comments included: naming a deleted file
+   * even in an explanation is how it finds its way back into a path.
+   */
+  assert.ok(
+    !/how-it-works-\d\d-[a-z]+-full\.webp/.test(workflow),
+    "a superseded blurred-edge original is referenced again",
+  );
 
   assert.equal(new Set(photos).size, 7, "no photograph is reused across two stages");
   assert.equal((workflow.match(/name: "/g) ?? []).length, 7, "seven stages");
@@ -131,6 +189,39 @@ test("all seven workflow stages survive, each with its own approved photograph",
      lookup must be positional. A name lookup would put step 1's photograph
      under step 7 and nothing on screen would look wrong. */
   assert.match(workflow, /WORKFLOW_PHOTOS\[active\]/);
+});
+
+test("the workflow photograph is a band, not a panorama", async () => {
+  const css = await read("app/(marketing)/marketing.css");
+  /*
+   * `aspect-ratio:21/9` made the picture ~530px tall on a 1240px card, which
+   * pushed the badge, the title and the explanation below the fold: the reader
+   * saw a photograph and had to scroll to learn which stage it belonged to.
+   */
+  assert.ok(!/\.wf__photo\{[^}]*aspect-ratio:21\/9/.test(css), "the panorama ratio is gone");
+  assert.ok(!/\.wf__photo\{[^}]*height:100%/.test(css), "and so is the height it had nothing to fill");
+
+  const height = css.match(/\.wf__photo\{[^}]*height:(clamp\([^)]*\))/);
+  assert.ok(height, ".wf__photo must set a fluid height of its own");
+  /* Named bounds rather than an exact expression: the point is that a phone
+     gets a low band and a wide desktop is capped, not which arithmetic gets
+     there. */
+  const [, min, max] = height[1].match(/clamp\((\d+)px,[^,]+,\s*(\d+)px\)/) ?? [];
+  assert.ok(Number(min) >= 150 && Number(min) <= 230, `phone band out of range: ${min}px`);
+  assert.ok(Number(max) >= 280 && Number(max) <= 380, `desktop cap out of range: ${max}px`);
+
+  /* The height only lands if the <picture> is a block; inline, it collapses to
+     a line box and the img's own height leaves a gap under it. */
+  assert.match(css, /\.wf__stage picture\{display:block\}/);
+  assert.match(css, /\.wf__photo\{[^}]*object-fit:cover/, "cover crops, it never stretches");
+
+  /* Vertical crop means each stage needs its own focal point, carried on the
+     stage data and passed through the shared photo component. */
+  const workflow = await read("app/(marketing)/_sections/workflow.tsx");
+  assert.match(workflow, /objectPosition=\{stage\.focus\}/);
+  const photo = await read("app/(marketing)/_sections/approved-photo.tsx");
+  assert.match(photo, /objectPosition\?: string/, "and it stays optional for every other caller");
+  assert.match(photo, /style=\{objectPosition \? \{ objectPosition \} : undefined\}/);
 });
 
 test("each audience card carries the photograph the README gives it", async () => {

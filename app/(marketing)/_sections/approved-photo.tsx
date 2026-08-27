@@ -25,6 +25,7 @@ export function ApprovedPhoto({
   sizes,
   className = "",
   loading = "lazy",
+  objectPosition,
 }: {
   /** The site path from the pack's README, e.g. `/assets/audience/…png`. */
   src: string;
@@ -33,6 +34,13 @@ export function ApprovedPhoto({
   sizes: string;
   className?: string;
   loading?: "lazy" | "eager";
+  /**
+   * Which part of the picture to keep when `object-fit: cover` has to crop —
+   * per PICTURE, so it belongs with the picture's own data rather than in a
+   * stylesheet rule per stage. Left undefined the element keeps whatever the
+   * stylesheet says, so every existing caller is unaffected.
+   */
+  objectPosition?: string;
 }) {
   /*
    * The size comes from the manifest, not from the caller. Passing one pair of
@@ -66,6 +74,7 @@ export function ApprovedPhoto({
         sizes={sizes}
         loading={loading}
         decoding="async"
+        style={objectPosition ? { objectPosition } : undefined}
       />
     </picture>
   );

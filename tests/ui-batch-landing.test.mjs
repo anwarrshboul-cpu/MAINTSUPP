@@ -114,7 +114,9 @@ test("the stage list is gone and only the stage name is red", async () => {
   assert.match(workflow, /key === "ArrowLeft"/);
   assert.match(workflow, /aria-live="polite"/);
   /* Everything the card carried is still there. */
-  for (const kept of ["Stage {active + 1} of {COUNT}", "What you do", "What we record on your file", "wf__bar", "wfPrev", "wfNext", "Swipe the panel, or use the arrows."]) {
+  /* "What the system records" is the owner's later wording for the second
+     definition term; what this list pins is that the term is still there. */
+  for (const kept of ["Stage {active + 1} of {COUNT}", "What you do", "What the system records", "wf__bar", "wfPrev", "wfNext", "Swipe the panel, or use the arrows."]) {
     assert.ok(workflow.includes(kept), `lost from the stepper: ${kept}`);
   }
   assert.equal((workflow.match(/name: "/g) ?? []).length, 7, "seven stages");

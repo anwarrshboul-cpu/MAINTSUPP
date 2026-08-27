@@ -851,7 +851,19 @@ fieldset.field:focus{outline:none}
 .wf{display:grid;gap:24px}
 .wf__stage{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
 .wf__stage:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
-.wf__photo{aspect-ratio:21/9}
+/* THE PHOTOGRAPH IS BANDED, NOT PANORAMIC. It used to be `aspect-ratio:21/9`,
+   which on a 1240px card is a 530px-tall picture — the badge, the title and
+   the explanation were all pushed below the fold, so a reader saw a photograph
+   and had to scroll to find out which stage it belonged to. One fluid height
+   replaces it: about 205px on a phone, 250px on a tablet, 330px on a desktop,
+   capped at 340 so an ultrawide monitor does not go back to a panorama. The
+   card is roughly viewport-width, so vw tracks it closely enough without a
+   ladder of breakpoints. */
+.wf__photo{height:clamp(180px,160px + 12vw,340px)}
+/* The <img> carries the original's own width/height attributes so the box is
+   reserved before the bytes land; both used dimensions are set below, so the
+   intrinsic ratio must not be allowed back in to fight them. */
+.wf__stage picture{display:block}
 .wf__body{padding:clamp(20px,3vw,30px)}
 .wf__title{font-size:var(--fs-h3);margin:12px 0 .7rem;max-width:40ch}
 /* Only the stage's name is red; the explanation after the dash stays navy. */
@@ -869,7 +881,10 @@ fieldset.field:focus{outline:none}
 .wf__ctl .btn{flex:1}
 .wf__count{flex:none;font-size:.8rem;font-weight:600;color:var(--slate);font-variant-numeric:tabular-nums;min-width:64px;text-align:center}
 .wf__stage{touch-action:pan-y}
-@media(max-width:620px){.wf__ctl{gap:8px}.wf__count{min-width:52px;font-size:.76rem}}
+/* On a phone these two are the only way through the stepper, so they get the
+   44px touch target rather than `btn--sm`'s 40px. Scoped to the stepper: the
+   40px is right for `btn--sm` where it sits beside body text elsewhere. */
+@media(max-width:620px){.wf__ctl{gap:8px}.wf__ctl .btn{min-height:44px}.wf__count{min-width:52px;font-size:.76rem}}
 
 /* ------------------------------------------------------------- dashboard */
 .dashshot{position:relative;border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-lg);
@@ -1553,5 +1568,13 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
    step 1 worst of all.
 
    `cover` crops rather than distorts, which is the trade the brief asks for —
-   sensible crop, no stretching, and no blurred side-fill. */
-.wf__photo{display:block;width:100%;height:100%;object-fit:cover;object-position:center}
+   sensible crop, no stretching, and no blurred side-fill.
+
+   The workflow photograph's height is the fluid band set with the rest of the
+   `.wf` rules, NOT `height:100%` — the picture element has no height of its
+   own to be a percentage of. `aspect-ratio:auto` is spelled out because this
+   rule is the later of the two and the intrinsic ratio must not creep back in
+   and override the band. Because the frame is far wider than 16:9 at desktop
+   the crop is vertical, and each stage sets its own `object-position` inline
+   where centring it would cut the subject's head off. */
+.wf__photo{display:block;width:100%;aspect-ratio:auto;object-fit:cover;object-position:center}
