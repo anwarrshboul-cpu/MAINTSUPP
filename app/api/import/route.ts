@@ -241,10 +241,15 @@ async function commit(
    * `?? request.location` fallback elsewhere never fired because the id was
    * valid, just wrong.
    *
+   * Adding an ORDER BY fixed the "arbitrary" half and left the worse half in
+   * place: a deterministic wrong site is still a wrong site, and the row it
+   * landed on could be a closed one. An unmatched row is now recorded as
+   * unmatched — no site, the store name the file gave preserved verbatim, and
+   * one `import_anomalies` row naming it. Nothing is attributed to a store the
+   * file never mentioned, and nothing is written as "" either.
+   *
    * The sites are listed once and indexed on every name they are known by, so
-   * matching 744 rows costs one query rather than 744. `site_id` is NOT NULL,
-   * so an unmatched row still needs somewhere to go; it lands on `anySite` and
-   * is reported, rather than being silently attributed.
+   * matching 744 rows costs one query rather than 744.
    */
   const siteRows = await listSites(db, orgId, { includeInactive: true });
   const siteIdByName = new Map<string, string>();

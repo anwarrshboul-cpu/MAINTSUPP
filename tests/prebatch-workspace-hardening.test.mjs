@@ -160,11 +160,74 @@ after(async () => {
     db.prepare(
       "DELETE FROM compliance_documents WHERE site_id IN (SELECT id FROM sites WHERE name LIKE ?)",
     ).run(`${RUN}%`);
+    /*
+     * Aliases before sites: `site_aliases.site_id` references `sites.id`, and
+     * SQLite enforces that here — the driver is built with node:sqlite's
+     * defaults, which turn foreign keys on. The rename test leaves two.
+     */
+    db.prepare(
+      "DELETE FROM site_aliases WHERE site_id IN (SELECT id FROM sites WHERE name LIKE ?) OR alias LIKE ?",
+    ).run(`${RUN}%`, `${RUN}%`);
     db.prepare("DELETE FROM sites WHERE name LIKE ?").run(`${RUN}%`);
   } catch (error) {
     console.warn(`fixture cleanup left rows behind: ${error.message}`);
   }
 });
+
+/**
+ * A site's recorded former names, read straight from the development database.
+ *
+ * `GET /api/sites` does not carry aliases, and this asserts the one thing a
+ * rename is now supposed to leave behind. Opened read-only and closed
+ * immediately: the development server holds the same file, and a handle kept
+ * across an await is how one suite's cleanup turns into another suite's 503.
+ */
+/** One site's row, read straight from the development database. Same reason. */
+async function siteRow(id) {
+  return withDatabase((db) =>
+    db.prepare("SELECT name, status, lifecycle, active FROM sites WHERE id = ?").get(id),
+  );
+}
+
+async function siteAliases(id) {
+  return withDatabase((db) =>
+    db
+      .prepare("SELECT alias FROM site_aliases WHERE site_id = ? ORDER BY alias")
+      .all(id)
+      .map((row) => row.alias),
+  );
+}
+
+/** Opens the development database read-only, runs one query, closes it. */
+async function withDatabase(query) {
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = await import("node:sqlite"));
+  } catch {
+    return null;
+  }
+  const directory = new URL("../.wrangler/state/v3/d1/miniflare-D1DatabaseObject/", import.meta.url);
+  let file;
+  try {
+    file = (await readdir(directory)).find((entry) => entry.endsWith(".sqlite") && entry !== "metadata.sqlite");
+  } catch {
+    return null;
+  }
+  if (!file) return null;
+  let db;
+  try {
+    db = new DatabaseSync(fileURLToPath(new URL(file, directory)), { readOnly: true });
+    return query(db);
+  } catch {
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // Nothing to do — the handle is going out of scope regardless.
+    }
+  }
+}
 
 const workspace = (orgId) => call("GET", "/api/workspace", orgId);
 const create = (orgId, entity, data) =>
@@ -540,6 +603,68 @@ test("a reference belonging to another organisation is refused, and writes nothi
   } finally {
     await archive(PRIMARY_ORGANISATION_ID, "unit", unitId);
   }
+});
+
+test("renaming a site keeps every name it used to have", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+  if (!(await signIn())) {
+    t.skip(`could not sign in as ${EMAIL} on ${BASE_URL}`);
+    return;
+  }
+
+  /*
+   * Batch 1B, decision D6. A rename used to write the new name and nothing
+   * else, so every job, compliance row and import that recorded the old
+   * spelling stopped resolving the moment somebody tidied a store's name.
+   *
+   * It lives in this file rather than beside the rest of Batch 1B because the
+   * local D1 cannot serve a third concurrent live suite: three test files
+   * talking to one development server turns its own reads into 503s, which then
+   * surface as failures in whichever suite happened to be mid-request.
+   */
+  const created = await call("POST", "/api/sites", PRIMARY_ORGANISATION_ID, {
+    data: {
+      name: `${RUN} Alpha`,
+      addressLine1: "1 Alias Way",
+      city: "London",
+      postcode: "E1 1AA",
+      siteTypeValue: "Kiosk",
+      status: "active",
+      region: "UK",
+    },
+  });
+  assert.equal(created.status, 200, `fixture creation failed: ${JSON.stringify(created.body)}`);
+  const id = created.body.id;
+  assert.ok(id, "the fixture must exist before anything destructive runs");
+
+  const rename = (to) => call("PATCH", "/api/sites", PRIMARY_ORGANISATION_ID, { id, rename: to });
+  // Read from the database, not `GET /api/sites`: that call lists the whole
+  // register, and doing it between every rename is what tips the one
+  // development server over when the suites run in parallel.
+  const siteName = async () => (await siteRow(id))?.name;
+
+  // A -> B -> C: both earlier names must still resolve.
+  assert.equal((await rename(`${RUN} Beta`)).status, 200);
+  assert.equal((await rename(`${RUN} Gamma`)).status, 200);
+  assert.equal(await siteName(), `${RUN} Gamma`);
+  const afterTwo = await siteAliases(id);
+  if (afterTwo === null) {
+    t.skip("no development database to read aliases from");
+    return;
+  }
+  assert.deepEqual(afterTwo, [`${RUN} Alpha`, `${RUN} Beta`], "a rename is additive, not a replace");
+
+  // C -> A: adopting a name back retires it as an alias rather than duplicating it.
+  assert.equal((await rename(`${RUN} Alpha`)).status, 200);
+  assert.equal(await siteName(), `${RUN} Alpha`);
+  assert.deepEqual(
+    await siteAliases(id),
+    [`${RUN} Beta`, `${RUN} Gamma`],
+    "the adopted name stops being a former name of the same site",
+  );
 });
 
 test("an archived site is closed in every column the app filters on", async (t) => {

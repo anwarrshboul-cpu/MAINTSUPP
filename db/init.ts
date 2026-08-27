@@ -108,8 +108,27 @@ async function initialize() {
  * exist, which is why `siteIdIsNullable` is published rather than inferred.
  */
 async function ensureCanonicalSiteLink(d1: D1DatabaseLike) {
+  /*
+   * The Postgres half does not run because the code shipped. It runs because
+   * somebody set a flag.
+   *
+   * This file executes on the boot path of every isolate, and a preview deploy
+   * points at the shared staging database — so merely deploying would relax a
+   * column and null nineteen rows there, on a database other people are writing
+   * to, with no migration ledger and no restore point a concurrent writer
+   * cannot invalidate. The change is safe and reversible with the backup below;
+   * applying it unannounced to a database that is not ours to schedule is not
+   * the same question, and it is not this file's to answer.
+   *
+   * Unset, everything here is a no-op on Postgres and the column stays as it
+   * is. The SQLite half is unaffected either way: it has nothing to apply.
+   */
+  const applyApproved =
+    (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process?.env?.["BATCH_1B_APPLY"] === "1";
+
   const before = await columnInfo(d1, "maintenance_requests", "site_id");
-  if (before && Number(before.notnull) === 1 && usePostgres()) {
+  if (before && Number(before.notnull) === 1 && usePostgres() && applyApproved) {
     /*
      * Idempotent in Postgres — dropping a NOT NULL that is already gone is a
      * no-op, so two isolates racing this bootstrap cannot make it fail. It is a
@@ -124,7 +143,7 @@ async function ensureCanonicalSiteLink(d1: D1DatabaseLike) {
   const after = await columnInfo(d1, "maintenance_requests", "site_id");
   siteIdNullable = after ? Number(after.notnull) === 0 : null;
 
-  if (siteIdNullable === true) {
+  if (siteIdNullable === true && (applyApproved || !usePostgres())) {
     /*
      * Three placeholders, one meaning. "site-unassigned" is what the board's
      * inline add writes and matches no row in `sites`. "site-website-intake-…"
@@ -148,6 +167,15 @@ async function ensureCanonicalSiteLink(d1: D1DatabaseLike) {
       .run();
   }
 
+  /*
+   * Not behind the flag, deliberately. This is additive — one nullable column
+   * and one index, nothing narrowed, nothing rewritten — and `db/schema.ts`
+   * declares it, so drizzle asks for `contractor_id` in every select against
+   * this table. A database without it would answer "no such column" to every
+   * job query on the board. The flag guards the destructive half above, which
+   * relaxes a constraint and rewrites rows; this half is what makes the code
+   * and the database agree at all.
+   */
   await addColumn(
     d1,
     "maintenance_requests",
@@ -157,6 +185,41 @@ async function ensureCanonicalSiteLink(d1: D1DatabaseLike) {
   await d1
     .prepare(
       "CREATE INDEX IF NOT EXISTS maintenance_contractor_idx ON maintenance_requests (organisation_id, contractor_id)",
+    )
+    .run();
+
+  /*
+   * The links the register can make on its own, and not one more.
+   *
+   * A job is attached to a contractor only where the name it carries matches
+   * exactly one row in that job's OWN organisation, comparing on trimmed,
+   * case-folded text and nothing else. No initials, no first names, no
+   * substrings, no similarity: "Saed" is probably "Saed Electrical" and
+   * probably is not good enough to put a company's name against an invoice.
+   *
+   * The `count(*) = 1` is what makes an ambiguous register safe rather than
+   * lucky — two contractors sharing a name link neither job. The organisation
+   * predicate is inside that count as well as the select, so a same-named
+   * contractor in another tenant can neither steal the link nor spoil it.
+   *
+   * Nothing is created, nothing is overwritten, and the `contractor` text is
+   * untouched — it stays the record of who was named on the job. Re-running is
+   * a no-op, because only rows still holding no reference are considered.
+   */
+  await d1
+    .prepare(
+      `UPDATE maintenance_requests
+          SET contractor_id = (
+            SELECT c.id FROM contractors c
+             WHERE c.organisation_id = maintenance_requests.organisation_id
+               AND lower(trim(c.name)) = lower(trim(maintenance_requests.contractor))
+          )
+        WHERE contractor_id IS NULL
+          AND contractor IS NOT NULL
+          AND trim(contractor) <> ''
+          AND (SELECT count(*) FROM contractors c
+                WHERE c.organisation_id = maintenance_requests.organisation_id
+                  AND lower(trim(c.name)) = lower(trim(maintenance_requests.contractor))) = 1`,
     )
     .run();
 }
