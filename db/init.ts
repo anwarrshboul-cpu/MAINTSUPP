@@ -79,6 +79,86 @@ async function initialize() {
   await ensureStageNineContractorLinks(d1);
   await ensureStageTwentyThreeRecycleBin(d1);
   await ensureBoardAutomations(d1);
+  await ensureCanonicalSiteLink(d1);
+}
+
+/**
+ * Batch 1B — `site_id` stops lying, and `contractor_id` starts existing.
+ *
+ * Two things, in an order that is not negotiable.
+ *
+ * First `site_id` becomes nullable, THEN the placeholders are nulled. The other
+ * way round raises "NOT NULL constraint failed", and on this file's boot path
+ * that takes every API route down with it. Measured, not assumed.
+ *
+ * Then `contractor_id` is added beside the legacy `contractor` text, which is
+ * never touched. The text is the historical record of who did the work; the id
+ * is a live reference. Removing a contractor must not remove the job, so the
+ * reference is dropped and the name kept.
+ *
+ * The dialect split lives in the first half alone, and it is a real one rather
+ * than a tidy one. Postgres relaxes the column in place. SQLite has no
+ * `ALTER COLUMN ... DROP NOT NULL`; `PRAGMA writable_schema` is refused by both
+ * the translator and the driver; and the only remaining move — dropping and
+ * recreating a 52-column table on a boot path — would be doing that to
+ * Railway's volume of real client data on every deploy. So an existing SQLite
+ * database keeps `NOT NULL`, keeps its sentinels, and skips the data step
+ * entirely. Fresh databases of either dialect are born nullable from the
+ * CREATE TABLE above. Read paths must tolerate both shapes for as long as both
+ * exist, which is why `siteIdIsNullable` is published rather than inferred.
+ */
+async function ensureCanonicalSiteLink(d1: D1DatabaseLike) {
+  const before = await columnInfo(d1, "maintenance_requests", "site_id");
+  if (before && Number(before.notnull) === 1 && usePostgres()) {
+    /*
+     * Idempotent in Postgres — dropping a NOT NULL that is already gone is a
+     * no-op, so two isolates racing this bootstrap cannot make it fail. It is a
+     * catalogue change rather than a rewrite, so the lock it takes is held for
+     * microseconds however large the table is.
+     */
+    await d1
+      .prepare("ALTER TABLE maintenance_requests ALTER COLUMN site_id DROP NOT NULL")
+      .run();
+  }
+
+  const after = await columnInfo(d1, "maintenance_requests", "site_id");
+  siteIdNullable = after ? Number(after.notnull) === 0 : null;
+
+  if (siteIdNullable === true) {
+    /*
+     * Three placeholders, one meaning. "site-unassigned" is what the board's
+     * inline add writes and matches no row in `sites`. "site-website-intake-…"
+     * is the standing bucket the public form used to invent when a typed store
+     * name matched nothing. An empty string was never meant to be a value at
+     * all. None of them is a site.
+     *
+     * Deliberately NOT "every id with no matching site": an orphan this does
+     * not name is a real id whose site row went missing, which is a fault to
+     * report rather than data to erase.
+     */
+    await d1
+      .prepare(
+        `UPDATE maintenance_requests
+            SET site_id = NULL
+          WHERE site_id IS NOT NULL
+            AND (TRIM(site_id) = ''
+                 OR site_id = 'site-unassigned'
+                 OR site_id LIKE 'site-website-intake-%')`,
+      )
+      .run();
+  }
+
+  await addColumn(
+    d1,
+    "maintenance_requests",
+    "contractor_id",
+    "TEXT REFERENCES contractors(id) ON DELETE SET NULL",
+  );
+  await d1
+    .prepare(
+      "CREATE INDEX IF NOT EXISTS maintenance_contractor_idx ON maintenance_requests (organisation_id, contractor_id)",
+    )
+    .run();
 }
 
 type D1DatabaseLike = Awaited<ReturnType<typeof getD1>>;
@@ -110,6 +190,60 @@ async function addColumn(
   await d1
     .prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
     .run();
+}
+
+/**
+ * Which dialect `env.DB` is.
+ *
+ * This file is dialect-shared: with `PG_D1=1` every statement here goes through
+ * `db/sqlite-to-postgres.ts` to Supabase, otherwise to a SQLite file. Almost
+ * everything is written in the subset both accept, and where it cannot be, this
+ * is the flag that decides — the same read `db/node-workers-env.ts` uses to
+ * choose the adapter in the first place.
+ */
+function usePostgres(): boolean {
+  return (
+    (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process?.env?.["PG_D1"] === "1"
+  );
+}
+
+/**
+ * One column's `PRAGMA table_info` row, or null.
+ *
+ * Portable on purpose. `db/sqlite-to-postgres.ts` rewrites `PRAGMA table_info`
+ * into a catalogue query carrying PRAGMA's own result shape, `notnull`
+ * included, so this reads real nullability on BOTH dialects. That is what lets
+ * the work below be guarded by what the column actually is rather than by which
+ * database we are on — the distinction that keeps it from throwing on a boot
+ * path that every API route awaits.
+ */
+async function columnInfo(
+  d1: D1DatabaseLike,
+  table: string,
+  column: string,
+): Promise<{ name?: string; notnull?: number | boolean } | null> {
+  const info = await d1.prepare(`PRAGMA table_info(${table})`).all();
+  const rows = (info.results ?? []) as Array<{
+    name?: string;
+    notnull?: number | boolean;
+  }>;
+  return rows.find((row) => row.name === column) ?? null;
+}
+
+/**
+ * Whether a job may say it has no site yet.
+ *
+ * Postgres can relax the column in place and does. An existing SQLite database
+ * cannot, so it keeps `NOT NULL` and keeps writing the sentinel — and Railway
+ * runs SQLite over a volume of real client data, so this is not a development
+ * detail. Writers ask this rather than assume, which is what stops a NULL write
+ * raising `NOT NULL constraint failed` on that deployment.
+ */
+let siteIdNullable: boolean | null = null;
+
+export function siteIdIsNullable(): boolean {
+  return siteIdNullable === true;
 }
 
 /**
@@ -280,11 +414,21 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
     // Held in the post-0003 shape: the seven columns 0001–0003 added are
     // declared here and back-filled onto older databases by
     // `ensureLegacyColumns`.
+    /*
+     * `site_id` is nullable here: a job whose site is unknown has no site, and
+     * the sentinel that stood in for one referenced a row in no table. Only
+     * FRESH databases start that way — `ensureCanonicalSiteLink` explains why
+     * an existing SQLite one cannot be relaxed in place.
+     *
+     * The note lives out here rather than in the statement because D1 rejects
+     * a `--` comment inside a prepared one, and a failure in this batch takes
+     * the whole bootstrap down with it.
+     */
     d1.prepare(
       `CREATE TABLE IF NOT EXISTS maintenance_requests (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
-         site_id TEXT NOT NULL,
+         site_id TEXT,
          source TEXT NOT NULL DEFAULT 'Portal form',
          title TEXT NOT NULL,
          description TEXT NOT NULL,

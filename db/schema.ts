@@ -316,7 +316,14 @@ export const maintenanceRequests = sqliteTable(
     id: text("id").primaryKey(),
     organisationId: text("organisation_id").notNull().references(() => organisations.id),
     legacyClientId: text("client_id").notNull().default("sunnamusk-uk"),
-    siteId: text("site_id").notNull(),
+    /*
+     * Nullable — a job whose site is not yet known has no site. Still no
+     * foreign key: an existing SQLite database cannot be relaxed in place, so
+     * it keeps its sentinels, and a constraint only one dialect could carry
+     * would put the two permanently out of step on a table where they currently
+     * match column for column.
+     */
+    siteId: text("site_id"),
     source: text("source").notNull().default("Portal form"),
     title: text("title").notNull(),
     reference: text("reference"),
@@ -376,6 +383,15 @@ export const maintenanceRequests = sqliteTable(
     stage: text("stage").notNull().default("Incoming"),
     status: text("status").notNull().default("Pending Approval"),
     contractor: text("contractor"),
+    /*
+     * The canonical reference beside the legacy text above, which is never
+     * touched. The text records who was named on the job; this records who they
+     * are in the register. Removing a contractor drops the reference and keeps
+     * the name, so a completed job never disappears because somebody tidied.
+     */
+    contractorId: text("contractor_id").references(() => contractors.id, {
+      onDelete: "set null",
+    }),
     assignee: text("assignee"),
     requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     dueAt: text("due_at"),
@@ -405,6 +421,7 @@ export const maintenanceRequests = sqliteTable(
   (table) => [
     index("maintenance_organisation_stage_idx").on(table.organisationId, table.stage),
     index("maintenance_site_idx").on(table.siteId),
+    index("maintenance_contractor_idx").on(table.organisationId, table.contractorId),
     index("maintenance_priority_idx").on(table.priority),
     // Kept in step with db/init.ts, which is what actually runs: CREATE INDEX
     // IF NOT EXISTS matches on name, so an index declared only here can never
