@@ -149,6 +149,12 @@ after(async () => {
     return;
   }
   try {
+    /*
+     * The dev server holds this file open, so an unqualified write loses the
+     * race and throws "database is locked" — which is how two runs' fixtures
+     * survived their own cleanup. Wait for the writer rather than give up.
+     */
+    db.exec("PRAGMA busy_timeout = 10000");
     db.prepare("DELETE FROM planned_maintenance WHERE title LIKE ?").run(`${RUN}%`);
     db.prepare("DELETE FROM units WHERE name LIKE ?").run(`${RUN}%`);
     db.prepare(
