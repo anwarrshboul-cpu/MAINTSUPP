@@ -83,11 +83,35 @@ test("the public route and the builder route offer the same options", async () =
 });
 
 test("only ACTIVE sites are offered to a submitter", async () => {
+  /*
+   * The filter moved rather than went away, and it got stricter on the way.
+   *
+   * This asserted `eq(sites.active, true)` inside form-options. Batch 1B made
+   * the site register the client's real estate — closed stores, the office and
+   * two warehouses are all canonical Sites now — and `active` alone would have
+   * offered "Warehouse 2" to somebody reporting a leak in a shop. So the rule
+   * is one shared definition, and the form and the board's Location column both
+   * read it, because two definitions is how a dropdown comes to disagree with
+   * the register behind it.
+   */
   const options = await read("app/lib/form-options.ts");
+  assert.match(options, /listRetailSites\(db, organisationId\)/, "the form asks for retail sites");
+  assert.doesNotMatch(options, /eq\(sites\.active, true\)/, "and does not keep a second copy of the rule");
+
+  const repository = await read("app/lib/sites-repository.ts");
+  const helper = repository.slice(repository.indexOf("export async function listRetailSites"));
+  const body = helper.slice(0, helper.indexOf("export async function listSites"));
+  assert.match(body, /row\.active/, "an archived site must leave the form");
+  assert.match(body, /row\.status === "active"/, "and so must a closed one");
   assert.match(
-    options,
-    /eq\(sites\.active, true\)/,
-    "an archived site must leave the form",
+    body,
+    /RETAIL_SITE_TYPES\.includes/,
+    "and the office, the warehouses and anything unverified are not locations a shop reports from",
+  );
+  assert.match(
+    repository,
+    /const RETAIL_SITE_TYPES = \["Inline", "Kiosk"\]/,
+    "retail is the two types a customer walks into",
   );
 });
 

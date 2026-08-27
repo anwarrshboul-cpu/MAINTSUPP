@@ -147,7 +147,11 @@ const SET_TO_BOARD_COLUMN: Record<string, string> = {
   engineer_required: "engineer",
   priority: "priority",
   tier_level: "tier",
-  store_location: "storeLocation",
+  /*
+   * `store_location` is deliberately absent. Mirroring it kept a twenty-one row
+   * option set in step with the board as though it were the estate; the estate
+   * is `sites`, and a store is created there or not at all.
+   */
 };
 
 /**

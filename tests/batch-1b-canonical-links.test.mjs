@@ -153,6 +153,37 @@ test("the canonical columns are provisioned by the thing that actually runs", as
   assert.match(init, /BATCH_1B_APPLY/, "the Postgres nullability step is behind an explicit flag");
 });
 
+test("the store location list is derived from the register, not kept beside it", async () => {
+  /*
+   * The twenty-one `store_location` option values were a second estate: the
+   * board could add a store in a spelling no site answered to, and after
+   * canonicalisation the two lists would simply have disagreed. Locations come
+   * from `sites` now, and a store is created in the register or not at all.
+   */
+  const board = await read("app/api/board/route.ts");
+  assert.match(board, /listRetailSites\(db, orgId\)/, "the board asks the register");
+  assert.match(board, /columnKey: "storeLocation" as const/, "and serves the Location column from it");
+  const map = board.slice(board.indexOf("const BOARD_COLUMN_TO_SET"), board.indexOf("async function mirrorRegistryOption"));
+  assert.doesNotMatch(map, /^\s*storeLocation:/m, "the board must not mirror locations back onto an option set");
+  const columns = board.slice(board.indexOf("const optionColumns"), board.indexOf("const optionColors"));
+  assert.doesNotMatch(columns, /"storeLocation"/, "and must not let a location be added as a chip");
+
+  const options = await read("app/api/options/route.ts");
+  const setMap = options.slice(options.indexOf("const SET_TO_BOARD_COLUMN"));
+  assert.doesNotMatch(
+    setMap.slice(0, setMap.indexOf("};")),
+    /store_location:/,
+    "and the registry must not mirror the other way either",
+  );
+
+  const model = await read("app/(app)/portal/board-model.ts");
+  assert.match(
+    model,
+    /export const storeLocationOptions: Option\[\] = \[\]/,
+    "the client's captured monday vocabulary must not paint a stale list",
+  );
+});
+
 test("the contractor backfill links only what the register answers unambiguously", async () => {
   const init = await read("db/init.ts");
   const backfill = init.slice(init.indexOf("SET contractor_id"));

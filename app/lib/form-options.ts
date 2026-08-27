@@ -1,7 +1,6 @@
-import { and, eq } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { sites } from "../../db/schema";
 import { listOptionValues } from "./options-repository";
+import { listRetailSites } from "./sites-repository";
 import {
   CANONICAL_OPTION_SETS,
   LOCATION_QUESTION_ID,
@@ -47,15 +46,17 @@ export async function formOptionOverrides(
   const questionById = new Map(config.questions.map((question) => [question.id, question]));
 
   /*
-   * ACTIVE sites only. An archived site keeps its jobs and its history, but a
-   * closed store must not be offered to a submitter — the whole point of
+   * Open retail sites only. An archived site keeps its jobs and its history,
+   * but a closed store must not be offered to a submitter — the whole point of
    * archiving from the Location editor is that it leaves the form.
+   *
+   * `active` alone stopped being enough once the register became the client's
+   * real estate: the office and the two warehouses are open, canonical
+   * locations, and offering "Warehouse 2" to somebody reporting a leak in a
+   * shop is not a location list. `listRetailSites` is the one definition of
+   * what belongs in a picker, shared with the board's Location column.
    */
-  const estate = await db
-    .select({ name: sites.name })
-    .from(sites)
-    .where(and(eq(sites.organisationId, organisationId), eq(sites.active, true)))
-    .orderBy(sites.name);
+  const estate = await listRetailSites(db, organisationId);
   if (estate.length) {
     overrides[LOCATION_QUESTION_ID] = applyOptionPreferences(
       questionById.get(LOCATION_QUESTION_ID)?.options ?? null,

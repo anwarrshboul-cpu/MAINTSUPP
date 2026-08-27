@@ -58,6 +58,7 @@ import {
   sendJobsToBin,
 } from "../../lib/recycle-bin";
 import { statusForStage } from "../../lib/stage-status";
+import { listRetailSites } from "../../lib/sites-repository";
 import {
   createBoardItem,
   duplicateBoardItems,
@@ -112,7 +113,13 @@ const BOARD_COLUMN_TO_SET: Record<string, string> = {
   engineer: "engineer_required",
   priority: "priority",
   tier: "tier_level",
-  storeLocation: "store_location",
+  /*
+   * `storeLocation` is deliberately NOT here any more. It used to mirror onto
+   * an option set of twenty-one hard-coded store spellings, which made that set
+   * a second register of the estate — one the board could add a store to, in a
+   * spelling no site answered to. Locations come from `sites` now, and the
+   * register is the only place a store is created.
+   */
 };
 
 async function mirrorRegistryOption(
@@ -230,8 +237,13 @@ const optionColumns = new Set<BoardOptionColumn>([
   "priority",
   "label",
   "status",
-  "storeLocation",
 ]);
+/** The board's own chip palette, used to colour the site-derived Location column. */
+const SITE_CHIP_COLOURS = [
+  "#579bfc", "#00c875", "#e2445c", "#a25ddc", "#ff642e",
+  "#fdab3d", "#0086c0", "#bb3354", "#037f4c", "#ff158a",
+];
+
 const optionColors = new Set([
   ...groupColors,
   "#ff008c",
@@ -1002,7 +1014,7 @@ async function boardPayload(
     .from(maintenanceGroupItems)
     .where(and(eq(maintenanceGroupItems.boardId, boardId), eq(maintenanceGroupItems.organisationId, orgId)))
     .orderBy(asc(maintenanceGroupItems.groupId), asc(maintenanceGroupItems.position));
-  const options = await db
+  const storedOptions = await db
     .select()
     .from(maintenanceBoardOptions)
     .where(and(eq(maintenanceBoardOptions.boardId, boardId), eq(maintenanceBoardOptions.organisationId, orgId)))
@@ -1010,6 +1022,44 @@ async function boardPayload(
       asc(maintenanceBoardOptions.columnKey),
       asc(maintenanceBoardOptions.position),
     );
+  /*
+   * The Location column is drawn from the site register, not from the chip
+   * store.
+   *
+   * Those chips were twenty-one captured monday spellings, and they behaved as
+   * a second estate: a store could be added to the board in a spelling no site
+   * answered to, and after canonicalisation the two lists would simply have
+   * disagreed. The register is the estate now, so the column offers what a
+   * person can actually be standing in — open, and retail. Closed stores, the
+   * office, the warehouses and anything unverified stay canonical Sites and
+   * stay out of the picker.
+   *
+   * The stored chips for this column are ignored rather than deleted: they are
+   * still the historical record of what the board once offered.
+   */
+  const retailSites = await listRetailSites(db, orgId);
+  const options = [
+    ...storedOptions.filter((option) => option.columnKey !== "storeLocation"),
+    ...retailSites.map((site, index) => ({
+      id: `site-option-${site.id}`,
+      organisationId: orgId,
+      legacyClientId: "sunnamusk-uk",
+      boardId,
+      columnKey: "storeLocation" as const,
+      value: site.name,
+      label: site.name,
+      /*
+       * Picked by position from the board's own palette rather than stored on
+       * the site: a colour is how the board draws a chip, not a fact about a
+       * shop, and deriving it keeps the register free of presentation.
+       */
+      colour: SITE_CHIP_COLOURS[index % SITE_CHIP_COLOURS.length],
+      textColour: "#ffffff",
+      position: index,
+      createdAt: site.createdAt,
+      updatedAt: site.updatedAt,
+    })),
+  ];
   const columnRows =
     seeded?.columns ??
     (await db

@@ -60,6 +60,41 @@ export function junkReason(name: string, address: string): string | null {
   return null;
 }
 
+/**
+ * The site types a person is choosing between when they say where a job is.
+ *
+ * The register holds every real operational location the client has — closed
+ * stores, so historical jobs keep a real site rather than losing one; the
+ * office; the two warehouses. All of those are canonical, and none of them is
+ * an answer to "which shop is this job at". Existing in `sites` and appearing
+ * in a location picker are deliberately different things.
+ */
+const RETAIL_SITE_TYPES = ["Inline", "Kiosk"];
+
+/**
+ * The sites a location picker may offer: open, and somewhere a customer walks
+ * into.
+ *
+ * One definition, used by the board's Location column and by the public form,
+ * because two definitions is how a dropdown comes to disagree with the register
+ * behind it. Closed stores are excluded by `status`, the office and warehouses
+ * by type, and anything the register cannot vouch for carries status 'other'
+ * and is excluded with them — a legacy row must never become a suggestion.
+ */
+export async function listRetailSites(db: Database, organisationId: string) {
+  const rows = await db
+    .select()
+    .from(sites)
+    .where(eq(sites.organisationId, organisationId))
+    .orderBy(asc(sites.position), asc(sites.name));
+  return rows.filter(
+    (row) =>
+      row.active &&
+      row.status === "active" &&
+      RETAIL_SITE_TYPES.includes(row.siteTypeValue ?? row.type ?? ""),
+  );
+}
+
 export async function listSites(
   db: Database,
   organisationId: string,

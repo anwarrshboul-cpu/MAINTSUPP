@@ -210,7 +210,16 @@ export const engineerOptions: Option[] = toOptions("engineer_required");
 export const priorityOptions: Option[] = toOptions("priority");
 export const labelOptions: Option[] = toOptions("maintenance_label");
 export const statusOptions: Option[] = toOptions("maintenance_status");
-export const storeLocationOptions: Option[] = toOptions("store_location");
+/*
+ * Empty on purpose. This was the captured monday vocabulary — twenty-one store
+ * spellings baked into the bundle — and it was the client-side half of a second
+ * register: after canonicalisation it would have gone on painting names the
+ * site register no longer answers to, and the board would have disagreed with
+ * the form about which stores exist. Locations are served from `sites` now, so
+ * with no server payload the column shows no chips, which is honest, rather
+ * than a stale list that looks authoritative.
+ */
+export const storeLocationOptions: Option[] = [];
 /** Monday's subitem board (1164003119) carries its own three-label status. */
 export const subitemStatusOptions: Option[] = (
   maintenanceSubitemOptions.subitem_status ?? []
@@ -229,6 +238,7 @@ export const editableFallbackOptions: Record<BoardOptionColumn, Option[]> = {
   status: statusOptions,
   storeLocation: storeLocationOptions,
 };
+
 
 export type SystemColumnDefinition = {
   key: ColumnKey;
