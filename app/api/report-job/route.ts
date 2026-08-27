@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
-import { activityLog, maintenanceRequests, sites } from "../../../db/schema";
+import { activityLog, maintenanceRequests, siteAliases, sites } from "../../../db/schema";
 import { exposeRequest } from "../../lib/request-payload";
 import {
   jobAlertTemplate,
@@ -10,6 +10,8 @@ import {
 import { configuredValue } from "../../lib/options-repository";
 import { priorityRule } from "../../lib/priority-rules";
 import { PRIMARY_ORGANISATION_ID, scopedDb } from "../../lib/tenant-db";
+import { normaliseSiteName } from "../../lib/sites-repository";
+import { unassignedSiteId } from "../../lib/site-reference";
 
 export const dynamic = "force-dynamic";
 
@@ -76,50 +78,68 @@ type PublicDatabase = Awaited<ReturnType<typeof scopedDb>>["db"];
  * — a picker — would publish the list of every site under contract to anyone
  * who loaded the home page.
  *
- * A typed name will therefore sometimes match nothing, and `site_id` is NOT
- * NULL, so the choice is between refusing the report and filing it somewhere a
- * coordinator can find it. Refusing is the wrong answer: a shop with water
- * coming through the ceiling, typing "Oxford St" where the row says "Sunnamusk
- * Oxford Street", would be turned away. An unmatched name therefore lands on a
- * single standing intake site, with what they actually typed preserved in
- * `location` so the job can be reassigned in one edit.
+ * A typed name will therefore sometimes match nothing. Refusing the report is
+ * the wrong answer: a shop with water coming through the ceiling, typing
+ * "Oxford St" where the row says "Sunnamusk Oxford Street", would be turned
+ * away. So an unmatched name is filed with NO site, and the words they actually
+ * typed are kept in `location`.
+ *
+ * It used to be filed against a standing "Unmatched website reports" row in
+ * `sites`, created on demand — a site that is not a site, which then appeared
+ * in the register, in the portfolio filter, in spend-by-site, in the site count
+ * and in every site-joined report, and which the comment here promised could be
+ * "reassigned in one edit" while no surface in the application could set a
+ * job's site at all. Both halves are fixed: nothing is invented here, and
+ * `PATCH /api/maintenance` can now attach the job to a real site when somebody
+ * recognises the name.
+ *
+ * Matching is exact, then case-insensitive, then this organisation's own
+ * aliases — which is what a renamed site leaves behind, so a reporter typing
+ * the name the shop carried last year still lands on the right row.
  */
-async function resolveSite(db: PublicDatabase, orgId: string, location: string) {
+async function resolveSite(
+  db: PublicDatabase,
+  orgId: string,
+  location: string,
+): Promise<{ id: string; name: string } | null> {
   const [exact] = await db
-    .select({ id: sites.id })
+    .select({ id: sites.id, name: sites.name })
     .from(sites)
     .where(and(eq(sites.name, location), eq(sites.organisationId, orgId)))
     .limit(1);
-  if (exact) return exact.id;
+  if (exact) return exact;
 
   const [loose] = await db
-    .select({ id: sites.id })
+    .select({ id: sites.id, name: sites.name })
     .from(sites)
     .where(
       and(eq(sites.organisationId, orgId), sql`lower(${sites.name}) = lower(${location})`),
     )
     .limit(1);
-  if (loose) return loose.id;
+  if (loose) return loose;
 
-  const intakeId = `site-website-intake-${orgId}`;
-  const [existing] = await db
-    .select({ id: sites.id })
-    .from(sites)
-    .where(and(eq(sites.id, intakeId), eq(sites.organisationId, orgId)))
+  /*
+   * A renamed site keeps its previous canonical name as an organisation-scoped
+   * alias. `site_aliases` is unique on (organisation_id, normalised), so this
+   * resolves to at most one site — and joining on `sites.organisationId` as
+   * well as the alias's own means a submitted string can never reach another
+   * tenant's row.
+   */
+  const normalised = normaliseSiteName(location);
+  if (!normalised) return null;
+  const [alias] = await db
+    .select({ id: sites.id, name: sites.name })
+    .from(siteAliases)
+    .innerJoin(sites, eq(sites.id, siteAliases.siteId))
+    .where(
+      and(
+        eq(siteAliases.organisationId, orgId),
+        eq(siteAliases.normalised, normalised),
+        eq(sites.organisationId, orgId),
+      ),
+    )
     .limit(1);
-  if (existing) return existing.id;
-
-  await db.insert(sites).values({
-    id: intakeId,
-    organisationId: orgId,
-    name: "Unmatched website reports",
-    type: "Intake",
-    address: "Reported from the website — reassign to the correct site",
-    lifecycle: "Current",
-    status: "active",
-    position: 9999,
-  });
-  return intakeId;
+  return alias ?? null;
 }
 
 export async function POST(request: Request) {
@@ -149,7 +169,9 @@ export async function POST(request: Request) {
 
     const priority = await configuredValue(db, orgId, "priority", payload.priority);
     const engineer = await configuredValue(db, orgId, "engineer_required", payload.engineer);
-    const siteId = await resolveSite(db, orgId, location);
+    const site = await resolveSite(db, orgId, location);
+    // No site rather than an invented one. The submitted text is kept below.
+    const siteId = site?.id ?? unassignedSiteId();
 
     const [latest] = await db
       .select({

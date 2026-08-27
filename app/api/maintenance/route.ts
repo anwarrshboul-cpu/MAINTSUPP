@@ -771,6 +771,44 @@ export async function PATCH(request: Request) {
         }
         values.parentId = parentId;
       }
+
+      /*
+       * Attaching a job to a site — the manual assignment an unattached job is
+       * waiting for.
+       *
+       * There was no way to do this. `siteId` is not in SYSTEM_FIELD_BY_KEY, so
+       * the board cannot write it, and the one `update(...).set({ siteId })` in
+       * the whole application was the monday importer. A job filed against the
+       * wrong site, or against none, could not be moved without re-running an
+       * import — while the website intake route's own comment promised it could
+       * be reassigned in one edit.
+       *
+       * The site must be one THIS organisation owns, the same check the board's
+       * create route makes and for the same reason: the row stays in the
+       * actor's organisation, but its `site_id` would point across the tenant
+       * boundary and corrupt every site-joined report and compliance count. A
+       * site belonging to another tenant and an id that exists nowhere are
+       * answered identically, so the status cannot be used to confirm that an
+       * id is real.
+       *
+       * `null` clears it. `location` is whatever the caller sent in the same
+       * payload and is applied above — this route never invents a name for a
+       * site the caller did not name, and never blanks the text a person typed
+       * just because an id arrived beside it.
+       */
+      if (typeof fields.siteId === "string" || fields.siteId === null) {
+        const nextSiteId = trimString(fields.siteId, 64) || null;
+        if (nextSiteId) {
+          const [site] = await db
+            .select({ id: sites.id })
+            .from(sites)
+            .where(and(eq(sites.id, nextSiteId), eq(sites.organisationId, orgId)));
+          if (!site) {
+            return Response.json({ error: "Site not found." }, { status: 404 });
+          }
+        }
+        values.siteId = nextSiteId;
+      }
     }
 
     const [before] = await db

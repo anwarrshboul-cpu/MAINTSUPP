@@ -23,6 +23,7 @@ import {
 } from "../../../lib/automations";
 import { getColumnType, normaliseCellValue } from "../../../lib/column-types";
 import { chunkIds, selectInChunks } from "../../../lib/sql-batching";
+import { isUnassignedSite, unassignedSiteId } from "../../../lib/site-reference";
 
 export const dynamic = "force-dynamic";
 
@@ -281,28 +282,33 @@ export async function POST(request: Request) {
     const title = text(body.title, 200);
     if (!title) return bad("A job title is required.");
 
-    // A job always belongs to a site — reporting, compliance and the site
-    // detail page all depend on it, so an unassigned job is not allowed.
-    const siteId = text(body.siteId, 64);
-    if (!siteId) return bad("A site is required.");
-
     /*
-     * The site must be one THIS organisation owns. The two references directly
-     * below — groupId and parentId — were org-scoped from the start, but siteId
-     * was only length-checked, so a caller could file a job in their own tenant
-     * against another tenant's site id (or an invented one). The row lands in
-     * the actor's org, but its site_id then points across the tenant boundary,
-     * which corrupts every site-joined report and compliance count.
+     * The site, which a job may legitimately not have.
      *
-     * The only value that is legitimately not a site row is the "unassigned"
-     * sentinel the board's inline "Add item" writes (board-mutations.ts) and
-     * that a subitem of such a job carries up from its parent. It references no
-     * real site in any tenant, so it leaks nothing and is allowed through; every
-     * other id must resolve to a site in this organisation. This validates the
-     * existing reference — it is not the deferred canonical Site migration.
+     * This refused an absent site outright. That was right while `site_id` was
+     * NOT NULL — except that what a board-created row actually carried was the
+     * literal "site-unassigned", a sentinel referencing no row in any table,
+     * admitted by an exemption this very block had to carry. A subitem inherits
+     * its parent's site, so once a parent can honestly have none — a website
+     * report naming a store nobody recognises — refusing an absent site would
+     * make that job impossible to add a subitem to.
+     *
+     * So absence is absence. A site that IS named must be one THIS organisation
+     * owns: `siteId` was only length-checked, so a caller could file a job in
+     * their own tenant against another tenant's site id, or an invented one,
+     * and every site-joined report and compliance count would then be reading
+     * across a tenant boundary.
      */
-    const UNASSIGNED_SITE_ID = "site-unassigned";
-    if (siteId !== UNASSIGNED_SITE_ID) {
+    const rawSiteId = text(body.siteId, 64);
+    /*
+     * Rows created before `site_id` could be null carry the sentinel, and a
+     * subitem raised from one hands it straight back here. It references no
+     * site in any tenant, so it is read as the absence it always meant rather
+     * than 404ing the operator mid-gesture. It is also still what a database
+     * that cannot hold NULL is given to write.
+     */
+    const siteId = isUnassignedSite(rawSiteId) ? unassignedSiteId() : rawSiteId;
+    if (siteId && !isUnassignedSite(siteId)) {
       const [site] = await db
         .select({ id: sites.id })
         .from(sites)

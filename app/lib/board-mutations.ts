@@ -29,6 +29,7 @@ import type { RequestStage } from "./types";
 import { statusForStage } from "./stage-status";
 import { selectInChunks } from "./sql-batching";
 import { PRIMARY_ORGANISATION_ID } from "./tenant-access";
+import { unassignedSiteId } from "./site-reference";
 
 export type BoardDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -213,11 +214,26 @@ export async function createBoardItem(
   // Everything about the new row except its id, which is picked per attempt.
   const values = {
     organisationId: orgId,
-    siteId: "site-unassigned",
+    /*
+     * No site, said as no site.
+     *
+     * This wrote the literal "site-unassigned" — an id referencing no row in
+     * `sites`, or in any table, in any tenant. It had to be exempted by hand
+     * from the cross-organisation check on the create route, it keyed a bucket
+     * of its own in every rollup that grouped on `site_id`, and it read as a
+     * real site id to anything that did not know the sentinel by name.
+     * `unassignedSiteId` returns null wherever the column can hold one.
+     */
+    siteId: unassignedSiteId(),
     source: "Manual",
     title,
     description: title,
-    location: "Choose a location",
+    /*
+     * And no location either. "Choose a location" is a prompt, not a place: it
+     * aggregated as a site name wherever a rollup fell back to the text, and
+     * the board already draws the prompt itself where this field is empty.
+     */
+    location: "",
     requester: actor.displayName || actor.email || "Workspace",
     contact: "Not provided",
     category: "Other",

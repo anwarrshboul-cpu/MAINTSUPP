@@ -210,6 +210,25 @@ export function invalidRequestFields(fields: Record<string, unknown>): string[] 
     note("parentId", "an item id or null");
   }
 
+  /*
+   * `siteId` is shape-checked here and RESOLVED in the route, exactly as
+   * `parentId` above and for the same reason: attaching a job to a site needs a
+   * database read scoped to the caller's organisation, and this module has
+   * neither a database nor an organisation.
+   *
+   * So `requestFieldValues` does NOT coerce it and `site` is NOT in
+   * SYSTEM_FIELD_BY_KEY. Both omissions are load-bearing: the automation engine
+   * calls `requestFieldValues` with no reference validation of its own, so
+   * either addition would hand an unattended rule the power to move a job onto
+   * another tenant's site, at scale.
+   *
+   * `null` is how a job is detached. A report whose site nobody has recognised
+   * yet is honestly site-less, and that is a state the product now has.
+   */
+  if (has("siteId") && typeof fields.siteId !== "string" && fields.siteId !== null) {
+    note("siteId", "a site id, or null to leave the job unattached");
+  }
+
   return problems;
 }
 

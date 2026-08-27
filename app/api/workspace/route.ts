@@ -428,8 +428,19 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       ),
   ]);
 
+  /*
+   * Keyed by site id, and a job with no site contributes to none of them.
+   *
+   * `site_id` is nullable now, so this grouped a `null` key alongside the real
+   * ones — and every unattached job in the estate would have been counted
+   * against whichever site that key happened to reach. An unattached job is not
+   * open work at any site; it is work whose site nobody has established yet,
+   * and it is surfaced as that rather than folded into a store's figures.
+   */
   const openJobsBySite = new Map<string, number>(
-    openJobRows.map((row) => [row.siteId, Number(row.open)]),
+    openJobRows
+      .filter((row): row is typeof row & { siteId: string } => Boolean(row.siteId))
+      .map((row) => [row.siteId, Number(row.open)]),
   );
   /*
    * Keyed by the contractor name exactly as stored on the job. Jobs with no

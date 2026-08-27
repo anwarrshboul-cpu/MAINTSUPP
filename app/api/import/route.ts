@@ -9,7 +9,8 @@ import {
   siteAliases,
 } from "../../../db/schema";
 import { auditActor, recordAudit } from "../../lib/audit";
-import { listSites, normaliseSiteName } from "../../lib/sites-repository";
+import { listSites, normaliseSiteName, recordAnomaly } from "../../lib/sites-repository";
+import { unassignedSiteId } from "../../lib/site-reference";
 import { scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { resolveBoard } from "../../lib/board-registry";
 import {
@@ -169,6 +170,7 @@ async function commit(
   orgId: string,
   boardKey: string,
   plan: ImportPlan,
+  batchId: string,
 ) {
   // Groups first — an item cannot be placed before its group exists.
   const existingGroups = await db
@@ -255,7 +257,21 @@ async function commit(
       const key = name ? normaliseSiteName(name) : "";
       if (key && !siteIdByName.has(key)) siteIdByName.set(key, row.id);
     }
-    if (row.code) siteIdByName.set(row.code.trim().toLowerCase(), row.id);
+  }
+  /*
+   * Site CODES, indexed after every NAME and never over one.
+   *
+   * `row.code` was written into this same map unconditionally, from inside the
+   * name loop — so a two-letter code silently overwrote whatever name
+   * normalised to it, including one an EARLIER row had already claimed, and
+   * re-pointed every job naming that store. It was also merely lower-cased
+   * rather than normalised, so "WG-01" and "wg01" were two keys that could not
+   * find each other. A code is a fallback for a name, so it goes in second,
+   * guarded, through the same normaliser.
+   */
+  for (const row of siteRows) {
+    const key = row.code ? normaliseSiteName(row.code) : "";
+    if (key && !siteIdByName.has(key)) siteIdByName.set(key, row.id);
   }
   const siteAliasRows = await db
     .select({ siteId: siteAliases.siteId, normalised: siteAliases.normalised })
@@ -266,8 +282,18 @@ async function commit(
       siteIdByName.set(alias.normalised, alias.siteId);
     }
   }
-  const anySite = siteRows[0] ?? null;
+  /*
+   * Two disjoint failures, counted apart because they need different answers.
+   * F2 — the file named a store the register does not know under any name, code
+   * or alias: fix the register, or add an alias, and re-run. F1 — the row named
+   * no store at all: fix the export. F1 was not counted at all before, so the
+   * rows carrying the least information were the ones that vanished most
+   * quietly.
+   */
   let unmatchedSites = 0;
+  let blankSites = 0;
+  /** Distinct store names that resolved to nothing, and how many rows named each. */
+  const unmatchedNames = new Map<string, number>();
 
   /*
    * How a row in the file is matched to a row already here.
@@ -378,13 +404,20 @@ async function commit(
       nextUpdateAt: item.values.nextUpdate || null,
     };
 
-    // The store the row names, not whichever site happened to sort first.
+    // The store the row names, or nothing at all. Never another store.
     const locationName = fields.location.trim();
     const matchedSiteId = locationName
       ? siteIdByName.get(normaliseSiteName(locationName))
       : undefined;
-    if (locationName && !matchedSiteId) unmatchedSites += 1;
-    const siteId = matchedSiteId ?? anySite?.id ?? "";
+    if (!matchedSiteId) {
+      if (locationName) {
+        unmatchedSites += 1;
+        unmatchedNames.set(locationName, (unmatchedNames.get(locationName) ?? 0) + 1);
+      } else {
+        blankSites += 1;
+      }
+    }
+    const siteId = matchedSiteId ?? unassignedSiteId();
 
     if (!requestId) {
       requestId = newId("req");
@@ -490,7 +523,59 @@ async function commit(
     }
   }
 
-  return { groupsCreated, created, updated, cellsWritten, unmatchedSites };
+  /*
+   * The unmatched stores, written down rather than counted.
+   *
+   * `unmatchedSites` was an integer in the HTTP body and nothing else. It was
+   * never persisted, so an hour later nobody could answer "which stores?", and
+   * it under-counted, because a row naming no store was not counted at all. One
+   * anomaly per distinct name gives the register a work queue, and
+   * `import_anomalies.resolved` gives it a done state.
+   */
+  for (const [name, rows] of unmatchedNames) {
+    await recordAnomaly(db, orgId, {
+      batchId,
+      entityType: "maintenance_request",
+      sourceName: name,
+      kind: "site_unmatched",
+      field: "site_id",
+      originalValue: name,
+      appliedValue: null,
+      detail:
+        `${rows} imported job${rows === 1 ? "" : "s"} name this store, which is not in the ` +
+        `site register under any name, code or alias. They are filed with no site and the ` +
+        `name they gave is kept. Add the site, or an alias for it, and re-run the import.`,
+    });
+  }
+  if (blankSites) {
+    await recordAnomaly(db, orgId, {
+      batchId,
+      entityType: "maintenance_request",
+      kind: "site_missing",
+      field: "site_id",
+      detail: `${blankSites} imported job${blankSites === 1 ? "" : "s"} name no store at all. They are filed with no site.`,
+    });
+  }
+
+  return {
+    groupsCreated,
+    created,
+    updated,
+    cellsWritten,
+    unmatchedSites,
+    blankSites,
+    /*
+     * Returned as well as recorded. `listAnomalies` has no caller anywhere in
+     * the application yet, so the rows are durable but not visible; until a
+     * screen reads them, the operator's only sight of which stores failed is
+     * the response to the import they just ran.
+     */
+    unmatchedSiteNames: [...unmatchedNames.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "en-GB"))
+      .slice(0, 50)
+      .map(([name, rows]) => ({ name, rows })),
+    batchId,
+  };
 }
 
 export async function POST(request: Request) {
@@ -571,7 +656,10 @@ export async function POST(request: Request) {
     // Commit writes into whichever board the workspace resolves, so an import
     // cannot land on a board the caller is not looking at.
     const board = await resolveBoard(db, orgId, boardKey);
-    const result = await commit(db, orgId, board.key, plan);
+    // One id for everything this run records, so its anomalies list back
+    // together and match the audit entry below.
+    const batchId = `import-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+    const result = await commit(db, orgId, board.key, plan, batchId);
 
     /*
      * An import rewrites more rows in one call than any other action in the
