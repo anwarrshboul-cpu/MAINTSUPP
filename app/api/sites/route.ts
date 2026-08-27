@@ -15,13 +15,16 @@ import {
   cleanAddress,
   existingSiteCodes,
   findDuplicateCandidates,
+  addSiteAlias,
   generateSiteCode,
   getSite,
   junkReason,
   listSiteGroups,
   listSites,
+  nameConflict,
   nextSitePosition,
   recordAnomaly,
+  releaseSiteAlias,
   setSiteAliases,
   setSiteGroupMembership,
   uniqueSlug,
@@ -415,6 +418,25 @@ export async function PATCH(request: Request) {
       const nextName = text(body.rename, 120);
       if (!nextName) throw new Error("A site name is required.");
       if (nextName !== existing.name) {
+        /*
+         * A name that already resolves elsewhere cannot be taken.
+         * `findDuplicateCandidates` only warns, and only about site names; an
+         * ALIAS pointing at another site is a hard conflict, because
+         * `site_aliases` is uniquely indexed on (organisation_id, normalised)
+         * and the alias insert below would be rejected — leaving the rename
+         * applied and its history lost.
+         */
+        const conflict = await nameConflict(db, orgId, nextName, id);
+        if (conflict?.kind === "alias") {
+          return Response.json(
+            {
+              error:
+                "That name is already recorded as a former name of another site. Remove it there first.",
+              conflictSiteId: conflict.siteId,
+            },
+            { status: 409 },
+          );
+        }
         const duplicates = await findDuplicateCandidates(db, orgId, nextName, id);
         if (duplicates.length && !body.confirmDuplicate) {
           return Response.json(
@@ -430,9 +452,24 @@ export async function PATCH(request: Request) {
             updatedAt: new Date().toISOString(),
           })
           .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+
+        /*
+         * The previous name survives as an organisation-scoped alias, so every
+         * job, compliance row and import that recorded the old spelling still
+         * resolves. Additive: two renames leave both earlier names resolving.
+         * `releaseSiteAlias` runs first because renaming back to a name this
+         * site once had must retire it as an alias, rather than leave the
+         * register saying one string is both the current name and a historic
+         * spelling of it.
+         */
+        await releaseSiteAlias(db, orgId, id, nextName);
+        const recorded = await addSiteAlias(db, orgId, id, existing.name, "rename");
+
         await logChange(db, orgId, id, "renamed", actor.email, {
           from: existing.name,
           to: nextName,
+          aliasRecorded: recorded.ok ? recorded.created : false,
+          aliasSkipped: recorded.ok ? null : recorded.reason,
         });
       }
       return Response.json({ ok: true, id, name: nextName });
@@ -444,6 +481,20 @@ export async function PATCH(request: Request) {
     if (!address.value) throw new Error("A first line of address is required.");
 
     if (payload.name !== existing.name) {
+      // A name another site already answers to by alias is a hard conflict, not
+      // a warning — the alias insert below would be rejected by the unique
+      // index and the rename would be left half-applied.
+      const conflict = await nameConflict(db, orgId, payload.name, id);
+      if (conflict?.kind === "alias") {
+        return Response.json(
+          {
+            error:
+              "That name is already recorded as a former name of another site. Remove it there first.",
+            conflictSiteId: conflict.siteId,
+          },
+          { status: 409 },
+        );
+      }
       const duplicates = await findDuplicateCandidates(db, orgId, payload.name, id);
       if (duplicates.length && !body.confirmDuplicate) {
         return Response.json(
@@ -479,6 +530,20 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+
+    /*
+     * The same rule on the full-payload path. It recorded nothing at all unless
+     * the caller happened to send an `aliases` array, so a rename from the Sites
+     * form lost the old name while the identical rename from the Location editor
+     * kept it. The alias comes from the rename itself, never from a field the
+     * caller may not have sent — and it runs BEFORE `setSiteAliases` so the
+     * hand-typed list ("manual") and this row ("rename") occupy different slots
+     * and cannot delete one another.
+     */
+    if (payload.name !== existing.name) {
+      await releaseSiteAlias(db, orgId, id, payload.name);
+      await addSiteAlias(db, orgId, id, existing.name, "rename");
+    }
 
     if (Array.isArray(body.data?.aliases) || typeof body.data?.aliases === "string") {
       await setSiteAliases(db, orgId, id, [

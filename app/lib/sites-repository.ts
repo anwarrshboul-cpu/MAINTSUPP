@@ -225,6 +225,131 @@ export async function uniqueSlug(
   return `${base}-${suffix}`;
 }
 
+export type AliasWrite =
+  | { ok: true; created: boolean; normalised: string }
+  | { ok: false; reason: "empty" | "self" | "taken"; conflictSiteId?: string };
+
+/**
+ * Record ONE alias without disturbing the ones already recorded.
+ *
+ * `setSiteAliases` below is a replace: it clears every alias the site has and
+ * writes the list it was handed. That is right for the alias editor, which
+ * sends the whole list, and fatal for a rename, which knows only the name being
+ * retired. Renaming a store twice must leave BOTH earlier spellings resolving;
+ * a replace leaves only the last.
+ *
+ * Nothing is written silently. A normalised key already claimed by a DIFFERENT
+ * site is refused and reported rather than dropped by `onConflictDoNothing` —
+ * that swallow is how a rename could report success while the retired name went
+ * on resolving to somebody else's store.
+ */
+export async function addSiteAlias(
+  db: Database,
+  organisationId: string,
+  siteId: string,
+  alias: string,
+  source = "rename",
+): Promise<AliasWrite> {
+  const trimmed = alias.trim();
+  const normalised = normaliseSiteName(trimmed);
+  if (!trimmed || !normalised) return { ok: false, reason: "empty" };
+
+  /*
+   * An alias equal to a LIVE site name can never be reached: `resolveSiteByName`
+   * matches site names before aliases. If it names THIS site it is dead weight;
+   * if it names another it is a false claim that goes live the moment that site
+   * is renamed away. There is no unique index on sites(organisation_id, name) to
+   * catch either, so it is checked here.
+   */
+  const named = await db
+    .select({ id: sites.id, name: sites.name })
+    .from(sites)
+    .where(eq(sites.organisationId, organisationId));
+  const collides = named.find((row) => normaliseSiteName(row.name) === normalised);
+  if (collides) {
+    return collides.id === siteId
+      ? { ok: false, reason: "self" }
+      : { ok: false, reason: "taken", conflictSiteId: collides.id };
+  }
+
+  const [held] = await db
+    .select({ siteId: siteAliases.siteId })
+    .from(siteAliases)
+    .where(
+      and(eq(siteAliases.organisationId, organisationId), eq(siteAliases.normalised, normalised)),
+    )
+    .limit(1);
+  if (held) {
+    // Idempotent: renaming back and away again must not throw.
+    return held.siteId === siteId
+      ? { ok: true, created: false, normalised }
+      : { ok: false, reason: "taken", conflictSiteId: held.siteId };
+  }
+
+  await db.insert(siteAliases).values({
+    id: `alias-${siteId}-${normalised}`.slice(0, 120),
+    organisationId,
+    siteId,
+    alias: trimmed,
+    normalised,
+    source,
+  });
+  return { ok: true, created: true, normalised };
+}
+
+/**
+ * The other half of a rename. Adopting a name back means it must stop being an
+ * alias of the SAME site, or the register claims one string is both a site's
+ * current name and a historic spelling of it. Only this site's own rows are
+ * touched; another site's claim is a conflict the caller refuses beforehand.
+ */
+export async function releaseSiteAlias(
+  db: Database,
+  organisationId: string,
+  siteId: string,
+  name: string,
+) {
+  const normalised = normaliseSiteName(name);
+  if (!normalised) return;
+  await db
+    .delete(siteAliases)
+    .where(
+      and(
+        eq(siteAliases.organisationId, organisationId),
+        eq(siteAliases.siteId, siteId),
+        eq(siteAliases.normalised, normalised),
+      ),
+    );
+}
+
+/**
+ * Who, if anyone, already answers to this name — a site or an alias.
+ *
+ * `findDuplicateCandidates` looks only at site names and only warns. An alias
+ * pointing at another site is a hard conflict: the unique index would reject
+ * the rename's own alias insert, so the rename has to be refused up front
+ * rather than half-applied.
+ */
+export async function nameConflict(
+  db: Database,
+  organisationId: string,
+  name: string,
+  excludeId: string,
+): Promise<{ siteId: string; kind: "site" | "alias" } | null> {
+  const key = normaliseSiteName(name);
+  if (!key) return null;
+  const rows = await listSites(db, organisationId, { includeInactive: true });
+  const site = rows.find((row) => row.id !== excludeId && normaliseSiteName(row.name) === key);
+  if (site) return { siteId: site.id, kind: "site" };
+  const [alias] = await db
+    .select({ siteId: siteAliases.siteId })
+    .from(siteAliases)
+    .where(and(eq(siteAliases.organisationId, organisationId), eq(siteAliases.normalised, key)))
+    .limit(1);
+  if (alias && alias.siteId !== excludeId) return { siteId: alias.siteId, kind: "alias" };
+  return null;
+}
+
 export async function setSiteAliases(
   db: Database,
   organisationId: string,
@@ -232,10 +357,21 @@ export async function setSiteAliases(
   aliases: string[],
   source = "manual",
 ) {
+  /*
+   * Scoped to the source it is replacing. This used to clear EVERY alias the
+   * site had, so saving the alias editor — which sends only the hand-typed list
+   * — erased the names the site had been renamed away from, and every job filed
+   * under an old spelling stopped resolving. A rename is history; it is not the
+   * editor's to overwrite.
+   */
   await db
     .delete(siteAliases)
     .where(
-      and(eq(siteAliases.organisationId, organisationId), eq(siteAliases.siteId, siteId)),
+      and(
+        eq(siteAliases.organisationId, organisationId),
+        eq(siteAliases.siteId, siteId),
+        eq(siteAliases.source, source),
+      ),
     );
   const seen = new Set<string>();
   for (const alias of aliases) {
