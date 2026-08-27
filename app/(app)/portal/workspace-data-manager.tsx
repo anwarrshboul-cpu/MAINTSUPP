@@ -159,7 +159,10 @@ function fieldsFor(tab: Exclude<ManagerTab, "activity">, workspace: WorkspaceSna
   return [
     { key: "name", label: "Full name", required: true },
     { key: "email", label: "Email", type: "email", required: true },
-    { key: "role", label: "Role", type: "select", options: ["Super Admin", "Admin", "Client"].map((value) => ({ value, label: value })) },
+    // `required`, so the select does not offer the blank "None" every optional
+    // field gets. A member's role is one of three words and "" is not one of
+    // them — the API refuses it, so offering it here only produced an error.
+    { key: "role", label: "Role", type: "select", required: true, options: ["Super Admin", "Admin", "Client"].map((value) => ({ value, label: value })) },
     { key: "active", label: "Active access", type: "checkbox" },
   ];
 }

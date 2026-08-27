@@ -721,7 +721,14 @@ export async function POST(request: Request) {
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; data?: Record<string, unknown> };
     const entity = payload.entity;
-    const data = payload.data ?? {};
+    /*
+     * An object or nothing. The branches below ask `"key" in data` before
+     * writing a column, and `in` throws a TypeError on a primitive, so a body
+     * whose `data` was a string or a number answered with a V8 message about
+     * the `in` operator instead of a refusal. An array is not a record either.
+     */
+    const rawData = payload.data;
+    const data = rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
     if (refusal) return refusal;
     let id = "";
@@ -779,6 +786,17 @@ export async function POST(request: Request) {
       const name = text(data.name, 120);
       const email = text(data.email, 180).toLowerCase();
       if (!name || !email.includes("@")) throw new Error("A name and valid email are required.");
+      /*
+       * Before the insert, so a refusal writes nothing. The `|| "Client"` below
+       * still covers an omitted role; this refuses a supplied one that is not a
+       * role, which on a new member is the value the seed above would otherwise
+       * turn into a membership. See `MEMBER_ROLES` for what that does and does
+       * not close.
+       */
+      const badRole = memberRoleRefusal(data);
+      if (badRole) return badRole;
+      const badAccess = memberActiveRefusal(data);
+      if (badAccess) return badAccess;
       id = newId("user", email);
       await db.insert(users).values({ id, organisationId: orgId, fullName: name, email, role: text(data.role, 60) || "Client", active: booleanValue(data.active) });
     } else if (entity === "settings") {
@@ -927,6 +945,74 @@ function requiredTextRefusal(
   return text(data[key], max) ? null : Response.json({ error: message }, { status: 400 });
 }
 
+/**
+ * The roles the Team tab can express, refused when it is sent anything else.
+ *
+ * `users.role` had no allow-list on either verb, so a caller holding
+ * `users.edit` could store any string at all — and the tab prints that string
+ * straight back, so "Owner", "" or a paragraph of markup became a role this
+ * workspace appears to have. These three are the whole set: the manage form's
+ * select offers exactly them, `ROLE_LABEL` in the invitation tokens writes
+ * exactly them, and `seedWorkspaceIfEmpty` above maps exactly them onto the
+ * three membership roles.
+ *
+ * The column is a LABEL, not authority. Access comes from `memberships`, and
+ * `/api/admin/users` is what changes that — behind a rank check, a
+ * no-self-promotion rule and a last-super-admin guard-rail this route has none
+ * of. Writing "Super Admin" here renames somebody on a screen.
+ *
+ * The create is guarded as well as the edit, but be clear about what that does
+ * and does not buy. `seedWorkspaceIfEmpty` above derives a membership from this
+ * label for a member who has none yet, so on a NEW member the label briefly
+ * becomes authority — and "Super Admin" is a legitimate entry here, so this
+ * list stops a typo reaching that mapping and does not stop somebody choosing
+ * the top of it. Closing that properly means the seed not deriving authority
+ * from a display column at all, which is a change to the seed and not to this
+ * check. An edit cannot reach the mapping either way: the membership already
+ * exists by then and the insert leaves it alone.
+ *
+ * It is also narrower than it looks. The seed returns early outside the primary
+ * organisation and outside development, so in production nothing derives a
+ * membership from this column and the label really is only a label.
+ */
+const MEMBER_ROLES = ["Super Admin", "Admin", "Client"];
+
+function memberRoleRefusal(data: Record<string, unknown>): Response | null {
+  if (!("role" in data)) return null;
+  return MEMBER_ROLES.includes(text(data.role, 60))
+    ? null
+    : Response.json(
+        { error: `A member's role must be ${MEMBER_ROLES.join(", ")}.` },
+        { status: 400 },
+      );
+}
+
+/**
+ * A member's access, refused when it is sent something that is not an answer.
+ *
+ * `booleanValue` falls back to TRUE for anything it cannot read, so `null`,
+ * `"no"`, `[]` and the string `"0"` all RESTORED access to somebody whose
+ * access had been withdrawn — while the number `0` correctly withdrew it.
+ * Reactivating is a privilege-relevant act: withdrawing access through the
+ * archive verb below needs `users.deactivate`, and restoring it on the admin
+ * route sits behind a rank check, so it must not happen here by accident under
+ * plain `users.edit`.
+ *
+ * The accepted set is exactly what `booleanValue` can read, so a caller
+ * already sending `"true"` or `1` is unaffected and only genuinely ambiguous
+ * values are refused — the same treatment `role` and `email` get above rather
+ * than a silent guess.
+ */
+function memberActiveRefusal(data: Record<string, unknown>): Response | null {
+  if (!("active" in data)) return null;
+  const value = data.active;
+  const readable =
+    typeof value === "boolean" || value === "true" || value === "false" || value === 0 || value === 1;
+  return readable
+    ? null
+    : Response.json({ error: "A member's access must be true or false." }, { status: 400 });
+}
+
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
@@ -935,7 +1021,14 @@ export async function PATCH(request: Request) {
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string; data?: Record<string, unknown> };
     const entity = payload.entity;
     const id = text(payload.id, 120);
-    const data = payload.data ?? {};
+    /*
+     * An object or nothing. The branches below ask `"key" in data` before
+     * writing a column, and `in` throws a TypeError on a primitive, so a body
+     * whose `data` was a string or a number answered with a V8 message about
+     * the `in` operator instead of a refusal. An array is not a record either.
+     */
+    const rawData = payload.data;
+    const data = rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
     if (!entity || !id) return Response.json({ error: "A record type and ID are required." }, { status: 400 });
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
     if (refusal) return refusal;
@@ -1112,7 +1205,50 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
     } else if (entity === "member") {
-      await db.update(users).set({ fullName: text(data.name, 120), email: text(data.email, 180).toLowerCase(), role: text(data.role, 60), active: booleanValue(data.active), updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
+      /*
+       * Only what was sent — see `supplied`. `users.email` is NOT NULL and
+       * UNIQUE and `users.role` is NOT NULL, so the unconditional
+       * `text(data.x)` this replaces turned any partial PATCH into a wrecked
+       * account: pausing somebody with `{ active: false }` blanked their email
+       * to "", which the unique index accepts exactly once — so the SECOND
+       * member paused that way answered 400 with a raw constraint error — and
+       * blanked their role and their name alongside it.
+       *
+       * `active` was worse than the text columns rather than better.
+       * `booleanValue` falls back to TRUE, so a PATCH that mentioned only the
+       * name silently RESTORED access to somebody whose access had been
+       * withdrawn. It is the one field here where the fallback is the opposite
+       * of what the caller asked for.
+       *
+       * The payload key is `name` and the column is `fullName`, so that one
+       * cannot go through `supplied`, which spreads the key it is given — the
+       * same reason `dayRate` is spelled out in the contractor branch above.
+       */
+      const badName = requiredTextRefusal(data, "name", 120, "A member name is required.");
+      if (badName) return badName;
+      /*
+       * The rule the create above already applies. A member with no working
+       * address is one nobody can invite, notify or send a reset to, and the
+       * column is this workspace's only unique handle on a person. Conditional
+       * on the key being present, because an omitted `email` now means "leave
+       * it" rather than ""; "" fails `includes("@")` too, so one check covers
+       * the blank and the malformed alike.
+       */
+      if ("email" in data && !text(data.email, 180).includes("@")) {
+        return Response.json({ error: "A valid email is required." }, { status: 400 });
+      }
+      // Before the update, so a refusal writes nothing. See `memberRoleRefusal`.
+      const badRole = memberRoleRefusal(data);
+      if (badRole) return badRole;
+      const badAccess = memberActiveRefusal(data);
+      if (badAccess) return badAccess;
+      await db.update(users).set({
+        ...("name" in data ? { fullName: text(data.name, 120) } : {}),
+        ...supplied(data, "email", (value) => text(value, 180).toLowerCase()),
+        ...supplied(data, "role", (value) => text(value, 60)),
+        ...supplied(data, "active", booleanValue),
+        updatedAt: new Date().toISOString(),
+      }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     } else if (entity === "settings") {
       const settings = data as unknown as WorkspaceSettings;
       await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
