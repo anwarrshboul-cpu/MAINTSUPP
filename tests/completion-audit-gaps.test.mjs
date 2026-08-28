@@ -218,7 +218,16 @@ test("Reports can answer the question a spend report is opened for", async () =>
 
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(portal, /key: "spend-trend"/, "and it is a Reports widget");
-  assert.match(portal, /<SpendTrend requests=\{scopedRequests\} period=\{period\} now=\{now\} \/>/);
+  /*
+   * Workstream 8 added `loading`: the panel drew "Nothing in this period"
+   * against a named window during the first fetch — a finding about the
+   * portfolio, made before the portfolio had been read. Pinned with the prop
+   * so it cannot be dropped again.
+   */
+  assert.match(
+    portal,
+    /<SpendTrend requests=\{scopedRequests\} period=\{period\} now=\{now\} loading=\{loading\} \/>/,
+  );
 });
 
 test("the desktop date cell shows a calendar, not just the browser's own picker", async () => {

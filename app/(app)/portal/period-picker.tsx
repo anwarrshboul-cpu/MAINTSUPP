@@ -209,11 +209,25 @@ export function PeriodCaption({
   now,
   matched,
   noun = "work orders",
+  loading = false,
 }: {
   period: string;
   now: number;
   matched: number;
   noun?: string;
+  /**
+   * Whether the rows counted above have actually arrived yet.
+   *
+   * Without this the caption read "Nothing in this period — no work orders
+   * were raised" for the whole of the first load, because `matched` is 0
+   * before the fetch resolves exactly as it is for a genuinely empty quarter.
+   * One of those is a finding about the portfolio and the other is a statement
+   * about the network, and a reporting screen must not present the second as
+   * the first. Overview learned this for its workspace tiles in Stage 19 and
+   * the wording of that lesson still stands: loading and empty are different
+   * states.
+   */
+  loading?: boolean;
 }) {
   const window = resolvePeriod(period, now);
   if (!window.recognised) {
@@ -228,10 +242,12 @@ export function PeriodCaption({
     <p className="analytics-period-caption">
       <Icon name="calendar" size={14} />
       <strong>{window.label}</strong>
-      <span>
-        {matched
-          ? `${matched.toLocaleString("en-GB")} ${noun}`
-          : `Nothing in this period — no ${noun} were raised`}
+      <span aria-live={loading ? "polite" : undefined}>
+        {loading
+          ? `Counting ${noun}…`
+          : matched
+            ? `${matched.toLocaleString("en-GB")} ${noun}`
+            : `Nothing in this period — no ${noun} were raised`}
       </span>
     </p>
   );

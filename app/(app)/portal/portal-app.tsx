@@ -147,6 +147,7 @@ import {
   periodTrend,
   resolvePeriod,
   sortBySpend,
+  stampWithinPeriod,
 } from "./period-model";
 
 export type Section =
@@ -2362,11 +2363,33 @@ export default function PortalApp({
           )}
           {activeSurface === "overview" && dataMode !== "unavailable" && (
             <OverviewView
+              /*
+                KEYED BY SECTION, so a range belongs to the page it was chosen on.
+
+                These surfaces are chosen by `activeSurface`, and a workspace
+                section may declare ANY built-in surface as the thing it draws
+                (`WorkspaceSectionEntry.surface`, resolved a few hundred lines
+                above). Two sidebar destinations can therefore resolve to one
+                surface — "Reports" and a workspace "Site reports", say — and
+                without a key React reconciles the SAME component instance
+                across them. The date range, the portfolio and every other
+                piece of page state then follow the reader from one page to
+                the other, which is precisely what this workstream forbids.
+
+                Independence held until now only because switching surface
+                happened to unmount the old one. This makes it structural.
+              */
+              key={activeSection}
               requests={requests}
               stores={currentStores}
               compliance={workspace?.compliance ?? []}
               units={currentUnits}
               workspaceReady={workspace !== null}
+              /* The workspace flag above covers units and compliance, which
+                 arrive from a different fetch. The four job tiles below it
+                 were still printing a literal 0 until /api/maintenance
+                 answered. */
+              jobsReady={dataMode === "live"}
               onOpenRequest={(request) => {
                 openRequest(request);
                 setSection("maintenance");
@@ -2458,8 +2481,34 @@ export default function PortalApp({
           {activeSurface === "units" && (
             <UnitsManager sites={currentStores} onNotify={setToast} />
           )}
-          {activeSurface === "contractors" && (
+          {/*
+            THE FAILURE STATE REACHES THE TWO SCREENS THAT ARE MADE OF JOBS.
+
+            `WorkspaceUnavailable` was wired to Overview and Reports only, on
+            the reasoning that the other sections read their own sources. That
+            is true of the registers and the board; it is not true of these
+            two. The contractor scorecard's roster falls back to one derived
+            from `requests`, and every count beside a name — assigned,
+            completed, urgent, spend — is computed from them, so a failed jobs
+            fetch drew a full roster with a column of zeroes. The calendar
+            takes `requests` as a prop and draws a schedule that silently
+            omits every job.
+
+            Both are the invented-figures problem this product has already
+            ruled on twice: nothing is shown rather than something made up.
+          */}
+          {activeSurface === "contractors" && dataMode === "unavailable" && (
+            <WorkspaceUnavailable
+              onRetry={() => {
+                setRefreshing(true);
+                setRefreshToken((token) => token + 1);
+              }}
+              busy={refreshing}
+            />
+          )}
+          {activeSurface === "contractors" && dataMode !== "unavailable" && (
             <ContractorsView
+              key={activeSection}
               contractors={currentContractors}
               requests={requests}
               onManage={(id) => openWorkspaceManager("contractor", id)}
@@ -2468,14 +2517,25 @@ export default function PortalApp({
           )}
           {activeSurface === "compliance" && (
             <ComplianceView
+              key={activeSection}
               stores={currentStores}
               complianceRecords={workspace?.compliance ?? []}
               onManage={(id) => openWorkspaceManager("compliance", id)}
               onNotify={setToast}
             />
           )}
-          {activeSurface === "calendar" && (
+          {activeSurface === "calendar" && dataMode === "unavailable" && (
+            <WorkspaceUnavailable
+              onRetry={() => {
+                setRefreshing(true);
+                setRefreshToken((token) => token + 1);
+              }}
+              busy={refreshing}
+            />
+          )}
+          {activeSurface === "calendar" && dataMode !== "unavailable" && (
             <CalendarView
+              key={activeSection}
               requests={requests}
               planned={currentPlanned}
               complianceRecords={workspace?.compliance ?? []}
@@ -2491,7 +2551,7 @@ export default function PortalApp({
             />
           )}
           {activeSurface === "documents" && (
-            <DocumentsView files={documents} />
+            <DocumentsView key={activeSection} files={documents} />
           )}
           {activeSurface === "reports" && dataMode === "unavailable" && (
             <WorkspaceUnavailable
@@ -2504,8 +2564,15 @@ export default function PortalApp({
           )}
           {activeSurface === "reports" && dataMode !== "unavailable" && (
             <ReportsView
+              key={activeSection}
               requests={requests}
               stores={currentStores}
+              /* `dataMode` IS the jobs signal — it is stamped "live" only
+                 once /api/maintenance has answered, and the gate above lets
+                 "loading" through on purpose so the page's chrome paints
+                 immediately. What it must not do is let the figures claim the
+                 portfolio is empty while the fetch is still in flight. */
+              jobsReady={dataMode === "live"}
               onNavigate={setSection}
             />
           )}
@@ -2770,12 +2837,38 @@ function NotificationPanel({
   );
 }
 
+/**
+ * Whether a row is a work order the reporting screens should count.
+ *
+ * Two rows reach the browser that are not a job anybody ordered, and both were
+ * being counted as one.
+ *
+ * A SUBITEM is a full row of `maintenance_requests` whose `parentId` is
+ * another row — monday's Subitems column, kept in one table so the whole
+ * editing surface applies to it. The board has always known this: it filters
+ * `!request.parentId` before it places anything, and the comment there records
+ * why — "the same work appeared twice and the group counts were wrong". The
+ * analytics screens never learned it, so a job split into three visits counted
+ * as four work orders and its parts cost was summed alongside its parent's.
+ *
+ * An ARCHIVED row is one somebody deliberately took off the board.
+ * `/api/board/items` excludes them; `/api/maintenance`, which is where every
+ * dashboard figure comes from, does not. The exclusion is applied here rather
+ * than in that route because the jobs board reads the same array, and quietly
+ * emptying rows out of the board is a different decision from leaving them out
+ * of a spend total — this is the one Workstream 8 is entitled to make.
+ */
+function countsAsWorkOrder(request: MaintenanceRequest) {
+  return !request.parentId && !request.archived;
+}
+
 function OverviewView({
   requests,
   stores: storeRows,
   compliance: complianceRecords,
   units,
   workspaceReady,
+  jobsReady,
   onNavigate,
   onOpenRequest,
 }: {
@@ -2802,12 +2895,25 @@ function OverviewView({
    * dashboard must not present one as the other.
    */
   workspaceReady: boolean;
+  /**
+   * Whether `/api/maintenance` has answered yet — the jobs half of this page.
+   *
+   * `workspaceReady` was added when "Active units 0" and "Compliance 0%" were
+   * found standing over an account that had not loaded. The job tiles have the
+   * same defect from the same cause and it was left in place: "Open jobs 0",
+   * "Overdue 0" and "Completed 0" are all printed from an array that starts
+   * empty. Two fetches, two flags.
+   */
+  jobsReady: boolean;
   onNavigate: (section: Section) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
 }) {
   const now = useCurrentTime();
   const [portfolio, setPortfolio] = useState("all");
   const [overviewLayoutSlot, setOverviewLayoutSlot] = useState<HTMLElement | null>(null);
+  // Named once, so the tiles and the panels below cannot drift apart on what
+  // "not loaded yet" means.
+  const loading = !jobsReady;
   const [period, setPeriod] = useState("90");
   const scopedStores = useMemo(
     () => storeRows.filter((store) => store.lifecycle === "Current" && (portfolio === "all" || store.id === portfolio)),
@@ -2815,6 +2921,7 @@ function OverviewView({
   );
   const scopedRequests = useMemo(
     () => requests.filter((request) =>
+      countsAsWorkOrder(request) &&
       (portfolio === "all" || request.siteId === portfolio) &&
       withinAnalyticsPeriod(request.requestedAt, period, now),
     ),
@@ -2929,10 +3036,18 @@ function OverviewView({
           over a line that summed 2.
         */}
         <AnalyticsMetricCard label="Active units" value={workspaceReady ? String(activeUnitCount) : "—"} detail={!workspaceReady ? "Loading workspace…" : activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Maintenance requests raised across the selected period — not a history of the unit count; the unit register keeps none." onClick={() => onNavigate("units")} />
-        <AnalyticsMetricCard label="Requiring attention" value={String(attention.length)} detail="Urgent or escalated" icon="alert" tone="orange" trend={periodTrend(attention, () => true, period, now)} trendLabel="Jobs now urgent or escalated, by the week they were raised across the selected period. Not a history of the attention count." onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Open jobs" value={String(open.length)} detail={`${open.filter((request) => request.priority === "Urgent").length} urgent`} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} trendLabel="Open jobs by the week they were raised, across the selected period. Not a history of the open count — no status history is recorded." onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Overdue" value={String(overdue.length)} detail="Target date passed" icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} trendLabel="Jobs now overdue, by the week they were raised across the selected period. Not a history of the overdue count." onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Completed" value={String(completed.length)} detail="Verified closures" icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} trendLabel="Completed jobs by the week they were raised — not by the week they closed, and not a history of the completed count." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Requiring attention" value={jobsReady ? String(attention.length) : "—"} detail={jobsReady ? "Urgent or escalated" : "Loading jobs…"} icon="alert" tone="orange" trend={periodTrend(attention, () => true, period, now)} trendLabel="Jobs now urgent or escalated, by the week they were raised across the selected period. Not a history of the attention count." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Open jobs" value={jobsReady ? String(open.length) : "—"} detail={jobsReady ? `${open.filter((request) => request.priority === "Urgent").length} urgent` : "Loading jobs…"} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} trendLabel="Open jobs by the week they were raised, across the selected period. Not a history of the open count — no status history is recorded." onClick={() => onNavigate("maintenance")} />
+        <AnalyticsMetricCard label="Overdue" value={jobsReady ? String(overdue.length) : "—"} detail={jobsReady ? "Target date passed" : "Loading jobs…"} icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} trendLabel="Jobs now overdue, by the week they were raised across the selected period. Not a history of the overdue count." onClick={() => onNavigate("maintenance")} />
+        {/*
+          "Raised in this period" is not padding. This tile counts the jobs
+          RAISED inside the window that are now closed — not the jobs closed
+          inside it. A job raised in June and closed in August is absent from
+          August, and one raised in August and closed in November is present.
+          The sparkline below has always said so; the number above it never
+          did, and that is the figure a reader takes away.
+        */}
+        <AnalyticsMetricCard label="Completed" value={jobsReady ? String(completed.length) : "—"} detail={jobsReady ? "Verified closures, raised in this period" : "Loading jobs…"} icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} trendLabel="Completed jobs by the week they were raised — not by the week they closed, and not a history of the completed count." onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Compliance" value={workspaceReady ? `${compliancePercent}%` : "—"} detail={!workspaceReady ? "Loading workspace…" : complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} trendLabel="Today's compliance score walked back through recorded certificate expiries, week by week. A view of expiry pressure, not an audit trail." onClick={() => onNavigate("compliance")} />
       </section>
 
@@ -2949,7 +3064,9 @@ function OverviewView({
           */}
           {spendSeries.some((point) => point.value > 0)
             ? <TrendChart items={spendSeries} valueFormatter={(value) => formatMoney(Math.round(value))} />
-            : <p className="analytics-empty">No costs recorded against jobs in this period. Spend appears here once jobs carry a cost.</p>}
+            : <p className="analytics-empty">{jobsReady
+                ? "No costs recorded against jobs in this period. Spend appears here once jobs carry a cost."
+                : "Loading jobs…"}</p>}
         </article>
         <button className="analytics-panel analytics-score-panel" type="button" onClick={() => onNavigate("compliance")}>
           <header><h2>Compliance score</h2></header>
@@ -2975,7 +3092,9 @@ function OverviewView({
           */}
           {tradeRows.length
             ? <HorizontalBars items={tradeRows} />
-            : <p className="analytics-empty">No jobs in this period. Logged jobs are grouped here by the trade on the record.</p>}
+            : <p className="analytics-empty">{jobsReady
+                ? "No jobs in this period. Logged jobs are grouped here by the trade on the record."
+                : "Loading jobs…"}</p>}
         </article>
       </section>
 
@@ -3058,7 +3177,7 @@ function OverviewView({
                 requests={scopedRequests}
                 compliance={complianceItems}
                 stores={scopedStores}
-                loading={!workspaceReady}
+                loading={!workspaceReady || loading}
               />
             ),
           },
@@ -3066,7 +3185,7 @@ function OverviewView({
             key: "reactive-planned",
             label: "Reactive vs planned",
             render: () => (
-              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} />
+              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} loading={loading} />
             ),
           },
           {
@@ -3078,7 +3197,7 @@ function OverviewView({
                 sites={storeRows}
                 period={period}
                 now={now}
-                loading={!workspaceReady}
+                loading={!workspaceReady || loading}
               />
             ),
           },
@@ -3920,13 +4039,35 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
    * the rows all describe the same set.
    */
   const [period, setPeriod] = useState("12m");
-  const now = Date.now();
+  /*
+   * The clock is read once per render pass, not on every render.
+   *
+   * `Date.now()` in the body moved the window a few milliseconds every time
+   * React re-rendered for any reason, so no two paints filtered on quite the
+   * same range and nothing downstream could be memoised against it. This is
+   * the hook Overview and Reports already use; it ticks on the minute.
+   */
+  const now = useCurrentTime();
   const window = resolvePeriod(period, now);
-  const withinPeriod = (file: FileRecord) => {
-    if (!window) return true;
-    const at = Date.parse(file.uploadedAt);
-    return Number.isNaN(at) ? true : at >= window.start && at <= window.end;
-  };
+  /*
+   * `stampWithinPeriod`, not `Date.parse`, and the difference is a day.
+   *
+   * `uploadedAt` arrives in the two forms this database stores — a bare
+   * `2026-08-03` and a `2026-08-09 07:39:18` — and `Date.parse` reads the
+   * first as UTC midnight and the second as local, while every bound above is
+   * built from LOCAL midnight. West of Greenwich a file uploaded on the first
+   * of the month fell out of that month. The comparator that knows about both
+   * forms is the one the reporting screens already share.
+   *
+   * It also replaces a guard that could never fire: `resolvePeriod` always
+   * returns an object, so `if (!window) return true` was dead, and a
+   * half-typed custom range left `start`/`end` as NaN — every comparison
+   * false, every file hidden, and the register silently empty with no reason
+   * given. `stampWithinPeriod` returns false for an unrecognised window and
+   * the panel below now says why.
+   */
+  const withinPeriod = (file: FileRecord) =>
+    stampWithinPeriod(file.uploadedAt, period, now);
   const inRange = files.filter(withinPeriod);
   const filtered = inRange.filter((file) =>
     [file.name, file.kind, file.site, file.requestId ?? ""]
@@ -4075,6 +4216,25 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
                     </td>
                   </tr>
                 ))}
+                {/*
+                  A register that filters had no way of saying it had filtered
+                  everything out: an empty range drew a header row over
+                  nothing, which reads as a broken page rather than an answer.
+                  The range and the search fail differently and are named
+                  separately, and an unrecognised window says what is missing
+                  from it instead of pretending the estate holds no documents.
+                */}
+                {!filtered.length && (
+                  <tr>
+                    <td className="analytics-empty" colSpan={8}>
+                      {!window.recognised
+                        ? window.reason
+                        : inRange.length
+                          ? `No document in ${window.label} matches "${query.trim()}".`
+                          : `No documents were uploaded in ${window.label}.`}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -4096,6 +4256,17 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
                 </small>
               </button>
             ))}
+            {/* The card view empties for the same two reasons the table does,
+                and said the same nothing about either. */}
+            {!filtered.length && (
+              <p className="analytics-empty">
+                {!window.recognised
+                  ? window.reason
+                  : inRange.length
+                    ? `No document in ${window.label} matches "${query.trim()}".`
+                    : `No documents were uploaded in ${window.label}.`}
+              </p>
+            )}
           </div>
         )}
       </section>
@@ -4243,13 +4414,31 @@ function ContractorsView({
    * nothing this quarter" is the answer the reader came for.
    */
   const [period, setPeriod] = useState("12m");
-  const nowMs = Date.now();
+  // Once per render pass, and on the minute — not a fresh instant on every
+  // render, which gave two paints two slightly different windows.
+  const nowMs = useCurrentTime();
   const periodWindow = resolvePeriod(period, nowMs);
-  const inWindow = (request: MaintenanceRequest) => {
-    if (!periodWindow) return true;
-    const at = Date.parse(request.completedAt ?? request.requestedAt);
-    return Number.isNaN(at) ? true : at >= periodWindow.start && at <= periodWindow.end;
-  };
+  /*
+   * THIS PAGE DATES WORK BY WHEN IT WAS FINISHED, and that is deliberate.
+   *
+   * Every other reporting screen filters on `requestedAt`, because it is
+   * asking what was raised in a window. This one asks what a contractor DID in
+   * a window, and a job raised in June and finished in August is August's work
+   * to them. `completedAt ?? requestedAt` keeps open jobs in view under the
+   * date they were raised, which is the only date they have. Said here because
+   * a reader comparing this page's "38 completed" against the Reports total
+   * will otherwise find two honest numbers that do not add up, and nothing on
+   * either screen explaining why.
+   *
+   * The comparator is the shared one for the same reason Documents' is: a bare
+   * `YYYY-MM-DD` read by `Date.parse` is UTC midnight measured against local
+   * bounds, and the guard it replaces — `if (!periodWindow) return true` —
+   * could never fire, so a half-typed custom range emptied the table with no
+   * explanation instead of saying it was unfinished.
+   */
+  const inWindow = (request: MaintenanceRequest) =>
+    countsAsWorkOrder(request) &&
+    stampWithinPeriod(request.completedAt ?? request.requestedAt, period, nowMs);
   const scopedRequests = requests.filter(inWindow);
 
   const contractors = roster.map((contractor) => {
@@ -4289,19 +4478,67 @@ function ContractorsView({
         <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Coverage</th><th>Day rate</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
         <tbody>{contractors.map((contractor) => (
           <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.coverageAreas.join(", ") || "Not specified"}</td><td>{contractor.dayRatePence === null || contractor.dayRatePence === undefined ? "—" : formatMoney(contractor.dayRatePence / 100)}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
-        ))}</tbody>
+        ))}
+        {!contractors.length && (
+          <tr>
+            <td className="analytics-empty" colSpan={11}>
+              {periodWindow.recognised
+                ? "No contractors are registered yet, and no job in this period names one."
+                : periodWindow.reason}
+            </td>
+          </tr>
+        )}</tbody>
       </table></div></section>
     </div>
   );
 }
 
+/**
+ * How often an issue recurs — measured against the window it was counted in.
+ *
+ * The column used to read the raw order count and nothing else: four or more
+ * was "Weekly", two was "Fortnightly", one was "Monthly". Those words are
+ * rates and a count is not a rate, so on "All records" — eleven years of this
+ * workspace — four orders was labelled "Weekly", and on "Today" two orders was
+ * labelled "Fortnightly". Both readings were wrong, in opposite directions,
+ * with nothing on the screen to warn the reader.
+ *
+ * A span the caller cannot measure returns a dash rather than a guess: a
+ * single-row window has no cadence to report, and inventing one is what this
+ * replaces.
+ */
+function describeCadence(orders: number, spanDays: number | null) {
+  if (!spanDays || spanDays <= 0 || orders <= 0) return "—";
+  const perWeek = orders / (spanDays / 7);
+  if (perWeek >= 1) return "Weekly";
+  if (perWeek >= 0.5) return "Fortnightly";
+  if (perWeek >= 0.2) return "Monthly";
+  if (perWeek >= 0.05) return "Quarterly";
+  return "Occasional";
+}
+
 function ReportsView({
   requests,
   stores: storeRows,
+  jobsReady,
   onNavigate,
 }: {
   requests: MaintenanceRequest[];
   stores: StoreRecord[];
+  /**
+   * Whether `/api/maintenance` has answered yet.
+   *
+   * Every figure on this screen is computed from `requests`, which starts as
+   * an empty array. Before this flag the whole page read "Nothing in this
+   * period — Last 12 months", "No job in Last 12 months carries a cost, so
+   * there is nothing to rank" and a caption saying no work orders were raised
+   * — five confident findings about a portfolio that had simply not loaded,
+   * and on a slow connection they stood there for seconds. Overview was given
+   * the same treatment for its workspace tiles in Stage 19; the sentence
+   * written there applies here unchanged: loading and empty are different
+   * states, and a dashboard must not present one as the other.
+   */
+  jobsReady: boolean;
   onNavigate: (section: Section) => void;
 }) {
   const now = useCurrentTime();
@@ -4346,10 +4583,28 @@ function ReportsView({
   const periodWindow = resolvePeriod(period, now);
   const scopedRequests = useMemo(
     () => requests.filter((request) =>
+      countsAsWorkOrder(request) &&
       (portfolio === "all" || request.siteId === portfolio) &&
       withinAnalyticsPeriod(request.requestedAt, period, now)),
     [now, period, portfolio, requests],
   );
+  /*
+   * The denominator the cadence needs, in days.
+   *
+   * A named period supplies its own edges. "All records" has none — its start
+   * is -Infinity — so the rows supply them instead, which is the same thing
+   * `resolveBounds` does for a sparkline over the same token.
+   */
+  const cadenceSpanDays = useMemo(() => {
+    if (Number.isFinite(periodWindow.start) && Number.isFinite(periodWindow.end)) {
+      return (periodWindow.end - periodWindow.start) / 86_400_000;
+    }
+    const stamps = scopedRequests
+      .map((request) => parseStamp(request.requestedAt))
+      .filter((stamp) => Number.isFinite(stamp));
+    if (stamps.length < 2) return null;
+    return (Math.max(...stamps) - Math.min(...stamps)) / 86_400_000;
+  }, [periodWindow.start, periodWindow.end, scopedRequests]);
   const analytics = useMemo(() => {
     const spendBySite = new Map<string, number>();
     let total = 0;
@@ -4385,7 +4640,7 @@ function ReportsView({
     )
       .map(([, item]) => ({
         ...item,
-        frequency: item.orders >= 4 ? "Weekly" : item.orders >= 2 ? "Fortnightly" : "Monthly",
+        frequency: describeCadence(item.orders, cadenceSpanDays),
       }))
       /*
        * Orders, then spend, then name. The sort was on orders alone, which
@@ -4412,8 +4667,15 @@ function ReportsView({
       ),
       repeats,
     };
-  }, [scopedRequests, siteSpendOrder, storeRows]);
+  }, [cadenceSpanDays, scopedRequests, siteSpendOrder, storeRows]);
   const spendTrend = periodSpendSeries(scopedRequests, period, now);
+  /*
+   * One sentence, used wherever this screen would otherwise assert that the
+   * portfolio is empty. Kept as a constant so a later panel cannot half-adopt
+   * the distinction and go back to claiming nothing happened.
+   */
+  const loading = !jobsReady;
+  const LOADING_NOTE = "Loading jobs…";
 
   return (
     <div className="section-stack analytics-page">
@@ -4426,7 +4688,7 @@ function ReportsView({
             not tell anyone which three months they are reading, and every
             figure below depends on the answer.
           */}
-          <PeriodCaption period={period} now={now} matched={scopedRequests.length} />
+          <PeriodCaption period={period} now={now} matched={scopedRequests.length} loading={loading} />
         </div>
         <AnalyticsToolbar
           portfolio={portfolio}
@@ -4451,10 +4713,24 @@ function ReportsView({
           £0 is a result — it says the portfolio spent nothing — and on a period
           that simply holds no work that is a different and untrue claim.
         */}
-        <AnalyticsMetricCard label="This period" value={scopedRequests.length ? formatMoney(analytics.total) : "—"} detail={scopedRequests.length ? `${scopedRequests.length} work orders` : "Nothing in this period"} icon="chart" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} />
-        <AnalyticsMetricCard label="Reactive" value={scopedRequests.length ? formatMoney(analytics.reactive) : "—"} detail="Day-to-day maintenance" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => request.tier < 4 && (request.cost ?? 0) < 1000, period, now)} />
-        <AnalyticsMetricCard label="Planned" value={scopedRequests.length ? formatMoney(analytics.planned) : "—"} detail="Compliance and planned work" icon="calendar" tone="blue" trend={periodTrend(scopedRequests, (request) => request.tier >= 4 || request.category.toLowerCase().includes("compliance"), period, now)} />
-        <AnalyticsMetricCard label="Projects" value={scopedRequests.length ? formatMoney(analytics.projects) : "—"} detail="Higher-value works" icon="document" tone="green" trend={periodTrend(scopedRequests, (request) => (request.cost ?? 0) >= 1000, period, now)} />
+        {/*
+          The line under each tile counts JOBS; the figure above it sums MONEY.
+          Both are wanted — the shape of the work and the size of it — and each
+          `trendLabel` says which, because a sparkline under a pound sign reads
+          as pounds otherwise.
+
+          The three splits go through `classifySpend`, which is the whole reason
+          that function is exported. They used to restate it inline, and got it
+          wrong in a way that only showed on the chart: the classifier tests
+          compliance-or-tier-4 FIRST, so a £5,000 compliance job is "planned"
+          and its money landed on the Planned tile — while `cost >= 1000` drew
+          it under Projects and `tier >= 4 || compliance` drew it under Planned
+          as well. One job, two lines, and neither line matching its own total.
+        */}
+        <AnalyticsMetricCard label="This period" value={scopedRequests.length ? formatMoney(analytics.total) : "—"} detail={loading ? LOADING_NOTE : scopedRequests.length ? `${scopedRequests.length} work orders` : "Nothing in this period"} icon="chart" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Work orders raised per bucket across the selected period — a count of jobs, not the spend totalled above." />
+        <AnalyticsMetricCard label="Reactive" value={scopedRequests.length ? formatMoney(analytics.reactive) : "—"} detail="Day-to-day maintenance" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => classifySpend(request) === "reactive", period, now)} trendLabel="Reactive jobs raised per bucket, classified exactly as the figure above is." />
+        <AnalyticsMetricCard label="Planned" value={scopedRequests.length ? formatMoney(analytics.planned) : "—"} detail="Compliance and planned work" icon="calendar" tone="blue" trend={periodTrend(scopedRequests, (request) => classifySpend(request) === "planned", period, now)} trendLabel="Planned and compliance jobs raised per bucket, classified exactly as the figure above is." />
+        <AnalyticsMetricCard label="Projects" value={scopedRequests.length ? formatMoney(analytics.projects) : "—"} detail="Higher-value works" icon="document" tone="green" trend={periodTrend(scopedRequests, (request) => classifySpend(request) === "projects", period, now)} trendLabel="Project jobs raised per bucket, classified exactly as the figure above is." />
       </section>
 
       <section className="analytics-report-grid">
@@ -4472,11 +4748,13 @@ function ReportsView({
           */}
           {!periodWindow.recognised
             ? <p className="analytics-empty">{periodWindow.reason}</p>
-            : spendTrend.some((point) => point.value > 0)
-              ? <TrendChart items={spendTrend} valueFormatter={(value) => formatMoney(Math.round(value))} />
-              : <p className="analytics-empty">{scopedRequests.length
-                  ? `None of the ${scopedRequests.length} jobs in ${periodWindow.label} carries a cost yet.`
-                  : `Nothing in this period — ${periodWindow.label}.`}</p>}
+            : loading
+              ? <p className="analytics-empty">{LOADING_NOTE}</p>
+              : spendTrend.some((point) => point.value > 0)
+                ? <TrendChart items={spendTrend} valueFormatter={(value) => formatMoney(Math.round(value))} />
+                : <p className="analytics-empty">{scopedRequests.length
+                    ? `None of the ${scopedRequests.length} jobs in ${periodWindow.label} carries a cost yet.`
+                    : `Nothing in this period — ${periodWindow.label}.`}</p>}
         </article>
 
         <article className="analytics-panel analytics-top-sites">
@@ -4501,9 +4779,11 @@ function ReportsView({
               onSelect={setPortfolio}
             />
           ) : (
-            <div className="analytics-empty">{periodWindow.recognised
-              ? `No job in ${periodWindow.label} carries a cost, so there is nothing to rank.`
-              : periodWindow.reason}</div>
+            <div className="analytics-empty">{loading
+              ? LOADING_NOTE
+              : periodWindow.recognised
+                ? `No job in ${periodWindow.label} carries a cost, so there is nothing to rank.`
+                : periodWindow.reason}</div>
           )}
         </article>
       </section>
@@ -4527,7 +4807,7 @@ function ReportsView({
             label: "Spend trend",
             wide: true,
             render: () => (
-              <SpendTrend requests={scopedRequests} period={period} now={now} />
+              <SpendTrend requests={scopedRequests} period={period} now={now} loading={loading} />
             ),
           },
           {
@@ -4542,13 +4822,14 @@ function ReportsView({
                 now={now}
                 period={period}
                 direction={siteSpendOrder}
+                loading={loading}
               />
             ),
           },
           {
             key: "cost-by-category",
             label: "Cost by job type",
-            render: () => <CostByCategory requests={scopedRequests} />,
+            render: () => <CostByCategory requests={scopedRequests} loading={loading} />,
           },
           {
             key: "spend-budget",
@@ -4559,19 +4840,20 @@ function ReportsView({
                 sites={storeRows}
                 period={period}
                 now={now}
+                loading={loading}
               />
             ),
           },
           {
             key: "contractor-scorecard",
             label: "Contractor scorecard",
-            render: () => <ContractorScorecard requests={scopedRequests} />,
+            render: () => <ContractorScorecard requests={scopedRequests} loading={loading} />,
           },
           {
             key: "reactive-planned",
             label: "Reactive vs planned",
             render: () => (
-              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} />
+              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} loading={loading} />
             ),
           },
         ] satisfies DashboardWidget[]}
@@ -4584,12 +4866,16 @@ function ReportsView({
         <header><h2>Repeat activity</h2><button type="button" onClick={() => setShowAllRepeat((current) => !current)}>{showAllRepeat ? "Show summary" : "View all"}</button></header>
         <div className="table-scroll">
           <table className="analytics-table analytics-table--mobile-cards">
-            <thead><tr><th>Issue</th><th>Activity</th><th>Sites</th><th>Orders</th><th>Spend</th><th>Last occurred</th><th>Frequency</th></tr></thead>
+            {/* "Activity" is gone. Every row of it printed one identical
+                authored sentence, under a column heading, in a table of
+                measurements — which is a claim about the job that nothing on
+                the record supports. There is no field to populate it from, so
+                the column goes rather than the sentence being reworded. */}
+            <thead><tr><th>Issue</th><th>Sites</th><th>Orders</th><th>Spend</th><th>Last occurred</th><th>Frequency</th></tr></thead>
             <tbody>
               {analytics.repeats.slice(0, showAllRepeat ? analytics.repeats.length : 6).map((item) => (
                 <tr key={item.issue}>
                   <td data-label="Issue"><strong>{item.issue || "Unlabelled"}</strong></td>
-                  <td data-label="Activity">Investigate, repair and verify</td>
                   <td data-label="Sites">{item.sites.size}</td>
                   <td data-label="Orders">{item.orders}</td>
                   <td data-label="Spend">{item.spend ? formatMoney(item.spend) : "Not quoted"}</td>
@@ -4597,9 +4883,11 @@ function ReportsView({
                   <td data-label="Frequency"><span className="analytics-frequency">{item.frequency}</span></td>
                 </tr>
               ))}
-              {!analytics.repeats.length && <tr><td className="analytics-empty" colSpan={7}>{periodWindow.recognised
-                ? `Nothing in this period — ${periodWindow.label}.`
-                : periodWindow.reason}</td></tr>}
+              {!analytics.repeats.length && <tr><td className="analytics-empty" colSpan={6}>{loading
+                ? LOADING_NOTE
+                : periodWindow.recognised
+                  ? `Nothing in this period — ${periodWindow.label}.`
+                  : periodWindow.reason}</td></tr>}
             </tbody>
           </table>
         </div>

@@ -246,6 +246,14 @@ export interface MaintenanceRequest {
    * it. `null` on a top-level item.
    */
   parentId?: string | null;
+  /**
+   * Archived, but not deleted — two different states, as
+   * `/api/board/items` has always had them. The column has been on
+   * `maintenance_requests` since the board gained an archive; it is declared
+   * here because the analytics screens have to be able to leave archived work
+   * out of a spend total, and until now they could not see it.
+   */
+  archived?: boolean;
   source: "Portal form" | "Manual";
   /**
    * The public reference the board mints for a job — "MS-2026-0040".

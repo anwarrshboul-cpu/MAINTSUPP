@@ -72,6 +72,7 @@ import {
   useCalendarSources,
   useCalendarViewMode,
 } from "./calendar-preferences";
+import { parseStamp } from "./period-model";
 import "./calendar-page.css";
 
 /**
@@ -161,10 +162,24 @@ export function OperationsCalendarPanel({
     ? `${periodWindow.start}:${periodWindow.end}`
     : "all";
 
+  /*
+   * `parseStamp`, not `Date.parse`.
+   *
+   * `periodWindow` is built by `resolvePeriod` out of LOCAL midnights, and a
+   * job date arrives in the two forms this database stores. `Date.parse` reads
+   * a bare `2026-09-01` as UTC midnight and a `2026-09-01 08:00:00` as local,
+   * so west of Greenwich a job due on the first of a range's first day was
+   * measured an hour or eight before that range began and dropped out of it.
+   * The shared parser reads both forms as the wall-clock they were written as,
+   * which is the same clock the bounds were built on.
+   *
+   * The null guard above is real, unlike its counterparts elsewhere: the host
+   * passes `periodWindow` as null when no range is selected.
+   */
   const withinPeriod = (value: string | null | undefined) => {
     if (!periodWindow) return true;
     if (!value) return false;
-    const at = Date.parse(value);
+    const at = parseStamp(value);
     return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
   };
 
@@ -249,7 +264,13 @@ export function OperationsCalendarPanel({
    */
   const withinPeriodDay = (day: CalendarDay) => {
     if (!periodWindow) return true;
-    const at = Date.parse(day);
+    /*
+     * The same parser as above, and the same reason. A `CalendarDay` is a bare
+     * `YYYY-MM-DD`, which `Date.parse` reads as UTC midnight — so west of
+     * Greenwich it resolved to the evening BEFORE, and the first day of every
+     * range fell outside the range that named it.
+     */
+    const at = parseStamp(day);
     return Number.isNaN(at) ? false : at >= periodWindow.start && at <= periodWindow.end;
   };
 

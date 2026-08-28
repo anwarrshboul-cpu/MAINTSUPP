@@ -6605,6 +6605,64 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
   min-width: 108px;
   max-width: 148px;
   font-size: 13px;
+  /*
+   * Fill the chip, so the thing a thumb has to hit is the thing that is drawn.
+   *
+   * The chip around it is 42px, and 46px at phone widths — comfortably over
+   * the 44px minimum this product holds itself to everywhere else. The input
+   * inside it measured 24px at every width from 768 down, because nothing gave
+   * it a height and a date input sizes to its text. Clicking the chip does
+   * focus the input, so it was never unreachable; it was just smaller than it
+   * looked, which is the harder kind of target to hit.
+   */
+  align-self: stretch;
+  min-height: 40px;
+}
+
+/*
+ * A FOCUS RING ON THE REPORTING CONTROLS, which had none.
+ *
+ * The rule above this section clears `outline` on every select and input in
+ * the toolbar so the controls read as one chip rather than three boxes, and
+ * nothing was ever put back for the keyboard. `:focus-within` on the chip
+ * tints its border, which is a colour-only signal and sits outside the
+ * control's own box — a screenshot of the focused select against the
+ * unfocused one is identical. So a keyboard user tabbing across Reports had
+ * no way to see where they were.
+ *
+ * `:focus-visible`, so a mouse click does not draw it, and the same two lines
+ * the form fields already use, because a second focus style is a second thing
+ * to keep in step.
+ */
+.analytics-toolbar select:focus-visible,
+.analytics-toolbar input:focus-visible,
+.analytics-inline-select select:focus-visible {
+  outline: 2px solid var(--teal-600);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/*
+ * The two halves of a custom range stay in reading order.
+ *
+ * They are two sibling labels, so at phone widths the toolbar's wrap put the
+ * start date at the end of one row and the end date at the beginning of the
+ * next — below and to the LEFT of the field it follows. Given a full row each
+ * they stack in the order they are read. `flex` and `grid-column` are both
+ * set because the toolbar is a flex row at 768 and a two-column grid below
+ * 760; each layout ignores the property meant for the other.
+ */
+@media (max-width: 768px) {
+  .analytics-toolbar > label.analytics-period--argument {
+    flex: 1 0 100%;
+    grid-column: 1 / -1;
+  }
+
+  /* The period select is already 44px here. A date field beside it that is
+     only 40 is the same target problem in a smaller form. */
+  .analytics-toolbar > label.analytics-period--argument input {
+    min-height: 44px;
+  }
 }
 
 /*

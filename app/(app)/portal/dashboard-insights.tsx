@@ -499,7 +499,21 @@ export function OpenJobAgeing({
  * bar takes the same hue. Colouring each contractor differently would spend the
  * identity channel re-encoding what the bar length already shows.
  */
-export function ContractorScorecard({ requests }: { requests: MaintenanceRequest[] }) {
+export function ContractorScorecard({
+  requests,
+  loading = false,
+}: {
+  requests: MaintenanceRequest[];
+  /**
+   * Whether the rows have arrived yet. `InsightPanel` has rendered a
+   * "Loading…" state since it was written; the panels simply were not told,
+   * so on a slow first load each one announced "Nothing in this period"
+   * against a named window — a finding about the portfolio, made before the
+   * portfolio had been read. `SpendAgainstBudget` already took this prop;
+   * these are the rest of the panels Reports draws.
+   */
+  loading?: boolean;
+}) {
   const rows = useMemo(() => {
     const byContractor = new Map<
       string,
@@ -534,6 +548,7 @@ export function ContractorScorecard({ requests }: { requests: MaintenanceRequest
   if (!rows.length) {
     return (
       <InsightPanel
+        loading={loading}
         title="Contractor scorecard"
         hint="Volume, speed and spend per contractor"
         empty={{
@@ -720,9 +735,19 @@ export function ReactiveVsPlanned({
   requests,
   now: clock,
   period = DEFAULT_PANEL_PERIOD,
+  loading = false,
 }: {
   requests: MaintenanceRequest[];
   now: number;
+  /**
+   * Whether the rows have arrived yet. `InsightPanel` has rendered a
+   * "Loading…" state since it was written; the panels simply were not told,
+   * so on a slow first load each one announced "Nothing in this period"
+   * against a named window — a finding about the portfolio, made before the
+   * portfolio had been read. `SpendAgainstBudget` already took this prop;
+   * these are the rest of the panels Reports draws.
+   */
+  loading?: boolean;
   /**
    * The period the screen is reporting on.
    *
@@ -765,6 +790,7 @@ export function ReactiveVsPlanned({
   if (!hasData) {
     return (
       <InsightPanel
+        loading={loading}
         title="Reactive vs planned"
         hint="The share of work that was not scheduled"
         /*
@@ -857,10 +883,20 @@ export function SpendMatrix({
   now: clock,
   period = DEFAULT_PANEL_PERIOD,
   direction = "desc",
+  loading = false,
 }: {
   requests: MaintenanceRequest[];
   stores: StoreRecord[];
   now: number;
+  /**
+   * Whether the rows have arrived yet. `InsightPanel` has rendered a
+   * "Loading…" state since it was written; the panels simply were not told,
+   * so on a slow first load each one announced "Nothing in this period"
+   * against a named window — a finding about the portfolio, made before the
+   * portfolio had been read. `SpendAgainstBudget` already took this prop;
+   * these are the rest of the panels Reports draws.
+   */
+  loading?: boolean;
   /** The reporting period. See the note on `ReactiveVsPlanned`. */
   period?: string;
   /**
@@ -908,6 +944,7 @@ export function SpendMatrix({
   if (!rows.length) {
     return (
       <InsightPanel
+        loading={loading}
         title="Spend by site"
         hint="Where the money goes, period by period"
         /* See the note on `ReactiveVsPlanned` — two situations, two sentences. */
@@ -1026,10 +1063,20 @@ export function SpendTrend({
   requests,
   period,
   now,
+  loading = false,
 }: {
   requests: MaintenanceRequest[];
   period: string;
   now: number;
+  /**
+   * Whether the rows have arrived yet. `InsightPanel` has rendered a
+   * "Loading…" state since it was written; the panels simply were not told,
+   * so on a slow first load each one announced "Nothing in this period"
+   * against a named window — a finding about the portfolio, made before the
+   * portfolio had been read. `SpendAgainstBudget` already took this prop;
+   * these are the rest of the panels Reports draws.
+   */
+  loading?: boolean;
 }) {
   const series = useMemo(
     () => periodSpendSeries(requests, period, now),
@@ -1046,6 +1093,7 @@ export function SpendTrend({
   if (!series.some((point) => point.value > 0)) {
     return (
       <InsightPanel
+        loading={loading}
         title="Spend trend"
         hint={window.label}
         empty={{
@@ -1068,7 +1116,21 @@ export function SpendTrend({
   );
 }
 
-export function CostByCategory({ requests }: { requests: MaintenanceRequest[] }) {
+export function CostByCategory({
+  requests,
+  loading = false,
+}: {
+  requests: MaintenanceRequest[];
+  /**
+   * Whether the rows have arrived yet. `InsightPanel` has rendered a
+   * "Loading…" state since it was written; the panels simply were not told,
+   * so on a slow first load each one announced "Nothing in this period"
+   * against a named window — a finding about the portfolio, made before the
+   * portfolio had been read. `SpendAgainstBudget` already took this prop;
+   * these are the rest of the panels Reports draws.
+   */
+  loading?: boolean;
+}) {
   const rows = useMemo(() => {
     const byCategory = new Map<string, { total: number; jobs: number }>();
     for (const request of requests) {
@@ -1093,6 +1155,7 @@ export function CostByCategory({ requests }: { requests: MaintenanceRequest[] })
   if (!rows.length) {
     return (
       <InsightPanel
+        loading={loading}
         title="Cost by job type"
         hint="Which kinds of fault cost the most"
         empty={{

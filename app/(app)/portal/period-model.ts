@@ -112,6 +112,24 @@ export function endOfDay(ms: number) {
   return date.getTime();
 }
 
+/**
+ * N days later, by the CALENDAR rather than by arithmetic.
+ *
+ * `ms + n * 86_400_000` is a day only where every day is 24 hours long. On the
+ * two days a year a zone changes offset it is 23 or 25, and the difference is
+ * not cosmetic: stepping back one `DAY_MS` from midnight after a spring-forward
+ * lands at 23:00 on the day BEFORE the one intended, so "Yesterday" became a
+ * 59-minute window over the wrong date and captioned itself confidently. Every
+ * bound and every bucket edge in this file is a local wall-clock day, so all of
+ * them move the DATE and let `Date` hold the time at midnight — which is what
+ * `startOfWeek` below has always done.
+ */
+export function addDays(ms: number, days: number) {
+  const date = new Date(ms);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+}
+
 /** Monday. The UK working week, and what "this week" means to the owner. */
 export function startOfWeek(ms: number) {
   const date = new Date(startOfDay(ms));
@@ -286,13 +304,15 @@ export function resolvePeriod(period: string, now: number): PeriodWindow {
   switch (token) {
     case "today":
       return made(today, endOfDay(today));
-    case "yesterday":
-      return made(today - DAY_MS, endOfDay(today - DAY_MS));
+    case "yesterday": {
+      const start = addDays(today, -1);
+      return made(start, endOfDay(start));
+    }
     case "week":
       return made(startOfWeek(now), toDate);
     case "week-1": {
-      const start = startOfWeek(now) - 7 * DAY_MS;
-      return made(start, endOfDay(start + 6 * DAY_MS));
+      const start = addDays(startOfWeek(now), -7);
+      return made(start, endOfDay(addDays(start, 6)));
     }
     case "mtd":
       return made(monthStart(year, month), toDate);
@@ -540,23 +560,23 @@ export function rawPeriodBuckets(
       });
     }
   } else if (spanDays <= 62) {
-    for (let edge = startOfDay(start); edge <= end; edge += DAY_MS) {
+    for (let edge = startOfDay(start); edge <= end; edge = addDays(edge, 1)) {
       const at = new Date(edge);
       buckets.push({
         key: String(edge),
         label: `${at.getDate()} ${SHORT_MONTHS[at.getMonth()]}`,
         start: edge,
-        end: edge + DAY_MS,
+        end: addDays(edge, 1),
       });
     }
   } else if (spanDays <= 120) {
-    for (let edge = startOfWeek(start); edge <= end; edge += 7 * DAY_MS) {
+    for (let edge = startOfWeek(start); edge <= end; edge = addDays(edge, 7)) {
       const at = new Date(edge);
       buckets.push({
         key: String(edge),
         label: `${at.getDate()} ${SHORT_MONTHS[at.getMonth()]}`,
         start: edge,
-        end: edge + 7 * DAY_MS,
+        end: addDays(edge, 7),
       });
     }
   } else {
@@ -750,9 +770,22 @@ export function periodSpendSeries<T extends { requestedAt: string; cost: number 
 ): PeriodSeriesPoint[] {
   const stamps = rows.map((row) => parseStamp(row.requestedAt));
   const buckets = periodBuckets(period, now, stamps);
+  /*
+   * Every caller scopes its rows before calling, and none of them has to.
+   * These two are exported for the insight panels, and a panel handed the
+   * whole board with a period of "July" drew December's spend on 31 July —
+   * silently, because `bucketFor` sweeps anything past the final edge into the
+   * last bucket. That sweep is deliberate and stays: a to-date period ends at
+   * midnight tonight and a job logged this afternoon belongs on the last bar.
+   * It simply has no upper limit, so the period is tested here, where it is
+   * known. "All records" keeps its open ends, so this excludes nothing there.
+   */
+  const window = resolvePeriod(period, now);
   const totals = new Array<number>(buckets.length).fill(0);
   rows.forEach((row, index) => {
-    const at = bucketFor(buckets, stamps[index]);
+    const stamp = stamps[index];
+    if (stamp < window.start || stamp > window.end) return;
+    const at = bucketFor(buckets, stamp);
     if (at < 0) return;
     totals[at] += row.cost ?? 0;
   });
@@ -790,6 +823,9 @@ export function periodTrend<T extends { requestedAt: string }>(
     if (!predicate(row)) return;
     const stamp = stamps[index];
     if (!Number.isFinite(stamp)) return;
+    // The clamp below places an out-of-window row on the first or last bar
+    // rather than dropping it, so the window has to be tested before it.
+    if (stamp < start || stamp > end) return;
     const at = Math.min(
       PERIOD_TREND_BUCKETS - 1,
       Math.max(0, Math.floor((stamp - start) / size)),

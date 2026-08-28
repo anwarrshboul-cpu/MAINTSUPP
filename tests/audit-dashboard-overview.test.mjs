@@ -274,9 +274,18 @@ test("workspace figures say Loading, not a definitive empty claim, before the fe
   // The honest empty captions survive for the truly-empty account.
   assert.ok(overview.includes("Add units to the register"));
   assert.ok(overview.includes("No requirements recorded yet"));
-  // And the two workspace-fed panels are told when they are still loading.
-  assert.match(overview, /<SiteAttention[\s\S]{0,400}loading=\{!workspaceReady\}/);
-  assert.match(overview, /<SpendAgainstBudget[\s\S]{0,400}loading=\{!workspaceReady\}/);
+  /*
+   * And the two panels are told when they are still loading.
+   *
+   * Workstream 8 widened this. Both draw their bars from `requests`, which
+   * arrives on a SEPARATE fetch from the workspace — so waiting only on
+   * `workspaceReady` still let them announce that a site had spent nothing
+   * against its budget while the jobs were in flight. Pinned in the stronger
+   * form so it cannot quietly narrow back to one fetch.
+   */
+  assert.match(overview, /<SiteAttention[\s\S]{0,400}loading=\{!workspaceReady \|\| loading\}/);
+  assert.match(overview, /<SpendAgainstBudget[\s\S]{0,400}loading=\{!workspaceReady \|\| loading\}/);
+  assert.match(overview, /const loading = !jobsReady;/, "and the jobs fetch has a name");
 
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(
