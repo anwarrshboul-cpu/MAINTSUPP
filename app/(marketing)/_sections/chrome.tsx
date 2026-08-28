@@ -546,19 +546,51 @@ export function ScrollFurniture() {
    */
   const choice = useSyncExternalStore(cookieStore.subscribe, cookieStore.read, () => "pending");
 
+  /*
+   * THE LANE IS WATCHED, NOT TAKEN ONCE.
+   *
+   * It used to be measured in this effect and again on `resize`, and between
+   * those two moments the banner is free to change height — which it does. On
+   * the deployed build at 375 and 360 the banner settles at 168px and the lane
+   * published 158.75px: 21.25px short, which is exactly one of its own line
+   * heights. It is not a font race — the same number comes back with
+   * `document.fonts.status === "loaded"` and 1.5s after `fonts.ready` — and a
+   * resize corrects it to 180 on the spot, which is what a stale reading looks
+   * like. The cost was small (the designed 12px of clearance became 4.75px)
+   * but the shape of the bug is not: a fixed element's height was treated as
+   * a constant, so anything that reflows the banner after this effect runs —
+   * a wrapped line, a rotation, a text-size setting — leaves the lane wrong
+   * until something else happens to shake it.
+   *
+   * So the banner's own box is observed. A `ResizeObserver` fires with the
+   * real border box every time it changes, including the first delivery after
+   * layout, so the published value is derived from live geometry rather than
+   * from one snapshot. `fonts.ready`, `resize` and `orientationchange` are
+   * kept as well: they cover the case where the banner is absent and the
+   * button's own lane still has to be re-read. No width is special-cased.
+   */
   useEffect(() => {
     let lane = 0;
-    const measure = () => {
-      const button = totop.current;
-      if (!button) {
-        lane = 0;
-        return;
-      }
-      const banner = document.getElementById("cookie");
+    let dropped = false;
+    /**
+     * Publishes a banner height as the lane every fixed thing at the bottom of
+     * the page is spaced by, then reads the button's own reach back off the
+     * computed style — `bottom` plus height, never a rect (see above).
+     */
+    const publish = (height: number) => {
       /* 12px so the button clears the banner's shadow, not just its box. */
-      const lift = banner ? banner.getBoundingClientRect().height + 12 : 0;
-      document.documentElement.style.setProperty("--cookie-lane", `${lift}px`);
-      lane = parseFloat(getComputedStyle(button).bottom || "0") + button.offsetHeight;
+      document.documentElement.style.setProperty(
+        "--cookie-lane",
+        height > 0 ? `${height + 12}px` : "0px",
+      );
+      const button = totop.current;
+      lane = button
+        ? parseFloat(getComputedStyle(button).bottom || "0") + button.offsetHeight
+        : 0;
+    };
+    const measure = () => {
+      const banner = document.getElementById("cookie");
+      publish(banner ? banner.getBoundingClientRect().height : 0);
     };
     const onScroll = () => {
       const y = window.pageYOffset || document.documentElement.scrollTop || 0;
@@ -571,17 +603,43 @@ export function ScrollFurniture() {
         y > 0 && !!legal && legal.getBoundingClientRect().top <= window.innerHeight - lane,
       );
     };
-    const onResize = () => {
+    const settle = () => {
+      if (dropped) return;
       measure();
       onScroll();
     };
-    measure();
-    onScroll();
+    settle();
+
+    /* The banner's live box. `entry.target` rather than the entry's own boxes
+       so this reads the same border box `measure` does, whatever the browser
+       reports. Setting `--cookie-lane` moves the footer's padding and the
+       button's offset and nothing about the banner, so there is no loop. */
+    const banner = document.getElementById("cookie");
+    const observer =
+      banner && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver((entries) => {
+            if (dropped) return;
+            for (const entry of entries) {
+              publish(entry.target.getBoundingClientRect().height);
+            }
+            onScroll();
+          })
+        : null;
+    if (banner && observer) observer.observe(banner);
+
+    /* A banner that is not there cannot be observed, and the button's lane
+       still moves when the type it is spaced against finishes loading. */
+    if (document.fonts) document.fonts.ready.then(settle, () => {});
+
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onResize);
+    window.addEventListener("resize", settle);
+    window.addEventListener("orientationchange", settle);
     return () => {
+      dropped = true;
+      observer?.disconnect();
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onResize);
+      window.removeEventListener("resize", settle);
+      window.removeEventListener("orientationchange", settle);
     };
   }, [choice]);
 

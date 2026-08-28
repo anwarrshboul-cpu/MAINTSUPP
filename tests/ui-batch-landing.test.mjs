@@ -223,16 +223,57 @@ test("back-to-top is bounded by the page, not by a scroll percentage", async () 
    */
   assert.match(totop, /z-index:calc\(var\(--z-sticky\) \+ 60\)/, "above the cookie banner's +50");
   assert.match(furniture, /document\.getElementById\("cookie"\)/, "the banner is measured, not assumed");
-  assert.match(furniture, /setProperty\("--cookie-lane"/);
-  assert.doesNotMatch(furniture, /--cookie-lane", `1?\d{2,3}px`/, "measured, never a hardcoded height");
+  assert.match(furniture, /setProperty\(\s*"--cookie-lane"/);
+  assert.doesNotMatch(furniture, /--cookie-lane",?\s*`1?\d{2,3}px`/, "measured, never a hardcoded height");
+
+  /*
+   * AND MEASURED CONTINUOUSLY, NOT ONCE.
+   *
+   * One reading in the effect plus one on `resize` left the lane stale: at 375
+   * and 360 the banner settles at 168px and the lane published 158.75 — short
+   * by 21.25, one of the banner's own line heights — while a resize corrected
+   * it to 180 on the spot. Identical with `fonts.status === "loaded"` and 1.5s
+   * after `fonts.ready`, so it is not a font race; it is a fixed element's
+   * height treated as a constant.
+   *
+   * The banner's own box has to be watched, so the published value comes from
+   * live geometry however the banner reflows — a wrapped line, a rotation, a
+   * reader's text size. The observer must be attached to the element and let
+   * go on cleanup, and none of it may be keyed to a viewport width.
+   */
+  assert.match(furniture, /new ResizeObserver\(/, "the banner's box is observed, not sampled once");
+  assert.match(furniture, /observer\.observe\(banner\)/, "and observed on the banner element itself");
+  assert.match(furniture, /observer\?\.disconnect\(\)/, "and let go when the effect is torn down");
+  assert.match(furniture, /document\.fonts\.ready\.then\(/, "re-published when the type lands");
+  assert.match(
+    furniture,
+    /addEventListener\("orientationchange", settle\)/,
+    "and when the phone is turned",
+  );
+  assert.doesNotMatch(
+    furniture,
+    /innerWidth/,
+    "the lane is geometry, never a width special-case for 375 or 360",
+  );
   /* The effect re-runs when the banner appears after hydration and when it is
      dismissed — the same store the banner itself renders from. */
   assert.match(furniture, /useSyncExternalStore\(cookieStore\.subscribe/);
   assert.match(furniture, /\}, \[choice\]\);/);
 
   /* The footer's bottom padding is the button's lane: at the very bottom of
-     the page it has to be over nothing at all, banner up or not. */
-  const lane = /padding-block:(?:clamp\(40px,3\.4vw,50px\)|34px) calc\(86px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/;
+     the page it has to be over nothing at all, banner up or not.
+
+     86px made that true and nothing else. The window the button was available
+     for is the legal block's height plus this padding minus the button's own
+     reach, which measured 213px at 430/390/375, 233 at 360 and 253 at 320 —
+     1.3% of a page 16,300–17,100px tall, a control you had to catch rather
+     than one you could use. 280px is the same guarantee with a window worth
+     having: measured after, 406px at 375 and 447 at 320, 1.9x, for a footer
+     +16.5% at 320. Every link, line and control sits above this padding, so
+     the whole cost is navy below the copyright line — and 280 is where that
+     band stops, at 49% of a 320x568 viewport, because it is bought pixel for
+     pixel and past half a screen it reads as a page that did not finish. */
+  const lane = /padding-block:(?:clamp\(40px,3\.4vw,50px\)|34px) calc\(280px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/;
   assert.match(ruleFor(css, ".ftr{"), lane);
   /* And the phone override must not quietly cancel it — it did, with `16px`,
      which left the button clearing the copyright line only by the accident of

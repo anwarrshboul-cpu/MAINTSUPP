@@ -9,8 +9,16 @@ import { PhotoSlot } from "./photo";
  * section repeated the same ground as eight photo tiles with their own detail
  * panel, and a `CtaBand` whose headline is now Section 10's.
  *
- * WHAT SHIPS: five plain cards, one or two lines each, and a single strip of
+ * WHAT SHIPS: the five services as one ruled register, and a single strip of
  * trade thumbnails below them. Both were an accordion; neither needed to be.
+ *
+ * WHY A REGISTER AND NOT CARDS. They were five cards in an auto-fit grid,
+ * which at desktop meant four across and the fifth alone on a second row, and
+ * four short cards stretched to the height of the one long body — the section
+ * was among the tallest on the page and mostly empty. The words are untouched;
+ * they are now one bordered panel with a ruled row each, the service on the
+ * left and what it covers on the right. An uneven body length is the normal
+ * case for a register rather than the thing that breaks a grid.
  *
  * THE THUMBNAILS ARE THE EXISTING PHOTOGRAPHS. `trade-electrical`,
  * `trade-leaks`, `trade-doors`, `trade-hvac`, `trade-signage` and
@@ -119,14 +127,22 @@ export function Services() {
           <h2 className="h2">If it breaks at a commercial site, we coordinate the repair.</h2>
         </div>
 
-        <ul className="offergrid reveal">
+        {/*
+          `role="list"` is not redundant. The stylesheet sets `list-style:none`
+          on this <ul>, and Safari/VoiceOver drops the list role when it does —
+          which would take the "list of 5 items" announcement with it, and that
+          count is the whole point of a register.
+        */}
+        <ul className="svclist reveal" role="list">
           {SERVICES.map((service) => (
-            <li className="offercard" key={service.title}>
-              <span className="offercard__ic">
-                <Ic path={service.icon} />
-              </span>
-              <h3>{service.title}</h3>
-              <p>{service.body}</p>
+            <li className="svclist__row" key={service.title}>
+              <h3 className="svclist__term">
+                <span className="svclist__ic">
+                  <Ic path={service.icon} />
+                </span>
+                {service.title}
+              </h3>
+              <p className="svclist__def">{service.body}</p>
             </li>
           ))}
         </ul>

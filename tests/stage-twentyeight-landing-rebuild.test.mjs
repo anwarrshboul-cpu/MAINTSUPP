@@ -370,13 +370,72 @@ test("the page's vertical rhythm is a scale, not thirty typed numbers", async ()
   /* The blocks that used to carry their own 26/30px must read the scale. */
   for (const rule of [
     /\.whogrid\{[^}]*margin-top:var\(--gap-block\)/,
-    /\.offergrid\{[^}]*margin-top:var\(--gap-block\)/,
+    /* Was `.offergrid`. The five services are one ruled register now, not a
+       card grid, but the block it sits in still has to read the scale. */
+    /\.svclist\{[^}]*margin-top:var\(--gap-block\)/,
     /\.pricing__plans\{margin-top:var\(--gap-step\)\}/,
     /\.pkgfoot\{[^}]*margin-top:var\(--gap-step\)/,
     /\.whocard__body\{padding:calc\(var\(--gap-pad\) - 2px\)/,
   ]) {
     assert.match(css, rule, `${rule} no longer reads the spacing scale`);
   }
+});
+
+test("What we offer still carries all five services, word for word", async () => {
+  /*
+   * THE RISK THIS CLOSES. "What we offer" was five cards in an auto-fit grid;
+   * it is now one ruled register, because five cards laid out four-plus-one and
+   * padded the four short ones out to the height of the long one. A layout edit
+   * like that is exactly the kind of change under which a sentence quietly goes
+   * missing — the Compliance body is the longest on the page, and shortening it
+   * is the easiest way to make any grid look tidier.
+   *
+   * So the copy is pinned here in full, not by title and not by prefix. These
+   * are claims about who does the inspections; they may be re-laid-out freely
+   * and may not be trimmed, summarised or reworded without editing this list.
+   */
+  const source = await read("app/(marketing)/_sections/services.tsx");
+  const services = [
+    [
+      "Reactive Maintenance Coordination",
+      "Intake, triage, contractor assignment, quote control, attendance chasing and verified close-out.",
+    ],
+    [
+      "Planned Maintenance (PPM)",
+      "Recurring service schedules, work orders, attendance monitoring and follow-up actions.",
+    ],
+    [
+      "Compliance Administration",
+      "Certificate register, due-date reminders, provider booking, document chasing and remedial tracking. Inspections and certificates are carried out by competent certified providers.",
+    ],
+    [
+      "Projects & Store Works",
+      "Kiosk moves, refreshes, signage and multi-trade works, each separately scoped and quoted.",
+    ],
+    [
+      "Reporting & Visibility",
+      "Monthly KPI, spend, ageing and compliance reporting across the portfolio.",
+    ],
+  ];
+  for (const [title, body] of services) {
+    assert.ok(source.includes(`title: "${title}"`), `the ${title} service is gone`);
+    assert.ok(source.includes(`body: "${body}"`), `the ${title} body has been altered or trimmed`);
+  }
+  assert.equal(
+    [...source.matchAll(/^\s{4}title: "/gm)].length,
+    services.length,
+    "five services, no more and no fewer — a sixth would need a row here too",
+  );
+
+  /*
+   * And the semantics the register is built on. `list-style:none` costs a <ul>
+   * its list role in Safari, so the explicit role is what keeps "list, 5 items"
+   * being announced; the headings are what keep the five services reachable by
+   * heading navigation, which the cards' <h3>s used to provide.
+   */
+  assert.match(source, /<ul className="svclist reveal" role="list">/);
+  assert.match(source, /<h3 className="svclist__term">/);
+  assert.match(source, /<p className="svclist__def">\{service\.body\}<\/p>/);
 });
 
 /* ── 3. The Report a Job form ────────────────────────────────────────────── */

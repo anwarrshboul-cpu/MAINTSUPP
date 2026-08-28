@@ -1321,11 +1321,42 @@ fieldset.field:focus{outline:none}
 
 /* --------------------------------------------------------------- sectors */
 /* ------------------------------------------------- who we help (section 3)
-   Six icon cards. `.sectors` — the photo-tile grid these replace — is gone with
-   its section; `.tile` below stays, because the trade thumbnails in section 4
-   are the same component. */
+   Five icon cards. `.sectors` — the photo-tile grid these replace — is gone
+   with its section, and its last surviving phone rule went with the sixth card;
+   `.tile` below stays, because the trade thumbnails in section 4 are the same
+   component. */
+/* FIVE CARDS, AND NEVER A ROW WITH A HOLE IN IT.
+   `repeat(auto-fit,minmax(232px,1fr))` picks whatever column count the width
+   affords, which is only ever right by luck: with five cards it gave 5 at 1440,
+   then 4+1 at 1280 — one card alone beside three empty slots — and 3+2 at 1024
+   and 2+2+1 at 768, each leaving the last row short against a flush-left edge.
+   Five is a prime, so no honest column count divides it; the fix is to choose
+   the count per band and centre whatever is left over, so a short last row
+   reads as a deliberate arrangement rather than as a gap where a card fell out.
+   Cards span two tracks and the odd one starts one track in, which is what
+   centres it without giving it a different width from its neighbours. */
 .whogrid{list-style:none;display:grid;gap:var(--gap-card);margin-top:var(--gap-block);
-  grid-template-columns:repeat(auto-fit,minmax(232px,1fr))}
+  grid-template-columns:minmax(0,1fr)}
+/* 2 + 2 + 1 centred. Four tracks, so the fifth card starts on track 2. */
+@media(min-width:500px){
+  .whogrid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .whocard{grid-column:span 2}
+  .whocard:nth-child(5){grid-column:2/span 2}
+}
+/* 3 + 2 centred. Six tracks, so the fourth card starts on track 2 and the
+   fifth follows it; tracks 1 and 6 of the second row stay empty, symmetrically. */
+@media(min-width:768px){
+  .whogrid{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .whocard:nth-child(4){grid-column:2/span 2}
+  .whocard:nth-child(5){grid-column:auto/span 2}
+}
+/* One row of five. Only above 1280 is there room: the cards are 229px here and
+   237px at 1440, and below 232px the 16/9 photograph starts reading as a
+   thumbnail and the two-line body wraps to four. */
+@media(min-width:1280px){
+  .whogrid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .whocard,.whocard:nth-child(4),.whocard:nth-child(5){grid-column:auto}
+}
 /* The card now leads with its approved photograph, so the padding moves off the
    card and onto the body — a 22px inset would leave a white gutter around a
    picture that is meant to meet the card's edges. */
@@ -1340,18 +1371,43 @@ fieldset.field:focus{outline:none}
 .whocard p{margin:0;font-size:.87rem;color:var(--slate)}
 .whogrid__note{margin-top:max(14px,calc(var(--gap-block) - 10px))}
 /* ------------------------------------------------ what we offer (section 4)
-   Five service cards, then the trade strip. Both were interactive components
-   with detail panels; neither is now, so `.tile--static` drops the affordances
-   `.tile` carries for a button it no longer is. */
-.offergrid{list-style:none;display:grid;gap:var(--gap-card);margin-top:var(--gap-block);
-  grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
-.offercard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
-  padding:var(--gap-pad);display:grid;gap:9px;align-content:start}
-.offercard__ic{width:var(--ic-card);height:var(--ic-card);display:grid;place-items:center;border-radius:var(--r-sm);
+   THE FIVE SERVICES ARE A REGISTER, NOT FIVE CARDS. `.offergrid` was an
+   auto-fit card grid, which with five items laid out four across and left the
+   fifth alone on a second row — a whole row of the page spent on one card —
+   while the four short cards were padded out to the height of the one long
+   body. Every word is unchanged; only the container is. One bordered panel,
+   one ruled row per service, the term on the left and what it covers on the
+   right, so the long Compliance body simply makes its own row taller instead
+   of stretching four neighbours to match it. Five rows is five rows: there is
+   no orphan to leave, at any width.
+   Then the trade strip. Both were interactive components with detail panels;
+   neither is now, so `.tile--static` drops the affordances `.tile` carries for
+   a button it no longer is. */
+.svclist{list-style:none;margin-top:var(--gap-block);background:#fff;
+  border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.svclist__row{display:grid;gap:6px;align-items:start;padding:var(--gap-card) var(--gap-pad)}
+.svclist__row + .svclist__row{border-top:1px solid var(--border-soft)}
+/* The two-column register. Below this the row stacks — but the icon stays on
+   the title's line either way, which is where most of the phone height went:
+   the card stacked a 36px chip above the title and paid a gap for it, five
+   times over. */
+@media(min-width:620px){
+  .svclist__row{grid-template-columns:16rem minmax(0,1fr);gap:var(--gap-pad);align-items:center}
+}
+/* The panel is full width so its edges line up with the trade strip under it,
+   which means the wide screens need the term column to take the extra room —
+   otherwise a one-line body runs the best part of a metre. */
+@media(min-width:1120px){
+  .svclist__row{grid-template-columns:21rem minmax(0,1fr)}
+}
+.svclist__term{display:flex;align-items:center;gap:12px;font-size:1rem;margin:0}
+.svclist__ic{width:calc(var(--ic-card) - 8px);height:calc(var(--ic-card) - 8px);flex:none;
+  display:grid;place-items:center;border-radius:var(--r-sm);
   background:var(--amber-soft);color:var(--amber-strong)}
-.offercard__ic .ic{width:22px;height:22px}
-.offercard h3{font-size:1rem;margin:0}
-.offercard p{margin:0;font-size:.87rem;color:var(--slate)}
+.svclist__ic .ic{width:19px;height:19px}
+/* A reading measure, held on the text rather than on the panel: the panel has
+   to stay the width of the section, the sentence does not. */
+.svclist__def{margin:0;font-size:.87rem;color:var(--slate);max-width:82ch}
 .faults{margin-top:calc(var(--gap-block) + 4px)}
 .faults__title{font-size:var(--fs-h3);margin:0 0 14px}
 .faults__row{list-style:none;display:grid;gap:10px;
@@ -1455,20 +1511,40 @@ fieldset.field:focus{outline:none}
 /* ---------------------------------------------------------------- footer */
 /* The footer's bottom padding is also the back-to-top button's lane. The button
    appears only over the legal block, and at the very bottom of the page it must
-   still be over nothing: 20px of the page's own footer padding plus the 66px
-   the button reaches up from the viewport's bottom edge (46px tall at a 20px
-   offset — the phone's 44 at 14 fits inside that), so the copyright line is
-   never behind it.
+   still be over nothing: the 66px the button reaches up from the viewport's
+   bottom edge (46px tall at a 20px offset — the phone's 44 at 14 fits inside
+   that), plus the clear run above it, so the copyright line is never behind it.
+
+   THAT CLEAR RUN IS THE WHOLE WINDOW THE BUTTON HAS, AND 86px LEFT IT A FLASH.
+   The button may only appear once its own top edge is below the top of the
+   legal block, so the distance it stays available for is the legal block's
+   height plus this padding minus the button's lane. Measured at 86px: 213px
+   at 430/390/375, 233 at 360, 253 at 320 — on a page 16,300–17,100px tall,
+   1.3% of it. A control you had to catch rather than one you could use.
+
+   280px is that same guarantee with a window worth having. Measured after:
+   406px at 375, 447 at 320, and identical with the cookie banner up or
+   dismissed — 1.9x, and about two thirds of a short phone's viewport rather
+   than a third. It costs the footer +16.5% at 320 and +17.0% at 360, all of
+   it navy below the copyright line: no link, no line and no control moves,
+   because every one of them sits above this padding.
+
+   Why 280 and not more. The window is bought one-for-one — every extra pixel
+   of lane is a pixel of empty navy at the end of the page — and at 320x568,
+   the shortest phone in the sweep, 280px is 49% of the viewport. Past half
+   the screen the band stops reading as the end of a page and starts reading
+   as a page that failed to finish; 330px was tried and looked it.
 
    `--cookie-lane` again, and it is what keeps the button reachable on a first
    visit. Lifting the button over the cookie banner also raises the point at
    which it is allowed to appear, which on its own left a 20px window at 375px —
    the reader had to be within one scroll step of the very bottom. Growing the
    lane by the same measured height cancels that exactly: the window works out
-   to the legal block plus 28px whether the banner is up or not. The extra
-   padding costs nothing to look at, because while it exists the banner is
-   sitting on top of it. */
-.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(86px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));font-size:.87rem}
+   to the legal block plus 222px whether the banner is up or not, and the sweep
+   measures the two states within a pixel of each other. The extra padding
+   costs nothing to look at, because while it exists the banner is sitting on
+   top of it. */
+.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(280px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));font-size:.87rem}
 .ftr__grid{display:grid;gap:clamp(20px,4vw,28px)}
 @media(min-width:780px){.ftr__grid{grid-template-columns:1.7fr repeat(3,1fr) 1.2fr}}
 .ftr__brand p{max-width:34ch;margin:15px 0;font-size:.83rem}
@@ -1577,7 +1653,7 @@ fieldset.field:focus{outline:none}
      the back-to-top button's lane: `16px` here quietly cancelled the base
      rule and left the button clearing the copyright line only by accident,
      on the height the three legal paragraphs happen to wrap to. */
-  .ftr{padding-block:34px calc(86px + var(--cookie-lane,0px) + env(safe-area-inset-bottom))}
+  .ftr{padding-block:34px calc(280px + var(--cookie-lane,0px) + env(safe-area-inset-bottom))}
   .ftr ul{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px 14px}
   .ftr h3{margin-bottom:11px}
   /* The opening hours are a whole sentence with an icon; they take the full
@@ -1588,15 +1664,38 @@ fieldset.field:focus{outline:none}
   .cookie__act .btn{flex:1 1 auto}
   /* chips get their own line rather than squeezing */
   .chipgroup label{font-size:.8rem;padding:9px 13px}
-  .tabs{gap:6px}
-  .tabs button{padding:10px 14px;font-size:.82rem}
+  /* FOUR TABS, ONE ROW — Overview, Jobs, Compliance, Spend.
+     They wrapped 2+2 on every phone: measured at 620px and below the four
+     pills came to 443.6px against a 288px container at 320, so `flex-wrap`
+     put half of them on a second line and the strip read as two half-rows
+     rather than one control.
+
+     What buys the room, in the order it was spent:
+      - the decorative icon goes. It is `aria-hidden` ornament, and at 20px
+        plus a 9px gap it was 116px of the 443 — more than the whole gap and
+        border budget put together. Nothing is lost from the label.
+      - the horizontal padding drops from 14px to 8px at the narrowest width
+        and grows back with the viewport, so 430 does not wear 320's spacing.
+      - the type steps from .82rem to .76rem, which is 12.16px: smaller, still
+        a bold pill label, not squinting.
+     Measured after: 282.4px inside 288 at 320, and it only gets roomier from
+     there. The 46px min-height is untouched, so the touch target is the same
+     size it always was — only its width moved.
+
+     `nowrap` is the instruction and `overflow-x:auto` is the safety net: if a
+     reader's own text size or a future label ever outgrows the row, the strip
+     scrolls sideways inside itself instead of pushing the page wide. Overflow
+     also clips, and the page's focus ring is 3px at a 2px offset — hence the
+     5px of block padding, taken back out of the margins so nothing moves. */
+  .tabs{flex-wrap:nowrap;overflow-x:auto;gap:6px;padding-block:5px;margin-top:-5px;margin-bottom:calc(var(--gap-card) - 5px)}
+  .tabs button{padding:10px clamp(8px,2.4vw,15px);font-size:.76rem;white-space:nowrap}
+  .tabs button .ic{display:none}
   .switcher{width:100%}
   .switcher button{flex:1;padding:9px 12px;font-size:.82rem}
 }
 @media (max-width: 420px){
   /* two square trade tiles per row stays readable down to 320px */
   .trades{grid-template-columns:1fr 1fr;gap:9px}
-  .sectors{grid-template-columns:1fr 1fr;gap:9px}
   .trade__cap,.tile__cap{font-size:.72rem;padding:10px 7px;line-height:1.25}
   .kpis{grid-template-columns:1fr 1fr}
   .hero__title{font-size:clamp(2rem,7.5vw,2.6rem)}

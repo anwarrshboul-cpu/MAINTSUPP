@@ -246,12 +246,96 @@ test("each audience card carries the photograph the README gives it", async () =
   assert.deepEqual(pairs, [
     ["Retail chains", "/assets/audience/who-we-help-retail-chains.png"],
     ["Shopping-centre kiosks", "/assets/audience/who-we-help-shopping-centre-kiosks.png"],
-    ["Franchise groups", "/assets/audience/who-we-help-franchise-groups.png"],
     ["Clinics & wellness", "/assets/audience/who-we-help-clinics-wellness.png"],
     ["Gyms & studios", "/assets/audience/who-we-help-gyms-studios.png"],
     ["Small commercial offices", "/assets/audience/who-we-help-commercial-offices.png"],
   ], "card → file, exactly as the pack's README maps them");
-  assert.equal(new Set(pairs.map(([, file]) => file)).size, 6, "no photograph is reused");
+  assert.equal(new Set(pairs.map(([, file]) => file)).size, 5, "no photograph is reused");
+});
+
+test("Franchise groups is withdrawn, and nothing of it is left behind", async () => {
+  /*
+   * THE RISK THIS CLOSES. The card was removed because a franchise group is an
+   * ownership arrangement, not a sixth kind of operator — but the pack still
+   * ships `who-we-help-franchise-groups.png`, and the manifest that lists it is
+   * generated, so the file stays in the repository. That is exactly the setup
+   * in which a "restore the missing card" edit looks harmless: the photograph
+   * is right there, and the branches glyph would be one paste away.
+   *
+   * So the absence is pinned in three places at once — the label, the
+   * photograph reference, and the glyph — because removing only one of them is
+   * how the card half-comes-back.
+   */
+  const who = await read("app/(marketing)/_sections/who-we-help.tsx");
+  const cards = [...who.matchAll(/^\s{4}label: "/gm)].length;
+  assert.equal(cards, 5, `Who we help is five cards; found ${cards}`);
+  assert.ok(!/label: "Franchise groups"/.test(who), "the Franchise groups card is back");
+  assert.ok(
+    !/"\/assets\/audience\/who-we-help-franchise-groups/.test(who),
+    "the franchise photograph is referenced again",
+  );
+  assert.ok(!/\bbranches:/.test(who), "the branches glyph is dead code unless the card returns");
+  assert.ok(!/icon: "branches"/.test(who), "a card is asking for a glyph that no longer exists");
+
+  /* Every glyph the ICONS map defines must still be spent by a card, and every
+     card must name a glyph that exists — the pair of checks that would have
+     caught the orphaned `branches` on its own. */
+  const defined = [...who.matchAll(/^\s{2}(\w+): \(/gm)].map((m) => m[1]);
+  const used = [...who.matchAll(/icon: "(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...defined].sort(), [...new Set(used)].sort(), "glyphs and cards must match one to one");
+});
+
+test("five cards never leave a row with a hole in it", async () => {
+  /*
+   * Five is prime, so no column count divides it and `auto-fit` cannot help:
+   * the grid must choose the count per band and centre the remainder. Pinned
+   * because the failure is silent — the page still renders, it just renders one
+   * card alone beside three empty slots, which is what 1280 did before this.
+   */
+  const css = await read("app/(marketing)/marketing.css");
+  assert.ok(
+    !/\.whogrid\{[^}]*auto-fit/.test(css),
+    "auto-fit picks the column count by accident; five cards need it chosen",
+  );
+  /* One row of five above 1280. */
+  assert.match(css, /@media\(min-width:1280px\)\{\s*\.whogrid\{grid-template-columns:repeat\(5,minmax\(0,1fr\)\)\}/);
+  /* 3 + 2, the pair centred by starting the fourth card one track in. */
+  assert.match(css, /@media\(min-width:768px\)\{\s*\.whogrid\{grid-template-columns:repeat\(6,minmax\(0,1fr\)\)\}/);
+  assert.match(css, /\.whocard:nth-child\(4\)\{grid-column:2\/span 2\}/);
+  /* 2 + 2 + 1, the single card centred the same way. */
+  assert.match(css, /@media\(min-width:500px\)\{\s*\.whogrid\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\)\}/);
+  assert.match(css, /\.whocard:nth-child\(5\)\{grid-column:2\/span 2\}/);
+  /* And one column below that, which is the base rule, not a query. */
+  assert.match(css, /\.whogrid\{[^}]*grid-template-columns:minmax\(0,1fr\)\}/);
+});
+
+test("the store count is one number, and it is not the certificate deadline", async () => {
+  /*
+   * THE TRAP THIS CLOSES. The portfolio is 20 stores, and it is claimed in four
+   * places across two sections. The hero also carries "certificate due in 21
+   * days" — a number of days, in the same file, one search-and-replace away
+   * from being changed along with the store count. Both directions are pinned:
+   * the count must read 20 everywhere it is claimed, and the deadline must stay
+   * at 21 days.
+   */
+  const hero = await read("app/(marketing)/_sections/hero.tsx");
+  const caseStudy = await read("app/(marketing)/_sections/case-study.tsx");
+
+  assert.match(hero, /<span>20 stores currently coordinated<\/span>/, "the hero trust line");
+  assert.match(caseStudy, /\{ value: "20", label: "stores coordinated" \}/, "the case-study stat tile");
+  assert.match(caseStudy, /<h2 className="h2">20 stores\. One point of contact\.<\/h2>/, "the case-study heading");
+  assert.match(caseStudy, /A UK fragrance retailer with 20 stores and kiosks/, "the case-study lede");
+
+  for (const [name, source] of [["hero.tsx", hero], ["case-study.tsx", caseStudy]]) {
+    const stale = [...source.matchAll(/\b21\b(?=[^\n]*\bstores?\b)/g)];
+    assert.equal(stale.length, 0, `${name} still claims 21 stores somewhere`);
+  }
+
+  assert.match(
+    hero,
+    /certificate due in 21 days/,
+    "21 days is a deadline, not a store count — it must survive every store-count edit",
+  );
 });
 
 test("every approved asset the page asks for is actually in the repository", async () => {
@@ -263,7 +347,7 @@ test("every approved asset the page asks for is actually in the repository", asy
     ...(await read("app/(marketing)/_sections/workflow.tsx")).matchAll(/"(\/assets\/workflow\/[^"]+)"/g),
   ].map((m) => m[1]);
 
-  assert.equal(referenced.length, 13, "six audience cards and seven workflow stages");
+  assert.equal(referenced.length, 12, "five audience cards and seven workflow stages");
   for (const src of referenced) {
     const file = path.join(root, "public", src);
     await readFile(file).catch(() => {
