@@ -311,6 +311,45 @@ test("the matrix scrolls inside its own box, and the page never does", async () 
   assert.match(block, /@media \(max-width:767px\)\{\s*\.pkgs\{display:none\}\s*\.pmx\{display:block\}/);
 });
 
+test("the matrix cells do not hyphenate", async () => {
+  /*
+   * `hyphens:auto` was tried here and removed after QA on the deployed
+   * preview: the cells that carry a sentence rather than a label rendered
+   * "Reactive re-pairs, run end to end" and "Certificates tracked be-fore
+   * they expire" at 430 and below, which reads as a typo in a pricing table.
+   *
+   * `overflow-wrap:break-word` stays and covers the only thing hyphenation
+   * was needed for — stopping a long word overflowing its column. Verified in
+   * Chromium at 430/390/375/360/320: no cell overflows its box, and the only
+   * breaks that are not at a space are two compound labels at 375 breaking at
+   * their OWN hyphen ("Photo-" / "verified", "90/60/30-" / "day"), which is
+   * correct typography rather than an inserted hyphen.
+   *
+   * Widening the feature column to make even those fit was measured and
+   * rejected: at 30% the plan names stop fitting, which trades a correct
+   * hyphen break for an incorrect mid-word one ("Administratio/n").
+   */
+  const css = await read("app/(marketing)/marketing.css");
+  const block = css.slice(css.indexOf(".pmx{display:none}"));
+  const cellRule = block.slice(block.indexOf(".pmx__table th,.pmx__table td{"));
+
+  assert.doesNotMatch(
+    cellRule.slice(0, cellRule.indexOf("}") + 1),
+    /hyphens/,
+    "the matrix cells must not hyphenate — see the note above this rule",
+  );
+  assert.match(cellRule.slice(0, cellRule.indexOf("}") + 1), /overflow-wrap:break-word/);
+  assert.match(
+    block,
+    /No `hyphens:auto` here, deliberately/,
+    "the reason must stay recorded, or the next person reads it as an accidental deletion",
+  );
+  /* The row header's `hyphens:manual` is a different rule and still correct:
+     it wraps on spaces and on its own punctuation, never on an inserted
+     hyphen. */
+  assert.match(block, /th\[scope=row\]\{[^}]*hyphens:manual/);
+});
+
 test("the page's vertical rhythm is a scale, not thirty typed numbers", async () => {
   const css = await read("app/(marketing)/marketing.css");
   /* Both ends of the scale, pinned. The desktop values are the ones that

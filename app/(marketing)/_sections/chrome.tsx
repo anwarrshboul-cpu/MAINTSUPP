@@ -463,7 +463,9 @@ export function SiteFooter() {
         </div>
       </div>
 
-      <div className="wrap ftr__legal">
+      {/* `id` so the back-to-top button can find the one line below which
+          there is nothing left to cover. See ScrollFurniture. */}
+      <div className="wrap ftr__legal" id="ftrLegal">
         {/* The brief gives this line verbatim and it is the one place the legal
             entity is named, so it is reproduced exactly — including the
             registered office, which was missing. */}
@@ -486,17 +488,71 @@ export function SiteFooter() {
 export function ScrollFurniture() {
   const [progress, setProgress] = useState(0);
   const [showTop, setShowTop] = useState(false);
+  const totop = useRef<HTMLButtonElement>(null);
 
+  /*
+   * WHEN THE BACK-TO-TOP BUTTON EXISTS, AND WHY IT IS NOT A SCROLL PERCENTAGE.
+   *
+   * It used to appear at `y > 700` and then float over whatever happened to be
+   * under it. On a phone every section is one full-width column, so a button
+   * fixed to a corner of the viewport eventually crosses everything: measured,
+   * it covered up to 41% of the How It Works "Next" button, 43% of the Total
+   * Care price in the pricing table, a quarter of the "26+ stores" tier button
+   * and up to 31% of the footer links including the published email address.
+   * Moving it up or down only changes which of those it eats — the overlap is
+   * geometry, not a bad offset.
+   *
+   * So it is bounded by the page instead of by a number: it appears once its
+   * own top edge has come to rest below the top of the footer's legal block,
+   * which is the last thing on the page and holds no link and no control. Below
+   * that line there is nothing left to cover, so every section above it —
+   * How It Works, Pricing, the forms, the footer's own links — is clear of the
+   * button because the button does not exist while any of them is under it,
+   * not because it happens to sit a few pixels higher.
+   *
+   * A percentage cannot do this job. The depth at which the footer's links
+   * finish varies with the viewport (98.8% at 320px, 99.6% at 1280px, measured)
+   * and moves again whenever the page's height changes, which it has twice this
+   * week. The element's position is the fact; the percentage is a guess at it.
+   *
+   * `lane` is how far the button reaches up from the bottom of the viewport —
+   * its `bottom` offset plus its height — and it is read from the computed
+   * style, not from `getBoundingClientRect`. The hidden state carries a
+   * `translateY(10px)` that a rect would include, so the button's measured top
+   * would jump 10px the instant it appeared and the test could flip back off
+   * again on the same scroll. `bottom` and `offsetHeight` ignore transforms.
+   */
   useEffect(() => {
+    let lane = 0;
+    const measure = () => {
+      const button = totop.current;
+      lane = button
+        ? parseFloat(getComputedStyle(button).bottom || "0") + button.offsetHeight
+        : 0;
+    };
     const onScroll = () => {
       const y = window.pageYOffset || document.documentElement.scrollTop || 0;
       const max = document.documentElement.scrollHeight - window.innerHeight;
       setProgress(max > 0 ? Math.min(100, (y / max) * 100) : 0);
-      setShowTop(y > 700);
+      /* `y > 0` so a page short enough to show its own footer without being
+         scrolled does not offer to scroll you back to a top you never left. */
+      const legal = document.getElementById("ftrLegal");
+      setShowTop(
+        y > 0 && !!legal && legal.getBoundingClientRect().top <= window.innerHeight - lane,
+      );
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    const onResize = () => {
+      measure();
+      onScroll();
+    };
+    measure();
     onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
 
   const toTop = () => {
@@ -510,6 +566,7 @@ export function ScrollFurniture() {
         <div className="progress__bar" style={{ width: `${progress}%` }} />
       </div>
       <button
+        ref={totop}
         type="button"
         className={`totop${showTop ? " is-on" : ""}`}
         aria-label="Back to top"

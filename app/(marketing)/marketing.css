@@ -542,19 +542,15 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .progress__bar{height:100%;width:0;background:linear-gradient(90deg,var(--teal-deep),var(--teal-bright));transition:width 80ms linear}
 .reveal{opacity:0;transform:translateY(20px);transition:opacity .55s var(--ease),transform .55s var(--ease)}
 .reveal.is-in{opacity:1;transform:none}
-/* The back-to-top button clears a full touch row, not just the viewport edge.
-   At 20px — 14px on a phone — it sat in the band a browser parks a control row
-   in the moment it scrolls that row into view, so it covered the right-hand
-   third of the How It Works "Next" button: measured 17.7% of it at 430px
-   rising to 29.7% at 320px, with a tap at 85% or 95% across the button landing
-   on the FAB instead, at every phone width. The clearance is
-   read off the design system rather than off a scroll position: 44px, the
-   minimum touch height this page gives every control under
-   `@media(pointer:coarse)`, plus a 16px gap. Anything the page scrolls to rest
-   at its bottom edge is therefore whole, and the number stays correct however
-   the page's height changes. `env(safe-area-inset-*)` keeps it off the home
-   indicator and the curved edges of a notched phone. */
-.totop{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(60px + env(safe-area-inset-bottom));z-index:var(--z-sticky);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
+/* The back-to-top button sits in the corner, and WHEN it is there is what
+   keeps it off everything else — see ScrollFurniture in chrome.tsx. It is
+   shown only once it has come to rest in the footer's legal lane, below the
+   last link on the page, so there is never any content beneath it to cover.
+   An earlier attempt raised it 60px to clear a touch row; that only moved the
+   collision onto the mobile pricing table, where it took 43% of the Total Care
+   price. The offset is back to the design's own, and `env(safe-area-inset-*)`
+   keeps it off the home indicator and the curved edge of a notched phone. */
+.totop{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));z-index:var(--z-sticky);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
 .totop.is-on{opacity:1;pointer-events:auto;transform:none}
 
 /* --------------------------------------------------------------- utility */
@@ -1173,7 +1169,12 @@ fieldset.field:focus{outline:none}
 .pmx__table{width:100%;min-width:340px;table-layout:fixed;border-collapse:separate;
   border-spacing:0;font-size:.78rem;line-height:1.35}
 .pmx__table th,.pmx__table td{padding:8px 6px;text-align:center;vertical-align:middle;
-  border-top:1px solid var(--border-soft);overflow-wrap:break-word;hyphens:auto}
+  border-top:1px solid var(--border-soft);overflow-wrap:break-word}
+/* No `hyphens:auto` here, deliberately. It broke the cells that carry a
+   sentence rather than a label — "Reactive re-pairs, run end to end" and
+   "Certificates tracked be-fore they expire" — which reads as a typo in a
+   pricing table. `overflow-wrap` still stops a long word overflowing, which
+   is the only thing hyphenation was needed for. */
 .pmx__table thead th{border-top:0}
 /* The row header carries the feature name and stays put while the plan
    columns scroll under it, so it needs an opaque background of its own. */
@@ -1428,7 +1429,13 @@ fieldset.field:focus{outline:none}
 .consent input{width:19px;height:19px;margin:2px 0 0;accent-color:var(--steel);flex:none}
 
 /* ---------------------------------------------------------------- footer */
-.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) 20px;font-size:.87rem}
+/* The footer's bottom padding is also the back-to-top button's lane. The button
+   appears only over the legal block, and at the very bottom of the page it must
+   still be over nothing: 20px of the page's own footer padding plus the 66px
+   the button reaches up from the viewport's bottom edge (46px tall at a 20px
+   offset — the phone's 44 at 14 fits inside that), so the copyright line is
+   never behind it. */
+.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(86px + env(safe-area-inset-bottom));font-size:.87rem}
 .ftr__grid{display:grid;gap:clamp(20px,4vw,28px)}
 @media(min-width:780px){.ftr__grid{grid-template-columns:1.7fr repeat(3,1fr) 1.2fr}}
 .ftr__brand p{max-width:34ch;margin:15px 0;font-size:.83rem}
@@ -1476,9 +1483,7 @@ fieldset.field:focus{outline:none}
    ========================================================================== */
 @media (max-width: 900px){
   /* stop the two floating buttons colliding with content or each other */
-  /* Nearer the edge and down to the 44px minimum, but the bottom clearance is
-     the base rule's — one number, one reason, at every width. */
-  .totop{right:max(14px,env(safe-area-inset-right));width:44px;height:44px}
+  .totop{right:max(14px,env(safe-area-inset-right));bottom:calc(14px + env(safe-area-inset-bottom));width:44px;height:44px}
   .slotbtn{left:14px;bottom:14px;padding:9px 13px;font-size:.74rem}
   .toasts{right:14px;bottom:70px}
 }

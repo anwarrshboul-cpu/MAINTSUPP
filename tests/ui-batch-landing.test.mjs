@@ -160,6 +160,59 @@ test("the drawer opens from the left edge and locks the page without shifting it
   }
 });
 
+test("back-to-top is bounded by the page, not by a scroll percentage", async () => {
+  /*
+   * The button used to appear at `y > 700` and then float over whatever was
+   * beneath it. On a phone every section is one full-width column, so measured
+   * against a 20px scroll sweep it covered 36% of the How It Works "Next"
+   * button, 100% of a price in the mobile pricing table, 31% of the "26+
+   * stores" tier button and 30% of the footer links including the published
+   * email address. Raising the button only moved which of those it ate.
+   *
+   * What this pins is the shape of the answer: the button is shown only once
+   * it has come to rest below the top of the footer's legal block — the last
+   * thing on the page, and the only part of it holding no link and no control.
+   * A scroll percentage must not come back: the depth at which the footer's
+   * links finish is 98.8% at 320px and 99.6% at 1280px, and it moves again
+   * every time the page's height changes.
+   */
+  /* Stripped: this function's own comment quotes the `y > 700` it replaced. */
+  const chrome = stripComments(await read("app/(marketing)/_sections/chrome.tsx"));
+  const furniture = chrome.slice(
+    chrome.indexOf("export function ScrollFurniture"),
+    chrome.indexOf("const cookieStore"),
+  );
+  /* `y > 0` is allowed — it only asks whether the reader has scrolled at all.
+     Any other number is a threshold, and a threshold is the bug. */
+  assert.doesNotMatch(furniture, /y\s*>\s*[1-9]\d*/, "no absolute pixel depth");
+  assert.doesNotMatch(furniture, /scrollHeight[^;]*\*\s*0\.\d/, "and no percentage of the page either");
+  assert.match(furniture, /getElementById\("ftrLegal"\)/, "the boundary is an element on the page");
+  assert.match(
+    furniture,
+    /legal\.getBoundingClientRect\(\)\.top <= window\.innerHeight - lane/,
+    "shown once the button's own top edge is below that element's top",
+  );
+  /* `lane` must come from the computed style, not a rect: the hidden state
+     carries translateY(10px), and a rect would make the button's measured top
+     jump the instant it appeared, flipping the test back off on one scroll. */
+  assert.match(furniture, /getComputedStyle\(button\)\.bottom/);
+  assert.match(furniture, /button\.offsetHeight/);
+  assert.doesNotMatch(furniture, /totop\.current\.getBoundingClientRect/);
+  /* And the element it keys off has to exist, with the id it looks up. */
+  assert.match(chrome, /className="wrap ftr__legal" id="ftrLegal"/);
+
+  const css = await read("app/(marketing)/marketing.css");
+  const totop = ruleFor(css, ".totop{");
+  assert.match(totop, /position:fixed/);
+  assert.match(totop, /bottom:calc\(20px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(totop, /right:max\(20px,env\(safe-area-inset-right\)\)/);
+  assert.match(css, /\.totop\{right:max\(14px,env\(safe-area-inset-right\)\);bottom:calc\(14px \+ env\(safe-area-inset-bottom\)\);width:44px;height:44px\}/,
+    "44px is the floor on a phone — never smaller, never display:none");
+  /* The footer's bottom padding is the button's lane: at the very bottom of
+     the page it has to be over nothing at all. */
+  assert.match(ruleFor(css, ".ftr{"), /padding-block:clamp\(40px,3\.4vw,50px\) calc\(86px \+ env\(safe-area-inset-bottom\)\)/);
+});
+
 test("Contact Us is in both navs, and both send you to the section the footer already calls Contact", async () => {
   /*
    * One list feeds both bars, so the only way "Contact Us" can be in the
