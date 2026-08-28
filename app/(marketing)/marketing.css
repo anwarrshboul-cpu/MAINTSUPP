@@ -549,8 +549,24 @@ body.slots-enabled .slotbtn{display:inline-flex}
    An earlier attempt raised it 60px to clear a touch row; that only moved the
    collision onto the mobile pricing table, where it took 43% of the Total Care
    price. The offset is back to the design's own, and `env(safe-area-inset-*)`
-   keeps it off the home indicator and the curved edge of a notched phone. */
-.totop{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));z-index:var(--z-sticky);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
+   keeps it off the home indicator and the curved edge of a notched phone.
+
+   `--cookie-lane` is the cookie banner's measured height, published by
+   ScrollFurniture while the banner is up and zero the rest of the time. The
+   banner is fixed to the same bottom edge at z-index 150, and the button's
+   lane is now the very end of the page — precisely and only where the banner
+   sits — so on a first visit the banner covered the button completely on every
+   phone. It is lifted over the banner rather than buried under it, and the
+   z-index goes above it so a frame of stale measurement cannot hide it either.
+   The trigger needs no adjustment for this: it reads the button's `bottom`
+   back off the computed style, so lifting the button also moves the point at
+   which it is allowed to appear, and the zero-coverage guarantee holds in both
+   states.
+
+   `--teal-text`, not `--navy`: the button now only ever appears over the
+   footer, and navy on `--navy-deep` is 1.10:1 — the white arrow was legible
+   but the button itself was invisible. The teal is 3.9:1 on that ground. */
+.totop{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(20px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));z-index:calc(var(--z-sticky) + 60);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--teal-text);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
 .totop.is-on{opacity:1;pointer-events:auto;transform:none}
 
 /* --------------------------------------------------------------- utility */
@@ -564,7 +580,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 /* ---------------------------------------------------------------- header */
 .hdr{position:sticky;top:0;z-index:var(--z-sticky);background:#fff;border-bottom:1px solid var(--border);transition:box-shadow var(--t-base) var(--ease)}
 .hdr.is-stuck{box-shadow:var(--sh-sm)}
-.hdr__inner{display:flex;align-items:center;gap:20px;min-height:74px}
+.hdr__inner{display:flex;align-items:center;gap:14px;min-height:74px}
 .logo{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--navy);flex:none}
 .logo__mark{width:38px;height:38px;color:var(--navy)}
 .logo__text{display:flex;flex-direction:column;line-height:1}
@@ -583,10 +599,12 @@ body.slots-enabled .slotbtn{display:inline-flex}
    1160px; a fifth destination only widened the range it happened over. Held on
    one line the nav is 43px tall and the header 75px at every width from 1120 to
    1920, with nothing overlapping and the document never scrolling sideways. */
-.nav__link{display:inline-flex;align-items:center;gap:5px;padding:10px 12px;background:none;border:0;border-radius:var(--r-sm);cursor:pointer;font-size:.91rem;font-weight:500;color:var(--navy);text-decoration:none;white-space:nowrap}
+.nav__link{display:inline-flex;align-items:center;gap:5px;padding:10px 8px;background:none;border:0;border-radius:var(--r-sm);cursor:pointer;font-size:.91rem;font-weight:500;color:var(--navy);text-decoration:none;white-space:nowrap}
 .nav__link:hover{background:var(--cloud);color:var(--teal-text)}
-.hdr__actions{display:flex;align-items:center;gap:10px;margin-left:auto}
-.nav~.hdr__actions{margin-left:14px}
+.hdr__actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.nav~.hdr__actions{margin-left:8px}
+/* the CTA is a name, like the nav labels: it does not fold in half */
+.hdr__cta{white-space:nowrap}
 .burger{display:inline-grid;place-items:center;width:46px;height:46px;background:none;border:1px solid var(--border);border-radius:var(--r-sm);color:var(--navy);cursor:pointer;flex:none}
 .cta-short{display:none}
 /* the header must never force the page wider than the screen */
@@ -601,7 +619,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    to the gap rather than to the button. So the label shortens here exactly as
    it does on a phone, and the `aria-label` on the link keeps the spoken name
    "Book a Portfolio Review" at every width. */
-@media(min-width:1120px) and (max-width:1299px){.cta-long{display:none}.cta-short{display:inline}}
+@media(min-width:1120px) and (max-width:1179px){.cta-long{display:none}.cta-short{display:inline}}
 @media(max-width:500px){.hdr__cta{display:none}.hdr__inner{gap:12px}}
 @media(max-width:360px){.logo__text em{display:none}.logo__text strong{font-size:1.12rem}}
 /* Portal Login and Report a Job ride with the nav.
@@ -1434,8 +1452,17 @@ fieldset.field:focus{outline:none}
    still be over nothing: 20px of the page's own footer padding plus the 66px
    the button reaches up from the viewport's bottom edge (46px tall at a 20px
    offset — the phone's 44 at 14 fits inside that), so the copyright line is
-   never behind it. */
-.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(86px + env(safe-area-inset-bottom));font-size:.87rem}
+   never behind it.
+
+   `--cookie-lane` again, and it is what keeps the button reachable on a first
+   visit. Lifting the button over the cookie banner also raises the point at
+   which it is allowed to appear, which on its own left a 20px window at 375px —
+   the reader had to be within one scroll step of the very bottom. Growing the
+   lane by the same measured height cancels that exactly: the window works out
+   to the legal block plus 28px whether the banner is up or not. The extra
+   padding costs nothing to look at, because while it exists the banner is
+   sitting on top of it. */
+.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(86px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));font-size:.87rem}
 .ftr__grid{display:grid;gap:clamp(20px,4vw,28px)}
 @media(min-width:780px){.ftr__grid{grid-template-columns:1.7fr repeat(3,1fr) 1.2fr}}
 .ftr__brand p{max-width:34ch;margin:15px 0;font-size:.83rem}
@@ -1483,7 +1510,7 @@ fieldset.field:focus{outline:none}
    ========================================================================== */
 @media (max-width: 900px){
   /* stop the two floating buttons colliding with content or each other */
-  .totop{right:max(14px,env(safe-area-inset-right));bottom:calc(14px + env(safe-area-inset-bottom));width:44px;height:44px}
+  .totop{right:max(14px,env(safe-area-inset-right));bottom:calc(14px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));width:44px;height:44px}
   .slotbtn{left:14px;bottom:14px;padding:9px 13px;font-size:.74rem}
   .toasts{right:14px;bottom:70px}
 }
@@ -1539,7 +1566,12 @@ fieldset.field:focus{outline:none}
      `minmax(130px,1fr)` rather than `1fr 1fr` so the contact lines, which are
      an icon plus a phone number or an address, keep a whole row to
      themselves when they cannot fit a half one. */
-  .ftr{padding-block:34px 16px}
+  /* Less room above — the phone footer does not need the desktop's opening
+     gap — but the SAME room below. That bottom value is not padding, it is
+     the back-to-top button's lane: `16px` here quietly cancelled the base
+     rule and left the button clearing the copyright line only by accident,
+     on the height the three legal paragraphs happen to wrap to. */
+  .ftr{padding-block:34px calc(86px + var(--cookie-lane,0px) + env(safe-area-inset-bottom))}
   .ftr ul{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px 14px}
   .ftr h3{margin-bottom:11px}
   /* The opening hours are a whole sentence with an icon; they take the full

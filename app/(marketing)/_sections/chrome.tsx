@@ -522,13 +522,43 @@ export function ScrollFurniture() {
    * would jump 10px the instant it appeared and the test could flip back off
    * again on the same scroll. `bottom` and `offsetHeight` ignore transforms.
    */
+  /*
+   * THE COOKIE BANNER SITS EXACTLY WHERE THIS BUTTON LIVES.
+   *
+   * The banner is fixed to the bottom edge at z-index 150 and the button was at
+   * 100, so on a first visit the button was 100% obscured on every phone width:
+   * its centre and all four corners hit-tested to "Accept all". The z-index
+   * clash predates this pass, but bounding the button to the end of the page is
+   * what made it fatal — the banner's strip is now the only ground the button
+   * ever stands on.
+   *
+   * So the banner's height is measured and published as `--cookie-lane`, the
+   * button is lifted by it, and it is given a z-index above the banner as well.
+   * Nothing else has to change: `lane` is read back off the computed `bottom`,
+   * so lifting the button automatically pushes back the point at which it is
+   * allowed to appear, and it still covers nothing in either state.
+   *
+   * `choice` is the same store the banner itself renders from, so this effect
+   * re-runs when the banner appears after hydration and again when it is
+   * dismissed. Watching for the element instead would mean either a mutation
+   * observer or trusting that this component's effect runs after its sibling's,
+   * which is the kind of ordering that breaks quietly.
+   */
+  const choice = useSyncExternalStore(cookieStore.subscribe, cookieStore.read, () => "pending");
+
   useEffect(() => {
     let lane = 0;
     const measure = () => {
       const button = totop.current;
-      lane = button
-        ? parseFloat(getComputedStyle(button).bottom || "0") + button.offsetHeight
-        : 0;
+      if (!button) {
+        lane = 0;
+        return;
+      }
+      const banner = document.getElementById("cookie");
+      /* 12px so the button clears the banner's shadow, not just its box. */
+      const lift = banner ? banner.getBoundingClientRect().height + 12 : 0;
+      document.documentElement.style.setProperty("--cookie-lane", `${lift}px`);
+      lane = parseFloat(getComputedStyle(button).bottom || "0") + button.offsetHeight;
     };
     const onScroll = () => {
       const y = window.pageYOffset || document.documentElement.scrollTop || 0;
@@ -553,7 +583,7 @@ export function ScrollFurniture() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
     };
-  }, []);
+  }, [choice]);
 
   const toTop = () => {
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;

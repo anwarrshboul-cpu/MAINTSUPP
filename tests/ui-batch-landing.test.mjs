@@ -204,13 +204,44 @@ test("back-to-top is bounded by the page, not by a scroll percentage", async () 
   const css = await read("app/(marketing)/marketing.css");
   const totop = ruleFor(css, ".totop{");
   assert.match(totop, /position:fixed/);
-  assert.match(totop, /bottom:calc\(20px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(totop, /bottom:calc\(20px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/);
   assert.match(totop, /right:max\(20px,env\(safe-area-inset-right\)\)/);
-  assert.match(css, /\.totop\{right:max\(14px,env\(safe-area-inset-right\)\);bottom:calc\(14px \+ env\(safe-area-inset-bottom\)\);width:44px;height:44px\}/,
+  assert.match(css, /\.totop\{right:max\(14px,env\(safe-area-inset-right\)\);bottom:calc\(14px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\);width:44px;height:44px\}/,
     "44px is the floor on a phone — never smaller, never display:none");
+
+  /*
+   * THE COOKIE BANNER. It is fixed to the same bottom edge at z-index 150, and
+   * the button's lane is the very end of the page — exactly and only where the
+   * banner sits. At z-index 100 the button was 100% obscured on a first visit:
+   * its centre and all four corners hit-tested to "Accept all".
+   *
+   * Three things have to hold together, so all three are pinned. The button is
+   * lifted by the banner's measured height, it outranks the banner, and the
+   * FOOTER's lane grows by that same height — without the third the lift eats
+   * the window, because raising the button also raises the point at which it
+   * may appear (measured: a 20px window at 375px, one scroll step).
+   */
+  assert.match(totop, /z-index:calc\(var\(--z-sticky\) \+ 60\)/, "above the cookie banner's +50");
+  assert.match(furniture, /document\.getElementById\("cookie"\)/, "the banner is measured, not assumed");
+  assert.match(furniture, /setProperty\("--cookie-lane"/);
+  assert.doesNotMatch(furniture, /--cookie-lane", `1?\d{2,3}px`/, "measured, never a hardcoded height");
+  /* The effect re-runs when the banner appears after hydration and when it is
+     dismissed — the same store the banner itself renders from. */
+  assert.match(furniture, /useSyncExternalStore\(cookieStore\.subscribe/);
+  assert.match(furniture, /\}, \[choice\]\);/);
+
   /* The footer's bottom padding is the button's lane: at the very bottom of
-     the page it has to be over nothing at all. */
-  assert.match(ruleFor(css, ".ftr{"), /padding-block:clamp\(40px,3\.4vw,50px\) calc\(86px \+ env\(safe-area-inset-bottom\)\)/);
+     the page it has to be over nothing at all, banner up or not. */
+  const lane = /padding-block:(?:clamp\(40px,3\.4vw,50px\)|34px) calc\(86px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/;
+  assert.match(ruleFor(css, ".ftr{"), lane);
+  /* And the phone override must not quietly cancel it — it did, with `16px`,
+     which left the button clearing the copyright line only by the accident of
+     how tall the legal paragraphs happen to wrap. */
+  assert.equal((css.match(new RegExp(lane, "g")) ?? []).length, 2, "base rule and the max-width:620px override");
+
+  /* Navy on --navy-deep was 1.10:1. The button only ever appears over the
+     footer now, so it has to read against it. */
+  assert.match(totop, /background:var\(--teal-text\)/);
 });
 
 test("Contact Us is in both navs, and both send you to the section the footer already calls Contact", async () => {
