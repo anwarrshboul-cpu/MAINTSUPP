@@ -132,19 +132,27 @@ function wrap(index: number) {
  * Step → file, copied from the "How it works" table in the approved pack's
  * README. The order here IS the step order, so index 0 is step 1.
  *
- * Steps 2-7 are the re-shot PNGs. The .webp files they replace were the ones
- * with blurred filler strips down each side — those originals are deleted, so
- * a path ending `-full.webp` here would now be a 404 as well as the wrong
- * picture.
+ * WHY EVERY STEM ENDS `-v3`. The previous pass put the re-shot pictures behind
+ * the filenames the superseded ones already had. Static assets are served
+ * `Cache-Control: public, max-age=31536000, immutable`, and `immutable` means a
+ * browser will not even ask whether the file changed — so every returning
+ * visitor kept being shown the old blurred-edge photographs from disk cache
+ * while the server was answering correctly to anyone new. The version in the
+ * name is what makes the derived `-480/-960/-1400` URLs new too, and a URL
+ * nobody has fetched cannot come from anybody's cache.
+ *
+ * Nothing named `-full` exists under /assets/workflow any more: those files are
+ * deleted, so such a path would now be a 404 as well as the wrong picture. A
+ * future re-shoot gets a new suffix, never a quiet overwrite of these.
  */
 const WORKFLOW_PHOTOS = [
-  "/assets/workflow/how-it-works-01-report-full.jpg",
-  "/assets/workflow/how-it-works-02-triage-full.png",
-  "/assets/workflow/how-it-works-03-approve-full.png",
-  "/assets/workflow/how-it-works-04-assign-full.png",
-  "/assets/workflow/how-it-works-05-attend-full.png",
-  "/assets/workflow/how-it-works-06-verify-full.png",
-  "/assets/workflow/how-it-works-07-reporting-full.png",
+  "/assets/workflow/how-it-works-01-report-v3.jpg",
+  "/assets/workflow/how-it-works-02-triage-v3.png",
+  "/assets/workflow/how-it-works-03-approve-v3.png",
+  "/assets/workflow/how-it-works-04-assign-v3.png",
+  "/assets/workflow/how-it-works-05-attend-v3.png",
+  "/assets/workflow/how-it-works-06-verify-v3.png",
+  "/assets/workflow/how-it-works-07-reporting-v3.png",
 ] as const;
 
 export function Workflow() {

@@ -23,22 +23,30 @@ import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 
 /*
- * Four links, and every one of them lands on a section that exists.
+ * Five links, and every one of them lands on a section that exists.
  *
  * The old list pointed at `#trades`, `#packages`, `#calculator`, `#evidence`
  * and `#faq` — five anchors whose sections this rebuild removes. An anchor with
  * no target does not error; it silently does nothing, which is the worst
  * possible behaviour for the top-level navigation of a page.
  *
- * The drawer carried nine of these. It now carries the same four as the
+ * The drawer carried nine of these. It now carries the same five as the
  * desktop bar: a phone menu that lists more destinations than the desktop nav
  * was never a decision anybody made.
+ *
+ * "Contact Us" points at `#review`, the Book a Portfolio Review section, which
+ * is where the footer's own "Contact" link has always gone. That section is the
+ * page's contact form — name, company, email, phone — so it is the destination
+ * a reader looking for "contact us" actually wants. No new phone number, email
+ * or address is invented here: the ones the site already publishes live in the
+ * utility bar and the footer.
  */
 const NAV = [
   ["#services", "Services"],
   ["#how", "How It Works"],
   ["#pricing", "Pricing"],
   ["#case-study", "Case Study"],
+  ["#review", "Contact Us"],
 ] as const;
 
 function Ic({ d, size = "ic--sm" }: { d: string; size?: string }) {

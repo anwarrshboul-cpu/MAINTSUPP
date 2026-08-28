@@ -69,7 +69,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1672,
     "height": 941
   },
-  "/assets/workflow/how-it-works-01-report-full.jpg": {
+  "/assets/workflow/how-it-works-01-report-v3.jpg": {
     "widths": [
       480,
       960,
@@ -78,7 +78,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1240,
     "height": 531
   },
-  "/assets/workflow/how-it-works-02-triage-full.png": {
+  "/assets/workflow/how-it-works-02-triage-v3.png": {
     "widths": [
       480,
       960,
@@ -87,7 +87,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1672,
     "height": 941
   },
-  "/assets/workflow/how-it-works-03-approve-full.png": {
+  "/assets/workflow/how-it-works-03-approve-v3.png": {
     "widths": [
       480,
       960,
@@ -96,7 +96,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1672,
     "height": 941
   },
-  "/assets/workflow/how-it-works-04-assign-full.png": {
+  "/assets/workflow/how-it-works-04-assign-v3.png": {
     "widths": [
       480,
       960,
@@ -105,7 +105,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1672,
     "height": 941
   },
-  "/assets/workflow/how-it-works-05-attend-full.png": {
+  "/assets/workflow/how-it-works-05-attend-v3.png": {
     "widths": [
       480,
       960,
@@ -114,7 +114,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1672,
     "height": 941
   },
-  "/assets/workflow/how-it-works-06-verify-full.png": {
+  "/assets/workflow/how-it-works-06-verify-v3.png": {
     "widths": [
       480,
       960,
@@ -123,7 +123,7 @@ export const assetWidths: Record<string, AssetEntry> = {
     "width": 1672,
     "height": 941
   },
-  "/assets/workflow/how-it-works-07-reporting-full.png": {
+  "/assets/workflow/how-it-works-07-reporting-v3.png": {
     "widths": [
       480,
       960,

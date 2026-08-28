@@ -188,6 +188,158 @@ test("the store count drives the band, the rate and the monthly total", async ()
   assert.match(pricing, /was > amount/, "and only shows once the reader is past that band");
 });
 
+/*
+ * The phone presentation of the same section.
+ *
+ * Three plan cards stacked ran to 2294px at 390 and 2510px at 320 — more than
+ * the whole desktop section — and answered no comparison question, because a
+ * reader had to hold one card's feature list in their head while scrolling to
+ * the next. Below 768px the section renders a comparison matrix instead.
+ *
+ * The danger in a second presentation is a second copy of the facts, so these
+ * tests hold the opposite: one data table, two renderings, and nothing that
+ * only one of them knows.
+ */
+
+/** Every feature the cards listed before the matrix existed, in order. */
+const CARD_FEATURES = {
+  coordination: [
+    "Intake & triage",
+    "Contractor assignment",
+    "Quote control",
+    "Attendance chasing",
+    "Photo-verified close-out",
+    "Monthly report",
+  ],
+  compliance: [
+    "Certificate register",
+    "90/60/30-day reminders",
+    "Provider booking",
+    "Certificate chasing",
+    "Remedial tracking",
+    "Traffic-light compliance dashboard",
+  ],
+  total: ["Quarterly portfolio review"],
+};
+
+test("every feature the cards listed still exists, once, in the shared table", async () => {
+  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  const table = pricing.slice(pricing.indexOf("const FEATURES"), pricing.indexOf("/** Whether `plan`"));
+  const rows = [...table.matchAll(/\{ label: "([^"]+)", plan: "(\w+)" \}/g)].map(
+    ([, label, plan]) => ({ label, plan }),
+  );
+
+  for (const [plan, labels] of Object.entries(CARD_FEATURES)) {
+    assert.deepEqual(
+      rows.filter((row) => row.plan === plan).map((row) => row.label),
+      labels,
+      `${plan} lost or reordered a feature`,
+    );
+  }
+  assert.equal(rows.length, 13, "a feature was added or dropped without this test moving");
+
+  /* No label may be typed twice — that is the defect a second presentation
+     invites, and it is what would let the card and the matrix disagree. */
+  assert.equal(new Set(rows.map((r) => r.label)).size, rows.length);
+});
+
+test("both presentations render from that table, not from copies of it", async () => {
+  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+
+  /* The card's bullets are derived, including Total Care's summary lines. */
+  assert.match(pricing, /cardPoints\(plan\)\.map\(/, "the card must render derived points");
+  assert.match(
+    pricing,
+    /`Everything in \$\{titleOf\(key\)\}`/,
+    "Total Care's roll-up wording must be built from the plan titles, not typed",
+  );
+  /* The matrix enumerates the same table. */
+  assert.match(pricing, /FEATURES\.map\(\(feature\)/, "the matrix must render every feature row");
+  assert.match(pricing, /planHas\(plan, feature\)/, "and decide each tick from the same data");
+  /* Prices in both come from the band on screen. */
+  assert.match(pricing, /const amount = band\[plan\.key\]/);
+
+  /* One price table. Outside BANDS and the footnote list, no £ figure may be
+     typed into the markup — a second one is how a matrix comes to quote a
+     price the cards no longer charge. */
+  const body = pricing
+    .slice(pricing.indexOf("export function Pricing"))
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const literals = [...body.matchAll(/£(\d[\d,]*)/g)].map((m) => m[0]);
+  assert.deepEqual(
+    literals,
+    ["£295", "£65", "£125"],
+    `only the three footnote figures may be typed; found ${literals.join(", ")}`,
+  );
+});
+
+test("the matrix says what is included in words, never in colour alone", async () => {
+  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  assert.match(pricing, /<span className="vh">Included<\/span>/, "a tick needs a name");
+  assert.match(
+    pricing,
+    /function NotIncluded\(\{ label = "Not included" \}/,
+    "an excluded cell needs a name too",
+  );
+  assert.match(pricing, /<span className="pmx__no" aria-hidden="true">/, "and a glyph, not a tint");
+
+  /* It is a real table: a row header and a column header per cell. */
+  assert.match(pricing, /<th\s+scope="col"/);
+  assert.match(pricing, /<th scope="row">/);
+  assert.match(pricing, /<caption className="vh">/, "the table must name itself");
+});
+
+test("the matrix scrolls inside its own box, and the page never does", async () => {
+  const css = await read("app/(marketing)/marketing.css");
+  const block = css.slice(css.indexOf(".pmx{display:none}"));
+  assert.ok(block.length > 0, "the matrix styles have been removed");
+
+  const scroll = block.slice(block.indexOf(".pmx__scroll{"), block.indexOf(".pmx__table{"));
+  assert.match(scroll, /overflow-x:auto/);
+  assert.match(
+    scroll,
+    /contain:paint/,
+    "without it the table's width reaches the document and the whole page slides sideways at 320",
+  );
+
+  /* Sized so 375, 390 and 430 need no sideways scroll at all. */
+  assert.match(block, /\.pmx__table\{[^}]*min-width:340px/);
+  /* The feature column stays named while the plans pass under it. */
+  assert.match(block, /th\[scope=row\]\{width:29%;position:sticky;left:0/);
+
+  /* The two presentations swap; neither is hidden to shorten the page. */
+  assert.match(block, /@media \(max-width:767px\)\{\s*\.pkgs\{display:none\}\s*\.pmx\{display:block\}/);
+});
+
+test("the page's vertical rhythm is a scale, not thirty typed numbers", async () => {
+  const css = await read("app/(marketing)/marketing.css");
+  /* Both ends of the scale, pinned. The desktop values are the ones that
+     took 615px off 1440 and 489px off 1024: the section band came down from
+     7.2vw/108px to 5vw/76px, and the block and step gaps from 30/26 to 26/22.
+     They are held here because the next person to "just nudge one section"
+     should have to change the scale instead. */
+  assert.match(css, /--section-y:clamp\(50px,5vw,76px\)/, "the desktop section band");
+  assert.match(css, /--gap-block:26px;--gap-step:22px;--gap-card:14px;--gap-pad:22px/);
+  assert.match(
+    css,
+    /--section-y:clamp\(40px,8vw,56px\);--gap-block:20px;--gap-step:18px;--gap-card:10px;--gap-pad:16px/,
+    "the phone step sizes must narrow together, in one place",
+  );
+  /* Dead space, not a gap: a trailing paragraph's bottom margin sat against
+     the section's own padding at every width. */
+  assert.match(css, /\.section > \.wrap > \*:last-child\{margin-bottom:0\}/);
+  /* The blocks that used to carry their own 26/30px must read the scale. */
+  for (const rule of [
+    /\.whogrid\{[^}]*margin-top:var\(--gap-block\)/,
+    /\.offergrid\{[^}]*margin-top:var\(--gap-block\)/,
+    /\.pricing__plans\{margin-top:var\(--gap-step\)\}/,
+    /\.pkgfoot\{[^}]*margin-top:var\(--gap-step\)/,
+    /\.whocard__body\{padding:calc\(var\(--gap-pad\) - 2px\)/,
+  ]) {
+    assert.match(css, rule, `${rule} no longer reads the spacing scale`);
+  }
+});
+
 /* ── 3. The Report a Job form ────────────────────────────────────────────── */
 
 test("the form asks the brief's eleven questions, in order", async () => {
@@ -405,7 +557,8 @@ test("every nav anchor names a section that exists", async () => {
   const chrome = await read("app/(marketing)/_sections/chrome.tsx");
   const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
   const targets = [...nav.matchAll(/\["#([a-z-]+)"/g)].map((match) => match[1]);
-  assert.ok(targets.length >= 4, "the brief lists four in-page destinations");
+  assert.ok(targets.length >= 5, "four in-page destinations from the brief, plus Contact Us");
+  assert.ok(targets.includes("review"), "Contact Us points at the section the footer calls Contact");
   for (const target of targets) {
     assert.ok(ANCHORS.includes(target), `#${target} has no section`);
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 /**
  * SECTION 7 — Pricing.
@@ -25,6 +25,15 @@ import { useState } from "react";
  * from the entry band, and only renders once the reader is past it.
  *
  * Every price carries "+ VAT", which is a rule of the brief and not a detail.
+ *
+ * TWO PRESENTATIONS, ONE SET OF FACTS. Wide enough for three columns, the
+ * section is three cards. On a phone the three cards stacked ran to 2294px —
+ * more than the whole desktop section — and a reader comparing them had to
+ * hold one card's feature list in their head while scrolling to the next. So
+ * below 768px the same data renders as a comparison matrix: features down the
+ * left, the three plans across. Both presentations read `BANDS`, `PLANS` and
+ * `FEATURES` below; neither of them contains a typed price or a typed feature
+ * list of its own, because a second copy would be a second thing to keep true.
  */
 
 /*
@@ -51,6 +60,7 @@ const SLIDER_MIN = 1;
 const SLIDER_MAX = 40;
 
 type Band = (typeof BANDS)[number];
+type PlanKey = "coordination" | "compliance" | "total";
 
 const CHECK = <path d="M20 6 9 17l-5-5" />;
 
@@ -93,25 +103,27 @@ function Price({ amount, was }: { amount: number; was: number }) {
   );
 }
 
-const PLANS = [
+type Plan = {
+  key: PlanKey;
+  title: string;
+  for: string;
+  icon: ReactNode;
+  /** The plans whose entire feature set this plan contains. */
+  rollup?: readonly PlanKey[];
+  footnote?: string;
+};
+
+const PLANS: readonly Plan[] = [
   {
-    key: "coordination" as const,
+    key: "coordination",
     title: "Maintenance Coordination",
     for: "Reactive repairs, run end to end.",
     icon: (
       <path d="M14.7 6.3a4 4 0 1 0 5 5L21 21H3l9.7-9.7a4 4 0 0 1 2-4.9Z" />
     ),
-    points: [
-      "Intake & triage",
-      "Contractor assignment",
-      "Quote control",
-      "Attendance chasing",
-      "Photo-verified close-out",
-      "Monthly report",
-    ],
   },
   {
-    key: "compliance" as const,
+    key: "compliance",
     title: "Compliance Administration",
     for: "Certificates tracked before they expire.",
     icon: (
@@ -120,18 +132,10 @@ const PLANS = [
         <path d="m9 12 2 2 4-4" />
       </>
     ),
-    points: [
-      "Certificate register",
-      "90/60/30-day reminders",
-      "Provider booking",
-      "Certificate chasing",
-      "Remedial tracking",
-      "Traffic-light compliance dashboard",
-    ],
     footnote: "One-off setup from £25/store + VAT.",
   },
   {
-    key: "total" as const,
+    key: "total",
     title: "Total Care",
     for: "Both, plus a quarterly portfolio review.",
     icon: (
@@ -140,13 +144,67 @@ const PLANS = [
         <path d="m3 7 9 5 9-5M12 12v10" />
       </>
     ),
-    points: [
-      "Everything in Maintenance Coordination",
-      "Everything in Compliance Administration",
-      "Quarterly portfolio review",
-    ],
+    rollup: ["coordination", "compliance"],
   },
 ];
+
+/*
+ * EVERY FEATURE, ONCE, AGAINST THE PLAN THAT INTRODUCES IT.
+ *
+ * The cards used to carry three hardcoded bullet lists and Total Care's read
+ * "Everything in Maintenance Coordination / Everything in Compliance
+ * Administration / Quarterly portfolio review" — which is the right thing for
+ * a card and useless in a matrix, where the reader wants to see the tick land
+ * on the row. Holding the features here and the roll-up on the plan lets the
+ * card keep its summary wording and the matrix enumerate what the summary
+ * stands for, without either one being typed twice.
+ */
+const FEATURES: readonly { label: string; plan: PlanKey }[] = [
+  { label: "Intake & triage", plan: "coordination" },
+  { label: "Contractor assignment", plan: "coordination" },
+  { label: "Quote control", plan: "coordination" },
+  { label: "Attendance chasing", plan: "coordination" },
+  { label: "Photo-verified close-out", plan: "coordination" },
+  { label: "Monthly report", plan: "coordination" },
+  { label: "Certificate register", plan: "compliance" },
+  { label: "90/60/30-day reminders", plan: "compliance" },
+  { label: "Provider booking", plan: "compliance" },
+  { label: "Certificate chasing", plan: "compliance" },
+  { label: "Remedial tracking", plan: "compliance" },
+  { label: "Traffic-light compliance dashboard", plan: "compliance" },
+  { label: "Quarterly portfolio review", plan: "total" },
+];
+
+/** Whether `plan` includes `feature`, directly or through its roll-up. */
+function planHas(plan: Plan, feature: (typeof FEATURES)[number]) {
+  return feature.plan === plan.key || (plan.rollup?.includes(feature.plan) ?? false);
+}
+
+/**
+ * The card's bullet list: a plan's own features, preceded by one line per
+ * rolled-up plan. Total Care therefore still reads "Everything in Maintenance
+ * Coordination / Everything in Compliance Administration / Quarterly portfolio
+ * review" — derived, so the summary cannot come to describe a set the matrix
+ * beside it no longer ticks.
+ */
+function cardPoints(plan: Plan) {
+  const own = FEATURES.filter((feature) => feature.plan === plan.key).map((f) => f.label);
+  if (!plan.rollup) return own;
+  const titleOf = (key: PlanKey) => PLANS.find((entry) => entry.key === key)?.title ?? key;
+  return [...plan.rollup.map((key) => `Everything in ${titleOf(key)}`), ...own];
+}
+
+/** A matrix cell that is not included. Never colour alone — a glyph and a name. */
+function NotIncluded({ label = "Not included" }: { label?: string }) {
+  return (
+    <>
+      <span className="pmx__no" aria-hidden="true">
+        —
+      </span>
+      <span className="vh">{label}</span>
+    </>
+  );
+}
 
 export function Pricing() {
   /*
@@ -174,6 +232,9 @@ export function Pricing() {
   /* What the same plan costs at the entry band, so a discount can be shown as
      a discount rather than asserted. */
   const entryBand = BANDS[0];
+
+  const stores = `${storeCount} ${storeCount === 1 ? "store" : "stores"}`;
+  const monthly = (plan: Plan) => (band[plan.key] * storeCount).toLocaleString("en-GB");
 
   return (
     <section className="section section--tint" id="pricing">
@@ -239,53 +300,214 @@ export function Pricing() {
           ))}
         </div>
 
-        <div className="pkgs reveal">
-          {PLANS.map((plan) => {
-            const amount = band[plan.key];
-            const isTotal = plan.key === "total";
-            return (
-              <article
-                className={`pkg${isTotal ? " is-match" : ""}`}
-                key={plan.key}
-              >
-                {isTotal && (
-                  <span className="pkg__flag">Most popular — save £{saving} per store</span>
-                )}
-                <span className="pkg__icon">
-                  <svg
-                    className="ic"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    {plan.icon}
-                  </svg>
-                </span>
-                <h3>{plan.title}</h3>
-                <p className="pkg__for">{plan.for}</p>
-                <Price amount={amount} was={entryBand[plan.key]} />
-                {/* What it actually costs this reader, which is the number
-                    they came for. Computed from the same rate above. */}
-                <p className="pkg__total">
-                  ≈ <strong>£{(amount * storeCount).toLocaleString("en-GB")}</strong>
-                  /month for {storeCount} {storeCount === 1 ? "store" : "stores"}
-                </p>
-                <ul className="pkg__list">
-                  {plan.points.map((point) => (
-                    <li key={point}>
-                      <Tick />
-                      <span>{point}</span>
-                    </li>
+        {/*
+          One reveal wrapper around both presentations. The observer that adds
+          `is-in` never fires on a `display:none` element, so giving each of
+          them the class of its own would leave whichever one is showing after
+          a resize stuck at opacity 0.
+        */}
+        <div className="pricing__plans reveal">
+          {/* Wide: three cards. */}
+          <div className="pkgs">
+            {PLANS.map((plan) => {
+              const amount = band[plan.key];
+              const isTotal = plan.key === "total";
+              return (
+                <article
+                  className={`pkg${isTotal ? " is-match" : ""}`}
+                  key={plan.key}
+                >
+                  {isTotal && (
+                    <span className="pkg__flag">Most popular — save £{saving} per store</span>
+                  )}
+                  <span className="pkg__icon">
+                    <svg
+                      className="ic"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      {plan.icon}
+                    </svg>
+                  </span>
+                  <h3>{plan.title}</h3>
+                  <p className="pkg__for">{plan.for}</p>
+                  <Price amount={amount} was={entryBand[plan.key]} />
+                  {/* What it actually costs this reader, which is the number
+                      they came for. Computed from the same rate above. */}
+                  <p className="pkg__total">
+                    ≈ <strong>£{(amount * storeCount).toLocaleString("en-GB")}</strong>
+                    /month for {storeCount} {storeCount === 1 ? "store" : "stores"}
+                  </p>
+                  <ul className="pkg__list">
+                    {cardPoints(plan).map((point) => (
+                      <li key={point}>
+                        <Tick />
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {plan.footnote && <p className="pkg__setup">{plan.footnote}</p>}
+                </article>
+              );
+            })}
+          </div>
+
+          {/*
+            Narrow: the same three plans as a comparison matrix.
+
+            It is a real <table> because it is real tabular data — a row header
+            and three column headers give a screen reader the two coordinates
+            of every tick, which a grid of divs cannot. The feature column is
+            sticky, so on the two narrowest phones, where the three plan
+            columns cannot all fit, the row a reader is scrolling stays named.
+          */}
+          <div className="pmx">
+            <div
+              className="pmx__scroll"
+              tabIndex={0}
+              role="region"
+              aria-label="Plan comparison table"
+            >
+              <table className="pmx__table">
+                <caption className="vh">
+                  {`The three plans compared at ${stores}, on the ${band.label} rate.`}
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="pmx__corner">
+                      <span className="vh">Feature</span>
+                    </th>
+                    {PLANS.map((plan) => (
+                      <th
+                        scope="col"
+                        key={plan.key}
+                        className={`pmx__plan${plan.key === "total" ? " is-match" : ""}`}
+                      >
+                        <span className="pmx__planname">{plan.title}</span>
+                        {plan.key === "total" && (
+                          <span className="pmx__pop">Most popular</span>
+                        )}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="pmx__row--says">
+                    <th scope="row">What it is for</th>
+                    {PLANS.map((plan) => (
+                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
+                        {plan.for}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="pmx__row--price">
+                    <th scope="row">Per store / month</th>
+                    {PLANS.map((plan) => {
+                      const amount = band[plan.key];
+                      const was = entryBand[plan.key];
+                      return (
+                        <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
+                          <span className="pmx__price">£{amount}</span>
+                          {was > amount && (
+                            <s className="pkg__was" aria-label={`Down from £${was} per store`}>
+                              £{was}
+                            </s>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  <tr>
+                    <th scope="row">VAT</th>
+                    {PLANS.map((plan) => (
+                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
+                        + VAT on top
+                      </td>
+                    ))}
+                  </tr>
+                  {/*
+                    The row header carries "per month" and the store count, so
+                    the cell is the figure alone — "≈ £520/month" broke as
+                    "£520/mon th" in an 80px column, and the sentence the card
+                    prints ("≈ £520/month for 8 stores") is here in full,
+                    split across the header and the cell rather than crushed
+                    into one of them.
+                  */}
+                  <tr className="pmx__row--total">
+                    <th scope="row">
+                      Your total per month
+                      <span className="pmx__sub">at {stores}</span>
+                    </th>
+                    {PLANS.map((plan) => (
+                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
+                        ≈ <strong>£{monthly(plan)}</strong>
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <th scope="row">Bundle saving</th>
+                    {PLANS.map((plan) => (
+                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
+                        {plan.rollup ? (
+                          <strong>Save £{saving} per store</strong>
+                        ) : (
+                          <NotIncluded label="No bundle saving" />
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="pmx__row--says">
+                    <th scope="row">One-off setup</th>
+                    {PLANS.map((plan) => (
+                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
+                        {plan.footnote ?? <NotIncluded label="None listed" />}
+                      </td>
+                    ))}
+                  </tr>
+                  {FEATURES.map((feature) => (
+                    <tr key={feature.label}>
+                      <th scope="row">{feature.label}</th>
+                      {PLANS.map((plan) => (
+                        <td
+                          key={plan.key}
+                          className={`pmx__mark${plan.key === "total" ? " is-match" : ""}`}
+                        >
+                          {planHas(plan, feature) ? (
+                            <>
+                              <span className="pmx__yes">
+                                <Tick />
+                              </span>
+                              <span className="vh">Included</span>
+                            </>
+                          ) : (
+                            <NotIncluded />
+                          )}
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </ul>
-                {plan.footnote && <p className="pkg__setup">{plan.footnote}</p>}
-              </article>
-            );
-          })}
+                </tbody>
+              </table>
+            </div>
+            {/*
+              The card's own summary of Total Care, in the card's own words and
+              built from the same table the matrix ticks. The matrix enumerates
+              what "everything in" stands for, which is the more useful thing
+              to show; this keeps the sentence a reader on a phone would
+              otherwise only meet on a wider screen.
+            */}
+            {PLANS.filter((plan) => plan.rollup).map((plan) => (
+              <p className="pmx__foot" key={plan.key}>
+                <strong>{plan.title}:</strong> {cardPoints(plan).join(" · ")}. Most popular —
+                save £{saving} per store.
+              </p>
+            ))}
+          </div>
         </div>
 
         <div className="pkgfoot reveal">

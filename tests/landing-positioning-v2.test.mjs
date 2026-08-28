@@ -162,26 +162,40 @@ test("all seven workflow stages survive, each with its own approved photograph",
   const photos = [...workflow.matchAll(/"\/assets\/workflow\/(how-it-works-[^"]+)"/g)].map((m) => m[1]);
 
   assert.deepEqual(photos, [
-    "how-it-works-01-report-full.jpg",
-    "how-it-works-02-triage-full.png",
-    "how-it-works-03-approve-full.png",
-    "how-it-works-04-assign-full.png",
-    "how-it-works-05-attend-full.png",
-    "how-it-works-06-verify-full.png",
-    "how-it-works-07-reporting-full.png",
+    "how-it-works-01-report-v3.jpg",
+    "how-it-works-02-triage-v3.png",
+    "how-it-works-03-approve-v3.png",
+    "how-it-works-04-assign-v3.png",
+    "how-it-works-05-attend-v3.png",
+    "how-it-works-06-verify-v3.png",
+    "how-it-works-07-reporting-v3.png",
   ], "step order, straight from the pack's README");
 
   /*
-   * Steps 2-7 were re-shot. The `*-full.webp` files they replace were the ones
-   * with blurred filler strips down the left and right edges — the defect the
-   * owner rejected — and those originals are deleted, so a reference to one is
-   * both the wrong picture and a 404. Comments included: naming a deleted file
-   * even in an explanation is how it finds its way back into a path.
+   * NOTHING MAY BE NAMED `-full` AGAIN, IN ANY EXTENSION. The re-shot pictures
+   * were first published behind the filenames the rejected ones already had,
+   * and static assets go out as `max-age=31536000, immutable` — so every
+   * returning visitor was served the old blurred-edge bytes from disk cache
+   * while the server answered correctly to everyone new. Those files are now
+   * deleted, which makes any such reference a 404 as well as the wrong
+   * picture. The guard covers every extension, not just .webp, and comments
+   * too: naming a deleted file even in an explanation is how it finds its way
+   * back into a path.
    */
   assert.ok(
-    !/how-it-works-\d\d-[a-z]+-full\.webp/.test(workflow),
-    "a superseded blurred-edge original is referenced again",
+    !/how-it-works-\d\d-[a-z]+-full/.test(workflow),
+    "a superseded cache-poisoned filename is referenced again",
   );
+
+  /*
+   * And the version marker is the whole defence. Without it a later edit can
+   * quietly reuse a stem that browsers already hold, and the symptom — correct
+   * bytes on the server, stale bytes on the screen — looks like anything but a
+   * naming mistake. Every runtime path must carry it.
+   */
+  for (const photo of photos) {
+    assert.match(photo, /-v3\.(jpg|png)$/, `${photo} has no version marker`);
+  }
 
   assert.equal(new Set(photos).size, 7, "no photograph is reused across two stages");
   assert.equal((workflow.match(/name: "/g) ?? []).length, 7, "seven stages");

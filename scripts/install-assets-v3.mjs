@@ -22,12 +22,21 @@ const WIDTHS = [480, 960, 1400];
    disk — the extension in the plan is always the one the supplied file
    actually carries, not the one the README's Filename column claims.
 
-   Steps 2-7 were re-shot: the supplied files are now full-bleed PNGs. The
-   .webp copies they replace had blurred filler strips down the left and right
-   edges, which is what made the pictures look letterboxed inside the frame.
-   The originals of those .webp files are deleted from public/assets/workflow;
-   their derived -480/-960/-1400 variants keep the same names and are simply
-   overwritten by this run. Step 1 was already clean and stays a .jpg. */
+   THE HOW-IT-WORKS TARGETS ARE VERSIONED, AND THAT IS THE POINT. The previous
+   run replaced the CONTENT of the derived variants but reused their exact
+   filenames — 36 of them show up in that commit as modifications, same path,
+   new bytes, not one addition among them. Those URLs are
+   served `Cache-Control: public, max-age=31536000, immutable`, and `immutable`
+   tells a browser never to revalidate: anyone who had opened the page before
+   the deploy went on being served the old blurred bytes out of disk cache, and
+   a hard refresh does not reliably defeat it. Only the un-suffixed originals
+   were renamed, and those are never fetched — the <source> elements beat the
+   <img src> wherever AVIF or WebP is understood.
+
+   So the stems end `-v3`. Every derived URL is therefore new as well, and a
+   URL nobody has ever fetched cannot be served from anybody's cache. A future
+   re-shoot needs a new suffix again, not a quiet overwrite. The sources keep
+   their supplied `-full` names; only the site paths carry the version. */
 const PLAN = [
   ["who-we-help/who-we-help-retail-chains.png", "audience/who-we-help-retail-chains.png"],
   ["who-we-help/who-we-help-shopping-centre-kiosks.png", "audience/who-we-help-shopping-centre-kiosks.png"],
@@ -35,13 +44,13 @@ const PLAN = [
   ["who-we-help/who-we-help-clinics-wellness.png", "audience/who-we-help-clinics-wellness.png"],
   ["who-we-help/who-we-help-gyms-studios.png", "audience/who-we-help-gyms-studios.png"],
   ["who-we-help/who-we-help-commercial-offices.png", "audience/who-we-help-commercial-offices.png"],
-  ["how-it-works/how-it-works-01-report-full.jpg", "workflow/how-it-works-01-report-full.jpg"],
-  ["how-it-works/how-it-works-02-triage-full.png", "workflow/how-it-works-02-triage-full.png"],
-  ["how-it-works/how-it-works-03-approve-full.png", "workflow/how-it-works-03-approve-full.png"],
-  ["how-it-works/how-it-works-04-assign-full.png", "workflow/how-it-works-04-assign-full.png"],
-  ["how-it-works/how-it-works-05-attend-full.png", "workflow/how-it-works-05-attend-full.png"],
-  ["how-it-works/how-it-works-06-verify-full.png", "workflow/how-it-works-06-verify-full.png"],
-  ["how-it-works/how-it-works-07-reporting-full.png", "workflow/how-it-works-07-reporting-full.png"],
+  ["how-it-works/how-it-works-01-report-full.jpg", "workflow/how-it-works-01-report-v3.jpg"],
+  ["how-it-works/how-it-works-02-triage-full.png", "workflow/how-it-works-02-triage-v3.png"],
+  ["how-it-works/how-it-works-03-approve-full.png", "workflow/how-it-works-03-approve-v3.png"],
+  ["how-it-works/how-it-works-04-assign-full.png", "workflow/how-it-works-04-assign-v3.png"],
+  ["how-it-works/how-it-works-05-attend-full.png", "workflow/how-it-works-05-attend-v3.png"],
+  ["how-it-works/how-it-works-06-verify-full.png", "workflow/how-it-works-06-verify-v3.png"],
+  ["how-it-works/how-it-works-07-reporting-full.png", "workflow/how-it-works-07-reporting-v3.png"],
 ];
 
 const manifest = {};

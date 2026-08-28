@@ -433,7 +433,17 @@
   --fs-h1:clamp(2.3rem,1.3rem + 3.9vw,4.05rem);
   --fs-h2:clamp(1.72rem,1.18rem + 2.2vw,2.65rem);
   --fs-h3:clamp(1.22rem,1.08rem + .68vw,1.55rem);
-  --wrap:1320px;--wrap-narrow:900px;--section-y:clamp(58px,7.2vw,108px);
+  --wrap:1320px;--wrap-narrow:900px;--section-y:clamp(50px,5vw,76px);
+  /* ONE SPACING SCALE FOR THE PAGE'S VERTICAL RHYTHM.
+     `--gap-block` is the step from a section's heading block to its first
+     content block, and between the content blocks after it. `--gap-card` is
+     the step between cards inside one grid. `--gap-pad` is the inside padding
+     of a content card. Every one of them was previously a hand-typed 26px /
+     30px / 14px / 22px repeated down the file, which meant the page could only
+     be tightened on a phone by editing thirty declarations and hoping none was
+     missed. They narrow together in the mobile block near the end of this
+     file — one place, one decision. */
+  --gap-block:26px;--gap-step:22px;--gap-card:14px;--gap-pad:22px;--ic-card:40px;
   --r-sm:8px;--r-md:12px;--r-lg:16px;--r-xl:20px;--r-pill:999px;
   --sh-xs:0 1px 2px rgba(6,19,28,.06);--sh-sm:0 2px 10px rgba(6,19,28,.07);
   --sh-md:0 8px 24px rgba(6,19,28,.09);--sh-lg:0 20px 54px rgba(3,18,28,.18);
@@ -461,6 +471,10 @@ a{color:var(--steel);text-underline-offset:3px}button{font:inherit}
 .wrap{width:100%;max-width:var(--wrap);margin-inline:auto;padding-inline:clamp(20px,4vw,40px)}
 .wrap--narrow{max-width:var(--wrap-narrow)}
 .section{padding-block:var(--section-y);position:relative}
+/* A trailing `p`/`.note` inside the last block of a section leaves its 1rem
+   bottom margin sitting against the section's own padding, where it is not a
+   gap between anything — 16px of dead space per section, at every width. */
+.section > .wrap > *:last-child{margin-bottom:0}
 .section--tint{background:var(--cloud)}
 .section--dark{background:var(--navy);color:#fff}
 .section--dark h2,.section--dark h3,.section--dark h4{color:#fff}
@@ -528,7 +542,19 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .progress__bar{height:100%;width:0;background:linear-gradient(90deg,var(--teal-deep),var(--teal-bright));transition:width 80ms linear}
 .reveal{opacity:0;transform:translateY(20px);transition:opacity .55s var(--ease),transform .55s var(--ease)}
 .reveal.is-in{opacity:1;transform:none}
-.totop{position:fixed;right:20px;bottom:20px;z-index:var(--z-sticky);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
+/* The back-to-top button clears a full touch row, not just the viewport edge.
+   At 20px — 14px on a phone — it sat in the band a browser parks a control row
+   in the moment it scrolls that row into view, so it covered the right-hand
+   third of the How It Works "Next" button: measured 17.7% of it at 430px
+   rising to 29.7% at 320px, with a tap at 85% or 95% across the button landing
+   on the FAB instead, at every phone width. The clearance is
+   read off the design system rather than off a scroll position: 44px, the
+   minimum touch height this page gives every control under
+   `@media(pointer:coarse)`, plus a 16px gap. Anything the page scrolls to rest
+   at its bottom edge is therefore whole, and the number stays correct however
+   the page's height changes. `env(safe-area-inset-*)` keeps it off the home
+   indicator and the curved edges of a notched phone. */
+.totop{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(60px + env(safe-area-inset-bottom));z-index:var(--z-sticky);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
 .totop.is-on{opacity:1;pointer-events:auto;transform:none}
 
 /* --------------------------------------------------------------- utility */
@@ -554,7 +580,14 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .logo--light .logo__text em{color:#87A0AA}
 .nav{display:none;margin-left:auto}
 .nav__list{display:flex;align-items:center;gap:2px;list-style:none}
-.nav__link{display:inline-flex;align-items:center;gap:5px;padding:10px 12px;background:none;border:0;border-radius:var(--r-sm);cursor:pointer;font-size:.91rem;font-weight:500;color:var(--navy);text-decoration:none}
+/* `white-space:nowrap`: a nav label is a name, and a name does not break.
+   Without it the row was solving its width by folding labels in half — "How It
+   / Works", "Case / Study", "Portal / Login" — which read as a second header
+   row 24px deep. That was already happening to the four-item bar at 1120 and
+   1160px; a fifth destination only widened the range it happened over. Held on
+   one line the nav is 43px tall and the header 75px at every width from 1120 to
+   1920, with nothing overlapping and the document never scrolling sideways. */
+.nav__link{display:inline-flex;align-items:center;gap:5px;padding:10px 12px;background:none;border:0;border-radius:var(--r-sm);cursor:pointer;font-size:.91rem;font-weight:500;color:var(--navy);text-decoration:none;white-space:nowrap}
 .nav__link:hover{background:var(--cloud);color:var(--teal-text)}
 .hdr__actions{display:flex;align-items:center;gap:10px;margin-left:auto}
 .nav~.hdr__actions{margin-left:14px}
@@ -562,6 +595,17 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .cta-short{display:none}
 /* the header must never force the page wider than the screen */
 @media(max-width:760px){.cta-long{display:none}.cta-short{display:inline}.hdr__cta{padding:9px 13px}}
+/* The other place the bar is tight, and the same answer.
+   The nav appears at 1120px, and between there and roughly 1300 the row is
+   carrying a logo, five destinations, Portal Login, Report a Job and this
+   button. The button is the piece that gives: it was already folding to two
+   lines at 1120 and 1160 with four destinations, and a fifth pushed it to
+   three — a 70px button inside a 75px header. Trimming the nav's padding does
+   not help, because `.hdr__actions{margin-left:auto}` hands every pixel saved
+   to the gap rather than to the button. So the label shortens here exactly as
+   it does on a phone, and the `aria-label` on the link keeps the spoken name
+   "Book a Portfolio Review" at every width. */
+@media(min-width:1120px) and (max-width:1299px){.cta-long{display:none}.cta-short{display:inline}}
 @media(max-width:500px){.hdr__cta{display:none}.hdr__inner{gap:12px}}
 @media(max-width:360px){.logo__text em{display:none}.logo__text strong{font-size:1.12rem}}
 /* Portal Login and Report a Job ride with the nav.
@@ -620,7 +664,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
   .hero__scrim{background:linear-gradient(180deg,rgba(8,23,38,.77) 0%,rgba(9,27,45,.85) 50%,rgba(9,27,45,.94) 100%)}
   .hero .ph__img{background-position:26% center}
 }
-.hero__inner{position:relative;z-index:6;display:grid;gap:42px;align-items:center;padding-block:clamp(44px,5.5vw,78px)}
+.hero__inner{position:relative;z-index:6;display:grid;gap:42px;align-items:center;padding-block:clamp(40px,4.6vw,66px)}
 /* One column, because the hero has one child.
    This was `1.1fr .9fr` — the text against the intake form. The form is its own
    section now, and a two-column grid with a single child would have left the
@@ -778,7 +822,7 @@ fieldset.field:focus{outline:none}
    logo's cyan, the "without" column the page's critical red; both are also
    named in the header row and shaped differently in the icon, so colour is
    never the only distinction. */
-.comparetable-wrap{margin-top:26px;max-width:100%}
+.comparetable-wrap{margin-top:var(--gap-step);max-width:100%}
 .comparetable{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;background:#fff;
   border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
 .comparetable th,.comparetable td{width:50%;padding:0;vertical-align:top;text-align:left}
@@ -816,7 +860,7 @@ fieldset.field:focus{outline:none}
 }
 
 /* -------------------------------------------------------- trade gallery */
-.trades{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:26px}
+.trades{display:grid;gap:var(--gap-card);grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:var(--gap-step)}
 .trade{position:relative;aspect-ratio:1;border:0;padding:0;border-radius:var(--r-md);overflow:hidden;cursor:pointer;background:var(--navy);transition:transform var(--t-base) var(--ease),box-shadow var(--t-base) var(--ease)}
 .trade:hover{transform:translateY(-4px);box-shadow:var(--sh-md)}
 .trade:hover .ph__img{transform:scale(1.06)}
@@ -832,13 +876,13 @@ fieldset.field:focus{outline:none}
 .section--dark .ticks .ic{color:#57B98D}
 
 /* -------------------------------------------------------------- services */
-.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--gap-card)}
 .tabs button{display:inline-flex;align-items:center;gap:9px;padding:11px 18px;min-height:46px;background:#fff;border:1.5px solid var(--border);border-radius:var(--r-pill);font-size:.87rem;font-weight:600;color:var(--slate);cursor:pointer;transition:all var(--t-base) var(--ease)}
 .tabs button:hover{border-color:var(--steel-mid)}
 .tabs button[aria-selected=true]{background:var(--navy);border-color:var(--navy);color:#fff}
 .tabs button[aria-selected=true] .ic{color:var(--amber-bright)}
 .tabpanel[hidden]{display:none}
-.svcgrid{display:grid;gap:28px;align-items:start}
+.svcgrid{display:grid;gap:clamp(18px,4vw,28px);align-items:start}
 @media(min-width:900px){.svcgrid{grid-template-columns:1fr 1fr}}
 .svcgrid h3{font-size:var(--fs-h3);margin-bottom:10px}
 .svcphoto{aspect-ratio:16/10;border-radius:var(--r-lg);overflow:hidden}
@@ -850,7 +894,15 @@ fieldset.field:focus{outline:none}
    are the whole component at every width. */
 .wf{display:grid;gap:24px}
 .wf__stage{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
-.wf__stage:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+/* `--amber-strong`, not `--amber`. Nothing outranks this rule — it is (0,2,1)
+   against the page-wide `:focus-visible` at (0,1,0) — the ring simply painted
+   whatever `--amber` holds, and the brand pass above set `--amber:#0DA1A9`,
+   the teal. That token's own note says why the swap is not harmless here: the
+   bright teal is 3.1:1 on white and light surfaces are meant to use #077E85 at
+   4.85:1. `.wf__stage` is `background:#fff`, so this was the one focus ring on
+   the page sitting a rounding error above the 3:1 floor. `--amber-strong` is
+   that #077E85, so the ring keeps the brand hue and gains the contrast. */
+.wf__stage:focus-visible{outline:3px solid var(--amber-strong);outline-offset:3px}
 /* THE PHOTOGRAPH IS BANDED, NOT PANORAMIC. It used to be `aspect-ratio:21/9`,
    which on a 1240px card is a 530px-tall picture — the badge, the title and
    the explanation were all pushed below the fold, so a reader saw a photograph
@@ -966,7 +1018,7 @@ fieldset.field:focus{outline:none}
   font-size:.88rem;color:var(--slate);text-align:center}
 .pkgpicker__out strong{color:var(--navy)}
 
-.pkgs{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));margin-top:26px;align-items:start}
+.pkgs{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));align-items:start}
 .pkg{position:relative;background:#fff;border:1.5px solid var(--border);border-radius:var(--r-lg);
   padding:24px 22px;display:grid;gap:0;align-content:start;transition:all var(--t-base) var(--ease)}
 .pkg.is-match{border-color:var(--teal-text);box-shadow:0 14px 36px rgba(7,126,133,.16);transform:translateY(-5px)}
@@ -998,7 +1050,7 @@ fieldset.field:focus{outline:none}
    The strip is the dark band's `.claims` grid, now four icon items rather than
    a counter and three fragments. `.claim` keeps its left rule; the icon sits
    above the term. */
-.trustbar{padding-block:clamp(30px,4vw,44px)}
+.trustbar{padding-block:clamp(28px,3.2vw,38px)}
 .claim--iconed{display:grid;gap:6px;justify-items:start}
 .claim__ic{width:34px;height:34px;display:grid;place-items:center;border-radius:var(--r-sm);
   background:rgba(255,255,255,.1);color:#fff;margin-bottom:2px}
@@ -1012,23 +1064,25 @@ fieldset.field:focus{outline:none}
 /* ------------------------------------------------- the software (section 9)
    `.ticks` is the page's existing checked-list; two columns where there is room,
    because six single-line points in one column is a long thin ladder. */
-.portal__points{margin-top:26px}
+.portal__points{margin-top:var(--gap-step)}
 @media(min-width:720px){.portal__points{grid-template-columns:1fr 1fr;column-gap:26px}}
-.portal__promise{margin-top:20px}
+.portal__promise{margin-top:var(--gap-card)}
 
 /* ---------------------------------------------------- case study (section 8)
    Text beside the reused close-out photograph. The stat chips are `.kpi`,
    already the page's figure component. */
-.casestudy{display:grid;gap:26px;margin-top:30px;align-items:center}
+.casestudy{display:grid;gap:clamp(18px,3vw,26px);margin-top:var(--gap-block);align-items:center}
 @media(min-width:900px){.casestudy{grid-template-columns:1.05fr .95fr;gap:40px}}
 .casestudy__body{display:grid;gap:22px;min-width:0}
 .casestudy__stats{gap:12px}
 .casestudy__photo{border-radius:var(--r-lg);overflow:hidden;aspect-ratio:4/3}
 
-.pricing__bands{margin-top:18px}
+.pricing__bands{margin-top:calc(var(--gap-card) + 4px)}
+/* One step from the band buttons, whichever presentation follows. */
+.pricing__plans{margin-top:var(--gap-step)}
 
 /* The store-count calculator. One control, and every price below follows it. */
-.pricing__calc{margin-top:26px;padding:18px 20px;border:1px solid var(--line);
+.pricing__calc{margin-top:var(--gap-step);padding:calc(var(--gap-pad) - 4px) calc(var(--gap-pad) - 2px);border:1px solid var(--line);
   border-radius:var(--r-lg);background:var(--paper)}
 .pricing__calc-top{display:flex;align-items:center;justify-content:space-between;
   gap:16px;flex-wrap:wrap}
@@ -1078,11 +1132,117 @@ fieldset.field:focus{outline:none}
 .pricing__notes li{padding-left:15px;position:relative}
 .pricing__notes li::before{content:"";position:absolute;left:0;top:.62em;width:5px;height:5px;
   border-radius:50%;background:var(--border)}
-.pkgfoot{display:grid;gap:16px;align-items:center;margin-top:26px;padding:20px 22px;
+.pkgfoot{display:grid;gap:16px;align-items:center;margin-top:var(--gap-step);padding:calc(var(--gap-pad) - 2px) var(--gap-pad);
   background:#fff;border:1px solid var(--border);border-radius:var(--r-lg)}
 @media(min-width:820px){.pkgfoot{grid-template-columns:1fr auto}}
 .pkgfoot p{margin:0;font-size:.82rem;color:var(--slate);line-height:1.6}
 .pkgfoot strong{color:var(--navy)}
+
+/* ------------------------------------- the plan comparison matrix (phones)
+   THREE STACKED CARDS ARE NOT A COMPARISON. On a phone the `.pkg` cards run
+   one per row, and the section measured 2294px at 390 and 2510px at 320 —
+   more than the whole desktop section — while a reader trying to answer "what
+   does Total Care add?" had to hold six bullets in their head and scroll past
+   a price to check. Below 768px the same PLANS/FEATURES/BANDS data renders as
+   a matrix instead: features down the left, the three plans across, one
+   screenful of rows a reader can run their eye along.
+
+   IT FITS WITHOUT SCROLLING ON MOST PHONES. `min-width` is 340px, which is
+   under the content box at 375px and above (343px at 375, 358px at 390,
+   390px at 430), so no scrollbar appears at all there. At 360 and 320 the
+   table scrolls sideways INSIDE `.pmx__scroll` only — the page body never
+   moves — and the feature column is sticky so the row stays named while the
+   plan columns pass under it.
+
+   AVAILABILITY IS NEVER COLOUR ALONE. An included cell is a tick glyph in a
+   ringed badge plus a visually-hidden "Included"; an excluded one is an em
+   dash plus "Not included". The Total Care tint and the "Most popular" pill
+   are emphasis on top of that, never the message itself. */
+.pmx{display:none}
+.pmx__scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
+  background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
+  /* `overflow-x:auto` alone clips the table's paint but still let its layout
+     width reach the document: at 320px, where the 340px table is the widest
+     thing on the page, `documentElement.scrollWidth` went to 332 and Chrome's
+     mobile layout viewport widened with it, so the whole page could be dragged
+     12px sideways. `contain:paint` keeps the overflow inside this box, which
+     is what the scroll container was for. Measured: 320px body scrollWidth
+     back to 320 with the table still scrolling normally inside it. */
+  contain:paint}
+.pmx__scroll:focus-visible{outline:3px solid var(--amber-strong);outline-offset:2px}
+.pmx__table{width:100%;min-width:340px;table-layout:fixed;border-collapse:separate;
+  border-spacing:0;font-size:.78rem;line-height:1.35}
+.pmx__table th,.pmx__table td{padding:8px 6px;text-align:center;vertical-align:middle;
+  border-top:1px solid var(--border-soft);overflow-wrap:break-word;hyphens:auto}
+.pmx__table thead th{border-top:0}
+/* The row header carries the feature name and stays put while the plan
+   columns scroll under it, so it needs an opaque background of its own. */
+.pmx__table th[scope=row]{width:29%;position:sticky;left:0;z-index:2;background:#fff;
+  text-align:left;padding-left:10px;border-right:1px solid var(--border);
+  font-family:var(--font-body);font-size:.76rem;font-weight:600;color:var(--navy);
+  hyphens:manual}
+.pmx__table td{width:23.667%;color:var(--slate)}
+.pmx__corner{position:sticky;left:0;z-index:3;width:29%;background:var(--cloud);
+  border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
+/* COLUMN GEOMETRY IS MEASURED, NOT GUESSED. "Administration" is the widest
+   unbreakable word in the table, and at 375px — the narrowest width the table
+   still fits without scrolling — a 24-column at .62rem left it 4px short, so
+   it broke as "Administratio/n". A sweep of label-column width (28-31%),
+   header size (.58-.62rem) and table min-width (340/348/356) at 430/390/375/
+   360/320 gives one combination that fits every plan name at every width AND
+   keeps 375, 390 and 430 free of any sideways scroll: 29% / .58rem / 340px.
+   The shorter alternatives all bought their 60px back by making 375 scroll. */
+.pmx__plan{width:23.667%;background:var(--cloud);border-bottom:1px solid var(--border);
+  padding:9px 3px;vertical-align:top;font-family:var(--font-display);font-size:.58rem;
+  font-weight:800;line-height:1.24;letter-spacing:-.012em;color:var(--navy)}
+.pmx__plan.is-match{background:var(--steel-soft)}
+.pmx__planname{display:block}
+.pmx__pop{display:inline-block;margin-top:5px;padding:3px 6px;border-radius:var(--r-pill);
+  background:var(--teal-text);color:#fff;font-family:var(--font-body);font-size:.56rem;
+  font-weight:700;letter-spacing:.02em;line-height:1.3;hyphens:none}
+/* The recommended column is tinted the whole way down so the eye can follow
+   it; every cell in it still states its own value in words. */
+.pmx__table td.is-match{background:rgba(230,245,246,.5)}
+.pmx__price{font-family:var(--font-display);font-size:1.02rem;font-weight:800;color:var(--navy)}
+.pmx__row--price td{padding-block:10px}
+.pmx .pkg__was{margin-left:4px;font-size:.74rem}
+.pmx__sub{display:block;font-family:var(--font-body);font-size:.68rem;font-weight:400;
+  color:var(--slate)}
+.pmx__row--total td strong{color:var(--navy);font-weight:700}
+/* Long prose in an 80px column: the sentence rows drop a step so they wrap to
+   fewer lines. Nothing is shortened — "One-off setup from £25/store + VAT."
+   is the card's sentence, verbatim. */
+.pmx__row--says td{font-size:.72rem;line-height:1.3}
+.pmx__yes{display:inline-grid;place-items:center;width:25px;height:25px;border-radius:50%;
+  background:var(--success-bg);color:var(--success)}
+.pmx__yes .ic{width:15px;height:15px}
+.pmx__no{display:inline-block;font-size:1rem;font-weight:700;color:var(--slate)}
+.pmx__mark{padding-block:6px}
+.pmx__foot{margin:10px 0 0;font-size:.76rem;line-height:1.45;color:var(--slate)}
+.pmx__foot strong{color:var(--navy)}
+@media (max-width:767px){
+  .pkgs{display:none}
+  .pmx{display:block}
+}
+/* Between a large phone and the card breakpoint the table has 560-720px to
+   work with, so the type that a 356px column forced down comes back up. */
+@media (min-width:601px) and (max-width:767px){
+  .pmx__table{font-size:.86rem}
+  .pmx__table th,.pmx__table td{padding:10px 10px}
+  .pmx__table th[scope=row]{font-size:.85rem;padding-left:14px}
+  .pmx__plan{font-size:.82rem;padding:12px 10px}
+  .pmx__pop{font-size:.66rem;padding:3px 9px}
+  .pmx__price{font-size:1.15rem}
+  .pmx__row--says td{font-size:.82rem}
+  .pmx__sub{font-size:.76rem}
+}
+@media (max-width:374px){
+  .pmx__table{font-size:.74rem}
+  .pmx__table th,.pmx__table td{padding:7px 5px}
+  .pmx__table th[scope=row]{font-size:.73rem;padding-left:9px}
+  .pmx__plan{padding:9px 3px}
+  .pmx__price{font-size:.95rem}
+}
 
 /* ------------------------------------------------------------ calculator */
 .calc{display:grid;gap:26px}
@@ -1139,7 +1299,7 @@ fieldset.field:focus{outline:none}
    Six icon cards. `.sectors` — the photo-tile grid these replace — is gone with
    its section; `.tile` below stays, because the trade thumbnails in section 4
    are the same component. */
-.whogrid{list-style:none;display:grid;gap:14px;margin-top:30px;
+.whogrid{list-style:none;display:grid;gap:var(--gap-card);margin-top:var(--gap-block);
   grid-template-columns:repeat(auto-fit,minmax(232px,1fr))}
 /* The card now leads with its approved photograph, so the padding moves off the
    card and onto the body — a 22px inset would leave a white gutter around a
@@ -1147,27 +1307,27 @@ fieldset.field:focus{outline:none}
 .whocard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
   display:grid;gap:0;align-content:start;overflow:hidden}
 .whocard__photo{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}
-.whocard__body{padding:20px 22px 22px;display:grid;gap:9px;align-content:start}
-.whocard__ic{width:40px;height:40px;display:grid;place-items:center;border-radius:var(--r-sm);
+.whocard__body{padding:calc(var(--gap-pad) - 2px) var(--gap-pad) var(--gap-pad);display:grid;gap:9px;align-content:start}
+.whocard__ic{width:var(--ic-card);height:var(--ic-card);display:grid;place-items:center;border-radius:var(--r-sm);
   background:var(--steel-soft);color:var(--steel)}
 .whocard__ic .ic{width:22px;height:22px}
 .whocard h3{font-size:1rem;margin:0}
 .whocard p{margin:0;font-size:.87rem;color:var(--slate)}
-.whogrid__note{margin-top:20px}
+.whogrid__note{margin-top:max(14px,calc(var(--gap-block) - 10px))}
 /* ------------------------------------------------ what we offer (section 4)
    Five service cards, then the trade strip. Both were interactive components
    with detail panels; neither is now, so `.tile--static` drops the affordances
    `.tile` carries for a button it no longer is. */
-.offergrid{list-style:none;display:grid;gap:14px;margin-top:30px;
+.offergrid{list-style:none;display:grid;gap:var(--gap-card);margin-top:var(--gap-block);
   grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
 .offercard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
-  padding:22px;display:grid;gap:9px;align-content:start}
-.offercard__ic{width:40px;height:40px;display:grid;place-items:center;border-radius:var(--r-sm);
+  padding:var(--gap-pad);display:grid;gap:9px;align-content:start}
+.offercard__ic{width:var(--ic-card);height:var(--ic-card);display:grid;place-items:center;border-radius:var(--r-sm);
   background:var(--amber-soft);color:var(--amber-strong)}
 .offercard__ic .ic{width:22px;height:22px}
 .offercard h3{font-size:1rem;margin:0}
 .offercard p{margin:0;font-size:.87rem;color:var(--slate)}
-.faults{margin-top:34px}
+.faults{margin-top:calc(var(--gap-block) + 4px)}
 .faults__title{font-size:var(--fs-h3);margin:0 0 14px}
 .faults__row{list-style:none;display:grid;gap:10px;
   grid-template-columns:repeat(auto-fit,minmax(124px,1fr))}
@@ -1180,7 +1340,7 @@ fieldset.field:focus{outline:none}
 .tile::after{content:"";position:absolute;inset:auto 0 0;height:60%;z-index:4;background:linear-gradient(to top,rgba(6,20,34,.94),rgba(6,20,34,.3) 60%,transparent)}
 .tile__cap{position:absolute;inset:auto 0 0;z-index:5;display:grid;justify-items:center;gap:6px;padding:15px 11px;color:#fff;font-size:.82rem;font-weight:600;text-align:center;text-shadow:0 1px 8px rgba(4,15,26,.6)}
 .tile[aria-pressed=true]{outline:3px solid var(--amber);outline-offset:-3px}
-.sectordetail{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:24px;margin-top:18px;display:grid;gap:16px}
+.sectordetail{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:24px;margin-top:calc(var(--gap-card) + 4px);display:grid;gap:16px}
 @media(min-width:820px){.sectordetail{grid-template-columns:1.1fr 1fr;gap:32px}}
 
 /* -------------------------------------------------------------- coverage */
@@ -1242,7 +1402,7 @@ fieldset.field:focus{outline:none}
 /* the form card is light, so its own text stays dark */
 .finalcta .stepform,.finalcta .stepform h2,.finalcta .stepform h3{color:var(--charcoal)}
 .finalcta .stepform .lbl,.finalcta .stepform label{color:var(--navy)}
-.finalcta__inner{position:relative;z-index:1;display:grid;gap:34px}
+.finalcta__inner{position:relative;z-index:1;display:grid;gap:clamp(22px,4vw,34px)}
 @media(min-width:980px){.finalcta__inner{grid-template-columns:1fr 1fr;gap:52px;align-items:start}}
 .stepform{background:#fff;border-radius:var(--r-lg);padding:clamp(20px,3vw,28px);color:var(--charcoal)}
 .stepform__bar{display:flex;gap:6px;margin-bottom:18px}
@@ -1268,8 +1428,8 @@ fieldset.field:focus{outline:none}
 .consent input{width:19px;height:19px;margin:2px 0 0;accent-color:var(--steel);flex:none}
 
 /* ---------------------------------------------------------------- footer */
-.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:60px 22px;font-size:.87rem}
-.ftr__grid{display:grid;gap:28px}
+.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) 20px;font-size:.87rem}
+.ftr__grid{display:grid;gap:clamp(20px,4vw,28px)}
 @media(min-width:780px){.ftr__grid{grid-template-columns:1.7fr repeat(3,1fr) 1.2fr}}
 .ftr__brand p{max-width:34ch;margin:15px 0;font-size:.83rem}
 .ftr__social{display:flex;gap:10px}
@@ -1281,7 +1441,11 @@ fieldset.field:focus{outline:none}
 .ftr a,.ftr span.li{display:inline-flex;align-items:center;gap:9px;min-height:26px;color:#AABEC7;text-decoration:none}
 .ftr ul{gap:6px}
 .ftr a:hover{color:var(--amber)}
-.ftr__legal{margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);font-size:.75rem;color:#83979F;display:grid;gap:11px}
+/* The contact column carries two headings. The second sat directly on the
+   line above it at every width — a heading needs air over it more than the
+   page needs the 18px back. */
+.ftr__h3--legal{margin-top:18px}
+.ftr__legal{margin-top:clamp(24px,5vw,40px);padding-top:20px;border-top:1px solid rgba(255,255,255,.12);font-size:.75rem;color:#83979F;display:grid;gap:11px}
 @media(min-width:780px){.ftr__legal{grid-template-columns:1fr auto;align-items:center}}
 .ftr__legal p{margin:0}
 
@@ -1312,19 +1476,43 @@ fieldset.field:focus{outline:none}
    ========================================================================== */
 @media (max-width: 900px){
   /* stop the two floating buttons colliding with content or each other */
-  .totop{right:14px;bottom:14px;width:44px;height:44px}
+  /* Nearer the edge and down to the 44px minimum, but the bottom clearance is
+     the base rule's — one number, one reason, at every width. */
+  .totop{right:max(14px,env(safe-area-inset-right));width:44px;height:44px}
   .slotbtn{left:14px;bottom:14px;padding:9px 13px;font-size:.74rem}
   .toasts{right:14px;bottom:70px}
 }
 @media (max-width: 620px){
-  :root{--section-y:clamp(46px,9vw,64px)}
+  /* THE PAGE IS LONG ON A PHONE BECAUSE OF SPACING, NOT CONTENT.
+     Measured on the deployed page: 17426px at 390 and 18010px at 320 against
+     12193px at 1440, and the sections that more than doubled — #sectors 2598,
+     #services 2238, #pricing 2294 — did it by keeping desktop's 30px block
+     steps, 14px card gaps and 22px card padding while every card went
+     full-width and one-per-row. Nothing here removes anything: the same
+     headings, copy, features, prices and CTAs render, at a step size that
+     suits a 358px column instead of a 1320px one.
+     Backed off deliberately: `--gap-block` stops at 20px rather than 16, and
+     section padding at 40px rather than 32, because below those the section
+     boundaries stopped reading as boundaries. */
+  :root{--section-y:clamp(40px,8vw,56px);--gap-block:20px;--gap-step:18px;--gap-card:10px;--gap-pad:16px;--ic-card:36px}
   .hero__inner{padding-block:34px 40px;gap:30px}
   .hero__title{letter-spacing:-.02em}
   .hero__pills{gap:12px 18px;margin:16px 0}
   .hero__actions{gap:10px}
   .hero__actions .btn{width:100%}
   .hero__live{padding:11px 13px}
-  .qj{padding:20px;border-radius:var(--r-md)}
+  .qj{padding:17px;border-radius:var(--r-md)}
+  .qj__head{margin-bottom:14px}
+  .qj__form{gap:10px}
+  .field{gap:5px}
+  .stepform__grid{gap:11px}
+  .stepform__bar{margin-bottom:14px}
+  .stepform__nav{margin-top:14px}
+  /* C5 — the store-count control loses its slack, not its targets: the
+     slider's own 26px box and the 44px floor on labels and buttons are
+     untouched. */
+  .pricing__calc-top{gap:10px}
+  .pricing__slider{margin:10px 0 4px}
   /* single-column stats so numbers never wrap mid-word */
   .calc__grid{grid-template-columns:1fr}
   .regionstats{grid-template-columns:1fr}
@@ -1339,7 +1527,19 @@ fieldset.field:focus{outline:none}
   .wf__ctl .btn{flex:1 1 auto}
   .stepform__nav{flex-wrap:wrap}
   .stepform__nav .btn{flex:1 1 auto;margin-left:0!important}
-  .ftr{padding-block:44px 20px}
+  /* THE FOOTER WAS 1345px ON A PHONE — 8% of the page — because every link
+     is a 44px touch target and all twenty of them were in one column. Two
+     columns keeps every target at 44px and halves the rows. Nothing is
+     dropped: the same five groups, the same links, in the same order.
+     `minmax(130px,1fr)` rather than `1fr 1fr` so the contact lines, which are
+     an icon plus a phone number or an address, keep a whole row to
+     themselves when they cannot fit a half one. */
+  .ftr{padding-block:34px 16px}
+  .ftr ul{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px 14px}
+  .ftr h3{margin-bottom:11px}
+  /* The opening hours are a whole sentence with an icon; they take the full
+     row rather than being squeezed into half of one. */
+  .ftr li:has(.ftr__hours){grid-column:1/-1}
   .ctaband__inner{padding-block:28px}
   .ctaband .btn{width:100%}
   .cookie__act .btn{flex:1 1 auto}

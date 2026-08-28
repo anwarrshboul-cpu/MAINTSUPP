@@ -155,9 +155,48 @@ test("the drawer opens from the left edge and locks the page without shifting it
   assert.match(chrome, /destination\.scrollIntoView\(\{ behavior: reduced \? "auto" : "smooth", block: "start" \}\);/);
   assert.match(chrome, /event\.key === "Escape"/);
   assert.match(chrome, /event\.shiftKey && document\.activeElement === first/);
-  for (const item of ["Report a Job", "Portal Login", "Services", "How It Works", "Pricing", "Case Study", "Book a Portfolio Review"]) {
+  for (const item of ["Report a Job", "Portal Login", "Services", "How It Works", "Pricing", "Case Study", "Contact Us", "Book a Portfolio Review"]) {
     assert.ok(chrome.includes(item), `drawer item missing: ${item}`);
   }
+});
+
+test("Contact Us is in both navs, and both send you to the section the footer already calls Contact", async () => {
+  /*
+   * One list feeds both bars, so the only way "Contact Us" can be in the
+   * desktop nav and missing from the drawer — the failure this pins — is for
+   * somebody to stop rendering NAV in one of them. Both halves are asserted.
+   *
+   * `#review` is not a new destination. The footer's own "Contact" link has
+   * always pointed there, and `#review` is the Book a Portfolio Review section,
+   * whose form asks for name, company, email and phone. No phone number, email
+   * or address was invented for this link.
+   */
+  const chrome = await read("app/(marketing)/_sections/chrome.tsx");
+  const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
+  assert.match(nav, /\["#review", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
+
+  const order = [...nav.matchAll(/\["#[a-z-]+", "([^"]+)"\]/g)].map((match) => match[1]);
+  assert.deepEqual(order, ["Services", "How It Works", "Pricing", "Case Study", "Contact Us"]);
+
+  /* Desktop: the list renders into .nav__list, and Portal Login follows it. */
+  assert.match(chrome, /<nav className="nav" aria-label="Primary">[\s\S]*?NAV\.map/, "the desktop bar renders NAV");
+  assert.ok(
+    chrome.indexOf('className="nav" aria-label="Primary"') < chrome.indexOf('className="nav__link hdr__login"'),
+    "Portal Login comes after the section links",
+  );
+
+  /* Drawer: the same list, the same close-then-go handler as its siblings, and
+     it sits above the Book a Portfolio Review button. */
+  assert.match(chrome, /<nav aria-label="Mobile">[\s\S]*?NAV\.map[\s\S]*?<a href=\{href\} onClick=\{onDrawerLink\}>/);
+  assert.ok(
+    chrome.indexOf('aria-label="Mobile"') < chrome.lastIndexOf('href="#review" onClick={onDrawerLink}'),
+    "the section links precede the CTA in the drawer",
+  );
+
+  /* And the destination exists — the same anchor the footer uses. */
+  assert.match(chrome, /<a href="#review">Contact<\/a>/, "the footer convention this reuses");
+  const finalCta = await read("app/(marketing)/_sections/final-cta.tsx");
+  assert.match(finalCta, /<section className="section finalcta" id="review">/, "#review is a real section");
 });
 
 test("the pricing band buttons do not move under the thumb that pressed them", async () => {
