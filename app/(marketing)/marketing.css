@@ -428,6 +428,10 @@
   --border:#DEE5E9;--border-soft:#EDF1F4;
   --success:#1E7A4E;--success-bg:#E7F4EC;--warning:#8A5A00;--warning-bg:#FBF2E0;
   --critical:#A82A1C;--critical-bg:#FBEBE9;--info:#077E85;--info-bg:#E6F5F6;--muted-bg:#EFF2F4;
+  /* Marketing accent, not a status. Same red as `--critical` today; declared
+     separately so changing what an error looks like cannot silently repaint a
+     heading, and vice versa. Used by the How it works stage keyword. */
+  --stage-accent:#A82A1C;
   --font-display:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
   --fs-h1:clamp(2.3rem,1.3rem + 3.9vw,4.05rem);
@@ -636,6 +640,17 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .hdr__login,.hdr__report{display:none}
 @media(min-width:1120px){.nav{display:block}.burger{display:none}
   .hdr__login,.hdr__report{display:inline-flex}}
+/* WHITE ON WHITE. `btn--outline` is the hero's button: `color:#fff` with a
+   half-opaque white border, drawn to sit on a dark photograph. The header is
+   `background:#fff` in every state, so on this bar the label and its border
+   were invisible — the button occupied 121px of a row that was fighting for
+   space and showed nothing, and a reader could only find it by hovering.
+   Overridden here rather than in `btn--outline`, which is correct where it is
+   used on the hero. The colours are the ones `.burger` and `.drawer__close`
+   already use on this bar, so it reads as part of the set. */
+.hdr__report{color:var(--navy);border-color:var(--border);background:#fff}
+.hdr__report:hover{background:var(--cloud);border-color:var(--steel-mid);color:var(--navy)}
+.hdr__report:active{background:var(--border-soft)}
 /* Below the nav breakpoint the menu button leads on the left, ahead of the
    logo — thumb-reachable and the first thing in the tab order. display:contents
    lifts the action buttons into the header's own flex row so they can be
@@ -939,7 +954,14 @@ fieldset.field:focus{outline:none}
 .wf__body{padding:clamp(20px,3vw,30px)}
 .wf__title{font-size:var(--fs-h3);margin:12px 0 .7rem;max-width:40ch}
 /* Only the stage's name is red; the explanation after the dash stays navy. */
-.wf__stage-name{color:var(--critical)}
+/* The stage keyword's red, as its own token. It carried `--critical` before,
+   which is the colour the site uses for an invalid field, a required marker
+   and the pain column of the comparison table — borrowed because the value
+   matched, not because the meaning did. A marketing accent that reads as an
+   error state is a token misuse waiting to be "fixed" by someone tuning error
+   colours. Same value, so nothing looks different; separate name, so the two
+   can move apart. */
+.wf__stage-name{color:var(--stage-accent)}
 .wf__meta{display:grid;gap:13px;margin-top:20px}
 @media(min-width:620px){.wf__meta{grid-template-columns:1fr 1fr}}
 .wf__meta div{background:var(--cloud);border-radius:var(--r-md);padding:14px}

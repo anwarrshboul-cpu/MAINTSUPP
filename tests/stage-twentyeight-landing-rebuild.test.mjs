@@ -43,6 +43,11 @@ const ANCHORS = [
   "portal",
   "trust",
   "review",
+  /* Not a twelfth section — a second name for the eleventh. `#contact` is on
+     the final CTA's inner wrapper so that "Contact Us" in the nav lands on the
+     page's only form that asks who you are, without renaming the anchor the
+     "Book a Portfolio Review" buttons have always used. */
+  "contact",
 ];
 
 test("the page is eleven sections, in the v2 order, each exactly once", async () => {
@@ -656,10 +661,24 @@ test("every nav anchor names a section that exists", async () => {
   const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
   const targets = [...nav.matchAll(/\["#([a-z-]+)"/g)].map((match) => match[1]);
   assert.ok(targets.length >= 5, "four in-page destinations from the brief, plus Contact Us");
-  assert.ok(targets.includes("review"), "Contact Us points at the section the footer calls Contact");
+  assert.ok(targets.includes("contact"), "Contact Us points at #contact");
   for (const target of targets) {
     assert.ok(ANCHORS.includes(target), `#${target} has no section`);
   }
+
+  /* And `#contact` is a real element, not a name in a list. It lives on the
+     final CTA's inner wrapper, alongside the section's own `#review`, so both
+     the nav item and every existing Book-a-Portfolio-Review link resolve. */
+  const cta = await read("app/(marketing)/_sections/final-cta.tsx");
+  assert.match(cta, /id="contact"/, "#contact must exist in the markup");
+  assert.match(cta, /<section className="section finalcta" id="review">/, "#review must still resolve");
+  /* The footer's own Contact link moves with the nav; the CTA buttons do not. */
+  const chromeSrc = await read("app/(marketing)/_sections/chrome.tsx");
+  assert.match(chromeSrc, /<li><a href="#contact">Contact<\/a><\/li>/);
+  assert.ok(
+    (chromeSrc.match(/href="#review"/g) ?? []).length >= 2,
+    "the header and drawer Book a Portfolio Review buttons still point at #review",
+  );
 });
 
 test("the footer carries the legal line verbatim", async () => {

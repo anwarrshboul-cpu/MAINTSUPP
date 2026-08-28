@@ -124,7 +124,7 @@ test("the stage list is gone and only the stage name is red", async () => {
   const css = await read("app/(marketing)/marketing.css");
   assert.ok(!css.includes(".wf__steps"), "the list's styles went with it");
   assert.ok(!/\.wf\{[^}]*grid-template-columns/.test(css), "no second column is reserved");
-  assert.match(css, /\.wf__stage-name\{color:var\(--critical\)\}/, "red is the page's critical token");
+  assert.match(css, /\.wf__stage-name\{color:var\(--stage-accent\)\}/, "red is the marketing accent, not the status token");
 });
 
 test("the drawer opens from the left edge and locks the page without shifting it", async () => {
@@ -302,14 +302,16 @@ test("Contact Us is in both navs, and both send you to the section the footer al
    * desktop nav and missing from the drawer — the failure this pins — is for
    * somebody to stop rendering NAV in one of them. Both halves are asserted.
    *
-   * `#review` is not a new destination. The footer's own "Contact" link has
-   * always pointed there, and `#review` is the Book a Portfolio Review section,
-   * whose form asks for name, company, email and phone. No phone number, email
-   * or address was invented for this link.
+   * `#contact` is not a new place. It is a second name on the final CTA — the
+   * section the footer's own "Contact" link has always pointed at, whose form
+   * asks for name, company, email and phone. It used to be linked as
+   * `#review`, which worked but read as a mistake: a nav item called Contact
+   * Us landing on an anchor called review. No phone number, email or address
+   * was invented for this link.
    */
   const chrome = await read("app/(marketing)/_sections/chrome.tsx");
   const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
-  assert.match(nav, /\["#review", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
+  assert.match(nav, /\["#contact", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
 
   const order = [...nav.matchAll(/\["#[a-z-]+", "([^"]+)"\]/g)].map((match) => match[1]);
   assert.deepEqual(order, ["Services", "How It Works", "Pricing", "Case Study", "Contact Us"]);
@@ -329,10 +331,16 @@ test("Contact Us is in both navs, and both send you to the section the footer al
     "the section links precede the CTA in the drawer",
   );
 
-  /* And the destination exists — the same anchor the footer uses. */
-  assert.match(chrome, /<a href="#review">Contact<\/a>/, "the footer convention this reuses");
+  /* And the destination exists — the same anchor the footer uses. The footer's
+     Contact link moved with the nav, so both now say `#contact`. */
+  assert.match(chrome, /<a href="#contact">Contact<\/a>/, "the footer convention this reuses");
   const finalCta = await read("app/(marketing)/_sections/final-cta.tsx");
-  assert.match(finalCta, /<section className="section finalcta" id="review">/, "#review is a real section");
+  assert.match(finalCta, /<section className="section finalcta" id="review">/, "#review is still a real section");
+  assert.match(finalCta, /className="wrap finalcta__inner" id="contact"/, "#contact names the same place");
+  /* The copy has to earn the nav item: a reader who clicked Contact Us must
+     not land under a heading that only offers a portfolio review. */
+  assert.match(finalCta, /Contact us or book a portfolio review/);
+  assert.match(finalCta, /Or use the\s+same form to tell us what you need\./);
 });
 
 test("the pricing band buttons do not move under the thumb that pressed them", async () => {

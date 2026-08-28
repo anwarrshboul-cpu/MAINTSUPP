@@ -34,19 +34,22 @@ import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } fr
  * desktop bar: a phone menu that lists more destinations than the desktop nav
  * was never a decision anybody made.
  *
- * "Contact Us" points at `#review`, the Book a Portfolio Review section, which
- * is where the footer's own "Contact" link has always gone. That section is the
- * page's contact form — name, company, email, phone — so it is the destination
- * a reader looking for "contact us" actually wants. No new phone number, email
- * or address is invented here: the ones the site already publishes live in the
- * utility bar and the footer.
+ * "Contact Us" points at `#contact`, which names the same section the footer's
+ * "Contact" link has always gone to — the page's only form that asks who you
+ * are and how to reach you. It used to point at `#review`, the anchor the
+ * "Book a Portfolio Review" buttons use; that worked, but a nav item called
+ * Contact Us landing on an anchor called review, under a heading that only
+ * offered a portfolio review, read as a mistake. The section now carries both
+ * names and says both things, so every existing link still resolves. No new
+ * phone number, email or address is invented here: the ones the site already
+ * publishes live in the utility bar and the footer.
  */
 const NAV = [
   ["#services", "Services"],
   ["#how", "How It Works"],
   ["#pricing", "Pricing"],
   ["#case-study", "Case Study"],
-  ["#review", "Contact Us"],
+  ["#contact", "Contact Us"],
 ] as const;
 
 function Ic({ d, size = "ic--sm" }: { d: string; size?: string }) {
@@ -424,7 +427,7 @@ export function SiteFooter() {
                 site is selling to, and a contractor looking for work is not
                 that reader. */}
             <li><Link href="/contractors">Join our contractor network</Link></li>
-            <li><a href="#review">Contact</a></li>
+            <li><a href="#contact">Contact</a></li>
           </ul>
         </div>
 

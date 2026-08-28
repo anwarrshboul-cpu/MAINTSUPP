@@ -148,13 +148,29 @@ test("only the stage name carries the accent colour", async () => {
     /<span className="wf__stage-name">\{stage\.name\}<\/span> — \{stage\.heading\}/,
   );
 
-  /* And `wf__stage-name` is the only workflow rule that reaches for the
-     critical token — colouring `.wf__title` would paint the whole line. */
+  /* And `wf__stage-name` is the only workflow rule that reaches for the accent
+     — colouring `.wf__title` would paint the whole line. */
   const css = await read("app/(marketing)/marketing.css");
   const reddened = [...css.matchAll(/(^|\n)(\.wf[\w-]*)\{([^}]*)\}/g)]
-    .filter(([, , , body]) => body.includes("var(--critical)"))
+    .filter(([, , , body]) => /var\(--(stage-accent|critical)\)/.test(body))
     .map(([, , selector]) => selector);
   assert.deepEqual(reddened, [".wf__stage-name"], "something else in the stepper is red");
+
+  /* And the accent it reaches for is the marketing one, not the status one.
+     `--critical` is what an invalid field, a required marker and the pain
+     column of the comparison table are painted with; the stage keyword
+     borrowed it because the value matched, not because the meaning did. Same
+     colour, separate token, so tuning error red cannot repaint a heading. */
+  assert.match(css, /\.wf__stage-name\{color:var\(--stage-accent\)\}/);
+  assert.doesNotMatch(
+    css,
+    /\.wf__stage-name\{color:var\(--critical\)\}/,
+    "the stage keyword must not carry the status token",
+  );
+  assert.match(css, /--stage-accent:#A82A1C/, "declared, and the same red as before");
+  /* The status token keeps its own value and its own users. */
+  assert.match(css, /--critical:#A82A1C/);
+  assert.match(css, /\.field__err\{[^}]*color:var\(--critical\)/, "errors still use the status token");
 });
 
 test("all seven workflow stages survive, each with its own approved photograph", async () => {
