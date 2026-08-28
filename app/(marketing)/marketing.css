@@ -619,7 +619,13 @@ body.slots-enabled .slotbtn{display:inline-flex}
    to the gap rather than to the button. So the label shortens here exactly as
    it does on a phone, and the `aria-label` on the link keeps the spoken name
    "Book a Portfolio Review" at every width. */
-@media(min-width:1120px) and (max-width:1179px){.cta-long{display:none}.cta-short{display:inline}}
+/* The band ends at 1219, not 1179. Restoring the long label at 1180 handed
+   the row back 72px it did not have, and `Report a Job` — the next piece to
+   give — folded to two lines from 1180 to 1213. The button that shortens is
+   the one whose full name survives in its `aria-label`; the other would just
+   be a wrapped label. Measured on the deployed build, not resized into: a
+   resize leaves the header laid out at its previous width. */
+@media(min-width:1120px) and (max-width:1219px){.cta-long{display:none}.cta-short{display:inline}}
 @media(max-width:500px){.hdr__cta{display:none}.hdr__inner{gap:12px}}
 @media(max-width:360px){.logo__text em{display:none}.logo__text strong{font-size:1.12rem}}
 /* Portal Login and Report a Job ride with the nav.
