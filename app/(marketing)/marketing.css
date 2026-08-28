@@ -1522,18 +1522,21 @@ fieldset.field:focus{outline:none}
    at 430/390/375, 233 at 360, 253 at 320 — on a page 16,300–17,100px tall,
    1.3% of it. A control you had to catch rather than one you could use.
 
-   280px is that same guarantee with a window worth having. Measured after:
-   406px at 375, 447 at 320, and identical with the cookie banner up or
-   dismissed — 1.9x, and about two thirds of a short phone's viewport rather
-   than a third. It costs the footer +16.5% at 320 and +17.0% at 360, all of
-   it navy below the copyright line: no link, no line and no control moves,
-   because every one of them sits above this padding.
+   The window is bought one-for-one: every extra pixel of lane is a pixel of
+   empty navy at the end of the page. 280px was tried and is too much. At
+   320x568 it is 49% of the viewport — the copyright sits at the top of the
+   screen and the rest is a blank field with one circle floating in it — and
+   at 1440 it is worse, because it is a 280px band running the full width
+   under a line of text that ends at 320px. Reviewed against a screenshot,
+   that reads as a page that failed to finish rather than as the end of one.
 
-   Why 280 and not more. The window is bought one-for-one — every extra pixel
-   of lane is a pixel of empty navy at the end of the page — and at 320x568,
-   the shortest phone in the sweep, 280px is 49% of the viewport. Past half
-   the screen the band stops reading as the end of a page and starts reading
-   as a page that failed to finish; 330px was tried and looked it.
+   So the lane is split. A phone gets 200px, which keeps most of the reach —
+   the window still roughly doubles — for 35% of a 568px viewport rather than
+   half. Wider screens get 140px, comfortably clear of the button's 66px
+   reach: the desktop reader has a mouse, a shorter page and no cookie banner
+   under their thumb, so the window matters less there and the dead band
+   costs more. No link, line or control moves at either size, because every
+   one of them sits above this padding.
 
    `--cookie-lane` again, and it is what keeps the button reachable on a first
    visit. Lifting the button over the cookie banner also raises the point at
@@ -1544,7 +1547,7 @@ fieldset.field:focus{outline:none}
    measures the two states within a pixel of each other. The extra padding
    costs nothing to look at, because while it exists the banner is sitting on
    top of it. */
-.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(280px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));font-size:.87rem}
+.ftr{background:var(--navy-deep);color:#AABEC7;padding-block:clamp(40px,3.4vw,50px) calc(140px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));font-size:.87rem}
 .ftr__grid{display:grid;gap:clamp(20px,4vw,28px)}
 @media(min-width:780px){.ftr__grid{grid-template-columns:1.7fr repeat(3,1fr) 1.2fr}}
 .ftr__brand p{max-width:34ch;margin:15px 0;font-size:.83rem}
@@ -1653,7 +1656,7 @@ fieldset.field:focus{outline:none}
      the back-to-top button's lane: `16px` here quietly cancelled the base
      rule and left the button clearing the copyright line only by accident,
      on the height the three legal paragraphs happen to wrap to. */
-  .ftr{padding-block:34px calc(280px + var(--cookie-lane,0px) + env(safe-area-inset-bottom))}
+  .ftr{padding-block:34px calc(200px + var(--cookie-lane,0px) + env(safe-area-inset-bottom))}
   .ftr ul{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px 14px}
   .ftr h3{margin-bottom:11px}
   /* The opening hours are a whole sentence with an icon; they take the full
@@ -1687,7 +1690,12 @@ fieldset.field:focus{outline:none}
      scrolls sideways inside itself instead of pushing the page wide. Overflow
      also clips, and the page's focus ring is 3px at a 2px offset — hence the
      5px of block padding, taken back out of the margins so nothing moves. */
-  .tabs{flex-wrap:nowrap;overflow-x:auto;gap:6px;padding-block:5px;margin-top:-5px;margin-bottom:calc(var(--gap-card) - 5px)}
+  /* The inline padding is the focus ring's, not the layout's. `overflow-x`
+     clips on both axes, and the first pill's left edge sits flush with the
+     strip's, so a 3px ring came out cut flat down its left side. Four pixels
+     each side, pulled straight back out with a negative margin, so nothing
+     moves but the ring has somewhere to land. */
+  .tabs{flex-wrap:nowrap;overflow-x:auto;gap:6px;padding-block:5px;padding-inline:4px;margin-top:-5px;margin-inline:-4px;margin-bottom:calc(var(--gap-card) - 5px)}
   .tabs button{padding:10px clamp(8px,2.4vw,15px);font-size:.76rem;white-space:nowrap}
   .tabs button .ic{display:none}
   .switcher{width:100%}

@@ -267,18 +267,29 @@ test("back-to-top is bounded by the page, not by a scroll percentage", async () 
      for is the legal block's height plus this padding minus the button's own
      reach, which measured 213px at 430/390/375, 233 at 360 and 253 at 320 —
      1.3% of a page 16,300–17,100px tall, a control you had to catch rather
-     than one you could use. 280px is the same guarantee with a window worth
-     having: measured after, 406px at 375 and 447 at 320, 1.9x, for a footer
-     +16.5% at 320. Every link, line and control sits above this padding, so
-     the whole cost is navy below the copyright line — and 280 is where that
-     band stops, at 49% of a 320x568 viewport, because it is bought pixel for
-     pixel and past half a screen it reads as a page that did not finish. */
-  const lane = /padding-block:(?:clamp\(40px,3\.4vw,50px\)|34px) calc\(280px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/;
-  assert.match(ruleFor(css, ".ftr{"), lane);
+     than one you could use. The window is bought pixel for pixel, so every
+     pixel of lane is a pixel of empty navy at the end of the page, and the
+     two ends of the site want different answers. 280px everywhere was tried
+     and rejected on a screenshot: 49% of a 320x568 viewport, and at 1440 a
+     full-width band under a line of text ending at 320px. A phone keeps 200,
+     which still roughly doubles the window for 35% of that viewport; wider
+     screens take 140, clear of the button's 66px reach, because a desktop
+     reader has a mouse, a shorter page and no cookie banner under their
+     thumb. Every link, line and control sits above this padding at both
+     sizes, so the whole cost is navy below the copyright line. */
+  const DESKTOP_LANE = /padding-block:clamp\(40px,3\.4vw,50px\) calc\(140px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/;
+  const PHONE_LANE = /padding-block:34px calc\(200px \+ var\(--cookie-lane,0px\) \+ env\(safe-area-inset-bottom\)\)/;
+  assert.match(ruleFor(css, ".ftr{"), DESKTOP_LANE);
   /* And the phone override must not quietly cancel it — it did, with `16px`,
      which left the button clearing the copyright line only by the accident of
-     how tall the legal paragraphs happen to wrap. */
-  assert.equal((css.match(new RegExp(lane, "g")) ?? []).length, 2, "base rule and the max-width:620px override");
+     how tall the legal paragraphs happen to wrap. Both ends are pinned, so
+     neither can be dropped or silently equalised. */
+  assert.equal((css.match(new RegExp(DESKTOP_LANE, "g")) ?? []).length, 1, "the base rule carries the desktop lane");
+  assert.equal((css.match(new RegExp(PHONE_LANE, "g")) ?? []).length, 1, "the max-width:620px override carries the phone lane");
+  /* Both must clear the button's reach, or it parks on the copyright line. */
+  for (const [label, px] of [["desktop", 140], ["phone", 200]]) {
+    assert.ok(px > 66, `${label} lane must exceed the button's 66px reach`);
+  }
 
   /* Navy on --navy-deep was 1.10:1. The button only ever appears over the
      footer now, so it has to read against it. */
