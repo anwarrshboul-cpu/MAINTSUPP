@@ -688,16 +688,105 @@ body.slots-enabled .slotbtn{display:inline-flex}
 
 /* ------------------------------------------------------------------ hero */
 .hero{position:relative;background:var(--navy-ink);color:#fff;overflow:hidden}
-.hero__media{position:absolute;inset:0}
+/* The sky the photograph's own sky comes out of — see the band note below.
+   Sampled off the approved file: its top row averages rgb(17,58,101), so the
+   gradient ends there and the two skies meet as one. */
+.hero__media{position:absolute;inset:0;
+  background:linear-gradient(180deg,#03121C 0%,#061A2B 30%,#0A2740 64%,#113A65 100%)}
 .hero__media .ph{position:absolute;inset:0;background:none}
+
+/* ── THE PHOTOGRAPH IS A BAND ACROSS THE HERO, NOT A FILL OF IT ───────────
+   The approved photograph is 1916x821 — 2.33:1 — and the hero is 1.62:1 at
+   1440 (889px tall) and 0.33:1 at 320 (977px tall). `object-fit:cover` on a
+   box that shape scales the picture by its HEIGHT and pushes the width out
+   over both sides. Measured in the browser before this rule existed: 69.4% of
+   the picture's width survived at 1440, 52.7% at 1024, 42.5% at 768, 20.0% at
+   390 and 14.0% at 320 — a middle strip of skyline, with the two engineers
+   and the plant panel cut off the left edge and the access platform cut off
+   the right at EVERY width. That is the complaint this answers.
+
+   So the picture is not asked to fill the hero. It is laid across the full
+   width at its own aspect ratio and anchored to the bottom, where its subject
+   is. Nothing is cropped and nothing is stretched: the panel, both engineers,
+   the whole skyline and the access platform are all in frame at 320px and at
+   1440px alike. It also puts the photograph where the copy is not — the
+   headline and the lede sit against painted sky, and only the buttons and the
+   live chip, which carry their own backgrounds, overlap the picture.
+
+   `--hero-band` is the knob. Set it to anything TALLER than the picture and
+   `object-fit:cover` starts cropping the width again; it is held at the
+   picture's own ratio precisely so that it does not.
+
+   The height is never touched. The hero is as tall as its content and not one
+   pixel taller — 889px at 1440, 838px at 390, exactly as before. */
+.hero{--hero-band:1916/821}
+/* `.ph picture` and `.ph__art` both carry `inset:0` from the shared photo
+   system further down this file, so these need the extra class to win. */
+.hero__media .ph > picture,
+.hero__media .ph > .ph__art{top:auto;bottom:0;height:auto;aspect-ratio:var(--hero-band);
+  /* The top fifth of the band dissolves into the painted sky. It is sky in
+     the photograph too, so there is no horizon where the two meet — and the
+     generated artwork gets the identical treatment, so a photograph that
+     fails to load degrades to the same shape rather than to a hard rectangle
+     in the middle of the fold. */
+  -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 20%);
+  mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 20%)}
+/* Was `background-position`, which an `<img>` ignores entirely — the comment
+   that used to sit here claimed to hold the framing on every width and the
+   property it named could not move the picture by one pixel. `object-position`
+   is the one that can. At the band ratio there is nothing to crop, so this is
+   what decides the framing only if `--hero-band` is ever made taller: the
+   engineers stay, the access platform goes. */
+.hero .ph__img{object-position:12% bottom}
+
+/* THE SCRIM IS NOW A FLOOR, NOT A BLANKET. It used to run 77%→94% opaque top
+   to bottom below 980px, which over this photograph would have left a sixth
+   of it visible. Contrast is measured against the pixels actually painted
+   behind each string, at every width — see the ratios in the hero notes. */
 .hero__scrim{position:absolute;inset:0;z-index:5;background:
-  linear-gradient(122deg,rgba(8,23,38,.58) 0%,rgba(8,23,38,0) 66%),
-  linear-gradient(100deg,rgba(8,23,38,.71) 0%,rgba(11,32,53,.66) 42%,rgba(11,32,53,.43) 72%,rgba(11,32,53,.77) 100%)}
-/* the hero subjects sit left of centre — hold that framing on every width */
-.hero .ph__img{background-position:center 40%}
+  linear-gradient(122deg,rgba(8,23,38,.36) 0%,rgba(8,23,38,0) 60%),
+  linear-gradient(100deg,rgba(8,23,38,.5) 0%,rgba(11,32,53,.4) 44%,rgba(11,32,53,.18) 74%,rgba(11,32,53,.42) 100%)}
 @media(max-width:979px){
-  .hero__scrim{background:linear-gradient(180deg,rgba(8,23,38,.77) 0%,rgba(9,27,45,.85) 50%,rgba(9,27,45,.94) 100%)}
-  .hero .ph__img{background-position:26% center}
+  /* One column, text top to bottom, band at the foot: a vertical wash that is
+     strongest where the words are and lightest across the picture. */
+  .hero__scrim{background:linear-gradient(180deg,rgba(8,23,38,.7) 0%,rgba(9,27,45,.58) 42%,rgba(9,27,45,.3) 68%,rgba(9,27,45,.44) 100%)}
+}
+
+/* ── ON A PHONE THE BAND FLOATS, AND ONLY THERE DOES IT CROP ──────────────
+   At the picture's own ratio the band is 167px tall at 390px wide, and pinned
+   to the foot of an 838px hero that puts it at page y 783 — below the fold and
+   behind the cookie bar. Measured, not assumed: it is a photograph nobody
+   sees. So below 620px the band is made about 70% taller than the picture and
+   lifted to sit inside the fold, between the lede and the buttons.
+
+   Height costs width, and the cost is arithmetic rather than taste: `cover`
+   fits whichever axis overflows less, so a band `h` tall shows
+   `viewport / (2.3337 x h)` of the picture. Sizing the band off the WIDTH —
+   a ratio, not a percentage of the hero — holds that share at 58.6% across
+   every phone width, 320 through 430, instead of letting it collapse on the
+   narrow screens where the hero grows tallest. (At 320 the hero is 977px: a
+   percentage-of-height band would have shown 33%.)
+
+   WHAT SURVIVES: the plant panel, BOTH engineers, the Shard, the City tower
+   cluster, the Gherkin. WHAT IS LOST: St Paul's, the London Eye and the access
+   platform at the right edge. The engineers are kept over the platform because
+   they are the subject — a person doing maintenance is the thing the page
+   claims, and a crane arm on its own is scenery.
+
+   A separate pre-cropped phone asset was considered and is arithmetically
+   WORSE: crop the empty sky off the top and the file gets wider relative to
+   its height, so `cover` scales it harder and shows LESS of the width in the
+   same band. The full frame is the best phone source available. */
+@media(max-width:620px){
+  .hero{--hero-band:1916/1400}
+  /* Sky rising to the photograph's own top row at the band's top edge, and
+     falling away again below it, so the band has somewhere to fade into at
+     both ends rather than sitting on the page like a sticker. */
+  .hero__media{background:linear-gradient(180deg,#03121C 0%,#071C2E 22%,#0D2E4E 38%,#113A65 45%,#0E2843 66%,#08192A 80%,#050F18 100%)}
+  .hero__media .ph > picture,
+  .hero__media .ph > .ph__art{top:42%;bottom:auto;
+    -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 17%,#000 84%,rgba(0,0,0,0) 100%);
+    mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 17%,#000 84%,rgba(0,0,0,0) 100%)}
 }
 .hero__inner{position:relative;z-index:6;display:grid;gap:42px;align-items:center;padding-block:clamp(40px,4.6vw,66px)}
 /* One column, because the hero has one child.
@@ -711,9 +800,17 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .hero__title{font-size:var(--fs-h1);font-weight:800;color:#fff;margin-bottom:18px;letter-spacing:-.028em;text-shadow:0 2px 30px rgba(4,15,26,.62),0 1px 3px rgba(4,15,26,.42)}
 .hero__title span{display:block}
 .hero__accent{color:var(--amber-bright)}
-.hero__lede{max-width:47ch;color:#C2D2D9;font-size:1.06rem;text-shadow:0 1px 14px rgba(4,15,26,.6)}
+/* TWO SHADOWS, NOT ONE, AND THIS IS WHY THE SCRIM STAYS LIGHT. A single 14px
+   blur at .6 is a wash that dims the whole line without ever getting dark
+   directly under a stroke, so the only way to make the copy clear AA over a
+   photograph was to blacken the photograph. A tight near-opaque layer under
+   the glyph plus the soft one around it puts the contrast exactly where the
+   letters are and nowhere else — measured against the pixels a glyph actually
+   sits on, the lede went from 3.98:1 at 1280 to 6.41:1 with the picture no
+   darker than before. */
+.hero__lede{max-width:47ch;color:#C2D2D9;font-size:1.06rem;text-shadow:0 1px 2px rgba(4,15,26,.92),0 0 5px rgba(4,15,26,.78),0 2px 18px rgba(4,15,26,.72)}
 .hero__pills{display:flex;flex-wrap:wrap;gap:20px;list-style:none;margin:20px 0}
-.hero__pills li{display:flex;align-items:center;gap:9px;font-size:.89rem;font-weight:500;color:#D6E3E7;text-shadow:0 1px 12px rgba(4,15,26,.6)}
+.hero__pills li{display:flex;align-items:center;gap:9px;font-size:.89rem;font-weight:500;color:#D6E3E7;text-shadow:0 1px 2px rgba(4,15,26,.92),0 0 5px rgba(4,15,26,.78),0 2px 14px rgba(4,15,26,.7)}
 .hero__pills .ic{color:#6FC5CB}
 .hero__actions{display:flex;flex-wrap:wrap;gap:13px;margin-top:24px}
 .hero__live{margin-top:26px;padding:13px 16px;border-radius:var(--r-md);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);display:flex;gap:11px;align-items:center;min-height:58px;overflow:hidden}
@@ -926,8 +1023,18 @@ fieldset.field:focus{outline:none}
 /* One column: the stage card takes the full width. The left-hand list of the
    seven stages is gone (it repeated every heading the card already shows),
    so there is no second column to leave empty — the card, bar and arrows
-   are the whole component at every width. */
-.wf{display:grid;gap:24px}
+   are the whole component at every width.
+
+   `gap:0`, AND THE CHILDREN KEEP THEIR OWN MARGINS. This was `gap:24px` while
+   `.wf__bar`, `.wf__ctl` and `.wf__swipe` each also carried a `margin-top` —
+   margins do not collapse into a grid gap, so every one of those three
+   distances was the sum of the two. The authored 18/16/10 rendered as
+   42/40/34, and 116px of the 183px below the card on a phone was empty. One
+   authority, not two: the gap is zero and each child states its own distance,
+   which is also the only way the three can differ — the bar sits nearer the
+   card than the arrows do, and the hint sits nearest of all to the arrows it
+   describes. A fifth child added here must bring its own `margin-top`. */
+.wf{display:grid;gap:0}
 .wf__stage{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
 /* `--amber-strong`, not `--amber`. Nothing outranks this rule — it is (0,2,1)
    against the page-wide `:focus-visible` at (0,1,0) — the ring simply painted
@@ -967,18 +1074,24 @@ fieldset.field:focus{outline:none}
 .wf__meta div{background:var(--cloud);border-radius:var(--r-md);padding:14px}
 .wf__meta dt{font-size:.71rem;letter-spacing:.08em;text-transform:uppercase;color:var(--slate);margin-bottom:5px}
 .wf__meta dd{margin:0;font-size:.87rem;color:#3A4C5C}
-.wf__bar{display:flex;gap:5px;margin-top:18px}
+.wf__bar{display:flex;gap:5px;margin-top:24px}
 .wf__bar i{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background var(--t-base) var(--ease)}
 .wf__bar i.is-done{background:var(--teal-text)}
-.wf__swipe{margin:10px 0 0;font-size:.76rem;color:var(--slate);text-align:center}
-.wf__ctl{display:flex;gap:10px;align-items:center;margin-top:16px}
+.wf__swipe{margin:12px 0 0;font-size:.76rem;color:var(--slate);text-align:center}
+.wf__ctl{display:flex;gap:10px;align-items:center;margin-top:20px}
 .wf__ctl .btn{flex:1}
 .wf__count{flex:none;font-size:.8rem;font-weight:600;color:var(--slate);font-variant-numeric:tabular-nums;min-width:64px;text-align:center}
 .wf__stage{touch-action:pan-y}
 /* On a phone these two are the only way through the stepper, so they get the
    44px touch target rather than `btn--sm`'s 40px. Scoped to the stepper: the
-   40px is right for `btn--sm` where it sits beside body text elsewhere. */
-@media(max-width:620px){.wf__ctl{gap:8px}.wf__ctl .btn{min-height:44px}.wf__count{min-width:52px;font-size:.76rem}}
+   40px is right for `btn--sm` where it sits beside body text elsewhere.
+   THE 44px IS NOT SPACING AND IS NOT AVAILABLE TO A SPACING PASS — it is the
+   touch floor, and the three margins beside it are what a phone gives back.
+   Tighter than the base by a few pixels each: a phone reads the card, the
+   bar, the arrows and the hint as one stack in a single glance, where a
+   desktop has the width to want more air around them. Nothing here goes
+   below 10px, so the stack stays four separated things, not one block. */
+@media(max-width:620px){.wf__bar{margin-top:18px}.wf__ctl{gap:8px;margin-top:14px}.wf__ctl .btn{min-height:44px}.wf__count{min-width:52px;font-size:.76rem}.wf__swipe{margin-top:10px}}
 
 /* ------------------------------------------------------------- dashboard */
 .dashshot{position:relative;border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-lg);
@@ -1508,6 +1621,16 @@ fieldset.field:focus{outline:none}
 .finalcta__inner{position:relative;z-index:1;display:grid;gap:clamp(22px,4vw,34px)}
 @media(min-width:980px){.finalcta__inner{grid-template-columns:1fr 1fr;gap:52px;align-items:start}}
 .stepform{background:#fff;border-radius:var(--r-lg);padding:clamp(20px,3vw,28px);color:var(--charcoal)}
+/* THE PANEL'S ROWS HAD NOTHING BETWEEN THEM. Every block child sat flush
+   against the next, so each label rested directly on the input above it —
+   measured 0px between all five rows at 1440. Eight fields hid it, because
+   the eye read the whole thing as one dense stack; five do not. The rows get
+   the same 13px down that the two-up rows already use across, so the panel
+   has one rhythm instead of two. It is still far shorter than it was: three
+   rows and three gaps against five rows and none. */
+.stepform > * + *{margin-top:13px}
+/* An error line belongs to the control above it, not to the next row. */
+.stepform > .field__err{margin-top:7px}
 .stepform__bar{display:flex;gap:6px;margin-bottom:18px}
 .stepform__bar i{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background var(--t-base) var(--ease)}
 .stepform__bar i.is-on{background:var(--amber-strong)}
@@ -1643,8 +1766,16 @@ fieldset.field:focus{outline:none}
   .qj{padding:17px;border-radius:var(--r-md)}
   .qj__head{margin-bottom:14px}
   .qj__form{gap:10px}
-  .field{gap:5px}
+  /* A LABEL AND ITS CONTROL ARE ONE THING, and on a phone they should read
+     that way. 6px desktop, 5px here, now 4px: enough that the label still
+     detaches from the input it names, tight enough that a nine-field form
+     stops looking like nine separate objects. Only the gap moves — the
+     control keeps its 46px min-height and its 16px type, so no tap target
+     and no field height changes with it. Desktop is untouched: this is
+     inside the 620px block, and 1440 still measures 6px. */
+  .field{gap:4px}
   .stepform__grid{gap:11px}
+  .stepform > * + *{margin-top:11px}
   .stepform__bar{margin-bottom:14px}
   .stepform__nav{margin-top:14px}
   /* C5 — the store-count control loses its slack, not its targets: the

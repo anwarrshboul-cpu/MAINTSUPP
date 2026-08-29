@@ -295,3 +295,209 @@ test("a slot with no photograph asks for none", async () => {
     assert.ok(named.has(slot), `${slot} is a trade tile with no photograph on disk`);
   }
 });
+
+/* ================================================================ hero v4
+ *
+ * The hero photograph was replaced with the owner-approved 1916x821 file, and
+ * both halves of that job are pinned here: the CACHE half, because this repo
+ * has already shipped new bytes at old `immutable` URLs once and served the
+ * stale ones for a year; and the CROP half, because the treatment that got
+ * replaced looked correct in the source and ate 80% of the picture in the
+ * browser, which is a failure no reading of the CSS would have caught.
+ */
+
+const HERO_SLOT = "hero-maintenance-v4";
+const HERO_RETIRED = "hero-london-maintenance";
+/** The approved source's own pixels. Every number below is derived from these. */
+const HERO_W = 1916;
+const HERO_H = 821;
+
+test("the hero photograph is the versioned file, and the retired one is asked for by nobody", async () => {
+  const hero = await read("app/(marketing)/_sections/hero.tsx");
+  assert.match(hero, new RegExp(`slot="${HERO_SLOT}"`), "the hero renders the versioned slot");
+
+  /*
+   * THE CACHE TRAP. `/assets/photos/*` is served
+   * `Cache-Control: public, max-age=31536000, immutable`. `immutable` tells a
+   * browser never to revalidate, so replacing the CONTENT of a variant at its
+   * existing PATH serves the old bytes to every returning visitor and a hard
+   * refresh does not reliably defeat it. The stem carries the version for that
+   * reason, and every derived URL inherits it. A re-shoot needs a new suffix,
+   * not a quiet overwrite of these files — which is what this asserts: no
+   * section may reference the retired stem, so not one of its URLs is ever
+   * requested, and its bytes on disk are free to stay exactly as they are.
+   */
+  const sources = await sectionSources();
+  const stillAsking = sources
+    .filter(
+      ({ source }) =>
+        source.includes(`slot="${HERO_RETIRED}"`) ||
+        source.includes(`/assets/photos/${HERO_RETIRED}`),
+    )
+    .map(({ file }) => file);
+  assert.deepEqual(stillAsking, [], `${HERO_RETIRED} is retired — nothing may request its URLs`);
+  /* Naming it in a comment or keeping its alt-text entry is fine and wanted:
+     the registry is the guarantee that no slot reaches the page undescribed,
+     and an entry costs nothing. Rendering it is what is forbidden. */
+
+  /*
+   * `sizes` is not decoration on a full-bleed background. PhotoSlot's default
+   * hint is written for the section tiles — `(min-width: 1024px) 620px` — and
+   * under it the browser picked a variant about a third of the width the hero
+   * actually paints and upscaled it across the fold.
+   */
+  assert.match(hero, /sizes="100vw"/, "the hero paints at the full viewport width, so say so");
+  assert.match(hero, new RegExp(`w=\\{${HERO_W}\\}`), "the artwork is drawn at the photograph's own shape");
+  assert.match(hero, new RegExp(`h=\\{${HERO_H}\\}`));
+});
+
+test("the hero photograph ships an original that matches the approved file, and a full ladder", async () => {
+  const files = await readdir(PHOTOS);
+
+  /* The byte-identical provenance copy: what shipped can be proved to be what
+     was approved. The `.jpg` beside it is the last-resort `<img src>` the
+     component addresses and the base the manifest invariant counts. */
+  assert.ok(files.includes(`${HERO_SLOT}.png`), "the approved original, byte for byte");
+  assert.ok(files.includes(`${HERO_SLOT}.jpg`), "the base the <img src> falls back to");
+
+  const manifest = await read("app/(marketing)/_sections/photo-widths.ts");
+  const entry = manifest.match(new RegExp(`"${HERO_SLOT}": \\[([^\\]]*)\\]`));
+  assert.ok(entry, `${HERO_SLOT} must be in the generated manifest`);
+  const widths = entry[1].split(",").map((n) => Number(n.trim())).filter(Boolean);
+  assert.deepEqual(widths, [480, 960, 1600, HERO_W], "480/960/1600 plus the source's own width");
+
+  /*
+   * The top rung is the source's own width, not 1600. The `<source>` elements
+   * beat the `<img src>` in every browser that understands AVIF or WebP, so
+   * the full-size original behind them is unreachable — and at a 1440px
+   * viewport this hero paints the picture about 1633 CSS px wide, which makes
+   * a 1600 rung an upscale of the widest thing on the page.
+   */
+  for (const width of widths) {
+    for (const ext of ["avif", "webp"]) {
+      assert.ok(files.includes(`${HERO_SLOT}-${width}.${ext}`), `${HERO_SLOT}-${width}.${ext} is missing`);
+    }
+  }
+});
+
+test("the hero crop is a band, and no edit can quietly go back to eating the picture", async () => {
+  const css = (await read("app/(marketing)/marketing.css")).replace(/\r\n/g, "\n");
+
+  /*
+   * WHAT WENT WRONG BEFORE, IN NUMBERS. The photograph is 2.33:1 and the hero
+   * is 889px tall at 1440 and 977px at 320. `object-fit:cover` on a box that
+   * shape scales the picture by its HEIGHT and pushes the width out over both
+   * sides — measured in the browser: 69.4% of the width survived at 1440,
+   * 42.5% at 768, 20.0% at 390 and 14.0% at 320, with the engineers cut off
+   * one edge and the access platform off the other at every width.
+   *
+   * The fix gives the picture a box of its own shape, bottom-anchored, so
+   * nothing is cropped. `--hero-band` is the whole treatment in one number and
+   * the arithmetic is exact: a band of ratio 1916/N shows 821/N of the width.
+   * The assertions below are that arithmetic, not a copy of the stylesheet.
+   */
+  const bandRatio = (block) => {
+    const found = block.match(/--hero-band:\s*(\d+)\s*\/\s*(\d+)/);
+    assert.ok(found, "--hero-band must be declared");
+    return { w: Number(found[1]), h: Number(found[2]) };
+  };
+  /** The share of the picture's width a band of this ratio leaves visible. */
+  const visible = ({ h }) => HERO_H / h;
+
+  const base = bandRatio(css.slice(css.indexOf(".hero{--hero-band")));
+  assert.equal(base.w, HERO_W);
+  assert.equal(base.h, HERO_H, "at any other height the wide layouts start cropping again");
+  assert.equal(visible(base), 1, "desktop and tablet show the whole frame");
+
+  /* The band box: the picture's shape, pinned to the foot of the hero, and the
+     artwork fallback given the identical box so a failed photograph degrades
+     to the same shape rather than to a rectangle in the middle of the fold. */
+  const band = css.match(
+    /\.hero__media \.ph > picture,\s*\n\.hero__media \.ph > \.ph__art\{([^}]*)\}/,
+  );
+  assert.ok(band, "the band rule must cover both the <picture> and the artwork");
+  assert.match(band[1], /top:auto/);
+  assert.match(band[1], /bottom:0/);
+  assert.match(band[1], /height:auto/);
+  assert.match(band[1], /aspect-ratio:var\(--hero-band\)/);
+
+  /*
+   * `background-position` on an `<img>` does nothing at all. The rule this
+   * replaced set it and carried a comment claiming it held the framing on
+   * every width; the property it named could not move the picture by a pixel,
+   * and the framing it claimed to hold was never held.
+   */
+  assert.doesNotMatch(
+    css,
+    /\.hero[^{\n]*\.ph__img\{[^}]*background-position/,
+    "an <img> ignores background-position — the framing lever is object-position",
+  );
+  assert.match(css, /\.hero \.ph__img\{[^}]*object-position:12% bottom/);
+
+  /*
+   * PHONES. At the picture's own ratio the band is 167px tall at 390 and sits
+   * at page y 783 — below the fold and behind the cookie bar, a photograph
+   * nobody sees. So below 620px it is made taller and lifted into the fold,
+   * and height costs width. The bound is the point: a future pass may retune
+   * this, but it may not tune it back past half the picture, which is the
+   * "eaten crop" the owner rejected.
+   */
+  /* The block is found by what it CONTAINS, not by where it sits: another
+     section may open a 620px query above this one at any time. */
+  const phoneBlocks = [...css.matchAll(/@media\s*\(max-width:\s*620px\)\s*\{([\s\S]*?)\n\}/g)]
+    .map((match) => match[1])
+    .filter((body) => body.includes("--hero-band"));
+  assert.equal(phoneBlocks.length, 1, "exactly one phone block may own the hero band");
+  const [phoneBlock] = phoneBlocks;
+  const phone = bandRatio(phoneBlock);
+  assert.equal(phone.w, HERO_W);
+  assert.ok(
+    phone.h > HERO_H,
+    "a phone band at the picture's own ratio falls below the fold — it has to be taller",
+  );
+  assert.ok(
+    visible(phone) >= 0.5,
+    `a phone shows ${(visible(phone) * 100).toFixed(1)}% of the picture — under half is the crop that was rejected`,
+  );
+  assert.match(phoneBlock, /top:42%/, "lifted into the fold, not pinned to the hero's foot");
+  assert.match(phoneBlock, /mask-image:linear-gradient/, "and faded at both ends into the painted sky");
+});
+
+test("the hero copy carries its own contrast, so the scrim does not have to crush the picture", async () => {
+  const css = (await read("app/(marketing)/marketing.css")).replace(/\r\n/g, "\n");
+
+  /*
+   * A single wide blur dims a line without ever getting dark directly under a
+   * stroke, which is why the old treatment had to reach for a 77%-94% opaque
+   * scrim on phones — over this photograph that would have left about a sixth
+   * of it visible. A tight near-opaque layer plus a symmetric halo puts the
+   * contrast where the letters are and nowhere else. Measured against the
+   * pixels a glyph actually sits on, every string clears AA at 320 through
+   * 1440 with the picture no darker than the photographer left it.
+   */
+  for (const selector of [".hero__lede", ".hero__pills li"]) {
+    const rule = css.match(new RegExp(`\\n${selector.replace(/[.]/g, "\\.")}\\{([^}]*)\\}`));
+    assert.ok(rule, `${selector} must still be declared`);
+    const shadows = rule[1].match(/text-shadow:([^;}]*)/);
+    assert.ok(shadows, `${selector} needs a text-shadow over a photograph`);
+    assert.ok(
+      shadows[1].split(",").length >= 3,
+      `${selector} needs the tight layer as well as the wash — found: ${shadows[1]}`,
+    );
+    assert.match(shadows[1], /0 1px 2px rgba\(4,15,26,\.9\d?\)/, "a near-opaque layer right under the glyph");
+  }
+
+  /* And the scrim must stay a wash, not a blanket: nothing in the hero's own
+     rules may paint the photograph out. */
+  const scrims = [...css.matchAll(/\.hero__scrim\{[^}]*\}/g)].map((m) => m[0]);
+  assert.ok(scrims.length >= 2, "a wide scrim and a narrow one");
+  for (const scrim of scrims) {
+    for (const alpha of scrim.match(/rgba\([\d,]+,\.(\d+)\)/g) ?? []) {
+      const value = Number(`0.${alpha.match(/\.(\d+)\)$/)[1]}`);
+      assert.ok(
+        value <= 0.75,
+        `${alpha} in the scrim — above .75 the engineers and the plant go invisible, which is the point of the photograph`,
+      );
+    }
+  }
+});

@@ -233,12 +233,160 @@ test("the lead form protects a part-completed draft", async () => {
   const form = await read("app/(marketing)/_sections/final-cta.tsx");
   assert.match(form, /sessionStorage/, "a mis-tap on a phone must not lose the answers");
   assert.match(form, /removeItem\(DRAFT_KEY\)/, "the draft must be cleared on submit");
-  /* The step indicator is gone with the steps: the brief replaces the
-     three-step wizard with one panel of eight questions, so there is no
-     progress to indicate. The draft protection it sat beside is kept, which is
-     what the rest of this test is about. */
+  /* The step indicator is gone with the steps: the brief replaced the
+     three-step wizard with one panel — eight questions then, five now — so
+     there is no progress to indicate. The draft protection it sat beside is
+     kept, which is what the rest of this test is about. */
   assert.doesNotMatch(form, /stepform__bar/, "there are no steps left to indicate");
   assert.match(form, /Book My Portfolio Review/, "the brief's button label");
+
+  /* The draft must carry the fields that exist and only those. A key for a
+     removed field would be written on every keystroke and read back into
+     nothing. */
+  const draft = form.slice(form.indexOf("JSON.stringify({ name"));
+  assert.match(
+    draft.slice(0, 120),
+    /JSON\.stringify\(\{ name, company, email, phone, sites \}\)/,
+    "the draft holds the five live fields, and no ghosts",
+  );
+});
+
+test("the portfolio review form no longer asks the three dropped questions", async () => {
+  /*
+   * Regions, "Approx. maintenance issues per month" and "Biggest problem right
+   * now" were removed on the owner's instruction. This test exists because
+   * removing them from the markup alone would have been silent breakage: the
+   * route required `regions` and a 20-character `challenge`, and the form was
+   * the only thing supplying either.
+   */
+  const form = await read("app/(marketing)/_sections/final-cta.tsx");
+
+  for (const id of ["lfRegions", "lfVolume", "lfProblem"]) {
+    assert.doesNotMatch(form, new RegExp(`id="${id}"`), `${id} must not be rendered`);
+  }
+  for (const name of ["regions", "volume", "problem"]) {
+    assert.doesNotMatch(
+      form,
+      new RegExp(`name="${name}"`),
+      `there must be no control named ${name}`,
+    );
+  }
+  /* The focus effect looks the failed field up by `[name="…"]`, so a member of
+     the union with no control behind it would move focus nowhere. */
+  const union = form.slice(form.indexOf("type ErrorField"), form.indexOf("type FieldError"));
+  for (const field of ["regions", "volume", "problem"]) {
+    assert.ok(!union.includes(`"${field}"`), `${field} must be out of ErrorField too`);
+  }
+  for (const kept of ["name", "company", "email", "phone", "sites", "consent"]) {
+    assert.ok(union.includes(`"${kept}"`), `${kept} is still a real control`);
+  }
+
+  /* Nothing may be invented to replace them. The old code composed a sentence
+     out of the two dropdowns to clear the API's length floor; a hard-coded one
+     would put words in the visitor's mouth. */
+  assert.doesNotMatch(form, /Biggest problem right now: \$\{/, "the composed challenge is gone");
+  assert.doesNotMatch(form, /challenge:/, "no challenge is sent at all");
+  assert.doesNotMatch(form, /regions:\s*regions/, "no regions are sent at all");
+
+  /* And the questions that remain, all five of them, still do. */
+  for (const label of ["Name", "Company", "Email", "Phone", "Number of sites"]) {
+    assert.ok(form.includes(`>${label}</label>`), `${label} must still be asked`);
+  }
+  assert.match(form, /name="website"/, "the honeypot survives");
+  assert.match(form, /href="\/privacy"/, "so does the privacy link");
+});
+
+test("the leads route stopped requiring what the form stopped asking", async () => {
+  const route = await read("app/api/leads/route.ts");
+  const guard = route.slice(route.indexOf("if (!name || !company"), route.indexOf("await ensureDatabase"));
+
+  assert.doesNotMatch(guard, /regions\.length/, "regions must not be required");
+  assert.doesNotMatch(guard, /challenge\.length/, "the 20-character floor must be gone");
+  /* Not a licence to accept anything: the five the form does ask for are still
+     enforced, or this would be an open endpoint rather than a shorter form. */
+  assert.match(guard, /!name \|\| !company/);
+  assert.match(guard, /\.test\(email\)/, "the email shape is still checked");
+  assert.match(guard, /!siteRange/, "the portfolio size is still required");
+
+  /* Still READ, still WRITTEN. `leads.regions` and `leads.challenge` are NOT
+     NULL columns with rows behind them, and another caller may still send
+     both. Dropping the requirement must not drop the data. */
+  assert.match(route, /const regions = Array\.isArray\(payload\.regions\)/);
+  assert.match(route, /const challenge = clean\(payload\.challenge, 900\)/);
+  assert.match(route, /regions: JSON\.stringify\(regions\)/, "regions are still stored");
+  const insert = route.slice(route.indexOf("db.insert(leads).values("), route.indexOf("J2 / J3"));
+  assert.match(insert, /challenge,/, "challenge is still stored");
+  assert.match(
+    route,
+    /leadAlertTemplate\(\{\s*name, company, email, phone, siteRange, challenge,\s*\}\)/,
+    "and still passed to the alert template",
+  );
+
+  /* The schema is the reason an empty string is written rather than nothing. */
+  const schema = await read("db/schema.ts");
+  const table = schema.slice(schema.indexOf('sqliteTable(\n  "leads"'), schema.indexOf("contractorApplications"));
+  assert.match(table, /regions: text\("regions"\)\.notNull\(\)/, "the column cannot take NULL");
+  assert.match(table, /challenge: text\("challenge"\)\.notNull\(\)/, "nor can this one");
+});
+
+test("an empty challenge prints no section in the sales alert", async () => {
+  /* `row()` returns an empty string for a falsy value, which is what stops a
+     lead with no challenge rendering a "What they said" heading over nothing.
+     Asserted on the guard itself, because that is the behaviour the route's
+     comment now relies on. */
+  const source = await read("app/lib/notifications.ts");
+  const helper = source.slice(source.indexOf("function row("), source.indexOf("export function leadAlertTemplate"));
+  assert.match(helper, /if \(!value\) return "";/, "an empty value must render no row");
+  const template = source.slice(source.indexOf("export function leadAlertTemplate"));
+  assert.match(template.slice(0, 900), /row\("What they said", lead\.challenge\)/);
+});
+
+test("live: a portfolio review is accepted with no regions and no challenge", async (t) => {
+  /*
+   * The point of the whole change, asserted against the running route rather
+   * than against its source. Before it, this exact body was a 400.
+   */
+  const base = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
+  let up = false;
+  try {
+    up = (await fetch(`${base}/`, { signal: AbortSignal.timeout(30000) })).ok;
+  } catch {
+    up = false;
+  }
+  if (!up) {
+    t.skip(`no dev server on ${base}`);
+    return;
+  }
+
+  const body = {
+    name: "Suite Portfolio Tester",
+    company: "Five Field Ltd",
+    email: `suite.${Date.now()}@example.com`,
+    phone: "07700900123",
+    siteRange: "6–10",
+  };
+  const response = await fetch(`${base}/api/leads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  const result = await response.json();
+  assert.equal(response.status, 201, `expected 201, got ${response.status}: ${JSON.stringify(result)}`);
+  assert.ok(result.lead, "a lead row must come back");
+  assert.equal(result.lead.regions, "[]", "an unanswered question is stored as unanswered");
+  assert.equal(result.lead.challenge, "", "and nothing is invented to fill it");
+  assert.equal(result.lead.siteRange, "6–10", "what was asked is what was stored");
+
+  /* The five that remain are still enforced — a body missing one is still a
+     400, so this is a shorter form and not an unguarded endpoint. */
+  const short = await fetch(`${base}/api/leads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, siteRange: "" }),
+    signal: AbortSignal.timeout(60000),
+  });
+  assert.equal(short.status, 400, "a missing portfolio size is still refused");
 });
 
 test("the marketing CSS keeps its accessibility floors", async () => {

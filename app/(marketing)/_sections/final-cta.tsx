@@ -21,10 +21,21 @@ import { FormEvent, useEffect, useRef, useState } from "react";
  *
  * ── THE FORM ───────────────────────────────────────────────────────────────
  *
- * Eight questions on one panel, which is the brief's list exactly. It was a
- * three-step wizard over nine questions including "which service lines are you
- * interested in" — a question asked before the reader has been told what the
- * service lines cost, and one the brief drops.
+ * Five questions on one panel: who you are, how to reach you, and how big the
+ * portfolio is. It was a three-step wizard over nine questions including
+ * "which service lines are you interested in" — a question asked before the
+ * reader has been told what the service lines cost — then a single panel of
+ * eight.
+ *
+ * THREE OF THOSE EIGHT ARE GONE, on the owner's instruction: "Regions",
+ * "Approx. maintenance issues per month" and "Biggest problem right now". They
+ * were the three that asked a stranger to profile their own estate before
+ * anyone had earned the answer, and the last two only existed to be glued back
+ * together into a `challenge` string the API happened to have a column for.
+ * Removing them is a contract change, not a markup change: /api/leads required
+ * `regions` and a 20-character `challenge`, so leaving the fields out without
+ * touching the route would have made every submission a 400. The route no
+ * longer requires either — see the comment there.
  *
  * KEPT FROM THE WIZARD, because all three earn their place:
  *   · the sessionStorage draft, so a mis-tap on the back gesture does not throw
@@ -35,15 +46,6 @@ import { FormEvent, useEffect, useRef, useState } from "react";
  */
 
 const SITE_RANGES = ["1–5", "6–10", "11–25", "26+"] as const;
-const ISSUE_VOLUMES = ["<5", "5–15", "15–40", "40+"] as const;
-const PROBLEMS = [
-  "Slow repairs",
-  "Missing certificates",
-  "Too many contractors",
-  "No visibility",
-  "Cost control",
-  "Other",
-] as const;
 
 const REVIEW_POINTS = [
   "A review of how repairs are reported and chased today",
@@ -54,16 +56,14 @@ const REVIEW_POINTS = [
 /** sessionStorage key for the part-completed form. */
 const DRAFT_KEY = "mt_review_draft";
 
-type ErrorField =
-  | "name"
-  | "company"
-  | "email"
-  | "phone"
-  | "sites"
-  | "regions"
-  | "volume"
-  | "problem"
-  | "consent";
+/*
+ * Every member of this union must name a control that is actually rendered:
+ * the focus effect below looks the failed field up by `[name="…"]`, and a
+ * field name with no control behind it would move focus nowhere and leave the
+ * reader with a message they cannot act on. `regions`, `volume` and `problem`
+ * left the union with their inputs.
+ */
+type ErrorField = "name" | "company" | "email" | "phone" | "sites" | "consent";
 
 type FieldError = { field: ErrorField; message: string };
 
@@ -186,9 +186,6 @@ export function FinalCta() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [sites, setSites] = useState("");
-  const [regions, setRegions] = useState("");
-  const [volume, setVolume] = useState("");
-  const [problem, setProblem] = useState("");
   const [consent, setConsent] = useState(false);
   const [website, setWebsite] = useState("");
 
@@ -209,9 +206,10 @@ export function FinalCta() {
       if (typeof draft.email === "string") setEmail(draft.email);
       if (typeof draft.phone === "string") setPhone(draft.phone);
       if (typeof draft.sites === "string") setSites(draft.sites);
-      if (typeof draft.regions === "string") setRegions(draft.regions);
-      if (typeof draft.volume === "string") setVolume(draft.volume);
-      if (typeof draft.problem === "string") setProblem(draft.problem);
+      /* A draft written before the three fields were removed still carries
+         `regions`, `volume` and `problem`. They are not read back — there is
+         nowhere to put them — and the next keystroke rewrites the draft
+         without them, so nothing here has to migrate anything. */
       /* Consent is deliberately NOT restored: an accepted privacy notice has to
          be an action taken on this submission, not inherited from a draft. */
     } catch {
@@ -225,12 +223,12 @@ export function FinalCta() {
     try {
       window.sessionStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ name, company, email, phone, sites, regions, volume, problem }),
+        JSON.stringify({ name, company, email, phone, sites }),
       );
     } catch {
       // Storage can be refused. The form still works, it just will not survive.
     }
-  }, [name, company, email, phone, sites, regions, volume, problem, sentRange]);
+  }, [name, company, email, phone, sites, sentRange]);
 
   // A fresh object on every failure, so re-submitting into the same error still
   // moves focus back to the control that needs attention.
@@ -255,9 +253,6 @@ export function FinalCta() {
     }
     if (!phone.trim()) return fail("phone", "Enter a contact number.");
     if (!sites) return fail("sites", "Choose how many sites you operate.");
-    if (!regions.trim()) return fail("regions", "Tell us which regions they are in.");
-    if (!volume) return fail("volume", "Choose roughly how many issues you see a month.");
-    if (!problem) return fail("problem", "Choose the problem that matters most today.");
     if (!consent) return fail("consent", "Please accept the privacy notice.");
     return true;
   }
@@ -282,22 +277,18 @@ export function FinalCta() {
           phone,
           siteRange: sites,
           /*
-           * `challenge` is composed, not typed.
+           * `challenge` and `regions` are NOT sent, and nothing is invented to
+           * stand in for them.
            *
-           * It was a free-text box with a 20-character floor, which the API
-           * still enforces. The brief replaces it with two dropdowns, so the
-           * two answers are written into the field that carries them — rather
-           * than dropping the volume on the floor because there is no column
-           * named after it.
+           * `challenge` used to be composed here out of the two dropdowns —
+           * "Biggest problem right now: X. Approx. maintenance issues per
+           * month: Y." — because the API enforced a 20-character floor left
+           * over from the free-text box those dropdowns replaced. With the
+           * dropdowns gone there is no answer to compose, and a hard-coded
+           * sentence would be a lie told to satisfy a length check. `regions`
+           * likewise: an empty array is what we know, so an empty array is
+           * what the route stores. Both stopped being required there.
            */
-          challenge: `Biggest problem right now: ${problem}. Approx. maintenance issues per month: ${volume}.`,
-          /* Regions is free text now, and the API takes a list. Split on commas
-             so "Midlands, North" arrives as two regions rather than one oddly
-             named one. */
-          regions: regions
-            .split(",")
-            .map((entry) => entry.trim())
-            .filter(Boolean),
         }),
       });
       const result: { lead?: unknown; error?: string } = await response.json();
@@ -438,70 +429,25 @@ export function FinalCta() {
                 </div>
               </div>
 
-              <div className="stepform__grid stepform__grid--2">
-                <div className={fieldClass("sites")}>
-                  <label htmlFor="lfSites">Number of sites</label>
-                  <select
-                    id="lfSites"
-                    name="sites"
-                    value={sites}
-                    onChange={(event) => setSites(event.target.value)}
-                    aria-invalid={invalid("sites")}
-                  >
-                    <option value="">Select</option>
-                    {SITE_RANGES.map((range) => (
-                      <option key={range}>{range}</option>
-                    ))}
-                  </select>
-                  {errorFor("sites") && <p className="field__err">{errorFor("sites")}</p>}
-                </div>
-                <div className={fieldClass("regions")}>
-                  <label htmlFor="lfRegions">Regions</label>
-                  <input
-                    type="text"
-                    id="lfRegions"
-                    name="regions"
-                    placeholder="Midlands, North, London"
-                    value={regions}
-                    onChange={(event) => setRegions(event.target.value)}
-                    aria-invalid={invalid("regions")}
-                  />
-                  {errorFor("regions") && <p className="field__err">{errorFor("regions")}</p>}
-                </div>
-              </div>
-
-              <div className={fieldClass("volume")}>
-                <label htmlFor="lfVolume">Approx. maintenance issues per month</label>
+              {/* "Number of sites" was the left half of a two-up row whose
+                  right half was Regions. Rather than leave a half-width select
+                  beside a hole, it takes the whole row — the shape the two
+                  dropdowns below it used to have. */}
+              <div className={fieldClass("sites")}>
+                <label htmlFor="lfSites">Number of sites</label>
                 <select
-                  id="lfVolume"
-                  name="volume"
-                  value={volume}
-                  onChange={(event) => setVolume(event.target.value)}
-                  aria-invalid={invalid("volume")}
+                  id="lfSites"
+                  name="sites"
+                  value={sites}
+                  onChange={(event) => setSites(event.target.value)}
+                  aria-invalid={invalid("sites")}
                 >
                   <option value="">Select</option>
-                  {ISSUE_VOLUMES.map((entry) => (
-                    <option key={entry}>{entry}</option>
+                  {SITE_RANGES.map((range) => (
+                    <option key={range}>{range}</option>
                   ))}
                 </select>
-                {errorFor("volume") && <p className="field__err">{errorFor("volume")}</p>}
-              </div>
-
-              <div className={fieldClass("problem")}>
-                <label htmlFor="lfProblem">Biggest problem right now</label>
-                <select
-                  id="lfProblem"
-                  name="problem"
-                  value={problem}
-                  onChange={(event) => setProblem(event.target.value)}
-                  aria-invalid={invalid("problem")}
-                >
-                  <option value="">Select</option>
-                  {PROBLEMS.map((entry) => (
-                    <option key={entry}>{entry}</option>
-                  ))}
-                </select>
-                {errorFor("problem") && <p className="field__err">{errorFor("problem")}</p>}
+                {errorFor("sites") && <p className="field__err">{errorFor("sites")}</p>}
               </div>
 
               {/* Honeypot. Off-screen rather than display:none — some bots skip

@@ -69,13 +69,33 @@ export function Hero() {
           was a CSS background with no alt text. PhotoSlot renders a real <img>,
           so only the scrim stays hidden and the photograph is described. */}
       <div className="hero__media">
+        {/*
+          THE APPROVED v4 PHOTOGRAPH, ON A URL NOBODY HAS EVER FETCHED.
+
+          The slot stem carries the version — `hero-maintenance-v4` — because
+          every derived variant inherits it, and this repo has been burned once
+          by replacing variant CONTENT at unchanged variant PATHS: those files
+          are served `Cache-Control: immutable`, so returning visitors kept the
+          old bytes. `hero-london-maintenance*` still sits on disk, unchanged
+          and now referenced by nothing.
+
+          `w`/`h` are the source's real 1916x821, so the fallback artwork behind
+          the photograph is drawn at the photograph's own shape.
+
+          `sizes` is the correction that matters for weight. The default hint is
+          `620px` at desktop — written for the section tiles — and this is a
+          full-bleed background that paints at 100vw and then some, so the
+          browser was picking a variant roughly a third of the width it needed
+          and upscaling it across the fold.
+        */}
         <PhotoSlot
-          slot="hero-london-maintenance"
-          w={2400}
-          h={1200}
+          slot="hero-maintenance-v4"
+          w={1916}
+          h={821}
           art="city"
-          alt="A maintenance engineer working on a commercial shopfront on a London street at dusk"
-          desc="London skyline at dusk, or an engineer working on a commercial site in London"
+          sizes="100vw"
+          alt="Two maintenance engineers in hi-vis jackets and hard hats working at an open plant panel on a London rooftop at dusk, the lit City skyline behind them and an access platform raised at the far right"
+          desc="London rooftop at dusk: engineers at a plant panel on the left, the City skyline centre, an access platform right"
           priority
         />
         <div className="hero__scrim" aria-hidden="true" />
@@ -171,7 +191,7 @@ export function Hero() {
                 <path d="M15 21V13h6v8" />
                 <path d="M2 21h20M7 12h2M7 16h2" />
               </svg>
-              <span>20 stores currently coordinated</span>
+              <span>+20 stores currently coordinated</span>
             </li>
           </ul>
           <div className="hero__actions">

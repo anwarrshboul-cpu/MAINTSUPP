@@ -254,6 +254,94 @@ test("the workflow photograph is a band, not a panorama", async () => {
   assert.match(photo, /style=\{objectPosition \? \{ objectPosition \} : undefined\}/);
 });
 
+test("the stepper's gaps have one owner, and no tightening of them can cross the touch floor", async () => {
+  const css = (await read("app/(marketing)/marketing.css")).replace(/\r\n/g, "\n");
+
+  /*
+   * THE DOUBLE COUNT. `.wf` is a single-column grid and its three lower
+   * children each carry a `margin-top` of their own. A margin does not
+   * collapse into a grid gap, so a non-zero `gap` here is added to all three
+   * distances on top of what was written. It was `gap:24px` against an
+   * authored 18/16/10, which rendered 42/40/34: measured at 390x844, 116px of
+   * the 183px below the stage card was empty. Either the gap or the margins
+   * may own these distances — never both at once.
+   */
+  const rule = (selector) => {
+    const found = css.match(new RegExp(`\\n${selector.replace(/\./g, "\\.")}\\{([^}]*)\\}`));
+    assert.ok(found, `${selector} must still be declared`);
+    return found[1];
+  };
+  /** The top margin a declaration block sets, by shorthand or longhand. */
+  const top = (body) => Number((body.match(/margin(?:-top)?:(-?\d+)px/) ?? [, "0"])[1]);
+
+  const gap = Number((rule(".wf").match(/(?:^|;)gap:(\d+)px/) ?? [, "0"])[1]);
+  assert.equal(gap, 0, "the grid gap is added to every child margin below — one of the two must be zero");
+
+  /* Desktop distances, which are now exactly what the file says they are. */
+  const wide = {
+    "card → bar": gap + top(rule(".wf__bar")),
+    "bar → controls": gap + top(rule(".wf__ctl")),
+    "controls → hint": gap + top(rule(".wf__swipe")),
+  };
+  for (const [what, px] of Object.entries(wide)) {
+    assert.ok(px >= 10, `${what} is ${px}px — under 10px the stepper reads as one block, not four things`);
+    assert.ok(px <= 28, `${what} is ${px}px — that is the double count coming back`);
+  }
+  assert.ok(wide["card → bar"] >= wide["bar → controls"], "the bar belongs to the controls, not to the card");
+  assert.ok(wide["bar → controls"] >= wide["controls → hint"], "the hint captions the arrows above it");
+
+  /*
+   * THE PHONE BLOCK, PINNED AS ONE THING. The tightened margins and the 44px
+   * touch floor share a block deliberately: `.wf__ctl .btn` is `btn--sm`,
+   * which is 40px everywhere else, and on a phone these two buttons are the
+   * only way through the stepper. A later pass reaching in here for a few
+   * more pixels must not be able to take them out of the button's height —
+   * so the spacing this test allows and the floor it requires are asserted
+   * together, from the same block.
+   */
+  const opener = "@media(max-width:620px){";
+  /* There is more than one block at this breakpoint — the hero's band and the
+     stepper's spacing both live at 620px, which is the agreed value and not a
+     licence to invent another. So find the one that actually carries the
+     stepper, rather than the first one in the file: taking `indexOf` here
+     silently asserted against the hero's block the moment a second appeared. */
+  let start = -1;
+  for (let at = css.indexOf(opener); at !== -1; at = css.indexOf(opener, at + 1)) {
+    const chunk = css.slice(at, css.indexOf("\n}", at));
+    if (chunk.includes(".wf__ctl")) { start = at; break; }
+  }
+  assert.notEqual(start, -1, "the stepper's phone block must still exist at the agreed 620px breakpoint");
+  let end = start + opener.length;
+  for (let depth = 1; depth > 0; end += 1) {
+    assert.ok(end < css.length, "the phone block is unterminated");
+    if (css[end] === "{") depth += 1;
+    else if (css[end] === "}") depth -= 1;
+  }
+  const phone = css.slice(start, end);
+
+  assert.match(phone, /\.wf__ctl \.btn\{min-height:44px\}/, "Previous and Next are the phone's only arrows: 44px, not btn--sm's 40px");
+  assert.doesNotMatch(
+    css,
+    /\.wf__ctl \.btn\{[^}]*min-height:(?:[0-9]|[1-3]\d|4[0-3])px/,
+    "nothing may set the stepper's buttons under 44px anywhere in the file",
+  );
+
+  const narrow = {
+    "card → bar": Number(phone.match(/\.wf__bar\{[^}]*margin-top:(\d+)px/)[1]),
+    "bar → controls": Number(phone.match(/\.wf__ctl\{[^}]*margin-top:(\d+)px/)[1]),
+    "controls → hint": Number(phone.match(/\.wf__swipe\{[^}]*margin-top:(\d+)px/)[1]),
+  };
+  for (const [what, px] of Object.entries(narrow)) {
+    assert.ok(px >= 10, `${what} is ${px}px on a phone — that is cramped, not efficient`);
+    assert.ok(px <= wide[what], `${what} is looser on a phone (${px}px) than on a desktop (${wide[what]}px)`);
+  }
+  /* 116px of dead space below the card became 42px. The budget keeps both
+     ends of that honest: it may not creep back, and it may not be cut to a
+     seam either. */
+  const budget = Object.values(narrow).reduce((a, b) => a + b, 0);
+  assert.ok(budget >= 34 && budget <= 60, `the phone's whitespace below the card is ${budget}px, outside 34-60`);
+});
+
 test("each audience card carries the photograph the README gives it", async () => {
   const who = await read("app/(marketing)/_sections/who-we-help.tsx");
   const pairs = [...who.matchAll(/label: "([^"]+)",\s*\n\s*body: "[^"]*",\s*\n\s*photo: "([^"]+)"/g)].map(
@@ -337,10 +425,23 @@ test("the store count is one number, and it is not the certificate deadline", as
   const hero = await read("app/(marketing)/_sections/hero.tsx");
   const caseStudy = await read("app/(marketing)/_sections/case-study.tsx");
 
-  assert.match(hero, /<span>20 stores currently coordinated<\/span>/, "the hero trust line");
-  assert.match(caseStudy, /\{ value: "20", label: "stores coordinated" \}/, "the case-study stat tile");
-  assert.match(caseStudy, /<h2 className="h2">20 stores\. One point of contact\.<\/h2>/, "the case-study heading");
-  assert.match(caseStudy, /A UK fragrance retailer with 20 stores and kiosks/, "the case-study lede");
+  /* "+20", not "20", in all four places — the owner's notation. A bare 20
+     claims an exact count the business would have to keep correcting; the plus
+     says "at least", which stays true as the portfolio grows. The digits are
+     pinned and so is the plus, in every one of the four, because dropping it
+     anywhere would leave the page claiming two different things about the same
+     portfolio. */
+  assert.match(hero, /<span>\+20 stores currently coordinated<\/span>/, "the hero trust line");
+  assert.match(caseStudy, /\{ value: "\+20", label: "stores coordinated" \}/, "the case-study stat tile");
+  assert.match(caseStudy, /<h2 className="h2">\+20 stores\. One point of contact\.<\/h2>/, "the case-study heading");
+  assert.match(caseStudy, /A UK fragrance retailer with \+20 stores and kiosks/, "the case-study lede");
+
+  /* And no un-prefixed survivor. A "20 stores" without the plus, anywhere in
+     either file, means one of the four was missed. */
+  for (const [name, source] of [["hero.tsx", hero], ["case-study.tsx", caseStudy]]) {
+    const bare = [...source.matchAll(/(?<!\+)\b20 stores\b/g)];
+    assert.equal(bare.length, 0, `${name} claims "20 stores" without the plus`);
+  }
 
   for (const [name, source] of [["hero.tsx", hero], ["case-study.tsx", caseStudy]]) {
     const stale = [...source.matchAll(/\b21\b(?=[^\n]*\bstores?\b)/g)];

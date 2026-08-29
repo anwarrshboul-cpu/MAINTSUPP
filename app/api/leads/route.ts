@@ -46,9 +46,30 @@ export async function POST(request: Request) {
      * still READ and still stored: anything that does send it keeps working,
      * which matters because `leads.services` already holds rows.
      *
-     * Everything else stays required. Those eight are all on the form.
+     * `regions` and `challenge` are no longer required either, for exactly
+     * the same reason: the form stopped asking.
+     *
+     * The CTA dropped "Regions", "Approx. maintenance issues per month" and
+     * "Biggest problem right now". `regions` was the first of those; the
+     * other two were glued into `challenge` by the form, because `challenge`
+     * was once a free-text box and this check went on demanding 20 characters
+     * of it long after the box was gone. With no control behind either,
+     * keeping them required would have made every submission from the only
+     * page that posts here a 400 nobody can fix — and the alternative,
+     * sending a placeholder long enough to clear the floor, would have
+     * written a sentence the visitor never said into a sales inbox.
+     *
+     * Both are still READ, still stored and still notified: anything that
+     * does send them keeps working, and `leads.regions` / `leads.challenge`
+     * are NOT NULL columns with existing rows behind them. Absent, they
+     * store as "[]" and "" — an unanswered question recorded as unanswered,
+     * which is honest in a way an invented answer is not. `leadAlertTemplate`
+     * already drops a row whose value is empty, so a lead with no challenge
+     * shows no "What they said" line rather than an empty one.
+     *
+     * Everything else stays required. Those five are all on the form.
      */
-    if (!name || !company || !/^\S+@\S+\.\S+$/.test(email) || !siteRange || !regions.length || challenge.length < 20) {
+    if (!name || !company || !/^\S+@\S+\.\S+$/.test(email) || !siteRange) {
       return Response.json({ error: "Complete the required portfolio and contact details." }, { status: 400 });
     }
 

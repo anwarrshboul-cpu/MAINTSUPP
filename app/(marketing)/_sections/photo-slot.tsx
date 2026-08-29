@@ -19,6 +19,12 @@
  * string so a screen reader is not told twice.
  */
 export const photoAlt: Record<string, string> = {
+  /* The hero photograph. `hero-london-maintenance` is the retired v3 file — its
+     entry stays because the registry is the guarantee that no slot can ever
+     reach the page undescribed, and an entry costs nothing while a missing one
+     is a gap waiting for a caller that forgets. */
+  "hero-maintenance-v4":
+    "Two maintenance engineers in hi-vis jackets and hard hats at an open plant panel on a London rooftop at dusk, with the lit City skyline behind them",
   "hero-london-maintenance":
     "A maintenance engineer working on a shopfront in a London high street",
   "evidence-closeout":
