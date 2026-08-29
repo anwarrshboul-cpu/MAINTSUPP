@@ -737,7 +737,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    is the one that can. At the band ratio there is nothing to crop, so this is
    what decides the framing only if `--hero-band` is ever made taller: the
    engineers stay, the access platform goes. */
-.hero .ph__img{object-position:12% bottom}
+.hero .ph__img{object-position:25% bottom}
 
 /* THE SCRIM IS NOW A FLOOR, NOT A BLANKET. It used to run 77%→94% opaque top
    to bottom below 980px, which over this photograph would have left a sixth

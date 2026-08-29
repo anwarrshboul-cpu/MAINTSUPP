@@ -432,7 +432,7 @@ test("the hero crop is a band, and no edit can quietly go back to eating the pic
     /\.hero[^{\n]*\.ph__img\{[^}]*background-position/,
     "an <img> ignores background-position — the framing lever is object-position",
   );
-  assert.match(css, /\.hero \.ph__img\{[^}]*object-position:12% bottom/);
+  assert.match(css, /\.hero \.ph__img\{[^}]*object-position:25% bottom/);
 
   /*
    * PHONES, AND BOTH WAYS OF GETTING THIS WRONG.
@@ -474,7 +474,7 @@ test("the hero crop is a band, and no edit can quietly go back to eating the pic
 
   /* The framing lever, which is what keeps the people in frame once height is
      cropping the width again. */
-  assert.match(css, /\.hero \.ph__img\{[^}]*object-position:12% bottom/);
+  assert.match(css, /\.hero \.ph__img\{[^}]*object-position:25% bottom/);
 });
 
 test("the hero copy carries its own contrast, so the scrim does not have to crush the picture", async () => {
