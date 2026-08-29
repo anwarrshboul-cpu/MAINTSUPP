@@ -435,32 +435,46 @@ test("the hero crop is a band, and no edit can quietly go back to eating the pic
   assert.match(css, /\.hero \.ph__img\{[^}]*object-position:12% bottom/);
 
   /*
-   * PHONES. At the picture's own ratio the band is 167px tall at 390 and sits
-   * at page y 783 — below the fold and behind the cookie bar, a photograph
-   * nobody sees. So below 620px it is made taller and lifted into the fold,
-   * and height costs width. The bound is the point: a future pass may retune
-   * this, but it may not tune it back past half the picture, which is the
-   * "eaten crop" the owner rejected.
+   * PHONES, AND BOTH WAYS OF GETTING THIS WRONG.
+   *
+   * At the picture's own ratio the band is 167px tall at 390 and sits at page
+   * y 783 — below the fold, a photograph nobody sees. Made taller by a ratio of
+   * the WIDTH it reached 58% of the picture, which is the number the brief
+   * asked for and still looked wrong: 285px of an 838px hero, so more than half
+   * the hero was flat navy and it read as an image that had failed to load.
+   *
+   * Cover makes height and width reciprocal, so the two failure modes sit at
+   * opposite ends of one dial: too little height reads as empty, too little
+   * width goes back to the middle-of-the-skyline crop with no people in it.
+   * Both ends are bounded here, and the band is a share of the HERO'S height
+   * rather than of the viewport's width — the hero grows as the headline wraps
+   * (838px at 390, 977px at 320), so a width-derived band is thinnest exactly
+   * where the hero is tallest.
    */
   /* The block is found by what it CONTAINS, not by where it sits: another
      section may open a 620px query above this one at any time. */
   const phoneBlocks = [...css.matchAll(/@media\s*\(max-width:\s*620px\)\s*\{([\s\S]*?)\n\}/g)]
     .map((match) => match[1])
-    .filter((body) => body.includes("--hero-band"));
+    .filter((body) => body.includes(".hero__media .ph > picture"));
   assert.equal(phoneBlocks.length, 1, "exactly one phone block may own the hero band");
   const [phoneBlock] = phoneBlocks;
-  const phone = bandRatio(phoneBlock);
-  assert.equal(phone.w, HERO_W);
-  assert.ok(
-    phone.h > HERO_H,
-    "a phone band at the picture's own ratio falls below the fold — it has to be taller",
-  );
-  assert.ok(
-    visible(phone) >= 0.5,
-    `a phone shows ${(visible(phone) * 100).toFixed(1)}% of the picture — under half is the crop that was rejected`,
-  );
-  assert.match(phoneBlock, /top:42%/, "lifted into the fold, not pinned to the hero's foot");
-  assert.match(phoneBlock, /mask-image:linear-gradient/, "and faded at both ends into the painted sky");
+
+  const fill = phoneBlock.match(/height:\s*(\d+)%/);
+  assert.ok(fill, "the phone band must take a share of the hero's height");
+  const pct = Number(fill[1]);
+  assert.ok(pct >= 50, `the band fills ${pct}% of the hero — under half reads as a page with no photograph on it`);
+  assert.ok(pct <= 70, `the band fills ${pct}% of the hero — past this the width collapses back to the eaten crop`);
+
+  /* A share of the height only means anything if the ratio stops driving the
+     box, and the picture must still be anchored to the hero's foot. */
+  assert.match(phoneBlock, /aspect-ratio:auto/, "the desktop ratio must not also be setting the height");
+  assert.match(phoneBlock, /bottom:0/, "anchored to the hero's foot");
+  assert.match(phoneBlock, /top:auto/);
+  assert.match(phoneBlock, /mask-image:linear-gradient/, "and faded at the top into the painted sky");
+
+  /* The framing lever, which is what keeps the people in frame once height is
+     cropping the width again. */
+  assert.match(css, /\.hero \.ph__img\{[^}]*object-position:12% bottom/);
 });
 
 test("the hero copy carries its own contrast, so the scrim does not have to crush the picture", async () => {
