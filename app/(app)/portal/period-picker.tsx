@@ -31,6 +31,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { Icon } from "../../components";
 import {
   dateToken,
+  isPeriodToken,
   monthToken,
   periodOptionGroups,
   periodRangeParts,
@@ -251,6 +252,132 @@ export function PeriodCaption({
       </span>
     </p>
   );
+}
+
+/* ── The remembered range ────────────────────────────────────────────────── */
+
+/**
+ * A range belongs to its page, and it stays there.
+ *
+ * Workstream 8 gave every analytical section its own `period` and keyed the
+ * sections so two of them could never share one React instance. That made the
+ * ranges independent — and it made them forgetful, because keying a section
+ * means it unmounts on the way out and mounts fresh on the way back, taking
+ * its `useState` default with it. The owner's report was exact: set Overview
+ * to Last week, open Jobs, come back, and it reads Last 90 days again.
+ *
+ * The fix is persistence, NOT a longer-lived component. The key stays: it is
+ * what stops one section's range reaching another, and correctness here must
+ * not depend on a component happening to stay mounted.
+ *
+ * ONE KEY PER SECTION, NEVER ONE SHARED KEY. The namespace below is per
+ * section id, so writing Overview's range cannot move Reports'. The id is the
+ * section the shell is actually on — including a workspace-defined section —
+ * rather than a display label, which changes the moment somebody renames a
+ * menu item.
+ *
+ * Per person per BROWSER, not per account: `localStorage` is the only
+ * preference store this product has for a view setting, the same one the
+ * theme, the board's collapsed groups and the sort direction below use. On a
+ * second device the page default comes back. Said plainly rather than implied.
+ */
+const RANGE_NAMESPACE = "maintsupp:date-range:";
+
+/**
+ * The storage key for one section.
+ *
+ * Sanitised because a workspace section id is workspace-authored text, and a
+ * key is not the place to discover that.
+ */
+export function periodStorageKey(sectionKey: string) {
+  const safe = (sectionKey || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .slice(0, 60);
+  return `${RANGE_NAMESPACE}${safe || "unknown"}`;
+}
+
+const rangeListeners = new Set<() => void>();
+
+/**
+ * The choice for this session when storage refuses it.
+ *
+ * Private browsing and blocked storage both make `setItem` throw. Without
+ * this the control would appear inert in those browsers — the click would
+ * write nowhere and the snapshot would read the default straight back.
+ * Storage stays authoritative when it works, so another tab still wins.
+ */
+const rangeMemory = new Map<string, string>();
+
+function subscribeToRange(onChange: () => void) {
+  rangeListeners.add(onChange);
+  // `storage` fires only in OTHER tabs, so same-tab writes are announced
+  // through the listener set. Both feed one subscribe/snapshot pair.
+  window.addEventListener("storage", onChange);
+  return () => {
+    rangeListeners.delete(onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+export function useStoredPeriod(
+  sectionKey: string,
+  fallback: string,
+  isValid: (value: string) => boolean = isPeriodToken,
+): [string, (next: string) => void] {
+  const key = periodStorageKey(sectionKey);
+
+  /*
+   * Read through `useSyncExternalStore` rather than copied into state by an
+   * effect — the same pattern the theme toggle and the sort control use, and
+   * for the same two reasons: the server render and the first client render
+   * agree, and there is no cascading re-render on mount. Coming BACK to a
+   * section is a mount, not a hydration, so the stored range is the first
+   * thing that section ever paints; there is no flash of the default.
+   */
+  const read = useCallback(() => {
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (saved === null) return rangeMemory.get(key) ?? fallback;
+      if (isValid(saved)) return saved;
+      /*
+       * Malformed, or a preset this release no longer offers. Dropped rather
+       * than left to fail the same way on every future load — and the page
+       * default is used, not an error.
+       */
+      window.localStorage.removeItem(key);
+    } catch {
+      // Storage unavailable. The default still filters, so nothing breaks.
+      return rangeMemory.get(key) ?? fallback;
+    }
+    return fallback;
+  }, [fallback, isValid, key]);
+
+  const readOnServer = useCallback(() => fallback, [fallback]);
+
+  const period = useSyncExternalStore(subscribeToRange, read, readOnServer);
+
+  const choose = useCallback(
+    (next: string) => {
+      /*
+       * Whatever the control emits is stored as given. The picker is trusted —
+       * it is the thing that defines the vocabulary — and validating on the
+       * way IN would freeze the control mid-edit the first time somebody typed
+       * a year with five digits. The trust boundary is the read above, where
+       * the value is arriving from storage rather than from the page.
+       */
+      rangeMemory.set(key, next);
+      try {
+        window.localStorage.setItem(key, next);
+      } catch {
+        // Kept in memory above, so the control still works for this session.
+      }
+      for (const listener of rangeListeners) listener();
+    },
+    [key],
+  );
+
+  return [period, choose];
 }
 
 /* ── Sort direction ──────────────────────────────────────────────────────── */

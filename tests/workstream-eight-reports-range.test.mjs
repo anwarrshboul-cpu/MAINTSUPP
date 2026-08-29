@@ -487,13 +487,164 @@ test("no surface persists its range anywhere shared", async () => {
   );
 });
 
-test("each surface still owns a separate period", async () => {
-  const states =
-    (await read(PORTAL)).match(/const \[period, setPeriod\] = useState\("[^"]+"\)/g) ?? [];
+test("each surface still owns a separate period, and remembers it", async () => {
+  /*
+   * The owner's acceptance failure. Keying the surfaces by section stopped a
+   * range leaking from one page to another — and, because a keyed surface
+   * unmounts on the way out, also threw the range away: set Overview to Last
+   * week, open Jobs, come back, and it read Last 90 days again.
+   *
+   * The key stays. Correctness here must not depend on a component happening
+   * to remain mounted, so the range moved OUT of the component instead.
+   */
+  const portal = await read(PORTAL);
+  const stored =
+    portal.match(/const \[period, setPeriod\] = useStoredPeriod\(sectionKey, "[^"]+"\)/g) ?? [];
   assert.ok(
-    states.length >= 5,
-    `expected a period per analytical page, found ${states.length}`,
+    stored.length >= 5,
+    `expected a remembered period per analytical page, found ${stored.length}`,
   );
+  // No analytical surface may keep its range in state that dies with it.
+  assert.doesNotMatch(
+    portal,
+    /const \[period, setPeriod\] = useState\(/,
+    "a page's range is back in state that its own unmount will discard",
+  );
+  // The jobs board is a range-enabled surface too, and the owner named it.
+  assert.match(
+    await read("app/(app)/portal/live-board.tsx"),
+    /const \[analyticsPeriod, setAnalyticsPeriod\] = useStoredPeriod\(/,
+    "the jobs board forgets its range",
+  );
+});
+
+test("one key per section, and never one shared key", async () => {
+  /*
+   * The whole point. A single global key would restore the requirement's
+   * forbidden case — set Overview to Last week, open Reports, find Reports on
+   * Last week — with persistence added on top.
+   */
+  const picker = await read(PICKER);
+  assert.match(picker, /const RANGE_NAMESPACE = "maintsupp:date-range:";/);
+  assert.match(
+    picker,
+    /export function periodStorageKey\(sectionKey: string\)/,
+    "the key has to be built from the section, not from a label",
+  );
+  // Built from the argument, not a constant: a key that ignored its input
+  // would be one shared key wearing a per-section name.
+  assert.match(picker, /\$\{RANGE_NAMESPACE\}\$\{safe \|\| "unknown"\}/);
+
+  const portal = await read(PORTAL);
+  // Every surface is handed the section it is, alongside the React key.
+  for (const element of [
+    "OverviewView",
+    "ContractorsView",
+    "ComplianceView",
+    "CalendarView",
+    "DocumentsView",
+    "ReportsView",
+  ]) {
+    const at = portal.indexOf(`<${element}`);
+    assert.match(
+      portal.slice(at, at + 1400),
+      /sectionKey=\{activeSection\}/,
+      `<${element}> does not know which page it is`,
+    );
+  }
+});
+
+test("what is stored is the range itself, not the words on the screen", async () => {
+  /*
+   * The token IS the canonical representation — a preset is its own id, and a
+   * custom span carries both dates — so restoring it restores the selection
+   * exactly, including the month/year/date shapes. Storing the caption would
+   * restore a sentence and lose the filter.
+   */
+  for (const token of [
+    "90",
+    "week-1",
+    "12m",
+    "all",
+    "month:2026-07",
+    "year:2026",
+    "date:2026-08-17",
+    "range:2026-08-01..2026-08-17",
+  ]) {
+    assert.ok(period.isPeriodToken(token), `${token} would not survive a round trip`);
+  }
+
+  // A custom range restores both ends, to the day.
+  const parts = period.periodRangeParts("range:2026-08-01..2026-08-17");
+  assert.deepEqual(parts, { from: "2026-08-01", to: "2026-08-17" });
+
+  // And an unfinished one is kept rather than discarded: the reader picked
+  // that first date, and the caption already explains what is missing.
+  assert.ok(period.isPeriodToken("range:2026-08-01.."));
+  assert.equal(period.resolvePeriod("range:2026-08-01..", Date.now()).recognised, false);
+});
+
+test("a malformed or retired stored value falls back to the page default", async () => {
+  /*
+   * localStorage is writable by anything on the origin and survives releases,
+   * so what comes back is not ours. Two different things can be wrong with it
+   * — junk, and a preset a later release stopped offering — and both have to
+   * land on the page default without reaching the window maths.
+   */
+  for (const junk of [
+    "",
+    "   ",
+    "<script>alert(1)</script>",
+    "range:not-a-date",
+    "month:2026-07; DROP TABLE",
+    "definitely-not-a-period",
+    "x".repeat(200),
+    "range:" + "9".repeat(80),
+  ]) {
+    assert.equal(period.isPeriodToken(junk), false, `${junk.slice(0, 30)} was accepted`);
+  }
+  for (const notAString of [null, undefined, 42, {}, []]) {
+    assert.equal(period.isPeriodToken(notAString), false);
+  }
+
+  // And the bad key is cleared rather than left to fail the same way forever.
+  const picker = await read(PICKER);
+  assert.match(picker, /window\.localStorage\.removeItem\(key\)/);
+  // Nothing about a parse failure reaches the reader.
+  assert.doesNotMatch(picker, /catch \(\w+\) \{[\s\S]{0,120}console\./);
+});
+
+test("reading is guarded, writing is trusted", async () => {
+  /*
+   * The trust boundary is the read. Validating on the way IN would freeze the
+   * control mid-edit the first time somebody typed a five-digit year, so what
+   * the picker emits is stored as given; what storage returns is checked.
+   */
+  const picker = await read(PICKER);
+  const hook = picker.slice(picker.indexOf("export function useStoredPeriod"));
+  const body = hook.slice(0, hook.indexOf("\n/* ── Sort direction"));
+  assert.match(body, /if \(isValid\(saved\)\) return saved;/, "the read is checked");
+  assert.match(body, /window\.localStorage\.setItem\(key, next\)/, "the write is not");
+  // Blocked storage must not make the control inert.
+  assert.match(body, /rangeMemory\.set\(key, next\)/);
+  // Server and first client render agree; there is no effect-copied state.
+  assert.match(body, /useSyncExternalStore\(subscribeToRange, read, readOnServer\)/);
+});
+
+test("compliance remembers its horizon and both custom dates together", async () => {
+  /*
+   * Its control is an expiry horizon, not the reporting picker, and it carries
+   * three pieces of state. They are stored as ONE token so the horizon and the
+   * dates cannot come back disagreeing with each other.
+   */
+  const portal = await read(PORTAL);
+  assert.match(portal, /function isExpiryToken\(value: string\)/);
+  assert.match(portal, /const expiryToken = \(window: string, from: string, to: string\)/);
+  assert.match(portal, /useStoredPeriod\(\s*sectionKey \?/);
+  assert.ok(portal.includes(":expiry"), "compliance needs its own sub-key");
+  const view = componentBody(portal, "ComplianceView");
+  assert.doesNotMatch(view, /const \[expiryFrom, setExpiryFrom\] = useState\(/);
+  assert.doesNotMatch(view, /const \[expiryWindow, setExpiryWindow\] = useState\(/);
 });
 
 /* ── 7. The right clock, on every surface that filters ───────────────────── */

@@ -458,10 +458,22 @@ test("the calendar does not open on a backward-looking range", async () => {
     portal.indexOf("function CalendarView("),
     portal.indexOf("function DocumentsView("),
   );
+  /*
+   * Workstream 8 moved the default from a `useState` initialiser to the
+   * second argument of `useStoredPeriod`, so the range survives leaving the
+   * page. The guarantee is the same and is checked in both forms — a
+   * `doesNotMatch` against a call that no longer exists would pass while
+   * saying nothing.
+   */
   assert.doesNotMatch(
     view,
     /useState\("(7|30|90|180|365|12m)"\)/,
     "a rolling backward window must not be the calendar's starting state",
+  );
+  assert.doesNotMatch(
+    view,
+    /useStoredPeriod\([^)]*"(7|30|90|180|365|12m)"\)/s,
+    "nor may it be the remembered default",
   );
 });
 
@@ -478,7 +490,17 @@ test("the calendar's state is its own, and does not reach other pages", async ()
     portal.indexOf("function CalendarView("),
     portal.indexOf("function DocumentsView("),
   );
-  assert.match(view, /const \[period, setPeriod\] = useState\("all"\)/, "its own period");
+  /*
+   * Its own period, and it is remembered — keyed to the SECTION this page is,
+   * never to a shared range. Workstream 8's correction: keying the surfaces
+   * stopped a range leaking between pages and also threw it away on the way
+   * out, so the calendar reopened on "all" after every visit elsewhere.
+   */
+  assert.match(
+    view,
+    /const \[period, setPeriod\] = useStoredPeriod\(sectionKey, "all"\)/,
+    "its own period, remembered under its own section",
+  );
   assert.doesNotMatch(view, /setSection\(/, "and it does not steer the rest of the app");
   const prefs = await read(PREFS);
   assert.doesNotMatch(prefs, /maintsupp:(dashboard|reports|board):/, "no shared key");

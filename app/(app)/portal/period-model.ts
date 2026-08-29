@@ -487,6 +487,51 @@ export function periodSelectValue(period: string) {
   return shape === "preset" ? (period || "all") : shape;
 }
 
+/**
+ * Whether a string is a period this vocabulary recognises the SHAPE of.
+ *
+ * This exists because a remembered range comes back out of `localStorage`,
+ * which is writable by anything running on the origin and survives releases.
+ * Two different things can be wrong with what comes back: it can be junk, and
+ * it can be a preset a later release stopped offering. Both have to land on
+ * the page's default rather than reaching `resolvePeriod`, and neither may
+ * throw.
+ *
+ * It is deliberately looser than "resolves to a window". A half-typed custom
+ * range — `range:2026-08-01..` — is UNFINISHED, not malformed: the control
+ * shows it, the caption explains that the other end is missing, and throwing
+ * it away would lose the date the reader had already picked. So the argument
+ * is checked for the characters a date field can produce and a length, not for
+ * a complete date.
+ */
+export function isPeriodToken(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const token = value.trim();
+  // Capped before any pattern work: this input is not ours.
+  if (!token || token.length > 64) return false;
+
+  const shape = periodShape(token);
+  if (shape === "preset") {
+    return periodOptions.some((option) => option.value === token);
+  }
+  // "month", "year", "date", "range" on their own are what the select holds
+  // while its extra field is still empty.
+  if (token === shape) return true;
+
+  const argument = periodArgument(token);
+  /*
+   * Digits, hyphens and the range separator. Nothing a date input can emit
+   * falls outside this, and nothing outside it is worth restoring.
+   *
+   * 32 rather than something tighter because the longest legitimate argument
+   * is a whole custom range — `2026-08-01..2026-08-17`, 22 characters — and a
+   * cap that trims a real selection is a worse bug than a loose one: it would
+   * throw away exactly the range a reader took the trouble to type.
+   */
+  if (!/^[0-9.-]{0,32}$/.test(argument)) return false;
+  return shape === "range" ? argument.includes("..") : true;
+}
+
 /* ── Buckets ─────────────────────────────────────────────────────────────── */
 
 export interface PeriodBucket {

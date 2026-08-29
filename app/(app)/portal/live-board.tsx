@@ -53,7 +53,7 @@ import {
   withinAnalyticsPeriod,
 } from "./dashboard-analytics";
 import { computeJobMeters, jobMeterTrendLabels } from "./dashboard-meters";
-import { PeriodPicker } from "./period-picker";
+import { PeriodPicker, useStoredPeriod } from "./period-picker";
 import { JobsMeterToggle, useCollapsingMeters } from "./jobs-meter-strip";
 
 import {
@@ -349,7 +349,9 @@ export function LiveMaintenanceBoard({
    * started carrying monday's real Date Requested — a job raised six months ago
    * looked deleted rather than filtered.
    */
-  const [analyticsPeriod, setAnalyticsPeriod] = useState("all");
+  /* Remembered per section — the identity this board already uses for its
+     per-section open tab; `boardId` covers Store Documentation, which has none. */
+  const [analyticsPeriod, setAnalyticsPeriod] = useStoredPeriod(sectionKey || boardId || "maintenance", "all");
   const [analyticsNow] = useState(() => Date.now());
   const [priority, setPriority] = useState<"All" | Priority>("All");
   /** Store Documentation's filter, holding a Store Type choice id. */

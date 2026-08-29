@@ -138,6 +138,7 @@ import {
   PeriodCaption,
   PeriodPicker,
   SortDirectionSelect,
+  useStoredPeriod,
   useStoredSortDirection,
 } from "./period-picker";
 import {
@@ -2380,6 +2381,7 @@ export default function PortalApp({
                 happened to unmount the old one. This makes it structural.
               */
               key={activeSection}
+              sectionKey={activeSection}
               requests={requests}
               stores={currentStores}
               compliance={workspace?.compliance ?? []}
@@ -2509,6 +2511,7 @@ export default function PortalApp({
           {activeSurface === "contractors" && dataMode !== "unavailable" && (
             <ContractorsView
               key={activeSection}
+              sectionKey={activeSection}
               contractors={currentContractors}
               requests={requests}
               onManage={(id) => openWorkspaceManager("contractor", id)}
@@ -2518,6 +2521,7 @@ export default function PortalApp({
           {activeSurface === "compliance" && (
             <ComplianceView
               key={activeSection}
+              sectionKey={activeSection}
               stores={currentStores}
               complianceRecords={workspace?.compliance ?? []}
               onManage={(id) => openWorkspaceManager("compliance", id)}
@@ -2536,6 +2540,7 @@ export default function PortalApp({
           {activeSurface === "calendar" && dataMode !== "unavailable" && (
             <CalendarView
               key={activeSection}
+              sectionKey={activeSection}
               requests={requests}
               planned={currentPlanned}
               complianceRecords={workspace?.compliance ?? []}
@@ -2551,7 +2556,7 @@ export default function PortalApp({
             />
           )}
           {activeSurface === "documents" && (
-            <DocumentsView key={activeSection} files={documents} />
+            <DocumentsView key={activeSection} sectionKey={activeSection} files={documents} />
           )}
           {activeSurface === "reports" && dataMode === "unavailable" && (
             <WorkspaceUnavailable
@@ -2565,6 +2570,7 @@ export default function PortalApp({
           {activeSurface === "reports" && dataMode !== "unavailable" && (
             <ReportsView
               key={activeSection}
+              sectionKey={activeSection}
               requests={requests}
               stores={currentStores}
               /* `dataMode` IS the jobs signal — it is stamped "live" only
@@ -2869,6 +2875,7 @@ function OverviewView({
   units,
   workspaceReady,
   jobsReady,
+  sectionKey,
   onNavigate,
   onOpenRequest,
 }: {
@@ -2896,6 +2903,16 @@ function OverviewView({
    */
   workspaceReady: boolean;
   /**
+   * WHICH PAGE THIS IS, for the range it remembers.
+   *
+   * The section id the shell is actually on — a built-in one, or a
+   * workspace-defined section that draws this surface. It is the storage
+   * namespace for this page's date range and nothing else, which is what
+   * keeps one page's range out of another's. A display label would break the
+   * moment somebody renamed a menu item.
+   */
+  sectionKey: string;
+  /**
    * Whether `/api/maintenance` has answered yet — the jobs half of this page.
    *
    * `workspaceReady` was added when "Active units 0" and "Compliance 0%" were
@@ -2914,7 +2931,13 @@ function OverviewView({
   // Named once, so the tiles and the panels below cannot drift apart on what
   // "not loaded yet" means.
   const loading = !jobsReady;
-  const [period, setPeriod] = useState("90");
+  /*
+   * Remembered for THIS page. Keying the sections stopped a range leaking
+   * between them and, by unmounting on the way out, also threw it away — so
+   * Overview came back on its default every time. The key stays and the value
+   * outlives the component; see `useStoredPeriod`.
+   */
+  const [period, setPeriod] = useStoredPeriod(sectionKey, "90");
   const scopedStores = useMemo(
     () => storeRows.filter((store) => store.lifecycle === "Current" && (portfolio === "all" || store.id === portfolio)),
     [portfolio, storeRows],
@@ -3579,21 +3602,85 @@ function WorkspaceUnavailable({
   );
 }
 
+/*
+ * COMPLIANCE'S HORIZON, AS ONE REMEMBERABLE VALUE.
+ *
+ * This page's control is not the reporting `PeriodPicker` — it is an EXPIRY
+ * horizon ("what falls due in the next 90 days") with a two-date custom shape
+ * beside it, and it is deliberately a different question. But it is a date
+ * range the reader chose, so it has to survive leaving the page like the
+ * others.
+ *
+ * Three pieces of state are stored as one token so the horizon and the two
+ * dates can never come back out of storage disagreeing with each other:
+ * a preset is itself, and a custom span is `custom:FROM..TO` with either end
+ * allowed to be empty while it is being typed.
+ */
+const EXPIRY_PRESETS = new Set(["all", "30", "90", "180", "custom"]);
+
+function isExpiryToken(value: string) {
+  if (EXPIRY_PRESETS.has(value)) return true;
+  if (!value.startsWith("custom:") || value.length > 64) return false;
+  const span = value.slice("custom:".length);
+  return span.includes("..") && /^[0-9.-]{0,21}$/.test(span);
+}
+
+const expiryToken = (window: string, from: string, to: string) =>
+  window === "custom" ? `custom:${from}..${to}` : window;
+
+function expiryParts(token: string) {
+  if (!token.startsWith("custom:")) return { window: token, from: "", to: "" };
+  const [from = "", to = ""] = token.slice("custom:".length).split("..");
+  return { window: "custom", from, to };
+}
+
 function ComplianceView({
   stores: storeRows,
   complianceRecords,
+  sectionKey,
   onManage,
   onNotify,
 }: {
   stores: StoreRecord[];
   complianceRecords: WorkspaceSnapshot["compliance"];
+  /**
+   * WHICH PAGE THIS IS, for the range it remembers.
+   *
+   * The section id the shell is actually on — a built-in one, or a
+   * workspace-defined section that draws this surface. It is the storage
+   * namespace for this page's date range and nothing else, which is what
+   * keeps one page's range out of another's. A display label would break the
+   * moment somebody renamed a menu item.
+   */
+  sectionKey: string;
   onManage: (id?: string | null) => void;
   onNotify: (message: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"All" | ComplianceState>("All");
   const [portfolio, setPortfolio] = useState("all");
-  const [expiryWindow, setExpiryWindow] = useState("all");
+  /*
+   * One stored token, three values read back out of it. Every existing caller
+   * below still sets one thing at a time; each setter rewrites the token with
+   * the other two carried through, so choosing "Between two dates" cannot lose
+   * a date already typed and typing a date cannot lose the horizon.
+   */
+  const [storedExpiry, setStoredExpiry] = useStoredPeriod(
+    sectionKey ? `${sectionKey}:expiry` : "compliance:expiry",
+    "all",
+    isExpiryToken,
+  );
+  const {
+    window: expiryWindow,
+    from: expiryFrom,
+    to: expiryTo,
+  } = expiryParts(storedExpiry);
+  const setExpiryWindow = (next: string) =>
+    setStoredExpiry(expiryToken(next, expiryFrom, expiryTo));
+  const setExpiryFrom = (next: string) =>
+    setStoredExpiry(expiryToken("custom", next, expiryTo));
+  const setExpiryTo = (next: string) =>
+    setStoredExpiry(expiryToken("custom", expiryFrom, next));
   /*
    * A start and an end of the reader's own, for the expiry horizon.
    *
@@ -3604,8 +3691,6 @@ function ComplianceView({
    * filter rather than becoming a reporting period: this page is about what is
    * coming, not what happened.
    */
-  const [expiryFrom, setExpiryFrom] = useState("");
-  const [expiryTo, setExpiryTo] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const now = useCurrentTime();
@@ -3909,6 +3994,7 @@ function CalendarView({
   requests,
   planned,
   complianceRecords,
+  sectionKey,
   onManage,
   onOpenRequest,
   onOpenCompliance,
@@ -3916,6 +4002,16 @@ function CalendarView({
   onJobDateChange,
   onComplianceDateChange,
 }: {
+  /**
+   * WHICH PAGE THIS IS, for the range it remembers.
+   *
+   * The section id the shell is actually on — a built-in one, or a
+   * workspace-defined section that draws this surface. It is the storage
+   * namespace for this page's date range and nothing else, which is what
+   * keeps one page's range out of another's. A display label would break the
+   * moment somebody renamed a menu item.
+   */
+  sectionKey: string;
   requests: MaintenanceRequest[];
   planned: WorkspacePlannedItem[];
   complianceRecords: WorkspaceSnapshot["compliance"];
@@ -3954,7 +4050,7 @@ function CalendarView({
    * or later: of 28 jobs carrying a due date, 13 were drawn and 15 hidden, most
    * of them the future work the page exists to show.
    */
-  const [period, setPeriod] = useState("all");
+  const [period, setPeriod] = useStoredPeriod(sectionKey, "all");
   const periodWindow = resolvePeriod(period, nowMs);
 
   return (
@@ -4024,7 +4120,22 @@ function CalendarView({
   );
 }
 
-function DocumentsView({ files }: { files: FileRecord[] }) {
+function DocumentsView({
+  files,
+  sectionKey,
+}: {
+  files: FileRecord[];
+  /**
+   * WHICH PAGE THIS IS, for the range it remembers.
+   *
+   * The section id the shell is actually on — a built-in one, or a
+   * workspace-defined section that draws this surface. It is the storage
+   * namespace for this page's date range and nothing else, which is what
+   * keeps one page's range out of another's. A display label would break the
+   * moment somebody renamed a menu item.
+   */
+  sectionKey: string;
+}) {
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
@@ -4038,7 +4149,7 @@ function DocumentsView({ files }: { files: FileRecord[] }) {
    * applied before the search, so the counts above the table, the export and
    * the rows all describe the same set.
    */
-  const [period, setPeriod] = useState("12m");
+  const [period, setPeriod] = useStoredPeriod(sectionKey, "12m");
   /*
    * The clock is read once per render pass, not on every render.
    *
@@ -4351,11 +4462,22 @@ function ContractorContact({
 function ContractorsView({
   contractors: registeredContractors,
   requests,
+  sectionKey,
   onManage,
   onNotify,
 }: {
   contractors: WorkspaceContractor[];
   requests: MaintenanceRequest[];
+  /**
+   * WHICH PAGE THIS IS, for the range it remembers.
+   *
+   * The section id the shell is actually on — a built-in one, or a
+   * workspace-defined section that draws this surface. It is the storage
+   * namespace for this page's date range and nothing else, which is what
+   * keeps one page's range out of another's. A display label would break the
+   * moment somebody renamed a menu item.
+   */
+  sectionKey: string;
   onManage: (id?: string | null) => void;
   /* Toasts the raise control's outcome, the same channel every other screen
      reports through. */
@@ -4413,7 +4535,7 @@ function ContractorsView({
    * window stays listed, showing zeroes, because "we use them and they did
    * nothing this quarter" is the answer the reader came for.
    */
-  const [period, setPeriod] = useState("12m");
+  const [period, setPeriod] = useStoredPeriod(sectionKey, "12m");
   // Once per render pass, and on the minute — not a fresh instant on every
   // render, which gave two paints two slightly different windows.
   const nowMs = useCurrentTime();
@@ -4521,6 +4643,7 @@ function ReportsView({
   requests,
   stores: storeRows,
   jobsReady,
+  sectionKey,
   onNavigate,
 }: {
   requests: MaintenanceRequest[];
@@ -4539,6 +4662,16 @@ function ReportsView({
    * states, and a dashboard must not present one as the other.
    */
   jobsReady: boolean;
+  /**
+   * WHICH PAGE THIS IS, for the range it remembers.
+   *
+   * The section id the shell is actually on — a built-in one, or a
+   * workspace-defined section that draws this surface. It is the storage
+   * namespace for this page's date range and nothing else, which is what
+   * keeps one page's range out of another's. A display label would break the
+   * moment somebody renamed a menu item.
+   */
+  sectionKey: string;
   onNavigate: (section: Section) => void;
 }) {
   const now = useCurrentTime();
@@ -4548,7 +4681,7 @@ function ReportsView({
    * but as whole calendar months, so the chart underneath draws twelve labelled
    * monthly buckets instead of a rolling window that starts mid-month.
    */
-  const [period, setPeriod] = useState("12m");
+  const [period, setPeriod] = useStoredPeriod(sectionKey, "12m");
   /*
    * Highest first, and the choice is remembered.
    *
