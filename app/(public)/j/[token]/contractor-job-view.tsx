@@ -505,15 +505,25 @@ export default function ContractorJobView({ token }: { token: string }) {
 
       {readOnly ? (
         /*
-         * `--note` rather than a plain card, because this is the only block on
-         * the page that is not a fact about the job. Given the same white
-         * ground, the same border and the same heading as "Where" and "What
-         * needs doing", a statement about the LINK read as one more thing the
-         * engineer had been told about the WORK — and it was the last card on
-         * the page, so it also had to do the job the contractor's Submit
-         * button does and close the document. It now looks like neither.
+         * THE PLAIN CARD, deliberately — and this reverses an earlier judgement
+         * of mine, on the owner's instruction.
+         *
+         * It was a tinted `--note` block with a coloured left edge, reasoned
+         * from the fact that this is the only section on the page which is not
+         * a fact about the job. That reasoning is not wrong in isolation, but
+         * it made this page's closing block the ONE container on either public
+         * link that belongs to neither page's vocabulary — which is exactly
+         * what "the Fix Tracker still looks like the old design" means when the
+         * rest of the page is already identical to the contractor's.
+         *
+         * So it takes the same white ground, the same border, the same radius,
+         * the same padding and the same heading treatment as every other card
+         * here, and sits in the same slot the contractor's action area sits in.
+         * The read-only fact is carried where it belongs instead: by the "View
+         * only" pill beside the priority in the header, which is stated once,
+         * up front, before the reader has scrolled anywhere.
          */
-        <section className="job-link__card job-link__card--note">
+        <section className="job-link__card">
           <h2>View only</h2>
           <p>
             This link shows the job&apos;s status and photographs. It cannot upload,

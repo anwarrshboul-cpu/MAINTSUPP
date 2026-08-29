@@ -147,29 +147,22 @@ body {
 }
 
 /*
- * The closing note.
+ * THE CLOSING BLOCK HAS NO SKIN OF ITS OWN — see the note beside it in
+ * `contractor-job-view.tsx`.
  *
- * `--done` already establishes that a card which is not job data gets a tint
- * and a coloured edge; this is the same idea in the page's neutral rather than
- * its teal, because "you cannot do anything here" is not good news to
- * celebrate. The left edge does the work a heading colour would otherwise have
- * to, so the heading keeps the same treatment every other card's heading has.
+ * There was a `--note` modifier here: a neutral tint and a teal left edge,
+ * on the reasoning that a statement about the LINK should not look like one
+ * more fact about the WORK. The owner opened the two public links side by
+ * side and read the result the other way round — as the one container on
+ * this page that belongs to no other page, which is what made the ticket
+ * still look like its own old thing while every card above it already
+ * matched the contractor link exactly.
+ *
+ * The read-only fact is carried by the `.job-link__viewonly` pill in the
+ * header instead, where it is read first rather than last. So there is
+ * deliberately no rule here: the block is a `.job-link__card` like every
+ * other one, and adding a modifier back is how the two pages drift again.
  */
-.job-link__card--note {
-  border-color: #dde4e8;
-  border-left: 3px solid #12b4a8;
-  background: #f7f9fa;
-}
-
-.job-link__card--note h2 {
-  color: #3b4a52;
-}
-
-.job-link__card--note p {
-  margin: 0;
-  color: #45555e;
-  font-size: 15px;
-}
 
 /*
  * A ticket is read on a desk as often as in a corridor.
