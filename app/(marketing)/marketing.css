@@ -767,11 +767,19 @@ body.slots-enabled .slotbtn{display:inline-flex}
    narrow screens where the hero grows tallest. (At 320 the hero is 977px: a
    percentage-of-height band would have shown 33%.)
 
-   WHAT SURVIVES: the plant panel, BOTH engineers, the Shard, the City tower
-   cluster, the Gherkin. WHAT IS LOST: St Paul's, the London Eye and the access
-   platform at the right edge. The engineers are kept over the platform because
-   they are the subject — a person doing maintenance is the thing the page
-   claims, and a crane arm on its own is scenery.
+   WHAT SURVIVES, measured on the deployed build rather than predicted: at
+   375-430 an engineer in a white hard hat, the Shard, the City cluster and the
+   Gherkin. At 360 that engineer is clipped at the left edge; at 320 only he
+   and the Shard remain, and the buttons cover most of the band. WHAT IS LOST
+   on every phone: the plant panel, the second engineer, St Paul's, the London
+   Eye and the access platform. The engineers are kept over the platform
+   because they are the subject — a person doing maintenance is the thing the
+   page claims, and a crane arm on its own is scenery.
+
+   (An earlier draft of this note claimed the panel and BOTH engineers
+   survived. That was true of a 12% anchor, which put the panel's shadow in
+   frame and read as murk; the anchor moved to 25% and the note did not. It
+   says the shipped truth now.)
 
    A separate pre-cropped phone asset was considered and is arithmetically
    WORSE: crop the empty sky off the top and the file gets wider relative to
@@ -793,7 +801,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    * They trade against each other almost exactly — cover means height and
    * width are reciprocal — so this is a choice, not a win. 60% of the hero's
    * height puts roughly a third of the picture's width in frame: both
-   * engineers and the open panel, anchored by `object-position:12%`, with the
+   * engineers and the open panel, anchored by `object-position:25%`, with the
    * skyline running off to their right. The old crop showed a fifth of the
    * width and no people at all; this shows fewer buildings and the subject.
    *
@@ -1045,7 +1053,7 @@ fieldset.field:focus{outline:none}
    `gap:0`, AND THE CHILDREN KEEP THEIR OWN MARGINS. This was `gap:24px` while
    `.wf__bar`, `.wf__ctl` and `.wf__swipe` each also carried a `margin-top` —
    margins do not collapse into a grid gap, so every one of those three
-   distances was the sum of the two. The authored 18/16/10 rendered as
+   distances was the sum of the two. The authored values rendered as
    42/40/34, and 116px of the 183px below the card on a phone was empty. One
    authority, not two: the gap is zero and each child states its own distance,
    which is also the only way the three can differ — the bar sits nearer the
