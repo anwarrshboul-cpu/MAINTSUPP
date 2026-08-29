@@ -7,7 +7,6 @@ import {
   isNotNull,
   isNull,
   max,
-  sql,
 } from "drizzle-orm";
 import { defaultBoardOptions } from "../../../db/seed-options";
 import {
@@ -48,6 +47,11 @@ import { invalidateOptionCache } from "../../lib/options-repository";
 import { auditActor, changeDetail, recordAudit } from "../../lib/audit";
 import { summariesFor } from "../../lib/column-types";
 import { exposeRequest } from "../../lib/request-payload";
+import {
+  attachmentCountsByRequest,
+  reconcileAttachmentCounts,
+  withCountedAttachments,
+} from "../../lib/attachment-counts";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import { selectInChunks } from "../../lib/sql-batching";
@@ -686,28 +690,32 @@ async function deleteFilesForColumn(db: BoardDb, orgId: string, columnId: string
         eq(attachments.organisationId, orgId),
       ),
     );
-  const removedByRequest = new Map<string, number>();
+  /*
+   * A SET, not a count per request. The counters below are recomputed from the
+   * rows that survive, so how many were removed is no longer information this
+   * needs — only which jobs to recount.
+   */
+  const removedByRequest = new Set<string>();
   for (const file of fileRows) {
     if (!file.requestId) continue;
-    removedByRequest.set(
-      file.requestId,
-      (removedByRequest.get(file.requestId) ?? 0) + 1,
-    );
+    removedByRequest.add(file.requestId);
   }
-  for (const [requestId, removed] of removedByRequest) {
-    await db
-      .update(maintenanceRequests)
-      .set({
-        attachmentCount: sql`max(${maintenanceRequests.attachmentCount} - ${removed}, 0)`,
-        generalAttachmentCount: sql`max(${maintenanceRequests.generalAttachmentCount} - ${removed}, 0)`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(
-        and(
-          eq(maintenanceRequests.id, requestId),
-          eq(maintenanceRequests.organisationId, orgId),
-        ),
-      );
+  /*
+   * RECOUNTED, NOT DECREMENTED — and this one was wrong in a second way.
+   *
+   * It took `generalAttachmentCount` down by the number of rows removed
+   * REGARDLESS OF THEIR KIND, on the assumption that a file filed under a board
+   * column is always `general`. It is not: the monday import filed fault and
+   * completion photographs under `issuePictures` and `completedPictures` with
+   * their kinds intact, and `scripts/repair-attachment-kinds.mjs` restored the
+   * kind on 2,915 more. Deleting such a column drove the general counter
+   * negative-then-clamped and left the issue and completion counters claiming
+   * photographs that had just been destroyed.
+   *
+   * Counting what is left needs to know none of that.
+   */
+  for (const requestId of removedByRequest) {
+    await reconcileAttachmentCounts(db, orgId, requestId);
   }
 }
 
@@ -1343,6 +1351,39 @@ async function boardPayload(
     : [];
 
   /*
+   * THE FOUR COUNTERS ON A REQUEST ROW ARE RECOUNTED BEFORE THEY ARE SENT.
+   *
+   * `issue_attachment_count` and its siblings are denormalised and drift. On
+   * the preview workspace, job MN-1055 reported three issue photographs, one
+   * completion and one general — five — against three rows in `attachments`,
+   * only one of which was an issue photograph. The public job page, which
+   * counts rows, showed the truth; the board's number was the lie.
+   *
+   * The counters are not repaired here, they are OVERRULED here: `db/init.ts`
+   * still carries a boot-time back-fill that sets the issue counter to the
+   * undifferentiated total whenever a job has attachments and no issue-kind
+   * row, so a row corrected in the database goes wrong again on the next cold
+   * start. Counting at the point of reading is the only place the answer
+   * cannot be re-broken behind us. See `app/lib/attachment-counts.ts`.
+   *
+   * Only asked for when the payload actually carries request rows —
+   * `?compact=1` says "I have the rows" and this would be one aggregate query
+   * spent on nothing.
+   */
+  const countedAttachments = include.requests
+    ? await attachmentCountsByRequest(db, orgId, placedIds, {
+        /*
+         * The SAME two columns `kindColumns` above is built from, so the number
+         * on the request row and the number on the cell are the same number
+         * arrived at the same way. Reused rather than re-queried: this function
+         * already holds every column of this board.
+         */
+        issue: kindColumns.get("issue") ?? null,
+        completion: kindColumns.get("completion") ?? null,
+      })
+    : new Map();
+
+  /*
    * The one compliance fact the board cannot hold.
    *
    * Store Documentation's Compliance Tracker tab is driven off this payload and
@@ -1370,7 +1411,9 @@ async function boardPayload(
     cells,
     fileCounts,
     notRequired,
-    requests: requestRows.map(exposeRequest),
+    requests: requestRows.map((row) =>
+      exposeRequest(withCountedAttachments(row, countedAttachments, row.id)),
+    ),
   };
 }
 

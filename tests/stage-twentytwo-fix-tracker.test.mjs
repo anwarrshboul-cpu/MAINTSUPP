@@ -392,13 +392,28 @@ test("a copied job link opens the job it names", async () => {
   const view = await read(VIEW);
   /*
    * The button used to write `?item=<id>` on the portal's own URL — a link
-   * that demanded a login from a store manager or landlord it was sent to.
-   * It now mints a READ-ONLY viewer token on the contractor-link
-   * infrastructure and copies the public /j/:token URL, which opens the job
-   * it names with no account at all. The grant is minted as "viewer", which
-   * `createJobToken` strips of every write right whatever else is sent.
+   * that demanded a login from a store manager or landlord it was sent to. It
+   * now mints a token on the contractor-link infrastructure and copies the
+   * public /j/:token URL, which opens the job it names with no account at all.
+   *
+   * THE GRANT CHANGED, on the owner's explicit instruction. It was `viewer` —
+   * read-only by construction — and the owner cancelled that rule outright:
+   * the Fix Tracker link must offer the same working job page as a contractor
+   * link, uploads, dates, signature and completion included. Minting
+   * `contractor` is the whole of how that was done, which is deliberate: the
+   * permission model is the proven one rather than a second, parallel set of
+   * rules that would have to be kept safe separately.
+   *
+   * The `viewer` audience is NOT weakened by this and is still forced
+   * read-only at mint and at resolve — see stage-thirty — so links already in
+   * circulation keep the grant they were issued with. Nothing mints one now.
    */
-  assert.match(view, /audience: "viewer"/);
+  assert.match(view, /audience: "contractor"/);
+  assert.doesNotMatch(
+    view,
+    /audience: "viewer"/,
+    "the Fix Tracker link is a working link; the owner cancelled the read-only rule",
+  );
   assert.match(view, /fetch\("\/api\/board\/links"/);
   assert.doesNotMatch(
     view,

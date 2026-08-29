@@ -9,6 +9,7 @@ import {
   listJobTokens,
   revokeJobToken,
 } from "../../../lib/job-tokens";
+import { publicUrl } from "../../../lib/public-origin";
 
 export const dynamic = "force-dynamic";
 
@@ -138,10 +139,16 @@ export async function POST(request: Request) {
     if (!job) return bad("Job not found.", 404);
 
     /*
-     * "viewer" is the Fix Tracker's read-only Copy Link; anything else is a
-     * contractor working link. Allowlisted, so a typo cannot invent a third
-     * audience with undefined behaviour. `createJobToken` itself strips every
-     * write right off a viewer grant, whatever else the body says.
+     * Two audiences, allowlisted, so a typo cannot invent a third with
+     * undefined behaviour. `createJobToken` itself strips every write right
+     * off a viewer grant, whatever else the body says.
+     *
+     * "viewer" was described here as the Fix Tracker's Copy Link, and it is no
+     * longer: that button now asks for a CONTRACTOR grant, so the page it opens
+     * is the working page rather than a read-only rendering of it. Nothing in
+     * this route changed for that — the allowlist below already routed
+     * "contractor" correctly — but the sentence that named the caller was
+     * wrong, and a comment naming the wrong caller is worse than none.
      */
     const audience = body.audience === "viewer" ? "viewer" : "contractor";
     const { token, scope } = await createJobToken(db, {
@@ -156,8 +163,19 @@ export async function POST(request: Request) {
       createdBy: actor.displayName || undefined,
     });
 
-    const origin = new URL(request.url).origin;
-    const url = `${origin}/j/${token}`;
+    /*
+     * NOT `new URL(request.url).origin`, which is what this was.
+     *
+     * A contractor's link is opened days later by somebody who cannot be told
+     * to try a different address, and on Vercel every deployment keeps its own
+     * permanent hostname serving its own frozen build. A coordinator who copied
+     * this link while the dashboard was on a deployment URL rather than the
+     * alias pinned the contractor to that build for the life of the token.
+     * `publicUrl` reads the environment's canonical origin and falls back to
+     * exactly the line this replaced when none is configured — see
+     * `app/lib/public-origin.ts`.
+     */
+    const url = publicUrl(request, `/j/${token}`);
 
     return Response.json(
       {

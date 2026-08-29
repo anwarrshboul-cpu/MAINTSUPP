@@ -33,6 +33,7 @@ import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
   attachments,
+  jobAccessTokens,
   maintenanceBoardCells,
   maintenanceBoardColumns,
   maintenanceGroupItems,
@@ -517,6 +518,34 @@ async function purgeJobRow(db: Database, orgId: string, requestId: string) {
         eq(activityLog.organisationId, orgId),
       ),
     );
+  /*
+   * THE PUBLIC LINKS GO WITH THE JOB, and this is not tidiness.
+   *
+   * `job_access_tokens` rows are keyed on `request_id`, and MAINTSUPP REUSES
+   * MN- IDS: the highest id is not a high-water mark, so a purged MN-1072 is
+   * handed straight back out to the next job created. Observed during QA — a
+   * "new" job arrived already carrying six token rows minted against the
+   * unrelated job that had held the id a week earlier.
+   *
+   * Every survivor in that instance was already revoked or expired, so nothing
+   * was exposed. But the shape is a real hole rather than an untidy one: a
+   * token that outlives its job and is still live becomes, the moment its id is
+   * reissued, a no-login credential for somebody else's job — and now that the
+   * Fix Tracker's links are contractor grants, a WRITE credential. Deleting
+   * them here is what makes "purge" mean what it says.
+   *
+   * Before the request row, deliberately, so a failure part-way through leaves
+   * a job with no links rather than links with no job.
+   */
+  await db
+    .delete(jobAccessTokens)
+    .where(
+      and(
+        eq(jobAccessTokens.requestId, requestId),
+        eq(jobAccessTokens.organisationId, orgId),
+      ),
+    );
+
   await db
     .delete(maintenanceRequests)
     .where(

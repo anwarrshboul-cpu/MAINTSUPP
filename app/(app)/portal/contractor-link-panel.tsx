@@ -274,6 +274,18 @@ export default function ContractorLinkPanel({
             onFocus={(event) => event.target.select()}
           />
           <div className="link-panel__share">
+            {/*
+              THE CHAT BUBBLE IS THE CORRECT MARK HERE, and it is deliberate
+              that it stayed one when a `phone` glyph joined the set.
+              
+              That handset was added because the contractor register was
+              dialling a telephone number under a bubble — a mark that claimed
+              the number opened a conversation. This row is the opposite case:
+              `wa.me` opens a WhatsApp chat with the link pasted into it, and
+              nothing about it places a call. Swapping in the handset because
+              WhatsApp happens to also be a phone app would put the same class
+              of lie on the other button.
+            */}
             <a
               className="link-panel__whatsapp"
               href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
@@ -330,6 +342,17 @@ export default function ContractorLinkPanel({
         </div>
       )}
 
+      {/*
+        EVERY link for this job, whichever surface issued it.
+        
+        The Fix Tracker's Copy Link used to mint a read-only `viewer` grant and
+        was a different kind of thing; since the owner cancelled that rule it
+        mints the same working contractor grant this panel does, and its links
+        land in this list as equals. They are told apart by their label — "Fix
+        Tracker share link" — and by nothing else, which is why that label is
+        set deliberately over there. This list is the only place any of them
+        can be revoked, so it has to show all of them.
+      */}
       {links.length > 0 && (
         <div className="link-panel__history">
           <h4>Links issued</h4>

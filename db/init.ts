@@ -833,14 +833,33 @@ async function ensureLegacyColumns(d1: D1DatabaseLike) {
     await addColumn(d1, table, column, definition);
   }
 
-  // 0002 carried the undifferentiated count into the issue count. Guarded on
-  // the target being zero so a later correction is never overwritten.
-  await d1
-    .prepare(
-      `UPDATE maintenance_requests SET issue_attachment_count = attachment_count
-        WHERE attachment_count > 0 AND issue_attachment_count = 0`,
-    )
-    .run();
+  /*
+   * THE 0002 BACKFILL IS GONE, AND ITS GUARD WAS THE BUG.
+   *
+   * There used to be an `UPDATE maintenance_requests SET issue_attachment_count
+   * = attachment_count WHERE attachment_count > 0 AND issue_attachment_count =
+   * 0` here, written for migration 0002 when attachments carried no `kind` and
+   * every file on a job really was a fault photograph. Its comment claimed the
+   * `= 0` guard meant "a later correction is never overwritten". It means the
+   * opposite: zero is the correct, settled answer for a job that has evidence
+   * but no fault photographs, so the guard does not PROTECT a corrected row, it
+   * SELECTS for it.
+   *
+   * And `ensureBaseSchema` calls this unconditionally from `initialize()`, so
+   * it ran on every cold start of every isolate, in both dialects. Upload a
+   * completion photograph to a job with no issue photographs and the next boot
+   * declared that completion photograph to be a fault photograph — for ever,
+   * re-applying itself after any repair. Measured on staging: all 16 rows fit
+   * this and nothing else. MN-1055 held one completion row and one general row
+   * and reported two issue photographs; the same statement explains MN-1058 and
+   * MN-1050 exactly, and the two jobs that had a genuine issue photo before
+   * their first boot were never touched because the guard never held.
+   *
+   * Nothing replaces it. The counters are recomputed from `attachments` on
+   * every write and overruled on every read by `app/lib/attachment-counts.ts`,
+   * so there is no longer anything for a boot-time guess to contribute — only
+   * something for it to break.
+   */
 }
 
 /**

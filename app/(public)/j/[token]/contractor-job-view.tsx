@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignaturePad } from "./signature-pad";
 import { ArrivalPack, type ArrivalPack as ArrivalPackData } from "./arrival-pack";
+import { uploadEvidenceFile } from "../../../lib/client-upload";
+import type { AttachmentKind } from "../../../lib/types";
 
 type Photo = {
   id: string;
@@ -23,7 +25,15 @@ type Photo = {
  */
 type UploadSlot = {
   kind: string;
-  storageKind: string;
+  /*
+   * The value `attachments.kind` will actually be written as — three values,
+   * and "nameplate" is not one of them. Typed as `AttachmentKind` rather than
+   * `string` because it is handed straight to `uploadEvidenceFile`, and a
+   * widened string there would let a slot name reach the uploader as a storage
+   * kind. `storageKindFor` on the server is what narrows it; this is the
+   * client-side end of the same agreement.
+   */
+  storageKind: AttachmentKind;
   columnId: string | null;
 };
 
@@ -59,7 +69,12 @@ type JobPayload = {
     canComment: boolean;
     canRequestCompletion: boolean;
   };
-  /** "viewer" is the Fix Tracker's read-only ticket link. */
+  /**
+   * "viewer" is a read-only ticket grant. Nothing in the product mints one
+   * any more — the Fix Tracker's Copy Link used to, and the owner cancelled
+   * that rule — but the grant is still honoured, because links issued under
+   * the old rule are in people's hands and must keep behaving as promised.
+   */
   audience?: string;
   expiresAt: string;
 };
@@ -108,13 +123,17 @@ function PhotoCard({
   /*
    * What to say when there are none.
    *
-   * The contractor page never passes this, and its two galleries still only
-   * render when they have something in them — an engineer standing in front of
-   * the fault does not need telling that nobody has photographed it yet. The
-   * read-only ticket does: it is a record of a job, handed to a store manager
-   * or a landlord, and "Photos of the problem" quietly not existing reads as
-   * "there were none" when what is true is "none have been added". Absence and
-   * emptiness are different facts and this page has to be able to say both.
+   * A working link never passes this, and its two galleries still only render
+   * when they have something in them — an engineer standing in front of the
+   * fault does not need telling that nobody has photographed it yet. A
+   * read-only ticket does: it is a record of a job, read rather than worked,
+   * and "Photos of the problem" quietly not existing reads as "there were
+   * none" when what is true is "none have been added". Absence and emptiness
+   * are different facts and this component has to be able to say both.
+   *
+   * Only a `viewer` token reaches that branch now. The prop stays because
+   * those tokens are still in circulation and the distinction it draws is
+   * still the right one for them.
    */
   empty?: string;
 }) {
@@ -202,49 +221,67 @@ export default function ContractorJobView({ token }: { token: string }) {
         [kind]: [...(current[kind] ?? []), { name: file.name, status: "uploading" }],
       }));
 
-      const form = new FormData();
-      form.append("file", file);
       /*
-       * `requestId` — the whole reason contractor uploads never worked.
+       * THE SHARED UPLOADER, not a bare POST — which is what a phone photograph
+       * needs and what this page was not doing.
        *
-       * `/api/files` answers 400 "A file and work order ID are required."
-       * without it, and this page never sent one, so every upload from a
-       * shared link failed. Proven against the running server: the same
-       * request with the field is 201, without it 400.
+       * It used to build a FormData and `fetch("/api/files")` directly. That
+       * works up to the platform's request ceiling and then stops dead:
+       * measured through this page into the completion slot, 480 KB and 1.01 MB
+       * were accepted and 1.92 MB and 3.99 MB came back 413, shown to the
+       * contractor as "Upload failed" with no reason and no remedy. A photograph
+       * off any current phone is 2–5 MB, so the ordinary case was the broken one.
+       *
+       * `uploadEvidenceFile` is the same helper the dashboard's file cell uses:
+       * it sends anything over `DIRECT_UPLOAD_LIMIT` (900 KB) through
+       * `/api/files/multipart` in chunks, retries a direct upload that 413s, and
+       * offers a WebP thumbnail afterwards so the board draws a thumbnail rather
+       * than the original. It also enforces the real size ceilings — 25 MB, or
+       * 90 MB for video — with a sentence a human can act on.
+       *
+       * This was never a regression: the page always posted directly, and the
+       * contractor link had the same ceiling. What changed is who is standing in
+       * front of it. The Fix Tracker link is now a working link, so this is the
+       * surface every recipient uses to send completion evidence from a phone,
+       * and the failure that was rare became the default.
+       *
+       * `slot.storageKind` stays the value sent: `attachments.kind` has three
+       * values and "nameplate" is not one of them — the server tells this page
+       * which storage kind a slot writes, and the helper passes it through
+       * unchanged.
        */
-      form.append("requestId", data.requestId);
-      /*
-       * The STORAGE kind, not the slot's name. `attachments.kind` has three
-       * values and "nameplate" is not one of them — `/api/files` coerces an
-       * unknown kind to "issue" and then refuses it against a link that never
-       * granted issue evidence. The server tells this page what to send.
-       */
-      form.append("kind", slot.storageKind);
-      if (slot.columnId) form.append("columnId", slot.columnId);
-      form.append("uploadToken", token);
-
       try {
-        const response = await fetch("/api/files", { method: "POST", body: form });
-        const ok = response.ok;
-        const payload = ok ? null : await response.json().catch(() => ({}));
+        await uploadEvidenceFile({
+          file,
+          requestId: data.requestId,
+          kind: slot.storageKind,
+          columnId: slot.columnId ?? undefined,
+          uploadToken: token,
+        });
         setUploads((current) => ({
           ...current,
           [kind]: (current[kind] ?? []).map((entry) =>
             entry.name === file.name && entry.status === "uploading"
-              ? {
-                  ...entry,
-                  status: ok ? "done" : "failed",
-                  error: ok ? undefined : (payload?.error ?? "Upload failed"),
-                }
+              ? { ...entry, status: "done", error: undefined }
               : entry,
           ),
         }));
-      } catch {
+      } catch (error) {
+        /*
+         * The helper throws a message written for a person — "Files must be
+         * 25 MB or smaller", or whatever the API refused with — so it is shown
+         * rather than replaced with a generic failure. Only a genuinely
+         * unlabelled throw falls back.
+         */
+        const reason =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Upload failed";
         setUploads((current) => ({
           ...current,
           [kind]: (current[kind] ?? []).map((entry) =>
             entry.name === file.name && entry.status === "uploading"
-              ? { ...entry, status: "failed", error: "Connection lost" }
+              ? { ...entry, status: "failed", error: reason }
               : entry,
           ),
         }));
@@ -351,11 +388,24 @@ export default function ContractorJobView({ token }: { token: string }) {
   const reportedDone = formatDate(job.completionRequestedAt);
   const expires = formatDate(data.expiresAt);
   /*
-   * The Fix Tracker's Copy Link mints a "viewer" token: a read-only ticket.
-   * Belt and braces with the grant itself — the scope carries no upload slots
-   * and no write rights, and /api/job-link refuses every POST from it — but
-   * drawing upload fields that can only fail would be showing controls that
-   * lie, so none of the action sections render at all.
+   * A "viewer" token is a read-only ticket, and this is where the page stops
+   * offering what such a token cannot do.
+   *
+   * It is belt and braces with the grant itself — the scope carries no upload
+   * slots and no write rights, and /api/job-link refuses every POST from it —
+   * but drawing upload fields that can only fail would be showing controls
+   * that lie, so none of the action sections render at all.
+   *
+   * WHO STILL ARRIVES HERE READ-ONLY: only a `viewer` token. The Fix Tracker's
+   * Copy Link minted one until the owner cancelled the view-only rule; it now
+   * mints the same `contractor` grant a coordinator's own link uses, so a Fix
+   * Tracker link takes the working branch below and gets the whole workflow.
+   * Viewer links already sent out keep landing on this branch, which is the
+   * reason it stays.
+   *
+   * The second clause is the fallback, and it is not decoration: a contractor
+   * grant hand-narrowed to nothing would otherwise render an upload card with
+   * no slots in it and a Submit button that refuses.
    */
   const readOnly =
     data.audience === "viewer" ||
@@ -365,11 +415,17 @@ export default function ContractorJobView({ token }: { token: string }) {
     /*
      * ONE PAGE, TWO AUDIENCES, AND THE MODIFIER THAT KEEPS THEM ONE PAGE.
      *
-     * The Fix Tracker's Copy Link and a contractor's working link are the same
-     * route rendering the same component through the same stylesheet; the only
-     * difference between them is the grant. Which means the read-only ticket
-     * was never a different design — it was this design with three sections
-     * missing, ending on a card that looked exactly like the job data above it.
+     * Every public job link is the same route rendering the same component
+     * through the same stylesheet; the only difference between them is the
+     * grant. Which means the read-only ticket was never a different design —
+     * it was this design with three sections missing, ending on a card that
+     * looked exactly like the job data above it.
+     *
+     * Since the owner cancelled the view-only rule the Fix Tracker's own links
+     * are contractor grants, so they no longer take this modifier at all. It
+     * remains for the viewer tokens that are still out there, and remains
+     * scoped, so the day one is opened it is still a designed page and not a
+     * subtraction.
      *
      * `job-link--readonly` is how the read-only composition gets to be a
      * first-class member of that design system rather than a subtraction from
@@ -513,8 +569,8 @@ export default function ContractorJobView({ token }: { token: string }) {
          * a fact about the job. That reasoning is not wrong in isolation, but
          * it made this page's closing block the ONE container on either public
          * link that belongs to neither page's vocabulary — which is exactly
-         * what "the Fix Tracker still looks like the old design" means when the
-         * rest of the page is already identical to the contractor's.
+         * what "the shared link still looks like its own old thing" means when
+         * the rest of the page is already identical to the contractor's.
          *
          * So it takes the same white ground, the same border, the same radius,
          * the same padding and the same heading treatment as every other card

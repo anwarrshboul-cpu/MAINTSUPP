@@ -653,7 +653,12 @@ export async function POST(
         .update(maintenanceRequests)
         .set({
           blockedReason: reason,
-          completionNote: note || null,
+          /*
+           * ONLY WHAT WAS SENT — see the note on the completion branch below.
+           * A contractor reporting a second obstruction should not silently
+           * erase what they wrote about the first.
+           */
+          ...(note ? { completionNote: note } : {}),
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(
@@ -720,7 +725,20 @@ export async function POST(
         .set({
           completionRequestedAt: finishedOn ?? sql`CURRENT_TIMESTAMP`,
           completionRequestedBy: by || "Contractor",
-          completionNote: note || null,
+          /*
+           * ONLY WHAT WAS SENT. This was `note || null`, which is a WRITE of
+           * null whenever the box is empty — so a contractor who submitted with
+           * a note, then submitted again to attach one more photograph, silently
+           * destroyed the note they had already written. Nothing on the page
+           * warns them, and the coordinator sees the second, emptier version.
+           *
+           * The same discipline `supplied()` enforces on the workspace API: an
+           * absent field means "unchanged", not "cleared". There is deliberately
+           * no way to clear a note from here — the public page offers no such
+           * intent, and inventing one out of an empty textarea is how the
+           * information got lost in the first place.
+           */
+          ...(note ? { completionNote: note } : {}),
           /*
            * The signature, the moment it was given, and the name typed beside
            * it. Written together or not at all: a signature with no name and no
@@ -773,7 +791,13 @@ export async function POST(
     await db
       .update(maintenanceRequests)
       .set({
-        completionNote: note || null,
+        /*
+         * ONLY WHAT WAS SENT — see the completion branch. The guard above
+         * already refuses a submission carrying neither a note nor a date, so
+         * reaching here with no note means the contractor sent a DATE, and
+         * their earlier note must survive it.
+         */
+        ...(note ? { completionNote: note } : {}),
         ...(finishedOn ? { completionRequestedAt: finishedOn } : {}),
         updatedAt: sql`CURRENT_TIMESTAMP`,
       })

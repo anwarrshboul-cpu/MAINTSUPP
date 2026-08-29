@@ -4,6 +4,7 @@ import { formConfigurations } from "../../db/schema";
 import { maintenanceFormConfiguration, type FormQuestion } from "../../db/monday-board-spec";
 import { hashPassword, passwordProblem, verifyPassword } from "./password";
 import { projectPublicForm, type PublicQuestion } from "./form-projection";
+import { publicUrl } from "./public-origin";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -457,13 +458,24 @@ export function generateShareToken() {
 /**
  * The public URL for a token.
  *
- * Built from the REQUEST's own origin rather than a configured base URL, so the
- * link copied out of the Share dialog is the host the operator is actually on —
- * localhost in development, the real domain in production — instead of a
- * hard-coded guess that is wrong in one of those two places.
+ * This used to be built from the REQUEST's own origin and nothing else, on the
+ * reasoning that the host the operator is looking at is the host they mean —
+ * localhost in development, the real domain in production — rather than a
+ * hard-coded guess that is wrong in one of those two places. That reasoning
+ * holds for exactly as long as a deployment has one address.
+ *
+ * It does not on Vercel, where every build keeps its own permanent hostname
+ * beside the alias. A form link copied while the dashboard was open on a
+ * deployment URL is served by that frozen build for ever, so the form a
+ * customer fills in weeks later is a version of the form nobody is maintaining.
+ *
+ * `publicUrl` prefers the environment's configured canonical origin and falls
+ * back to the request origin — this function's entire previous behaviour — when
+ * none is set, which is why development and any unconfigured deployment are
+ * untouched. See `app/lib/public-origin.ts`.
  */
 export function shareUrl(request: Request, token: string) {
-  return new URL(`/f/${token}`, new URL(request.url).origin).toString();
+  return publicUrl(request, `/f/${token}`);
 }
 
 /** The twelve-character alias behind the "Shorten URL" switch. */

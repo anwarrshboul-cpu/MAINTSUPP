@@ -42,10 +42,17 @@ export type TokenScope = {
   requestId: string;
   organisationId: string;
   /**
-   * `viewer` is the Fix Tracker's Copy Link grant: READ-ONLY by construction.
-   * A viewer scope carries no evidence slots (so /api/files refuses every
-   * upload), no comment right and no completion right — and both the mint and
-   * the resolve force those off, so a hand-edited row cannot widen one.
+   * `viewer` is a READ-ONLY grant by construction. A viewer scope carries no
+   * evidence slots (so /api/files refuses every upload), no comment right and
+   * no completion right — and both the mint and the resolve force those off,
+   * so a hand-edited row cannot widen one.
+   *
+   * It was the Fix Tracker's Copy Link grant. The owner has since cancelled
+   * the view-only rule and that button mints `contractor` like every other
+   * shared link, so nothing in the product issues a `viewer` today. The
+   * audience is kept, and kept forced, for the one reason that matters: links
+   * minted under the old rule are in people's hands and were promised they
+   * could not write. They must go on keeping that promise until they expire.
    */
   audience: "reporter" | "contractor" | "viewer";
   label: string | null;
@@ -279,7 +286,24 @@ export async function listJobTokens(
     id: row.id,
     label: row.label,
     audience: row.audience,
-    allowedKinds: sanitiseKinds(parseKinds(row.allowedKinds)),
+    /*
+     * THE SAME VIEWER GUARD THE RESOLVER HAS, because this list is now the only
+     * thing that describes a link to a coordinator.
+     *
+     * `sanitiseKinds` turns an EMPTY grant into the contractor default — right
+     * for a contractor row whose column was never written, and exactly wrong
+     * here: a viewer row stores `[]` precisely because it may upload nothing,
+     * so the one token in the list that can do least was reported as granting
+     * `["completion","nameplate"]`, the most any link can do.
+     *
+     * It was already wrong before; what makes it worth fixing now is that the
+     * Fix Tracker's Copy Link no longer mints `viewer`, so `audience` has
+     * stopped separating the two kinds of link in "Links issued" — and a panel
+     * that misdescribes the harmless token while it is the only reader left is
+     * a coordinator revoking the wrong link.
+     */
+    allowedKinds:
+      row.audience === "viewer" ? [] : sanitiseKinds(parseKinds(row.allowedKinds)),
     expiresAt: row.expiresAt,
     revokedAt: row.revokedAt,
     firstOpenedAt: row.firstOpenedAt,

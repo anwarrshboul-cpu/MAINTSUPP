@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { AttachmentKind, MaintenanceRequest } from "../../../lib/types";
 import { ensureDatabase } from "../../../../db/init";
 import {
@@ -15,6 +15,10 @@ import {
   resolveJobToken,
   type EvidenceKind,
 } from "../../../lib/job-tokens";
+import {
+  kindForColumnKey,
+  reconcileAttachmentCounts,
+} from "../../../lib/attachment-counts";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -238,6 +242,54 @@ async function authorizeUpload(
   }
 
   /*
+   * THE COLUMN IS RESOLVED BEFORE THE GRANT IS CHECKED, and it did not used to
+   * be.
+   *
+   * A file that names a column is stored under that column's kind, so the kind
+   * the grant must be checked against is not known until the column is known.
+   * This block ran AFTER the check and began `if (kind !== "general") return
+   * 400` — so the contractor page's issue slot, which sends the issue column's
+   * id alongside `kind=issue`, was refused outright on the path every file
+   * over ~900 KB takes. That is every photograph a phone produces. The direct
+   * route had the mirror-image fault: it rewrote the kind to "general" first
+   * and then compared "general" against a grant of `issue`, answering 403.
+   *
+   * Ordering it this way means one rule decides what is written and the grant
+   * is checked against exactly that.
+   */
+  let storedKind = kind;
+  if (boardColumnId) {
+    // Scoped to the work order's own board, not the literal "maintenance" —
+    // Store Documentation's twelve file columns live on another board and were
+    // refused outright. See `boardKeyForRequest`.
+    const boardKey = await boardKeyForRequest(db, orgId, workOrder.id);
+    const [column] = await db
+      .select({
+        id: maintenanceBoardColumns.id,
+        key: maintenanceBoardColumns.key,
+      })
+      .from(maintenanceBoardColumns)
+      .where(
+        and(
+          eq(maintenanceBoardColumns.id, boardColumnId),
+          eq(maintenanceBoardColumns.boardId, boardKey),
+          eq(maintenanceBoardColumns.type, "files"),
+          eq(maintenanceBoardColumns.organisationId, orgId),
+        ),
+      )
+      .limit(1);
+    if (!column) {
+      return {
+        response: Response.json(
+          { error: "The file column no longer exists." },
+          { status: 404 },
+        ),
+      } as const;
+    }
+    storedKind = kindForColumnKey(column.key);
+  }
+
+  /*
    * What the link is allowed to do, now that we know whose it is.
    *
    * The token was resolved above because it chooses the tenant; this is the
@@ -266,10 +318,10 @@ async function authorizeUpload(
         ),
       } as const;
     }
-    if (!scopedToken.allowedKinds.includes(kind as EvidenceKind)) {
+    if (!scopedToken.allowedKinds.includes(storedKind as EvidenceKind)) {
       return {
         response: Response.json(
-          { error: `This link cannot upload ${kind} evidence.` },
+          { error: `This link cannot upload ${storedKind} evidence.` },
           { status: 403 },
         ),
       } as const;
@@ -277,49 +329,26 @@ async function authorizeUpload(
     await recordTokenUse(db, scopedToken.id);
   }
 
-  if (boardColumnId) {
-    if (kind !== "general") {
-      return {
-        response: Response.json(
-          { error: "Custom file columns require the general file section." },
-          { status: 400 },
-        ),
-      } as const;
-    }
-    // Scoped to the work order's own board, not the literal "maintenance" —
-    // Store Documentation's twelve file columns live on another board and were
-    // refused outright. See `boardKeyForRequest`.
-    const boardKey = await boardKeyForRequest(db, orgId, workOrder.id);
-    const [column] = await db
-      .select({ id: maintenanceBoardColumns.id })
-      .from(maintenanceBoardColumns)
-      .where(
-        and(
-          eq(maintenanceBoardColumns.id, boardColumnId),
-          eq(maintenanceBoardColumns.boardId, boardKey),
-          eq(maintenanceBoardColumns.type, "files"),
-          eq(maintenanceBoardColumns.organisationId, orgId),
-        ),
-      )
-      .limit(1);
-    if (!column) {
-      return {
-        response: Response.json(
-          { error: "The file column no longer exists." },
-          { status: 404 },
-        ),
-      } as const;
-    }
-  }
-
   return {
     actor,
     orgId,
-    kind,
+    kind: storedKind,
     workOrder,
     db,
     boardColumnId: boardColumnId || null,
     actorEmail: actor.email,
+    /*
+     * The token itself, not just the fact that it authorised.
+     *
+     * The caller has to record WHICH link produced the file and hold the file
+     * for review, and neither is derivable from `actorEmail` —
+     * `getWorkspaceActor` returns a preview identity when there is no session,
+     * so an anonymous contractor and a signed-in coordinator are
+     * indistinguishable by the time authorisation is over. `../route.ts` had
+     * the token in scope at its insert and used it; this route did not, and
+     * quietly filed every large contractor upload as internal and approved.
+     */
+    scopedToken,
   } as const;
 }
 
@@ -380,7 +409,22 @@ export async function POST(request: Request) {
       requestedColumnId,
     );
     if ("response" in authorization) return authorization.response;
-    const { db, kind, workOrder, actorEmail, boardColumnId, orgId } = authorization;
+    const { db, kind, workOrder, actorEmail, boardColumnId, orgId, scopedToken } =
+      authorization;
+    /*
+     * WHO REALLY UPLOADED THIS — the same rule `../route.ts` applies, which
+     * this route was missing.
+     *
+     * `actor.email` is never empty, so a contractor's photograph arriving
+     * through a public link was attributed to an internal-looking address and
+     * the link that carried it was recorded nowhere. After the fact there was
+     * no way to tell which of a job's links produced which photograph. The
+     * token id is a truthful answer to "who", and it is the SAME string the
+     * direct route writes, so the two paths cannot be told apart by a reader.
+     */
+    const uploadedByEmail = scopedToken
+      ? `contractor-link:${scopedToken.id}`
+      : actorEmail;
     const storage = await bucket();
     if (!storage) {
       return Response.json(
@@ -436,7 +480,7 @@ export async function POST(request: Request) {
           originalName,
           contentType,
           byteSize: String(byteSize),
-          uploadedBy: actorEmail,
+          uploadedBy: uploadedByEmail,
         },
       });
       return Response.json(
@@ -544,30 +588,38 @@ export async function POST(request: Request) {
             originalName: completed.originalName,
             contentType: completed.contentType,
             byteSize,
-            uploadedByEmail: actorEmail,
+            uploadedByEmail,
+            /*
+             * EVIDENCE FROM A PUBLIC LINK WAITS FOR A COORDINATOR — and until
+             * now it did so only if it was small enough.
+             *
+             * `../route.ts` sets these two, so a contractor's photograph under
+             * ~900 KB landed `pending` and appeared in the review queue. Every
+             * file above that threshold takes THIS route, which set neither —
+             * and a phone photograph is 2–5 MB, so in practice the review queue
+             * saw the test files and nothing else. Anonymous evidence published
+             * itself straight onto the job exactly as it did before migration
+             * 0012, on the path that carries the real photographs.
+             *
+             * A signed-in operator's upload is not pending, here as there.
+             */
+            pending: Boolean(scopedToken),
+            submittedVia: scopedToken ? scopedToken.id : null,
           })
           .returning();
 
-        const [updatedRequest] = await db
-          .update(maintenanceRequests)
-          .set({
-            attachmentCount: sql`${maintenanceRequests.attachmentCount} + 1`,
-            issueAttachmentCount:
-              kind === "issue"
-                ? sql`${maintenanceRequests.issueAttachmentCount} + 1`
-                : maintenanceRequests.issueAttachmentCount,
-            completedAttachmentCount:
-              kind === "completion"
-                ? sql`${maintenanceRequests.completedAttachmentCount} + 1`
-                : maintenanceRequests.completedAttachmentCount,
-            generalAttachmentCount:
-              kind === "general"
-                ? sql`${maintenanceRequests.generalAttachmentCount} + 1`
-                : maintenanceRequests.generalAttachmentCount,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
-          .returning();
+        /*
+         * RECOUNTED, NOT INCREMENTED.
+         *
+         * This was four conditional `+ 1`s, one per kind. Correct arithmetic
+         * on a number that was already wrong: `db/init.ts` sets a job's issue
+         * counter to its undifferentiated total on every cold start where the
+         * job has attachments and no issue-kind row, so incrementing from
+         * there compounds the lie rather than correcting it — MN-1055 reported
+         * five photographs against three rows. A COUNT converges from whatever
+         * the counter had drifted to. See `app/lib/attachment-counts.ts`.
+         */
+        const updatedRequest = await reconcileAttachmentCounts(db, orgId, requestId);
 
         await db.insert(activityLog).values({
           id: crypto.randomUUID(),

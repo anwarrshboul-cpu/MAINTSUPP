@@ -192,20 +192,43 @@ test("Copy Link's outcome is shown at the button, never only off-screen", async 
   assert.match(links, /Sign in to issue a contractor link\./);
 });
 
-test("the Fix Tracker mints a viewer link and the page renders it read-only", async () => {
+test("the Fix Tracker mints a WORKING link, and viewer stays read-only for the ones already out", async () => {
+  /*
+   * THE OWNER CANCELLED THE READ-ONLY RULE, and this test is the record of
+   * what that did and — more importantly — what it deliberately did NOT do.
+   *
+   * The Fix Tracker's Copy Link used to mint `viewer`. The requirement now is
+   * that it offers the same working job page as a contractor link: uploads,
+   * dates, signature, notes, completion, all writing to the canonical job. It
+   * was implemented by changing the AUDIENCE ASKED FOR and nothing else, so
+   * the permission model in force is the proven contractor one rather than a
+   * second set of rules that would have to be kept safe in parallel.
+   *
+   * The `viewer` audience itself is untouched and still forced read-only at
+   * BOTH layers — the two tests above this one are what hold that — because
+   * links minted before the change are still in circulation and must keep the
+   * grant they were issued with. Nothing in the app mints one any more.
+   */
   const view = await read("app/(app)/portal/views/fix-tracker.tsx");
-  assert.match(view, /audience: "viewer"/);
+  assert.match(view, /audience: "contractor"/);
+  assert.doesNotMatch(view, /audience: "viewer"/);
 
   const links = await read("app/api/board/links/route.ts");
   assert.match(
     links,
     /body\.audience === "viewer" \? "viewer" : "contractor"/,
-    "the audience is allowlisted, not passed through",
+    "the audience is still allowlisted, not passed through",
   );
 
+  /*
+   * The page keeps its read-only rendering path. It is now reached only by a
+   * token that genuinely grants nothing — an old viewer link, or a contractor
+   * grant narrowed to no slots and no rights — and removing it would turn
+   * those into a page offering controls that can only fail.
+   */
   const page = await read("app/(public)/j/[token]/contractor-job-view.tsx");
   assert.match(page, /data\.audience === "viewer"/);
-  assert.match(page, /readOnly \?/, "a read-only link draws no action sections");
+  assert.match(page, /readOnly \?/, "a link that grants nothing still draws no action sections");
 });
 
 test("every registry write is mirrored onto the board's chip store", async () => {

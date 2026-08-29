@@ -65,13 +65,39 @@ test("the shared page sends the work order id it is given", async () => {
     "the page cannot upload without being told which job it is on",
   );
 
+  /*
+   * THE PAGE NO LONGER BUILDS THE FormData ITSELF — and the contract this test
+   * guards survived the change, which is why it is rewritten rather than
+   * deleted.
+   *
+   * It used to `fetch("/api/files")` with a hand-built body. That worked up to
+   * the platform's request ceiling and then stopped dead: measured through the
+   * real page, 1.01 MB was accepted and 1.92 MB came back 413, shown to the
+   * contractor as "Upload failed" with no reason. A photograph off any current
+   * phone is 2–5 MB, so the ordinary case was the broken one. It now goes
+   * through `uploadEvidenceFile`, the same helper the dashboard's file cell
+   * uses, which chunks anything over 900 KB through `/api/files/multipart`.
+   *
+   * The two fields this test has always been about are still sent — they are
+   * named arguments now instead of form fields.
+   */
   const view = codeOnly(await source("app/(public)/j/[token]/contractor-job-view.tsx"));
   assert.match(
     view,
-    /form\.append\("requestId", data\.requestId\)/,
+    /uploadEvidenceFile\(\{/,
+    "a bare POST cannot carry a phone photograph; the shared helper chunks",
+  );
+  assert.match(
+    view,
+    /requestId: data\.requestId/,
     "/api/files answers 400 without it",
   );
-  assert.match(view, /form\.append\("uploadToken", token\)/);
+  assert.match(view, /uploadToken: token/);
+  assert.doesNotMatch(
+    view,
+    /fetch\("\/api\/files"/,
+    "posting directly is what capped uploads at the request-body limit",
+  );
 });
 
 test("the page uploads the storage kind the server names, not the slot's word", async () => {
@@ -83,11 +109,12 @@ test("the page uploads the storage kind the server names, not the slot's word", 
   assert.match(api, /storageKind/, "the server decides where each kind goes");
 
   const view = codeOnly(await source("app/(public)/j/[token]/contractor-job-view.tsx"));
-  assert.match(view, /form\.append\("kind", slot\.storageKind\)/);
+  // Same contract, now a named argument to the shared uploader — see above.
+  assert.match(view, /kind: slot\.storageKind/);
   assert.doesNotMatch(
     view,
-    /form\.append\("kind", kind\)/,
-    "posting the slot's own word is what produced the nameplate 403",
+    /kind: kind,/,
+    "sending the slot's own word is what produced the nameplate 403",
   );
 });
 

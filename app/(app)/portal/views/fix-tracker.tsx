@@ -862,16 +862,43 @@ function FixTrackerDetail({
   const otherFiles = files.filter((file) => !inGallery.has(file.id));
 
   /*
-   * Copy Link copies a PUBLIC, READ-ONLY ticket URL.
+   * Copy Link copies a PUBLIC, WORKING job URL — and this reverses an earlier
+   * decision of the owner's, which is why the reversal is recorded here rather
+   * than quietly written over.
    *
-   * It used to copy `?item=<id>` on the portal's own address — a link that
+   * It first copied `?item=<id>` on the portal's own address — a link that
    * asked whoever received it to sign in, which is exactly what sharing a
-   * ticket with a store manager or a landlord must not do. It now mints a
+   * ticket with a store manager or a landlord must not do. It then minted a
    * "viewer" token on the same infrastructure the contractor links use
-   * (/j/:token): no login, no upload, no comment, no completion — the grant
-   * itself carries no write rights and the API refuses every POST from it.
-   * The registered whitelist still applies: cost, invoices and approvals are
-   * never in the payload.
+   * (/j/:token): no login, and no writes either.
+   *
+   * THE OWNER HAS CANCELLED THE VIEW-ONLY RULE. A Fix Tracker link must now
+   * offer the same working job workflow as a contractor link — the uploads,
+   * the completion date, the signature, the note — all writing to the same
+   * job record. So it mints the SAME `contractor` grant that the contractor
+   * link panel mints, through the same route, with the same defaults
+   * (`allowedKinds` omitted becomes completion + nameplate; comment and
+   * completion rights on). The public page is then not a lookalike of the
+   * contractor page: it IS the contractor page. No parallel permission model,
+   * no second security surface, and parity by construction rather than by
+   * upkeep.
+   *
+   * THE CONSEQUENCE, SAID PLAINLY BECAUSE IT IS THE POINT: whoever holds this
+   * URL can upload evidence and mark this job complete, with no login. That is
+   * the owner's decision, taken with that consequence stated. What has NOT
+   * changed is the shape of the grant — one job, one organisation, revocable
+   * from the contractor link panel, expiring — nor the registered whitelist:
+   * cost, invoices and approvals are still never in the payload.
+   *
+   * `label` stays distinctive because the audience column no longer separates
+   * these from a coordinator's own contractor links, and "Links issued" is
+   * where somebody decides what to revoke. The label is now the only thing
+   * saying where a link came from, so it has to keep saying it.
+   *
+   * The `viewer` audience itself is left alone and still safe: both the mint
+   * and the resolve force it read-only, so every Fix Tracker link handed out
+   * under the old rule keeps resolving read-only. This button simply stops
+   * issuing them.
    *
    * Minted once per panel opening and cached, so pressing Copy twice does not
    * fill the links table with one-use tokens.
@@ -900,7 +927,7 @@ function FixTrackerDetail({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             requestId: item.id,
-            audience: "viewer",
+            audience: "contractor",
             label: "Fix Tracker share link",
             expiryDays: 30,
           }),
@@ -1073,20 +1100,21 @@ function FixTrackerDetail({
             {share.copied ? (
               <p>
                 <Icon name="check" size={14} />
-                Public read-only link copied — it opens without a login and shows
-                no costs or approvals.
+                Public job link copied — it opens without a login, and whoever
+                has it can upload photos and mark the job complete. No costs or
+                approvals are shown.
               </p>
             ) : (
               <p>
                 <Icon name="link" size={14} />
-                Your public read-only link is ready — copy it below.
+                Your public job link is ready — copy it below.
               </p>
             )}
             <span>
               <input
                 readOnly
                 value={share.url}
-                aria-label="Public read-only link"
+                aria-label="Public job link"
                 onFocus={(event) => event.target.select()}
               />
               <button

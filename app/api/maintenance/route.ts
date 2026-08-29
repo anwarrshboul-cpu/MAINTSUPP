@@ -4,6 +4,11 @@ import {
 } from "../../lib/mock-data";
 import type { RequestActivityEntry } from "../../lib/types";
 import { exposeRequest } from "../../lib/request-payload";
+import {
+  attachmentCountsByRequest,
+  pictureColumnsFor,
+  withCountedAttachments,
+} from "../../lib/attachment-counts";
 import { ensureDatabase } from "../../../db/init";
 import {
   jobAlertTemplate,
@@ -303,8 +308,36 @@ export async function GET(request: Request) {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
 
+    /*
+     * THE COUNTERS ARE COUNTED, not read off the row — the same treatment
+     * `/api/board` now gets, and this is the other half of it.
+     *
+     * This is the portal grid's own row source: the mobile job card reads
+     * `issueAttachmentCount` straight off these rows, and `board-filter.ts`,
+     * `board-ordering.ts` and `board-csv.ts` all sort and export on them. Left
+     * alone, the board would tell the truth about a job's photographs and the
+     * grid beside it would keep repeating the boot back-fill's invention — a
+     * worse state than both being wrong together, because only one of them
+     * looks broken.
+     *
+     * `pictureColumnsFor` is one lookup per BOARD, not per row: every job in a
+     * page shares its board's file columns, so the first row's answer serves
+     * the whole page. An empty page skips both queries.
+     */
+    const pictureColumns = page.length
+      ? await pictureColumnsFor(db, orgId, page[0].id)
+      : undefined;
+    const counted = await attachmentCountsByRequest(
+      db,
+      orgId,
+      page.map((row) => row.id),
+      pictureColumns,
+    );
+
     return Response.json({
-      requests: page.map(exposeRequest),
+      requests: page.map((row) =>
+        exposeRequest(withCountedAttachments(row, counted, row.id)),
+      ),
       hasMore,
       nextOffset: hasMore ? offset + limit : null,
     });

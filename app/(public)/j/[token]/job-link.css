@@ -111,14 +111,24 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
-/* THE READ-ONLY TICKET                                                */
+/* THE READ-ONLY TICKET — a `viewer` token, and nothing else now        */
 /*                                                                     */
-/* The Fix Tracker's Copy Link and a contractor's working link are the  */
-/* same route, the same component and this same stylesheet — the only   */
-/* difference between them is the grant, so the ticket was never a      */
-/* different design. It was this design with the upload, the details    */
-/* form and the submit row removed, which left a page that ended on a   */
-/* card indistinguishable from the job data above it.                   */
+/* Every public job link is the same route, the same component and this */
+/* same stylesheet — the only difference between them is the grant, so  */
+/* the ticket was never a different design. It was this design with the */
+/* upload, the details form and the submit row removed, which left a    */
+/* page that ended on a card indistinguishable from the job data above  */
+/* it.                                                                  */
+/*                                                                     */
+/* WHAT STILL USES THESE RULES. The Fix Tracker's Copy Link minted the  */
+/* viewer tokens they were written for; the owner has cancelled the     */
+/* view-only rule and it now mints a contractor grant, so a Fix Tracker */
+/* link never takes this branch again. These rules are not dead: a      */
+/* viewer grant is still mintable and still resolves read-only, and the */
+/* links issued under the old rule stay live until they expire. The day */
+/* one is opened it has to be a designed page rather than a subtraction */
+/* — which is the whole reason this block exists. Delete it and those   */
+/* links degrade silently.                                              */
 /*                                                                     */
 /* Everything below is scoped to `.job-link--readonly` or to a class    */
 /* only the read-only branch renders. Not one contractor rule is        */
@@ -156,7 +166,7 @@ body {
  * side and read the result the other way round — as the one container on
  * this page that belongs to no other page, which is what made the ticket
  * still look like its own old thing while every card above it already
- * matched the contractor link exactly.
+ * matched the working link exactly.
  *
  * The read-only fact is carried by the `.job-link__viewonly` pill in the
  * header instead, where it is read first rather than last. So there is

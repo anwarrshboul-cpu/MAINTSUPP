@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import {
   activityLog,
@@ -12,6 +12,7 @@ import {
   scopedDb,
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
+import { reconcileAttachmentCounts } from "../../../lib/attachment-counts";
 
 /**
  * The only types rendered inline in the browser.
@@ -301,26 +302,18 @@ export async function DELETE(
 
   let updatedRequest: typeof maintenanceRequests.$inferSelect | undefined;
   if (record.requestId) {
-    [updatedRequest] = await db
-      .update(maintenanceRequests)
-      .set({
-        attachmentCount: sql`max(${maintenanceRequests.attachmentCount} - 1, 0)`,
-        issueAttachmentCount:
-          record.kind === "issue"
-            ? sql`max(${maintenanceRequests.issueAttachmentCount} - 1, 0)`
-            : maintenanceRequests.issueAttachmentCount,
-        completedAttachmentCount:
-          record.kind === "completion"
-            ? sql`max(${maintenanceRequests.completedAttachmentCount} - 1, 0)`
-            : maintenanceRequests.completedAttachmentCount,
-        generalAttachmentCount:
-          record.kind === "general"
-            ? sql`max(${maintenanceRequests.generalAttachmentCount} - 1, 0)`
-            : maintenanceRequests.generalAttachmentCount,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(maintenanceRequests.id, record.requestId), eq(maintenanceRequests.organisationId, orgId)))
-      .returning();
+    /*
+     * RECOUNTED, NOT DECREMENTED.
+     *
+     * `max(x - 1, 0)` cannot repair a counter that was never right: a job
+     * whose issue counter had been inflated to 3 by the boot back-fill in
+     * `db/init.ts` still reads 2 after its only real fault photograph is
+     * deleted, and the coordinator is still promised two photographs that do
+     * not exist. Counting the rows that remain converges from any starting
+     * value and makes a repeat of this request a no-op. See
+     * `app/lib/attachment-counts.ts`.
+     */
+    updatedRequest = await reconcileAttachmentCounts(db, orgId, record.requestId);
 
     await db.insert(activityLog).values({
       id: crypto.randomUUID(),

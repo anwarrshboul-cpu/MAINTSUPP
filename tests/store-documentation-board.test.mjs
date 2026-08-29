@@ -303,7 +303,15 @@ test("the board serves the rows it places", async () => {
 
   // `items` is placement only. Without the rows themselves the grid drew 31
   // stores' worth of positions against nothing and came up empty.
-  assert.match(route, /requests: requestRows\.map\(exposeRequest\)/);
+  //
+  // The rows now pass through `withCountedAttachments` on the way out, which
+  // replaces the four denormalised attachment counters with a count of the rows
+  // behind them — see `app/lib/attachment-counts.ts`. What this assertion is
+  // pinning is that the payload still carries the placed rows and still puts
+  // them through the shared redaction, so it names both rather than the exact
+  // expression it used to.
+  assert.match(route, /requests: requestRows\.map\(/);
+  assert.match(route, /exposeRequest\(withCountedAttachments\(row, countedAttachments, row\.id\)\)/);
   assert.match(
     route,
     /inArray\(maintenanceRequests\.id, chunk\)/,

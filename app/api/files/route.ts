@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import type { AttachmentKind, MaintenanceRequest } from "../../lib/types";
 import { ensureDatabase } from "../../../db/init";
 import {
@@ -15,6 +15,10 @@ import {
 import { boardKeyForRequest } from "../../lib/board-registry";
 import { demoIdentityAllowed } from "../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import {
+  kindForColumnKey,
+  reconcileAttachmentCounts,
+} from "../../lib/attachment-counts";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -400,7 +404,10 @@ export async function POST(request: Request) {
       // Documentation certificate. See `boardKeyForRequest`.
       const boardKey = await boardKeyForRequest(db, orgId, workOrder.id);
       const [column] = await db
-        .select({ id: maintenanceBoardColumns.id })
+        .select({
+          id: maintenanceBoardColumns.id,
+          key: maintenanceBoardColumns.key,
+        })
         .from(maintenanceBoardColumns)
         .where(
           and(
@@ -417,7 +424,32 @@ export async function POST(request: Request) {
           { status: 404 },
         );
       }
-      kind = "general";
+      /*
+       * THE COLUMN DECIDES THE KIND — AND THIS WAS `kind = "general"`.
+       *
+       * Unconditionally. The rule was written for a file column an admin added,
+       * where "general evidence" is exactly right, and then applied to the two
+       * columns that mean something. Two consequences, both measured:
+       *
+       *  · The issue slot on the contractor's page could never be used. The
+       *    page sends `kind=issue` together with the issue column's id, this
+       *    line rewrote the kind to "general", and the grant check below —
+       *    which runs AFTER — compared "general" against a link granted
+       *    `issue` and answered 403. The identical request without a column id
+       *    answered 201. The link was not too narrow; the coercion was.
+       *
+       *  · A photograph the uploader called a fault photograph was STORED as
+       *    general evidence in the fault column, so `kind` and
+       *    `board_column_id` disagreed about the same row — which is one of
+       *    the two ways the counters and the table came apart in the first
+       *    place.
+       *
+       * `kindForColumnKey` is the same mapping `scripts/repair-attachment-kinds`
+       * had to reconstruct to undo that damage: the two picture columns keep
+       * their meaning, every other file column is general. The grant is still
+       * checked, and now it is checked against what will actually be written.
+       */
+      kind = kindForColumnKey(column.key);
     }
 
     // Z3 — a scoped contractor link carries its own permitted evidence kinds.
@@ -549,26 +581,18 @@ export async function POST(request: Request) {
         })
         .returning();
 
-      const [updatedRequest] = await db
-        .update(maintenanceRequests)
-        .set({
-          attachmentCount: sql`${maintenanceRequests.attachmentCount} + 1`,
-          issueAttachmentCount:
-            kind === "issue"
-              ? sql`${maintenanceRequests.issueAttachmentCount} + 1`
-              : maintenanceRequests.issueAttachmentCount,
-          completedAttachmentCount:
-            kind === "completion"
-              ? sql`${maintenanceRequests.completedAttachmentCount} + 1`
-              : maintenanceRequests.completedAttachmentCount,
-          generalAttachmentCount:
-            kind === "general"
-              ? sql`${maintenanceRequests.generalAttachmentCount} + 1`
-              : maintenanceRequests.generalAttachmentCount,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
-        .returning();
+      /*
+       * RECOUNTED, NOT INCREMENTED.
+       *
+       * This was four conditional `+ 1`s, one per kind. Correct arithmetic
+       * on a number that was already wrong: `db/init.ts` sets a job's issue
+       * counter to its undifferentiated total on every cold start where the
+       * job has attachments and no issue-kind row, so incrementing from
+       * there compounds the lie rather than correcting it — MN-1055 reported
+       * five photographs against three rows. A COUNT converges from whatever
+       * the counter had drifted to. See `app/lib/attachment-counts.ts`.
+       */
+      const updatedRequest = await reconcileAttachmentCounts(db, orgId, requestId);
 
       await db.insert(activityLog).values({
         id: crypto.randomUUID(),
