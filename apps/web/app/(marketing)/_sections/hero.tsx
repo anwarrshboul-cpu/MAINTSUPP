@@ -161,7 +161,7 @@ export function Hero() {
                 <path d="M15 21V13h6v8" />
                 <path d="M2 21h20M7 12h2M7 16h2" />
               </svg>
-              <span>21 stores currently coordinated</span>
+              <span>+20 stores currently coordinated</span>
             </li>
           </ul>
           <div className="hero__actions">

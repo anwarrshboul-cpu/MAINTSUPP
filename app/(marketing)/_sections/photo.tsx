@@ -170,6 +170,33 @@ export type PhotoSlotProps = {
   desc?: string;
   /** `sizes` hint, or the browser guesses wrong and over-fetches. */
   sizes?: string;
+  /**
+   * A DIFFERENT PHOTOGRAPH FOR NARROW SCREENS — art direction, not resizing.
+   *
+   * `srcset`/`sizes` answers "how many pixels of this picture", and a
+   * `<source media>` answers "which picture". They are different questions and
+   * only the second one can help a plate whose SHAPE is wrong for the screen:
+   * the 2.33:1 hero has no framing that survives a 0.47:1 phone, so the phone
+   * is given a portrait plate of the same scene instead.
+   *
+   * The `media` string is a plain CSS media query and must match the
+   * stylesheet's own breakpoint, or the CSS and the browser disagree about
+   * which picture is on screen. Because the browser picks the FIRST `<source>`
+   * whose media matches and whose type it supports, exactly one of the two
+   * plates is ever fetched — a phone never downloads the desktop file and a
+   * desktop never downloads the phone one.
+   *
+   * Optional, and omitted by every caller but the hero: leave it out and this
+   * component renders precisely what it always did.
+   */
+  narrow?: {
+    /** File stem of the narrow-screen plate; needs its own manifest entry. */
+    slot: string;
+    /** CSS media query that selects it, e.g. "(max-width: 620px)". */
+    media: string;
+    /** `sizes` for the narrow plate, if it differs from the wide one's. */
+    sizes?: string;
+  };
   priority?: boolean;
   className?: string;
   children?: ReactNode;
@@ -186,6 +213,7 @@ export function PhotoSlot({
   n = 0,
   alt,
   sizes = "(min-width: 1024px) 620px, (min-width: 640px) 50vw, 100vw",
+  narrow,
   priority = false,
   className = "",
   children,
@@ -229,8 +257,17 @@ export function PhotoSlot({
   }, [attempt, failed]);
 
   const widths = photoWidths[slot] ?? [];
-  const srcSet = (ext: "avif" | "webp") =>
-    widths.map((width) => `/assets/photos/${slot}-${width}.${ext} ${width}w`).join(", ");
+  /* One ladder builder for both plates, so the narrow one is subject to the
+     same rule as the wide one: only widths the manifest says are on disk. */
+  const ladder = (stem: string, ext: "avif" | "webp") =>
+    (photoWidths[stem] ?? [])
+      .map((width) => `/assets/photos/${stem}-${width}.${ext} ${width}w`)
+      .join(", ");
+  const srcSet = (ext: "avif" | "webp") => ladder(slot, ext);
+  /* A narrow plate that has no manifest entry has no files on disk either, and
+     advertising it would make the browser fetch what is not there. */
+  const narrowWidths = narrow ? photoWidths[narrow.slot] ?? [] : [];
+  const hasNarrow = narrowWidths.length > 0;
 
   /*
    * NO ENTRY IN THE MANIFEST MEANS NO PHOTOGRAPH — so do not ask for one.
@@ -263,6 +300,41 @@ export function PhotoSlot({
       />
       {hasPhotograph && !(failed && attempt >= 2) && (
         <picture>
+          {/*
+            THE ART-DIRECTED PLATE GOES FIRST, AND THAT ORDER IS THE MECHANISM.
+            A browser walks the `<source>` list once and stops at the first one
+            whose `media` matches and whose `type` it can decode. So on a phone
+            the AVIF below wins and the desktop rungs underneath are never
+            looked at; above the breakpoint none of these three match and the
+            walk falls through to the wide plate. Exactly one file is fetched
+            either way — which is the whole point, and is verified in the
+            network panel rather than asserted from the source.
+
+            The JPEG rung exists for the browser that can decode neither AVIF
+            nor WebP: without it that browser would fall through to the `<img>`
+            and pull the 1916px desktop plate onto a 390px screen.
+          */}
+          {narrow && hasNarrow && (
+            <>
+              <source
+                type="image/avif"
+                media={narrow.media}
+                srcSet={ladder(narrow.slot, "avif")}
+                sizes={narrow.sizes ?? sizes}
+              />
+              <source
+                type="image/webp"
+                media={narrow.media}
+                srcSet={ladder(narrow.slot, "webp")}
+                sizes={narrow.sizes ?? sizes}
+              />
+              <source
+                type="image/jpeg"
+                media={narrow.media}
+                srcSet={`/assets/photos/${narrow.slot}.jpg`}
+              />
+            </>
+          )}
           <source type="image/avif" srcSet={srcSet("avif")} sizes={sizes} />
           <source type="image/webp" srcSet={srcSet("webp")} sizes={sizes} />
           <img

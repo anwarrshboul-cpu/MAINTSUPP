@@ -752,66 +752,50 @@ body.slots-enabled .slotbtn{display:inline-flex}
   .hero__scrim{background:linear-gradient(180deg,rgba(8,23,38,.7) 0%,rgba(9,27,45,.58) 42%,rgba(9,27,45,.3) 68%,rgba(9,27,45,.44) 100%)}
 }
 
-/* ── ON A PHONE THE BAND FLOATS, AND ONLY THERE DOES IT CROP ──────────────
-   At the picture's own ratio the band is 167px tall at 390px wide, and pinned
-   to the foot of an 838px hero that puts it at page y 783 — below the fold and
-   behind the cookie bar. Measured, not assumed: it is a photograph nobody
-   sees. So below 620px the band is made about 70% taller than the picture and
-   lifted to sit inside the fold, between the lede and the buttons.
+/* ── ON A PHONE IT IS A DIFFERENT PHOTOGRAPH, SO IT IS THE SAME RULE ──────
+   What used to be here was a workaround, and it is gone rather than tuned.
+   The band was pushed to 60% of the HERO'S height and floated up into the
+   fold, and `object-position:25% bottom` then chose which third of the width
+   to keep — because a 2.33:1 plate has no framing that survives a 0.47:1
+   screen, and something had to be thrown away. What was thrown away, measured
+   on the shipped build: the plant panel, the second engineer, St Paul's, the
+   London Eye and the access platform. One hard hat and the Shard remained.
 
-   Height costs width, and the cost is arithmetic rather than taste: `cover`
-   fits whichever axis overflows less, so a band `h` tall shows
-   `viewport / (2.3337 x h)` of the picture. Sizing the band off the WIDTH —
-   a ratio, not a percentage of the hero — holds that share at 58.6% across
-   every phone width, 320 through 430, instead of letting it collapse on the
-   narrow screens where the hero grows tallest. (At 320 the hero is 977px: a
-   percentage-of-height band would have shown 33%.)
+   The plate is portrait now — 941x1452, 0.648:1, shot for this — so there is
+   nothing to work around. `--hero-band` is simply re-pointed at the new file's
+   own ratio and the base rule above does the rest, unchanged: full width,
+   pinned to the hero's foot, top fifth dissolving into the painted sky. The
+   band IS the picture's shape, so `object-fit:cover` has nothing to crop.
 
-   WHAT SURVIVES, measured on the deployed build rather than predicted: at
-   375-430 an engineer in a white hard hat, the Shard, the City cluster and the
-   Gherkin. At 360 that engineer is clipped at the left edge; at 320 only he
-   and the Shard remain, and the buttons cover most of the band. WHAT IS LOST
-   on every phone: the plant panel, the second engineer, St Paul's, the London
-   Eye and the access platform. The engineers are kept over the platform
-   because they are the subject — a person doing maintenance is the thing the
-   page claims, and a crane arm on its own is scenery.
+   THE ARITHMETIC, WHICH IS WHY THIS IS THE MAXIMUM AND NOT A COMPROMISE. Cover
+   makes the two axes reciprocal: a band `h` tall over a `W` wide viewport
+   shows `1.5433 x W / h` of the picture's width, so h = 1.5433W — the source's
+   own ratio — is the tallest band that still shows all of it, and anything
+   taller starts eating the width again. At 390 that is a 602px band in an
+   838px hero: 72% of the fold is photograph and 100% of the photograph is in
+   frame. The old rule filled 60% of the hero with 33% of the picture.
 
-   (An earlier draft of this note claimed the panel and BOTH engineers
-   survived. That was true of a 12% anchor, which put the panel's shadow in
-   frame and read as murk; the anchor moved to 25% and the note did not. It
-   says the shipped truth now.)
+   WHAT IS IN FRAME, at every phone width and not just the wide ones: the open
+   plant panel, both engineers, the wet rooftop and its railing, the City
+   cluster with St Paul's, the London Eye at the right edge, and the boom lift
+   with a worker in its basket. Nothing is cropped at 430, 390, 375, 360 or
+   320 — only the share of the hero the band occupies changes, from 79% at 430
+   to 51% at 320, because the hero grows as the headline wraps.
 
-   A separate pre-cropped phone asset was considered and is arithmetically
-   WORSE: crop the empty sky off the top and the file gets wider relative to
-   its height, so `cover` scales it harder and shows LESS of the width in the
-   same band. The full frame is the best phone source available. */
+   The `<picture media>` in `photo.tsx` is set to this same 620px, so the file
+   the browser fetches and the file this ratio describes are always the same
+   file. Change one and the other has to move with it. */
 @media(max-width:620px){
-  /* Sky rising to the photograph's own top row at the band's top edge, and
-     falling away again below it, so the band has somewhere to fade into at
-     both ends rather than sitting on the page like a sticker. */
-  .hero__media{background:linear-gradient(180deg,#03121C 0%,#071C2E 22%,#0D2E4E 38%,#113A65 45%,#0E2843 66%,#08192A 80%,#050F18 100%)}
-  /*
-   * A SHARE OF THE HEIGHT, NOT A RATIO. Holding the band at a ratio of the
-   * WIDTH kept 58% of the picture's width on a phone, which is the number the
-   * brief asked to improve — and it looked wrong anyway: at 390 it filled 285
-   * of 838px, so over half the hero was flat navy and the read was "the image
-   * failed to load". Width shown and area filled are different things, and a
-   * reader experiences the second one.
-   *
-   * They trade against each other almost exactly — cover means height and
-   * width are reciprocal — so this is a choice, not a win. 60% of the hero's
-   * height puts roughly a third of the picture's width in frame: both
-   * engineers and the open panel, anchored by `object-position:25%`, with the
-   * skyline running off to their right. The old crop showed a fifth of the
-   * width and no people at all; this shows fewer buildings and the subject.
-   *
-   * Off the HERO's height, not the viewport's width, because the hero grows as
-   * the headline wraps — 838px at 390 but 977px at 320. A width-derived band
-   * shrinks to a third of the hero exactly where the hero is tallest. */
-  .hero__media .ph > picture,
-  .hero__media .ph > .ph__art{top:auto;bottom:0;height:60%;aspect-ratio:auto;
-    -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 22%);
-    mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 22%)}
+  /* Sky reaching the phone plate's own top row — rgb(3,27,58), sampled off the
+     approved file — by a third of the way down, and holding it from there, so
+     the band's top edge meets a matching sky wherever it happens to fall: the
+     band starts 21% down the hero at 430 and 49% down at 320. Above that the
+     gradient stays dark, which is where the headline is. */
+  .hero__media{background:linear-gradient(180deg,#02101B 0%,#03141F 16%,#031B3A 34%,#031B3A 100%)}
+  /* The whole phone treatment, in one number: the new plate's own pixels.
+     Nothing else in the band rule changes, which is the point — a second
+     photograph, not a second layout. */
+  .hero{--hero-band:941/1452}
 }
 .hero__inner{position:relative;z-index:6;display:grid;gap:42px;align-items:center;padding-block:clamp(40px,4.6vw,66px)}
 /* One column, because the hero has one child.
@@ -864,13 +848,37 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .qj__split{display:flex;align-items:center;gap:11px;margin-top:4px;
   font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--slate)}
 .qj__split::after{content:"";flex:1;height:1px;background:var(--border)}
-.qj__row{display:grid;gap:12px}
-@media(min-width:420px){.qj__row{grid-template-columns:1fr 1fr}}
+/* THE PAIRS ARE THE LAYOUT, NOT A DESKTOP LUXURY. The markup has always
+   wrapped Site+Contact, Phone+Email and Postcode+Category in a `.qj__row`,
+   but the two columns only switched on at `min-width:420px`, so every phone
+   narrower than that — 390, 375, 360, 320, which is most of them — got nine
+   full-width fields in a single stack. That is the form the owner said got
+   worse, and the label spacing was blamed for it.
+
+   `repeat(2,minmax(0,1fr))` rather than `1fr 1fr`: `1fr` is `minmax(auto,1fr)`,
+   and a grid item's automatic minimum is its min-content, which for a text
+   input is the UA's ~20-character intrinsic width. At 320 that is wider than
+   the 121px track, so `1fr 1fr` would push the card — and the page — sideways.
+   The `0` floor lets the track win; `.field{min-width:0}` below lets the item
+   inside it shrink to match. No fixed widths, so the pairs scale with the card
+   instead of breaking at some invented width. */
+.qj__row{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
 .qj__note{display:flex;align-items:center;gap:7px;margin:0;font-size:.73rem;color:var(--slate)}
-.field{display:grid;gap:6px}
+/* `min-width:0` is what makes a field survive being half a phone wide: as a
+   grid item its automatic minimum is the input's intrinsic width, which is
+   larger than the track it is being asked to sit in. Nothing else changes —
+   at every width where the track is roomy this line has no effect at all. */
+/* `align-content:start` is the other half of pairing fields. Two fields in one
+   grid row are the same height as each other, so the shorter one is stretched —
+   and a stretched grid shares the slack out between its own rows, which slid
+   its control down the page. Invisible until one field of a pair failed
+   validation and grew an error line: measured at 1440, "Company"'s input sat
+   12.9px below "Name"'s, and at 320 "Email" sat 6.6px below "Phone". Rows hug
+   the top now, so a pair reads as a pair whatever either half is doing. */
+.field{display:grid;gap:6px;min-width:0;align-content:start}
 .field label,.field .lbl{font-size:.83rem;font-weight:600;color:var(--navy)}
 .field .hint{font-size:.75rem;color:var(--slate);font-weight:400}
-.field input[type=text],.field input[type=email],.field input[type=tel],.field select,.field textarea{width:100%;min-height:46px;padding:11px 13px;font:inherit;font-size:.91rem;color:var(--charcoal);background:#fff;border:1.5px solid var(--border);border-radius:var(--r-sm);transition:border-color var(--t-base) var(--ease),box-shadow var(--t-base) var(--ease)}
+.field input[type=text],.field input[type=email],.field input[type=tel],.field select,.field textarea{width:100%;min-height:46px;padding:11px 13px;font:inherit;font-size:.91rem;color:var(--charcoal);background:#fff;border:1.5px solid var(--border);border-radius:var(--r-sm);transition:border-color var(--t-base) var(--ease),box-shadow var(--t-base) var(--ease);text-overflow:ellipsis}
 .field textarea{min-height:84px;resize:vertical}
 .field select{appearance:none;cursor:pointer;padding-right:38px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m5 8 5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
 .field :is(input,select,textarea):focus{border-color:var(--steel);box-shadow:0 0 0 3px rgba(46,90,156,.15);outline:none}
@@ -1523,11 +1531,39 @@ fieldset.field:focus{outline:none}
 .whocard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
   display:grid;gap:0;align-content:start;overflow:hidden}
 .whocard__photo{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}
-.whocard__body{padding:calc(var(--gap-pad) - 2px) var(--gap-pad) var(--gap-pad);display:grid;gap:9px;align-content:start}
-.whocard__ic{width:var(--ic-card);height:var(--ic-card);display:grid;place-items:center;border-radius:var(--r-sm);
+/* THE ICON SITS BESIDE THE TITLE, NOT ABOVE IT.
+   The icon had a row of its own — a 40px tile, then 9px, then the label —
+   which cost every card 49px of height to say nothing the label did not
+   already say. It is one row now: `[icon] Title`, description underneath.
+
+   `auto 1fr` puts the tile in a shrink-to-fit first column and gives the
+   title the rest; `p` spans both so the description still runs the full width
+   of the card. `row-gap` stays the 9px the stack already used, so the only
+   spacing that changes is the spacing that is gone.
+
+   FIRST-LINE ALIGNMENT, NOT CENTRING. "Shopping-centre kiosks" and "Small
+   commercial offices" wrap in a card this narrow. Centring the tile against a
+   two-line block drops it half a line low and the row reads as a bullet that
+   has slipped. So both items are `start`-aligned and the title is pushed down
+   by exactly half the difference between the tile and one line of itself:
+   the tile's centre and the FIRST line's centre then coincide at
+   `--ic-tile/2` from the top of the row, whatever the title does afterwards.
+   `1.14em` is the line box — `h1..h4`'s line-height times the h3's own size —
+   so the sum re-derives itself if either ever changes, and `calc()` clamps a
+   negative result to zero if a reader's text size ever outgrows the tile.
+
+   The tile is 34px rather than `--ic-card`'s 40/36 — the slight shrink the
+   brief allows. Beside 16px text a 40px tile is the loudest thing in the
+   card, and 34 is the size the trust strip's icon already uses. */
+.whocard__body{padding:calc(var(--gap-pad) - 2px) var(--gap-pad) var(--gap-pad);display:grid;
+  grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:9px;align-content:start}
+.whocard__ic{--ic-tile:34px;width:var(--ic-tile);height:var(--ic-tile);grid-column:1;grid-row:1;align-self:start;
+  display:grid;place-items:center;border-radius:var(--r-sm);
   background:var(--steel-soft);color:var(--steel)}
-.whocard__ic .ic{width:22px;height:22px}
-.whocard h3{font-size:1rem;margin:0}
+.whocard__ic .ic{width:20px;height:20px}
+.whocard h3{font-size:1rem;margin:0;grid-column:2;grid-row:1;align-self:start;
+  padding-top:calc((34px - 1.14em) / 2)}
+.whocard__body p{grid-column:1/-1}
 .whocard p{margin:0;font-size:.87rem;color:var(--slate)}
 .whogrid__note{margin-top:max(14px,calc(var(--gap-block) - 10px))}
 /* ------------------------------------------------ what we offer (section 4)
@@ -1603,12 +1639,74 @@ fieldset.field:focus{outline:none}
 /* component display rules must never beat the hidden attribute */
 [hidden]{display:none!important}
 .consent input{width:20px;height:20px}
-.claims{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+/* FOUR ACROSS ONLY WHERE FOUR ACROSS FITS.
+   `repeat(auto-fit,minmax(160px,1fr))` was sized for a claim whose title had
+   the whole column: a 160px floor packed four items in from about 760px up,
+   and three from 640 — which put one claim alone on a second row — and it was
+   already at the limit at 768, where the document measured exactly 768px wide
+   with nothing to spare. Moving the icon onto the title's line takes 44px out
+   of every column, and 44px is more than that limit had.
+
+   Measured, with the strip's own display face: the widest word in the four
+   titles is "Documented" — 172.4px at the ceiling the clamp below now sets. A
+   claim needs that plus its 17px rule gutter plus the 34+10px tile, so four
+   columns need 4×233.4 + 3×18 = 988px of grid. There is 944px at 1024 and
+   1040px at 1120. Below that floor the title does not wrap, it escapes: at
+   1024 "Documented" ran 25px through "Data protection"'s divider, which is
+   the collision this replaces.
+
+   So: two columns from 421px, four from 1120px, which is an agreed breakpoint
+   the file already uses and the first at which the grid is wide enough. Below
+   421 the single column already ruled here stands. The `auto-fit` packing is
+   gone because it cannot express "four or two, never three" — with four items
+   a three-track row is one orphan, which is what 640–740px used to get. */
+.claims{display:grid;gap:18px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:1120px){.claims{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* The rule separates a claim from the one BESIDE it, so the claim that opens a
+   row never carries one — and with two columns that is every odd item, not
+   just the first. `:first-child` alone left the second row starting 17px in
+   behind a divider with nothing on its other side. At four across the rows
+   change, so the third claim takes its rule back. */
 .claim{border-left:1px solid rgba(255,255,255,.2);padding-left:17px}
-.claim:first-child{border-left:0;padding-left:0}
-/* The icon is a child of the <dt> so the <dl> stays valid; the dt stacks it
-   above the title, which is exactly what .claim--iconed used to do. */
-.claim dt{font-family:var(--font-display);font-size:clamp(1.3rem,1rem + 1.3vw,1.85rem);font-weight:800;color:#fff;display:grid;gap:6px;justify-items:start}
+.claim:nth-child(odd){border-left:0;padding-left:0}
+@media(min-width:1120px){.claim:nth-child(3){border-left:1px solid rgba(255,255,255,.2);padding-left:17px}}
+/* THE ICON IS A CHILD OF THE <dt>, AND IT STAYS THERE. A <div> group inside a
+   <dl> may hold only <dt> and <dd>; a sibling <span> made the list invalid and
+   cost a serious axe violation. So the row is built inside the <dt> instead:
+   `auto 1fr`, tile then title, and the <dd> follows underneath as it always
+   did. The dt used to stack them — that is the vertical gap this removes.
+
+   FIRST-LINE ALIGNMENT. "Documented evidence" and "Insurance & competence
+   checked" wrap at several widths, and the dt carries a display face that
+   clamps from 1.3rem upwards, so the line box moves with the viewport.
+   Both items are `start`-aligned and the title takes half the difference
+   between the 34px tile and one line of itself as padding: tile centre and
+   first-line centre then meet at 17px from the top of the row at every width.
+   `line-height:1.14` is the value `h1..h4` already carry — at 1.6 a single
+   line was 47px against a 34px tile, which is what made the offset flip sign
+   between desktop and phone; at 1.14 the line box is never taller than the
+   tile, so the correction is always downward and never negative.
+
+   The clamp's ceiling comes down from 1.85rem to 1.7rem — 2.4px at the
+   widest, the only widths that ever reached it. That is what buys the
+   four-column band above its measured floor with 13px in hand rather than
+   two, so nothing depends on a word being 187px and not 188.
+
+   `align-content:start` on the group: `.claim` is stretched by the `.claims`
+   grid to the tallest item's height, and auto rows in a stretched grid absorb
+   the slack — which is why the gap between a claim's title and its subtext
+   used to differ from its neighbour's by tens of pixels. */
+.claim--iconed{align-content:start}
+.claim dt{font-family:var(--font-display);font-size:clamp(1.3rem,1rem + 1.3vw,1.7rem);font-weight:800;color:#fff;
+  display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;align-items:start;justify-items:start;min-width:0}
+.claim dt .claim__ic{grid-column:1;align-self:start;margin-bottom:0}
+/* `min-width:0` twice over: a grid item's automatic minimum is its min-content,
+   so without it the <dt> would push its column wide on the longest word rather
+   than wrap inside it — which is exactly how the title escaped its divider.
+   `overflow-wrap` is the last resort under it: the widths above are measured
+   with room to spare, and this only fires if a reader's own text size takes a
+   word past the column anyway. Better a broken word than a broken column. */
+.claim__title{line-height:1.14;padding-top:calc((34px - 1.14em) / 2);min-width:0;overflow-wrap:break-word}
 .claim dd{margin:5px 0 0;font-size:.78rem;color:#9DB4BE}
 
 /* ------------------------------------------------------------------- faq */
@@ -1660,8 +1758,13 @@ fieldset.field:focus{outline:none}
 .stepform__bar i{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background var(--t-base) var(--ease)}
 .stepform__bar i.is-on{background:var(--amber-strong)}
 .stepform__step[hidden]{display:none}
+/* Name+Company and Email+Phone are pairs at every width, for the same reason
+   `.qj__row` is: the markup already declares them as pairs, and the old
+   `min-width:560px` gate meant no phone ever saw one. `minmax(0,1fr)` for the
+   same reason as there — a text input's min-content is wider than half a
+   320px card, and `1fr` would let it push the page sideways. */
 .stepform__grid{display:grid;gap:13px}
-@media(min-width:560px){.stepform__grid--2{grid-template-columns:1fr 1fr}}
+.stepform__grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .stepform__nav{display:flex;gap:10px;margin-top:18px}
 .chipgroup{display:flex;flex-wrap:wrap;gap:8px}
 .chipgroup input{position:absolute;opacity:0;width:1px;height:1px}
@@ -1791,6 +1894,12 @@ fieldset.field:focus{outline:none}
   .qj{padding:17px;border-radius:var(--r-md)}
   .qj__head{margin-bottom:14px}
   .qj__form{gap:10px}
+  /* The pairs' gutter matches the gap between the rows, so the phone form has
+     one rhythm in both directions instead of 12 across and 10 down. It also
+     hands each half-width control a pixel back, which at 320 is the difference
+     between a postcode field and a postcode field that fits "E14 5AA". Only
+     the COLUMN gap moves — the row gap is `.qj__form`'s and is untouched. */
+  .qj__row{column-gap:10px}
   /* A LABEL AND ITS CONTROL ARE ONE THING, and on a phone they should read
      that way. 6px desktop, 5px here, now 4px: enough that the label still
      detaches from the input it names, tight enough that a nine-field form

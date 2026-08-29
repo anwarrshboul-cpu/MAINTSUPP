@@ -30,7 +30,7 @@ import { PhotoSlot } from "./photo";
  * work is closed, and is true without arithmetic.
  */
 const STATS = [
-  { value: "21", label: "stores coordinated" },
+  { value: "+20", label: "stores coordinated" },
   { value: "One", label: "monthly report" },
   { value: "Photo-verified", label: "close-outs" },
 ] as const;
@@ -41,13 +41,13 @@ export function CaseStudy() {
       <div className="wrap">
         <div className="reveal">
           <p className="eyebrow">Case study</p>
-          <h2 className="h2">21 stores. One point of contact.</h2>
+          <h2 className="h2">+20 stores. One point of contact.</h2>
         </div>
 
         <div className="casestudy reveal">
           <div className="casestudy__body">
             <p className="lede">
-              A UK fragrance retailer with 21 stores and kiosks needed one accountable
+              A UK fragrance retailer with +20 stores and kiosks needed one accountable
               contact for every repair, compliance date and store project. Maintsupp runs
               intake and triage, assigns vetted contractors, chases attendance, verifies
               completion with photo evidence, and reports monthly on jobs, spend and

@@ -25,6 +25,14 @@ export const photoAlt: Record<string, string> = {
      is a gap waiting for a caller that forgets. */
   "hero-maintenance-v4":
     "Two maintenance engineers in hi-vis jackets and hard hats at an open plant panel on a London rooftop at dusk, with the lit City skyline behind them",
+  /* The portrait plate the phone gets instead. It is a different photograph of
+     the same scene, not a crop of the one above — same rooftop, same dusk, but
+     framed tall so a portrait screen can hold all of it — so it is described in
+     its own words rather than sharing the desktop entry. The `<img>` carries
+     one alt whichever `<source>` wins, and `hero.tsx` passes a sentence that
+     covers both; this entry is the guarantee that stands if a caller forgets. */
+  "hero-maintenance-mobile-v5":
+    "Two maintenance engineers in hi-vis jackets and hard hats at an open plant panel on a London rooftop at dusk, a boom lift raised beside them with a worker in its basket and the lit City skyline between",
   "hero-london-maintenance":
     "A maintenance engineer working on a shopfront in a London high street",
   "evidence-closeout":

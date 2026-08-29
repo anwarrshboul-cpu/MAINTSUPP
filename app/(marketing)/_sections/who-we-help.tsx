@@ -26,8 +26,9 @@ import { ApprovedPhoto } from "./approved-photo";
  * a canopy, a dumbbell) rather than a generic square, because five cards
  * carrying five variations of "building" tell the reader nothing.
  *
- * `aria-hidden` on every icon: each sits directly above its own label, so a
- * screen reader that announced both would read everything twice.
+ * `aria-hidden` on every icon: each sits on the same line as its own label —
+ * the icon had a row to itself and now shares one — so a screen reader that
+ * announced both would read everything twice.
  */
 
 const ICONS: Record<string, ReactNode> = {

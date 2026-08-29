@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -296,7 +297,7 @@ test("a slot with no photograph asks for none", async () => {
   }
 });
 
-/* ================================================================ hero v4
+/* ============================================== hero: two plates, one hero
  *
  * The hero photograph was replaced with the owner-approved 1916x821 file, and
  * both halves of that job are pinned here: the CACHE half, because this repo
@@ -304,13 +305,53 @@ test("a slot with no photograph asks for none", async () => {
  * stale ones for a year; and the CROP half, because the treatment that got
  * replaced looked correct in the source and ate 80% of the picture in the
  * browser, which is a failure no reading of the CSS would have caught.
+ *
+ * A SECOND PLATE HAS SINCE JOINED IT, AND IT IS ART DIRECTION, NOT RESIZING.
+ * 2.33:1 has no framing that survives a 0.47:1 screen: the phone treatment
+ * that shipped alongside the desktop one pushed the band to 60% of the hero's
+ * HEIGHT and let `object-position` choose which third of the WIDTH to keep, so
+ * the plant panel, the second engineer, St Paul's, the London Eye and the
+ * access platform were all gone below 620px. That was a workaround for a plate
+ * of the wrong shape, and the owner supplied a portrait plate instead —
+ * 941x1452 — so the workaround is gone rather than tuned, and what replaced it
+ * is pinned below: one `<picture media>` switch, one `--hero-band` value, and
+ * nothing cropped on either side of the breakpoint.
  */
 
 const HERO_SLOT = "hero-maintenance-v4";
+const HERO_MOBILE_SLOT = "hero-maintenance-mobile-v5";
 const HERO_RETIRED = "hero-london-maintenance";
 /** The approved source's own pixels. Every number below is derived from these. */
 const HERO_W = 1916;
 const HERO_H = 821;
+/** The approved PORTRAIT source's own pixels, likewise. */
+const HERO_M_W = 941;
+const HERO_M_H = 1452;
+/**
+ * The breakpoint, written once.
+ *
+ * It is a cross-file invariant, not a preference: the stylesheet frames one
+ * plate and the `<picture media>` fetches the other, and if the two numbers
+ * ever drift the browser is showing a picture the CSS is not describing. Both
+ * are checked against this constant rather than against each other, so the
+ * failure names the number instead of leaving two files to be compared.
+ */
+const HERO_BREAKPOINT = 620;
+
+/**
+ * sha256 of each approved original, as it sits in the repository.
+ *
+ * The `.png` beside each plate is a byte-identical copy of the file the owner
+ * supplied — that is its entire job, and a digest is the only way to keep the
+ * claim true. It also nails down the other half of the cache rule: these paths
+ * are served `immutable`, so replacing the CONTENT under either stem is the
+ * exact mistake this repo has already made once. A re-shoot gets a new stem and
+ * a new digest here; it does not get to reuse an old URL.
+ */
+const APPROVED_SHA256 = {
+  [HERO_SLOT]: "48711bfbabb08d011371aabd8ca396f67ad2fc60e14a57138757d4a4ad494d2f",
+  [HERO_MOBILE_SLOT]: "048e133b90c459c51536c4cd40c4499a5303fea015504dc8b4b48370ecc078d4",
+};
 
 test("the hero photograph is the versioned file, and the retired one is asked for by nobody", async () => {
   const hero = await read("app/(marketing)/_sections/hero.tsx");
@@ -349,6 +390,168 @@ test("the hero photograph is the versioned file, and the retired one is asked fo
   assert.match(hero, /sizes="100vw"/, "the hero paints at the full viewport width, so say so");
   assert.match(hero, new RegExp(`w=\\{${HERO_W}\\}`), "the artwork is drawn at the photograph's own shape");
   assert.match(hero, new RegExp(`h=\\{${HERO_H}\\}`));
+});
+
+test("the phone gets a different photograph, chosen by the browser and not by JavaScript", async () => {
+  const hero = await read("app/(marketing)/_sections/hero.tsx");
+
+  /*
+   * ART DIRECTION IS A `media` ATTRIBUTE, AND NOTHING ELSE WILL DO.
+   *
+   * `srcset`/`sizes` answers "how many pixels of this picture" and cannot help
+   * a plate whose SHAPE is wrong for the screen — which is the whole problem
+   * on a phone. `<source media>` answers "which picture", the browser resolves
+   * it before it opens a socket, and exactly one of the two files is fetched.
+   *
+   * The two alternatives are both worse and both are ruled out here. A second
+   * <Hero> behind a viewport check duplicates the copy, the CTAs and the
+   * proof points, so they drift; and any JS width test runs after the browser
+   * has already started downloading the wrong picture, which is the download
+   * this exists to prevent.
+   */
+  assert.match(
+    hero,
+    new RegExp(`narrow=\\{\\{\\s*slot: "${HERO_MOBILE_SLOT}",\\s*media: "\\(max-width: ${HERO_BREAKPOINT}px\\)"`),
+    "the hero hands the phone plate to <picture> behind a media query",
+  );
+  assert.doesNotMatch(
+    hero,
+    /matchMedia\(\s*["'`]\(max-width|innerWidth|useMediaQuery/,
+    "the plate must be picked by the browser's own source selection, not by measuring the viewport in JS",
+  );
+
+  const heroSlotCount = (hero.match(/<PhotoSlot/g) ?? []).length;
+  assert.equal(heroSlotCount, 1, "one hero, one slot — a second component is a second copy of the copy");
+
+  const photo = await read("app/(marketing)/_sections/photo.tsx");
+
+  /*
+   * ORDER IS THE MECHANISM. A browser walks the `<source>` list once and stops
+   * at the first entry whose `media` matches and whose `type` it can decode.
+   * So the media-gated plate has to come FIRST or it can never win: put it
+   * after the unconditional AVIF and every phone downloads the desktop file.
+   */
+  const gated = photo.indexOf("media={narrow.media}");
+  const ungated = photo.indexOf('<source type="image/avif" srcSet={srcSet("avif")}');
+  assert.ok(gated > 0, "photo.tsx must emit a media-gated <source>");
+  assert.ok(ungated > 0, "photo.tsx must still emit the unconditional wide <source>");
+  assert.ok(
+    gated < ungated,
+    "the media-gated plate must precede the unconditional one, or the browser never reaches it",
+  );
+
+  /*
+   * NEITHER PLATE MAY BE ADVERTISED TO THE OTHER'S WIDTHS. Each `<source>`
+   * builds its srcset from ITS OWN stem's manifest entry — a shared ladder
+   * would put desktop rungs in the phone's srcset, and a phone on a wide DPR
+   * would fetch a 1916px file the media query was supposed to have excluded.
+   */
+  assert.match(
+    photo,
+    /srcSet=\{ladder\(narrow\.slot, "avif"\)\}/,
+    "the narrow <source> must advertise the narrow stem's widths",
+  );
+  assert.match(
+    photo,
+    /srcSet=\{ladder\(narrow\.slot, "webp"\)\}/,
+  );
+  assert.match(
+    photo,
+    /const srcSet = \(ext: "avif" \| "webp"\) => ladder\(slot, ext\);/,
+    "and the wide <source> must advertise the wide stem's",
+  );
+
+  /* A stem with no manifest entry has no files on disk either — the same rule
+     the wide plate has always been under, applied to the narrow one. */
+  assert.match(photo, /const narrowWidths = narrow \? photoWidths\[narrow\.slot\] \?\? \[\] : \[\];/);
+  assert.match(photo, /const hasNarrow = narrowWidths\.length > 0;/);
+  assert.match(
+    photo,
+    /\{narrow && hasNarrow && \(/,
+    "no manifest entry, no <source> — advertising a file that is not there is a 404 per visit",
+  );
+
+  /* And the prop is optional, so every other caller renders exactly what it
+     always did. Five call sites, one of them the hero. */
+  const sources = await sectionSources();
+  const withNarrow = sources.filter(({ source }) => source.includes("narrow={{")).map(({ file }) => file);
+  assert.deepEqual(withNarrow, ["hero.tsx"], "only the hero is art-directed; the rest are untouched");
+});
+
+test("both approved originals are on disk byte for byte, under stems nobody has fetched before", async () => {
+  /*
+   * Provenance and the cache rule are the same assertion from two sides. The
+   * digest proves the `.png` is the file the owner approved; the stem proves
+   * no returning visitor is holding different bytes at the same URL under
+   * `Cache-Control: immutable`. Change the picture and BOTH have to change.
+   */
+  for (const [stem, expected] of Object.entries(APPROVED_SHA256)) {
+    const bytes = await readFile(path.join(PHOTOS, `${stem}.png`));
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    assert.equal(
+      digest,
+      expected,
+      `${stem}.png is not the approved file — new bytes need a new stem, not a new hash under the old one`,
+    );
+
+    /* PNG IHDR: width and height are big-endian at bytes 16 and 20. Read from
+       the file rather than trusted from a note, so a re-crop cannot slip in. */
+    const [w, h] = [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+    const shape = stem === HERO_SLOT ? [HERO_W, HERO_H] : [HERO_M_W, HERO_M_H];
+    assert.deepEqual([w, h], shape, `${stem}.png is ${w}x${h}, not the approved ${shape.join("x")}`);
+  }
+
+  /* Landscape and portrait — which is the reason there are two of them at all.
+     If a future edit points the phone at a plate wider than it is tall, the
+     crop problem is back and this is where it shows up. */
+  assert.ok(HERO_W / HERO_H > 2, "the wide plate is a landscape band");
+  assert.ok(HERO_M_W / HERO_M_H < 1, "the phone plate is portrait, or it cannot fill a portrait screen");
+});
+
+test("the phone plate ships a phone ladder, and no desktop rung is in it", async () => {
+  const files = await readdir(PHOTOS);
+  assert.ok(files.includes(`${HERO_MOBILE_SLOT}.png`), "the approved original, byte for byte");
+  assert.ok(files.includes(`${HERO_MOBILE_SLOT}.jpg`), "the base the <img src> falls back to");
+
+  const manifest = await read("app/(marketing)/_sections/photo-widths.ts");
+  const entry = manifest.match(new RegExp(`"${HERO_MOBILE_SLOT}": \\[([^\\]]*)\\]`));
+  assert.ok(entry, `${HERO_MOBILE_SLOT} must be in the generated manifest`);
+  const widths = entry[1].split(",").map((n) => Number(n.trim())).filter(Boolean);
+  assert.deepEqual(widths, [480, 720, HERO_M_W], "480 and 720 plus the source's own width");
+
+  for (const width of widths) {
+    for (const ext of ["avif", "webp"]) {
+      assert.ok(
+        files.includes(`${HERO_MOBILE_SLOT}-${width}.${ext}`),
+        `${HERO_MOBILE_SLOT}-${width}.${ext} is missing`,
+      );
+    }
+  }
+
+  /*
+   * THE LADDER IS THE OTHER HALF OF "NEITHER PLATE IS ADVERTISED TO THE
+   * OTHER'S WIDTHS". This file is only ever fetched below 620px, where the
+   * widest realistic request is a 430px viewport at DPR 3 = 1290 device px —
+   * and the source is 941, so 941 is the cap. A 1600 or 1916 rung here would
+   * be an upscale of a phone plate shipped to a phone: the single heaviest
+   * mistake available on this page.
+   */
+  assert.equal(Math.max(...widths), HERO_M_W, "the top rung is the source's own width, never an upscale");
+  const wide = (manifest.match(new RegExp(`"${HERO_SLOT}": \\[([^\\]]*)\\]`)))[1]
+    .split(",").map((n) => Number(n.trim())).filter(Boolean);
+  assert.ok(
+    Math.max(...wide) > Math.max(...widths),
+    "the desktop plate still carries the wide rungs; the phone one must not",
+  );
+  for (const width of widths) {
+    assert.ok(width <= 1024, `${width}px is a desktop rung on a plate only phones can receive`);
+  }
+
+  /* Different stems, therefore disjoint URLs — which is what makes "one plate
+     per visit" true at the network layer rather than only in the markup. */
+  const urls = (stem, ws) => ws.flatMap((w) => [`${stem}-${w}.avif`, `${stem}-${w}.webp`]);
+  const shared = urls(HERO_SLOT, wide).filter((u) => urls(HERO_MOBILE_SLOT, widths).includes(u));
+  assert.deepEqual(shared, [], "the two plates may not share a single derived URL");
 });
 
 test("the hero photograph ships an original that matches the approved file, and a full ladder", async () => {
@@ -435,46 +638,95 @@ test("the hero crop is a band, and no edit can quietly go back to eating the pic
   assert.match(css, /\.hero \.ph__img\{[^}]*object-position:25% bottom/);
 
   /*
-   * PHONES, AND BOTH WAYS OF GETTING THIS WRONG.
+   * PHONES, WHERE THERE IS NOTHING LEFT TO WORK AROUND.
    *
-   * At the picture's own ratio the band is 167px tall at 390 and sits at page
-   * y 783 — below the fold, a photograph nobody sees. Made taller by a ratio of
-   * the WIDTH it reached 58% of the picture, which is the number the brief
-   * asked for and still looked wrong: 285px of an 838px hero, so more than half
-   * the hero was flat navy and it read as an image that had failed to load.
+   * The rule that used to sit here was a workaround and it is asserted GONE,
+   * not tuned. It pushed the band to 60% of the HERO'S height with
+   * `aspect-ratio:auto`, which made `cover` scale by height again and let
+   * `object-position:25% bottom` pick which third of the WIDTH to keep — the
+   * plant panel, the second engineer, St Paul's, the London Eye and the access
+   * platform were all outside the frame below 620px, on the shipped build.
    *
-   * Cover makes height and width reciprocal, so the two failure modes sit at
-   * opposite ends of one dial: too little height reads as empty, too little
-   * width goes back to the middle-of-the-skyline crop with no people in it.
-   * Both ends are bounded here, and the band is a share of the HERO'S height
-   * rather than of the viewport's width — the hero grows as the headline wraps
-   * (838px at 390, 977px at 320), so a width-derived band is thinnest exactly
-   * where the hero is tallest.
+   * The phone gets its own portrait plate now, so the same band rule above
+   * does the whole job with one number changed. The arithmetic is the same
+   * arithmetic: a band of the plate's OWN ratio is the tallest box that still
+   * shows all of it, because cover makes the axes reciprocal — taller and the
+   * width goes; shorter and the height goes. So `visible === 1` is asserted on
+   * BOTH sides of the breakpoint, and it is the same assertion, not a weaker
+   * one for the small screens.
    */
   /* The block is found by what it CONTAINS, not by where it sits: another
      section may open a 620px query above this one at any time. */
-  const phoneBlocks = [...css.matchAll(/@media\s*\(max-width:\s*620px\)\s*\{([\s\S]*?)\n\}/g)]
+  const phoneBlocks = [...css.matchAll(
+    new RegExp(`@media\\s*\\(max-width:\\s*${HERO_BREAKPOINT}px\\)\\s*\\{([\\s\\S]*?)\\n\\}`, "g"),
+  )]
     .map((match) => match[1])
-    .filter((body) => body.includes(".hero__media .ph > picture"));
+    .filter((body) => body.includes("--hero-band"));
   assert.equal(phoneBlocks.length, 1, "exactly one phone block may own the hero band");
   const [phoneBlock] = phoneBlocks;
 
-  const fill = phoneBlock.match(/height:\s*(\d+)%/);
-  assert.ok(fill, "the phone band must take a share of the hero's height");
-  const pct = Number(fill[1]);
-  assert.ok(pct >= 50, `the band fills ${pct}% of the hero — under half reads as a page with no photograph on it`);
-  assert.ok(pct <= 70, `the band fills ${pct}% of the hero — past this the width collapses back to the eaten crop`);
+  /* The phone band is the phone plate's own pixels, so nothing is cropped
+     there either — measured in the browser at 430/390/375/360/320: the panel,
+     both engineers, the rooftop, the skyline, St Paul's, the London Eye and
+     the boom lift are all in frame at every one of them. */
+  const phone = bandRatio(phoneBlock);
+  assert.equal(phone.w, HERO_M_W, "the phone band must be the phone plate's own width");
+  assert.equal(phone.h, HERO_M_H, "…and its own height, or cover starts cropping again");
+  assert.equal(HERO_M_H / phone.h, 1, "a phone shows the whole frame, exactly as a desktop does");
+  assert.ok(
+    phone.h > phone.w,
+    "the phone band must be portrait — a landscape band on a portrait screen is the bug this replaced",
+  );
 
-  /* A share of the height only means anything if the ratio stops driving the
-     box, and the picture must still be anchored to the hero's foot. */
-  assert.match(phoneBlock, /aspect-ratio:auto/, "the desktop ratio must not also be setting the height");
-  assert.match(phoneBlock, /bottom:0/, "anchored to the hero's foot");
-  assert.match(phoneBlock, /top:auto/);
-  assert.match(phoneBlock, /mask-image:linear-gradient/, "and faded at the top into the painted sky");
+  /*
+   * THE WORKAROUND, BY NAME, SO IT CANNOT COME BACK QUIETLY. Each of these
+   * would restore height-driven cover on a phone, and with it the crop.
+   */
+  assert.doesNotMatch(
+    phoneBlock,
+    /aspect-ratio:\s*auto/,
+    "the phone band must be driven by the ratio, not released from it",
+  );
+  assert.doesNotMatch(
+    phoneBlock,
+    /height:\s*\d+%/,
+    "a share-of-the-hero band is the old workaround — the plate's own ratio is the treatment now",
+  );
+  assert.doesNotMatch(
+    phoneBlock,
+    /\.hero__media \.ph > picture/,
+    "the phone must reuse the band rule above, not redeclare one — a second layout is how the two drift",
+  );
 
-  /* The framing lever, which is what keeps the people in frame once height is
-     cropping the width again. */
+  /* The base band rule is what the phone block leans on, so it has to survive
+     above the breakpoint AND be the thing still doing the work below it. */
+  assert.match(band[1], /aspect-ratio:var\(--hero-band\)/, "one rule, parameterised, on both sides");
+  assert.match(band[1], /mask-image:linear-gradient/, "faded at the top into the painted sky");
+  assert.match(
+    css.slice(css.indexOf(".hero{--hero-band")),
+    /^\.hero\{--hero-band:1916\/821\}/,
+    "the desktop band is declared outside any query, so it is what every width above 620 gets",
+  );
+
+  /* `object-position` is the framing lever and it is inert at a band of the
+     plate's own ratio — there is nothing to crop. It stays declared because it
+     is the only lever that works if `--hero-band` is ever made taller than the
+     plate, and because an `<img>` ignores the `background-position` that used
+     to be written here. */
   assert.match(css, /\.hero \.ph__img\{[^}]*object-position:25% bottom/);
+
+  /*
+   * THE CROSS-FILE INVARIANT. The stylesheet frames one plate and `<picture>`
+   * fetches the other; if the breakpoints drift the browser is showing a
+   * picture the CSS is not describing, and nothing else in this suite would
+   * notice.
+   */
+  const hero = await read("app/(marketing)/_sections/hero.tsx");
+  assert.match(
+    hero,
+    new RegExp(`media: "\\(max-width: ${HERO_BREAKPOINT}px\\)"`),
+    `the <picture> switch and the CSS band must both turn at ${HERO_BREAKPOINT}px`,
+  );
 });
 
 test("the hero copy carries its own contrast, so the scrim does not have to crush the picture", async () => {

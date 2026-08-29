@@ -35,6 +35,11 @@ export const photoWidths: Record<string, number[]> = {
     960,
     1600
   ],
+  "hero-maintenance-mobile-v5": [
+    480,
+    720,
+    941
+  ],
   "hero-maintenance-v4": [
     480,
     960,

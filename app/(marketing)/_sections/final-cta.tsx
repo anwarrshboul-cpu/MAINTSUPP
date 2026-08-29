@@ -141,8 +141,10 @@ export function TrustStrip() {
                 * The icon lives INSIDE the <dt>, not beside it. A <div> group in
                 * a <dl> may only hold <dt> and <dd>, so a sibling <span> made
                 * the list invalid — axe reports it as a serious violation and a
-                * screen reader loses the term/description pairing. The stacked
-                * look is unchanged; `.claim dt` does the stacking now.
+                * screen reader loses the term/description pairing. The icon and
+                * the title share a line now rather than stacking, and that is
+                * `.claim dt`'s two-column grid — still no second element in the
+                * group, still nothing between the <dt> and the <dd>.
                 */}
               <dt>
                 <span className="claim__ic">

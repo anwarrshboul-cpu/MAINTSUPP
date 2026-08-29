@@ -331,14 +331,26 @@ export function FinalCta() {
 
   return (
     <section className="section finalcta" id="review">
-      <div className="wrap finalcta__inner">
+      {/*
+        TWO NAMES FOR ONE PLACE. The section is `#review` because that is where
+        "Book a Portfolio Review" has always pointed, from the header, the
+        drawer and the footer. It is also the only form on the page that asks
+        who you are and how to reach you, so it is what a reader clicking
+        "Contact Us" in the navigation is looking for — but sending them to an
+        anchor called `review`, under a heading that only offered a portfolio
+        review, made the nav item read as a mistake. `#contact` names the same
+        place, the old anchor still resolves, and the copy below says both
+        things it has always done. Matches the canonical landing page.
+      */}
+      <div className="wrap finalcta__inner" id="contact">
         <div>
-          <p className="eyebrow">Book a portfolio review</p>
+          <p className="eyebrow">Contact us or book a portfolio review</p>
           <h2 className="h2">
             Not sure where your maintenance is leaking time and money?
           </h2>
           <p className="lede">
-            Book a free portfolio review — 30 minutes, no obligation.
+            Book a free portfolio review — 30 minutes, no obligation. Or use the
+            same form to tell us what you need.
           </p>
           <ul className="ticks" style={{ marginTop: 22 }}>
             {REVIEW_POINTS.map((point) => (

@@ -3,20 +3,27 @@ import type { ReactNode } from "react";
 /**
  * SECTION 3 — Who we help.
  *
- * Six operator types, each with a real line icon.
+ * Five operator types, each with a real line icon.
  *
  * WHAT THIS REPLACES: the `Sectors` section, which was five photo tiles with a
  * detail panel under them — a whole interactive component to say who the
- * product is for. The spec asks for six cards and one supporting line, and the
- * photographs go with the panel: `sector-retail`, `-kiosks`, `-gyms`,
+ * product is for. The spec asks for a card per operator type and one supporting
+ * line, and the photographs go with the panel: `sector-retail`, `-kiosks`,
  * `-cinemas` and `-commercial` are deleted with it.
+ *
+ * WHY FIVE AND NOT SIX: "Franchise groups" was withdrawn. A franchise group is
+ * not a sixth kind of operator alongside the other five — it is an ownership
+ * arrangement that any of them can be under, so the card was slicing the list
+ * on a second axis and describing a customer Maintsupp does not sell to as a
+ * category of its own. The canonical landing page dropped it; this copy now
+ * matches. See `app/(marketing)/_sections/who-we-help.tsx`.
  *
  * ICONS, NOT LETTERS. The brief is explicit that a letter in a box is not an
  * icon. These are drawn in the same idiom as every other glyph on the page —
  * 24×24, no fill, 1.7 stroke, round caps and joins, which is Lucide's grid and
  * the geometry `.ic` is sized for. Each one is the object itself (a shopfront,
- * a canopy, a branching tree) rather than a generic square, because six cards
- * carrying six variations of "building" tell the reader nothing.
+ * a canopy, a dumbbell) rather than a generic square, because five cards
+ * carrying five variations of "building" tell the reader nothing.
  *
  * `aria-hidden` on every icon: each sits directly above its own label, so a
  * screen reader that announced both would read everything twice.
@@ -39,16 +46,6 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M2 10 4 4h16l2 6Z" />
       <path d="M8 4v6M16 4v6" />
       <path d="M8 20v-5h8v5" />
-    </>
-  ),
-  /* Branches — one parent, three sites. A franchise group in one glyph. */
-  branches: (
-    <>
-      <rect x="9" y="2" width="6" height="5" rx="1" />
-      <rect x="2" y="17" width="5" height="5" rx="1" />
-      <rect x="9.5" y="17" width="5" height="5" rx="1" />
-      <rect x="17" y="17" width="5" height="5" rx="1" />
-      <path d="M12 7v5M4.5 17v-2.5h15V17M12 12v2.5" />
     </>
   ),
   /* Heart with a pulse trace across it. */
@@ -87,11 +84,6 @@ const AUDIENCES = [
     icon: "kiosk",
     label: "Shopping-centre kiosks",
     body: "Units inside a landlord's estate, with permits and out-of-hours access.",
-  },
-  {
-    icon: "branches",
-    label: "Franchise groups",
-    body: "One standard to hold across sites you do not all operate yourself.",
   },
   {
     icon: "heartPulse",

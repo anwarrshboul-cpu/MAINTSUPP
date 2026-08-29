@@ -87,14 +87,30 @@ export function Hero() {
           full-bleed background that paints at 100vw and then some, so the
           browser was picking a variant roughly a third of the width it needed
           and upscaling it across the fold.
+
+          AND A SECOND PLATE FOR PHONES, WHICH IS ART DIRECTION, NOT RESIZING.
+          The approved desktop file is 2.33:1 and a phone viewport is about
+          0.47:1. There is no framing of a plate that shape which survives a
+          portrait screen — every variant of it that has been tried cropped
+          away either the plant panel or the access platform, and the shipped
+          one showed a third of the width and one hard hat. So the owner shot
+          the scene again in portrait, 941x1452, with a tall clean sky for the
+          headline and every subject in the lower half; `narrow` hands it to
+          the browser behind a `media` query and the browser fetches exactly
+          one of the two. The breakpoint is the stylesheet's own 620px, so the
+          picture the CSS is framing is always the picture on screen.
+
+          The `alt` describes what is common to both plates, because an `<img>`
+          carries one alt whichever `<source>` wins.
         */}
         <PhotoSlot
           slot="hero-maintenance-v4"
+          narrow={{ slot: "hero-maintenance-mobile-v5", media: "(max-width: 620px)" }}
           w={1916}
           h={821}
           art="city"
           sizes="100vw"
-          alt="Two maintenance engineers in hi-vis jackets and hard hats working at an open plant panel on a London rooftop at dusk, the lit City skyline behind them and an access platform raised at the far right"
+          alt="Two maintenance engineers in hi-vis jackets and hard hats working at an open plant panel on a London rooftop at dusk, the lit City skyline behind them and an access platform raised nearby"
           desc="London rooftop at dusk: engineers at a plant panel on the left, the City skyline centre, an access platform right"
           priority
         />

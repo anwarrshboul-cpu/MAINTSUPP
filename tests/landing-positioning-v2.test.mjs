@@ -604,3 +604,243 @@ test("the contractor endpoint trusts nothing the browser sent", async () => {
   assert.doesNotMatch(route, /export async function GET/, "no public read of the application register");
   assert.match(route, /clean\(payload\.company, 160\)/, "every field length-capped");
 });
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * THE TWO PUBLIC FORMS PAIR THEIR FIELDS ON A PHONE, AND THE ICONS SIT BESIDE
+ * THEIR TITLES.
+ *
+ * Both forms already wrapped their pairs in the right containers; a media
+ * query was the only thing stopping the columns from appearing. Report a Job
+ * gated `.qj__row` at `min-width:420px` and the portfolio review gated
+ * `.stepform__grid--2` at `min-width:560px`, so every phone under those widths
+ * — 390, 375, 360, 320, which is most of them — got a single stack, and the
+ * blame landed on label spacing instead.
+ *
+ * These tests pin the fix from both ends: the markup still declares the pairs,
+ * and the CSS no longer refuses to draw them. They also pin the two things a
+ * later pass would most plausibly break while "tidying": the `minmax(0,…)`
+ * floor, without which a text input's intrinsic width pushes the page sideways
+ * at 320, and the desktop values, which the owner accepted and which must not
+ * move when the phone does.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+test("Report a Job keeps its three pairs, in order, at every width", async () => {
+  const form = await read("app/(marketing)/_sections/report-job.tsx");
+
+  /* Walk the markup in document order: a row marker, then the fields it holds.
+     Each `.qj__row` carries exactly two, so the sequence is the layout. */
+  const order = [...form.matchAll(/className="qj__row"|htmlFor="(rj[A-Za-z]+)"/g)].map(
+    (m) => m[1] ?? "ROW",
+  );
+  assert.deepEqual(
+    order,
+    [
+      "ROW", "rjSite", "rjName",
+      "ROW", "rjPhone", "rjEmail",
+      "rjAddress",
+      "ROW", "rjPostcode", "rjCategory",
+      "rjUrgency", "rjDesc", "rjAccess",
+    ],
+    "Site+Contact, Phone+Email, address full, Postcode+Category, urgency and description full",
+  );
+
+  const css = await read("app/(marketing)/marketing.css");
+  assert.match(
+    css,
+    /\.qj__row\{display:grid;gap:12px;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/,
+    "the pairs are the base rule, not something a viewport has to earn",
+  );
+  assert.doesNotMatch(
+    css,
+    /@media\([^)]*min-width:\s*420px[^)]*\)\{\.qj__row/,
+    "the 420px gate is what stacked every phone under it; it must not come back",
+  );
+  /* `1fr` is `minmax(auto,1fr)`, and a grid item's automatic minimum is its
+     min-content — for a text input, the UA's ~20-character intrinsic width,
+     which is wider than half a 320px card. Both halves of the release are
+     needed: the track's floor and the item's own. */
+  assert.doesNotMatch(css, /\.qj__row\{[^}]*grid-template-columns:1fr 1fr/, "no bare 1fr 1fr");
+  /* Two halves of the same release: the track's floor is `minmax(0,…)`, the
+     item's own is `min-width:0`. `align-content:start` is what stops the
+     shorter half of a pair being stretched — a stretched grid shares the slack
+     between its own rows, which slid the control down the moment its neighbour
+     grew a validation line. */
+  assert.match(
+    css,
+    /\.field\{display:grid;gap:6px;min-width:0;align-content:start\}/,
+    "the field may shrink to its track, and a paired field is not stretched out of line",
+  );
+});
+
+test("the portfolio review keeps its two pairs, and the three withdrawn questions stay withdrawn", async () => {
+  const form = await read("app/(marketing)/_sections/final-cta.tsx");
+
+  const order = [...form.matchAll(/className="stepform__grid stepform__grid--2"|htmlFor="(lf[A-Za-z]+)"/g)].map(
+    (m) => m[1] ?? "ROW",
+  );
+  assert.deepEqual(
+    order,
+    ["ROW", "lfName", "lfCompany", "ROW", "lfEmail", "lfPhone", "lfSites", "lfWebsite"],
+    "Name+Company, Email+Phone, then sites full width (lfWebsite is the honeypot)",
+  );
+
+  /* Regions, "Approx. maintenance issues per month" and "Biggest problem right
+     now" were withdrawn. Nothing may reintroduce them — not a control, not an
+     empty grid slot, not a reserved row. */
+  for (const id of ["lfRegions", "lfVolume", "lfProblem"]) {
+    assert.doesNotMatch(form, new RegExp(id), `${id} must stay gone`);
+  }
+  assert.equal(
+    (form.match(/className="stepform__grid/g) ?? []).length,
+    2,
+    "two grids, so no third one is standing empty where a withdrawn pair used to be",
+  );
+
+  const css = await read("app/(marketing)/marketing.css");
+  assert.match(
+    css,
+    /\.stepform__grid--2\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/,
+    "the pairs are unconditional here too",
+  );
+  assert.doesNotMatch(
+    css,
+    /@media\([^)]*min-width:\s*560px[^)]*\)\{\.stepform__grid--2/,
+    "the 560px gate is gone, and with it the file's only 560px breakpoint",
+  );
+});
+
+test("the phone tightens the label gap and nothing else; the desktop form is untouched", async () => {
+  const css = await read("app/(marketing)/marketing.css");
+
+  /* 6px is the desktop value, and it is the BASE rule — the only way it changes
+     is if somebody edits this line, which is the point. */
+  assert.match(css, /\.field\{display:grid;gap:6px;min-width:0;align-content:start\}/, "desktop stays at 6px");
+
+  const opener = "@media (max-width: 620px){";
+  const start = css.indexOf(opener);
+  assert.notEqual(start, -1, "the phone block lives at the agreed 620px breakpoint");
+  let end = start + opener.length;
+  for (let depth = 1; depth > 0; end += 1) {
+    assert.ok(end < css.length, "the phone block is unterminated");
+    if (css[end] === "{") depth += 1;
+    else if (css[end] === "}") depth -= 1;
+  }
+  const phone = css.slice(start, end);
+
+  assert.match(phone, /\.field\{gap:4px\}/, "4px on a phone, down from the desktop 6px");
+  assert.match(phone, /\.qj__row\{column-gap:10px\}/, "the pairs' gutter matches the row gap on a phone");
+  /* The gap is the ONLY thing the phone block may take out of a field. The
+     46px control height and the 16px type are what keep it tappable and stop
+     iOS zooming on focus, and a later pass hunting for pixels must not reach
+     in here for them. */
+  assert.doesNotMatch(phone, /\.field\{[^}]*min-height/, "no control height changes on a phone");
+  assert.doesNotMatch(phone, /\.field\{[^}]*padding/, "no field padding changes on a phone");
+  assert.doesNotMatch(phone, /\.field\{[^}]*font-size/, "no field type changes on a phone");
+  assert.doesNotMatch(phone, /\.qj__row\{[^}]*grid-template-columns/, "the pairs are not re-declared per width");
+
+  /* Nothing may reintroduce a width at which the pairs collapse. */
+  assert.doesNotMatch(css, /\.qj__row\{grid-template-columns:1fr\}/);
+  assert.doesNotMatch(css, /\.stepform__grid--2\{grid-template-columns:1fr\}/);
+});
+
+test("a placeholder that outgrows a half-width control is trimmed, not chopped", async () => {
+  /* At 320 a paired control is 122px wide, and several placeholders are longer
+     than that. `text-overflow` turns the hard cut mid-glyph into an ellipsis,
+     which reads as "there is more" rather than as a rendering fault. */
+  const css = await read("app/(marketing)/marketing.css");
+  const rule = css.match(/\.field input\[type=text\][^}]*\}/);
+  assert.ok(rule, "the shared control rule must still exist");
+  assert.match(rule[0], /text-overflow:ellipsis/);
+  assert.match(rule[0], /min-height:46px/, "and the tap target is untouched by it");
+});
+
+test("every icon sits on its title's first line, at every width", async () => {
+  const css = await read("app/(marketing)/marketing.css");
+
+  /* WHO WE HELP. One row: tile, title; the description spans both columns
+     underneath. `grid-row:1` on both is what puts them on the same line, and
+     `align-self:start` plus the title's half-difference padding is what keeps
+     the tile on the FIRST line when the title wraps — "Shopping-centre kiosks"
+     and "Small commercial offices" both do. */
+  assert.match(css, /\.whocard__body\{[^}]*display:grid;\s*grid-template-columns:auto minmax\(0,1fr\)/);
+  assert.match(css, /\.whocard__ic\{[^}]*grid-column:1;grid-row:1;align-self:start/);
+  assert.match(css, /\.whocard h3\{[^}]*grid-column:2;grid-row:1;align-self:start;\s*padding-top:calc\(\(34px - 1\.14em\) \/ 2\)\}/);
+  assert.match(css, /\.whocard__body p\{grid-column:1\/-1\}/, "the description keeps the full card width");
+  assert.doesNotMatch(css, /\.whocard h3\{[^}]*align-self:center/, "centring drops the tile half a line on a wrapped title");
+
+  /* THE TRUST STRIP. Same row, same first-line rule — and the icon stays
+     INSIDE the <dt>, because a <div> group in a <dl> may hold only <dt> and
+     <dd> and a sibling <span> costs a serious axe violation. */
+  assert.match(css, /\.claim dt\{[^}]*display:grid;\s*grid-template-columns:auto minmax\(0,1fr\)/);
+  assert.match(css, /\.claim__title\{line-height:1\.14;padding-top:calc\(\(34px - 1\.14em\) \/ 2\)/);
+  assert.doesNotMatch(css, /\.claim dt\{[^}]*display:grid;gap:6px;justify-items:start\}/, "the dt no longer stacks the icon over the title");
+
+  const cta = await read("app/(marketing)/_sections/final-cta.tsx");
+  const dt = cta.slice(cta.indexOf("<dt>"), cta.indexOf("</dt>"));
+  assert.match(dt, /claim__ic/, "the icon is inside the <dt>");
+  assert.match(dt, /claim__title/, "and so is the title");
+  assert.doesNotMatch(
+    cta.slice(cta.indexOf("</dt>"), cta.indexOf("</dd>")),
+    /claim__ic/,
+    "nothing sits between the <dt> and the <dd>",
+  );
+
+  /* The four claims say exactly what they said. */
+  for (const line of [
+    "Vetted contractors", "Insurance & competence checked",
+    "Documented evidence", "Standard on every job",
+    "Data protection", "ICO registered",
+    "Maintsupp", "A trading name of Maintauk Ltd",
+  ]) {
+    assert.ok(cta.includes(line), `the strip still reads "${line}"`);
+  }
+
+  /* Five cards, and Franchise Groups is still withdrawn. */
+  const who = await read("app/(marketing)/_sections/who-we-help.tsx");
+  for (const label of [
+    "Retail chains", "Shopping-centre kiosks", "Clinics & wellness",
+    "Gyms & studios", "Small commercial offices",
+  ]) {
+    assert.ok(who.includes(label), `${label} is still a card`);
+  }
+  const audiences = who.slice(who.indexOf("const AUDIENCES = ["), who.indexOf("] as const;"));
+  assert.equal((audiences.match(/label: "/g) ?? []).length, 5, "five cards, not six");
+  assert.doesNotMatch(audiences, /Franchise/i, "Franchise groups stays withdrawn as a card");
+});
+
+test("the trust strip never has fewer columns' worth of room than a claim needs", async () => {
+  /* Moving the icon onto the title's line takes 34+10px out of every column,
+     and `repeat(auto-fit,minmax(160px,1fr))` was already packing four claims
+     into 768px with nothing to spare — measured, "Documented" then ran 25px
+     through the next claim's divider at 1024. Two columns, four only from the
+     1120px breakpoint the file already uses, and the divider follows the rows
+     rather than the first child. */
+  const css = await read("app/(marketing)/marketing.css");
+  assert.match(css, /\.claims\{display:grid;gap:18px;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.match(css, /@media\(min-width:1120px\)\{\.claims\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\)\}\}/);
+  assert.doesNotMatch(css, /\.claims\{[^}]*auto-fit/, "auto-fit cannot say four or two, never three");
+  assert.match(css, /\.claim\{border-left:1px solid rgba\(255,255,255,\.2\);padding-left:17px\}/, "the divider stays");
+  assert.match(css, /\.claim:nth-child\(odd\)\{border-left:0;padding-left:0\}/, "a claim that opens a row carries no rule");
+  assert.match(css, /@media\(min-width:1120px\)\{\.claim:nth-child\(3\)\{border-left:1px solid/, "at four across the third opens no row");
+  /* Neither the title nor its dt may push its column wide again. */
+  assert.match(css, /\.claim dt\{[^}]*min-width:0\}/);
+  assert.match(css, /\.claim__title\{[^}]*min-width:0;overflow-wrap:break-word\}/);
+});
+
+test("the marketing breakpoint set did not grow to buy any of this", async () => {
+  /* stage-eleven caps the file at 30 distinct widths and the ported set was
+     25. This pass removed one (560, the portfolio review's gate) and added
+     none: `.qj__row`'s 420 gate went away without taking the 420 breakpoint
+     with it, since a max-width:420 block still uses it, and the trust strip
+     reuses 1120. */
+  const css = await read("app/(marketing)/marketing.css");
+  const widths = new Set(
+    (css.match(/@media[^{]*?\((?:min|max)-width:\s*(\d+)px\)/g) ?? []).map((q) => Number(q.match(/(\d+)px/)[1])),
+  );
+  assert.ok(widths.size <= 28, `${widths.size} distinct breakpoints — this pass left 28; consolidate before adding more`);
+  assert.ok(!widths.has(560), "560 was removed with the portfolio review's gate");
+  assert.ok(
+    widths.has(420) && widths.has(620) && widths.has(1120),
+    "the widths this pass relies on are the agreed ones",
+  );
+});

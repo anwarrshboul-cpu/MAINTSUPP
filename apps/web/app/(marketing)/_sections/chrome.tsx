@@ -39,6 +39,7 @@ const NAV = [
   ["#how", "How It Works"],
   ["#pricing", "Pricing"],
   ["#case-study", "Case Study"],
+  ["#contact", "Contact Us"],
 ] as const;
 
 function Ic({ d, size = "ic--sm" }: { d: string; size?: string }) {
