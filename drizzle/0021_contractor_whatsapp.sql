@@ -1,0 +1,25 @@
+-- A WhatsApp number on the contractor register, beside the phone number.
+--
+-- WhatsApp is how a large share of these trades actually answer, and the number
+-- they answer it on is frequently NOT the one on the invoice: an office
+-- landline takes the calls and a mobile takes the messages. So this is a second
+-- column rather than a reinterpretation of `phone`, and nothing here ever
+-- copies one into the other — a landline turned into a wa.me link opens on
+-- "the phone number shared via url is invalid", which is a broken promise
+-- dressed up as a working button.
+--
+-- Nullable and additive. Every existing row reads NULL, which is "no WhatsApp",
+-- and every screen behaves exactly as it did before this ran. Reversible in the
+-- only sense that matters: dropping the feature means ignoring the column.
+--
+-- Stored as typed. `app/lib/contact-links.ts` decides at render time whether
+-- what was typed can be resolved to an international number and refuses to
+-- guess a country code, so a national number is still shown and read by a
+-- human — it simply is not made into an action that would dead-end.
+--
+-- APPLIED BY db/init.ts, not by drizzle-kit. Like every migration from 0006 on,
+-- this file is the record; the statement that actually runs against both D1 and
+-- the Postgres mirror is the guarded `["contractors", "whatsapp_number", "TEXT"]`
+-- entry in `ensureBoardEngineColumns`, which is idempotent on an existing
+-- database. drizzle/meta stopped at 0005 and is not the source of truth here.
+ALTER TABLE contractors ADD COLUMN whatsapp_number TEXT;

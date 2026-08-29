@@ -176,6 +176,21 @@
   color: var(--ink);
 }
 
+/*
+ * The phone's Share link.
+ *
+ * NONE by default and flex only below 767px — the mirror image of
+ * `.form-builder__bar`, and the same argument: a width-dependent RENDER is a
+ * hydration mismatch, and `display: none` takes the control out of the
+ * accessibility tree as well as off the page, so a desktop screen reader never
+ * announces it. Desktop already shares through the toolbar's Share form
+ * dialog, so this is an addition for phones, not a second control on any screen
+ * that has one.
+ */
+.form-builder__mshare {
+  display: none;
+}
+
 .form-builder__banner {
   display: flex;
   align-items: center;
@@ -1305,6 +1320,55 @@
 @media (max-width: 767px) {
   .form-builder__bar {
     display: none;
+  }
+
+  /*
+   * It takes the toolbar's place at the top of the stage, so the form itself
+   * still starts where it always did. `min-width: 0` on the row and on the
+   * field is what stops a 60-character URL from widening the whole page at
+   * 320px — a flex item's default `min-width: auto` refuses to shrink below
+   * its content, and this is the only long unbreakable string on the screen.
+   */
+  .form-builder__mshare {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-head);
+  }
+
+  .form-builder__mshare-url {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-card);
+    color: var(--muted);
+    padding: 0 8px;
+    /* 44px is the phone touch minimum the board's chrome is held to; the field
+       is tappable — it selects itself on focus for the clipboard fallback. */
+    min-height: 44px;
+    font-size: 12px;
+    text-overflow: ellipsis;
+  }
+
+  .form-builder__mshare-btn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--brand-solid);
+    color: var(--on-brand-solid);
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .form-edit {

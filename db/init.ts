@@ -894,6 +894,21 @@ async function ensureBoardEngineColumns(d1: D1DatabaseLike) {
     ["contractors", "address", "TEXT"],
     ["contractors", "notes", "TEXT"],
     ["contractors", "day_rate_pence", "INTEGER"],
+    /*
+     * WhatsApp, as a number of its own rather than an assumption about the
+     * one already there. A contractor's landline and the mobile they answer
+     * messages on are routinely different numbers, and treating `phone` as
+     * both would put a wa.me link on an office line that will never receive
+     * it. Nullable, so every existing contractor reads NULL and the register
+     * simply draws no WhatsApp row for them.
+     *
+     * It belongs HERE rather than in a drizzle migration for the same reason
+     * the four columns above do: drizzle/meta stops at 0005, and this list is
+     * what actually reconciles a live database on boot — in both dialects,
+     * via `sqlite-to-postgres.ts`. A column declared only in the schema and a
+     * numbered file is a column that does not exist anywhere it is read.
+     */
+    ["contractors", "whatsapp_number", "TEXT"],
   ];
 
   for (const [table, column, definition] of additions) {

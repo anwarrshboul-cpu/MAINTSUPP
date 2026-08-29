@@ -193,6 +193,12 @@ export const ICON_NAMES = [
   "moon",
   "more",
   "paperclip",
+  /* Added with the contractor register's phone row, under the same one-set
+     rule as the groups above: the register was dialling a number under a
+     CHAT BUBBLE, so `IconName` gained a handset, and a glyph the renderer
+     can draw that this file has never heard of is what the assertion in
+     `tests/stage-twentythree-sections.test.mjs` exists to catch. */
+  "phone",
   "plus",
   "refresh",
   "reply",

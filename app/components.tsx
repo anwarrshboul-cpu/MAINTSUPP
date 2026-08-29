@@ -30,6 +30,7 @@ export type IconName =
   | "moon"
   | "more"
   | "paperclip"
+  | "phone"
   | "plus"
   | "refresh"
   | "reply"
@@ -179,6 +180,14 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   paperclip: <path d="m20 12-8 8a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.2-8.2" />,
+  /*
+   * A handset, because the contractor register was dialling a number under a
+   * CHAT BUBBLE. `message` is the right mark for a discussion thread and the
+   * wrong one for a telephone: it told the reader the number opened a
+   * conversation, which is precisely the claim the WhatsApp row beneath it
+   * now makes truthfully and separately.
+   */
+  phone: <path d="M15.6 21.5A14.1 14.1 0 0 1 2.5 8.4V5.3a1.8 1.8 0 0 1 1.8-1.8h2.5a1.8 1.8 0 0 1 1.8 1.5c.1 1 .3 1.9.6 2.8a1.8 1.8 0 0 1-.4 1.8l-1 1a13 13 0 0 0 5.6 5.6l1-1a1.8 1.8 0 0 1 1.8-.4c.9.3 1.8.5 2.8.6a1.8 1.8 0 0 1 1.5 1.8v2.5a1.8 1.8 0 0 1-1.8 1.8Z" />,
   plus: <path d="M12 5v14M5 12h14" />,
   search: (
     <>

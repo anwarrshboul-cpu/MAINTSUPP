@@ -558,6 +558,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       name: contractor.name,
       email: contractor.email,
       phone: contractor.phone,
+      // A second number, and never a copy of the first — see the column note.
+      whatsappNumber: contractor.whatsappNumber,
       // The person, the place, what was agreed and what it costs — see the
       // note on the `contractors` table for why the row could not hold them.
       contactName: contractor.contactName,
@@ -772,7 +774,7 @@ export async function POST(request: Request) {
       const name = text(data.name, 140);
       if (!name) throw new Error("A contractor name is required.");
       id = newId("contractor", name);
-      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: numeric(data.rating, 0, 0, 5), active: booleanValue(data.active) });
+      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: numeric(data.rating, 0, 0, 5), active: booleanValue(data.active) });
     } else if (entity === "planned") {
       const title = text(data.title, 160);
       const siteId = text(data.siteId, 100);
@@ -1162,6 +1164,15 @@ export async function PATCH(request: Request) {
         ...supplied(data, "name", (value) => text(value, 140)),
         ...supplied(data, "email", (value) => optionalText(value, 160)),
         ...supplied(data, "phone", (value) => optionalText(value, 80)),
+        /*
+         * Capped like `phone`, and behind `supplied` like everything else here:
+         * a PATCH that never mentions the WhatsApp number must not blank one
+         * somebody recorded. Stored exactly as typed — the decision about
+         * whether it can be turned into a wa.me link belongs to
+         * `app/lib/contact-links.ts` at render time, which refuses rather than
+         * inventing a country code. Nothing copies `phone` in here.
+         */
+        ...supplied(data, "whatsappNumber", (value) => optionalText(value, 80)),
         ...supplied(data, "contactName", (value) => optionalText(value, 140)),
         ...supplied(data, "address", (value) => optionalText(value, 240)),
         ...supplied(data, "notes", (value) => optionalText(value, 2000)),

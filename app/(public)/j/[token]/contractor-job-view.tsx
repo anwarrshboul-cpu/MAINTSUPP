@@ -98,7 +98,35 @@ function formatDate(value: string | null) {
  * whatever dimensions the engineer's phone produced. Every other photo surface
  * in this product renders a plain `<img>` for the same reason.
  */
-function PhotoCard({ title, photos }: { title: string; photos: Photo[] }) {
+function PhotoCard({
+  title,
+  photos,
+  empty,
+}: {
+  title: string;
+  photos: Photo[];
+  /*
+   * What to say when there are none.
+   *
+   * The contractor page never passes this, and its two galleries still only
+   * render when they have something in them — an engineer standing in front of
+   * the fault does not need telling that nobody has photographed it yet. The
+   * read-only ticket does: it is a record of a job, handed to a store manager
+   * or a landlord, and "Photos of the problem" quietly not existing reads as
+   * "there were none" when what is true is "none have been added". Absence and
+   * emptiness are different facts and this page has to be able to say both.
+   */
+  empty?: string;
+}) {
+  if (!photos.length) {
+    if (!empty) return null;
+    return (
+      <section className="job-link__card">
+        <h2>{title}</h2>
+        <p className="job-link__muted">{empty}</p>
+      </section>
+    );
+  }
   return (
     <section className="job-link__card">
       <h2>{title}</h2>
@@ -334,7 +362,22 @@ export default function ContractorJobView({ token }: { token: string }) {
     (uploadSlots.length === 0 && !permissions.canComment && !permissions.canRequestCompletion);
 
   return (
-    <main className="job-link">
+    /*
+     * ONE PAGE, TWO AUDIENCES, AND THE MODIFIER THAT KEEPS THEM ONE PAGE.
+     *
+     * The Fix Tracker's Copy Link and a contractor's working link are the same
+     * route rendering the same component through the same stylesheet; the only
+     * difference between them is the grant. Which means the read-only ticket
+     * was never a different design — it was this design with three sections
+     * missing, ending on a card that looked exactly like the job data above it.
+     *
+     * `job-link--readonly` is how the read-only composition gets to be a
+     * first-class member of that design system rather than a subtraction from
+     * it: every rule written for it is written under this class, so nothing on
+     * the contractor page can move, and the two can never drift into two
+     * stylesheets.
+     */
+    <main className={`job-link${readOnly ? " job-link--readonly" : ""}`}>
       <header className="job-link__head">
         <p className="job-link__brand">
           <span>MAINT</span>
@@ -347,6 +390,21 @@ export default function ContractorJobView({ token }: { token: string }) {
             {job.priority}
           </span>
         )}
+        {/*
+          Said at the top, not only at the bottom.
+          
+          The "View only" card at the foot of this page is the explanation;
+          this is the label. A reader who has been sent a ticket should not have
+          to scroll past five cards looking for a button before finding out
+          there was never going to be one.
+          
+          Deliberately a sibling of the priority pill rather than a wrapper
+          around both: the contractor page renders this header too, and giving
+          it a new flex parent would have moved its pill by whatever the line
+          box and the flex box disagree about. Nothing the contractor sees may
+          move, so nothing the contractor sees is re-parented.
+        */}
+        {readOnly && <span className="job-link__viewonly">View only</span>}
       </header>
 
       {(site || job.location) && (
@@ -432,20 +490,30 @@ export default function ContractorJobView({ token }: { token: string }) {
         </dl>
       </section>
 
-      {issuePhotos.length > 0 && (
-        <PhotoCard title="Photos of the problem" photos={issuePhotos} />
-      )}
+      <PhotoCard
+        title="Photos of the problem"
+        photos={issuePhotos}
+        empty={readOnly ? "None have been added to this job yet." : undefined}
+      />
 
-      {completionPhotos.length > 0 && (
-        <PhotoCard
-          /* A viewer did not send these; a contractor did. Say which is true. */
-          title={readOnly ? "Photos of the completed work" : "Photos you have sent"}
-          photos={completionPhotos}
-        />
-      )}
+      <PhotoCard
+        /* A viewer did not send these; a contractor did. Say which is true. */
+        title={readOnly ? "Photos of the completed work" : "Photos you have sent"}
+        photos={completionPhotos}
+        empty={readOnly ? "None have been added to this job yet." : undefined}
+      />
 
       {readOnly ? (
-        <section className="job-link__card">
+        /*
+         * `--note` rather than a plain card, because this is the only block on
+         * the page that is not a fact about the job. Given the same white
+         * ground, the same border and the same heading as "Where" and "What
+         * needs doing", a statement about the LINK read as one more thing the
+         * engineer had been told about the WORK — and it was the last card on
+         * the page, so it also had to do the job the contractor's Submit
+         * button does and close the document. It now looks like neither.
+         */
+        <section className="job-link__card job-link__card--note">
           <h2>View only</h2>
           <p>
             This link shows the job&apos;s status and photographs. It cannot upload,

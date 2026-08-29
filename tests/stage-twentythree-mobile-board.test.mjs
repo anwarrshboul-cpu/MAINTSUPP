@@ -81,11 +81,12 @@ test("the grid is still there, and the way back is above the fold", async () => 
   assert.match(list, /\{layout === "cards" \? \(/);
 });
 
-test("the layout preference is read without a flash", async () => {
+test("the layout is resolved during render, so no layout flashes first", async () => {
   const board = await read(BOARD);
 
-  // An effect reading storage paints the default first and the stored choice a
-  // frame later, so a phone that chose the table flashes the cards every time.
+  // An effect runs after paint by definition, so a layout chosen in one paints
+  // the other first. Both the initial state and the board-change reset are
+  // therefore resolved during render.
   assert.match(
     board,
     /if \(layoutFor\.boardId !== boardId\) setLayoutFor\(readMobileLayout\(boardId\)\);/,
@@ -93,25 +94,34 @@ test("the layout preference is read without a flash", async () => {
   assert.match(board, /useState\(\(\) => readMobileLayout\(boardId\)\)/);
 
   /*
-   * The resolver moved out of this file, and the key it reads gained a version.
+   * THE PREFERENCE IS NO LONGER STORED AT ALL, which is the third and final
+   * position this rule has held.
    *
-   * An unversioned preference records WHICH layout was chosen and nothing about
-   * which default it was chosen against, so the moment the Jobs default moved
-   * from cards to the table every phone that had ever tapped "Cards" — when
-   * that meant "stay where I am" — started reading as a deliberate override.
-   * `board-mobile-layout.ts` carries the whole argument; what belongs here is
-   * that the board no longer resolves this for itself, and no longer touches
-   * the key that cannot be interpreted.
+   * It began unversioned, which recorded WHICH layout was chosen and nothing
+   * about which default it was chosen against — so when the Jobs default moved
+   * from cards to the table, every phone that had ever tapped "Cards" back when
+   * that meant "stay where I am" started reading as a deliberate override. It
+   * then became a `:v2` key, on the reasoning that a versioned value knows its
+   * own generation. Also true, also not enough: the requirement is that
+   * ENTERING a section on a phone shows the table — first entry, back from
+   * another section, after a reload, after the browser is closed and reopened —
+   * and a value that survives an entry is a value that must be ignored on
+   * entry. So both keys are retired and deleted, nothing is written, and the
+   * choice lives in component state where a remount is genuinely a fresh entry.
+   *
+   * `board-mobile-layout.ts` carries the full argument. What belongs HERE is
+   * that the board does not resolve any of it for itself.
    */
   assert.match(
     board,
-    /import \{ readMobileLayout, writeMobileLayout \} from "\.\/board-mobile-layout";/,
+    /import \{ readMobileLayout \} from "\.\/board-mobile-layout";/,
   );
   assert.doesNotMatch(board, /function readMobileLayout\(boardId: string\)/);
-  assert.doesNotMatch(board, /`maintsupp:board:\$\{boardId\}:mobile-layout`/);
-  // Per board: a choice made on the job board must not follow you to another.
+  assert.doesNotMatch(board, /`maintsupp:board:\$\{boardId\}:mobile-layout/);
+  assert.doesNotMatch(board, /writeMobileLayout/);
+
   const resolver = await read("app/(app)/portal/board-mobile-layout.ts");
-  assert.match(resolver, /`maintsupp:board:\$\{boardId\}:mobile-layout:v2`/);
+  assert.doesNotMatch(resolver, /setItem/, "no layout preference may be persisted");
 });
 
 test("subitems belong to their parent's card, not beside it", async () => {

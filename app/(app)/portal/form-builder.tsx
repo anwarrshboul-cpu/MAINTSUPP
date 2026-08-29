@@ -37,6 +37,28 @@ import "./form-builder.css";
  *
  * The mode is reset to `view` at the same breakpoint by the effect below, so a
  * narrow window cannot strand somebody inside a panel with no way back.
+ *
+ * SHARING IS THE ONE THING A PHONE GETS BACK, and it is the SAME link
+ *
+ * "Editing and sharing are desktop-only" was one sentence covering two very
+ * different acts. Editing a form on a 360px screen is a bad idea; handing
+ * somebody the link is the thing a person on site actually wants to do, and
+ * they are the ones holding the phone. So a single Share link control is drawn
+ * below the (hidden) toolbar on phones only.
+ *
+ * It mints NOTHING. It shares `form.presentedUrl` — the exact string the
+ * desktop Share dialog displays and its Copy button copies, produced by
+ * `presentedShareUrl()` in `/api/board/form`, pointing at the public
+ * `/f/:token` route. That route already carries its own access model: the
+ * form's `active` switch, an optional password, and `requireLogin`. Sharing
+ * the authenticated dashboard URL, or inventing a second unauthenticated way
+ * in, would both be new exposure; reusing the link the product already mints
+ * is none.
+ *
+ * Same CSS-not-JavaScript rule as the toolbar, for the same two reasons: a
+ * width-dependent render is a hydration mismatch, and `display: none` takes
+ * the control out of the accessibility tree so a desktop screen reader does
+ * not announce a button nobody can see.
  */
 export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void }) {
   const [form, setForm] = useState<BuilderForm | null>(null);
@@ -133,6 +155,52 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
     }
   }
 
+  /**
+   * The phone's Share link: the native sheet where there is one, the clipboard
+   * where there is not.
+   *
+   * `navigator.share` is preferred because it is the only path that reaches
+   * WhatsApp, Messages and Mail — which is what "share this form with the
+   * contractor" means on site — and because it is the affordance the reader
+   * already knows. It is feature-detected rather than assumed: it is absent on
+   * every desktop Firefox, on Chrome for Linux, and on any page that is not a
+   * secure context.
+   */
+  async function shareLink() {
+    if (!form) return;
+    const url = form.presentedUrl;
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: form.title, url });
+        return;
+      } catch (caught) {
+        /*
+         * Dismissing the sheet rejects with AbortError, and that is a decision,
+         * not a failure — copying a link somebody just declined to send would
+         * be the wrong thing to do quietly. Anything else (an Android WebView
+         * that advertises share() and then refuses) falls through to the
+         * clipboard rather than leaving the tap with no result at all.
+         */
+        if (caught instanceof Error && caught.name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      /*
+       * The clipboard is refused without a gesture chain and over plain HTTP.
+       * The URL is on screen beside the button for exactly this case, so
+       * selecting it is a fallback that always works — the same one the
+       * desktop Share dialog uses.
+       */
+      const field = document.getElementById(
+        "form-mobile-share-url",
+      ) as HTMLInputElement | null;
+      field?.select();
+    }
+  }
+
   /* No form configured for this board: the live form, exactly as before. */
   if (!form) return <FormView onSubmitted={onSubmitted} />;
 
@@ -195,6 +263,35 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
             <Icon name={copied ? "check" : "link"} size={15} />
           </button>
         </div>
+      </div>
+
+      {/*
+        PHONE ONLY, by stylesheet — `.form-builder__mshare` is `display: none`
+        until 767px, the same boundary that hides the toolbar above. Rendered
+        unconditionally so the server and the first client render agree.
+
+        The link is shown as well as shared. It is what the button will hand
+        over, it is selectable when the clipboard refuses, and a reader who is
+        about to send a stranger a URL is entitled to see which one.
+      */}
+      <div className="form-builder__mshare">
+        <input
+          id="form-mobile-share-url"
+          className="form-builder__mshare-url"
+          readOnly
+          value={form.presentedUrl}
+          spellCheck={false}
+          aria-label="Public form link"
+          onFocus={(event) => event.currentTarget.select()}
+        />
+        <button
+          type="button"
+          className="form-builder__mshare-btn"
+          onClick={shareLink}
+        >
+          <Icon name={copied ? "check" : "share"} size={15} />
+          {copied ? "Link copied" : "Share link"}
+        </button>
       </div>
 
       {!form.active && (

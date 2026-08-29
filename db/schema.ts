@@ -288,6 +288,21 @@ export const contractors = sqliteTable(
     email: text("email"),
     phone: text("phone"),
     /*
+     * A second number, because WhatsApp is how a lot of these trades actually
+     * answer. It is deliberately NOT derived from `phone`: a contractor's
+     * landline is not on WhatsApp, and the office number they answer calls on
+     * is often not the mobile the coordinator messages. Copying one into the
+     * other would produce a button that opens on "the phone number shared via
+     * url is invalid", which is worse than no button.
+     *
+     * Nullable and additive — every existing row reads NULL, which is "no
+     * WhatsApp", and every screen behaves exactly as it did before. Stored as
+     * typed; `app/lib/contact-links.ts` decides whether what was typed can be
+     * resolved to an international number, and refuses rather than guessing a
+     * country code.
+     */
+    whatsappNumber: text("whatsapp_number"),
+    /*
      * The person, as distinct from the company. "Call Apex Electrical" is not
      * an instruction anybody can follow at 7am with water coming through a
      * ceiling; "call Dan at Apex" is.

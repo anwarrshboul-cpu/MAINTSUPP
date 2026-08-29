@@ -3257,6 +3257,25 @@ a {
 .section-header {
   display: flex;
   align-items: flex-end;
+  /*
+   * NOTHING SEPARATED THE HEADING FROM ITS CONTROLS.
+   *
+   * This is a flex row with a text block on the left and an actions cluster on
+   * the right, and it had no gap at all. `.section-header > div` caps the text
+   * at 720px, so on any page whose paragraph reaches that cap the two boxes
+   * meet exactly. Measured on Contractors at 1440: the paragraph's right edge
+   * and the period picker's left edge were BOTH at x=914 — zero pixels, the
+   * sentence running straight into the control. That is the owner's report
+   * that the date picker "sits too close to the text on its left", and it is a
+   * property of every section header rather than of that one control.
+   *
+   * 24px, which is the smallest gap that reads as a deliberate separation
+   * between two content groups at this type size rather than as slack inside
+   * one. The controls' own internal gap stays 9px, so the cluster still reads
+   * as a cluster. Below 650px the header stacks and the block down there
+   * overrides this with its own vertical 15px.
+   */
+  gap: 24px;
   min-height: 107px;
   padding: 5px 2px 14px;
 }

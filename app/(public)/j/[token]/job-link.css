@@ -110,6 +110,104 @@ body {
   background: #f0fbfa;
 }
 
+/* ------------------------------------------------------------------ */
+/* THE READ-ONLY TICKET                                                */
+/*                                                                     */
+/* The Fix Tracker's Copy Link and a contractor's working link are the  */
+/* same route, the same component and this same stylesheet — the only   */
+/* difference between them is the grant, so the ticket was never a      */
+/* different design. It was this design with the upload, the details    */
+/* form and the submit row removed, which left a page that ended on a   */
+/* card indistinguishable from the job data above it.                   */
+/*                                                                     */
+/* Everything below is scoped to `.job-link--readonly` or to a class    */
+/* only the read-only branch renders. Not one contractor rule is        */
+/* touched, and the two audiences cannot drift into two stylesheets.    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The label in the header, beside the priority pill.
+ *
+ * Same pill geometry as `.job-link__priority` — same radius, same padding,
+ * same 13px — because it sits on the same line and a second pill in a second
+ * shape would read as a second kind of thing. Outlined rather than filled, so
+ * it stays quieter than the priority it stands next to: the priority is about
+ * the work, this is only about the link.
+ */
+.job-link__viewonly {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 4px 12px;
+  border: 1px solid #dde4e8;
+  border-radius: 999px;
+  background: #fff;
+  color: #6b7a83;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/*
+ * The closing note.
+ *
+ * `--done` already establishes that a card which is not job data gets a tint
+ * and a coloured edge; this is the same idea in the page's neutral rather than
+ * its teal, because "you cannot do anything here" is not good news to
+ * celebrate. The left edge does the work a heading colour would otherwise have
+ * to, so the heading keeps the same treatment every other card's heading has.
+ */
+.job-link__card--note {
+  border-color: #dde4e8;
+  border-left: 3px solid #12b4a8;
+  background: #f7f9fa;
+}
+
+.job-link__card--note h2 {
+  color: #3b4a52;
+}
+
+.job-link__card--note p {
+  margin: 0;
+  color: #45555e;
+  font-size: 15px;
+}
+
+/*
+ * A ticket is read on a desk as often as in a corridor.
+ *
+ * The 560px column is the contractor page's width philosophy and the ticket
+ * keeps it — a job description does not become easier to read at 900px. What
+ * the ticket does not keep is the contractor page's reason for starting hard
+ * against the top of the screen, which is that an engineer wants the address
+ * in the first thumb's-length of scroll. With no form to fill in, the ticket
+ * is a short document, and a short document centred in a tall window wants a
+ * little air above it rather than to look like it fell off the top edge.
+ */
+@media (min-width: 768px) {
+  .job-link--readonly {
+    padding-top: 40px;
+  }
+}
+
+/*
+ * KEYBOARD, ON A PAGE THAT LOADS NO RESET AND THEREFORE NO FOCUS STYLE.
+ *
+ * Applies to both audiences on purpose, and shows only while tabbing, so
+ * nothing about either page's appearance changes. The public pages are the
+ * ones most likely to be read by somebody using a keyboard or a switch on a
+ * device they do not own, and the UA's default ring is drawn in the UA's own
+ * blue against whichever of these grounds happens to be under it.
+ */
+.job-link a:focus-visible,
+.job-link button:focus-visible,
+.job-link input:focus-visible,
+.job-link select:focus-visible,
+.job-link textarea:focus-visible,
+.job-link canvas:focus-visible {
+  outline: 2px solid #0b8f7f;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 .job-link__card h2 {
   margin: 0 0 10px;
   font-size: 14px;
@@ -322,6 +420,30 @@ body {
 /* K — sign to confirm the work is complete                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * THE INK IN THIS BLOCK AND THE NEXT WAS WRITTEN FOR A PAGE THAT DOES NOT
+ * EXIST.
+ *
+ * Everything from here down arrived carrying `rgba(255, 255, 255, 0.6)` for
+ * secondary text and `rgba(255, 255, 255, 0.18)` for hairlines — a dark
+ * surface's palette. This page declares `color-scheme: light` and paints
+ * `#ffffff`, and has done since the note at the top of this file was written,
+ * so every one of those values was white on white. Not "low contrast":
+ * invisible. Photographed at 390px before this change, the whole of "Before
+ * you arrive", expanded — nine field labels, nine "Not recorded yet" values
+ * and the paragraph explaining that nobody has filled the site in — was a
+ * blank white rectangle 560px tall, and the signature pad's dashed border and
+ * its "Optional. Sign with a finger…" hint were not there either.
+ *
+ * The replacements are not new colours. `#6b7a83` is this file's own muted
+ * ink (`.job-link__muted`, `.job-link__hint`, `.job-link__foot`), `#dde4e8` is
+ * its own hairline (`.job-link__card`, the typed inputs), `#a9b6bd` is the
+ * dashed edge the file pickers already use and `#eef2f4` is the ground under
+ * `.job-link__priority` and the photo tiles. Nothing here invents a value;
+ * the two blocks are being brought onto the palette the rest of the page has
+ * always used.
+ */
+
 .signature {
   display: grid;
   gap: 6px;
@@ -340,12 +462,13 @@ body {
 .signature__head button {
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid #dde4e8;
   border-radius: 8px;
-  background: transparent;
-  color: inherit;
+  background: #fff;
+  color: #101820;
   font: inherit;
   font-size: 0.82rem;
+  cursor: pointer;
 }
 
 .signature__head button:disabled {
@@ -360,14 +483,14 @@ body {
 .signature__pad {
   width: 100%;
   height: 160px;
-  border: 1px dashed rgba(255, 255, 255, 0.28);
+  border: 1px dashed #a9b6bd;
   border-radius: 10px;
   background: #f7f9fa;
   cursor: crosshair;
 }
 
 .signature small {
-  color: rgba(255, 255, 255, 0.62);
+  color: #6b7a83;
   font-size: 0.78rem;
 }
 
@@ -404,7 +527,7 @@ body {
 }
 
 .arrival__toggle small {
-  color: rgba(255, 255, 255, 0.62);
+  color: #6b7a83;
   font-size: 0.8rem;
 }
 
@@ -415,7 +538,8 @@ body {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #eef2f4;
+  color: #3b4a52;
   font-size: 1.1rem;
   line-height: 1;
 }
@@ -437,7 +561,7 @@ body {
   padding: 12px;
   border: 1px solid rgba(226, 68, 92, 0.45);
   border-radius: 10px;
-  background: rgba(226, 68, 92, 0.12);
+  background: #fdeaed;
 }
 
 .arrival__warning ul {
@@ -447,13 +571,17 @@ body {
   gap: 4px;
 }
 
+.arrival__warning strong {
+  color: #a3213a;
+}
+
 .arrival__warning em {
-  color: rgba(255, 255, 255, 0.6);
+  color: #6b7a83;
   font-style: normal;
 }
 
 .arrival__warning small {
-  color: rgba(255, 255, 255, 0.6);
+  color: #6b7a83;
   font-size: 0.76rem;
 }
 
@@ -464,7 +592,7 @@ body {
 }
 
 .arrival__fact dt {
-  color: rgba(255, 255, 255, 0.6);
+  color: #6b7a83;
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -476,9 +604,26 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* Recorded and blank are different states, and must not look the same. */
+/*
+ * Recorded and blank are different states, and must not look the same — but
+ * the difference is carried by the ITALIC, not by fading the text out.
+ *
+ * This started at #9aa8b0, which is 2.44:1 on this card's white and nowhere
+ * near AA. That was a quiet regression of the exact kind this repaint existed
+ * to fix: the whole arrival pack was previously painted in a dark surface's
+ * rgba(255,255,255,…) on a light page, i.e. white on white, and replacing
+ * invisible text with text a low-vision reader still cannot read would have
+ * been a very small improvement.
+ *
+ * #68767e is 4.69:1 and clears AA with margin. It is deliberately NOT lighter
+ * than the #6b7a83 label above it: that colour is already at 4.43:1, a hair
+ * under AA, so there is no room left underneath it for a "quieter" grey that
+ * is still legible. Anything genuinely fainter than the label fails. So the
+ * state is signalled by style rather than by contrast, which is the better
+ * answer anyway — colour alone should not have been carrying it.
+ */
 .arrival__fact dd.is-missing {
-  color: rgba(255, 255, 255, 0.38);
+  color: #68767e;
   font-style: italic;
 }
 
@@ -491,7 +636,7 @@ body {
 
 .arrival__empty {
   margin: 0;
-  color: rgba(255, 255, 255, 0.66);
+  color: #6b7a83;
   font-size: 0.86rem;
 }
 

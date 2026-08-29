@@ -24,6 +24,22 @@ function initialState(site: SiteRecord | null): FormState {
     city: site?.city ?? "",
     postcode: site?.postcode ?? "",
     country: site?.country ?? "United Kingdom",
+    /*
+     * THE FIELD THAT WAS BEING RESET BY ITS OWN ABSENCE.
+     *
+     * `region` is a real, NOT NULL column and it is the UK/Europe split every
+     * portfolio figure is grouped on — the CSV importer writes "Europe" for the
+     * international rows, `/api/workspace` carries it, and the Manage-data
+     * editor edits it. This form had no region field, and because
+     * `PATCH /api/sites` rebuilt every column from the body it sent, a site
+     * saved from here came back as "UK" whatever it had been. The route now
+     * preserves what an edit did not carry; this makes it editable rather than
+     * merely safe, so the one screen that owns a site can also correct it.
+     *
+     * "UK" is the same default the column and the API already hold, so a new
+     * site opens on the answer that is right for nine in ten of them.
+     */
+    region: site?.region ?? "UK",
     managerName: site?.managerName ?? "",
     managerPhone: site?.managerPhone ?? "",
     managerEmail: site?.managerEmail ?? "",
@@ -199,6 +215,21 @@ export function SiteForm({
           <Field id="city" label="Town or city" value={form.city} onChange={set("city")} />
           <Field id="postcode" label="Postcode" value={form.postcode} onChange={set("postcode")} />
           <Field id="country" label="Country" value={form.country} onChange={set("country")} />
+          {/*
+            * Free text rather than a select, because `region` is not one of the
+            * option tables — there is no `site_region` list for an admin to
+            * edit, and hardcoding a two-item dropdown here would be this file
+            * quietly inventing a vocabulary the rest of the product does not
+            * enforce. The hint names the two values already in the data instead,
+            * which is the honest version of the same guidance.
+            */}
+          <Field
+            id="region"
+            label="Region"
+            value={form.region}
+            onChange={set("region")}
+            hint="How the portfolio is split for reporting. Existing sites use UK or Europe."
+          />
         </div>
       ) : null}
 

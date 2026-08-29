@@ -20,9 +20,13 @@
  */
 
 import { useEffect, useSyncExternalStore } from "react";
-import { THEME_MIGRATION_KEY, THEME_STORAGE_KEY } from "./theme-boot";
+import {
+  MOBILE_THEME_QUERY,
+  THEME_MIGRATION_KEY,
+  THEME_STORAGE_KEY,
+} from "./theme-boot";
 
-/** What the user picked. "system" means "ask the device", and is the default. */
+/** What the user picked. "system" means "ask the device". */
 export type ThemeChoice = "system" | "light" | "dark";
 
 /** What is actually painted, once "system" has been asked of the browser. */
@@ -62,13 +66,35 @@ function migrate(store: Storage) {
   }
 }
 
-/** The stored choice, or "system" when nothing has been chosen. */
+/**
+ * What "nothing has been chosen" means — DARK on a phone, the device
+ * everywhere else.
+ *
+ * The owner's requirement is that the app is dark out of the box on a phone.
+ * This is the same decision `theme-boot.ts` makes before paint, written the
+ * same way against the same exported query, so the pre-paint stamp and the
+ * value React reads afterwards cannot disagree — that disagreement is a
+ * one-frame flash, and avoiding it is the entire reason the boot script exists.
+ *
+ * It is the DEFAULT that moves, not the resolution: `resolveTheme` is
+ * untouched, an explicit "light" or "dark" is still read first and still wins,
+ * and an explicit "system" still means the device on a phone. So the picker in
+ * `theme-toggle.tsx` reads "Dark" on a fresh phone, which is the truth — the
+ * page IS dark — rather than reading "System" beside a page that is ignoring
+ * the system.
+ */
+export function defaultThemeChoice(): ThemeChoice {
+  if (typeof window === "undefined" || !window.matchMedia) return "system";
+  return window.matchMedia(MOBILE_THEME_QUERY).matches ? "dark" : "system";
+}
+
+/** The stored choice, or the default above when nothing has been chosen. */
 export function readThemeChoice(): ThemeChoice {
   const store = storage();
-  if (!store) return memoryChoice ?? "system";
+  if (!store) return memoryChoice ?? defaultThemeChoice();
   migrate(store);
   const stored = store.getItem(THEME_STORAGE_KEY);
-  return isChoice(stored) ? stored : (memoryChoice ?? "system");
+  return isChoice(stored) ? stored : (memoryChoice ?? defaultThemeChoice());
 }
 
 /** "system" through the device; anything else through unchanged. */
@@ -118,10 +144,20 @@ function subscribe(onChange: () => void) {
   window.addEventListener("storage", onChange);
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   media.addEventListener("change", onChange);
+  /*
+   * The width matters now too: with nothing stored, the default is dark below
+   * the phone boundary and the device above it, so a window dragged across
+   * that boundary changes the answer. A phone never fires this; a desktop
+   * browser being resized would otherwise keep painting a stale default until
+   * something else happened to re-read the store.
+   */
+  const width = window.matchMedia(MOBILE_THEME_QUERY);
+  width.addEventListener("change", onChange);
   return () => {
     listeners.delete(onChange);
     window.removeEventListener("storage", onChange);
     media.removeEventListener("change", onChange);
+    width.removeEventListener("change", onChange);
   };
 }
 
@@ -160,11 +196,12 @@ export function useResolvedTheme(): ResolvedTheme {
 }
 
 /*
- * The server cannot know either value: the choice is in the visitor's browser
- * and the device preference is a media query. It renders the default — which is
- * now "system" rather than a hard-coded "dark" — and the first client render
- * uses the same value so the markup matches. The DOM is already correct by
- * then regardless, because the boot script set it.
+ * The server cannot know any of it: the choice is in the visitor's browser, and
+ * both the device preference and the viewport width are media queries. It
+ * renders "system" and the first client render uses the same value, so the
+ * markup matches; `useSyncExternalStore` then re-reads and re-renders with the
+ * real choice. The DOM is already correct throughout, because the boot script
+ * stamped it before paint — this is only what a picker shows.
  */
 function serverChoice(): ThemeChoice {
   return "system";

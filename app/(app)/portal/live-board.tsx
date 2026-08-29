@@ -79,12 +79,12 @@ import {
 } from "./board-ordering";
 import { useBoardRowDrag } from "./board-row-drag-gesture";
 /*
- * The phone's layout preference is VERSIONED, and the reader that knows why
- * lives in its own file — an unversioned stored "cards" outlived the default it
- * was chosen against and kept opening Jobs on the cards. Read that file's
- * header before touching either call below.
+ * The phone opens every board on the TABLE, and the file that knows why lives
+ * on its own — a stored "cards" outlived two different defaults, so the choice
+ * is no longer persisted at all and a fresh entry always resets. Read that
+ * header before touching the call below.
  */
-import { readMobileLayout, writeMobileLayout } from "./board-mobile-layout";
+import { readMobileLayout } from "./board-mobile-layout";
 import {
   customCellKey,
   choiceList,
@@ -306,21 +306,21 @@ export function LiveMaintenanceBoard({
   /*
    * Cards or the grid, on a phone only.
    *
-   * Cards by default, because that is what a 390px screen is for and what
-   * monday does. The grid stays one tap away rather than being replaced: a
-   * coordinator on a tablet may genuinely want the table, and a mobile view
-   * with no way out is its own trap. Remembered per board in the same
-   * `localStorage` the board already uses for collapsed groups, so the choice
-   * survives a reload and does not follow you to a different board.
+   * THE TABLE on entry, on every board, every time — the owner's standing
+   * requirement, taken literally. Tapping Cards still works and lasts as long
+   * as the reader stays in the section; it is component state and nothing
+   * else, so any remount — a board change, a trip to Overview and back, a
+   * reload, a browser reopened tomorrow — is a fresh entry and lands on the
+   * table again. `board-mobile-layout.ts` carries the whole argument.
    */
   const [layoutFor, setLayoutFor] = useState(() => readMobileLayout(boardId));
 
   /*
    * Adjusted during render rather than in an effect.
    *
-   * The obvious shape — `useEffect` reading storage and calling `setState` —
-   * paints the default first and the stored choice a frame later, so a phone
-   * that chose the table flashes the cards on every board change. React's own
+   * The obvious shape — `useEffect` resolving the layout and calling
+   * `setState` — paints one layout and the right one a frame later, so a
+   * board change flashes the cards every time. React's own
    * answer to "a prop changed and state must follow" is to compare and set
    * during render, which re-renders before anything is committed to the
    * screen; the lint rule that flags setState-in-an-effect is pointing at
@@ -330,10 +330,7 @@ export function LiveMaintenanceBoard({
   const mobileLayout = layoutFor.layout;
 
   const chooseMobileLayout = useCallback(
-    (layout: "cards" | "grid") => {
-      setLayoutFor({ boardId, layout });
-      writeMobileLayout(boardId, layout);
-    },
+    (layout: "cards" | "grid") => setLayoutFor({ boardId, layout }),
     [boardId],
   );
 

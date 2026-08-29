@@ -97,6 +97,20 @@ export type WorkspaceContractor = {
   email: string | null;
   phone: string | null;
   /**
+   * The number they answer on WhatsApp, when it is not the one above.
+   *
+   * A separate column rather than a reinterpretation of `phone`, and never a
+   * copy of it: the office landline that takes the calls is routinely not the
+   * mobile that takes the messages, and a landline turned into a wa.me link
+   * opens on "the phone number shared via url is invalid". Optional — null is
+   * "no WhatsApp", which is most of the register.
+   *
+   * Held as typed. `app/lib/contact-links.ts` decides whether it resolves to an
+   * international number and refuses to guess a country code, so a national
+   * number is still printed for a human to read even when no link can be made.
+   */
+  whatsappNumber: string | null;
+  /**
    * The person to ask for, as distinct from the company.
    *
    * "Call Apex Electrical" is not an instruction anybody can follow at 7am with

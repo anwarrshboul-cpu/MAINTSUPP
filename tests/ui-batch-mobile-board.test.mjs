@@ -50,69 +50,101 @@ function phoneBlocks(css) {
 }
 
 /*
- * REWRITTEN, and the reason is the defect this batch was opened for.
+ * THE TABLE, ON EVERY BOARD, ON EVERY ENTRY — and no stored value at all.
  *
- * The old assertion — "a stored choice still wins" — was the bug written down
- * as a requirement. The key it honoured, `maintsupp:board:<id>:mobile-layout`,
+ * This test has now been rewritten twice by the same underlying mistake, which
+ * is worth recording because the third time will look tempting too.
+ *
+ * FIRST the assertion was "a stored choice still wins". That was the bug
+ * written down as a requirement: the key `maintsupp:board:<id>:mobile-layout`
  * recorded WHICH layout was chosen and nothing about which default it was
- * chosen against. So when Jobs moved from cards to the table in bebf419, every
- * phone that had ever tapped "Cards" — under the old build, where tapping Cards
- * meant "yes, stay where I already am" — carried a value that now read as a
- * deliberate override. Measured in a browser against the running build: clean
- * storage lands on Table, the same build with `…:mobile-layout = "cards"`
- * seeded lands on Cards.
+ * chosen against, so when Jobs moved from cards to the table every phone that
+ * had ever tapped "Cards" — under a build where tapping Cards meant "yes, stay
+ * where I am" — carried a value that then read as a deliberate override.
  *
- * The contract changes, so this test changes with it. Only a VERSIONED value is
- * an explicit choice; the unversioned one is ignored and deleted; and the
- * resolver lives in its own file, because `live-board.tsx` sits a few dozen
- * lines under the ceiling `stage-eight-board-split.test.mjs` holds it to.
+ * SECOND it became "only a `:v2` value wins", on the reasoning that a versioned
+ * key knows which generation it belongs to. True, and still not enough. The
+ * owner's requirement is that entering a section on a phone shows the TABLE —
+ * first entry, after navigating away and back, after a reload, after the
+ * browser is closed and reopened. A stored preference that survives an entry is
+ * a preference that must be ignored on entry, and a key nothing may honour is
+ * exactly the trap the unversioned key set. So there is no `:v3`: a version
+ * number would promise a generation of stored choices this build never writes.
+ *
+ * THE CONTRACT NOW. `defaultMobileLayout()` takes no board id and answers
+ * "grid" for everything — a per-board default is what let Store Documentation
+ * open on the cards while Jobs opened on the table. Tapping Cards still works
+ * and is held in component state, so a remount IS a fresh entry and every one
+ * of the owner's scenarios resets without any of them being special-cased.
+ * Nothing is written to storage; both retired keys are deleted on sight.
  */
-test("the Jobs board opens on the table on a phone; only a v2 choice overrides it", async () => {
+test("every board opens on the table on a phone, and nothing stored can override it", async () => {
   const mod = await read("app/(app)/portal/board-mobile-layout.ts");
 
-  // The versioned key is the only one read.
-  assert.match(mod, /`maintsupp:board:\$\{boardId\}:mobile-layout:v2`/);
+  // One answer for the whole product, and no board argument to disagree with.
   assert.match(
     mod,
-    /return boardId === "maintenance" \? "grid" : "cards";/,
-    "Jobs defaults to the grid; every other board keeps the cards",
-  );
-  assert.match(
-    mod,
-    /if \(stored === "cards" \|\| stored === "grid"\) return \{ boardId, layout: stored \};/,
+    /export function defaultMobileLayout\(\): MobileLayout \{\s*return "grid";\s*\}/,
+    "the table is the default on every board, not just on Jobs",
   );
 
-  // The legacy key is retired, not honoured: removed, and never returned.
+  // Both retired keys are deleted on sight, and neither can become the answer.
   assert.match(mod, /store\.removeItem\(legacyMobileLayoutKey\(boardId\)\);/);
+  assert.match(mod, /store\.removeItem\(retiredMobileLayoutKey\(boardId\)\);/);
+
   const resolver = mod.slice(mod.indexOf("export function readMobileLayout"));
+  assert.match(
+    resolver,
+    /return \{ boardId, layout: defaultMobileLayout\(\) \};/,
+    "the resolver answers the default and nothing else",
+  );
   assert.doesNotMatch(
-    resolver.slice(0, resolver.indexOf("\n}\n")),
-    /stored = store\.getItem\(legacyMobileLayoutKey/,
-    "a legacy value must never become the returned layout",
+    resolver,
+    /layout: stored|stored === "cards"|stored === "grid"/,
+    "a stored layout must never become the returned layout",
   );
 
-  // Only the versioned key is ever written.
-  assert.match(mod, /store\.setItem\(mobileLayoutKey\(boardId\), layout\);/);
+  /*
+   * NOTHING WRITES. `writeMobileLayout` is gone rather than kept and unused:
+   * a writer with no reader is the next person's invitation to wire it back up.
+   */
+  assert.doesNotMatch(mod, /setItem/, "no layout preference may be persisted");
+  assert.doesNotMatch(mod, /export function writeMobileLayout/);
 
-  // A server render and a browser with storage switched off both answer.
+  // A server render and a browser with storage switched off both still answer.
   assert.match(mod, /if \(typeof window === "undefined"\) return null;/);
 });
 
 /*
- * THIS ONE LANDS WITH THE live-board.tsx CALL-SITE PATCH and is the acceptance
- * for it: the resolver above is inert until the board stops reading the
- * unversioned key for itself. Red between the two commits, by design.
+ * THE CALL SITE, which is where the previous version of this rule actually
+ * leaked: the resolver is inert while the board still reaches for a key itself.
  */
-test("live-board reads the layout through the versioned resolver", async () => {
+test("live-board takes the layout from the resolver and persists nothing", async () => {
   const board = await read(BOARD);
   assert.match(
     board,
-    /import \{ readMobileLayout, writeMobileLayout \} from "\.\/board-mobile-layout";/,
+    /import \{ readMobileLayout \} from "\.\/board-mobile-layout";/,
+    "the board imports the resolver, and no writer, because there is none",
   );
   assert.doesNotMatch(
     board,
-    /`maintsupp:board:\$\{boardId\}:mobile-layout`/,
-    "the unversioned key must not be read or written from the board any more",
+    /writeMobileLayout/,
+    "the board must not persist a layout choice",
+  );
+  assert.doesNotMatch(
+    board,
+    /`maintsupp:board:\$\{boardId\}:mobile-layout/,
+    "neither retired key may be read or written from the board",
+  );
+  /*
+   * Resolved during RENDER, not in an effect. An effect runs after paint by
+   * definition, which is the cards appearing for a frame before the table
+   * replaces them — the flicker the owner explicitly ruled out.
+   */
+  assert.match(
+    board,
+    /if \(layoutFor\.boardId !== boardId\) setLayoutFor\(readMobileLayout\(boardId\)\);/,
+    "a board change re-resolves during render, so no layout flashes first",
   );
 });
 

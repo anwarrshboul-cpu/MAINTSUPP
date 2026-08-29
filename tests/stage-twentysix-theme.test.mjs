@@ -176,29 +176,66 @@ const declarationList = (declarations) =>
 // 1. The default follows the device.
 // ---------------------------------------------------------------------------
 
-test("with nothing stored the theme is 'system', on the server and the client", async () => {
+test("with nothing stored: 'system' on a desktop, DARK on a phone", async () => {
   const theme = await read(THEME);
+  const boot = await read(BOOT);
 
-  // The server render, and therefore the first client render.
+  /*
+   * THE DEFAULT MOVED; THE RESOLUTION DID NOT.
+   *
+   * This test used to say an absent preference is "system" everywhere, which
+   * was right while there was one answer. The owner's requirement is that a
+   * phone is dark out of the box, so "nothing has been chosen" now means DARK
+   * on a phone and the device everywhere else. What must NOT move with it: an
+   * explicit "light" or "dark" is still read first and still wins, and an
+   * explicit "system" still means the device on a phone — otherwise the picker
+   * becomes decorative, which the brief ruled out in as many words.
+   */
+  assert.match(
+    theme,
+    /export function defaultThemeChoice\(\): ThemeChoice \{[\s\S]*?matchMedia\(MOBILE_THEME_QUERY\)\.matches \? "dark" : "system";/,
+    "an absent preference is dark on a phone and the device elsewhere",
+  );
+
+  /*
+   * ONE QUERY, IMPORTED — not two strings that happen to agree. The pre-paint
+   * script and the value React reads afterwards must decide identically: a
+   * boundary that differs between them is a one-frame flash, and avoiding that
+   * is the entire reason the blocking boot script exists.
+   */
+  assert.match(boot, /export const MOBILE_THEME_QUERY = "\(max-width: 760px\)";/);
+  assert.match(theme, /MOBILE_THEME_QUERY,[\s\S]{0,160}from "\.\/theme-boot";/);
+  assert.match(
+    boot,
+    /matchMedia\(\$\{JSON\.stringify\(MOBILE_THEME_QUERY\)\}\)\.matches\)\{c="dark"\}/,
+    "the boot script decides the same thing before paint, from the same string",
+  );
+
+  // The server snapshot stays 'system'. A literal 'dark' here is what made the
+  // device irrelevant, and it would be a hydration mismatch on a desktop too.
   assert.match(
     theme,
     /function serverChoice\(\): ThemeChoice \{\s*return "system";/,
-    "the server snapshot must be 'system'; a literal 'dark' is what made the device irrelevant",
+    "the server snapshot must be 'system'; a literal 'dark' made the device irrelevant",
   );
 
-  // The stored-value read, both of its fallbacks.
+  // Both fallbacks go through the default, so storage being unreadable answers
+  // the same as storage being empty.
   const stored = /export function readThemeChoice\(\): ThemeChoice \{[\s\S]*?\n\}/.exec(theme);
   assert.ok(stored, "readThemeChoice must exist");
   assert.equal(
     /return\s+"dark"/.test(stored[0]),
     false,
-    "nothing may fall back to 'dark' when a preference is absent",
+    "nothing may fall back to a bare 'dark'; the default is a function of the device",
   );
   assert.equal(
-    (stored[0].match(/\?\?\s*"system"/g) ?? []).length >= 2,
+    (stored[0].match(/defaultThemeChoice\(\)/g) ?? []).length >= 2,
     true,
-    "an absent preference resolves to 'system' whether or not storage is readable",
+    "an absent preference resolves through the default whether or not storage is readable",
   );
+
+  // An explicit choice is still read first, so the picker still means something.
+  assert.match(stored[0], /isChoice\(stored\) \? stored :/);
 });
 
 test("'system' is resolved through prefers-color-scheme, not assumed", async () => {
@@ -419,12 +456,32 @@ test("the account row is written on a change, not on arrival", async () => {
   // ThemeToggle used to PATCH /api/account 400ms after every mount, so merely
   // loading a page rewrote users.theme_preference.
   const toggle = await read(TOGGLE);
+  /*
+   * WHAT IS COMPARED IS THE STORE, NOT THE RENDERED VALUE.
+   *
+   * `useThemeChoice` is a `useSyncExternalStore`: during hydration it hands back
+   * the SERVER snapshot and the real value a re-render later, and this effect
+   * could not tell that correction apart from somebody choosing. So a clean
+   * phone — where the server says "system" and the device default is now "dark"
+   * — PATCHed /api/account on every single page view. (The same bug already hit
+   * anyone with a stored "light"; desktop-clean escaped only because the two
+   * snapshots happen to agree there.) Reading the store directly makes the
+   * first run compare equal to what is already stored, so arriving writes
+   * nothing, while every real writer — this select, the board's picker, the
+   * account panel, all one store — still mirrors.
+   */
+  assert.match(toggle, /const stored = readThemeChoice\(\);/);
   assert.match(
     toggle,
-    /if \(lastPersisted\.current === null\) \{\s*lastPersisted\.current = choice;\s*return;\s*\}/,
+    /if \(lastPersisted\.current === null\) \{[\s\S]{0,240}?lastPersisted\.current = stored;\s*return;\s*\}/,
     "the first effect run is the page arriving, not somebody choosing",
   );
-  assert.match(toggle, /if \(lastPersisted\.current === choice\) return;/);
+  assert.match(toggle, /if \(lastPersisted\.current === stored\) return;/);
+  assert.doesNotMatch(
+    toggle,
+    /lastPersisted\.current === choice/,
+    "comparing the rendered value is what wrote the row on arrival",
+  );
 });
 
 // ---------------------------------------------------------------------------

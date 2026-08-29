@@ -184,16 +184,46 @@ const UNMEASURED: Measured = {
   ready: false,
 };
 
+/**
+ * How far a re-measurement has to move before it is worth writing.
+ *
+ * THE BELT TO `computePosition`'S BRACES. The loop this file has twice been
+ * bitten by is always the same shape: a written value changes the surface's
+ * box, the changed box is measured, and the measurement writes a slightly
+ * different value. `computePosition` is now arranged so no written value can
+ * reach a measured one — but that is an argument about the code, and the thing
+ * that made the bug so expensive to find is that it was invisible in every
+ * screenshot and absent from headless Chromium entirely. So there is also a
+ * floor: a re-measurement that moves the surface by less than two pixels is not
+ * written at all, and a one-pixel alternation therefore cannot run.
+ *
+ * Two, not one: the observed oscillation was exactly 1px, and `< 2` is the
+ * smallest threshold that cannot be re-triggered by it. The cost is that a
+ * genuine sub-2px correction is skipped; since the comparison is always against
+ * the value actually on the element, the error is bounded at under 2px and
+ * cannot accumulate. Nothing on this layer is placed to a precision a reader
+ * could notice at that scale, and a sub-pixel-accurate menu that vibrates is
+ * worth less than a menu that is two pixels out and still.
+ */
+const SETTLE_EPSILON = 2;
+
+/** Equal, or so close that moving would be a jitter rather than a correction. */
+function settled(a: CSSProperties[keyof CSSProperties], b: CSSProperties[keyof CSSProperties]) {
+  if (a === b) return true;
+  if (typeof a !== "number" || typeof b !== "number") return false;
+  return Math.abs(a - b) < SETTLE_EPSILON;
+}
+
 function sameMeasure(left: Measured, right: Measured) {
   if (left.ready !== right.ready || left.placement !== right.placement) return false;
   const a = left.style;
   const b = right.style;
   return (
-    a.top === b.top &&
-    a.left === b.left &&
-    a.maxHeight === b.maxHeight &&
-    a.maxWidth === b.maxWidth &&
-    a.width === b.width
+    settled(a.top, b.top) &&
+    settled(a.left, b.left) &&
+    settled(a.maxHeight, b.maxHeight) &&
+    settled(a.maxWidth, b.maxWidth) &&
+    settled(a.width, b.width)
   );
 }
 
@@ -214,14 +244,32 @@ function computePosition(
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
-  // scrollHeight is the full content height even while max-height clips it,
-  // so this asks "how tall do you want to be" without undoing the clamp.
-  const verticalChrome = surface.offsetHeight - surface.clientHeight;
-  const wantedHeight = surface.scrollHeight + verticalChrome;
-  const horizontalChrome = surface.offsetWidth - surface.clientWidth;
-  const wantedWidth = matchWidth
-    ? anchor.width
-    : Math.max(surface.offsetWidth, surface.scrollWidth + horizontalChrome);
+  /*
+   * HOW TALL THE SURFACE WANTS TO BE, MEASURED WITHOUT ITS OWN SCROLLBAR.
+   *
+   * `scrollHeight` is the full content height even while `max-height` clips it,
+   * so it asks the question without undoing the clamp. What it is added to is
+   * the part that mattered: this used to be `offsetHeight - clientHeight`,
+   * which is "border PLUS whatever the scrollbar takes" — and the scrollbar is
+   * present or absent according to the clamp this number goes on to produce.
+   * That is the feedback term, spelled out in three words. Reading the borders
+   * from the computed style asks for the same quantity minus the part the
+   * surface itself causes, so the answer no longer depends on the answer.
+   *
+   * The width is now simply the laid-out border box. The old
+   * `Math.max(offsetWidth, scrollWidth + horizontalChrome)` was carrying a
+   * second term that could never win — `.ms-popover` is `overflow-y: auto`
+   * with no horizontal scrolling, so `scrollWidth <= clientWidth` and the sum
+   * can never exceed `offsetWidth` — while reading exactly the same scrollbar
+   * width into a number that decides `left`. That is how a one-pixel height
+   * oscillation escaped into a 15px horizontal one at 320px, which is the
+   * movement the owner could actually see.
+   */
+  const borders = getComputedStyle(surface);
+  const borderY =
+    (parseFloat(borders.borderTopWidth) || 0) + (parseFloat(borders.borderBottomWidth) || 0);
+  const wantedHeight = surface.scrollHeight + borderY;
+  const wantedWidth = matchWidth ? anchor.width : surface.offsetWidth;
 
   const maxWidth = Math.max(0, vw - padding * 2);
   const width = Math.min(wantedWidth, maxWidth);
@@ -252,7 +300,46 @@ function computePosition(
 
   if (side === "bottom" || side === "top") {
     const space = side === "bottom" ? spaceBelow : spaceAbove;
-    maxHeight = Math.max(MIN_HEIGHT, Math.min(wantedHeight, space));
+    /*
+     * THE CLAMP IS THE ROOM, NOT THE CONTENT.
+     *
+     * `Math.min(wantedHeight, space)` fed the surface's own height straight
+     * back onto the surface, and that is a loop with nothing to stop it.
+     * `wantedHeight` is `scrollHeight + (offsetHeight - clientHeight)` —
+     * three integers rounded from a fractional layout — so on any display
+     * where a CSS pixel is not a device pixel (Windows at 125% or 150%, any
+     * browser zoom that is not 100%) the answer came out a fraction SHORT of
+     * the surface's real height. Half a pixel of clipping is enough for a
+     * scrollbar; the scrollbar drops `clientHeight`; the same arithmetic then
+     * comes out a fraction LONG; the scrollbar goes away; and the
+     * ResizeObserver below runs the whole thing again on the next frame.
+     * Forever.
+     *
+     * Measured on the account menu at 1440x900, where a 1px border computes
+     * to 0.8px: content 491.85 + 1.6 of border = a natural 493.45px box, read
+     * back as offsetHeight 493 / clientHeight 492 / scrollHeight 492, so the
+     * hook asked for `max-height: 493px`; at 493px the same box read as
+     * clientHeight 491, so it asked for 494px. `max-height` alternated
+     * 493/494 and the panel's CLIENT width alternated 558/543 with the
+     * scrollbar — which, through a `1fr 1fr` grid, moved every item in the
+     * menu 7.6px sideways and the right-aligned plan pill 15.2px, on 1403 of
+     * 1407 frames. That is the "shaking" the owner reported. It is invisible
+     * to headless Chromium, whose scrollbars are overlays and take no layout
+     * width, which is why a screenshot of it always looked fine.
+     *
+     * An auto-height element already stops at its content, so clamping to the
+     * content was buying nothing. Clamping to the room available is what
+     * `max-height` is for, and — unlike the surface's own height — it is not
+     * something the surface can change by reacting to it. Every popover on
+     * the layer comes through here, so this is not one menu's fix.
+     *
+     * `wantedHeight` still decides where a TOP-placed surface starts, and that
+     * is a read rather than a write: `top` does not change the surface's own
+     * box, so there is nothing for it to feed back into. That was only true
+     * once the final re-clamp below stopped turning `top` back into a
+     * `max-height` — see the note there.
+     */
+    maxHeight = Math.max(MIN_HEIGHT, space);
     const height = Math.min(wantedHeight, maxHeight);
     top = side === "bottom" ? anchor.bottom + offset : anchor.top - offset - height;
     left = align === "end" ? anchor.right - width : anchor.left;
@@ -267,7 +354,28 @@ function computePosition(
   // the top edge needs holding; the surface scrolls rather than overflowing.
   left = Math.max(padding, Math.min(left, vw - padding - width));
   top = Math.max(padding, Math.min(top, vh - padding - MIN_HEIGHT));
-  maxHeight = Math.min(maxHeight, vh - padding - top);
+
+  /*
+   * THE SECOND HALF OF THE LOOP, and the one the first fix left behind.
+   *
+   * There used to be a `maxHeight = Math.min(maxHeight, vh - padding - top)`
+   * here. For a BOTTOM-placed surface it is a no-op — `top` is
+   * `anchor.bottom + offset` and `spaceBelow` is `vh - anchor.bottom - offset
+   * - padding`, so the two sides are the same number. For a TOP-placed or
+   * side-placed one it is the loop again with one more step in it: `top` is
+   * derived from the surface's own height, so this line turned the surface's
+   * height back into a `max-height` written onto the surface. Clamping the
+   * clamp to the room BELOW a top-placed surface was never the right question
+   * either — such a surface hangs off the anchor's top edge and grows upwards.
+   *
+   * It is not needed, and the geometry says so in each branch. Bottom: the
+   * surface starts at `anchor.bottom + offset` and is at most `spaceBelow`
+   * tall, so it ends at `vh - padding`. Top: it is at most `spaceAbove` tall
+   * and starts no higher than `padding`, so it ends at `anchor.top - offset`.
+   * Side: it is at most `vh - padding * 2` tall and starts no higher than
+   * `padding`. Every case is already inside the viewport before this line ever
+   * ran, which is why removing it moves nothing and settles everything.
+   */
 
   const style: CSSProperties = {
     position: "fixed",

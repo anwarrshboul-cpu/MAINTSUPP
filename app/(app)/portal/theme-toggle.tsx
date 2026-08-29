@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Icon } from "../../components";
 import {
   type ThemeChoice,
+  readThemeChoice,
   setThemeChoice,
   useAppliedTheme,
   useThemeChoice,
@@ -40,22 +41,50 @@ export function ThemeToggle({ persist = true }: { persist?: boolean }) {
 
   const lastPersisted = useRef<ThemeChoice | null>(null);
 
+  /*
+   * WHAT IS COMPARED IS THE STORE, NOT THE RENDERED VALUE — and that difference
+   * is the whole reason a page load stopped writing the database.
+   *
+   * `useThemeChoice` is a `useSyncExternalStore`. During hydration it hands back
+   * the SERVER snapshot ("system", because the server can see neither the
+   * visitor's storage nor their viewport) and re-renders with the real value
+   * immediately afterwards. To an effect watching `choice`, that correction is
+   * indistinguishable from somebody picking a theme: it ran once with "system",
+   * seeded the ref, then ran again with the real value and PATCHed.
+   *
+   * Measured on the running build, three loads with no interaction at all:
+   * a clean phone (default "dark") PATCHed `{"themePreference":"dark"}`; a phone
+   * with a stored "light" PATCHed `{"themePreference":"light"}`; a clean desktop
+   * PATCHed nothing — because there and only there the server snapshot and the
+   * real value happen to agree. So the bug was always present for anybody with
+   * a stored preference, and making the phone default "dark" would have handed
+   * it to every mobile visitor as well.
+   *
+   * Reading the store inside the effect fixes both: on arrival the ref is
+   * seeded with what is ALREADY stored, so the hydration correction compares
+   * equal and writes nothing. A real choice — from this select, from the
+   * board's picker, or from the account panel, all of which go through the same
+   * store — changes the stored value, so it still compares unequal and is still
+   * mirrored. The mirror keeps working for every writer; only the page arriving
+   * stopped counting as one.
+   */
   useEffect(() => {
     if (!persist) return;
+    const stored = readThemeChoice();
     // The first run is the page arriving, not somebody choosing. Recording it
     // would write the account row on every navigation.
     if (lastPersisted.current === null) {
-      lastPersisted.current = choice;
+      lastPersisted.current = stored;
       return;
     }
-    if (lastPersisted.current === choice) return;
-    lastPersisted.current = choice;
+    if (lastPersisted.current === stored) return;
+    lastPersisted.current = stored;
     // Debounced: flicking through the three options should not post three times.
     const timer = window.setTimeout(() => {
       void fetch("/api/account", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ themePreference: choice }),
+        body: JSON.stringify({ themePreference: stored }),
       }).catch(() => undefined);
     }, 400);
     return () => window.clearTimeout(timer);

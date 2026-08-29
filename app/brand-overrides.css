@@ -7878,3 +7878,299 @@ label.live-board-tool {
     overscroll-behavior: contain;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE CONTROLS IN A SECTION HEADER, THE SITES FILTERS, AND THE NATIVE DATE
+   FIELD.
+
+   Four owner reports that all turn out to be the same omission: a control was
+   given a place in a row and never given the appearance of a control. Measured
+   in a browser before anything below was written, on Contractors at 1440:
+
+     .analytics-period   display:block, border 0, border-radius 0, padding 0,
+                         background transparent, height 37
+     its <select>        height 19, border 0, border-radius 0
+
+   So the "period picker" was a bare user-agent <select> with the calendar icon
+   STACKED ABOVE it rather than beside it, and its hit area was 19px tall. The
+   chip everyone has seen — the border, the ground, the icon on the left — is
+   written as `.analytics-toolbar > label`, and only Overview and Reports put
+   the picker in an `.analytics-toolbar`. Contractors, Calendar and Documents
+   put it in a section header, where none of those rules can reach it.
+
+   Nothing here duplicates that chip's declarations for the toolbar's benefit;
+   the toolbar keeps its own copy and is untouched. This is the same treatment
+   written once for the other two homes the control has.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.section-header__actions > .analytics-period,
+.section-header__controls > .analytics-period {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  /*
+   * `--radius-sm`, which is 8px, and NOT a number chosen for this control.
+   *
+   * It is the radius the primary button standing next to it already uses, the
+   * radius every `.analytics-toolbar` chip uses, and the radius of the search
+   * field on the registers. Against the 0px it was, this is the whole of the
+   * owner's "too rectangular". The larger `--radius` (13px) was considered and
+   * rejected for the obvious reason: it would have made the picker rounder
+   * than the button it sits nine pixels away from, which trades one thing that
+   * looks unplaced for another.
+   */
+  border-radius: var(--radius-sm);
+  background: var(--surface-head);
+  color: var(--ink);
+}
+
+.section-header__actions > .analytics-period:focus-within,
+.section-header__controls > .analytics-period:focus-within {
+  border-color: rgba(18, 180, 168, .72);
+  background: var(--surface-hover);
+  color: var(--control-fg-strong);
+}
+
+/* The calendar mark. `flex: none` because an icon that shrinks to fit is an
+   icon nobody can read, and it is the affordance this label has instead of
+   visible text. */
+.section-header__actions > .analytics-period > svg,
+.section-header__controls > .analytics-period > svg {
+  flex: none;
+}
+
+/*
+ * `!important`, for the same reason the toolbar's copy of this rule carries it
+ * and not one step further: the blanket
+ * `.portal-shell input:not([type="checkbox"]):not([type="radio"])` is (0,3,1)
+ * and paints a border, a sunken ground and its own ink on every field in the
+ * shell. Inside a chip the control must be invisible — the chip IS the box —
+ * and there is no selector short of this that outranks a blanket declared in
+ * two stylesheets.
+ */
+.section-header__actions > .analytics-period :is(select, input),
+.section-header__controls > .analytics-period :is(select, input) {
+  /*
+   * `align-self: stretch` and a floor, because the measured 19px above was not
+   * a styling nicety: clicking the chip does focus the control, so it was
+   * never unreachable, it was simply less than half the size it looked. That
+   * is the harder kind of target to hit, because nothing tells you where it is.
+   */
+  align-self: stretch;
+  min-width: 0;
+  min-height: 40px;
+  border: 0 !important;
+  outline: 0;
+  background: transparent !important;
+  color: inherit !important;
+}
+
+/*
+ * A ceiling, for the same reason the toolbar's picker has one: a <select>
+ * sizes itself to its longest OPTION, and this list contains "A custom
+ * range…" and "Last 12 months". Without a cap the closed control grows to the
+ * width of the open menu and shoulders the button beside it off the row.
+ */
+.section-header__actions > .analytics-period select,
+.section-header__controls > .analytics-period select {
+  min-width: 124px;
+  max-width: 210px;
+}
+
+.section-header__actions > .analytics-period--argument input,
+.section-header__controls > .analytics-period--argument input {
+  min-width: 108px;
+  max-width: 152px;
+}
+
+/*
+ * A FOCUS RING, which the toolbar's copy of this control got in Stage 23 and
+ * these two homes never did. The rule above clears `outline` so the chip reads
+ * as one box; without this a keyboard user tabbing across the header has no
+ * way to see where they are, because `:focus-within` only tints a border and a
+ * screenshot of the focused control is identical to the unfocused one.
+ */
+.section-header__actions > .analytics-period :is(select, input):focus-visible,
+.section-header__controls > .analytics-period :is(select, input):focus-visible {
+  outline: 2px solid var(--teal-600);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* ---- The Contractors header, now that it carries two controls ----------- */
+
+/*
+ * "Raise a ticket" has been taken out of this one header — a ticket is raised
+ * against a site, and a contractor is not a location; the reasoning is written
+ * beside the markup. What is left is the period and the register button, and
+ * this is what stops the pair from becoming an awkward gap on one side and an
+ * overflow on the other.
+ *
+ * `flex: 1 1 190px` on both: they share the row while there is room for two,
+ * and the row's own `flex-wrap: wrap` gives each a full line when there is
+ * not, rather than crushing them to a width neither can be read at. Measured,
+ * the switch happens between 360 and 320.
+ */
+@media (max-width: 768px) {
+  .section-header__actions--pair {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .section-header__actions--pair > .analytics-period,
+  .section-header__actions--pair > .primary-button {
+    flex: 1 1 190px;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  /* 44px inside, 46px outside — the chip has to be two pixels taller than its
+     control or the border eats into the touch minimum. */
+  .section-header__actions--pair > .analytics-period {
+    min-height: 46px;
+  }
+
+  .section-header__actions--pair > .analytics-period select {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    min-height: 44px;
+  }
+}
+
+/* ---- The two filters on the Sites register, on a phone ------------------ */
+
+/*
+ * "All statuses" and "All groups" are bare <select>s in `.workspace-toolbar`.
+ * Nothing gives them a radius, so they inherit the user agent's — measured at
+ * border-radius 0px in both themes — while the search field directly above
+ * them is 8px. Two square grey boxes under a rounded one, at their own content
+ * widths (110px and 120px at 390), reads as two controls that were left
+ * somewhere rather than placed.
+ *
+ * PHONE ONLY, deliberately. The same squareness is there on the desktop
+ * register and is reported rather than fixed here: the owner's complaint is
+ * about the phone, and widening a purely cosmetic change to every width the
+ * Sites and Units registers are used at is not this task's to make.
+ *
+ * `flex: 1 1 140px` rather than `1 1 0`: equal halves would put "All statuses"
+ * into a 127px control at 320px, and a filter whose label is clipped is worse
+ * than a filter on its own line. At 140 they sit side by side from 360 up and
+ * take a line each below it.
+ */
+@media (max-width: 768px) {
+  .workspace-toolbar {
+    column-gap: 12px;
+  }
+
+  .workspace-toolbar > select {
+    flex: 1 1 140px;
+    min-width: 0;
+    max-width: 100%;
+    padding-inline: 10px;
+    /* The same `--radius-sm` the search field above them already uses. */
+    border-radius: var(--radius-sm);
+  }
+}
+
+/* ---- The native date field in the Manage-data editor -------------------- */
+
+/*
+ * WHY "INSURANCE EXPIRY" RENDERS TOO WIDE ON SOME PHONES, AND WHY THE FIX IS
+ * NOT A WIDTH.
+ *
+ * `input[type="date"]` is not an ordinary text box. WebKit builds it out of
+ * `::-webkit-date-and-time-value` plus a picker button, and its preferred
+ * width is whatever those come to — on iOS that is materially wider than on
+ * desktop Safari, which is why the report is device-dependent and why chasing
+ * it with a pixel value for one handset would fix one phone and leave the next
+ * one broken.
+ *
+ * What turns an over-wide preferred width into an over-wide RENDERED width is
+ * `min-width: auto`. Every `.form-field` here is a grid item, and a grid item's
+ * automatic minimum size is its content's min-content size — so the field
+ * cannot shrink below the date control, and on the phone layout, where the
+ * track is `1fr` (that is, `minmax(auto, 1fr)`), the TRACK cannot shrink below
+ * it either. The row then pushes the editor sideways.
+ *
+ * So the cure is three general facts, not a measurement:
+ *
+ *   1. the grid items may shrink below their content        (min-width: 0)
+ *   2. the control's preferred width is its column          (width: 100%)
+ *   3. the parts WebKit builds it from may shrink too       (the pseudos)
+ *
+ * (1) also resizes the track: with the item contributing a 0 minimum, the
+ * `auto` half of `minmax(auto, 1fr)` resolves to 0 — so no media query and no
+ * change to `grid-template-columns` is needed at any width, and nothing about
+ * the two-column desktop layout moves.
+ *
+ * HONEST LIMIT: verified in Playwright's WebKit and in Chromium at 430 / 393 /
+ * 390 / 375 / 360 / 320. Desktop WebKit's date control is narrower than iOS
+ * Safari's and does not reproduce the original overflow, so what is proven here
+ * is that the constraint chain holds, not that an iPhone was in the room.
+ */
+.workspace-record-editor__fields > * {
+  min-width: 0;
+}
+
+.workspace-record-editor .form-field :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workspace-record-editor .form-field input[type="date"] {
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+ * The value text and the calendar button, which are the two boxes WebKit puts
+ * inside the control. The value box carries an intrinsic width of its own and a
+ * default margin; without these the input shrinks and its contents do not,
+ * which turns an overflowing row into a clipped date — a different bug wearing
+ * the same fix.
+ */
+.workspace-record-editor .form-field input[type="date"]::-webkit-date-and-time-value {
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+
+.workspace-record-editor .form-field input[type="date"]::-webkit-calendar-picker-indicator {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 0;
+}
+
+/* ---- Contractor contact: the WhatsApp row ------------------------------- */
+
+/*
+ * A number that could not be resolved to an international one is shown and NOT
+ * linked — see contact-links.ts for why guessing a country code is refused.
+ * This is what makes that legible: it keeps the row's shape, its icon and its
+ * height, and takes away the two things that promise an action. `--muted`
+ * rather than the link colour, and no underline, because the whole point is
+ * that there is nothing here to press.
+ */
+.contractor-contact__plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The WhatsApp mark is filled rather than stroked, so at 14px it reads heavier
+ * than the 1.8px handset above it. A pixel of air on each side evens the two
+ * rows out without making the glyph a different size from its neighbour.
+ */
+.contractor-contact__link--whatsapp svg,
+.contractor-contact__plain--whatsapp svg {
+  margin: 0 1px;
+}

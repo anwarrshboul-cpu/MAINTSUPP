@@ -20,6 +20,14 @@ type FieldDefinition = {
   required?: boolean;
   options?: Array<{ value: string; label: string }>;
   placeholder?: string;
+  /*
+   * The line under a checkbox's label. Every checkbox here used to print the
+   * same "Available in the shared testing workspace", which says nothing about
+   * what the box does — and for "Active contractor", which sits two rows below
+   * an Availability select that also offers the word "Inactive", saying nothing
+   * is what let the two be read as one field.
+   */
+  hint?: string;
 };
 
 // Sites and units moved to their own modules in Stage 2. They are deliberately
@@ -52,7 +60,7 @@ const emptyDefaults: Record<Exclude<ManagerTab, "activity" | "import">, EditorDa
   site: { name: "", type: "Kiosk", region: "UK", lifecycle: "Current", address: "", manager: "" },
   compliance: { siteId: "", kind: "", state: "Missing", expiry: "" },
   unit: { siteId: "", name: "", category: "Asset", manufacturer: "", model: "", serialNumber: "", status: "Active", notes: "" },
-  contractor: { name: "", contactName: "", email: "", phone: "", address: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", dayRate: "", availability: "Available", rating: "4", active: true, notes: "" },
+  contractor: { name: "", contactName: "", email: "", phone: "", whatsappNumber: "", address: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", dayRate: "", availability: "Available", rating: "4", active: true, notes: "" },
   planned: { siteId: "", unitId: "", contractorId: "", title: "", category: "Planned maintenance", frequency: "Annual", nextDueAt: "", lastCompletedAt: "", status: "Scheduled", reminderDays: "30" },
   member: { name: "", email: "", role: "Client", active: true },
 };
@@ -131,6 +139,16 @@ function fieldsFor(tab: Exclude<ManagerTab, "activity">, workspace: WorkspaceSna
     { key: "contactName", label: "Contact person", placeholder: "Who to ask for" },
     { key: "email", label: "Email", type: "email" },
     { key: "phone", label: "Phone", type: "tel" },
+    /*
+     * Optional, and directly under the phone number because that is where a
+     * coordinator looks for it — but a SEPARATE field, never prefilled from
+     * the one above. `whatsappHref` in `app/lib/contact-links.ts` will not
+     * guess a country code, so a number written the way it is on a van —
+     * "07812 224644" — is shown as text and not turned into a link that would
+     * open on "the phone number shared via url is invalid". The placeholder is
+     * the whole instruction: give it the international form.
+     */
+    { key: "whatsappNumber", label: "WhatsApp number", type: "tel", placeholder: "+44 7700 900123 — international format" },
     { key: "address", label: "Address", placeholder: "Where they are based" },
     { key: "serviceCategories", label: "Service categories", placeholder: "Electrical, HVAC, Plumbing" },
     { key: "coverageAreas", label: "Coverage areas", placeholder: "UK, London, Midlands" },
@@ -141,7 +159,12 @@ function fieldsFor(tab: Exclude<ManagerTab, "activity">, workspace: WorkspaceSna
     { key: "dayRate", label: "Day rate (£)", type: "number", placeholder: "e.g. 320" },
     { key: "availability", label: "Availability", type: "select", options: ["Available", "Limited", "Unavailable", "Inactive"].map((value) => ({ value, label: value })) },
     { key: "rating", label: "Rating (0–5)", type: "number" },
-    { key: "active", label: "Active contractor", type: "checkbox" },
+    {
+      key: "active",
+      label: "Active contractor",
+      type: "checkbox",
+      hint: "On the register, and offered when assigning work. Archiving clears this. Availability above is a separate, day-to-day state and is not changed by ticking this box.",
+    },
     { key: "notes", label: "Notes", type: "textarea", placeholder: "What was agreed, access arrangements, anything the next coordinator needs" },
   ];
   if (tab === "planned") return [
@@ -191,7 +214,33 @@ function recordSubtitle(tab: ManagerTab, record: Record<string, unknown>) {
   if (tab === "site") return `${record.type ?? "Site"} · ${record.lifecycle ?? "Current"}`;
   if (tab === "compliance") return `${record.siteName ?? "Unknown site"} · ${record.state ?? "Missing"}`;
   if (tab === "unit") return `${record.siteName ?? "Unknown site"} · ${record.status ?? "Active"}`;
-  if (tab === "contractor") return `${record.availability ?? "Available"} · ${record.assignedJobs ?? 0} jobs`;
+  /*
+   * BOTH states, and the canonical one first.
+   *
+   * This line printed `availability` alone, and the two fields behind it do not
+   * mean the same thing: `active` is whether the contractor is on the register
+   * at all, `availability` is whether one who IS on it can take work this week.
+   * The archive verb writes them together — `active:false` AND
+   * `availability:"Inactive"` — but re-ticking "Active contractor" writes only
+   * `active`, so an un-archived contractor keeps the availability the archive
+   * left behind. The list then read "Inactive" beside a saved, ticked Active
+   * box, and an owner reasonably concluded the checkbox was not saving. It was;
+   * the word on screen was reporting the other field entirely.
+   *
+   * Leading with Active/Archived is what stops the line contradicting the
+   * canonical flag again. Keeping availability beside it — rather than letting
+   * the record state stand in for it — is what makes a stale "Inactive" legible
+   * as a separate field somebody still has to set.
+   *
+   * Availability is NAMED rather than just printed, because the pair it forms
+   * with the word in front of it is otherwise its own small version of the same
+   * bug: "Active · Inactive · 0 jobs" is two unlabelled states reading as one
+   * contradiction, which is what sent the owner looking at the checkbox in the
+   * first place. Four extra characters buy the reader the thing the old line
+   * never told them — that these are two different questions about the same
+   * contractor.
+   */
+  if (tab === "contractor") return `${record.active ? "Active" : "Archived"} · Availability: ${record.availability ?? "Available"} · ${record.assignedJobs ?? 0} jobs`;
   if (tab === "planned") return `${record.siteName ?? "Unknown site"} · ${dateValue(record.nextDueAt) || "No date"}`;
   if (tab === "member") return `${record.role ?? "Client"} · ${record.active ? "Active" : "Paused"}`;
   return `${record.actorEmail ?? "Workspace"} · ${dateValue(record.createdAt)}`;
@@ -327,7 +376,7 @@ export function WorkspaceDataManager({
                 {fields.map((field) => {
                   const value = form[field.key] ?? (field.type === "checkbox" ? false : "");
                   if (field.type === "checkbox") return (
-                    <label className="workspace-checkbox" key={field.key}><span><strong>{field.label}</strong><small>Available in the shared testing workspace</small></span><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm((current) => current ? { ...current, [field.key]: event.target.checked } : current)} /></label>
+                    <label className="workspace-checkbox" key={field.key}><span><strong>{field.label}</strong><small>{field.hint ?? "Available in the shared testing workspace"}</small></span><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm((current) => current ? { ...current, [field.key]: event.target.checked } : current)} /></label>
                   );
                   return (
                     <label className="form-field" key={field.key}><span>{field.label}</span>

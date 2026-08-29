@@ -182,6 +182,103 @@ function sitePayload(data: Record<string, unknown>) {
   };
 }
 
+type SitePayload = ReturnType<typeof sitePayload>;
+
+/**
+ * Which request keys each stored column may arrive under.
+ *
+ * This is a restatement of the `??` chains in `sitePayload` above and it has to
+ * be kept beside them: adding a column there and forgetting it here means an
+ * edit can no longer reach that column. The two are one table read twice, and
+ * the compiler holds the shape — `Record<keyof SitePayload, …>` fails to build
+ * the moment `sitePayload` gains a key this does not name.
+ */
+const PAYLOAD_SOURCES: Record<keyof SitePayload, readonly string[]> = {
+  name: ["name"],
+  code: ["code"],
+  siteTypeValue: ["siteTypeValue", "type"],
+  status: ["status"],
+  addressLine1: ["addressLine1", "address"],
+  addressLine2: ["addressLine2"],
+  city: ["city"],
+  postcode: ["postcode"],
+  country: ["country"],
+  latitude: ["latitude"],
+  longitude: ["longitude"],
+  region: ["region"],
+  managerName: ["managerName", "manager"],
+  managerPhone: ["managerPhone"],
+  managerEmail: ["managerEmail"],
+  landlord: ["landlord"],
+  managingAgent: ["managingAgent"],
+  outOfHoursContact: ["outOfHoursContact"],
+  accessMethod: ["accessMethod"],
+  accessContact: ["accessContact"],
+  accessUrl: ["accessUrl"],
+  accessNotes: ["accessNotes"],
+  openingHours: ["openingHours"],
+  deliveryRestrictions: ["deliveryRestrictions"],
+  parkingNotes: ["parkingNotes"],
+  keyAlarmNotes: ["keyAlarmNotes"],
+  leaseStart: ["leaseStart"],
+  leaseEnd: ["leaseEnd"],
+  breakClause: ["breakClause"],
+  rentReview: ["rentReview"],
+  serviceChargePence: ["serviceCharge", "serviceChargePence"],
+  annualBudgetPence: ["annualBudget", "annualBudgetPence"],
+  mondayMaintenanceName: ["mondayMaintenanceName"],
+  mondayComplianceName: ["mondayComplianceName"],
+  notes: ["notes"],
+};
+
+/**
+ * AN EDIT MAY ONLY CHANGE WHAT IT CARRIED.
+ *
+ * THE BUG THIS FIXES, stated plainly because it was silently destroying data on
+ * real sites. `sitePayload` builds EVERY column from the request body, and the
+ * builders answer a missing key the same way they answer a cleared one:
+ * `optionalText(undefined)` is `null`, `optionalNumber(undefined)` is `null`,
+ * and `text(undefined, 60) || "UK"` is the literal `"UK"`. PATCH then wrote the
+ * whole object. So a column the editor does not render was not "left alone" —
+ * it was overwritten with the default on every save.
+ *
+ * Three columns were being hit. `region` reverted to "UK" — the Sites form has
+ * never had a region field, so opening any site outside the default region and
+ * pressing Save quietly relabelled it. `latitude` and `longitude` were nulled,
+ * and unlike a name nobody notices coordinates going missing until a map is
+ * empty. The comment on the rename branch below says the full-payload path is
+ * "right for the Sites form (it sends everything)"; the form does not send
+ * everything, and this closes the gap between that sentence and the code.
+ *
+ * ABSENT AND CLEARED STAY DIFFERENT, which is the whole discipline. A key the
+ * caller did not send at all (`undefined`) keeps what is stored. A key sent as
+ * `""` or `null` is somebody emptying a field on purpose and still clears it,
+ * exactly as before — otherwise a user could never delete a postcode.
+ *
+ * POST is untouched. A new row has nothing to preserve, and the defaults are
+ * correct there.
+ */
+function preserveUnsent<Row extends Record<string, unknown>>(
+  payload: SitePayload,
+  data: Record<string, unknown>,
+  existing: Row,
+): { [K in keyof SitePayload]: SitePayload[K] | (K extends keyof Row ? Row[K] : never) } {
+  const merged = { ...payload } as Record<string, unknown>;
+  for (const [column, sources] of Object.entries(PAYLOAD_SOURCES)) {
+    if (sources.some((source) => data[source] !== undefined)) continue;
+    merged[column] = existing[column];
+  }
+  /*
+   * The return type is the UNION of what the builders produce and what the row
+   * holds, rather than `SitePayload`, because those differ where a column is
+   * nullable in storage but non-null out of `text()` — `address_line1` and
+   * `site_type_value` both are. Typing this as `SitePayload` would have been
+   * one cast and would have hidden exactly the two nulls the callers below now
+   * have to answer for.
+   */
+  return merged as { [K in keyof SitePayload]: SitePayload[K] | (K extends keyof Row ? Row[K] : never) };
+}
+
 async function logChange(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
@@ -475,9 +572,13 @@ export async function PATCH(request: Request) {
       return Response.json({ ok: true, id, name: nextName });
     }
 
-    const payload = sitePayload(body.data ?? {});
+    const sent = body.data ?? {};
+    const payload = preserveUnsent(sitePayload(sent), sent, existing);
     if (!payload.name) throw new Error("A site name is required.");
-    const address = cleanAddress(payload.addressLine1);
+    // `addressLine1` is nullable in storage even though the form insists on it,
+    // and preservation can hand back that null for a caller that sent no
+    // address at all. The check two lines down is what still refuses to save.
+    const address = cleanAddress(payload.addressLine1 ?? "");
     if (!address.value) throw new Error("A first line of address is required.");
 
     if (payload.name !== existing.name) {
@@ -504,8 +605,14 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const siteTypeValue = await validateOption(db, orgId, "site_type", payload.siteTypeValue, true);
-    const status = await validateOption(db, orgId, "site_status", payload.status, true);
+    /*
+     * `?? ""` because `site_type_value` is nullable in storage and preservation
+     * can hand back that null for a legacy row that never had one. Empty is the
+     * "not stated" case `validateOption` already answers, with the workspace's
+     * default option rather than a rejection.
+     */
+    const siteTypeValue = await validateOption(db, orgId, "site_type", payload.siteTypeValue ?? "", true);
+    const status = await validateOption(db, orgId, "site_status", payload.status ?? "", true);
     const slug =
       payload.name === existing.name && existing.slug
         ? existing.slug
