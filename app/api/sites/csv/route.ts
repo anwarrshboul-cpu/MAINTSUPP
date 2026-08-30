@@ -5,13 +5,16 @@ import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib
 import { csvResponse, parseCsvObjects, toCsv } from "../../../lib/csv";
 import { siteWriteFailure } from "../route";
 import { listOptionValues } from "../../../lib/options-repository";
+import type { AddressParts } from "../../../lib/sites-repository";
 import {
   cleanAddress,
   codeConflict,
+  composeAddress,
   existingSiteCodes,
   generateSiteCode,
   junkReason,
   listSites,
+  mirrorAddress,
   nextSitePosition,
   normaliseSiteName,
   recordAnomaly,
@@ -59,6 +62,13 @@ const COLUMNS = [
   "break_clause",
   "rent_review",
   "service_charge_pounds",
+  // Writable through the Sites form (`site-form.tsx` renders an Annual budget
+  // field) and reachable through PATCH under two keys, but it had no column
+  // here — so the one money figure the dashboard reports on was the one field
+  // an admin could not bulk-edit, and the header comment above promising that
+  // "every writable field appears" was one column short of true. Pounds, like
+  // `service_charge_pounds`, because a sheet is edited by a person.
+  "annual_budget_pounds",
   "monday_maintenance_name",
   "monday_compliance_name",
   "notes",
@@ -114,12 +124,30 @@ const COLUMN_TARGETS: Record<string, readonly string[]> = {
   break_clause: ["breakClause"],
   rent_review: ["rentReview"],
   service_charge_pounds: ["serviceChargePence"],
+  annual_budget_pounds: ["annualBudgetPence"],
   monday_maintenance_name: ["mondayMaintenanceName"],
   monday_compliance_name: ["mondayComplianceName"],
   notes: ["notes"],
 };
 
 const ADDRESS_HEADERS = ["address_line1", "address_line2", "city", "postcode"] as const;
+
+/**
+ * The address columns of a row, whether it came from the database or from the
+ * merge below. Both arrive here as `Record<string, unknown>`, and reading them
+ * through one narrowing keeps `mirrorAddress` typed rather than cast.
+ */
+function addressPartsOf(row: Record<string, unknown>): AddressParts {
+  const value = (key: string) => (typeof row[key] === "string" ? (row[key] as string) : null);
+  return {
+    addressLine1: value("addressLine1"),
+    addressLine2: value("addressLine2"),
+    city: value("city"),
+    postcode: value("postcode"),
+    country: value("country"),
+    region: value("region"),
+  };
+}
 
 /**
  * AN IMPORT MAY ONLY CHANGE THE COLUMNS ITS SHEET CARRIES.
@@ -178,15 +206,24 @@ function sheetUpdate(
     update.region = "Europe";
   }
 
-  // `address` is the Stage 0 composite of the four columns above it. Rebuilt
-  // from the MERGED row, so a sheet carrying only `city` does not drop the
-  // house number, and left alone entirely by a sheet carrying none of them.
+  /*
+   * `address` is the Stage 0 composite of the four columns above it. Rebuilt
+   * from the MERGED row, so a sheet carrying only `city` does not drop the
+   * house number, and left alone entirely by a sheet carrying none of them.
+   *
+   * And rebuilt only when rebuilding loses nothing. A sheet cannot carry what
+   * the register never received: on the two sites whose street survives only in
+   * `address`, an export drops the street (it exports `address_line1`) and a
+   * re-import of that export would have rebuilt the column without it. Same
+   * rule, same helper, as PATCH /api/sites — see `mirrorAddress`.
+   */
   if (ADDRESS_HEADERS.some((header) => headers.has(header))) {
     const merged = { ...existing, ...update };
-    update.address = [merged.addressLine1, merged.addressLine2, merged.city, merged.postcode]
-      .filter(Boolean)
-      .join(", ")
-      .slice(0, 300);
+    update.address = mirrorAddress(
+      typeof existing.address === "string" ? existing.address : null,
+      addressPartsOf(existing),
+      addressPartsOf(merged),
+    ).value;
   }
 
   return update;
@@ -242,6 +279,8 @@ export async function GET(request: Request) {
         rent_review: site.rentReview ?? "",
         service_charge_pounds:
           site.serviceChargePence === null ? "" : (site.serviceChargePence / 100).toFixed(2),
+        annual_budget_pounds:
+          site.annualBudgetPence === null ? "" : (site.annualBudgetPence / 100).toFixed(2),
         monday_maintenance_name: site.mondayMaintenanceName ?? "",
         monday_compliance_name: site.mondayComplianceName ?? "",
         notes: site.notes ?? "",
@@ -368,6 +407,8 @@ export async function POST(request: Request) {
       const status = rawStatus || defaultStatus;
       const serviceChargePounds = cell(record, "service_charge_pounds");
       const parsedCharge = serviceChargePounds ? Number(serviceChargePounds) : NaN;
+      const annualBudgetPounds = cell(record, "annual_budget_pounds");
+      const parsedBudget = annualBudgetPounds ? Number(annualBudgetPounds) : NaN;
 
       const values = {
         name,
@@ -402,6 +443,7 @@ export async function POST(request: Request) {
         breakClause: optional(cell(record, "break_clause")),
         rentReview: optional(cell(record, "rent_review")),
         serviceChargePence: Number.isFinite(parsedCharge) ? Math.round(parsedCharge * 100) : null,
+        annualBudgetPence: Number.isFinite(parsedBudget) ? Math.round(parsedBudget * 100) : null,
         mondayMaintenanceName: optional(cell(record, "monday_maintenance_name")),
         mondayComplianceName: optional(cell(record, "monday_compliance_name")),
         notes: optional(cell(record, "notes")),
@@ -413,16 +455,15 @@ export async function POST(request: Request) {
         region: cell(record, "region") || (status === "international" ? "Europe" : "UK"),
         // Four parts, matching POST/PATCH /api/sites. This dropped
         // `address_line2` and the other writer keeps it, so the same site read
-        // back a shorter address after an import than after a form save.
-        address: [
-          address.value,
-          cell(record, "address_line2"),
-          cell(record, "city"),
-          cell(record, "postcode"),
-        ]
-          .filter(Boolean)
-          .join(", ")
-          .slice(0, 300),
+        // back a shorter address after an import than after a form save. It also
+        // repeated a postcode the first line already carried; `composeAddress`
+        // is the one place that rule now lives.
+        address: composeAddress({
+          addressLine1: address.value,
+          addressLine2: cell(record, "address_line2"),
+          city: cell(record, "city"),
+          postcode: cell(record, "postcode"),
+        }),
         manager: optional(cell(record, "manager_name")),
         updatedAt: new Date().toISOString(),
       };

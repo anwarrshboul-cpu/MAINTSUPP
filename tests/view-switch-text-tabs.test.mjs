@@ -50,7 +50,22 @@ test("every text tab strip opts out of the icon toggle's square", async () => {
     }
   }
 
-  assert.ok(textStrips.length >= 3, `expected the three known text strips, found ${textStrips.length}`);
+  /*
+   * TWO literals, not three, and the coverage is unchanged.
+   *
+   * This counts `<div className="…view-switch…" role="tablist">` written out in
+   * a .tsx file. Workstream 5 gave the Sites editor and the Site detail screen
+   * one shared `SectionTabs` component instead of a strip written twice, so the
+   * three literals became two — options-admin, and section-tabs itself. Every
+   * strip that renders is still scanned, because the shared component's own
+   * literal is in this directory and is checked like any other.
+   *
+   * The guard that matters is `missing` below: it names any text strip lacking
+   * `view-switch--text`, and it is asserted empty regardless of the count. This
+   * line only exists so the regex silently matching NOTHING cannot pass as
+   * success — which is why it is a floor rather than an equality.
+   */
+  assert.ok(textStrips.length >= 2, `expected the known text strips, found ${textStrips.length}`);
   assert.deepEqual(
     missing,
     [],

@@ -64,6 +64,25 @@ export type SiteRecord = {
   mondayMaintenanceName: string | null;
   mondayComplianceName: string | null;
   notes: string | null;
+  /**
+   * Every OTHER spelling this site has ever answered to, as written — the
+   * `site_aliases.alias` column, not `normalised`.
+   *
+   * OPTIONAL BECAUSE THE PAYLOAD DOES NOT CARRY IT YET, and the honest thing is
+   * to say so in the type rather than to declare a field the server never
+   * sends. `site_aliases` is real (db/schema.ts), it is written on every rename
+   * by `PATCH /api/sites`, `app/lib/sites-repository.ts` already exports
+   * `listAliases(db, organisationId)`, and `resolveSiteByName` already searches
+   * it — but `GET /api/sites` does not select it, so the register cannot find a
+   * site by a name it used to have. The filter in sites-manager.tsx reads this
+   * field defensively and starts working the moment the route attaches it; the
+   * route change is not this lane's to make.
+   *
+   * The two `monday*Name` columns above are a different thing and both are
+   * needed: they are the CURRENT spelling on each of the two monday boards,
+   * one each, whereas this is the unbounded history.
+   */
+  aliases?: string[];
   active: boolean;
   position: number;
   updatedAt: string;

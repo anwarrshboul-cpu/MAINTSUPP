@@ -121,6 +121,25 @@ export async function DELETE(request: Request) {
     const id = text(body.id, 120);
     if (!id) throw new Error("A group ID is required.");
 
+    /*
+     * Look first, so a refusal reads as one.
+     *
+     * Both DELETEs below are organisation-scoped, so a group belonging to
+     * another tenant was never actually touched — the isolation was already
+     * sound. What was wrong was the answer: `{ ok: true }`, 200, for an id that
+     * does not exist here. A caller deleting another tenant's group, or simply
+     * a stale id, was told the removal had happened. `PATCH` already answers
+     * "Group not found." for exactly this, and the two now agree.
+     */
+    const [existing] = await db
+      .select({ id: siteGroups.id })
+      .from(siteGroups)
+      .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)))
+      .limit(1);
+    if (!existing) {
+      return Response.json({ error: "Group not found." }, { status: 404 });
+    }
+
     await db
       .delete(siteGroupMembers)
       .where(

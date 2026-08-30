@@ -14,14 +14,17 @@ import { listOptionValues } from "../../lib/options-repository";
 import {
   cleanAddress,
   codeConflict,
+  composeAddress,
   existingSiteCodes,
   findDuplicateCandidates,
   addSiteAlias,
   generateSiteCode,
   getSite,
   junkReason,
+  listAliases,
   listSiteGroups,
   listSites,
+  mirrorAddress,
   nameConflict,
   nextSitePosition,
   recordAnomaly,
@@ -73,6 +76,35 @@ function sitesDatabaseError(error: unknown) {
     return "The workspace database is being prepared. Please retry in a moment.";
   }
   return "Sites are temporarily unavailable.";
+}
+
+/**
+ * A refusal of the caller's input, marked as one.
+ *
+ * `siteWriteFailure` decides between "your input was wrong" (400) and "the
+ * database is unwell" (503) by reading the error's message. That works until a
+ * refusal QUOTES the caller, which this one does:
+ *
+ *   "no such table" is not a configured site type. Add it in Settings first.
+ *
+ * A site type typed as `no such table`, `SQLITE_BUSY` or `too many clients`
+ * therefore came back as "the workspace database is being prepared, retry in a
+ * moment" — measured live, nine times. The user is told to wait for a fault
+ * that never happened, and never learns which field they got wrong.
+ *
+ * Matching harder would not fix it: the fault words are genuinely in the
+ * string, because the caller put them there. So the answer is not to guess from
+ * the text at all, but to say what the error IS at the point it is raised.
+ *
+ * ANY refusal that interpolates caller-supplied text must be thrown as this
+ * class. Refusals that name only fixed text ("A site name is required.") are
+ * safe as plain Errors and are left alone.
+ */
+export class SiteInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SiteInputError";
+  }
 }
 
 /**
@@ -176,6 +208,12 @@ function codeCollision(error: unknown) {
 }
 
 export function siteWriteFailure(error: unknown, fallback: string) {
+  // Asked before anything reads the message, because this is the one refusal
+  // whose text is partly the caller's own and so can contain a fault word.
+  if (error instanceof SiteInputError) {
+    return { message: error.message, status: 400 as const };
+  }
+
   if (codeCollision(error)) {
     return {
       message: "Another site already uses that code.",
@@ -282,7 +320,7 @@ async function validateOption(
   }
   const match = values.find((entry) => entry.value === candidate);
   if (!match) {
-    throw new Error(
+    throw new SiteInputError(
       `"${candidate}" is not a configured ${key.replace(/_/g, " ")}. Add it in Settings first.`,
     );
   }
@@ -567,13 +605,44 @@ export async function GET(request: Request) {
       });
     }
 
-    const [rows, groups, siteTypes, statuses] = await Promise.all([
+    const [rows, groups, siteTypes, statuses, aliases] = await Promise.all([
       listSites(db, orgId, { includeInactive: true }),
       listSiteGroups(db, orgId),
       listOptionValues(db, orgId, "site_type"),
       listOptionValues(db, orgId, "site_status"),
+      listAliases(db, orgId),
     ]);
-    return Response.json({ sites: rows, groups, siteTypes, statuses });
+
+    /*
+     * Every name a site also answers to, sent with the site.
+     *
+     * The register's search advertised "name, code, postcode or monday name"
+     * and matched none of the former names the alias table exists to hold, so
+     * searching "Cardiff St Davids" — a name this business used, and the exact
+     * case the rename machinery was built for — found nothing. The screen was
+     * not at fault: the payload simply had no aliases in it to match against.
+     *
+     * Grouped here rather than fetched per row: `listAliases` is one query for
+     * the whole organisation, and the register is read whole anyway.
+     *
+     * The array can repeat a monday name, because `setSiteAliases` records
+     * those as alias rows too. That is harmless — the search matches the same
+     * site either way — and filtering them out would mean deciding which of two
+     * identical strings is the "real" one.
+     */
+    const aliasesBySite = new Map<string, string[]>();
+    for (const alias of aliases) {
+      const list = aliasesBySite.get(alias.siteId);
+      if (list) list.push(alias.alias);
+      else aliasesBySite.set(alias.siteId, [alias.alias]);
+    }
+
+    return Response.json({
+      sites: rows.map((row) => ({ ...row, aliases: aliasesBySite.get(row.id) ?? [] })),
+      groups,
+      siteTypes,
+      statuses,
+    });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
@@ -657,10 +726,15 @@ export async function POST(request: Request) {
       // screens that still read `type`, `lifecycle` and `address` keep working.
       type: siteTypeValue,
       lifecycle: status === "closed" ? "Closed" : "Current",
-      address: [address.value, payload.addressLine2, payload.city, payload.postcode]
-        .filter(Boolean)
-        .join(", ")
-        .slice(0, 300),
+      // A new row has nothing stored to lose, so the composite is built
+      // outright — but still without repeating a part the first line already
+      // carries. See `composeAddress`.
+      address: composeAddress({
+        addressLine1: address.value,
+        addressLine2: payload.addressLine2,
+        city: payload.city,
+        postcode: payload.postcode,
+      }),
       manager: payload.managerName,
     });
 
@@ -886,6 +960,33 @@ export async function PATCH(request: Request) {
             lifecycle: status === "closed" ? "Closed" : "Current",
           };
 
+    /*
+     * THE STAGE 0 ADDRESS IS REBUILT ONLY WHEN REBUILDING IT LOSES NOTHING.
+     *
+     * THE BUG THIS FIXES. `address` was rebuilt from address_line1/2 + city +
+     * postcode on every save, and the canonical columns do not always hold what
+     * the string holds. The monday import read "<unit or mall> - <street>,
+     * <city> <postcode>", kept only the part before the " - " as
+     * `address_line1` and dropped the street, so on Highcross Leicester and
+     * Bullring - Birmingham the street lives ONLY in `address` — and a
+     * notes-only save deleted it. The contractor job link builds its map URL
+     * from this column, so what was lost was the road an engineer drives to.
+     *
+     * The rule is general and names no row: `mirrorAddress` holds the stored
+     * string whenever the rebuild would drop a word that no canonical address
+     * column has ever carried, before this edit or after it. A word the caller
+     * is deliberately changing or clearing WAS in a canonical column, so an
+     * ordinary address edit still updates the mirror exactly as before.
+     */
+    const mirror = mirrorAddress(existing.address, existing, {
+      addressLine1: address.value,
+      addressLine2: payload.addressLine2,
+      city: payload.city,
+      postcode: payload.postcode,
+      country: payload.country,
+      region: payload.region,
+    });
+
     await db
       .update(sites)
       .set({
@@ -896,10 +997,7 @@ export async function PATCH(request: Request) {
         slug,
         type: siteTypeValue,
         ...lifecycleState,
-        address: [address.value, payload.addressLine2, payload.city, payload.postcode]
-          .filter(Boolean)
-          .join(", ")
-          .slice(0, 300),
+        address: mirror.value,
         manager: payload.managerName,
         updatedAt: new Date().toISOString(),
       })
@@ -931,13 +1029,20 @@ export async function PATCH(request: Request) {
     if (body.data?.groupIds !== undefined) {
       await setSiteGroupMembership(db, orgId, id, stringList(body.data.groupIds));
     }
-    await logChange(db, orgId, id, "updated", actor.email, { name: payload.name });
+    // Holding the mirror is recorded rather than silent: the audit line names
+    // the words the canonical columns are missing, which is the whole of what an
+    // admin has to paste into `address_line2` to make the rebuild lossless.
+    await logChange(db, orgId, id, "updated", actor.email, {
+      name: payload.name,
+      ...(mirror.heldFor.length ? { addressMirrorHeld: mirror.heldFor } : {}),
+    });
 
     // See `setSiteAliases`: a name another site already answers to is refused,
     // and the save must say so rather than report a list it did not record.
     return Response.json({
       ok: true,
       id,
+      ...(mirror.heldFor.length ? { addressMirrorHeld: mirror.heldFor } : {}),
       ...(aliasConflicts.length ? { aliasConflicts } : {}),
     });
   } catch (error) {

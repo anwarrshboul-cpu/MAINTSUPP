@@ -8194,9 +8194,16 @@ label.live-board-tool {
 }
 
 /* ===========================================================================
-   SITES REGISTER — Workstream 5 (Subagent 3). Two measured defects, both
-   scoped to this screen by the ids only the Sites toolbar renders
-   (#site-search). Nothing here can reach another register.
+   SITES REGISTER — Workstream 5. Two measured defects.
+
+   RULE 2 is scoped to this screen by #site-search, an id only the Sites toolbar
+   renders, and cannot reach another register.
+   RULE 1 IS DELIBERATELY NOT. It was scoped the same way and should not have
+   been: the missing focus ring is on every `.search-field` in the product and
+   the note under the rule said so while fixing one of them. It is now one rule
+   for all of them, and the reasoning — including what was measured on the other
+   three wrappers before widening it — is under the rule itself.
+
    Breakpoint used: 768 only, which is inside the agreed set
    {640, 767, 768, 1024, 1280} that stage-five-board-chrome and stage-six-views
    enforce over everything after their markers — and this block is after both.
@@ -8218,17 +8225,43 @@ label.live-board-tool {
  * `outline: 0` is right for the input and the ring belongs on the wrapper, and
  * nobody ever put it there.
  *
- * `:focus-within` on the wrapper, selected through `:has()` so this reaches
- * only the Sites search field and not the seven other registers that share the
- * class. The `:has()` is not nested inside another `:has()`. The declarations
- * are copied verbatim from the global `:focus-visible` block so the ring is the
- * same 3px accent at the same offset the rest of the screen draws.
+ * `:focus-within` on the wrapper, because the wrapper is the visible control.
+ * The declarations are copied verbatim from the global `:focus-visible` block
+ * so the ring is the same 3px accent at the same offset the rest of the screen
+ * draws.
  *
- * REPORTED, NOT FIXED, because it is outside this lane: the same gap exists on
- * EVERY `.search-field input` in the product, for the same reason. The fix
- * belongs in globals.css as one rule on `.search-field:focus-within`.
+ * THIS SELECTOR REACHES EVERY REGISTER, ON PURPOSE — it is the one rule in this
+ * block that is not Sites-scoped. It was written as
+ * `.search-field:has(#site-search):focus-within`, with its own note saying the
+ * same gap was on every other `.search-field` and that the general fix belonged
+ * elsewhere. The note was right and the scoping was the wrong half to keep:
+ * three more copies of one declaration pair, one per screen, is the same rule
+ * written four times and still missing from the fifth screen somebody adds.
+ *
+ * CHECKED BEFORE WIDENING IT — all four wrappers, both themes, at 1440/768/390/320:
+ *   sites-manager.tsx  #site-search   the one that already had the ring
+ *   units-manager.tsx  #unit-search   reported `outline: 3px none`, i.e. none
+ *   portal-app.tsx     documents      reported `outline: 3px none`, i.e. none
+ *   portal-app.tsx     maintenance    inside `LegacyMaintenanceView`, which is
+ *                                     exported and never rendered — the only
+ *                                     references to it in the repo are two tests
+ *                                     slicing the file by its name. Unreachable
+ *                                     in the product; covered anyway.
+ *
+ * IT OVERRIDES NO PER-SURFACE STYLE. globals.css:3875 already gives
+ * `.search-field:focus-within` a border-colour and a
+ * `0 0 0 3px rgba(18, 181, 170, 0.1)` glow — 10% alpha, which is why nobody
+ * could see it — and that rule is byte-identical for all four wrappers, so
+ * there is no per-screen intent to preserve. `outline` collides with neither
+ * declaration: this ADDS a ring and replaces nothing.
+ *
+ * AND IT IS NOT CLIPPED. The documents wrapper is the only one inside an
+ * `overflow: hidden` ancestor (`.panel`); measured room to that edge is 13px at
+ * 320, 390 and 1440 and 16px at 768, against the 5px a 3px ring at a 2px offset
+ * needs. Verified at every one of those widths in both themes: no clipping, and
+ * `document.body` scrollWidth − clientWidth stays 0.
  */
-.search-field:has(#site-search):focus-within {
+.search-field:focus-within {
   outline: 3px solid var(--accent-fg);
   outline-offset: 2px;
 }

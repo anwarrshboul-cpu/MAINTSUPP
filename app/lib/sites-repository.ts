@@ -597,3 +597,171 @@ export async function listAnomalies(
     : eq(importAnomalies.organisationId, organisationId);
   return db.select().from(importAnomalies).where(clause);
 }
+
+/**
+ * The canonical address columns, and the Stage 0 string that mirrors them.
+ *
+ * `sites.address` is the Stage 0 column every reader outside the Sites screen
+ * still uses — the contractor job link prints it and builds the map URL from
+ * it (`app/(public)/j/[token]/contractor-job-view.tsx`), the compliance
+ * register reports it, the workspace API returns it. It is DERIVED from
+ * `address_line1/2 + city + postcode`, and both writers rebuilt it from those
+ * four on every save.
+ *
+ * THE BUG THAT RULE HAD. A derived column may only be rebuilt when the columns
+ * it derives from actually hold everything it held. On the canonical register
+ * they do not: the monday import read `"<unit or mall> - <street>, <city>
+ * <postcode>"`, took the part before the " - " as `address_line1` and threw the
+ * street away, so on two sites the street survives ONLY in `address`:
+ *
+ *   Highcross Leicester   address_line1 "Kiosk 13 Highcross Shopping Centre
+ *                         Leicester", line2 NULL — "5 Shires Ln" lives only in
+ *                         `address`
+ *   Bullring - Birmingham address_line1 "Site A, Upper Mall West, Bullring,
+ *                         Birmingham", line2 NULL — "Moor St" likewise
+ *
+ * A notes-only save rebuilt `address` without the street, and the engineer sent
+ * to the job got a shopping centre instead of a road. Those two rows are the
+ * symptom; the fault is that a REBUILD COULD DESTROY WHAT THE CANONICAL FIELDS
+ * NEVER RECEIVED. `mirrorAddress` below is the general rule, expressed once and
+ * used by every writer.
+ */
+export type AddressParts = {
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  postcode?: string | null;
+  country?: string | null;
+  region?: string | null;
+};
+
+/**
+ * An address reduced to comparable words: lower case, accents folded, every
+ * run of punctuation or space a separator. Word level rather than segment
+ * level on purpose — "Leicester LE1 4AN" is ONE comma segment holding TWO
+ * canonical values, so a segment comparison calls it unaccounted for and a
+ * word comparison sees both halves.
+ */
+export function addressTokens(value: string | null | undefined): string[] {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
+
+/** Whether `needle`'s words already appear, in order and adjacent, in `hay`. */
+function containsTokenRun(hay: readonly string[], needle: readonly string[]) {
+  if (!needle.length) return true;
+  for (let start = 0; start + needle.length <= hay.length; start += 1) {
+    let matched = true;
+    for (let offset = 0; offset < needle.length; offset += 1) {
+      if (hay[start + offset] !== needle[offset]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return true;
+  }
+  return false;
+}
+
+/**
+ * The four canonical columns joined into the Stage 0 string — WITHOUT REPEATING
+ * A PART THE STRING ALREADY CARRIES.
+ *
+ * The plain join repeated itself on 25 of the 31 canonical sites. Their
+ * `address_line1` is the whole imported address, postcode and all, and
+ * `postcode` holds that same postcode again, so the join produced
+ * "UNIT 5, THE WHITECHAPEL TECHNOLOGY CENTRE, 75 WHITECHAPEL ROAD, LONDON
+ * E1 1EW, E1 1EW" — the first edit of almost any site degraded the string the
+ * contractor's map link is built from. Bullring repeated "Birmingham" the same
+ * way.
+ *
+ * A part is skipped only when its words are ALREADY PRESENT, adjacent and in
+ * order, in what has been built so far, so nothing is dropped: the content is
+ * in the string, earlier. Word-run matching rather than substring, or a city of
+ * "London" would be swallowed by a line reading "Londonderry".
+ *
+ * Order is never changed. Parts are visited line1, line2, city, postcode as
+ * they always were; a part is either appended in its place or already there.
+ */
+export function composeAddress(parts: AddressParts) {
+  const segments: string[] = [];
+  let written: string[] = [];
+  for (const part of [parts.addressLine1, parts.addressLine2, parts.city, parts.postcode]) {
+    const value = typeof part === "string" ? part.trim() : "";
+    if (!value) continue;
+    const words = addressTokens(value);
+    if (words.length && containsTokenRun(written, words)) continue;
+    segments.push(value);
+    written = written.concat(words);
+  }
+  return segments.join(", ").slice(0, 300);
+}
+
+/**
+ * What to store in `address` on a save — and when NOT to touch it at all.
+ *
+ * THE RULE: a derived column may be rebuilt only when the rebuild is LOSSLESS.
+ * If the stored string contains a word that the rebuilt string does not, and
+ * that the canonical address columns never held — before the edit or after it —
+ * then the canonical columns are incomplete, the rebuild would be the only place
+ * that word ever existed, and the stored string is kept instead.
+ *
+ * WHY "BEFORE THE EDIT OR AFTER IT" IS THE WHOLE OF THE TEST, and why it is not
+ * simply "anything the rebuild drops". A save that legitimately CHANGES an
+ * address drops words on purpose: correcting a postcode from "LE1 4AN" to
+ * "LE1 4AB" drops "4an", clearing `address_line2` drops all of it. In both the
+ * dropped word was in a canonical column beforehand, so the register is losing
+ * nothing it was not told to lose, and the mirror must follow. Only a word that
+ * NO canonical column has ever carried is orphaned, and only that holds the
+ * mirror. So an ordinary edit still updates `address`, and a fix that refused
+ * to ever rebuild would be the same bug pointing the other way.
+ *
+ * `country` and `region` count as canonical even though the mirror never
+ * carried them: a stored address ending "United Kingdom" is not losing that
+ * fact when the mirror drops it, only its copy of it.
+ *
+ * HOLDING IS DELIBERATELY SELF-LIMITING. It fires only while the canonical
+ * columns are missing something, it is reported to the caller and written into
+ * the audit line rather than happening in silence, and the moment the orphaned
+ * text is put where it belongs — `address_line2` is NULL on both affected rows
+ * — the rebuild is lossless again and the mirror tracks every edit as before.
+ * The escape hatch is therefore correct data entry, not a flag.
+ *
+ * `heldFor` is the orphaned words, so the caller can say WHY it held.
+ */
+export function mirrorAddress(
+  stored: string | null | undefined,
+  before: AddressParts,
+  after: AddressParts,
+): { value: string; heldFor: string[] } {
+  const rebuilt = composeAddress(after);
+  const storedValue = typeof stored === "string" ? stored : "";
+  if (!storedValue.trim()) return { value: rebuilt, heldFor: [] };
+
+  const accounted = new Set(
+    [before, after].flatMap((parts) =>
+      [
+        parts.addressLine1,
+        parts.addressLine2,
+        parts.city,
+        parts.postcode,
+        parts.country,
+        parts.region,
+      ].flatMap((value) => addressTokens(value)),
+    ),
+  );
+  for (const word of addressTokens(rebuilt)) accounted.add(word);
+
+  const orphaned = [...new Set(addressTokens(storedValue))].filter(
+    (word) => !accounted.has(word),
+  );
+  if (!orphaned.length) return { value: rebuilt, heldFor: [] };
+  // Byte-identical to what is stored, so holding writes the column back
+  // unchanged rather than trimming or re-slicing it.
+  return { value: storedValue, heldFor: orphaned };
+}

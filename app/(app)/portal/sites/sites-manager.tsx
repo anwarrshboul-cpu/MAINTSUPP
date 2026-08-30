@@ -34,6 +34,35 @@ type Mode =
   | { kind: "detail"; siteId: string }
   | { kind: "form"; site: SiteRecord | null; groupIds: string[] };
 
+/**
+ * Every string the register will match a search term against, lower-cased once.
+ *
+ * `site.aliases` is spread in here rather than being a separate branch so that
+ * alias search is not a feature that has to be switched on later — it is simply
+ * the case where the array is empty. `GET /api/sites` does not send the field
+ * yet (see the note on `SiteRecord.aliases`); on a payload that lacks it this
+ * spreads nothing and the behaviour is exactly what it was, and on a payload
+ * that has it "Cardiff St Davids" finds "Grand Arcade - Cardiff" with no
+ * further change here.
+ *
+ * `String()` rather than a cast: `code`, `city` and both monday names are
+ * nullable, and `.filter(Boolean)` drops the nulls before they can become the
+ * string "null" and match a search for "null".
+ */
+function searchableText(site: SiteRecord): string[] {
+  return [
+    site.name,
+    site.code,
+    site.city,
+    site.postcode,
+    site.mondayMaintenanceName,
+    site.mondayComplianceName,
+    ...(site.aliases ?? []),
+  ]
+    .filter(Boolean)
+    .map((field) => String(field).toLowerCase());
+}
+
 export function SitesManager({ onNotify }: { onNotify: (message: string) => void }) {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const [search, setSearch] = useState("");
@@ -67,11 +96,29 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
         if (!group?.siteIds.includes(site.id)) return false;
       }
       if (!term) return true;
-      return [site.name, site.code, site.city, site.postcode, site.mondayMaintenanceName, site.mondayComplianceName]
-        .filter(Boolean)
-        .some((field) => String(field).toLowerCase().includes(term));
+      return searchableText(site).some((field) => field.includes(term));
     });
   }, [data, search, statusFilter, groupFilter]);
+
+  /*
+   * The placeholder says what is SEARCHED, and it has to keep saying that.
+   *
+   * It read "Search name, code, postcode or monday name" while the filter also
+   * matched the town — a promise that was short of the truth, which is the
+   * cheapest kind of search bug to ship because nobody reports the results they
+   * did not know to expect.
+   *
+   * The "former name" half appears only once the payload actually carries
+   * aliases. `aliases` is optional on `SiteRecord` because `GET /api/sites`
+   * does not select it yet (see site-types.ts), so advertising it now would put
+   * the same untruth back the other way round. This asks the data instead of a
+   * flag: the moment the route attaches a non-empty `aliases`, the label grows
+   * to match, and a workspace that genuinely has no former names is still told
+   * the truth about itself.
+   */
+  const searchesAliases = Boolean(
+    data?.sites.some((site) => (site.aliases?.length ?? 0) > 0),
+  );
 
   async function archive(site: SiteRecord) {
     if (!window.confirm(`Close ${site.name}? Its jobs and certificates are kept.`)) return;
@@ -229,7 +276,11 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
           <input
             id="site-search"
             type="search"
-            placeholder="Search name, code, postcode or monday name"
+            placeholder={
+              searchesAliases
+                ? "Search name, former name, code, town, postcode or monday name"
+                : "Search name, code, town, postcode or monday name"
+            }
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />

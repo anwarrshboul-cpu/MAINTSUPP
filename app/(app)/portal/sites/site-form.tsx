@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { FormField as Field } from "./form-field";
+import { SectionPanel, SectionTabs } from "./section-tabs";
 import {
   ApiError,
   api,
@@ -85,6 +86,14 @@ const SECTIONS = [
   "Reconciliation",
 ] as const;
 
+/**
+ * Namespaces the tab and panel ids. The editor and the detail screen are
+ * separate returns and never render together, but they use the same section
+ * names ("Contacts" is on both), and an id that is only unique by luck is not
+ * unique. See section-tabs.tsx.
+ */
+const TAB_PREFIX = "site-editor";
+
 export function SiteForm({
   site,
   siteTypes,
@@ -138,165 +147,185 @@ export function SiteForm({
 
   return (
     <div className="site-form">
-      <div className="view-switch view-switch--text" role="tablist" aria-label="Site editor sections">
-        {SECTIONS.map((entry) => (
-          <button
-            key={entry}
-            type="button"
-            role="tab"
-            aria-selected={section === entry}
-            className={section === entry ? "is-active" : ""}
-            onClick={() => setSection(entry)}
-          >
-            {entry}
-          </button>
-        ))}
-      </div>
+      {/*
+        The strip and the panels are one pattern, not two lists that happen to
+        agree. See section-tabs.tsx for what was missing and what the APG asks
+        for; every section body below is now the `tabpanel` the tab above it
+        points at.
+      */}
+      <SectionTabs
+        idPrefix={TAB_PREFIX}
+        label="Site editor sections"
+        sections={SECTIONS}
+        active={section}
+        onChange={setSection}
+      />
 
-      {section === "Identity" ? (
-        <div className="form-grid">
-          <Field id="site-name" label="Site name" value={form.name} onChange={set("name")} required />
-          <Field
-            id="site-code"
-            label="Site code"
-            value={form.code}
-            onChange={set("code")}
-            hint="Left blank, a code is generated from the site name."
-          />
-          <Field
-            id="site-type"
-            label="Site type"
-            value={form.siteTypeValue}
-            onChange={set("siteTypeValue")}
-            options={siteTypes}
-            required
-          />
-          <Field
-            id="site-status"
-            label="Status"
-            value={form.status}
-            onChange={set("status")}
-            options={statuses}
-            required
-          />
-          <Field id="site-notes" label="Notes" value={form.notes} onChange={set("notes")} multiline />
-          <fieldset className="form-field">
-            <legend>Reporting groups</legend>
-            {groups.length === 0 ? (
-              <p className="form-hint">
-                No groups yet. Create one to report on a region or portfolio.
-              </p>
-            ) : (
-              groups.map((group) => (
-                <label key={group.id} className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={groupIds.includes(group.id)}
-                    onChange={(event) =>
-                      setGroupIds((current) =>
-                        event.target.checked
-                          ? [...current, group.id]
-                          : current.filter((id) => id !== group.id),
-                      )
-                    }
-                  />
-                  <span>{group.name}</span>
-                </label>
-              ))
-            )}
-          </fieldset>
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Identity"
+        className="form-grid"
+        active={section === "Identity"}
+      >
+        <Field id="site-name" label="Site name" value={form.name} onChange={set("name")} required />
+        <Field
+          id="site-code"
+          label="Site code"
+          value={form.code}
+          onChange={set("code")}
+          hint="Left blank, a code is generated from the site name."
+        />
+        <Field
+          id="site-type"
+          label="Site type"
+          value={form.siteTypeValue}
+          onChange={set("siteTypeValue")}
+          options={siteTypes}
+          required
+        />
+        <Field
+          id="site-status"
+          label="Status"
+          value={form.status}
+          onChange={set("status")}
+          options={statuses}
+          required
+        />
+        <Field id="site-notes" label="Notes" value={form.notes} onChange={set("notes")} multiline />
+        <fieldset className="form-field">
+          <legend>Reporting groups</legend>
+          {groups.length === 0 ? (
+            <p className="form-hint">
+              No groups yet. Create one to report on a region or portfolio.
+            </p>
+          ) : (
+            groups.map((group) => (
+              <label key={group.id} className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={groupIds.includes(group.id)}
+                  onChange={(event) =>
+                    setGroupIds((current) =>
+                      event.target.checked
+                        ? [...current, group.id]
+                        : current.filter((id) => id !== group.id),
+                    )
+                  }
+                />
+                <span>{group.name}</span>
+              </label>
+            ))
+          )}
+        </fieldset>
+      </SectionPanel>
 
-      {section === "Address" ? (
-        <div className="form-grid">
-          <Field id="addr1" label="Address line 1" value={form.addressLine1} onChange={set("addressLine1")} required />
-          <Field id="addr2" label="Address line 2" value={form.addressLine2} onChange={set("addressLine2")} />
-          <Field id="city" label="Town or city" value={form.city} onChange={set("city")} />
-          <Field id="postcode" label="Postcode" value={form.postcode} onChange={set("postcode")} />
-          <Field id="country" label="Country" value={form.country} onChange={set("country")} />
-          {/*
-            * Free text rather than a select, because `region` is not one of the
-            * option tables — there is no `site_region` list for an admin to
-            * edit, and hardcoding a two-item dropdown here would be this file
-            * quietly inventing a vocabulary the rest of the product does not
-            * enforce. The hint names the two values already in the data instead,
-            * which is the honest version of the same guidance.
-            */}
-          <Field
-            id="region"
-            label="Region"
-            value={form.region}
-            onChange={set("region")}
-            hint="How the portfolio is split for reporting. Existing sites use UK or Europe."
-          />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Address"
+        className="form-grid"
+        active={section === "Address"}
+      >
+        <Field id="addr1" label="Address line 1" value={form.addressLine1} onChange={set("addressLine1")} required />
+        <Field id="addr2" label="Address line 2" value={form.addressLine2} onChange={set("addressLine2")} />
+        <Field id="city" label="Town or city" value={form.city} onChange={set("city")} />
+        <Field id="postcode" label="Postcode" value={form.postcode} onChange={set("postcode")} />
+        <Field id="country" label="Country" value={form.country} onChange={set("country")} />
+        {/*
+          * Free text rather than a select, because `region` is not one of the
+          * option tables — there is no `site_region` list for an admin to
+          * edit, and hardcoding a two-item dropdown here would be this file
+          * quietly inventing a vocabulary the rest of the product does not
+          * enforce. The hint names the two values already in the data instead,
+          * which is the honest version of the same guidance.
+          */}
+        <Field
+          id="region"
+          label="Region"
+          value={form.region}
+          onChange={set("region")}
+          hint="How the portfolio is split for reporting. Existing sites use UK or Europe."
+        />
+      </SectionPanel>
 
-      {section === "Contacts" ? (
-        <div className="form-grid">
-          <Field id="mgr" label="Site manager" value={form.managerName} onChange={set("managerName")} />
-          <Field id="mgr-phone" label="Manager phone" type="tel" value={form.managerPhone} onChange={set("managerPhone")} hint="Keep the leading zero." />
-          <Field id="mgr-email" label="Manager email" type="email" value={form.managerEmail} onChange={set("managerEmail")} />
-          <Field id="landlord" label="Landlord" value={form.landlord} onChange={set("landlord")} />
-          <Field id="agent" label="Managing agent" value={form.managingAgent} onChange={set("managingAgent")} />
-          <Field id="ooh" label="Out-of-hours contact" value={form.outOfHoursContact} onChange={set("outOfHoursContact")} />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Contacts"
+        className="form-grid"
+        active={section === "Contacts"}
+      >
+        <Field id="mgr" label="Site manager" value={form.managerName} onChange={set("managerName")} />
+        <Field id="mgr-phone" label="Manager phone" type="tel" value={form.managerPhone} onChange={set("managerPhone")} hint="Keep the leading zero." />
+        <Field id="mgr-email" label="Manager email" type="email" value={form.managerEmail} onChange={set("managerEmail")} />
+        <Field id="landlord" label="Landlord" value={form.landlord} onChange={set("landlord")} />
+        <Field id="agent" label="Managing agent" value={form.managingAgent} onChange={set("managingAgent")} />
+        <Field id="ooh" label="Out-of-hours contact" value={form.outOfHoursContact} onChange={set("outOfHoursContact")} />
+      </SectionPanel>
 
-      {section === "Access" ? (
-        <div className="form-grid">
-          <Field
-            id="access-method"
-            label="How access is arranged"
-            value={form.accessMethod}
-            onChange={set("accessMethod")}
-            options={accessMethods}
-            hint="One method per site. Add another in Settings if yours is missing."
-          />
-          <Field id="access-contact" label="Access contact" value={form.accessContact} onChange={set("accessContact")} hint="Email address or phone number, whichever the centre uses." />
-          <Field id="access-url" label="Access portal" type="url" value={form.accessUrl} onChange={set("accessUrl")} />
-          <Field id="access-notes" label="Access notes" value={form.accessNotes} onChange={set("accessNotes")} multiline />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Access"
+        className="form-grid"
+        active={section === "Access"}
+      >
+        <Field
+          id="access-method"
+          label="How access is arranged"
+          value={form.accessMethod}
+          onChange={set("accessMethod")}
+          options={accessMethods}
+          hint="One method per site. Add another in Settings if yours is missing."
+        />
+        <Field id="access-contact" label="Access contact" value={form.accessContact} onChange={set("accessContact")} hint="Email address or phone number, whichever the centre uses." />
+        <Field id="access-url" label="Access portal" type="url" value={form.accessUrl} onChange={set("accessUrl")} />
+        <Field id="access-notes" label="Access notes" value={form.accessNotes} onChange={set("accessNotes")} multiline />
+      </SectionPanel>
 
-      {section === "Opening" ? (
-        <div className="form-grid">
-          <Field id="hours" label="Opening hours" value={form.openingHours} onChange={set("openingHours")} multiline />
-          <Field id="delivery" label="Delivery restrictions" value={form.deliveryRestrictions} onChange={set("deliveryRestrictions")} multiline />
-          <Field id="parking" label="Parking" value={form.parkingNotes} onChange={set("parkingNotes")} multiline />
-          <Field id="keys" label="Key and alarm notes" value={form.keyAlarmNotes} onChange={set("keyAlarmNotes")} multiline />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Opening"
+        className="form-grid"
+        active={section === "Opening"}
+      >
+        <Field id="hours" label="Opening hours" value={form.openingHours} onChange={set("openingHours")} multiline />
+        <Field id="delivery" label="Delivery restrictions" value={form.deliveryRestrictions} onChange={set("deliveryRestrictions")} multiline />
+        <Field id="parking" label="Parking" value={form.parkingNotes} onChange={set("parkingNotes")} multiline />
+        <Field id="keys" label="Key and alarm notes" value={form.keyAlarmNotes} onChange={set("keyAlarmNotes")} multiline />
+      </SectionPanel>
 
-      {section === "Lease" ? (
-        <div className="form-grid">
-          <Field id="lease-start" label="Lease start" type="date" value={form.leaseStart} onChange={set("leaseStart")} />
-          <Field id="lease-end" label="Lease end" type="date" value={form.leaseEnd} onChange={set("leaseEnd")} />
-          <Field id="break" label="Break clause" value={form.breakClause} onChange={set("breakClause")} />
-          <Field id="review" label="Rent review" value={form.rentReview} onChange={set("rentReview")} />
-          <Field id="charge" label="Service charge (£)" type="number" value={form.serviceCharge} onChange={set("serviceCharge")} hint="Annual amount in pounds." />
-          <Field
-            id="budget"
-            label="Annual maintenance budget (£)"
-            type="number"
-            value={form.annualBudget}
-            onChange={set("annualBudget")}
-            hint="Leave blank if no budget is set. Spend against budget reports how much of the portfolio is covered."
-          />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Lease"
+        className="form-grid"
+        active={section === "Lease"}
+      >
+        <Field id="lease-start" label="Lease start" type="date" value={form.leaseStart} onChange={set("leaseStart")} />
+        <Field id="lease-end" label="Lease end" type="date" value={form.leaseEnd} onChange={set("leaseEnd")} />
+        <Field id="break" label="Break clause" value={form.breakClause} onChange={set("breakClause")} />
+        <Field id="review" label="Rent review" value={form.rentReview} onChange={set("rentReview")} />
+        <Field id="charge" label="Service charge (£)" type="number" value={form.serviceCharge} onChange={set("serviceCharge")} hint="Annual amount in pounds." />
+        <Field
+          id="budget"
+          label="Annual maintenance budget (£)"
+          type="number"
+          value={form.annualBudget}
+          onChange={set("annualBudget")}
+          hint="Leave blank if no budget is set. Spend against budget reports how much of the portfolio is covered."
+        />
+      </SectionPanel>
 
-      {section === "Reconciliation" ? (
-        <div className="form-grid">
-          <p className="form-hint">
-            The two monday boards name the same site differently. Record both
-            spellings here and an import matches either one.
-          </p>
-          <Field id="monday-maint" label="Name on the Maintenance board" value={form.mondayMaintenanceName} onChange={set("mondayMaintenanceName")} placeholder="Wood Green - High Road" />
-          <Field id="monday-comp" label="Name on the Store Documentation board" value={form.mondayComplianceName} onChange={set("mondayComplianceName")} placeholder="Woodgreen" />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Reconciliation"
+        className="form-grid"
+        active={section === "Reconciliation"}
+      >
+        <p className="form-hint">
+          The two monday boards name the same site differently. Record both
+          spellings here and an import matches either one.
+        </p>
+        <Field id="monday-maint" label="Name on the Maintenance board" value={form.mondayMaintenanceName} onChange={set("mondayMaintenanceName")} placeholder="Wood Green - High Road" />
+        <Field id="monday-comp" label="Name on the Store Documentation board" value={form.mondayComplianceName} onChange={set("mondayComplianceName")} placeholder="Woodgreen" />
+      </SectionPanel>
 
       {error ? (
         <div className="form-error" role="alert">

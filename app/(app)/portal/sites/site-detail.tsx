@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SectionPanel, SectionTabs } from "./section-tabs";
 import { useLoader } from "./use-loader";
 import {
   api,
@@ -61,6 +62,12 @@ const TABS = [
   "Contacts",
   "Activity",
 ] as const;
+
+/**
+ * Namespaces this screen's tab and panel ids so they cannot collide with the
+ * editor's — both strips have a "Contacts". See section-tabs.tsx.
+ */
+const TAB_PREFIX = "site-detail";
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="analytics-empty">{children}</p>;
@@ -167,62 +174,70 @@ export function SiteDetail({
         </div>
       </header>
 
-      <div className="view-switch view-switch--text" role="tablist" aria-label="Site sections">
-        {TABS.map((entry) => (
-          <button
-            key={entry}
-            type="button"
-            role="tab"
-            aria-selected={tab === entry}
-            className={tab === entry ? "is-active" : ""}
-            onClick={() => setTab(entry)}
-          >
-            {entry}
-          </button>
-        ))}
-      </div>
+      {/*
+        One tab pattern, shared with the editor. The strip used to declare
+        `role="tablist"` and then behave like seven separate buttons — no
+        `aria-controls`, nothing carrying `role="tabpanel"`, seven Tab stops
+        and dead arrow keys. section-tabs.tsx has the measurements.
+      */}
+      <SectionTabs
+        idPrefix={TAB_PREFIX}
+        label="Site sections"
+        sections={TABS}
+        active={tab}
+        onChange={setTab}
+      />
 
-      {tab === "Overview" ? (
-        <div className="site-stat-grid">
-          <div className="panel">
-            <span className="drawer-label">Open jobs</span>
-            <strong>{openJobs.length}</strong>
-          </div>
-          <div className="panel">
-            <span className="drawer-label">Jobs recorded</span>
-            <strong>{data.jobs.length}</strong>
-          </div>
-          <div className="panel">
-            <span className="drawer-label">Assets</span>
-            <strong>{data.units.length}</strong>
-          </div>
-          <div className="panel">
-            <span className="drawer-label">Documents held</span>
-            <strong>{data.compliance.length}</strong>
-          </div>
-          <div className="panel">
-            <span className="drawer-label">Spend recorded</span>
-            <strong>{formatMoney(Math.round(spend * 100))}</strong>
-          </div>
-          <div className="panel">
-            <span className="drawer-label">Site type</span>
-            <strong>{labelFor(siteTypes, site.siteTypeValue ?? site.type)}</strong>
-          </div>
-          <div className="panel site-detail__wide">
-            <Row label="Lease" value={`${formatDate(site.leaseStart)} to ${formatDate(site.leaseEnd)}`} />
-            <Row label="Break clause" value={site.breakClause} />
-            <Row label="Rent review" value={site.rentReview} />
-            <Row label="Service charge" value={formatMoney(site.serviceChargePence)} />
-            <Row label="Opening hours" value={site.openingHours} />
-            <Row label="Deliveries" value={site.deliveryRestrictions} />
-            <Row label="Parking" value={site.parkingNotes} />
-            <Row label="Notes" value={site.notes} />
-          </div>
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Overview"
+        className="site-stat-grid"
+        focusable
+        active={tab === "Overview"}
+      >
+        <div className="panel">
+          <span className="drawer-label">Open jobs</span>
+          <strong>{openJobs.length}</strong>
         </div>
-      ) : null}
+        <div className="panel">
+          <span className="drawer-label">Jobs recorded</span>
+          <strong>{data.jobs.length}</strong>
+        </div>
+        <div className="panel">
+          <span className="drawer-label">Assets</span>
+          <strong>{data.units.length}</strong>
+        </div>
+        <div className="panel">
+          <span className="drawer-label">Documents held</span>
+          <strong>{data.compliance.length}</strong>
+        </div>
+        <div className="panel">
+          <span className="drawer-label">Spend recorded</span>
+          <strong>{formatMoney(Math.round(spend * 100))}</strong>
+        </div>
+        <div className="panel">
+          <span className="drawer-label">Site type</span>
+          <strong>{labelFor(siteTypes, site.siteTypeValue ?? site.type)}</strong>
+        </div>
+        <div className="panel site-detail__wide">
+          <Row label="Lease" value={`${formatDate(site.leaseStart)} to ${formatDate(site.leaseEnd)}`} />
+          <Row label="Break clause" value={site.breakClause} />
+          <Row label="Rent review" value={site.rentReview} />
+          <Row label="Service charge" value={formatMoney(site.serviceChargePence)} />
+          <Row label="Opening hours" value={site.openingHours} />
+          <Row label="Deliveries" value={site.deliveryRestrictions} />
+          <Row label="Parking" value={site.parkingNotes} />
+          <Row label="Notes" value={site.notes} />
+        </div>
+      </SectionPanel>
 
-      {tab === "Jobs" ? (
-        data.jobs.length === 0 ? (
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Jobs"
+        focusable
+        active={tab === "Jobs"}
+      >
+        {data.jobs.length === 0 ? (
           <Empty>No jobs have been raised for this site yet.</Empty>
         ) : (
           <div className="table-scroll">
@@ -252,11 +267,16 @@ export function SiteDetail({
               </tbody>
             </table>
           </div>
-        )
-      ) : null}
+        )}
+      </SectionPanel>
 
-      {tab === "Compliance" ? (
-        data.compliance.length === 0 ? (
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Compliance"
+        focusable
+        active={tab === "Compliance"}
+      >
+        {data.compliance.length === 0 ? (
           <Empty>
             No certificates recorded against this site. Upload one from the
             Compliance screen and its expiry appears here.
@@ -290,11 +310,16 @@ export function SiteDetail({
               </tbody>
             </table>
           </div>
-        )
-      ) : null}
+        )}
+      </SectionPanel>
 
-      {tab === "Assets" ? (
-        data.units.length === 0 ? (
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Assets"
+        focusable
+        active={tab === "Assets"}
+      >
+        {data.units.length === 0 ? (
           <Empty>No assets recorded here yet. Add one from the Units screen.</Empty>
         ) : (
           <div className="table-scroll">
@@ -322,11 +347,16 @@ export function SiteDetail({
               </tbody>
             </table>
           </div>
-        )
-      ) : null}
+        )}
+      </SectionPanel>
 
-      {tab === "Documents" ? (
-        data.files.length === 0 ? (
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Documents"
+        focusable
+        active={tab === "Documents"}
+      >
+        {data.files.length === 0 ? (
           <Empty>No files are attached to this site.</Empty>
         ) : (
           <ul className="file-list">
@@ -339,30 +369,39 @@ export function SiteDetail({
               </li>
             ))}
           </ul>
-        )
-      ) : null}
+        )}
+      </SectionPanel>
 
-      {tab === "Contacts" ? (
-        <div className="panel">
-          <Row label="Site manager" value={site.managerName} />
-          <Row label="Phone" value={site.managerPhone} />
-          <Row label="Email" value={site.managerEmail} />
-          <Row label="Landlord" value={site.landlord} />
-          <Row label="Managing agent" value={site.managingAgent} />
-          <Row label="Out of hours" value={site.outOfHoursContact} />
-          <Row label="Access method" value={site.accessMethod} />
-          <Row label="Access contact" value={site.accessContact} />
-          <Row
-            label="Access portal"
-            value={site.accessUrl ? <a href={site.accessUrl}>{site.accessUrl}</a> : null}
-          />
-          <Row label="Access notes" value={site.accessNotes} />
-          <Row label="Keys and alarm" value={site.keyAlarmNotes} />
-        </div>
-      ) : null}
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Contacts"
+        className="panel"
+        focusable
+        active={tab === "Contacts"}
+      >
+        <Row label="Site manager" value={site.managerName} />
+        <Row label="Phone" value={site.managerPhone} />
+        <Row label="Email" value={site.managerEmail} />
+        <Row label="Landlord" value={site.landlord} />
+        <Row label="Managing agent" value={site.managingAgent} />
+        <Row label="Out of hours" value={site.outOfHoursContact} />
+        <Row label="Access method" value={site.accessMethod} />
+        <Row label="Access contact" value={site.accessContact} />
+        <Row
+          label="Access portal"
+          value={site.accessUrl ? <a href={site.accessUrl}>{site.accessUrl}</a> : null}
+        />
+        <Row label="Access notes" value={site.accessNotes} />
+        <Row label="Keys and alarm" value={site.keyAlarmNotes} />
+      </SectionPanel>
 
-      {tab === "Activity" ? (
-        data.activity.length === 0 ? (
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Activity"
+        focusable
+        active={tab === "Activity"}
+      >
+        {data.activity.length === 0 ? (
           <Empty>Nothing has changed on this site since it was created.</Empty>
         ) : (
           <ul className="activity-list">
@@ -375,8 +414,8 @@ export function SiteDetail({
               </li>
             ))}
           </ul>
-        )
-      ) : null}
+        )}
+      </SectionPanel>
     </section>
   );
 }
