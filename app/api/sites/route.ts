@@ -31,6 +31,7 @@ import {
   releaseSiteAlias,
   setSiteAliases,
   setSiteGroupMembership,
+  stageZeroState,
   uniqueSlug,
 } from "../../lib/sites-repository";
 
@@ -721,11 +722,11 @@ export async function POST(request: Request) {
       status,
       slug,
       position,
-      active: status !== "closed",
+      active: stageZeroState(status).active,
       // The Stage 0 columns are kept in step until Stage 3 retires them, so
       // screens that still read `type`, `lifecycle` and `address` keep working.
       type: siteTypeValue,
-      lifecycle: status === "closed" ? "Closed" : "Current",
+      lifecycle: stageZeroState(status).lifecycle,
       // A new row has nothing stored to lose, so the composite is built
       // outright — but still without repeating a part the first line already
       // carries. See `composeAddress`.
@@ -956,8 +957,8 @@ export async function PATCH(request: Request) {
       status === existing.status
         ? {}
         : {
-            active: status !== "closed",
-            lifecycle: status === "closed" ? "Closed" : "Current",
+            active: stageZeroState(status).active,
+            lifecycle: stageZeroState(status).lifecycle,
           };
 
     /*

@@ -117,6 +117,28 @@ export async function getSite(db: Database, organisationId: string, id: string) 
   return row ?? null;
 }
 
+/**
+ * The two Stage-0 columns a status implies, in one place.
+ *
+ * `lifecycle` and `active` are the lossy projections of `status`, and the
+ * derivation used to know only two answers: 'closed' was Closed/false and
+ * EVERYTHING ELSE was Current/true. That is wrong for 'other', which is how the
+ * register records a row it cannot vouch for — a legacy or unverified location.
+ * The three such rows on the canonical register are stored `status='other'`
+ * with `lifecycle='Closed'` and `active=false`, and creating or moving a site
+ * to 'other' contradicted them on the spot: the row came back Current and
+ * active, and then read as an open location everywhere `active` is filtered on.
+ *
+ * The test is deliberately "not closed and not other" rather than
+ * "is active". `status` also carries the configured 'international', which IS
+ * open for business, and keying on 'active' alone would have quietly closed
+ * every international site to fix the legacy ones.
+ */
+export function stageZeroState(status: string): { active: boolean; lifecycle: string } {
+  const open = status !== "closed" && status !== "other";
+  return { active: open, lifecycle: open ? "Current" : "Closed" };
+}
+
 export async function listAliases(db: Database, organisationId: string) {
   return db
     .select()

@@ -20,6 +20,7 @@ import {
   recordAnomaly,
   resolveSiteByName,
   setSiteAliases,
+  stageZeroState,
   uniqueSlug,
 } from "../../../lib/sites-repository";
 
@@ -448,8 +449,8 @@ export async function POST(request: Request) {
         mondayComplianceName: optional(cell(record, "monday_compliance_name")),
         notes: optional(cell(record, "notes")),
         type: siteTypeValue,
-        lifecycle: status === "closed" ? "Closed" : "Current",
-        active: status !== "closed",
+        lifecycle: stageZeroState(status).lifecycle,
+        active: stageZeroState(status).active,
         // The sheet's own answer wins. The derivation stays as the fallback a
         // NEW row needs when the template carries no region column.
         region: cell(record, "region") || (status === "international" ? "Europe" : "UK"),
