@@ -105,7 +105,19 @@ export function SiteDetail({
   siteId: string;
   siteTypes: OptionChoice[];
   statuses: OptionChoice[];
-  onEdit: (site: SiteRecord) => void;
+  /**
+   * The site AND the groups it is currently in.
+   *
+   * The second argument is not decoration. `SiteForm` always posts its
+   * `groupIds`, and `PATCH /api/sites` treats a sent list as authoritative:
+   * `setSiteGroupMembership` deletes every membership row for the site
+   * before re-inserting what it was handed. So an editor opened with an
+   * empty list and saved does not leave the groups alone — it destroys
+   * them, with the boxes drawn unticked as if that had always been true.
+   * This screen has already fetched the real membership; handing it over
+   * is what stops the editor guessing.
+   */
+  onEdit: (site: SiteRecord, groupIds: string[]) => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
@@ -126,7 +138,14 @@ export function SiteDetail({
       <header className="section-header">
         <div>
           <p className="eyebrow-chip">{site.code ?? "No code"}</p>
-          <h2>{site.name}</h2>
+          {/*
+            The site's name is this view's `<h1>`. The detail view is a
+            separate return from the register, so the list's `<h1>Sites</h1>`
+            is not on the page here — axe reported `page-has-heading-one` on
+            every detail run, and at 390px, where the topbar title is gone,
+            the screen had no heading of any level to announce what it showed.
+          */}
+          <h1>{site.name}</h1>
           <p className="drawer-label">
             {[site.addressLine1, site.city, site.postcode].filter(Boolean).join(", ")}
           </p>
@@ -135,7 +154,11 @@ export function SiteDetail({
           <span className="status-chip" style={styleFor(statuses, site.status)}>
             {labelFor(statuses, site.status)}
           </span>
-          <button type="button" className="secondary-button" onClick={() => onEdit(site)}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onEdit(site, data.groupIds)}
+          >
             Edit site
           </button>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close site">

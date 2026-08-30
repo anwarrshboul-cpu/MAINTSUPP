@@ -5,6 +5,7 @@ import { siteGroupMembers, siteGroups } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { listOptionValues } from "../../../lib/options-repository";
 import { listSiteGroups, toSlug } from "../../../lib/sites-repository";
+import { siteWriteFailure } from "../route";
 
 function text(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -32,8 +33,8 @@ export async function GET(request: Request) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
-    const message = error instanceof Error ? error.message : "Site groups could not be loaded.";
-    return Response.json({ error: message }, { status: 503 });
+    const failure = siteWriteFailure(error, "Site groups could not be loaded.");
+    return Response.json({ error: failure.message }, { status: 503 });
   }
 }
 
@@ -69,8 +70,8 @@ export async function POST(request: Request) {
     });
     return Response.json({ ok: true, id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The group could not be created.";
-    return Response.json({ error: message }, { status: 400 });
+    const failure = siteWriteFailure(error, "The group could not be created.");
+    return Response.json({ error: failure.message }, { status: failure.status });
   }
 }
 
@@ -104,8 +105,8 @@ export async function PATCH(request: Request) {
       .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)));
     return Response.json({ ok: true, id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The group could not be updated.";
-    return Response.json({ error: message }, { status: 400 });
+    const failure = siteWriteFailure(error, "The group could not be updated.");
+    return Response.json({ error: failure.message }, { status: failure.status });
   }
 }
 
@@ -133,7 +134,7 @@ export async function DELETE(request: Request) {
       .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)));
     return Response.json({ ok: true, id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The group could not be removed.";
-    return Response.json({ error: message }, { status: 400 });
+    const failure = siteWriteFailure(error, "The group could not be removed.");
+    return Response.json({ error: failure.message }, { status: failure.status });
   }
 }

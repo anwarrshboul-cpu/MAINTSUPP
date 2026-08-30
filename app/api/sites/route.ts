@@ -13,6 +13,7 @@ import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/te
 import { listOptionValues } from "../../lib/options-repository";
 import {
   cleanAddress,
+  codeConflict,
   existingSiteCodes,
   findDuplicateCandidates,
   addSiteAlias,
@@ -74,6 +75,130 @@ function sitesDatabaseError(error: unknown) {
   return "Sites are temporarily unavailable.";
 }
 
+/**
+ * A database fault that never went through Drizzle, and so has neither the
+ * `Failed query:` prefix nor an `Error` cause to recognise it by.
+ *
+ * The first version of `siteWriteFailure` tested only those two marks, and QA
+ * showed six real shapes walking straight past it and answering 400 with their
+ * raw text in production:
+ *
+ *   D1_ERROR: no such table: sites
+ *   D1_ERROR: UNIQUE constraint failed: site_aliases.organisation_id, …
+ *   no such column: sites.annual_budget_pence
+ *   connect ECONNREFUSED 10.12.4.7:5432
+ *   sorry, too many clients already
+ *   password authentication failed for user "portal_writer"
+ *
+ * They are reachable, not hypothetical. `ensureDatabase()` is the FIRST
+ * statement inside the try of every write verb here and `db/init.ts` runs its
+ * DDL through 249 raw `.prepare()` calls that Drizzle never sees; a connection
+ * failure is thrown before there is a query to wrap at all; and the session
+ * pooler's client cap makes "too many clients" an ordinary Tuesday.
+ *
+ * It also fixed a hole of its own making: `sitesDatabaseError` has a branch
+ * for "no such table"/"no such column" that answers "the workspace database is
+ * being prepared, retry in a moment" — and the narrow classifier rejected
+ * exactly those errors before they could reach the helper written for them.
+ *
+ * WIDENING THE RECOGNISER, NOT THE SUPPRESSION, is the point. None of the
+ * twenty-one messages these routes and their helpers throw matches this
+ * pattern, so every one of them still reaches the caller unchanged at 400.
+ *
+ * The last two alternatives are belt and braces. A constraint violation
+ * normally arrives either Drizzle-wrapped or `D1_ERROR:`-prefixed and is
+ * already caught above, and no real path producing a bare unmarked one could be
+ * constructed — only a synthetic one. They cost nothing and close the shape.
+ * `codeCollision` is deliberately tested BEFORE this, so a duplicate site code
+ * still answers 409 rather than being reported as an outage.
+ */
+const DATABASE_FAULT =
+  /^D1_ERROR|no such (table|column)|database is locked|SQLITE_|ECONNREFUSED|ETIMEDOUT|too many clients|authentication failed|UNIQUE constraint failed|duplicate key/i;
+
+/**
+ * The same protection, for the verbs that WRITE.
+ *
+ * `sitesDatabaseError` above was written for exactly this leak and then wired
+ * into one catch — the GET. POST, PATCH and DELETE here, all four verbs in
+ * `groups/route.ts` and both in `csv/route.ts` still answered with
+ * `error.message` verbatim, which for a Drizzle fault IS the failing
+ * statement. Captured from the running app before this change:
+ *
+ *   400 {"error":"Failed query: update \"sites\" set \"name\" = ?, \"type\" = ?,
+ *        \"region\" = ?, …"}
+ *
+ * so the schema went to the caller on eleven paths instead of one, and in
+ * production rather than only in development.
+ *
+ * The status was wrong as well. A database outage was reported as 400, which
+ * tells the caller their input was bad and invites them to edit a form that
+ * was never the problem; it is 503, the same answer the GET already gives.
+ *
+ * VALIDATION IS LEFT ALONE, and this narrows to the database fault rather than
+ * the other way round for a concrete reason. These routes refuse bad input by
+ * THROWING — "A site name is required.", "A first line of address is required.",
+ * `"<x>" is not a configured site type. Add it in Settings first.` and eleven
+ * others, plus whatever `junkReason` returns. All fifteen land in these same
+ * catches. Suppressing unrecognised messages in production would therefore
+ * replace every one of them with "The site could not be created.", and a form
+ * that cannot say which field is wrong is worse than the leak this closes.
+ *
+ * So only a fault that IS the database is converted. Drizzle prefixes its
+ * wrapper `Failed query:` and carries the real reason on `.cause`; a validation
+ * `new Error("A site name is required.")` has neither, and passes through at
+ * 400 exactly as before. What is left exposed is the message of some other
+ * unexpected error, which contains no statement and no bound parameters — the
+ * two things Part 16 names.
+ */
+/**
+ * The site-code unique index, refused in the caller's language.
+ *
+ * `codeConflict()` catches this before the write in every path that calls it,
+ * so reaching here means the check could not: two concurrent creates that both
+ * passed their SELECT, or an importer that never asked. The index is what
+ * actually holds the invariant, and its refusal is a CONFLICT about the value
+ * the caller sent — not the outage `DATABASE_FAULT` would otherwise report it
+ * as, since "UNIQUE constraint failed" matches that pattern too. This is tested
+ * first for exactly that reason.
+ *
+ * The two engines word it differently: SQLite names the columns, Postgres names
+ * the index. Both are matched rather than assuming the deployment target.
+ */
+function codeCollision(error: unknown) {
+  const text =
+    error instanceof Error
+      ? `${error.message} ${error.cause instanceof Error ? error.cause.message : ""}`
+      : String(error);
+  return (
+    text.includes("sites_organisation_code_idx") ||
+    (/UNIQUE constraint failed/i.test(text) && /sites\.code/i.test(text))
+  );
+}
+
+export function siteWriteFailure(error: unknown, fallback: string) {
+  if (codeCollision(error)) {
+    return {
+      message: "Another site already uses that code.",
+      status: 409 as const,
+    };
+  }
+
+  const databaseFault =
+    error instanceof Error &&
+    (error.message.startsWith("Failed query:") ||
+      error.cause instanceof Error ||
+      DATABASE_FAULT.test(error.message));
+
+  if (databaseFault) {
+    return { message: sitesDatabaseError(error), status: 503 as const };
+  }
+
+  return {
+    message: error instanceof Error && error.message ? error.message : fallback,
+    status: 400 as const,
+  };
+}
+
 function text(value: unknown, max = 240) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -95,6 +220,28 @@ function pence(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return Math.round(parsed * 100);
+}
+
+/**
+ * Pounds in, or pence in — but only ONE of them is multiplied.
+ *
+ * THE BUG THIS FIXES. Both keys were funnelled through `pence()`, which
+ * multiplies by 100, so a value that already arrived in pence was multiplied
+ * again. `PATCH { serviceChargePence: 123456 }` stored 12345600, and because
+ * `GET` returns the column as `serviceChargePence`, an ordinary read-edit-save
+ * of an untouched form multiplied the figure by a hundred every single time.
+ * `annualBudgetPence` had it too. Both keys are advertised in
+ * `PAYLOAD_SOURCES`, so both were reachable.
+ *
+ * The two names mean different units and now behave that way: `serviceCharge`
+ * is pounds and is scaled, `serviceChargePence` is already the stored integer
+ * and is only rounded. Pounds keeps precedence, as before.
+ */
+function moneyPence(pounds: unknown, pennies: unknown) {
+  if (pounds !== undefined && pounds !== null) return pence(pounds);
+  if (pennies === undefined || pennies === null || pennies === "") return null;
+  const parsed = Number(pennies);
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
 }
 
 function stringList(value: unknown): string[] {
@@ -174,8 +321,8 @@ function sitePayload(data: Record<string, unknown>) {
     leaseEnd: optionalText(data.leaseEnd, 20),
     breakClause: optionalText(data.breakClause, 200),
     rentReview: optionalText(data.rentReview, 200),
-    serviceChargePence: pence(data.serviceCharge ?? data.serviceChargePence),
-    annualBudgetPence: pence(data.annualBudget ?? data.annualBudgetPence),
+    serviceChargePence: moneyPence(data.serviceCharge, data.serviceChargePence),
+    annualBudgetPence: moneyPence(data.annualBudget, data.annualBudgetPence),
     mondayMaintenanceName: optionalText(data.mondayMaintenanceName, 160),
     mondayComplianceName: optionalText(data.mondayComplianceName, 160),
     notes: optionalText(data.notes, 2000),
@@ -279,6 +426,34 @@ function preserveUnsent<Row extends Record<string, unknown>>(
   return merged as { [K in keyof SitePayload]: SitePayload[K] | (K extends keyof Row ? Row[K] : never) };
 }
 
+/**
+ * Every requested reporting group must be one THIS organisation owns.
+ *
+ * THE BUG THIS FIXES. `setSiteGroupMembership` clears the site's membership
+ * first and then re-inserts only the groups the organisation owns, so a group
+ * id belonging to another tenant — or one that exists nowhere — was DROPPED in
+ * silence while the route answered `{ok:true}`. The caller was told the
+ * assignment had been made; what had actually happened was that the site's real
+ * groups were deleted and nothing put back.
+ *
+ * Checked BEFORE anything is written, so a bad id costs nothing rather than
+ * costing the memberships the site already had. Answering an unknown id and
+ * another tenant's id identically is deliberate — the same rule the board's
+ * create route follows for `site_id` — so a 404 cannot be used to confirm that
+ * an id is real.
+ */
+async function unknownGroupRefusal(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  requested: string[],
+) {
+  if (!requested.length) return null;
+  const owned = new Set((await listSiteGroups(db, orgId)).map((group) => group.id));
+  const missing = requested.filter((groupId) => !owned.has(groupId));
+  if (!missing.length) return null;
+  return Response.json({ error: "Group not found." }, { status: 404 });
+}
+
 async function logChange(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
@@ -288,7 +463,24 @@ async function logChange(
   detail: Record<string, unknown>,
 ) {
   await db.insert(activityLog).values({
-    id: `activity-site-${siteId}-${Date.now().toString(36)}`,
+    /*
+     * A RANDOM SUFFIX, because the timestamp alone is not unique.
+     *
+     * `Date.now()` has millisecond resolution, so two saves of the SAME site
+     * inside one millisecond built the same primary key and the second insert
+     * failed on it. Under 144 concurrent PATCHes, 113 failed this way.
+     *
+     * The damage was not a missing audit line. The site UPDATE runs BEFORE
+     * this insert, so the row was already written when the audit failed and
+     * the request then answered as an error: measured at 12 concurrent saves,
+     * 8 were reported FAILED to the caller and the value left in the row came
+     * from one of them. "It failed" has to mean nothing happened, and here it
+     * did not. Same suffix shape as `newId` above.
+     *
+     * `app/api/units/route.ts:110` builds its audit id the identical way and
+     * has the identical defect; it is outside this workstream and unchanged.
+     */
+    id: `activity-site-${siteId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     organisationId: orgId,
     entityType: "site",
     entityId: siteId,
@@ -409,6 +601,9 @@ export async function POST(request: Request) {
     const junk = junkReason(payload.name, address.value);
     if (junk) throw new Error(junk);
 
+    const badGroup = await unknownGroupRefusal(db, orgId, stringList(body.data?.groupIds));
+    if (badGroup) return badGroup;
+
     // X6 — warn, do not block. Two centres can legitimately share a name.
     const duplicates = await findDuplicateCandidates(db, orgId, payload.name);
     if (duplicates.length && !body.confirmDuplicate) {
@@ -429,6 +624,21 @@ export async function POST(request: Request) {
     const slug = await uniqueSlug(db, orgId, payload.name);
     // The owner has no existing store-code convention, so one is generated and
     // stored. It stays editable afterwards like any other field.
+    /*
+     * A code the CALLER supplied is checked; a generated one does not need to
+     * be, because `generateSiteCode` is already handed the existing codes and
+     * picks around them. Two sites answering to one code make
+     * `resolveSiteByName` non-deterministic — see `codeConflict`.
+     */
+    if (payload.code) {
+      const clash = await codeConflict(db, orgId, payload.code, id);
+      if (clash) {
+        return Response.json(
+          { error: `Another site already uses the code "${payload.code}".`, conflictSiteId: clash },
+          { status: 409 },
+        );
+      }
+    }
     const code = payload.code ?? generateSiteCode(payload.name, await existingSiteCodes(db, orgId));
     const position = await nextSitePosition(db, orgId);
 
@@ -468,7 +678,7 @@ export async function POST(request: Request) {
       });
     }
 
-    await setSiteAliases(db, orgId, id, [
+    const aliasWrite = await setSiteAliases(db, orgId, id, [
       ...stringList(body.data?.aliases),
       ...(payload.mondayMaintenanceName ? [payload.mondayMaintenanceName] : []),
       ...(payload.mondayComplianceName ? [payload.mondayComplianceName] : []),
@@ -476,10 +686,17 @@ export async function POST(request: Request) {
     await setSiteGroupMembership(db, orgId, id, stringList(body.data?.groupIds));
     await logChange(db, orgId, id, "created", actor.email, { name: payload.name });
 
-    return Response.json({ ok: true, id });
+    // A name another site already answers to is not recorded. Saying so is the
+    // difference between an alias that is missing and an alias nobody knows is
+    // missing — see `setSiteAliases`.
+    return Response.json({
+      ok: true,
+      id,
+      ...(aliasWrite.refused.length ? { aliasConflicts: aliasWrite.refused } : {}),
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The site could not be created.";
-    return Response.json({ error: message }, { status: 400 });
+    const failure = siteWriteFailure(error, "The site could not be created.");
+    return Response.json({ error: failure.message }, { status: failure.status });
   }
 }
 
@@ -500,6 +717,11 @@ export async function PATCH(request: Request) {
 
     const existing = await getSite(db, orgId, id);
     if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
+
+    if (body.data?.groupIds !== undefined) {
+      const badGroup = await unknownGroupRefusal(db, orgId, stringList(body.data.groupIds));
+      if (badGroup) return badGroup;
+    }
 
     /*
      * A NAME-ONLY rename, for callers that hold the site's identity and
@@ -581,6 +803,17 @@ export async function PATCH(request: Request) {
     const address = cleanAddress(payload.addressLine1 ?? "");
     if (!address.value) throw new Error("A first line of address is required.");
 
+    // Same rule on edit: a code is an identity, and it may not be duplicated.
+    if (payload.code && payload.code !== existing.code) {
+      const clash = await codeConflict(db, orgId, payload.code, id);
+      if (clash) {
+        return Response.json(
+          { error: `Another site already uses the code "${payload.code}".`, conflictSiteId: clash },
+          { status: 409 },
+        );
+      }
+    }
+
     if (payload.name !== existing.name) {
       // A name another site already answers to by alias is a hard conflict, not
       // a warning — the alias insert below would be rejected by the unique
@@ -618,6 +851,41 @@ export async function PATCH(request: Request) {
         ? existing.slug
         : await uniqueSlug(db, orgId, payload.name, id);
 
+    /*
+     * THE STAGE 0 TWINS MOVE ONLY WHEN THE THING THEY TWIN MOVES.
+     *
+     * `lifecycle` and `active` are derived from `status`, and the derivation
+     * only knows two answers: 'closed' is Closed/false, everything else is
+     * Current/true. `status` also carries 'other' and 'international', which
+     * are neither — and the register already holds rows that say so. The three
+     * legacy rows on the canonical register are `status='other'` with
+     * `lifecycle='Closed'` and `active=false`, recorded that way deliberately
+     * because they are unverified and must not be offered as current sites.
+     *
+     * Re-deriving on every save flattened them. A notes-only PATCH — which
+     * sends no status at all, so `preserveUnsent` hands back the stored one —
+     * still wrote `active = true` and `lifecycle = 'Current'`, promoting a
+     * legacy row into the live register and moving it out of the Closed
+     * reporting group, which `seedStoreDocumentationGroups` rebuilds from
+     * `lifecycle`. That is the same fault `preserveUnsent` exists to stop, one
+     * layer further down: these two columns are not payload fields, so
+     * preservation never reached them.
+     *
+     * So they are rewritten when the status actually changes and left alone
+     * when it does not. Closing and reopening still move all three together —
+     * see the DELETE verb below, which writes the trio outright. This is the
+     * rule `/api/workspace` already applies from the other direction: it too
+     * only clears a site that was ACTUALLY closed, because 'international' and
+     * 'other' are open states a two-way toggle cannot express.
+     */
+    const lifecycleState =
+      status === existing.status
+        ? {}
+        : {
+            active: status !== "closed",
+            lifecycle: status === "closed" ? "Closed" : "Current",
+          };
+
     await db
       .update(sites)
       .set({
@@ -626,9 +894,8 @@ export async function PATCH(request: Request) {
         siteTypeValue,
         status,
         slug,
-        active: status !== "closed",
         type: siteTypeValue,
-        lifecycle: status === "closed" ? "Closed" : "Current",
+        ...lifecycleState,
         address: [address.value, payload.addressLine2, payload.city, payload.postcode]
           .filter(Boolean)
           .join(", ")
@@ -652,22 +919,30 @@ export async function PATCH(request: Request) {
       await addSiteAlias(db, orgId, id, existing.name, "rename");
     }
 
+    let aliasConflicts: Array<{ alias: string; conflictSiteId: string }> = [];
     if (Array.isArray(body.data?.aliases) || typeof body.data?.aliases === "string") {
-      await setSiteAliases(db, orgId, id, [
+      const aliasWrite = await setSiteAliases(db, orgId, id, [
         ...stringList(body.data?.aliases),
         ...(payload.mondayMaintenanceName ? [payload.mondayMaintenanceName] : []),
         ...(payload.mondayComplianceName ? [payload.mondayComplianceName] : []),
       ]);
+      aliasConflicts = aliasWrite.refused;
     }
     if (body.data?.groupIds !== undefined) {
       await setSiteGroupMembership(db, orgId, id, stringList(body.data.groupIds));
     }
     await logChange(db, orgId, id, "updated", actor.email, { name: payload.name });
 
-    return Response.json({ ok: true, id });
+    // See `setSiteAliases`: a name another site already answers to is refused,
+    // and the save must say so rather than report a list it did not record.
+    return Response.json({
+      ok: true,
+      id,
+      ...(aliasConflicts.length ? { aliasConflicts } : {}),
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The site could not be updated.";
-    return Response.json({ error: message }, { status: 400 });
+    const failure = siteWriteFailure(error, "The site could not be updated.");
+    return Response.json({ error: failure.message }, { status: failure.status });
   }
 }
 
@@ -719,7 +994,7 @@ export async function DELETE(request: Request) {
 
     return Response.json({ ok: true, id, retainedJobs: openJobs?.total ?? 0 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The site could not be archived.";
-    return Response.json({ error: message }, { status: 400 });
+    const failure = siteWriteFailure(error, "The site could not be archived.");
+    return Response.json({ error: failure.message }, { status: failure.status });
   }
 }

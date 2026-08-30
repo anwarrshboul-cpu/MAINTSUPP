@@ -99,6 +99,12 @@ export const sites = sqliteTable(
     index("sites_organisation_status_idx").on(table.organisationId, table.status),
     index("sites_organisation_position_idx").on(table.organisationId, table.position),
     uniqueIndex("sites_organisation_slug_idx").on(table.organisationId, table.slug),
+    // A code identifies a site to job intake — `resolveSiteByName` matches on it
+    // and returns the first row that does — so two sites may not share one. The
+    // application check gives the friendly 409; this is what actually holds the
+    // invariant against a concurrent create or an import that bypasses the check.
+    // NULL is distinct from NULL under UNIQUE, so uncoded sites are unaffected.
+    uniqueIndex("sites_organisation_code_idx").on(table.organisationId, table.code),
   ],
 );
 

@@ -25,6 +25,7 @@ import {
 } from "../../../db/schema";
 import { configuredValue } from "../../lib/options-repository";
 import { priorityRule } from "../../lib/priority-rules";
+import { unassignedSiteId } from "../../lib/site-reference";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
 import {
@@ -840,7 +841,16 @@ export async function PATCH(request: Request) {
             return Response.json({ error: "Site not found." }, { status: 404 });
           }
         }
-        values.siteId = nextSiteId;
+        /*
+         * Clearing a site has to be written the way the column can hold it.
+         * Every other writer already asks `unassignedSiteId()` — this one sent
+         * a raw `null`, which Postgres accepts and SQLite refuses, because
+         * `site_id` is NOT NULL there and cannot be relaxed in place. The
+         * refusal surfaced as a 503 whose dev body carried the failing
+         * statement and every column name with it. Same rule as the rest:
+         * NULL where the schema allows one, the sentinel where it does not.
+         */
+        values.siteId = nextSiteId ?? unassignedSiteId();
       }
     }
 

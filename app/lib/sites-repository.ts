@@ -385,13 +385,64 @@ export async function nameConflict(
   return null;
 }
 
+/**
+ * Whether another site in this organisation already answers to this code.
+ *
+ * A DUPLICATE CODE IS NOT COSMETIC, which is why this refuses rather than
+ * warns the way `findDuplicateCandidates` does for names. `resolveSiteByName`
+ * treats a code as an identity — it matches `row.code` case-insensitively and
+ * returns the FIRST row it finds — so two sites carrying the same code make
+ * that lookup non-deterministic, and job intake naming that code attaches the
+ * work to whichever shop the query happened to return. Silently sending an
+ * engineer to the wrong store is the precise failure the canonical register
+ * exists to prevent.
+ *
+ * Two sites may legitimately share a NAME (two centres in one city), and that
+ * stays a confirmable warning. Nothing legitimately shares a code.
+ *
+ * The comparison is the same case-insensitive trim `resolveSiteByName` uses,
+ * so this guards exactly the keyspace that resolution reads. Closed sites are
+ * included — a closed store still owns its code, and reissuing it would make
+ * historical jobs ambiguous.
+ */
+export async function codeConflict(
+  db: Database,
+  organisationId: string,
+  code: string,
+  excludeId: string,
+): Promise<string | null> {
+  const key = code.trim().toLowerCase();
+  if (!key) return null;
+  const rows = await listSites(db, organisationId, { includeInactive: true });
+  const clash = rows.find(
+    (row) => row.id !== excludeId && (row.code ?? "").trim().toLowerCase() === key,
+  );
+  return clash ? clash.id : null;
+}
+
+/**
+ * The alias editor's replace — and what it could NOT record.
+ *
+ * THE BUG THIS FIXES. The insert below carried `onConflictDoNothing`, and
+ * `site_aliases` is uniquely indexed on (organisation_id, normalised). So an
+ * alias already claimed by ANOTHER site was dropped in silence and the route
+ * answered `{ok:true}`: the editor showed the name as saved, the register went
+ * on resolving it to somebody else's store, and nothing anywhere said so. That
+ * is the swallow `addSiteAlias` refuses by name in its own header; this is the
+ * other half of the same rule, for the path that sends a whole list.
+ *
+ * The conflicting names are returned rather than thrown, because the rest of
+ * the list is legitimate and a save that half-worked must still say which half.
+ * A key this site already holds under a different `source` is NOT a conflict —
+ * it resolves here either way — so only another site's claim is reported.
+ */
 export async function setSiteAliases(
   db: Database,
   organisationId: string,
   siteId: string,
   aliases: string[],
   source = "manual",
-) {
+): Promise<{ refused: Array<{ alias: string; conflictSiteId: string }> }> {
   /*
    * Scoped to the source it is replacing. This used to clear EVERY alias the
    * site had, so saving the alias editor — which sends only the hand-typed list
@@ -408,12 +459,29 @@ export async function setSiteAliases(
         eq(siteAliases.source, source),
       ),
     );
+  /*
+   * Read AFTER the delete above, so a key this site had just given up is free
+   * again and renaming a list back to an earlier version does not report a
+   * conflict with itself.
+   */
+  const held = await db
+    .select({ siteId: siteAliases.siteId, normalised: siteAliases.normalised })
+    .from(siteAliases)
+    .where(eq(siteAliases.organisationId, organisationId));
+  const holder = new Map(held.map((row) => [row.normalised, row.siteId]));
+
+  const refused: Array<{ alias: string; conflictSiteId: string }> = [];
   const seen = new Set<string>();
   for (const alias of aliases) {
     const trimmed = alias.trim();
     const normalised = normaliseSiteName(trimmed);
     if (!trimmed || !normalised || seen.has(normalised)) continue;
     seen.add(normalised);
+    const claimed = holder.get(normalised);
+    if (claimed && claimed !== siteId) {
+      refused.push({ alias: trimmed, conflictSiteId: claimed });
+      continue;
+    }
     await db
       .insert(siteAliases)
       .values({
@@ -424,8 +492,11 @@ export async function setSiteAliases(
         normalised,
         source,
       })
+      // Kept as the last line of defence against a concurrent writer. The check
+      // above is what makes the refusal REPORTABLE rather than invisible.
       .onConflictDoNothing();
   }
+  return { refused };
 }
 
 export async function listSiteGroups(db: Database, organisationId: string) {

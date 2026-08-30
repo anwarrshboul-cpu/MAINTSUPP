@@ -107,7 +107,16 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
         siteId={mode.siteId}
         siteTypes={data?.siteTypes ?? []}
         statuses={data?.statuses ?? []}
-        onEdit={(site) => setMode({ kind: "form", site, groupIds: [] })}
+        /*
+         * The membership the detail screen already loaded, carried into the
+         * editor. This used to pass `[]`, and because a saved form posts its
+         * `groupIds` and the route deletes-then-reinserts from that list,
+         * opening a site from its own detail page and pressing Save wiped
+         * every reporting group it belonged to — no diff, no warning, and
+         * the boxes drawn unticked. The list row below has always passed the
+         * real ids; the two paths now agree.
+         */
+        onEdit={(site, groupIds) => setMode({ kind: "form", site, groupIds })}
         onClose={() => setMode({ kind: "list" })}
       />
     );
@@ -117,7 +126,17 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
     return (
       <section className="section-stack">
         <header className="section-header">
-          <h2>{mode.site ? `Edit ${mode.site.name}` : "Add a site"}</h2>
+          {/*
+            An `<h1>` for the same reason the list below is one. These three
+            views REPLACE each other — list, form and detail are separate
+            returns, not panes of one page — so while the form is open the
+            `<h1>Sites</h1>` is not rendered at all, and the document had no
+            level-one heading. axe reported `page-has-heading-one` on the Add
+            form and the Edit form, on Sites only. `.section-header h2` has no
+            rule anywhere, so this also stops the heading being the one
+            unstyled title in the shell.
+          */}
+          <h1>{mode.site ? `Edit ${mode.site.name}` : "Add a site"}</h1>
         </header>
         <SiteForm
           site={mode.site}
@@ -175,11 +194,22 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
         </div>
       </header>
 
+      {/*
+        NOT A TAB STOP. `.visually-hidden` clips this to a 1x1 rect but leaves
+        it focusable, and it is opened by the "Import CSV" button above rather
+        than by a <label for>. So a keyboard user reached it one Tab after that
+        button, landed on an invisible control, saw no focus ring anywhere on
+        the page and had to Tab again — a WCAG 2.4.7 dead stop and a second,
+        silent route to the same action. `tabIndex={-1}` leaves the picker fully
+        usable through the visible button, which is the accessible control and
+        already carries the name.
+      */}
       <input
         ref={fileInput}
         type="file"
         accept=".csv,text/csv"
         className="visually-hidden"
+        tabIndex={-1}
         aria-label="Choose a CSV of sites"
         onChange={async (event) => {
           const file = event.target.files?.[0];

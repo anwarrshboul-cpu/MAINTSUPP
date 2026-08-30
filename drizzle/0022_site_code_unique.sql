@@ -1,0 +1,18 @@
+-- Workstream 5 — a site code is an identity, and the database enforces it.
+--
+-- `resolveSiteByName` matches a job's location against `sites.code` and returns
+-- the FIRST row that matches, so two sites sharing a code make intake
+-- non-deterministic: the work attaches to whichever shop the query returned.
+--
+-- The application-level check (`codeConflict`) still runs and still answers a
+-- readable 409, but a SELECT followed by an INSERT cannot enforce uniqueness.
+-- Both ways through were reproduced: eight concurrent creates claiming one code
+-- all succeeded, and the CSV importer produced a duplicate from a two-row sheet
+-- with no concurrency at all.
+--
+-- NULL is distinct from NULL under UNIQUE in both SQLite and Postgres, so the
+-- majority of rows, which carry no code, are unaffected. Verified before
+-- writing this: zero duplicate code groups, zero empty-string codes and zero
+-- untrimmed codes in both the canonical register and development, so the index
+-- applies with no cleanup.
+CREATE UNIQUE INDEX IF NOT EXISTS `sites_organisation_code_idx` ON `sites` (`organisation_id`,`code`);

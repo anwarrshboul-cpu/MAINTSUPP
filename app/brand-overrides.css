@@ -3603,6 +3603,24 @@ body[data-theme="dark"] .detail-drawer__body > .drawer-section {
   color: var(--muted);
 }
 
+/*
+ * The same ink, the same failure, one container further out.
+ *
+ * The block above fixes `.drawer-label` only inside `.detail-drawer__body`.
+ * The Sites detail screen is not a drawer — it renders `.panel` — so it kept
+ * the `#70828e` literal from globals.css:7102 and kept failing with it: axe
+ * reports `color-contrast` (serious) on fourteen nodes there, 3.8:1 on the
+ * dark card, in both themes and at both widths.
+ *
+ * Pre-existing rather than introduced by Workstream 5 — the register's own
+ * surfaces scan clean — but it is a serious violation sitting on the screen
+ * W5 delivers, and the remedy was already written three lines up. `--muted`
+ * is the per-theme secondary ink, which is exactly what a label wants.
+ */
+.panel .drawer-label {
+  color: var(--muted);
+}
+
 .detail-drawer__body .activity-timeline p > strong {
   color: var(--ink);
 }
@@ -8173,4 +8191,74 @@ label.live-board-tool {
 .contractor-contact__link--whatsapp svg,
 .contractor-contact__plain--whatsapp svg {
   margin: 0 1px;
+}
+
+/* ===========================================================================
+   SITES REGISTER — Workstream 5 (Subagent 3). Two measured defects, both
+   scoped to this screen by the ids only the Sites toolbar renders
+   (#site-search). Nothing here can reach another register.
+   Breakpoint used: 768 only, which is inside the agreed set
+   {640, 767, 768, 1024, 1280} that stage-five-board-chrome and stage-six-views
+   enforce over everything after their markers — and this block is after both.
+   =========================================================================== */
+
+/* ---- 1. The search box had no keyboard focus indicator ------------------ */
+
+/*
+ * MEASURED: tabbing through the Sites register, every control reported
+ * `outline: 3px solid` from the global `:focus-visible` rule in globals.css
+ * except the search box, which reported `outline: 0px none` and
+ * `box-shadow: none`. It is the one control on the screen a keyboard user
+ * cannot see themselves land on — WCAG 2.4.7.
+ *
+ * THE CAUSE is not a missing rule but a deliberate one: `.search-field input`
+ * in globals.css sets `border: 0; outline: 0; background: transparent`, because
+ * the visible control is the WRAPPER — that is what carries the 8px radius, the
+ * border and the icon. The input is a transparent hole in the middle of it. So
+ * `outline: 0` is right for the input and the ring belongs on the wrapper, and
+ * nobody ever put it there.
+ *
+ * `:focus-within` on the wrapper, selected through `:has()` so this reaches
+ * only the Sites search field and not the seven other registers that share the
+ * class. The `:has()` is not nested inside another `:has()`. The declarations
+ * are copied verbatim from the global `:focus-visible` block so the ring is the
+ * same 3px accent at the same offset the rest of the screen draws.
+ *
+ * REPORTED, NOT FIXED, because it is outside this lane: the same gap exists on
+ * EVERY `.search-field input` in the product, for the same reason. The fix
+ * belongs in globals.css as one rule on `.search-field:focus-within`.
+ */
+.search-field:has(#site-search):focus-within {
+  outline: 3px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+/* ---- 2. The 767/768 seam in the toolbar --------------------------------- */
+
+/*
+ * MEASURED at a 768px viewport (iPad portrait), both themes: the two filter
+ * selects were 223x44 with an 8px radius while the search field beside them was
+ * 240x39 — a 5px height difference in one row, and a 37px input, under the 44px
+ * touch floor the rest of the toolbar keeps.
+ *
+ * It is a one-pixel boundary, not a layout problem. Two blocks written at
+ * different times disagree by 1px about where a phone starts:
+ *   `.workspace-toolbar input, .search-field input { min-height: 44px }`
+ *       lives in @media (max-width: 767px)
+ *   `.workspace-toolbar > select { ... border-radius: var(--radius-sm) }`
+ *       lives in @media (max-width: 768px)
+ * so at exactly 768 the selects have taken the phone treatment and the search
+ * box has not. Below 768 both apply and the row is even; above it neither does
+ * and the row is even again. 768 is the only width that shows the seam, and it
+ * is a real device width.
+ *
+ * This raises the search box to meet the selects that the 768 block already
+ * sizes, rather than moving either existing breakpoint — both are load-bearing
+ * for other screens. Scoped to #site-search: the identical seam on the other
+ * registers is REPORTED, not reached from here.
+ */
+@media (max-width: 768px) {
+  #site-search {
+    min-height: 44px;
+  }
 }

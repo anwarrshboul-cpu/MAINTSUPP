@@ -1593,6 +1593,32 @@ async function ensureStageTwoFoundation(d1: D1DatabaseLike) {
       "CREATE UNIQUE INDEX IF NOT EXISTS site_aliases_organisation_normalised_idx ON site_aliases (organisation_id, normalised)",
     ),
 
+    /*
+     * A site code is an IDENTITY, so the database has to be the thing that says so.
+     *
+     * `codeConflict()` in the sites repository refuses a duplicate with a helpful
+     * 409, and it is worth keeping for that message — but a SELECT followed by an
+     * INSERT cannot enforce uniqueness on its own. QA reproduced both ways through
+     * on the first attempt: eight concurrent POSTs claiming one code all answered
+     * 200 and left eight sites sharing it, and the CSV importer, which never called
+     * the check at all, produced a duplicate from a single two-row sheet with no
+     * concurrency whatsoever.
+     *
+     * It matters because `resolveSiteByName` treats a code as an identity and
+     * returns the FIRST row that matches one, so two sites wearing the same code
+     * make job intake non-deterministic — work attaches to whichever shop the
+     * query happened to return.
+     *
+     * NULL is distinct from NULL under UNIQUE in both SQLite and Postgres, so the
+     * 26 of 31 canonical rows with no code are unaffected. Verified before adding:
+     * zero duplicate code groups, zero empty strings and zero untrimmed values in
+     * both the canonical register and the development database, so this applies
+     * with no cleanup step.
+     */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS sites_organisation_code_idx ON sites (organisation_id, code)",
+    ),
+
     // X14 — reporting groups. `seedStoreDocumentationGroups` fills these.
     d1.prepare(
       `CREATE TABLE IF NOT EXISTS site_groups (
@@ -2166,12 +2192,38 @@ export async function seedBoardStructure(
  * untouched — only the four seeded slugs are rebuilt.
  */
 export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisationId: string) {
+  /*
+   * The predicates read `status` and the site type, NOT `lifecycle`/`region`.
+   *
+   * They used to read the latter, and all four groups were wrong because those
+   * two columns are the LOSSY Stage-0 projections of `status`. Measured against
+   * the canonical 31-row register, the old predicates produced 24/0/7/0:
+   *
+   *  - "Current stores" collected 24 — every `lifecycle = 'Current'` UK row —
+   *    which swept in the office and both warehouses. It is supposed to be the
+   *    21 shops, the same 21 `listRetailSites()` offers a picker, and the same
+   *    21 the monday board's own Current stores group holds.
+   *  - "Closed" collected 7, because the three legacy rows carry `status='other'`
+   *    with `lifecycle='Closed'`; they are not closed shops.
+   *  - "Other" could never match anything. Its predicate asked for a region
+   *    outside ('UK','Europe'), `region` defaults to 'UK' and every row holds
+   *    it, so the group the office and warehouses belong in was permanently empty.
+   *
+   * Keyed on `status` and type the four become a true PARTITION — 21 + 0 + 4 + 6
+   * = 31, every site in exactly one group — and "Current stores" agrees with
+   * `listRetailSites()` by construction rather than by coincidence.
+   *
+   * `europe` keys on `status='international'` rather than `region='Europe'` for
+   * the same reason: status is canonical and the CSV importer sets the two
+   * together. It is 0 today, correctly — the board's two Europe rows are
+   * deliberately outside the register (one is non-UK scope, one is a placeholder).
+   */
   const groups: Array<[string, string, string, string]> = [
-    // slug, name, colour, SQL predicate over `sites`
-    ["current-stores", "Current stores", "#579bfc", "lifecycle = 'Current' AND region = 'UK'"],
-    ["europe", "Europe", "#a25ddc", "region = 'Europe'"],
-    ["closed", "Closed", "#ff5ac4", "lifecycle <> 'Current'"],
-    ["other", "Other", "#757575", "lifecycle = 'Current' AND region NOT IN ('UK', 'Europe')"],
+    // slug, name, colour, SQL predicate over `sites s`
+    ["current-stores", "Current stores", "#579bfc", "s.status = 'active' AND COALESCE(s.site_type_value, s.type) IN ('Inline', 'Kiosk')"],
+    ["europe", "Europe", "#a25ddc", "s.status = 'international'"],
+    ["closed", "Closed", "#ff5ac4", "s.status = 'closed'"],
+    ["other", "Other", "#757575", "s.status = 'other' OR (s.status = 'active' AND COALESCE(s.site_type_value, s.type) NOT IN ('Inline', 'Kiosk'))"],
   ];
 
   for (const [position, [slug, name, colour, predicate]] of groups.entries()) {
@@ -2192,11 +2244,21 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
       .run();
     await d1
       .prepare(
+        /*
+         * The predicate is PARENTHESISED, and that is load-bearing.
+         *
+         * `AND` binds tighter than `OR`, so interpolating a predicate that
+         * contains a top-level `OR` bare would parse as
+         *   (organisation_id = ? AND <left>) OR <right>
+         * and the right-hand branch would match rows belonging to EVERY
+         * organisation — a cross-tenant leak straight into a reporting group.
+         * The 'other' predicate below is exactly that shape.
+         */
         `INSERT OR IGNORE INTO site_group_members
            (id, organisation_id, site_group_id, site_id)
          SELECT 'sgm-' || ? || '-' || s.id, ?, ?, s.id
            FROM sites s
-          WHERE s.organisation_id = ? AND ${predicate}`,
+          WHERE s.organisation_id = ? AND (${predicate})`,
       )
       .bind(slug, organisationId, id, organisationId)
       .run();
