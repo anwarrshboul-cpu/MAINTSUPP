@@ -3485,8 +3485,60 @@ body[data-theme="dark"] .role-chip {
 
 @media (max-width: 1080px) {
   .topbar-data-button > span { display: none; }
-  .topbar-data-button { width: 40px; padding: 0; justify-content: center; }
+  /*
+   * 44px, not 40px, for the width the label is dropped at.
+   *
+   * This is the band where both topbar data buttons become icon-only, and an
+   * icon-only button is nothing but its box: with the words gone there is no
+   * larger thing to aim at. Measured at 768 in both themes, "Refresh the
+   * figures on screen" and "Manage data" were 40x44 — 4px short on one axis
+   * only, which is why they read as fine and were not.
+   *
+   * Raised across the whole 761–1080 band rather than at 768 alone, because
+   * the band is defined by the label being hidden and the reason applies to
+   * every width in it — an iPad in landscape is 1024 and is still a thumb.
+   * The two buttons together grow by 8px in a row that had slack for it; page
+   * overflow and topbar scroll re-measured at 768, 800, 900, 1024 and 1080, in
+   * both themes: 0 at every one.
+   *
+   * `min-height` for the same reason on the other axis. At 768 these already
+   * came out 44 tall and only the width was short; from 769 to 1080 they were
+   * 40x40, short on both, which the "at 768" finding had not reached. One box,
+   * one floor, across the whole band the label is hidden in.
+   */
+  .topbar-data-button { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
   .planned-register-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/*
+ * THE RECORD EDITOR WAS CLIPPED BETWEEN 761 AND 768.
+ *
+ * MEASURED at 768 (iPad portrait), both themes: `.workspace-manager` is
+ * `width: min(1180px, calc(100vw - 48px))` = 720px there, but the two-pane body
+ * it contains is `minmax(320px, .92fr) minmax(420px, 1.08fr)` — a 740px
+ * minimum. The grid rendered 740px wide inside a 720px box and the manager's
+ * own `overflow: hidden` swallowed the difference, so the DOCUMENT reported
+ * zero horizontal overflow while 20px of the editor was cut off the right-hand
+ * edge: the right column of every field pair, and the right side of the
+ * "Save changes" button. Nothing scrolled to it, because nothing overflowed.
+ *
+ * `minmax(0, …)` rather than smaller pixel floors, for the reason the
+ * `.site-stat-grid` note below gives: a track that floors at 0 can never demand
+ * more width than its container has, so this cannot come back at a width
+ * somebody did not think to check. The two panes keep their 0.92/1.08 ratio and
+ * both stay on screen — the record list is NOT hidden here, because 768 is a
+ * real device held in portrait and the two-pane view is the reason to use the
+ * manager on it.
+ *
+ * Placed ABOVE the 760px block ON PURPOSE. The phone block sets this same
+ * property to `1fr` and hides the list outright; equal specificity means source
+ * order decides, so sitting above it leaves the phone layout untouched and
+ * confines this rule to the 761–768 band it was written for.
+ */
+@media (max-width: 768px) {
+  .workspace-manager__body.has-editor {
+    grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+  }
 }
 
 @media (max-width: 760px) {
@@ -8397,4 +8449,86 @@ label.live-board-tool {
    * overflow bug re-introduced the overflow bug.
    */
   position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   O3 — 44px IN THE SHARED WORKSPACE MANAGER, WHERE THE POINTER IS A THUMB.
+
+   This is the screen W6 asks somebody to do contractor work on from a phone,
+   and it was the one screen still short of the 44px floor the rest of the
+   phone chrome keeps (section D above, `@media (max-width: 767px)`).
+
+   MEASURED before, at 768 / 430 / 393 / 390 / 375 / 360 / 320, light AND dark,
+   byte-identical between the two themes — 9 controls at every one of them:
+     `Close`  (.workspace-manager__header > .icon-button)   36 x 44
+     the eight section tabs Sites … Import                  70–115 x 36 (38 at 768)
+   plus, in the record editor that opens beside them:
+     `Close editor` (.workspace-record-editor > header …)   36 x 44
+   Two of those are 4px short on ONE axis, which is exactly why they read as
+   fine and were not: `.icon-button` is a 36px square (globals.css) and the
+   header's own height was doing the other half of the job.
+
+   NOT a `::before` overlay, which the tab strip in particular would be wrong
+   for: the tabs sit 4px apart, so an overlay wide enough to reach 44 would
+   reach into its neighbour, and on a control that carries a hover and an
+   `.is-active` wash the tap would land somewhere the eye was not told about.
+   `min-height` / `min-width` on the control keeps the target and the
+   affordance the same shape. Neither button PAINTS anything at rest —
+   `.icon-button` is a transparent background inside a transparent border — so
+   growing the box moves nothing on screen until the finger is already on it.
+
+   THE COST, stated rather than glossed: the tab strip grows 8px on a phone
+   (51px to 59px) and 6px at 768. `.workspace-manager` is
+   `grid-template-rows: auto auto minmax(0, 1fr)`, so the record list absorbs
+   it; the strip already scrolls sideways (`overflow-x: auto`) and none of the
+   eight tabs moves out of reach. Re-measured on all eight tabs — Sites, Units,
+   Compliance, Contractors, Planned, Team, Activity and Import — because this
+   chrome is shared and none of them is W6's.
+
+   768, not 767: the offenders were measured AT 768 and it is a real device
+   width. The 767/768 seam note further up this file is the same boundary
+   argument reached from the other side. Both are on the agreed set
+   (640 / 767 / 768 / 1024 / 1280) that stage-five and stage-six hold the tail
+   of this file to, so no new breakpoint is introduced.
+
+   BELOW the 760px block on purpose — that block sets the tabs to 36px, and a
+   floor that sits above it would be overridden on exactly the phones it is
+   for.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .workspace-manager__header > .icon-button,
+  .workspace-record-editor > header > .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .workspace-manager__tabs button {
+    min-height: 44px;
+  }
+
+  /*
+   * THE SEARCH BOX WAS 44px ON SIX TABS AND 42px ON TWO, AND NOTHING SAID SO.
+   *
+   * `.workspace-manager__toolbar` is a plain flex row at default
+   * `align-items: stretch`, so the label around the search field was being
+   * pulled to the height of the 44px `New` button beside it. Sites, Units,
+   * Compliance, Contractors, Planned and Team all have that button. Activity
+   * and Import are read-only tabs (`readOnlyTab` in workspace-data-manager),
+   * the button is not rendered, and the label dropped back to the 42px floor of
+   * its own — measured 690x42 at 768, 365x42 at 393, 292x42 at 320, both
+   * themes. Two pixels, on the two tabs where the only control in the row is
+   * the search box.
+   *
+   * The floor goes on the LABEL, not the input. That is the same call the
+   * board's own phone block makes and says out loud ("Not the search input: it
+   * fills its 44px label, and a 44px floor of its own put it two pixels taller
+   * than the box around it") — the label is `box-sizing: border-box` with a 1px
+   * border, so an input with the same floor overflows it top and bottom. The
+   * input is wrapped by this label, so the label IS the target: a tap anywhere
+   * in it focuses the field.
+   */
+  .workspace-manager__toolbar > label {
+    min-height: 44px;
+  }
 }

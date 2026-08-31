@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
@@ -20,6 +20,24 @@ import {
   STORE_DOCUMENTATION_BOARD_ID,
   readComplianceRegister,
 } from "../../lib/compliance-register";
+/*
+ * The "finished" vocabulary, taken from the browser's own copy of it.
+ *
+ * `dashboard-meters.ts` is where `isClosedRequest` builds the client-side
+ * predicate out of these same two values, so this is one list read by two
+ * languages rather than two lists that happen to agree — see
+ * `completedJobPredicate` below.
+ *
+ * A route importing from `app/(app)/portal/` is unusual and is the deliberate
+ * direction. That module has NO runtime imports of its own, by design: seven
+ * test suites transpile it alone and load it from a `data:` URL, where any
+ * relative specifier fails with `ERR_INVALID_URL`. Moving the vocabulary out to
+ * a neutral `app/lib` module and importing it back into the meters was tried and
+ * broke all of them, so the definition stays in the file that is already
+ * checkable in isolation and the SQL comes to it. It is plain TypeScript —
+ * no React, no hooks, no component — which is the property those suites rely on.
+ */
+import { COMPLETED_STAGE, completedStatuses } from "../../(app)/portal/dashboard-meters";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import {
@@ -355,6 +373,84 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
   }).onConflictDoNothing();
 }
 
+/* ── The two rules every job figure in this file is measured by ──────────── */
+
+/**
+ * "COMPLETED", IN SQL, MEANING EXACTLY WHAT IT MEANS IN THE BROWSER.
+ *
+ * These aggregates tested `stage = 'Completed'` and nothing else, while the
+ * screens that print their numbers ask `isClosedRequest`
+ * (app/(app)/portal/dashboard-meters.ts) — the UNION of the lifecycle stage and
+ * monday's own `is_done` Status label. The two are not the same set on this
+ * data: the imported rows sit in monday's "… Recently completed" groups, which
+ * carry no lifecycle stage in this app, so their `stage` is "Incoming" while
+ * their `status` says "Job Completed". Measured on a fixture — one job,
+ * `status = 'Job Completed'`, `stage = 'Incoming'` — this route reported
+ * `completed: 0` for a contractor whose own Contractors page reported
+ * `completed: 1`.
+ *
+ * Built FROM `COMPLETED_STAGE` and `completedStatuses` in
+ * `dashboard-meters.ts` itself — the same two values `isClosedRequest` is built
+ * from, three lines below where they are declared. The server is SQL and the
+ * client is TypeScript so the FUNCTION cannot be shared, but the VOCABULARY is,
+ * and it is the vocabulary that drifted. Adding a label to that array changes
+ * this predicate and the browser's in the same edit. (Why the import points
+ * that way rather than at a neutral module in `app/lib` is on the import line.)
+ *
+ * Whole-value equality — `=` on the stage, `IN` over the label list — for the
+ * reason the aggregate note below gives: this board carries 23 Status labels
+ * and nothing here may match a prefix, a substring or a pattern. The `IN` list
+ * is spread FROM the shared array rather than typed out, so it is the array
+ * that decides what the database counts.
+ *
+ * Assembled with `sql` and its own parentheses rather than drizzle's `or()`,
+ * for two reasons that both matter here: `or()` is typed `SQL | undefined`
+ * because it tolerates being handed nothing, and this expression is embedded
+ * inside `case when …` and negated by `not(…)`, where a missing pair of
+ * brackets is a silent change of meaning rather than an error. `eq` and
+ * `inArray` still supply the bound parameters, so no label is ever
+ * interpolated into the statement text.
+ */
+const completedJobPredicate = sql`(${eq(maintenanceRequests.stage, COMPLETED_STAGE)} or ${inArray(
+  maintenanceRequests.status,
+  [...completedStatuses],
+)})`;
+
+/**
+ * WHICH ROWS ARE A WORK ORDER AT ALL — the SQL twin of `countsAsWorkOrder`
+ * in `app/(app)/portal/portal-app.tsx`.
+ *
+ * Three exclusions, and until now this route applied only the first:
+ *
+ *   • `deleted_at IS NULL` — Stage 23's recycle bin. A binned job is not work.
+ *   • `archived = false`   — a row somebody deliberately took off the board.
+ *     There is a real `archived` column with an index
+ *     (`maintenance_org_archived_created_idx`) and `/api/board/items` has
+ *     always honoured it; these aggregates did not. Measured: archive a job
+ *     and the contractor's tally here did not move — `{a:4,c:0,u:4,s:1000}`
+ *     before and after — while the Contractors page dropped it, so the manage
+ *     drawer's "N jobs" subtitle and the table's Assigned column printed two
+ *     different numbers for one contractor on one screen.
+ *   • `parent_id IS NULL`  — a SUBITEM is a full row of this table whose parent
+ *     is another row. The board has always filtered them out before placing
+ *     anything ("the same work appeared twice and the group counts were
+ *     wrong"); the same fixture proved they were being counted here, and their
+ *     `cost` summed alongside the parent's.
+ *
+ * The rule is the same one the page applies, so the same contractor over the
+ * same range now yields the same four numbers on both surfaces. Archived and
+ * deleted work is still readable — through `/api/account/archive` and the
+ * recycle bin, which is where a row in either state belongs — it just is not
+ * counted as live operational work.
+ */
+const liveWorkOrder = (orgId: string) =>
+  and(
+    eq(maintenanceRequests.organisationId, orgId),
+    isNull(maintenanceRequests.deletedAt),
+    eq(maintenanceRequests.archived, false),
+    isNull(maintenanceRequests.parentId),
+  );
+
 async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceSnapshot> {
   await seedWorkspaceIfEmpty(db, orgId);
   const [
@@ -404,15 +500,27 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
      * compared it.
      *
      * Stage 23 — binned jobs are not open, so both keep the `deletedAt` filter.
+     *
+     * W6 closure — and neither is an archived row or a subitem, so both now
+     * take `liveWorkOrder` rather than spelling the organisation and the bin
+     * out again. One lifecycle scope for every job figure this function
+     * produces: see the note on that helper.
      */
     db
       .select({ siteId: maintenanceRequests.siteId, open: count() })
       .from(maintenanceRequests)
       .where(
         and(
-          eq(maintenanceRequests.organisationId, orgId),
-          isNull(maintenanceRequests.deletedAt),
-          ne(maintenanceRequests.stage, "Completed"),
+          liveWorkOrder(orgId),
+          /*
+           * `not (…)` over the shared predicate, not `stage <> 'Completed'`.
+           * Open and completed have to be a partition of the same rows — the
+           * meters assert exactly that invariant — and they were not while
+           * this asked a narrower question than `completedJobPredicate`
+           * answers. A job whose status says "Job Completed" was closed on the
+           * board and open at its site.
+           */
+          not(completedJobPredicate),
         ),
       )
       .groupBy(maintenanceRequests.siteId),
@@ -442,23 +550,45 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
      * would have traded the undercount for an overcount, double counting every
      * job whose id and text agree — which is most of them.
      *
-     * Nothing else moves: same organisation scope, same `deletedAt` filter,
-     * same `=` / `<>` predicates on the whole stored `stage` and `priority`
-     * values, for the reasons the note above gives.
+     * Nothing else moves: same organisation scope, same `=` predicates on the
+     * whole stored `stage`, `status` and `priority` values, for the reasons the
+     * note above gives.
+     *
+     * W6 closure — what DID move, in both halves at once so the partition still
+     * holds:
+     *
+     *   • the lifecycle scope is `liveWorkOrder`, which adds `archived = false`
+     *     and `parent_id IS NULL` to the bin filter that was already here;
+     *   • "completed" is `completedJobPredicate`, the same union the browser's
+     *     `isClosedRequest` applies, instead of the stage alone;
+     *   • "urgent" is therefore `priority = 'Urgent' AND NOT completed`, so
+     *     open and completed remain a partition of the rows in scope.
+     *
+     * SPEND'S DATE BASIS, said out loud because two screens report it and they
+     * are not asking the same question. There is no cost date in this product:
+     * `cost` is monday's "Cost of Works" number and carries no date of its own,
+     * the `invoice` column beside it is free text and empty on every row, and
+     * the `invoices` table has never been read or written by any code. So the
+     * figure here is ALL-TIME — every live work order this contractor holds,
+     * unfiltered by date — and that is what the manage drawer prints. The
+     * Contractors PAGE re-measures the same rows inside its own reporting
+     * period, dating each by `completedAt ?? requestedAt`; Reports dates by
+     * `requestedAt`. Under "All records" the page and this route agree exactly,
+     * which is the invariant `tests/workstream-six-contractor-scope.test.mjs`
+     * asserts.
      */
     db
       .select({
         contractor: maintenanceRequests.contractor,
         assigned: count(),
-        completed: sql<number>`sum(case when ${maintenanceRequests.stage} = ${"Completed"} then 1 else 0 end)`,
-        urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and ${maintenanceRequests.stage} <> ${"Completed"} then 1 else 0 end)`,
+        completed: sql<number>`sum(case when ${completedJobPredicate} then 1 else 0 end)`,
+        urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and not (${completedJobPredicate}) then 1 else 0 end)`,
         spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
       })
       .from(maintenanceRequests)
       .where(
         and(
-          eq(maintenanceRequests.organisationId, orgId),
-          isNull(maintenanceRequests.deletedAt),
+          liveWorkOrder(orgId),
           isNull(maintenanceRequests.contractorId),
         ),
       )
@@ -467,15 +597,14 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       .select({
         contractorId: maintenanceRequests.contractorId,
         assigned: count(),
-        completed: sql<number>`sum(case when ${maintenanceRequests.stage} = ${"Completed"} then 1 else 0 end)`,
-        urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and ${maintenanceRequests.stage} <> ${"Completed"} then 1 else 0 end)`,
+        completed: sql<number>`sum(case when ${completedJobPredicate} then 1 else 0 end)`,
+        urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and not (${completedJobPredicate}) then 1 else 0 end)`,
         spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
       })
       .from(maintenanceRequests)
       .where(
         and(
-          eq(maintenanceRequests.organisationId, orgId),
-          isNull(maintenanceRequests.deletedAt),
+          liveWorkOrder(orgId),
           isNotNull(maintenanceRequests.contractorId),
         ),
       )
@@ -920,6 +1049,15 @@ export async function POST(request: Request) {
        */
       const badAvailability = contractorAvailabilityRefusal(data);
       if (badAvailability) return badAvailability;
+      /*
+       * Last of the create guards, because it is the only one that has to ask
+       * the database a question, and there is no point asking it about a
+       * payload the cheap checks have already refused. See
+       * `contractorNameConflict`: the register cannot attribute a job to a name
+       * two contractors share, so this is where a second one is stopped.
+       */
+      const badName = await contractorNameConflict(db, orgId, name, null);
+      if (badName) return badName;
       id = newId("contractor", name);
       await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: optionalRating(data.rating), active: booleanValue(data.active) });
     } else if (entity === "planned") {
@@ -1386,6 +1524,102 @@ async function contractorTarget(
   return { row };
 }
 
+/**
+ * A name that would belong to TWO contractors in one organisation — refused.
+ *
+ * WHY THE REGISTER NEEDS THIS, and why it is not a tidiness rule.
+ *
+ * A contractor's name is not a display label here; it is the JOIN KEY on the
+ * only assignment surface the product has. There is no picker for a job's
+ * contractor — `portal-app.tsx` edits that column as free TEXT and
+ * `PATCH /api/maintenance { fields: { contractor: "<name>" } }` is the whole
+ * verb — and `contractor_id` is then DERIVED from that text by
+ * `resolveContractorLink`, which links only where EXACTLY ONE contractor in the
+ * organisation carries the name. The tallies on both surfaces apply the same
+ * rule: an ambiguous name attributes to NEITHER contractor.
+ *
+ * So a duplicate name does not produce a tidy register with two similar rows.
+ * It produces a register that cannot say who did the work, and says nothing
+ * about it. Measured against a running server: two contractors both called
+ * `ZZQA-CLOSURE-C1-dup` (two 200s, no complaint), then one job assigned to that
+ * name at a cost of GBP 999 — `contractor_id` came back NULL and BOTH rows read
+ * `assigned 0, completed 0, urgent 0, spend 0`. A thousand pounds of work
+ * vanished from the register, silently, with every request answering 200.
+ *
+ * ── Why the NAME and not the email ────────────────────────────────────────
+ *
+ * `email` is nullable, absent on most rows, and NOTHING in the product resolves
+ * a contractor by it — no link, no tally, no dedup. One office address shared
+ * by several trades ("info@") is an ordinary arrangement, and the monday data
+ * this register was built from carries no contractor email at all. A uniqueness
+ * rule there would be an invented restriction with no product behind it, so
+ * there is none. Duplicate emails are accepted, exactly as they are today.
+ *
+ * ── Why here and not a UNIQUE INDEX ───────────────────────────────────────
+ *
+ * A constraint applies to every writer, including the boot seeder and the
+ * importer, and to rows that already exist. There is no unique index on either
+ * dialect today (`pg_constraint` on staging: pkey and the organisation FK, and
+ * nothing else), a migration that fails on data somebody already has is worse
+ * than no migration, and legacy pairs must stay editable rather than becoming
+ * unsavable. This refuses the HUMAN path — the manage form — and leaves the
+ * data alone.
+ *
+ * Being a check-then-insert it is not a mutual exclusion: two simultaneous
+ * creates of the same name can still both land. That is why the READ side keeps
+ * its ambiguity rule (`contractorsPerName` above, `nameIsUnique` in
+ * `portal-app.tsx`) rather than being deleted as unreachable.
+ *
+ * ── Narrow on purpose, like the resurrection guard below ───────────────────
+ *
+ * It fires only on the TRANSITION into ambiguity. A row that already carries
+ * the name is not introducing anything — the manage form posts the WHOLE record
+ * on every save, so a rule that refused an unchanged name would refuse every
+ * ordinary edit — and two rows that already share one stay editable rather than
+ * being stranded there. The comparison is `resolveContractorLink`'s, exactly:
+ * organisation-scoped, `lower(trim())` performed BY THE DATABASE, and `active`
+ * deliberately not consulted, because an archived contractor still answers to
+ * their name when a job is being resolved.
+ */
+async function contractorNameConflict(
+  db: WorkspaceDb,
+  orgId: string,
+  name: string,
+  selfId: string | null,
+): Promise<Response | null> {
+  const carriesName = sql`lower(trim(${contractors.name})) = lower(trim(${name}))`;
+  if (selfId) {
+    // Asked in SQL rather than compared in JS, so "is this the same name" is
+    // answered by the same folding that will decide the link. See the module.
+    const [unchanged] = await db
+      .select({ id: contractors.id })
+      .from(contractors)
+      .where(and(eq(contractors.id, selfId), carriesName))
+      .limit(1);
+    if (unchanged) return null;
+  }
+  const [clash] = await db
+    .select({ id: contractors.id })
+    .from(contractors)
+    .where(
+      and(
+        eq(contractors.organisationId, orgId),
+        carriesName,
+        ...(selfId ? [not(eq(contractors.id, selfId))] : []),
+      ),
+    )
+    .limit(1);
+  return clash
+    ? Response.json(
+        {
+          error:
+            "Another contractor on this register is already called that. Give this one a name that tells them apart — a job assigned to a name two contractors share is counted against neither of them.",
+        },
+        { status: 409 },
+      )
+    : null;
+}
+
 /** What the archive verb writes into `availability`. Not a day-to-day state. */
 const ARCHIVED_AVAILABILITY = "Inactive";
 
@@ -1648,6 +1882,20 @@ export async function PATCH(request: Request) {
       if (target.refusal) return target.refusal;
       const badRestore = contractorResurrectionRefusal(data, target.row);
       if (badRestore) return badRestore;
+      /*
+       * AFTER the 404, deliberately. Asking about a name before establishing
+       * that the caller may see this row at all would answer a cross-tenant id
+       * with a 409 about a name in the ACTOR's organisation, which is a fact
+       * about somebody else's workspace leaking through the wrong door.
+       *
+       * Only when `name` is part of the write, and `contractorNameConflict`
+       * then does nothing when the row already carries it — the manage form
+       * posts the whole record, so every ordinary save arrives with a name.
+       */
+      if ("name" in data) {
+        const badRename = await contractorNameConflict(db, orgId, text(data.name, 140), id);
+        if (badRename) return badRename;
+      }
       await db.update(contractors).set({
         // Only what was sent — see `supplied`. A partial PATCH used to blank
         // every column it did not mention.

@@ -130,15 +130,53 @@ export const awaitingApprovalStatuses = [
  * open work, and "Open" read 40 where the board holds 12 live jobs. When the
  * importer does set a stage the two signals agree and the union changes
  * nothing, so this is safe in both directions.
+ *
+ * THE SERVER READS THIS ARRAY AND THE CONSTANT BELOW IT, and that is why they
+ * are exported from here rather than kept private.
+ *
+ * `readWorkspace` in `app/api/workspace/route.ts` counted `stage = 'Completed'`
+ * and nothing else, so a job whose own status says "Job Completed" was reported
+ * completed HERE and open THERE for the same contractor — the manage drawer and
+ * the Contractors table printing two different numbers for one person.
+ * `completedJobPredicate` in that route is now BUILT from these two values:
+ * `eq(stage, COMPLETED_STAGE) or inArray(status, [...completedStatuses])`.
+ * Adding a label here changes what the database counts, in the same edit.
+ *
+ * WHY THE DEPENDENCY POINTS THAT WAY — a route reaching into `portal/` — rather
+ * than both sides importing a neutral module in `app/lib`. This file must have
+ * NO runtime imports: seven test suites transpile it on its own and load it from
+ * a `data:` URL, where a relative specifier cannot resolve at all
+ * (`ERR_INVALID_URL`), and their headers say so out loud ("no React in it,
+ * exactly as dashboard-meters.ts is, so it transpiles"). Moving the list into
+ * `app/lib/stage-status.ts` and importing it back was tried and broke every one
+ * of them. The vocabulary therefore lives where it is already checkable in
+ * isolation, and the SQL comes to it.
  */
 export const completedStatuses = ["Job Completed"] as const;
+
+/**
+ * The lifecycle stage that means finished, named rather than typed out.
+ *
+ * `isClosedRequest` below and `completedJobPredicate` in
+ * `app/api/workspace/route.ts` both compare against it. `statusForStage` in
+ * `app/lib/stage-status.ts` maps this stage onto `completedStatuses[0]`, which
+ * is why the two signals agree whenever a stage has been set at all.
+ */
+export const COMPLETED_STAGE = "Completed" as const;
 
 const isAwaitingParts = statusMatcher(awaitingPartsStatuses);
 const isAwaitingApproval = statusMatcher(awaitingApprovalStatuses);
 const hasCompletedStatus = statusMatcher(completedStatuses);
 
+/**
+ * The union, and the canonical definition of "completed" in this product.
+ *
+ * Its SQL twin is `completedJobPredicate` in `app/api/workspace/route.ts`. The
+ * two are built from the same two constants; if you change one, you have
+ * already changed the other.
+ */
 export const isClosedRequest = (request: MaintenanceRequest) =>
-  request.stage === "Completed" || hasCompletedStatus(request);
+  request.stage === COMPLETED_STAGE || hasCompletedStatus(request);
 
 /**
  * Everything the board has not filed as finished. Open and closed are a

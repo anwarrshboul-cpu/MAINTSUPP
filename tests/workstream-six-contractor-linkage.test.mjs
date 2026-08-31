@@ -269,7 +269,7 @@ test("a job whose id AND text both name a contractor counts once, not twice", as
   }
 });
 
-test("an ambiguous name counts for neither contractor, a unique one still counts", async (t) => {
+test("the register refuses to be made ambiguous, and a unique name still counts", async (t) => {
   if (!(await signIn())) {
     t.skip("no development server");
     return;
@@ -280,53 +280,72 @@ test("an ambiguous name counts for neither contractor, a unique one still counts
     return;
   }
   /*
-   * TWO different questions, and this test used to answer the second one wrong.
+   * WHAT THIS TEST USED TO DO, AND WHY IT NO LONGER CAN.
    *
-   * Two contractors share a name, so the register cannot say which one a job
-   * means and NEITHER is linked — `count(*) = 1` is what makes an ambiguous
-   * register safe rather than lucky. That half was always right.
+   * It created two contractors carrying one name and proved that the job
+   * assigned to that name counted for NEITHER of them — the same answer
+   * `resolveContractorLink` gives, and the fix for a real defect: the name
+   * fallback is a lookup, both rows answered to the name, and one GBP 999 job
+   * was reported on the Contractors page as GBP 1,998.
    *
-   * What the job must then count for was NOT. This asserted that the unlinked
-   * job reaches BOTH of them, "exactly as it did before" — and it did do that
-   * before, which is the bug: the name fallback is a lookup, both rows answer
-   * to the name, and one GBP 75 job was counted twice. On the Contractors page,
-   * whose Tracked spend tile sums the per-contractor figures, a single GBP 999
-   * job was reported as GBP 1,998. Locking that in as "before" made the suite
-   * defend it.
+   * The register now REFUSES to create that pair (`contractorNameConflict`,
+   * app/api/workspace/route.ts). A name is not a label in this product — it is
+   * the join key on the only assignment surface there is, because a job's
+   * contractor is free text and `contractor_id` is derived from it. Measured
+   * before the guard: two contractors named the same, one job at GBP 999
+   * assigned to that name, `contractor_id` NULL and BOTH tallies reading
+   * 0/0/0/0. A thousand pounds attributed to nobody, every request answering
+   * 200. So the state this test constructed is now unreachable through the API,
+   * and the assertion that it counts for neither cannot be made behaviourally
+   * any more.
    *
-   * A register that cannot say WHICH contractor a name means cannot say whose
-   * job it was either, so an ambiguous name now counts for neither — the same
-   * answer `resolveContractorLink` gives to the same question one line above.
-   * Under-counting is visible and an operator can fix it by linking the job or
-   * renaming one of the pair; double-counting silently inflates a figure
-   * somebody bills from.
+   * Three things replace it, and between them nothing that was protected has
+   * been given up:
+   *
+   *  1. the refusal itself, asserted below — a stronger guarantee than the
+   *     tally rule it replaces, because the bad state never exists;
+   *  2. the job assigned to that name now LINKS, because the name is unique
+   *     by construction — asserted below;
+   *  3. the read-side rule that handles pairs which already exist is asserted
+   *     in `workstream-six-contractor-identity.test.mjs`. It is NOT dead code:
+   *     the guard is a check-then-insert rather than a mutual exclusion, so two
+   *     simultaneous creates can still both land, and legacy pairs are left
+   *     editable on purpose rather than being stranded.
    *
    * The genuinely additive case — an unlinked job whose name is UNIQUE — is
-   * proved separately at the end, because that is the one this test was
-   * reaching for and an ambiguous name was never the way to show it.
+   * unchanged below, and is the half this test was always reaching for.
    */
   const name = `${PREFIX}-ambiguous`;
   const first = await call("POST", "/api/workspace", { entity: "contractor", data: { name } });
+  assert.equal(first.status, 200);
   const second = await call("POST", "/api/workspace", { entity: "contractor", data: { name } });
   const jobId = await raiseJob("ambiguous");
   assert.ok(jobId);
 
   try {
+    assert.equal(second.status, 409, "a name the register already knows cannot be given twice");
+    assert.equal(
+      (await contractorsOf()).filter((row) => row.name === name).length,
+      1,
+      "and exactly one contractor carries it afterwards",
+    );
+
     await call("PATCH", "/api/maintenance", { id: jobId, fields: { contractor: name, cost: 75 } });
     const row = database
       .prepare("SELECT contractor, contractor_id FROM maintenance_requests WHERE id = ?")
       .get(jobId);
     assert.equal(row.contractor, name, "the text a person typed is kept whatever the register says");
-    assert.equal(row.contractor_id, null, "two contractors of that name link neither");
-
-    for (const id of [first.json.id, second.json.id]) {
-      const tally = await tallyOf(id);
-      assert.deepEqual(
-        { assigned: tally.assigned, completed: tally.completed, urgent: tally.urgent, spend: tally.spend },
-        { assigned: 0, completed: 0, urgent: 0, spend: 0 },
-        "an ambiguous name counts for neither contractor, rather than for both",
-      );
-    }
+    assert.equal(
+      row.contractor_id,
+      first.json.id,
+      "the name is unambiguous, so it resolves — which is the point of refusing the twin",
+    );
+    const tally = await tallyOf(first.json.id);
+    assert.deepEqual(
+      { assigned: tally.assigned, completed: tally.completed, urgent: tally.urgent, spend: tally.spend },
+      { assigned: 1, completed: 0, urgent: 1, spend: 75 },
+      "and the work reaches the one contractor who did it",
+    );
 
     /*
      * And now the additive half, with nothing ambiguous about it. The job takes
@@ -355,7 +374,12 @@ test("an ambiguous name counts for neither contractor, a unique one still counts
     database.close();
     await call("POST", "/api/board", { boardId: "maintenance", action: "delete_items", requestIds: [jobId] });
     await call("DELETE", "/api/workspace", { entity: "contractor", id: first.json.id });
-    await call("DELETE", "/api/workspace", { entity: "contractor", id: second.json.id });
+    // `second` was refused, so there is no id to archive. Guarded rather than
+    // dropped: a DELETE carrying `id: undefined` answers 400 and files nothing,
+    // but the cleanup should say what it means.
+    if (second.json?.id) {
+      await call("DELETE", "/api/workspace", { entity: "contractor", id: second.json.id });
+    }
   }
 });
 

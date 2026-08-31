@@ -2222,6 +2222,24 @@ export default function PortalApp({
               type="button"
               onClick={() => openWorkspaceManager()}
               disabled={!workspace}
+              /*
+               * Named here as well as in the span, because below 1080px the
+               * span is not there to name it.
+               *
+               * `.topbar-data-button > span { display: none }`
+               * (brand-overrides.css) drops the label and leaves an icon-only
+               * button — and `display: none` removes the text from the
+               * accessibility tree too, so this button had NO accessible name
+               * at all on a tablet or a phone. axe reports it `button-name`,
+               * impact CRITICAL, at 768. Its sibling above already carries an
+               * `aria-label` for exactly this reason; this one was missed.
+               *
+               * The visible label is unchanged at every width, and where the
+               * span IS shown the two agree word for word, so nothing is
+               * announced twice and nothing reads differently to what is
+               * printed.
+               */
+              aria-label="Manage data"
             >
               <Icon name="settings" size={17} />
               <span>Manage data</span>
@@ -4663,6 +4681,28 @@ function ContractorsView({
    * bounds, and the guard it replaces — `if (!periodWindow) return true` —
    * could never fire, so a half-typed custom range emptied the table with no
    * explanation instead of saying it was unfinished.
+   *
+   * AND THERE IS NO COST DATE TO USE INSTEAD. `cost` is monday's "Cost of
+   * Works" number; it carries no date of its own, the `invoice` column beside
+   * it is free text and empty on every row, and the `invoices` table — which
+   * does have `due_at` and `paid_at` — has never been read or written by any
+   * code here. So `completedAt ?? requestedAt` is not a proxy chosen over a
+   * transaction date; it is the only date these rows have. On staging, 10 of
+   * the 12 costed jobs have no completion date at all, so for most of them this
+   * dates spend by when the work was REQUESTED. A reader billing from the Spend
+   * column needs to know that, and now the code says it.
+   *
+   * THE RANGE IS THE ONLY THING THAT STILL SEPARATES THIS TABLE FROM THE
+   * DRAWER. `/api/workspace` carries `assignedJobs`/`completedJobs`/
+   * `urgentJobs`/`spend` per contractor with no date filter at all — all-time —
+   * and the manage drawer prints its "N jobs" straight from that. The lifecycle
+   * scope and the "completed" rule are now identical on both sides
+   * (`liveWorkOrder` and `completedJobPredicate` in app/api/workspace/route.ts
+   * are this page's `countsAsWorkOrder` and `isClosedRequest`), so under "All
+   * records" the two agree exactly, row for row — asserted by
+   * tests/workstream-six-contractor-scope.test.mjs. Under any narrower period
+   * they differ by the rows outside the window, which is the period doing its
+   * job and not a disagreement.
    */
   const inWindow = (request: MaintenanceRequest) =>
     countsAsWorkOrder(request) &&

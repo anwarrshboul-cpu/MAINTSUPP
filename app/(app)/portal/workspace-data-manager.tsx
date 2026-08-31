@@ -85,10 +85,62 @@ function editorData(record: Record<string, unknown>, dateKeys: string[] = []): E
   );
 }
 
-function fieldsFor(tab: Exclude<ManagerTab, "activity">, workspace: WorkspaceSnapshot): FieldDefinition[] {
+/**
+ * `assignedContractorId` — the contractor the record being edited is ALREADY
+ * assigned to, which is not always somebody the list would offer.
+ *
+ * See `contractorOptions` below. Absent when nothing is open, and absent from
+ * the keys-only call in `recordToEditor`, which is why it is optional.
+ */
+function fieldsFor(
+  tab: Exclude<ManagerTab, "activity">,
+  workspace: WorkspaceSnapshot,
+  assignedContractorId?: string | null,
+): FieldDefinition[] {
   const siteOptions = workspace.stores.map((site) => ({ value: site.id, label: site.name }));
   const unitOptions = [{ value: "", label: "No linked unit" }, ...workspace.units.map((unit) => ({ value: unit.id, label: unit.name }))];
-  const contractorOptions = [{ value: "", label: "No contractor" }, ...workspace.contractors.filter((item) => item.active).map((item) => ({ value: item.id, label: item.name }))];
+  /*
+   * WHO MAY BE ASSIGNED, plus WHOEVER IS ALREADY ASSIGNED.
+   *
+   * The first half is the membership rule and it is `active` alone, which is
+   * what the Active checkbox's own hint below promises a person reading it:
+   * "on the register, and offered when assigning work". `availability` is
+   * deliberately NOT consulted — it is the day-to-day answer to "can they take
+   * work this week", nothing in the product filters on it, and this select
+   * schedules PLANNED work whose `nextDueAt` is routinely months away. Somebody
+   * who is Unavailable today is a perfectly good choice for March.
+   *
+   * The second half is the bug that rule had. Archiving a contractor correctly
+   * takes them off the list — and a planned task ALREADY assigned to them keeps
+   * pointing at them, as it must: `referencesRefusal` in the workspace API
+   * checks the id and the organisation and deliberately not `active`, because
+   * refusing an archived id would make that task unsavable for ever. So the
+   * select was rendering `value="<archived id>"` against options that did not
+   * contain it. `selectedIndex` goes to -1 and the field shows BLANK on a task
+   * that is assigned — measured on a fixture: the payload still carried
+   * `contractorName: "ZZQA-CLOSURE-C1-AVAIL"` while the form showed nothing,
+   * and any save made from that screen was one careless click away from
+   * silently reassigning the task to "No contractor".
+   *
+   * Keeping the current value as an option is what this file already does for
+   * a compliance requirement recorded under a name the canonical list does not
+   * have (see `kind` below) — same problem, same answer. The suffix is there
+   * because "offered to everyone" and "still shown because you already picked
+   * them" must not read as the same thing.
+   */
+  const assignableContractors = workspace.contractors.filter((item) => item.active);
+  const assignedElsewhere =
+    assignedContractorId &&
+    !assignableContractors.some((item) => item.id === assignedContractorId)
+      ? workspace.contractors.find((item) => item.id === assignedContractorId)
+      : null;
+  const contractorOptions = [
+    { value: "", label: "No contractor" },
+    ...assignableContractors.map((item) => ({ value: item.id, label: item.name })),
+    ...(assignedElsewhere
+      ? [{ value: assignedElsewhere.id, label: `${assignedElsewhere.name} (archived)` }]
+      : []),
+  ];
   if (tab === "site") return [
     { key: "name", label: "Site name", required: true },
     { key: "type", label: "Type", type: "select", options: ["Kiosk", "Inline", "Office", "Warehouse"].map((value) => ({ value, label: value })) },
@@ -388,7 +440,14 @@ export function WorkspaceDataManager({
     });
   }, [query, tab, workspace]);
   const readOnlyTab = tab === "activity" || tab === "import";
-  const fields = readOnlyTab ? [] : fieldsFor(tab, workspace);
+  /*
+   * The open record's own contractor is handed to `fieldsFor` so the select can
+   * keep showing somebody who has since been archived. `form` rather than the
+   * record, because it is the value the control is actually bound to.
+   */
+  const fields = readOnlyTab
+    ? []
+    : fieldsFor(tab, workspace, typeof form?.contractorId === "string" ? form.contractorId : null);
   const activeTabLabel = tabs.find((item) => item.key === tab)?.label ?? "records";
 
   const startNew = () => {
