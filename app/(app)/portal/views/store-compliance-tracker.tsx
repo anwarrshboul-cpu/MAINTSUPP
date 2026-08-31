@@ -369,6 +369,37 @@ function byUrgency(left: MatrixRow, right: MatrixRow): number {
   return left.store.name.localeCompare(right.store.name, "en-GB");
 }
 
+/* ── Lifecycle ───────────────────────────────────────────────────────────── */
+
+/**
+ * WHICH STORES ARE STILL TRADING.
+ *
+ * `lifecycle` is the board GROUP a row sits in, and the captured monday board
+ * names its four groups "Current stores", "Europe", "Closed" and "Other" — see
+ * `storeDocumentationGroups` in db/monday-board-spec.ts. `buildComplianceStores`
+ * has always computed it and this view has always thrown it away, which is the
+ * defect: a closed unit's lapsed certificates were indistinguishable from a
+ * trading store's, counted in the same tiles, and ordered by the same rule.
+ *
+ * On the audit fixture — two closed units among six stores — five of the six
+ * entries in "Needs chasing first" were certificates belonging to CLOSED
+ * stores, and the trading store whose electrical certificate had genuinely
+ * lapsed was last. Nobody is going to renew the fire alarm certificate for a
+ * unit that has shut, so those five lines were work that does not exist,
+ * printed above work that does.
+ *
+ * The word is matched literally and nothing is inferred from it. Rename the
+ * group on the board and this simply stops telling closed stores apart — the
+ * behaviour it had before — rather than mis-filing a store as shut. Nothing is
+ * ever HIDDEN: every store keeps its row, its cells and its counts, and the
+ * lifecycle is printed on the row and offered as a filter so the reader decides.
+ */
+const CLOSED_LIFECYCLE = "closed";
+
+function isClosed(store: ComplianceTrackerStore): boolean {
+  return store.lifecycle.trim().toLowerCase() === CLOSED_LIFECYCLE;
+}
+
 /* ── Filters ─────────────────────────────────────────────────────────────── */
 
 type ComplianceFilter = "all" | CellState;
@@ -416,6 +447,8 @@ export function StoreComplianceTracker({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<ComplianceFilter>("all");
   const [responsibility, setResponsibility] = useState("");
+  /** Empty means every lifecycle, which is what the tab has always shown. */
+  const [lifecycle, setLifecycle] = useState("");
   const [query, setQuery] = useState("");
   const [order, setOrder] = useState<"urgency" | "name">("urgency");
 
@@ -455,6 +488,22 @@ export function StoreComplianceTracker({
 
   const allStores = stores ?? loaded;
 
+  /*
+   * The lifecycles actually on the board, in the board's own words.
+   *
+   * Derived from the rows rather than from `storeDocumentationGroups`, because
+   * a group an admin renamed has to appear here under its new name, and a
+   * group with no stores in it should not offer a filter that empties the
+   * matrix. A board with one lifecycle offers no control at all — see below.
+   */
+  const lifecycles = useMemo(
+    () =>
+      [...new Set((allStores ?? []).map((store) => store.lifecycle).filter(Boolean))].sort(
+        (left, right) => left.localeCompare(right, "en-GB"),
+      ),
+    [allStores],
+  );
+
   const responsibilities = useMemo(
     () =>
       [...new Set(storeDocumentationCertificates.map((slot) => slot.responsibility))].sort(
@@ -476,13 +525,14 @@ export function StoreComplianceTracker({
     if (!allStores) return [];
     const needle = query.trim().toLowerCase();
     return allStores
+      .filter((store) => !lifecycle || store.lifecycle === lifecycle)
       .filter(
         (store) =>
           !needle ||
           `${store.name} ${store.manager}`.toLowerCase().includes(needle),
       )
       .map((store) => buildRow(store, slots, now));
-  }, [allStores, query, slots, now]);
+  }, [allStores, lifecycle, query, slots, now]);
 
   /** Counts describe everything in scope, so they do not move as the status
    *  filter moves — the filter is a lens on these numbers, not a redefinition. */
@@ -522,6 +572,19 @@ export function StoreComplianceTracker({
     );
     return flat
       .sort((left, right) => {
+        /*
+         * TRADING BEFORE CLOSED, ahead of the status rank.
+         *
+         * This is a CHASE list — six lines, at the top of the tab, headed
+         * "Needs chasing first". A certificate on a store that has shut is not
+         * chased at all, so a closed unit's expired PAT must not push a
+         * trading store's expiring one off the list. Status rank still decides
+         * everything within each of the two groups, and nothing is removed:
+         * the closed store keeps its row, its cells and its counts in the
+         * matrix below, and appears here once the trading estate is clear.
+         */
+        const trading = Number(isClosed(left.row.store)) - Number(isClosed(right.row.store));
+        if (trading !== 0) return trading;
         const rank = STATUS[right.cell.status].rank - STATUS[left.cell.status].rank;
         if (rank !== 0) return rank;
         if (left.cell.daysAway !== right.cell.daysAway) {
@@ -645,6 +708,29 @@ export function StoreComplianceTracker({
           </select>
         </label>
 
+        {/*
+          Only where there is something to choose between. A board whose stores
+          all sit in one group would get a select with a single option, which is
+          a control that cannot do anything.
+        */}
+        {lifecycles.length > 1 && (
+          <label className="store-compliance__filter">
+            <Icon name="store" size={16} />
+            <select
+              value={lifecycle}
+              aria-label="Filter stores by lifecycle"
+              onChange={(event) => setLifecycle(event.target.value)}
+            >
+              <option value="">Every lifecycle</option>
+              {lifecycles.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <label className="store-compliance__filter">
           <Icon name="list" size={16} />
           <select
@@ -691,6 +777,9 @@ export function StoreComplianceTracker({
                     {entry.cell.daysAway !== null ? ` · ${overdueText(entry.cell.daysAway)}` : ""}
                     {" · chased by "}
                     {entry.slot.responsibility}
+                    {/* A closed unit only reaches this list once the trading
+                        estate is clear, and when it does it says so. */}
+                    {entry.row.store.lifecycle ? ` · ${entry.row.store.lifecycle}` : ""}
                   </span>
                 </span>
                 {/*
@@ -771,6 +860,22 @@ export function StoreComplianceTracker({
                         row.counts.missing === 0 &&
                         (row.counts.due > 0 ? `${row.counts.due} due soon` : "Nothing outstanding")}
                     </small>
+                    {/*
+                      The board's own word for where this store is in its life.
+                      Printed on every row that has one, not only the closed
+                      ones: "Closed" only means something next to rows that say
+                      "Current stores", and a reader who cannot see the
+                      difference cannot judge the counts above.
+                    */}
+                    {row.store.lifecycle && (
+                      <span
+                        className={`store-compliance__lifecycle${
+                          isClosed(row.store) ? " is-closed" : ""
+                        }`}
+                      >
+                        {row.store.lifecycle}
+                      </span>
+                    )}
                   </th>
 
                   {row.cells.map((cell, index) => {
@@ -822,7 +927,8 @@ export function StoreComplianceTracker({
 
       <p className="store-compliance__footnote">
         Showing {visible.length} of {rows.length} stores and {slots.length} of{" "}
-        {storeDocumentationCertificates.length} documents.{" "}
+        {storeDocumentationCertificates.length} documents
+        {lifecycle ? ` in ${lifecycle}` : ""}.{" "}
         {slots.some((slot) => slot.expiryColumn === null) &&
           "RAMS, the Fire Risk Assessment and the Drawing carry no expiry date on the board, so none is shown for them."}
       </p>

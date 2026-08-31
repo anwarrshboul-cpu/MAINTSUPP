@@ -422,4 +422,17 @@ export interface FileRecord {
   uploadedAt: string;
   size: string;
   status: "Current" | "Expiring soon" | "Archived";
+  /*
+   * WHERE THE BYTES ARE. `/api/files` has always returned these three —
+   * `attachmentPayload` in app/api/files/route.ts:130-137 builds
+   * `contentType`, `inlineUrl` and `downloadUrl` for every row — and the
+   * Documents register threw all three away when it mapped the payload, so a
+   * page whose whole job is to be a searchable file register listed files it
+   * could not open. Optional because `app/lib/mock-data.ts` also builds
+   * `FileRecord`s and has no storage behind them; the drawer treats their
+   * absence as "no preview, no download" rather than rendering a dead control.
+   */
+  inlineUrl?: string;
+  downloadUrl?: string;
+  contentType?: string;
 }

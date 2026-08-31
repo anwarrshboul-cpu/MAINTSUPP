@@ -142,6 +142,24 @@
   font: inherit;
   font-size: 13px;
   outline: none;
+  /*
+   * FILL THE BOX THAT IS DRAWN AROUND YOU.
+   *
+   * The label is `inline-flex; align-items: center; min-height: 34px`, so a
+   * child with no height of its own sits centred at its line box and nothing
+   * else. Measured in Chromium: the search input was 19.5px tall and each
+   * select 19px at 1024, 1280 and 1440 — under the 24px this repo holds itself
+   * to (tests/audit-touch-targets.test.mjs, WCAG 2.5.8), with 7px of the 34px
+   * box dead above and below.
+   *
+   * Only phones were ever protected, and by accident: brand-overrides.css puts
+   * a 44px floor under `.portal-shell` form controls at <=768px to stop iOS
+   * zooming on focus (see tests/stage-twentyfive-mobile-touch.test.mjs), and
+   * that floor was doing the touch-target work as a side effect. A pointer is
+   * not exempt from 2.5.8, so the control now fills its label at every width
+   * and the phone floor still wins where it is larger.
+   */
+  align-self: stretch;
 }
 
 .store-compliance__search input {
@@ -177,7 +195,9 @@
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--navy-800);
+  /* See the note on `.store-compliance__matrix thead th` — `--navy-800` is a
+     surface, and this heading was 1.51:1 on the dark canvas. */
+  color: var(--ink);
 }
 
 .store-compliance__priority ul {
@@ -286,6 +306,14 @@
   vertical-align: top;
 }
 
+/*
+ * `--ink`, NOT `--navy-800`.
+ *
+ * `--navy-800` is a SURFACE token: #123149 in light, #203743 in dark. As text
+ * on `--canvas` it reads at 1.51:1 in dark — axe flagged all twelve column
+ * labels plus the corner cell, at every width, in both this file's headings.
+ * `--ink` is the token that is defined as text and flips with the theme.
+ */
 .store-compliance__matrix thead th {
   position: sticky;
   top: 0;
@@ -293,7 +321,7 @@
   min-width: 132px;
   border-bottom: 1px solid var(--line);
   background: var(--canvas);
-  color: var(--navy-800);
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -352,6 +380,37 @@
   font-size: 10px;
   font-weight: 500;
   color: var(--muted-2);
+}
+
+/*
+ * The board group a store sits in — "Current stores", "Europe", "Closed",
+ * "Other" — printed on the row.
+ *
+ * A quiet outline chip rather than a coloured badge: it is context for the
+ * counts above it, not a status, and the row already carries three status
+ * colours. `is-closed` is the one that gets emphasis, because it is the one
+ * that changes whether the numbers beside it are work.
+ */
+.store-compliance__lifecycle {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.store-compliance__lifecycle.is-closed {
+  border-color: var(--muted-2);
+  color: var(--ink);
+  /* Not colour alone: a closed store also reads as closed in greyscale. */
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .store-compliance__cell {
@@ -417,10 +476,17 @@
   color: var(--paper);
 }
 
-/* Held, but nobody wrote down when it runs out. */
+/*
+ * Held, but nobody wrote down when it runs out.
+ *
+ * The RULE stays `--navy-700`; the WORDS do not. As text that token is
+ * #2b4b58 on the dark paper — 1.84:1 — and the state is already carried by the
+ * dotted underline, the hollow "?" and the left rule, so the label gives up
+ * the one signal it could not afford and keeps the other three.
+ */
 .store-compliance__cell.is-undated {
   border-left-color: var(--navy-700);
-  color: var(--navy-700);
+  color: var(--ink);
 }
 
 .store-compliance__cell.is-undated .store-compliance__cell-label {
@@ -430,7 +496,7 @@
 
 .store-compliance__cell.is-undated .store-compliance__glyph {
   border: 1.5px solid var(--navy-700);
-  color: var(--navy-700);
+  color: var(--ink);
 }
 
 .store-compliance__cell.is-valid,
@@ -453,9 +519,25 @@
   color: var(--muted-2);
 }
 
-/* Filtered out rather than absent — still readable, plainly not the subject. */
+/*
+ * Filtered out rather than absent — still readable, plainly not the subject.
+ *
+ * This was `opacity: 0.42`, and opacity fades the WORDS along with the colour.
+ * Measured with axe on a filtered matrix: "Missing" came out #dfb2a1 on
+ * #fff6f2 at 1.78:1 in light and #6b4437 on #262121 at 1.89:1 in dark, 56
+ * cells on one screen, 70 on a phone — while the sentence above this rule and
+ * the banner above the matrix both promise the store can still be read in
+ * full. It could not be read at all.
+ *
+ * So the fade comes off the text. What goes is the coloured WASH, which is the
+ * loudest part of a cell and the part that says "look here"; what stays is the
+ * status glyph, the 3px left rule and every word, at the secondary ink. The
+ * cell recedes because it is no longer coloured, not because it is no longer
+ * legible.
+ */
 .store-compliance__cell.is-dimmed {
-  opacity: 0.42;
+  background: none;
+  color: var(--muted);
 }
 
 .store-compliance__matrix tbody tr:hover .store-compliance__store {

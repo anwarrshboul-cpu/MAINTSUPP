@@ -395,7 +395,31 @@ async function completeMetadata(
 
 export async function POST(request: Request) {
   try {
-    const payload = (await request.json()) as Record<string, unknown>;
+    /*
+     * A BODY THAT IS NOT A JSON OBJECT IS A BAD REQUEST, NOT AN OUTAGE.
+     *
+     * The unguarded read let three ordinary client mistakes fall through every
+     * branch into the 503 at the bottom of this handler, which tells a browser
+     * to retry something no retry can fix. Measured against the running server:
+     * an empty body answered 503 "Unexpected end of JSON input", a body of
+     * literal `null` PARSES and then answered 503 "Cannot read properties of
+     * null (reading 'action')", and malformed JSON answered 503 with V8's
+     * parser message. In development those strings are appended to the reply,
+     * so an internal runtime message was being handed to the caller as well.
+     *
+     * `/api/board` guards its body in exactly this way and for exactly this
+     * reason. An array is not a record either — `payload.action` on one is
+     * `undefined`, which reached the "start" comparison and then the key
+     * validation, so it refused for the wrong reason.
+     */
+    const parsed = (await request.json().catch(() => null)) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return Response.json(
+        { error: "The request body must be a JSON object." },
+        { status: 400 },
+      );
+    }
+    const payload = parsed as Record<string, unknown>;
     const action = String(payload.action ?? "");
     const requestId = String(payload.requestId ?? "").trim();
     const requestedKind = String(payload.kind ?? "issue");
@@ -662,8 +686,18 @@ export async function POST(request: Request) {
       process.env.NODE_ENV === "development" && error instanceof Error
         ? ` ${error.message}`
         : "";
+    /*
+     * "The file", not "The video".
+     *
+     * This route was written for video and is now the path EVERY upload over
+     * 900 KB takes — `DIRECT_UPLOAD_LIMIT` in app/lib/client-upload.ts, lowered
+     * from 4 MB because the Workers runtime refuses to parse a form body at or
+     * above 1 MiB. So a coordinator whose PAT certificate failed was told the
+     * video could not be uploaded, about a PDF, and had no way to tell whether
+     * the message was about their file at all.
+     */
     return Response.json(
-      { error: `The video could not be uploaded.${detail}` },
+      { error: `The file could not be uploaded.${detail}` },
       { status: 503 },
     );
   }
@@ -725,8 +759,10 @@ export async function PUT(request: Request) {
       process.env.NODE_ENV === "development" && error instanceof Error
         ? ` ${error.message}`
         : "";
+    // "The file", not "The video" — see the matching note on POST. Every
+    // upload over 900 KB sends its parts here, whatever it is.
     return Response.json(
-      { error: `The video part could not be uploaded.${detail}` },
+      { error: `The file part could not be uploaded.${detail}` },
       { status: 503 },
     );
   }

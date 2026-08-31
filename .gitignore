@@ -32,8 +32,13 @@ yarn-error.log*
 
 # monday API pull — regenerate with db/monday-export/pull-monday-api.mjs.
 # The JSON carries hour-long signed S3 URLs and the assets are 3.4 GB of
-# photographs; neither belongs in git. The board captures that ARE ground truth
-# (MAINTENANCE-MONDAY-CAPTURE.md, store-documentation.json) stay committed.
+# photographs; neither belongs in git. The board captures are NOT committed
+# either - see the "Not published" block below, which ignores
+# MAINTENANCE-MONDAY-CAPTURE.md and every .json/.csv in this directory because
+# this repository is public and those files carry the client's live data. An
+# earlier version of this comment claimed they "stay committed"; acting on that
+# would publish real store addresses, contact numbers and out-of-hours access
+# notes. Regenerate them locally instead - they stay on the operator machine.
 /db/monday-export/api-pull/
 /db/monday-export/assets/
 

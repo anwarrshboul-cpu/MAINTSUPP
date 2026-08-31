@@ -107,6 +107,56 @@ export async function GET(request: Request) {
        * off the board entirely and comes back through Trash.
        */
       isNull(maintenanceRequests.deletedAt),
+      /*
+       * THE BOARD THE CALLER ASKED FOR — which this read used to resolve and
+       * then throw away.
+       *
+       * `resolveBoard` above ran, validated `?board=`, and its result reached
+       * the response envelope and nothing else: no condition here named a
+       * board, and there is no board column on `maintenance_requests` to name.
+       * So `?board=store-documentation` answered with the organisation's ENTIRE
+       * job list — 32 maintenance jobs on this dev workspace — and every
+       * alternative view built on this route (kanban, calendar, chart, gallery)
+       * drew the maintenance board's rows while claiming to draw the
+       * documentation board's. Not a tenant leak; the organisation filter was
+       * always intact. Worse in one respect: plausible wrong data rather than
+       * an error.
+       *
+       * Placement is what decides a request's board — see the long note in
+       * `ensureBoardState` (app/api/board/route.ts:936-956) — so the filter has
+       * to go through `maintenance_group_items`, which is also how
+       * `boardPayload` scopes its own item list.
+       *
+       * A SUBQUERY RATHER THAN A JOIN OR A TWO-STEP `IN` LIST, for two reasons.
+       * A join would change the shape drizzle returns for `.select()` and force
+       * every one of the twenty field reads below to be rewritten, which is a
+       * much larger diff than the defect. Reading the placed ids first and
+       * passing them as an `IN` list would blow D1's bound-variable budget on a
+       * real board — 744 rows against a cap the `chunkIds` helper puts at 90 —
+       * and chunking cannot be reconciled with the LIMIT/OFFSET paging this
+       * route promises. Two bound parameters, applied BEFORE the limit, so a
+       * page is a page of this board's items and `nextCursor` still means
+       * something.
+       *
+       * It also answers "unplaced" correctly by construction: a request with no
+       * placement row is on no board, so it belongs in no board's answer. The
+       * question asked here is "which board is this request on", which is what
+       * the request_id primary key can answer — NOT "is this request placed on
+       * board X", the narrower question whose board-scoped form caused the
+       * 31 discarded INSERTs that note records.
+       */
+      inArray(
+        maintenanceRequests.id,
+        db
+          .select({ requestId: maintenanceGroupItems.requestId })
+          .from(maintenanceGroupItems)
+          .where(
+            and(
+              eq(maintenanceGroupItems.organisationId, orgId),
+              eq(maintenanceGroupItems.boardId, board.key),
+            ),
+          ),
+      ),
     ];
     if (!includeArchived) conditions.push(eq(maintenanceRequests.archived, false));
 
@@ -692,8 +742,23 @@ export async function PATCH(request: Request) {
       afterRows.push(...rows);
     }
 
-    for (const itemId of itemIds) {
-      await recordActivity(db, orgId, board.key, itemId, who, action);
+    /*
+     * ACTIVITY FOLLOWS WHAT CHANGED, NOT WHAT WAS ASKED FOR.
+     *
+     * This iterated `itemIds`. The UPDATE above is organisation-scoped and
+     * every id that missed it is absent from `afterRows` — so a foreign,
+     * invented or binned id wrote nothing to `maintenance_requests` and still
+     * filed an `item_activity` row into the CALLER's organisation, naming a
+     * request id that organisation does not own. An audit trail that records
+     * edits which did not happen is worse than one that records none: it is the
+     * record somebody reaches for when they want to know what was changed.
+     *
+     * `afterRows` is the same list the automation dispatch immediately below
+     * already maps over, so this makes all three statements — the write, the
+     * trail and the events — agree about what happened.
+     */
+    for (const row of afterRows) {
+      await recordActivity(db, orgId, board.key, row.id, who, action);
     }
 
     await dispatchAutomationEvents(
@@ -701,7 +766,22 @@ export async function PATCH(request: Request) {
       afterRows.flatMap((row) => requestFieldEvents(board.key, beforeRows.get(row.id), row)),
     );
 
-    return Response.json({ ok: true, updated: itemIds.length });
+    /*
+     * THE COUNT OF ROWS WRITTEN, NOT THE COUNT OF IDS SENT.
+     *
+     * `updated: itemIds.length` answered `{ ok: true, updated: 1 }` to a PATCH
+     * naming a row in another organisation — measured: a cross-tenant rename to
+     * "HIJACKED-BY-ORG2" was refused by the `organisationId` predicate, wrote
+     * nothing, and was reported as having worked. Nothing leaked and nothing
+     * moved; the ANSWER was the defect, and it is the shape of defect a caller
+     * cannot detect. A board that shows a rename which never reached the
+     * database is telling its user something false and will keep telling them
+     * until they reload.
+     *
+     * It is also wrong for the ordinary case: a mixed batch where half the ids
+     * are already in the bin reported every one of them as saved.
+     */
+    return Response.json({ ok: true, updated: afterRows.length });
   } catch (error) {
     return unavailable(error);
   }

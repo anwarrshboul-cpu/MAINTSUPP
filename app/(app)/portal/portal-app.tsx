@@ -1180,6 +1180,9 @@ export default function PortalApp({
             originalName: string;
             byteSize: number;
             createdAt: string;
+            contentType?: string;
+            inlineUrl?: string;
+            downloadUrl?: string;
           }>;
         };
         if (!active || !payload.files) return;
@@ -1199,6 +1202,9 @@ export default function PortalApp({
           uploadedAt: file.createdAt,
           size: formatFileSize(file.byteSize),
           status: "Current",
+          inlineUrl: file.inlineUrl,
+          downloadUrl: file.downloadUrl,
+          contentType: file.contentType,
         }));
         setDocuments(liveFiles);
       } catch {
@@ -7535,6 +7541,36 @@ function StoreComplianceDrawer({
   );
 }
 
+/**
+ * WHAT A FILE DRAWER CAN PREVIEW, and why the list is the server's list.
+ *
+ * `app/api/files/[id]/route.ts` serves `INLINE_SAFE_TYPES` with their real
+ * content type and everything else as `application/octet-stream`, which the
+ * browser downloads rather than renders. A drawer that decided for itself what
+ * to preview would either embed something the server refuses to serve inline —
+ * an empty frame with no explanation — or refuse something the server would
+ * happily have shown. The two lists have to be the same list.
+ */
+function previewKindFor(contentType: string | undefined) {
+  if (!contentType) return "none" as const;
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  if (
+    type === "image/jpeg" ||
+    type === "image/png" ||
+    type === "image/webp" ||
+    type === "image/gif" ||
+    type === "image/heic" ||
+    type === "image/heif"
+  ) {
+    return "image" as const;
+  }
+  if (type === "video/mp4" || type === "video/webm" || type === "video/quicktime") {
+    return "video" as const;
+  }
+  if (type === "application/pdf") return "pdf" as const;
+  return "none" as const;
+}
+
 function FileDetailDrawer({
   file,
   onClose,
@@ -7542,6 +7578,61 @@ function FileDetailDrawer({
   file: FileRecord;
   onClose: () => void;
 }) {
+  /*
+   * THE DRAWER IS A DIALOG, AND HAS TO BEHAVE LIKE ONE.
+   *
+   * The same argument the request drawer above already makes, and the same fix
+   * — this one was simply missed. It painted over the page behind a scrim as a
+   * bare `<aside>`: no `role`, focus left on the row that opened it, and
+   * Escape doing nothing, measured closed in 0 of 20 openings across ten widths
+   * and both themes. `surface.focus()` rather than the close button's, so a
+   * screen reader announces the dialog and its label first; the close button is
+   * then one Tab away.
+   */
+  const drawerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const opener =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const surface = drawerRef.current;
+    if (surface && !surface.contains(document.activeElement)) {
+      surface.focus({ preventScroll: true });
+    }
+    return () => {
+      // Only if focus would otherwise be lost — see the request drawer above.
+      if (!opener || !document.contains(opener)) return;
+      const active = document.activeElement;
+      if (!active || active === document.body) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // An anchored popover owns the press while one is open.
+      if (document.querySelector(".ms-layer .ms-popover")) return;
+      /*
+       * Escape inside a box means "abandon what I am typing" everywhere else in
+       * this app, and the register's own search field is one Tab from here.
+       */
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("input, textarea, select, [contenteditable='true']")
+      ) {
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const preview = previewKindFor(file.contentType);
+  const canOpen = Boolean(file.inlineUrl);
+
   return (
     <>
       <button
@@ -7550,7 +7641,14 @@ function FileDetailDrawer({
         aria-label="Close file details"
         onClick={onClose}
       />
-      <aside className="detail-drawer detail-drawer--file">
+      <aside
+        className="detail-drawer detail-drawer--file"
+        ref={drawerRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`File details: ${file.name}`}
+      >
         <div className="detail-drawer__header">
           <div>
             <span>{file.id}</span>
@@ -7567,10 +7665,61 @@ function FileDetailDrawer({
         </div>
         <div className="detail-drawer__body">
           <div className="file-preview-placeholder">
-            <Icon name="document" size={38} />
-            <strong>{file.kind}</strong>
-            <span>{file.size}</span>
+            {preview === "image" && canOpen ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                className="file-preview__media"
+                src={file.inlineUrl}
+                alt={file.name}
+              />
+            ) : preview === "pdf" && canOpen ? (
+              <iframe
+                className="file-preview__media"
+                src={file.inlineUrl}
+                title={`Preview of ${file.name}`}
+              />
+            ) : preview === "video" && canOpen ? (
+              <video className="file-preview__media" src={file.inlineUrl} controls />
+            ) : (
+              <>
+                <Icon name="document" size={38} />
+                <strong>{file.kind}</strong>
+                <span>{file.size}</span>
+                {/*
+                 * Said rather than implied. The server sends this file as
+                 * octet-stream, so there is nothing to embed — and a reader
+                 * looking at an icon with no explanation cannot tell that from
+                 * a preview that failed to load.
+                 */}
+                <span>
+                  {canOpen
+                    ? "This file type cannot be previewed. Download it to open."
+                    : "No stored file for this record."}
+                </span>
+              </>
+            )}
           </div>
+          {canOpen && (
+            <div className="file-preview__actions">
+              <a
+                className="secondary-button"
+                href={file.inlineUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Icon name="search" size={17} />
+                Open in new tab
+              </a>
+              <a
+                className="secondary-button"
+                href={file.downloadUrl ?? `${file.inlineUrl}?download=1`}
+                download={file.name}
+              >
+                <Icon name="download" size={17} />
+                Download
+              </a>
+            </div>
+          )}
           <section className="drawer-section">
             <span className="drawer-label">File details</span>
             <div className="detail-grid">

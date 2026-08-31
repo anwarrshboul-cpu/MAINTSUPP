@@ -118,9 +118,38 @@ export async function GET(
    * before; the token path is only consulted when there is no session.
    */
   const shareToken = new URL(request.url).searchParams.get("token")?.trim() ?? "";
-  const { db, orgId, authenticated } = await scopedDb(request, {
-    allowAnonymous: Boolean(shareToken),
-  });
+  /*
+   * A SESSION THAT HAS ENDED IS NOT AN OUTAGE — and on this route it was a 500.
+   *
+   * Without a token `allowAnonymous` is false, so `scopedDb` refuses a caller
+   * with no session by throwing. This handler had no catch, so the throw
+   * escaped and the framework answered 500 WITH AN EMPTY BODY. Measured against
+   * the deployed preview: a real id, a nonexistent id and a malformed id all
+   * gave the identical empty 500 — the throw happens before the row lookup —
+   * while the same request with any `?token=` value returned a clean 404,
+   * which isolates the refusal as the only cause.
+   *
+   * The sibling index route already carries this fix and names the symptom in
+   * the same words (app/api/files/route.ts, `unavailable`): "an outage where
+   * every sibling route says 'sign in', and a stack trace in the log for a
+   * request that was correctly refused". It was applied there and not here, and
+   * this is the busier route of the two — every thumbnail on a board resolves
+   * through it, so one expired session produced a burst of false 500s in error
+   * monitoring instead of a single sign-in prompt.
+   *
+   * Wrapped at the call rather than around the whole handler, which is the
+   * idiom PUT below already uses: `anonymousRefusal` answers the refusal and
+   * anything else is re-thrown, so a genuine fault is still a fault.
+   */
+  let scope: Awaited<ReturnType<typeof scopedDb>>;
+  try {
+    scope = await scopedDb(request, { allowAnonymous: Boolean(shareToken) });
+  } catch (error) {
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    throw error;
+  }
+  const { db, orgId, authenticated } = scope;
 
   const linkScope =
     !authenticated && shareToken ? await resolveJobToken(db, shareToken) : null;

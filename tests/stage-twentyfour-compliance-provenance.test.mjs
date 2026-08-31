@@ -121,10 +121,23 @@ const model = await import(
   asModule(
     transpile(
       await read("app/(app)/portal/views/store-documentation-model.ts"),
-    ).replace(
-      /from ["']\.\.\/\.\.\/\.\.\/\.\.\/db\/monday-board-spec["']/g,
-      `from "${specUrl}"`,
-    ),
+    )
+      .replace(
+        /from ["']\.\.\/\.\.\/\.\.\/\.\.\/db\/monday-board-spec["']/g,
+        `from "${specUrl}"`,
+      )
+      /*
+       * The model now normalises the expiry cell through `dateOnlyValue`, the
+       * same helper the server-side register uses, so monday's two date shapes
+       * — a bare "2026-08-05" and a {"date":…} object — reach the tracker and
+       * the renewal calendar as one shape. That is one more relative specifier
+       * a data: URL cannot resolve, substituted here exactly as the register's
+       * own import of the same module is above.
+       */
+      .replace(
+        /from ["']\.\.\/\.\.\/\.\.\/lib\/expiry-status["']/g,
+        `from "${expiryUrl}"`,
+      ),
   )
 );
 
@@ -672,7 +685,7 @@ test("the classifier takes its today from the caller", () => {
 
 /* ── The whole board, against the real capture ───────────────────────────── */
 
-test("the capture's expired certificates are exactly the ones reported", async () => {
+test("the capture's expired certificates are exactly the ones reported", async (t) => {
   /*
    * The end-to-end number, walked out of the verbatim capture rather than out
    * of the database, so it fails if the classifier stops agreeing with the
@@ -683,7 +696,23 @@ test("the capture's expired certificates are exactly the ones reported", async (
    * their monday titles. Eleven certificates across seven stores were lapsed on
    * 2026-08-10, and the compliance screens showed one, a fictional one.
    */
-  const csv = await read("db/monday-export/store-documentation-expiry.csv");
+  /*
+   * Gitignored for the reason given in the "Not published"
+   * block: this repository is public and the expiry sheet is the client's live
+   * register. The sheet is an operator-machine artefact, so on a clone this
+   * assertion has no bytes to walk and stands down rather than failing for
+   * ever. Every BEHAVIOURAL assertion in this file - that a lapsed certificate
+   * is never reported valid, that state is recomputed from the date on every
+   * read, that a date cannot shift a day on its way to the screen - is
+   * independent of this file and still runs.
+   */
+  const csv = await read("db/monday-export/store-documentation-expiry.csv").catch(
+    () => null,
+  );
+  if (csv === null) {
+    t.skip("no monday expiry sheet on this machine (gitignored: client data)");
+    return;
+  }
 
   const titleByKey = new Map(
     spec.storeDocumentationColumns.map((column) => [column.key, column.title]),

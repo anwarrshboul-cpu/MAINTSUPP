@@ -330,6 +330,35 @@ export async function POST(request: Request) {
         { status: 415 },
       );
     }
+    /*
+     * A FILE OF NO BYTES IS NOT A DOCUMENT, AND ON THIS BOARD IT IS A LIE.
+     *
+     * The multipart route has always refused this — `byteSize < 1` is one of
+     * the four conditions behind its 415 (`multipart/route.ts:441-452`) — and
+     * this route accepted it: measured, a 0-byte `W7QA-empty-cert.pdf` filed
+     * against the PAT Test Certificate column of a Store Documentation row
+     * answered 201 with `byteSize: 0`.
+     *
+     * The consequence is not cosmetic. The compliance register decides whether
+     * a certificate is HELD by counting attachments on the slot's file column
+     * and asking `fileCount > 0` (`app/lib/store-documentation-register.ts:215`),
+     * and the file counts on `/api/board` went 7 to 8 for that column when the
+     * empty file landed. So an empty upload turns a slot from "Missing" to
+     * "Compliant" — or, on an undated slot, permanently to "Compliant", since
+     * RAMS, the Fire Risk Assessment and the Drawing have no expiry to fall
+     * back on. The register would then say the store holds a certificate that
+     * consists of nothing at all, and the digest would stop chasing it.
+     *
+     * 400 rather than 413: too large and empty are different mistakes, and the
+     * person who hit this needs to be told the file did not survive whatever
+     * produced it, not that it was too big.
+     */
+    if (file.size < 1) {
+      return Response.json(
+        { error: "That file is empty. Choose a file with something in it." },
+        { status: 400 },
+      );
+    }
     const maxSize = isVideo(file)
       ? MAX_VIDEO_FILE_SIZE
       : MAX_STANDARD_FILE_SIZE;

@@ -54,6 +54,7 @@ import {
   storeDocumentationCertificates,
   type StoreDocumentSlot,
 } from "../../../../db/monday-board-spec";
+import { dateOnlyValue } from "../../../lib/expiry-status";
 import type {
   ComplianceItem,
   ComplianceState,
@@ -101,21 +102,77 @@ export function columnIdByKey(
   return new Map((payload.columns ?? []).map((column) => [column.key, column.id]));
 }
 
-/** `requestId → {columnId: value}`. One pass over the flat cell list. */
+/**
+ * The ids of the nine expiry columns on this organisation's copy of the board.
+ *
+ * The spec names them by key; `payload.columns` is what turns a key into the
+ * id `cells` is actually keyed by. Anything not in this set is left exactly as
+ * the board sent it — `dateOnlyValue` answers "" for "123 High Street", so
+ * normalising every cell would empty the Store Address column.
+ */
+function expiryColumnIds(
+  payload: StoreDocumentationPayload,
+  slots: StoreDocumentSlot[] = storeDocumentationCertificates,
+): Set<string> {
+  const idByKey = columnIdByKey(payload);
+  const ids = new Set<string>();
+  for (const slot of slots) {
+    if (!slot.expiryColumn) continue;
+    const id = idByKey.get(slot.expiryColumn);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * `requestId → {columnId: value}`. One pass over the flat cell list.
+ *
+ * AN EXPIRY CELL ARRIVES IN TWO SHAPES, AND ONLY ONE OF THEM IS A DATE
+ *
+ * monday writes a date cell either as a bare `2026-08-29` or as the JSON
+ * object `{"date":"2026-08-29","time":"","icon":""}`, and on the imported
+ * board the JSON shape is the majority. The server register already normalises
+ * it — `store-documentation-register.ts` runs every expiry through
+ * `dateOnlyValue(...) || null` — but this file handed the raw string on, and
+ * the two readers of these cells fail differently and silently on it:
+ *
+ *  - the Compliance Tracker's status stayed CORRECT, because `readVerdict`
+ *    goes through `expiryStatus`, which calls `dateOnlyValue` itself. But
+ *    `daysUntil` does `new Date(raw)` → Invalid Date → null, so the cell
+ *    printed no date and no "12 days overdue", and `worstDays` — the tie-break
+ *    that decides which store is in the most trouble — ignored the row.
+ *  - the renewal Calendar dropped the entry ALTOGETHER: `parseIsoDay` in
+ *    `store-expiry-calendar.tsx` anchors `^(\d{4})-(\d{2})-(\d{2})`, a JSON
+ *    string does not match, and `buildEntries` does `continue`. Same symptom
+ *    as the bug that file's header records — an empty month with the data
+ *    sitting in the payload — from a different cause.
+ *
+ * Normalising HERE is what fixes both at once: `buildStoreBoardItems` and
+ * `complianceFor` both read this map, so neither can be repaired without the
+ * other. Doing it in the three consumers instead is three places to keep in
+ * step, which is how this class of bug came back the first time.
+ */
 export function cellsByRequest(
   payload: StoreDocumentationPayload,
 ): Map<string, Record<string, string>> {
   const byRequest = new Map<string, Record<string, string>>();
+  const expiryColumns = expiryColumnIds(payload);
   for (const cell of payload.cells ?? []) {
     let row = byRequest.get(cell.requestId);
     if (!row) {
       row = {};
       byRequest.set(cell.requestId, row);
     }
+    // `dateOnlyValue` answers "" for anything it cannot read as a date, which
+    // the empty check below then drops — an unreadable date is no date, and
+    // that is what the register says too.
+    const value = expiryColumns.has(cell.columnId)
+      ? dateOnlyValue(cell.value)
+      : cell.value;
     // An empty string is not a value. The board writes "" when a date is
     // cleared, and a calendar entry for "" would be an entry for nothing.
-    if (cell.value !== null && cell.value !== undefined && cell.value !== "") {
-      row[cell.columnId] = cell.value;
+    if (value !== null && value !== undefined && value !== "") {
+      row[cell.columnId] = value;
     }
   }
   return byRequest;
@@ -241,7 +298,19 @@ function complianceFor(
     const fileCount = fileColumnId
       ? (counts.get(`${requestId}::${fileColumnId}`) ?? 0)
       : 0;
-    const expiry = expiryColumnId ? (cells[expiryColumnId] ?? null) : null;
+    /*
+     * `cellsByRequest` has already normalised this — see the note there. The
+     * call is repeated because the next line is `holdingState(fileCount,
+     * expiry)`, which reads `expiry !== null` as "we hold the certificate", so
+     * a raw `{"date":…}` reaching here would be a date-shaped string that no
+     * consumer can read and every consumer counts as held.
+     *
+     * `|| null`, not the bare call: `dateOnlyValue` answers "" rather than
+     * null for a value it cannot read, and "" is not null. The server register
+     * writes it the same way for the same reason.
+     */
+    const rawExpiry = expiryColumnId ? (cells[expiryColumnId] ?? null) : null;
+    const expiry = dateOnlyValue(rawExpiry) || null;
     /*
      * The override wins over what the board holds. A store told us it does not
      * need this certificate; a missing file is then the expected state and not
