@@ -4669,8 +4669,60 @@ function ContractorsView({
     stampWithinPeriod(request.completedAt ?? request.requestedAt, period, nowMs);
   const scopedRequests = requests.filter(inWindow);
 
+  /*
+   * How many rows in this roster answer to each name.
+   *
+   * Two contractors can share one, because nothing stops them: no unique index
+   * on `contractors.name` and no duplicate check on the create. When that
+   * happens the name branch below matches BOTH, so one unlinked job was
+   * counted against each of them and the Tracked spend tile — which sums these
+   * per-row figures — reported a single GBP 999 job as GBP 1,998.
+   */
+  const rosterPerName = new Map<string, number>();
+  for (const entry of roster) {
+    rosterPerName.set(entry.name, (rosterPerName.get(entry.name) ?? 0) + 1);
+  }
+
   const contractors = roster.map((contractor) => {
-    const theirs = scopedRequests.filter((request) => request.contractor === contractor.name);
+    /*
+     * THE ID FIRST, AND THE NAME ONLY WHERE THERE IS NO ID.
+     *
+     * This line attributed work by matching the job's contractor NAME against
+     * the register row's name, and a name is not an identity. Renaming a
+     * contractor therefore zeroed their whole history — assigned, completed,
+     * urgent AND spend — while `contractor_id` on every one of those jobs went
+     * on pointing straight at them. S3 replayed this function over the live
+     * `/api/maintenance` payload and measured the drop: `{assigned:1,
+     * completed:0, urgent:1, spend:250}` → `{0,0,0,0}` on rename, server and
+     * client identically. The server half is fixed; this is the half the
+     * reader actually sees, because the four numbers in the table are
+     * recomputed here rather than taken from the payload — that is what the
+     * page's own reporting period requires, and it is also why fixing the API
+     * alone left the table wrong.
+     *
+     * The two branches are disjoint per job: a job with an id is matched by
+     * the id and by nothing else, a job without one falls back to the name. So
+     * no job can reach two contractors and none can be counted twice — the
+     * same partition property the server-side aggregate relies on.
+     *
+     * `fallbackContractors` above synthesises ids from the name
+     * (`contractor-${slug}`) and those are NOT register ids. The predicate is
+     * still right there: that roster only exists when the register is empty,
+     * and a workspace with no contractors has no job carrying a valid
+     * `contractor_id` either, so every synthesised row takes the name branch
+     * exactly as before. Matching those ids would be the bug, not the fix.
+     *
+     * And a name TWO of them share attributes to neither, matching both the
+     * server aggregate and `resolveContractorLink`: a register that cannot say
+     * which contractor a name means cannot say whose job it was. An ambiguous
+     * name under-counting is visible and fixable; double-counting silently
+     * inflates a figure somebody bills from.
+     */
+    const nameIsUnique = (rosterPerName.get(contractor.name) ?? 0) <= 1;
+    const theirs = scopedRequests.filter((request) =>
+      request.contractorId
+        ? request.contractorId === contractor.id
+        : nameIsUnique && request.contractor === contractor.name);
     return {
       ...contractor,
       assignedJobs: theirs.length,
@@ -4713,7 +4765,30 @@ function ContractorsView({
       <section className="panel sites-panel"><div className="table-scroll"><table className="data-table sites-table">
         <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Coverage</th><th>Day rate</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
         <tbody>{contractors.map((contractor) => (
-          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong></span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.coverageAreas.join(", ") || "Not specified"}</td><td>{contractor.dayRatePence === null || contractor.dayRatePence === undefined ? "—" : formatMoney(contractor.dayRatePence / 100)}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
+          /*
+            THE ONE STATE THIS TABLE COULD NOT SHOW.
+
+            Eleven columns, and neither of the register's two states was among
+            them. Proved on a fixture: archiving a contractor writes
+            `active:false, availability:"Inactive"` — confirmed against
+            /api/workspace — and its row here stayed byte-identical to a live
+            one. Nothing on the page distinguished a contractor you can call
+            today from one somebody took off the register last month.
+
+            A twelfth column was the wrong answer: the table already scrolls
+            sideways inside `.table-scroll` from 1440 down, and a column that is
+            blank on all but a handful of rows buys that scroll for nothing. So
+            the flag rides with the name, where the reader already is.
+
+            Labelled, and with the word `recordSubtitle` uses for the same flag,
+            because "Archived" and the availability value "Inactive" are two
+            different fields and this page has spent a stage learning not to
+            print one where the other is meant. The hidden half of the sentence
+            says which field it is out loud, for a reader who cannot see that it
+            is attached to the name rather than to the availability nobody
+            prints here.
+          */
+          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong>{!contractor.active && <span className="contractor-archived-chip">Archived<span className="visually-hidden"> — off the register; this is not their availability</span></span>}</span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.coverageAreas.join(", ") || "Not specified"}</td><td>{contractor.dayRatePence === null || contractor.dayRatePence === undefined ? "—" : formatMoney(contractor.dayRatePence / 100)}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
         ))}
         {!contractors.length && (
           <tr>

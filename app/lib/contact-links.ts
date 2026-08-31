@@ -39,8 +39,54 @@ function digitsOnly(value: string) {
  * other non-digit. The visible label is the caller's business: what was typed
  * is what a person recognises, and this is only the machine half.
  */
+/**
+ * Drop the national trunk digit that international notation writes in brackets.
+ *
+ * `+44 (0) 20 7946 0958` is one number written for two audiences: dial
+ * `020 7946 0958` inside the UK, or `+44 20 7946 0958` from outside it. The
+ * bracketed `0` is explicitly the digit you do NOT dial internationally — the
+ * brackets are the notation SAYING so — so carrying it through produced
+ * `wa.me/4402079460958`, a country code followed by a digit no number has.
+ * Measured: that link opens on "the phone number shared via url is invalid",
+ * which is the exact failure the WhatsApp column was added to avoid.
+ *
+ * This is NOT the country-code guess the rest of this module refuses. Nothing
+ * is invented and nothing is assumed about which country the number belongs
+ * to: a digit the writer already marked as optional is removed, and only when
+ * they marked it. A bare `07812 224644` still has no brackets and still
+ * resolves to nothing, exactly as before.
+ *
+ * Deliberately narrow — a single `0` alone inside its brackets. `(020)` is a
+ * whole area code in the British style of writing a NATIONAL number, and
+ * `telHref` must keep every one of its digits.
+ */
+function withoutBracketedTrunk(value: string): string {
+  /*
+   * ONLY where a country code is actually stated, and that condition is the
+   * whole guard rather than a refinement of it.
+   *
+   * Stripping unconditionally re-created the exact fault this module exists to
+   * prevent, one step further along. `(0)20 7946 0958` is a NATIONAL number —
+   * somebody's London landline, written the way a website writes it. Removing
+   * its bracketed zero leaves `2079460958`, which no longer opens with a trunk
+   * `0`, so the bare-digits branch below reads it as already international and
+   * hands WhatsApp `wa.me/2079460958` — a real number in EGYPT. `(0)7812
+   * 224644` went to RUSSIA the same way. Both returned NO link before the
+   * bracket rule existed, and a confident link to a stranger is far worse than
+   * a value the screen simply prints.
+   *
+   * `+44 (0) 20 …` and `0044 (0) 20 …` are different: the `+` or the `00` has
+   * already named the country, so the bracketed digit is unambiguously the
+   * national prefix that international dialling drops. That is the only case
+   * where the brackets mean what the ITU notation says they mean, and it is
+   * the only case handled here.
+   */
+  const statesCountryCode = value.startsWith("+") || digitsOnly(value).startsWith("00");
+  return statesCountryCode ? value.replace(/\(\s*0\s*\)/, " ") : value;
+}
+
 export function telHref(raw: string | null | undefined): string | null {
-  const value = (raw ?? "").trim();
+  const value = withoutBracketedTrunk((raw ?? "").trim());
   if (!value) return null;
   const plus = value.startsWith("+");
   const digits = digitsOnly(value);
@@ -66,7 +112,7 @@ export function telHref(raw: string | null | undefined): string | null {
  * are extensions or typos rather than reachable numbers.
  */
 export function whatsappNumber(raw: string | null | undefined): string | null {
-  const value = (raw ?? "").trim();
+  const value = withoutBracketedTrunk((raw ?? "").trim());
   if (!value) return null;
 
   let digits = digitsOnly(value);

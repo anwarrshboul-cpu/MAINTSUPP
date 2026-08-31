@@ -164,6 +164,14 @@ export function boardItemsAsRequests(items: BoardItem[]): MaintenanceRequest[] {
     stage: "Incoming",
     status: item.status ?? "",
     contractor: item.contractor,
+    /*
+     * A `BoardItem` carries the contractor's NAME and not the reference, so
+     * there is nothing truthful to put here. Null is the honest answer rather
+     * than a gap: every consumer of this shape treats a missing reference as
+     * "match by name", which is exactly what a board row can support and
+     * exactly what these rows did before the column existed.
+     */
+    contractorId: null,
     assignee: item.assignee,
     /* `requestedAt` is the one non-null date on the request. An item with none
        gets the empty string, which `calendarDay` rejects like any other

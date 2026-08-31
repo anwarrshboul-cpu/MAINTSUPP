@@ -3401,7 +3401,11 @@ body[data-theme="dark"] .role-chip {
 .workspace-checkbox > span { display: grid; gap: 3px; }
 .workspace-checkbox strong { color: var(--ink); font-size: 12px; }
 .workspace-checkbox small { color: var(--muted-2); font-size: 10px; }
-.workspace-checkbox input { width: 20px; height: 20px; accent-color: #12b4a8; }
+/* `flex: none`. The row is a flex box with the label block beside it, and
+   without this the box shrinks to fill whatever the text leaves: measured
+   15.5x20 at 1440 and 13x20 at 390, so the one control on this row that is
+   supposed to be square never was on any width. */
+.workspace-checkbox input { flex: none; width: 20px; height: 20px; accent-color: #12b4a8; }
 
 .workspace-archive-button {
   margin-right: auto;
@@ -8181,6 +8185,32 @@ label.live-board-tool {
   color: var(--muted);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  /*
+   * A CONTAINING BLOCK, so the sentence only a screen reader hears cannot push
+   * the page sideways.
+   *
+   * The unlinkable WhatsApp row carries a `.visually-hidden` span saying the
+   * country code is missing. That utility is `position: absolute` with no
+   * offsets and `clip: rect(0,0,0,0)`, and the legacy `clip` property removes
+   * the PAINT, not the layout overflow. With nothing positioned above it the
+   * span resolved against the initial containing block and took its static
+   * position -- which, for a cell most of the way along a register that is
+   * 1449px wide inside a 294px scroller, is far off the right of the document.
+   *
+   * Measured at 320 with a `.contractor-archived-chip` widening the first
+   * column: the span sat at left 385.6px and
+   * `document.documentElement.scrollWidth` was 386 against a clientWidth of
+   * 320 -- 66px of horizontal body scroll, on a page whose table, panel and
+   * shell all clip correctly (`.table-scroll` overflow-x auto at 294,
+   * `.sites-panel` overflow hidden, body scrollWidth 320). One 1px span,
+   * outside every one of those, was the whole of it.
+   *
+   * `position: relative` here puts the span's containing block back inside the
+   * row it belongs to, so `.table-scroll` clips it like everything else. The
+   * utility itself is left alone: it is global, and this is the one place in
+   * this pass proven to sit outside a positioned ancestor.
+   */
+  position: relative;
 }
 
 /*
@@ -8294,4 +8324,77 @@ label.live-board-tool {
   #site-search {
     min-height: 44px;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE ARCHIVED FLAG ON THE CONTRACTOR REGISTER.
+
+   The register table shows neither of the two states a contractor row carries,
+   so an archived contractor read as a working one. This is the marker that
+   fixes it, and it is written quiet on purpose: being off the register is not
+   an alarm, it is a fact about the row, and a red chip beside eleven columns of
+   numbers would pull the eye to the least urgent thing on the screen.
+
+   No media query. The chip is a few characters that wrap with the name, and it
+   needs nothing said about it at any width — which also keeps it clear of the
+   agreed breakpoint set (640 / 767 / 768 / 1024 / 1280) that stage-five and
+   stage-six hold this file to from their section markers to the end.
+
+   Tokens rather than literals, so the dark skin follows without a second copy;
+   the --surface-sunken / --muted pair the record editor's own fields use,
+   and both are defined for the light and the dark skin.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/*
+ * TWO CLASSES, because ONE loses to the icon box.
+ *
+ * `.site-name-cell > span` in globals.css is the 29x29 rounded tile the users
+ * glyph sits in, and it is (0,1,1) against a bare class's (0,1,0). A chip that
+ * is also a direct span child of that cell therefore inherited the tile:
+ * measured at 1440 before this selector was widened, the chip came out 29px
+ * wide and 29px tall as `display: grid; place-items: center; border-radius: 8px`
+ * with 242.3px of text inside it, and in the dark theme it kept the tile's
+ * hard-coded `#e8eff3` ground under dark ink -- a light chip on a dark table.
+ *
+ * So the four properties the tile sets are all named again here rather than
+ * merely overridden by accident: the sizing, the layout mode, the radius and
+ * the two colours.
+ */
+.site-name-cell > .contractor-archived-chip,
+.contractor-archived-chip {
+  display: inline-flex;
+  place-items: unset;
+  align-items: center;
+  flex: none;
+  width: auto;
+  height: auto;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 640;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  /*
+   * The same containing-block fix as `.contractor-contact__plain` above, for
+   * the same reason, because this chip carries its own `.visually-hidden` span
+   * (" -- off the register; this is not their availability").
+   *
+   * That utility is `position: absolute` with no offsets and a legacy `clip`,
+   * which removes the PAINT but not the layout overflow. With no positioned
+   * ancestor the span resolves against the initial containing block, takes its
+   * static position far off to the right of a wide scrolled table, and adds
+   * real horizontal scroll to the document. Measured with an archived
+   * contractor on screen at 320px: 45px of body scroll, and 5px at 360px, in
+   * both themes.
+   *
+   * It went unseen because the sweep that declared 0 ran after the QA fixtures
+   * were purged -- with no archived contractor in the register the chip never
+   * rendered, so the span it carries never existed to measure. A fix for an
+   * overflow bug re-introduced the overflow bug.
+   */
+  position: relative;
 }

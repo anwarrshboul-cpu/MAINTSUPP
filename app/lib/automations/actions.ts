@@ -35,6 +35,7 @@ import {
   setBoardCell,
 } from "../board-mutations";
 import { normalizeBoardCellValue, dateOfCell } from "../board-cell-values";
+import { contractorLinkValues } from "../contractor-reference";
 import { sendNotification } from "../notifications";
 import { sendJobsToBin } from "../recycle-bin";
 import {
@@ -131,9 +132,20 @@ async function setSystemField(
   if (!(entry.field in values)) {
     throw new Error(`${label}: "${wanted}" is not a value this column accepts.`);
   }
+  /*
+   * A rule that sets Contractor sets the REFERENCE too, by the same rule the
+   * board and the maintenance route use — organisation-scoped, exact name,
+   * unique match only, and nothing invented. `contractorLinkValues` returns an
+   * empty object unless `contractor` is part of THIS write, so every other
+   * action leaves an existing link untouched.
+   *
+   * `ctx.orgId` is the job's own organisation (the update below is scoped to
+   * it), so a rule cannot attach a job to another tenant's contractor.
+   */
+  const { link, ...contractorValues } = await contractorLinkValues(ctx.db, ctx.orgId, values);
   const [updated] = await ctx.db
     .update(maintenanceRequests)
-    .set({ ...values, updatedAt: new Date().toISOString() })
+    .set({ ...values, ...contractorValues, updatedAt: new Date().toISOString() })
     .where(
       and(
         eq(maintenanceRequests.id, item.id),
@@ -142,8 +154,20 @@ async function setSystemField(
     )
     .returning();
   if (!updated) throw new Error("The item no longer exists.");
+  /*
+   * An unresolvable contractor name is recorded, not hidden. The write stands —
+   * the text is the value a rule asked for and the register still shows it —
+   * but the history says why no reference was made, so "why is this job not in
+   * their figures" has an answer that does not require reading the database.
+   */
+  const linkNote =
+    link && link.reason === "unknown"
+      ? " (no contractor of that name in this workspace, so no link was made)"
+      : link && link.reason === "ambiguous"
+        ? " (more than one contractor carries that name, so no link was made)"
+        : "";
   return {
-    summary: `${label} set to ${wanted || "empty"}`,
+    summary: `${label} set to ${wanted || "empty"}${linkNote}`,
     events: requestFieldEvents(boardId, item, updated),
   };
 }

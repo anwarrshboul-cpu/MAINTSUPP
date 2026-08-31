@@ -19,14 +19,26 @@ import test from "node:test";
  * flag, so it cannot contradict it, and still shows availability beside it so
  * the stale value is visible as the separate field it is.
  *
+ * W6 NOTE. That contradictory pair can no longer be CREATED: the contractor
+ * PATCH refuses a stored `active:false` becoming true while the result still
+ * carries `availability:"Inactive"` (`contractorResurrectionRefusal`,
+ * app/api/workspace/route.ts). Restoring somebody now has to say what their
+ * availability is. The display fix below is still load-bearing, because rows
+ * written BEFORE that guard are still in the register wearing exactly this
+ * pair — the guard is deliberately narrow and leaves them editable rather than
+ * stranding them. So the state is legacy-only, not gone.
+ *
  * TWO — a WhatsApp number, which the register had nowhere to put.
  *
  * Nullable, additive, and never derived from `phone`: the landline that takes
  * the calls is routinely not the mobile that takes the messages, and a landline
  * handed to wa.me opens on "the phone number shared via url is invalid".
  *
- * Source assertions only. The behaviour behind them was verified against a dev
- * server by hand; what this file protects is that the wiring stays wired.
+ * Source assertions, except the last. The behaviour behind them was verified
+ * against a dev server by hand; what those protect is that the wiring stays
+ * wired. The bracketed-trunk test at the end runs `contact-links.ts` for real,
+ * because the defect it covers was in the digits that came out rather than in
+ * any wiring a regex could see.
  */
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -136,4 +148,71 @@ test("a WhatsApp number is carried end to end, and never copied from the phone",
   // POST never carries it.
   const defaults = form.slice(form.indexOf("contractor: { name:"));
   assert.match(defaults.slice(0, 400), /whatsappNumber: ""/);
+});
+
+/*
+ * The bracketed trunk digit, which is the one shape that produced a LINK that
+ * was WRONG rather than a link that was absent.
+ *
+ * Every other refusal in `contact-links.ts` fails safe: it declines to build a
+ * wa.me URL and the screen prints the stored value instead. `+44 (0) 20 7946
+ * 0958` did not. It starts with `+`, so the country code is stated and the
+ * module had nothing to strip — and the `0` the brackets mark as the digit you
+ * do NOT dial internationally went through into `wa.me/4402079460958`, a
+ * country code followed by a digit no British number has. That opens on "the
+ * phone number shared via url is invalid", which is precisely the failure the
+ * WhatsApp column exists to avoid.
+ *
+ * Behavioural rather than a regex over the source: the defect was in what the
+ * digits came out as, and only running it can say.
+ */
+test("a bracketed trunk digit is dropped, and nothing else is", async () => {
+  const { whatsappHref, telHref } = await import(
+    new URL("../app/lib/contact-links.ts", import.meta.url)
+  );
+
+  assert.equal(
+    whatsappHref("+44 (0) 20 7946 0958"),
+    "https://wa.me/442079460958",
+    "the bracketed 0 is not dialled internationally, so it is not in the link",
+  );
+  assert.equal(telHref("+44 (0) 20 7946 0958"), "tel:+442079460958");
+
+  // Nothing that worked before moves.
+  assert.equal(whatsappHref("+44 7700 900123"), "https://wa.me/447700900123");
+  assert.equal(whatsappHref("0044 7700 900456"), "https://wa.me/447700900456");
+
+  /*
+   * And nothing that was refused becomes reachable. A bare national number
+   * still needs a country nobody here may supply, and `(020)` is an area code
+   * written the British way — three digits inside the brackets, not one — so
+   * the narrow rule leaves every one of them alone.
+   */
+  assert.equal(whatsappHref("07812 224644"), null, "a bare trunk 0 is still not a country code");
+  assert.equal(whatsappHref("(020) 7946 0958"), null, "an area code is not an international number");
+  assert.equal(telHref("(020) 7946 0958"), "tel:02079460958", "and it keeps every digit for the dialler");
+
+  /*
+   * The half of this rule that matters more than the fix itself.
+   *
+   * Stripping the brackets UNCONDITIONALLY — which the first version of this
+   * did — turns a NATIONAL number into a plausible international one. Removing
+   * the zero from `(0)20 7946 0958` leaves `2079460958`, which no longer opens
+   * with a trunk `0`, so it reads as already-international and resolves to a
+   * live number in EGYPT; `(0)7812 224644` lands in RUSSIA. Both produced NO
+   * link before the bracket rule existed. A confident link to a stranger's
+   * phone is a worse failure than the invalid one it replaced, so the bracket
+   * is only ever dropped when a `+` or a `00` has already named the country.
+   */
+  assert.equal(
+    whatsappHref("(0)20 7946 0958"),
+    null,
+    "a bracketed trunk with NO stated country code must not become somebody else's number",
+  );
+  assert.equal(whatsappHref("(0)7812 224644"), null, "same, for a mobile");
+  assert.equal(telHref("(0)20 7946 0958"), "tel:02079460958", "the dialler still gets the national number");
+
+  // And the two shapes that DO state a country still resolve.
+  assert.equal(whatsappHref("0044 (0) 20 7946 0958"), "https://wa.me/442079460958");
+  assert.equal(whatsappHref("+44(0)7700900123"), "https://wa.me/447700900123");
 });

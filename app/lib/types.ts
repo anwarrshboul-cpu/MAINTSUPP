@@ -278,6 +278,19 @@ export interface MaintenanceRequest {
   stage: RequestStage;
   status: RequestStatus;
   contractor: string | null;
+  /*
+   * The canonical reference beside the free text, and the reason a renamed
+   * contractor keeps their jobs.
+   *
+   * `contractor` is what somebody typed — the historical record of who was
+   * named. This is who the register says that resolves to: organisation-scoped,
+   * exact name, unique match only (`app/lib/contractor-reference.ts`). The API
+   * has always returned it; the type simply never declared it, so every screen
+   * that wanted to attribute a job to a contractor had no choice but to compare
+   * names — and comparing names is what silently zeroed a contractor's whole
+   * history the moment they were renamed.
+   */
+  contractorId: string | null;
   assignee: string | null;
   requestedAt: string;
   dueAt: string | null;

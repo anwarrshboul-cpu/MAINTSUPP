@@ -515,6 +515,19 @@ export async function duplicateBoardItems(
         stage: source.stage,
         status: source.status,
         contractor: source.contractor,
+        /*
+         * The COPY inherits the original's contractor reference, not a
+         * re-resolution of its name.
+         *
+         * `source` is the whole row, read under `eq(organisationId, orgId)`
+         * above and re-inserted under the same `orgId`, so the id cannot cross
+         * a tenant boundary here. Dropping it — which is what omitting the
+         * column did — produced a duplicate whose text named a contractor and
+         * whose reference named nobody, and after the register learned to read
+         * the id (see app/lib/contractor-reference.ts) that copy would have
+         * fallen out of its contractor's figures for a reason no screen shows.
+         */
+        contractorId: source.contractorId,
         assignee: source.assignee,
         parentId: source.parentId,
         requestedAt: source.requestedAt,

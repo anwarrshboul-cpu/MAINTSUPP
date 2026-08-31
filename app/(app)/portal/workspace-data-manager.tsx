@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components";
 import { storeDocumentationKinds } from "../../../db/monday-board-spec";
 import { MondayImportPanel } from "./monday-import-panel";
@@ -60,7 +60,7 @@ const emptyDefaults: Record<Exclude<ManagerTab, "activity" | "import">, EditorDa
   site: { name: "", type: "Kiosk", region: "UK", lifecycle: "Current", address: "", manager: "" },
   compliance: { siteId: "", kind: "", state: "Missing", expiry: "" },
   unit: { siteId: "", name: "", category: "Asset", manufacturer: "", model: "", serialNumber: "", status: "Active", notes: "" },
-  contractor: { name: "", contactName: "", email: "", phone: "", whatsappNumber: "", address: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", dayRate: "", availability: "Available", rating: "4", active: true, notes: "" },
+  contractor: { name: "", contactName: "", email: "", phone: "", whatsappNumber: "", address: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", dayRate: "", availability: "Available", rating: "", active: true, notes: "" },
   planned: { siteId: "", unitId: "", contractorId: "", title: "", category: "Planned maintenance", frequency: "Annual", nextDueAt: "", lastCompletedAt: "", status: "Scheduled", reminderDays: "30" },
   member: { name: "", email: "", role: "Client", active: true },
 };
@@ -157,7 +157,19 @@ function fieldsFor(tab: Exclude<ManagerTab, "activity">, workspace: WorkspaceSna
     /* Pounds here, pence in the column — see `ratePence` in the workspace API.
        Left empty it stays null, because no recorded rate is not a rate of £0. */
     { key: "dayRate", label: "Day rate (£)", type: "number", placeholder: "e.g. 320" },
-    { key: "availability", label: "Availability", type: "select", options: ["Available", "Limited", "Unavailable", "Inactive"].map((value) => ({ value, label: value })) },
+    /*
+     * `required`, for the same reason a member's Role is — see the note on it
+     * below. Without it this select renders the blank "None" every optional
+     * field gets, and `availability` is NOT NULL with a four-label set behind
+     * it. Picking "None" sent `availability: ""` and came back 400 "A
+     * contractor's availability must be one of the offered states.", so the
+     * control was offering a choice that could only ever fail. Measured before
+     * the flag: PATCH /api/workspace → 400, editor left open, toast carrying
+     * the API's refusal. There is no "no availability" state to express — a
+     * contractor who cannot take work is Unavailable — so the blank was never
+     * a value, only a way to lose a save.
+     */
+    { key: "availability", label: "Availability", type: "select", required: true, options: ["Available", "Limited", "Unavailable", "Inactive"].map((value) => ({ value, label: value })) },
     { key: "rating", label: "Rating (0–5)", type: "number" },
     {
       key: "active",
@@ -240,10 +252,73 @@ function recordSubtitle(tab: ManagerTab, record: Record<string, unknown>) {
    * never told them — that these are two different questions about the same
    * contractor.
    */
-  if (tab === "contractor") return `${record.active ? "Active" : "Archived"} · Availability: ${record.availability ?? "Available"} · ${record.assignedJobs ?? 0} jobs`;
+  /*
+   * `||`, not `??`, and the fallback says nothing was set rather than naming a
+   * state nobody chose.
+   *
+   * `availability` is NOT NULL, so `??` looked safe. It is not: the column can
+   * hold an EMPTY STRING — `text(null, 60)` is `""`, and until the API started
+   * refusing it a `{ availability: null }` PATCH wrote one. A row in that state
+   * printed "Availability: " with nothing after the colon, which reads as a
+   * rendering fault rather than as a field somebody has to fix. `?? "Available"`
+   * would have been worse than the blank: it would have reported an unset
+   * column as the one value that means "send them work".
+   */
+  if (tab === "contractor") return `${record.active ? "Active" : "Archived"} · Availability: ${record.availability || "Not set"} · ${record.assignedJobs ?? 0} jobs`;
   if (tab === "planned") return `${record.siteName ?? "Unknown site"} · ${dateValue(record.nextDueAt) || "No date"}`;
   if (tab === "member") return `${record.role ?? "Client"} · ${record.active ? "Active" : "Paused"}`;
   return `${record.actorEmail ?? "Workspace"} · ${dateValue(record.createdAt)}`;
+}
+
+/**
+ * WHAT THE SEARCH BOX ACTUALLY LOOKS AT.
+ *
+ * It looked at the two strings the list happens to PRINT — `recordTitle` and
+ * `recordSubtitle` — which for a contractor is the name plus "Active ·
+ * Availability: X · N jobs". Measured against the register: "Dan Intl" → 0
+ * results with Dan Intl stored as the contact person; "s4intl@example.com" → 0
+ * with that address on the row; "+44 7700 900123" → 0 with that number on the
+ * row; "London" → 0 with London in the coverage areas. The three searches that
+ * DID return something — "Electrical", "Signage", "Midlands" — matched company
+ * NAMES (Saed Electrical, Johnny Signage, Midlands Glass) and not the service
+ * category or the coverage area of any other contractor, which is the worst
+ * kind of pass: it looks like the feature works. Meanwhile "Available" matched
+ * 33 of 33 rows, because the word is in the subtitle of every one of them.
+ *
+ * So the haystack is widened to the fields somebody is actually holding when
+ * they type: who to ask for, how to reach them, what they do, where they do it.
+ * The printed line stays IN the haystack rather than being replaced by it —
+ * "archived" is a real thing to search for, and it exists nowhere else.
+ *
+ * Phone numbers go in twice, once as typed and once as bare digits, because a
+ * pasted number carries whatever spacing its source used and "+44 7700 900123"
+ * should find a row stored as "+447700900123". The needle gets the same
+ * treatment below. What this deliberately does NOT do is treat "07700 900123"
+ * and "+44 7700 900123" as the same number: that is the country-code guess
+ * `app/lib/contact-links.ts` exists to refuse, and a search that quietly
+ * assumed a country would be the same mistake in a smaller box.
+ *
+ * Only the contractor branch is widened. The other registers have the same
+ * narrowness and it is the same fix, but this is a contractor pass and a
+ * change to Sites' search belongs to somebody looking at Sites.
+ */
+function searchText(tab: ManagerTab, record: Record<string, unknown>) {
+  const printed = `${recordTitle(tab, record)} ${recordSubtitle(tab, record)}`;
+  if (tab !== "contractor") return printed.toLowerCase();
+  const flat = (value: unknown) =>
+    Array.isArray(value) ? value.join(" ") : typeof value === "string" ? value : "";
+  const numbers = [record.phone, record.whatsappNumber].map(flat).filter(Boolean);
+  return [
+    printed,
+    flat(record.contactName),
+    flat(record.email),
+    ...numbers,
+    ...numbers.map((value) => value.replace(/\D/g, "")),
+    flat(record.serviceCategories),
+    flat(record.coverageAreas),
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function recordToEditor(tab: Exclude<ManagerTab, "activity">, record: Record<string, unknown>) {
@@ -303,9 +378,14 @@ export function WorkspaceDataManager({
 
   const records = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return recordsFor(tab, workspace).filter((record) =>
-      !needle || `${recordTitle(tab, record)} ${recordSubtitle(tab, record)}`.toLowerCase().includes(needle),
-    );
+    // A pasted number brings its own spacing. Four digits, so a search for a
+    // year or a house number does not start matching phone numbers.
+    const digits = needle.replace(/\D/g, "");
+    return recordsFor(tab, workspace).filter((record) => {
+      if (!needle) return true;
+      const hay = searchText(tab, record);
+      return hay.includes(needle) || (digits.length >= 4 && hay.includes(digits));
+    });
   }, [query, tab, workspace]);
   const readOnlyTab = tab === "activity" || tab === "import";
   const fields = readOnlyTab ? [] : fieldsFor(tab, workspace);
@@ -325,17 +405,132 @@ export function WorkspaceDataManager({
     setForm(recordToEditor(tab, record));
   };
 
+  /*
+   * KEYBOARD OWNERSHIP OF A DIALOG THAT ALREADY CLAIMED IT.
+   *
+   * The section below has said `role="dialog" aria-modal="true"` since it was
+   * written, and none of the three things that claim implies were true.
+   * Measured with the manager open, at 1440, before any of this:
+   *
+   *  · Opening it left focus on the "Manage contractors" button behind the
+   *    scrim. Eight Tabs from there walked the CONTRACTOR TABLE — "Call … on
+   *    +44 …", "Email Climate Response …", "Edit Johnny Signage" — every one of
+   *    them under the scrim, none of them in the dialog. Twelve Shift+Tabs
+   *    reached the topbar, the account menu and "Get help".
+   *  · Escape did nothing. The dialog was still there afterwards.
+   *  · Closing it dropped focus on `document.body`, so the next Tab restarted
+   *    from the top of the page rather than from the control that opened this.
+   *
+   * `aria-modal` tells a screen reader's virtual cursor to stay inside. It does
+   * not constrain the browser's focus ring, and the content behind is neither
+   * `inert` nor hidden, so the tab order ran straight through it. A sighted
+   * keyboard user was moving a focus ring they could not see across a page they
+   * could not reach.
+   *
+   * Escape-closes and focus-on-open are the pattern `raise-ticket.tsx:535` and
+   * `form-share-dialog.tsx:43` already use; the initial target is the dialog
+   * box itself rather than a control inside it, so the first thing announced is
+   * "Manage dashboard data, dialog" rather than a search field with no stated
+   * context. The wrap-around and the restore are new here because no dialog in
+   * this codebase had them, and this one covers the whole viewport on a phone.
+   */
+  const dialog = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    // Captured on mount, not on close: by the time the dialog is closing the
+    // element that opened it is no longer `document.activeElement`.
+    const opener = document.activeElement as HTMLElement | null;
+    dialog.current?.focus();
+    return () => {
+      // `isConnected`, because the surface behind can re-render while the
+      // manager is open and the opener may no longer exist to focus.
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const focusable = () =>
+      Array.from(
+        dialog.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+        // `offsetParent` is null for the record list once the editor takes the
+        // whole width on a phone — a hidden control is not a tab stop.
+      ).filter((element) => element.offsetParent !== null);
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        /*
+         * ONE LAYER AT A TIME.
+         *
+         * Closing the whole manager on Escape gave this dialog the keyboard
+         * dismissal it was missing, and took something else away with it: this
+         * component edits EIGHT tabs, so a half-typed new Site — name, address,
+         * manager — vanished along with the dialog on a keystroke people press
+         * to dismiss an autocomplete. Nothing asked, nothing recoverable.
+         *
+         * With the record editor open, Escape now does exactly what its own
+         * Cancel button does (`setForm(null)`): it backs out to the list and
+         * leaves the manager standing. That is the layered behaviour people
+         * expect from a dialog-within-a-dialog, the discard is the one the
+         * Cancel button already documents, and the user is still where they
+         * were. A second Escape then closes the manager, so the dismissal the
+         * accessibility fix added is still one key away and the trap still has
+         * its exit.
+         */
+        if (form) {
+          setForm(null);
+          return;
+        }
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!dialog.current?.contains(active)) {
+        // Focus escaped, or started outside — the scrim is a sibling of the
+        // dialog, not a child. Pull it back rather than let the page have it.
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, form]);
+
   return (
     <div className="workspace-manager-layer" role="presentation">
       <button className="modal-scrim" type="button" aria-label="Close data manager" onClick={onClose} />
-      <section className="workspace-manager" role="dialog" aria-modal="true" aria-labelledby="workspace-manager-title">
-        <header className="workspace-manager__header">
+      <section className="workspace-manager" role="dialog" aria-modal="true" aria-labelledby="workspace-manager-title" ref={dialog} tabIndex={-1}>
+        {/*
+          A `div`, not a `header`.
+
+          A bare `<header>` maps to the `banner` landmark unless it is inside an
+          article, aside, main, nav or section — and `role="dialog"` on the
+          section above is exactly what stops it counting as one. So this
+          announced itself as a SECOND page banner alongside the topbar, which
+          axe reports twice over (`landmark-no-duplicate-banner` and
+          `landmark-unique`, both moderate, in light and dark). The class does
+          all the styling, so nothing moves; the `h2` inside still labels the
+          dialog through `aria-labelledby`.
+        */}
+        <div className="workspace-manager__header">
           <div>
             <span><Icon name="grid" size={18} /></span>
             <div><small>Shared workspace database</small><h2 id="workspace-manager-title">Manage dashboard data</h2></div>
           </div>
           <button className="icon-button" type="button" aria-label="Close" onClick={onClose}><Icon name="close" size={19} /></button>
-        </header>
+        </div>
         <div className="workspace-manager__tabs" role="tablist" aria-label="Data sections">
           {tabs.map((item) => (
             <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={tab === item.key ? "is-active" : ""} onClick={() => { setTab(item.key); setForm(null); setEditorId(null); setQuery(""); }}>
@@ -371,12 +566,36 @@ export function WorkspaceDataManager({
           )}
           {form && !readOnlyTab && (
             <form className="workspace-record-editor" onSubmit={async (event) => { event.preventDefault(); try { await onSave(tab, editorId, form); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } }}>
-              <header><div><small>{editorId ? "Edit shared record" : "Create shared record"}</small><h3>{editorId ? "Update details" : `New ${tabs.find((item) => item.key === tab)?.label.slice(0, -1) || "record"}`}</h3></div><button className="icon-button" type="button" aria-label="Close editor" onClick={() => setForm(null)}><Icon name="close" size={17} /></button></header>
+              {/*
+                `role="presentation"` for the reason the manager's own header
+                is a `div`: a bare `<header>` is scoped out of the `banner`
+                landmark by an article, aside, main, nav or section, and a
+                `<form>` is none of those — so this announced itself as a third
+                page banner and axe reported `landmark-no-duplicate-banner`
+                against `form > header` in both themes. The role is dropped
+                rather than the element, because the two CSS rules that size
+                this bar and its `small` both select on `header`, and moving the
+                markup to keep an unwanted landmark out would be a restyle. The
+                `h3` inside keeps its own role either way.
+              */}
+              <header role="presentation"><div><small>{editorId ? "Edit shared record" : "Create shared record"}</small><h3>{editorId ? "Update details" : `New ${tabs.find((item) => item.key === tab)?.label.slice(0, -1) || "record"}`}</h3></div><button className="icon-button" type="button" aria-label="Close editor" onClick={() => setForm(null)}><Icon name="close" size={17} /></button></header>
               <div className="workspace-record-editor__fields">
                 {fields.map((field) => {
                   const value = form[field.key] ?? (field.type === "checkbox" ? false : "");
                   if (field.type === "checkbox") return (
-                    <label className="workspace-checkbox" key={field.key}><span><strong>{field.label}</strong><small>{field.hint ?? "Available in the shared testing workspace"}</small></span><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm((current) => current ? { ...current, [field.key]: event.target.checked } : current)} /></label>
+                    /*
+                      A NAME AND A DESCRIPTION, not one 180-character name.
+                      The wrapping label gives a checkbox the whole of its text
+                      content as its accessible name, and this label carries the
+                      hint that stops "Active contractor" being read as the
+                      Availability select two rows above. Measured: 180
+                      characters, all of it announced on focus before the state.
+                      `aria-label` keeps the name to the four words on the line;
+                      `aria-describedby` hands the sentence over as the
+                      description it always was. The visible text is unchanged
+                      and the label still toggles on click.
+                    */
+                    <label className="workspace-checkbox" key={field.key}><span><strong>{field.label}</strong><small id={`workspace-field-${field.key}-hint`}>{field.hint ?? "Available in the shared testing workspace"}</small></span><input type="checkbox" aria-label={field.label} aria-describedby={`workspace-field-${field.key}-hint`} checked={Boolean(value)} onChange={(event) => setForm((current) => current ? { ...current, [field.key]: event.target.checked } : current)} /></label>
                   );
                   return (
                     <label className="form-field" key={field.key}><span>{field.label}</span>

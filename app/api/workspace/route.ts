@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
@@ -69,6 +69,43 @@ function ratePence(value: unknown) {
   const pounds = Number(value);
   if (!Number.isFinite(pounds) || pounds < 0) return null;
   return Math.round(pounds * 100);
+}
+
+/**
+ * A contractor's rating, or the absence of one.
+ *
+ * `rating` is the one number on this record that is somebody's OPINION, and
+ * `numeric(value, 0, 0, 5)` had no way to say it had not been formed. The
+ * manage form's empty box posts `""`, `Number("")` is `0`, and `0` is finite —
+ * so an untouched field stored a flat **0 out of 5** against a contractor
+ * nobody had assessed. The form's own default hid it by pre-filling `"4"`,
+ * which is worse still: every contractor created through the UI was stored
+ * rated four fifths by a person who never rated them, and both staging rows
+ * carry exactly that 4.
+ *
+ * The column is nullable precisely so "not rated" can be said out loud. Empty,
+ * absent, null and unparseable all become NULL — none of them are a score —
+ * and only a real number is clamped and kept. Nothing is invented in either
+ * direction, which is the whole point: a made-up 4 flatters and a made-up 0
+ * libels, and the register should assert neither on a contractor's behalf.
+ */
+function optionalRating(value: unknown): number | null {
+  /*
+   * A number, or a string somebody typed into a number box. Nothing else gets
+   * to `Number()`, because `Number()` says yes to things that are not scores:
+   * `[]` and `" "` and `false` all come back 0, `true` comes back 1, and `[3]`
+   * comes back 3. Each of those would have written a rating onto a contractor
+   * from a request that never carried one — the same invention this function
+   * was added to stop, arriving through a different door.
+   */
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(Math.max(parsed, 0), 5);
 }
 
 function numeric(value: unknown, fallback: number, min = 0, max = 1_000_000) {
@@ -329,6 +366,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     settingsRows,
     openJobRows,
     contractorJobRows,
+    contractorJobRowsById,
     activities,
     register,
     documentationColumnRows,
@@ -386,6 +424,28 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
      * constructs here are spelled identically by both engines, as is the
      * `<>` inequality.
      */
+    /*
+     * TWO aggregates, over two halves of the same table, and they never
+     * overlap.
+     *
+     * A job belongs to a contractor when `contractor_id` says so, and — only
+     * where there is no id — when the raw text carries their name. This was
+     * keyed on the NAME alone, which meant RENAMING a contractor silently
+     * zeroed their entire history: measured on a QA fixture,
+     * `assigned: 1, urgent: 1, spend: 250` became `0, 0, 0` on the next read,
+     * with the job's `contractor_id` still pointing straight at the renamed
+     * row.
+     *
+     * The split is `contractor_id IS NULL` against `IS NOT NULL`, so every live
+     * job lands in exactly one of these and contributes to exactly one
+     * contractor once. Adding an id-keyed map ON TOP of the name-keyed one
+     * would have traded the undercount for an overcount, double counting every
+     * job whose id and text agree — which is most of them.
+     *
+     * Nothing else moves: same organisation scope, same `deletedAt` filter,
+     * same `=` / `<>` predicates on the whole stored `stage` and `priority`
+     * values, for the reasons the note above gives.
+     */
     db
       .select({
         contractor: maintenanceRequests.contractor,
@@ -399,9 +459,27 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         and(
           eq(maintenanceRequests.organisationId, orgId),
           isNull(maintenanceRequests.deletedAt),
+          isNull(maintenanceRequests.contractorId),
         ),
       )
       .groupBy(maintenanceRequests.contractor),
+    db
+      .select({
+        contractorId: maintenanceRequests.contractorId,
+        assigned: count(),
+        completed: sql<number>`sum(case when ${maintenanceRequests.stage} = ${"Completed"} then 1 else 0 end)`,
+        urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and ${maintenanceRequests.stage} <> ${"Completed"} then 1 else 0 end)`,
+        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+      })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.organisationId, orgId),
+          isNull(maintenanceRequests.deletedAt),
+          isNotNull(maintenanceRequests.contractorId),
+        ),
+      )
+      .groupBy(maintenanceRequests.contractorId),
     db.select().from(activityLog).where(eq(activityLog.organisationId, orgId)).orderBy(desc(activityLog.createdAt)).limit(60),
     readComplianceRegister(db, orgId),
     /*
@@ -443,14 +521,48 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       .map((row) => [row.siteId, Number(row.open)]),
   );
   /*
-   * Keyed by the contractor name exactly as stored on the job. Jobs with no
-   * contractor group under `null`, which no contractor's name can equal — the
-   * same rows the old `request.contractor === contractor.name` filter dropped.
+   * Keyed by the contractor name exactly as stored on the job, and holding
+   * ONLY the jobs that carry no `contractor_id`. Jobs with no contractor at all
+   * group under `null`, which no contractor's name can equal — the same rows
+   * the old `request.contractor === contractor.name` filter dropped.
    */
-  const jobsByContractor = new Map(
+  /*
+   * A name two contractors share attributes to NEITHER of them.
+   *
+   * The name fallback is a lookup, so when two rows in the register carry one
+   * name they BOTH matched it and the same unlinked job was counted twice —
+   * once against each — and the page's Tracked spend tile, which sums the
+   * per-contractor figures, reported one GBP 999 job as GBP 1,998. Nothing stops
+   * the pair existing: there is no unique index on `contractors.name` and the
+   * create has no duplicate check.
+   *
+   * Refusing to attribute is the same answer `resolveContractorLink` already
+   * gives to the same question. A register that cannot say WHICH contractor a
+   * name means cannot say whose job it was either, and inventing an answer in
+   * the tally while refusing to invent one in the link would be the two halves
+   * of this feature disagreeing. Under-counting an ambiguous name is visible
+   * and fixable — the operator links the jobs, or renames one of the pair.
+   * Double-counting is neither: it inflates a spend figure somebody bills from.
+   */
+  const contractorsPerName = new Map<string, number>();
+  for (const row of contractorRows) {
+    contractorsPerName.set(row.name, (contractorsPerName.get(row.name) ?? 0) + 1);
+  }
+  const jobsByContractorName = new Map(
     contractorJobRows
       .filter((row): row is typeof row & { contractor: string } => row.contractor !== null)
+      .filter((row) => (contractorsPerName.get(row.contractor) ?? 0) <= 1)
       .map((row) => [row.contractor, row]),
+  );
+  /*
+   * Keyed by the reference itself, and covering the half of the table the map
+   * above cannot see. A renamed contractor keeps these: nothing here depends on
+   * what the job's text says.
+   */
+  const jobsByContractorId = new Map(
+    contractorJobRowsById
+      .filter((row): row is typeof row & { contractorId: string } => row.contractorId !== null)
+      .map((row) => [row.contractorId, row]),
   );
   const siteNameById = new Map(siteRows.map((site) => [site.id, site.name]));
   const contractorNameById = new Map(contractorRows.map((item) => [item.id, item.name]));
@@ -551,8 +663,13 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
   });
 
   const contractorsPayload: WorkspaceContractor[] = contractorRows.map((contractor) => {
-    // No jobs carrying this name is a real answer — zeroes, not an absent row.
-    const tally = jobsByContractor.get(contractor.name);
+    /*
+     * Their linked jobs plus their unlinked-by-name jobs. Disjoint sets, so
+     * this is a sum and not a union — see the query. No jobs at all is a real
+     * answer: zeroes, not an absent row.
+     */
+    const byId = jobsByContractorId.get(contractor.id);
+    const byName = jobsByContractorName.get(contractor.name);
     return {
       id: contractor.id,
       name: contractor.name,
@@ -573,10 +690,10 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       availability: contractor.availability,
       rating: contractor.rating,
       active: contractor.active,
-      assignedJobs: Number(tally?.assigned ?? 0),
-      completedJobs: Number(tally?.completed ?? 0),
-      urgentJobs: Number(tally?.urgent ?? 0),
-      spend: Number(tally?.spend ?? 0),
+      assignedJobs: Number(byId?.assigned ?? 0) + Number(byName?.assigned ?? 0),
+      completedJobs: Number(byId?.completed ?? 0) + Number(byName?.completed ?? 0),
+      urgentJobs: Number(byId?.urgent ?? 0) + Number(byName?.urgent ?? 0),
+      spend: Number(byId?.spend ?? 0) + Number(byName?.spend ?? 0),
     };
   });
 
@@ -772,9 +889,39 @@ export async function POST(request: Request) {
       await db.insert(units).values({ id, organisationId: orgId, siteId, name, category: text(data.category, 80) || "Asset", manufacturer: optionalText(data.manufacturer, 100), model: optionalText(data.model, 100), serialNumber: optionalText(data.serialNumber, 100), status: text(data.status, 40) || "Active", notes: optionalText(data.notes, 500) });
     } else if (entity === "contractor") {
       const name = text(data.name, 140);
-      if (!name) throw new Error("A contractor name is required.");
+      // `hasVisibleText`, not truthiness: a name of only zero-width spaces is
+      // not a name, and JS `trim()` does not remove them.
+      if (!hasVisibleText(name)) throw new Error("A contractor name is required.");
+      /*
+       * Before the insert, so a refusal writes nothing.
+       *
+       * `active` for the same reason the member create above is guarded:
+       * `booleanValue` falls back to TRUE, so `{ "active": null }` created a
+       * contractor who is on the register and in the assignment dropdown from
+       * a request that never said they should be. A create is where the row
+       * gets its first state, so guessing it here is guessing it forever.
+       *
+       * `email` because a create is the cheapest place to refuse an address
+       * nobody can be reached on, and because the edit refusing what the
+       * create accepted would mean a row that cannot be saved again.
+       */
+      const badActive = contractorActiveRefusal(data);
+      if (badActive) return badActive;
+      const badEmail = contractorEmailRefusal(data);
+      if (badEmail) return badEmail;
+      const badRate = contractorRateRefusal(data);
+      if (badRate) return badRate;
+      /*
+       * Same allow-list as the edit. An OMITTED availability still falls to
+       * "Available" through the `||` below — that is the create's default and
+       * it stays. What is refused is a SUPPLIED value that is not one of the
+       * four, so the edit cannot end up stricter than the create and leave a
+       * row that will not save again.
+       */
+      const badAvailability = contractorAvailabilityRefusal(data);
+      if (badAvailability) return badAvailability;
       id = newId("contractor", name);
-      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: numeric(data.rating, 0, 0, 5), active: booleanValue(data.active) });
+      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: optionalRating(data.rating), active: booleanValue(data.active) });
     } else if (entity === "planned") {
       const title = text(data.title, 160);
       const siteId = text(data.siteId, 100);
@@ -955,7 +1102,31 @@ function requiredTextRefusal(
   message: string,
 ): Response | null {
   if (!(key in data)) return null;
-  return text(data[key], max) ? null : Response.json({ error: message }, { status: 400 });
+  return hasVisibleText(text(data[key], max))
+    ? null
+    : Response.json({ error: message }, { status: 400 });
+}
+
+/**
+ * Whether a string would actually show something to a person.
+ *
+ * `text()` trims with JS `String.prototype.trim`, which knows the spec's
+ * WhiteSpace set — U+00A0 and U+FEFF are in it, so those were already refused.
+ * **U+200B ZERO WIDTH SPACE is category Cf, not whitespace**, so it survived
+ * the trim, read as truthy, and `{ name: "​" }` answered 200 and put a row
+ * in the register whose name renders as nothing. That is precisely the outcome
+ * the required-name guard exists to prevent, reached through the one door
+ * nobody tried.
+ *
+ * Format characters and whitespace are stripped and what remains is asked to be
+ * non-empty. A name that merely CONTAINS an invisible character is untouched —
+ * only one made entirely of them is refused, which is never anybody's name.
+ *
+ * Shared with the create branches deliberately: PATCH refusing what POST
+ * accepted would leave a row that cannot be saved again.
+ */
+function hasVisibleText(value: string): boolean {
+  return value.replace(/[\p{Cf}\s]/gu, "") !== "";
 }
 
 /**
@@ -1018,12 +1189,291 @@ function memberRoleRefusal(data: Record<string, unknown>): Response | null {
  */
 function memberActiveRefusal(data: Record<string, unknown>): Response | null {
   if (!("active" in data)) return null;
-  const value = data.active;
-  const readable =
-    typeof value === "boolean" || value === "true" || value === "false" || value === 0 || value === 1;
-  return readable
+  return readableBoolean(data.active)
     ? null
     : Response.json({ error: "A member's access must be true or false." }, { status: 400 });
+}
+
+/**
+ * Exactly the values `booleanValue` can read, as a predicate.
+ *
+ * Two guards need this same sentence — a member's access above and a
+ * contractor's place on the register below — and both need it to mean
+ * precisely what `booleanValue` accepts, because everything OUTSIDE this set
+ * is what falls through to that function's TRUE fallback. Written out twice it
+ * would drift the first time `booleanValue` learned a new spelling, and the
+ * half that drifted would be the half that silently switches somebody back on.
+ */
+function readableBoolean(value: unknown) {
+  return (
+    typeof value === "boolean" ||
+    value === "true" ||
+    value === "false" ||
+    value === 0 ||
+    value === 1
+  );
+}
+
+/**
+ * A contractor's place on the register, refused when it is sent something that
+ * is not an answer.
+ *
+ * The same hole `memberActiveRefusal` closes, in the branch that never got the
+ * guard. `booleanValue` falls back to TRUE, so `{ "active": null }` — and
+ * `"no"`, `[]`, `"0"` and `{}` with it — did not leave an archived contractor
+ * alone and did not archive them either: it put them BACK on the register, back
+ * in the planned-work dropdown, and back in front of a coordinator picking
+ * somebody to send to a site. Measured against a running server: archive, then
+ * `PATCH { active: null }`, and the row reads `active: true` again, with a 200
+ * and no complaint.
+ *
+ * Refused rather than coerced to false, because both guesses are wrong. The
+ * caller sent something that is not a yes and is not a no; inventing either one
+ * silently changes who this workspace thinks it can call out to a job.
+ *
+ * The accepted set is exactly what `booleanValue` reads, so anybody already
+ * sending `true`, `"false"` or `1` is unaffected and only genuinely ambiguous
+ * values are refused.
+ */
+function contractorActiveRefusal(data: Record<string, unknown>): Response | null {
+  if (!("active" in data)) return null;
+  return readableBoolean(data.active)
+    ? null
+    : Response.json(
+        { error: "A contractor's active state must be true or false." },
+        { status: 400 },
+      );
+}
+
+/*
+ * What an address has to look like before it is worth storing.
+ *
+ * Deliberately narrower than the member rule, which asks only for an "@" and
+ * therefore accepts "@", "a@" and "@b" — none of which anybody can be written
+ * to. The contractor register is where a coordinator goes at 7am to find
+ * somebody who will answer, and a junk address there is worse than a blank one:
+ * a blank one at least says "we do not have this", while "a@" says "here it is"
+ * and then bounces.
+ *
+ * A local part, an "@", a domain, a dot, and a real label after it. No attempt
+ * at RFC 5322 — this is a plausibility check, not a parser, and the only thing
+ * it has to guarantee is that what got stored is not obviously unusable.
+ */
+const CONTRACTOR_EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/*
+ * Characters that are invisible on screen, and therefore invisible in review.
+ *
+ * `\s` does not cover them. U+200B ZERO WIDTH SPACE is a format character, not
+ * whitespace, so "a\u200bb@c.com" satisfies the shape above, prints in the
+ * register as "ab@c.com", and bounces every time anybody mails it with no
+ * visible reason why. The bidi overrides are worse: they can make a stored
+ * address READ as a different address than the one that will be used. Refusing
+ * them is the only way the operator ever finds out they are there.
+ */
+const INVISIBLE_CHARACTERS =
+  /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/;
+
+/**
+ * A contractor's email, refused when it is a string that cannot be an address.
+ *
+ * Three cases, and they are not the same case:
+ *
+ *  - key OMITTED — leave the column alone. `supplied` does that; this returns
+ *    null and says nothing.
+ *  - `null`, or the empty string the manage form posts for an empty box —
+ *    "no email". Accepted, stored NULL. Refusing "" would make every contractor
+ *    without an email unsavable, and the create form's blank record IS
+ *    `email: ""` (`app/(app)/portal/workspace-data-manager.tsx`).
+ *  - a NON-EMPTY string that is not an address — refused. Whitespace-only is in
+ *    this half deliberately: an empty box is "no email", but a box somebody
+ *    typed a space into is a claim, and " " is not an address.
+ *
+ * A non-string is left to `optionalText`, which stores NULL, exactly as it does
+ * for `phone`, `address` and every other optional text column on this route.
+ * Nothing junk is stored either way, and making email the one field that
+ * refuses a number would be a rule the rest of the record does not follow.
+ */
+function contractorEmailRefusal(data: Record<string, unknown>): Response | null {
+  if (!("email" in data)) return null;
+  const raw = data.email;
+  if (typeof raw !== "string" || raw === "") return null;
+  const value = text(raw, 160);
+  const usable =
+    value !== "" && CONTRACTOR_EMAIL_SHAPE.test(value) && !INVISIBLE_CHARACTERS.test(value);
+  return usable
+    ? null
+    : Response.json(
+        { error: "A contractor's email must be a working address, or left blank." },
+        { status: 400 },
+      );
+}
+
+/*
+ * What `day_rate_pence` can actually hold.
+ *
+ * The column is a 4-byte integer on Postgres — `information_schema` on the
+ * staging database says `integer`, not `bigint` — and SQLite hides that
+ * completely: locally, `{ "dayRate": 9e15 }` stored 900000000000000000 pence
+ * and answered 200. On the deployed Postgres the same request is a driver
+ * error, and the catch at the bottom of these handlers returns
+ * `error.message` verbatim, so a mistyped day rate answered with the
+ * database's own words instead of the route's.
+ *
+ * £21,474,836.47 is not a day rate anybody is refusing legitimately.
+ */
+const MAX_DAY_RATE_PENCE = 2_147_483_647;
+
+/**
+ * A day rate too large for the column, refused before the driver has to.
+ *
+ * Only the overflow. Everything `ratePence` already turns into null — an
+ * empty box, a negative, a word — keeps exactly the behaviour it has, because
+ * "no rate recorded" is a real answer and the register prints a dash for it.
+ * This is containment of a database error, not a new opinion about rates.
+ */
+function contractorRateRefusal(data: Record<string, unknown>): Response | null {
+  if (!("dayRate" in data)) return null;
+  const pence = ratePence(data.dayRate);
+  if (pence === null) return null;
+  return Number.isSafeInteger(pence) && pence <= MAX_DAY_RATE_PENCE
+    ? null
+    : Response.json(
+        { error: "A contractor's day rate is larger than this workspace can record." },
+        { status: 400 },
+      );
+}
+
+/**
+ * The contractor this request names, as this organisation can see it — or a
+ * refusal.
+ *
+ * TWO jobs, one SELECT, and neither is optional.
+ *
+ * THE TENANCY HALF. `.where(and(eq(id), eq(organisationId, orgId)))` on the
+ * UPDATE already means another tenant's contractor cannot be written. What it
+ * does NOT mean is that the caller is told: the statement matches no rows,
+ * drizzle reports no error, and the route answered 200 `{ ok: true }` and then
+ * wrote an activity row into the ACTOR's own organisation recording an update
+ * that never happened, carrying the caller's payload as its detail. Measured
+ * against a running server with a second tenant: a `PATCH` of another
+ * organisation's contractor with `{ name: "HACKED", notes: "pwned" }` answered
+ * 200, changed nothing, and put "HACKED" in the primary organisation's activity
+ * feed. Zero mutation was already true. A truthful answer was not.
+ *
+ * 404 for both a nonexistent id and another organisation's, in the same words
+ * `referenceRefusal` uses, because telling those two apart tells a caller which
+ * ids exist inside a tenant they are not allowed to read.
+ *
+ * THE STATE HALF. The archive verb writes `active: false` AND
+ * `availability: 'Inactive'` together, so the stored row is what
+ * `contractorResurrectionRefusal` has to compare against. Reading it here
+ * rather than in a second query keeps both checks on the same snapshot.
+ */
+async function contractorTarget(
+  db: WorkspaceDb,
+  orgId: string,
+  id: string,
+): Promise<
+  { row: { active: boolean; availability: string }; refusal?: undefined } | { refusal: Response }
+> {
+  const [row] = await db
+    .select({ active: contractors.active, availability: contractors.availability })
+    .from(contractors)
+    .where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)))
+    .limit(1);
+  if (!row) return { refusal: Response.json({ error: "Contractor not found." }, { status: 404 }) };
+  return { row };
+}
+
+/** What the archive verb writes into `availability`. Not a day-to-day state. */
+const ARCHIVED_AVAILABILITY = "Inactive";
+
+/**
+ * The four states a contractor's availability can be in.
+ *
+ * These existed ONLY in the browser (`workspace-data-manager.tsx`, the select's
+ * options). The column is plain TEXT with a default and no CHECK constraint on
+ * either dialect, and the server checked only that the value was non-empty —
+ * while answering a refusal that read "must be one of the offered states",
+ * which was a promise nothing kept. `"Bananas"`, a 200-character string and
+ * `"<script>alert(1)</script>"` all stored, and the register printed them.
+ *
+ * Worse, it made `contractorResurrectionRefusal` below decorative. That guard
+ * asks whether the resulting availability is still `'Inactive'` — a question
+ * with no force when the answer can be any string at all. `{ active: true,
+ * availability: "inactive" }` differs from the marker by one capital letter,
+ * was accepted, and put an archived contractor straight back on the register
+ * and back into the assignment dropdown, which filters on `active` alone. So
+ * the allow-list is not tidiness: it is what makes the archive guard mean
+ * anything.
+ *
+ * Exact, case-sensitive matches, the same treatment `MEMBER_ROLES` gets, and
+ * the same four strings the select offers — so every existing client is
+ * unaffected and only values no screen can produce are refused.
+ */
+const CONTRACTOR_AVAILABILITY = ["Available", "Limited", "Unavailable", "Inactive"];
+
+function contractorAvailabilityRefusal(data: Record<string, unknown>): Response | null {
+  if (!("availability" in data)) return null;
+  return CONTRACTOR_AVAILABILITY.includes(text(data.availability, 60))
+    ? null
+    : Response.json(
+        { error: `A contractor's availability must be ${CONTRACTOR_AVAILABILITY.join(", ")}.` },
+        { status: 400 },
+      );
+}
+
+/**
+ * An archived contractor put back on the register while still carrying the
+ * marker the archive left behind — refused.
+ *
+ * THE CASE THIS IS FOR, found in `activity_log` rather than reasoned about:
+ * contractor `contractor-test-c6cfce01` was archived on the 26th, and on the
+ * 29th an ORDINARY save carrying `{ …, "availability": "Inactive",
+ * "active": true }` put it back. The row still sits at `active = true,
+ * availability = 'Inactive'`. Nobody decided to un-archive it; a whole-record
+ * form posted the `active` it happened to be holding, and the archive was
+ * undone as a side effect of editing something else on the same screen.
+ *
+ * The server cannot tell a stale echo from a deliberate tick — the two payloads
+ * are byte-identical, and separating them needs a version token this form does
+ * not send. What it CAN see is that the RESULT contradicts itself: on the
+ * register, and wearing the availability that only archiving writes.
+ *
+ * So the rule is narrow on purpose. It fires ONLY on the transition — a stored
+ * `active: false` becoming true — and only while the resulting availability is
+ * still `'Inactive'`. Three things it deliberately does not do:
+ *
+ *  - It does not touch a row ALREADY sitting in the contradictory state. Those
+ *    rows exist, and making them unsavable would strand them there.
+ *  - It does not stop an operator marking an ACTIVE contractor's availability
+ *    'Inactive'. That is one of the four states the Availability select offers
+ *    and it is a day-to-day answer, not an archive.
+ *  - It does not heal the pair by writing 'Available' itself. The Active
+ *    checkbox's own hint promises availability "is not changed by ticking this
+ *    box", and a guess that quietly rewrites a second column is the failure
+ *    mode this whole family of fixes exists to stop. Restoring somebody to the
+ *    register is a decision; this asks for it rather than making it.
+ */
+function contractorResurrectionRefusal(
+  data: Record<string, unknown>,
+  stored: { active: boolean; availability: string },
+): Response | null {
+  if (!("active" in data)) return null;
+  if (stored.active) return null;
+  if (booleanValue(data.active) !== true) return null;
+  const availability =
+    "availability" in data ? text(data.availability, 60) : stored.availability;
+  return availability === ARCHIVED_AVAILABILITY
+    ? Response.json(
+        {
+          error:
+            "Restoring an archived contractor needs an availability. Set it to something other than 'Inactive' in the same save.",
+        },
+        { status: 409 },
+      )
+    : null;
 }
 
 export async function PATCH(request: Request) {
@@ -1158,6 +1608,46 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     } else if (entity === "contractor") {
+      /*
+       * `supplied` fixed omission. It does not fix a key that was SENT
+       * carrying nothing, and three of these columns are NOT NULL, so the
+       * five guards below are what stops a 200 writing a row the register
+       * cannot use. Every one of them was measured against a running server
+       * before it was written; see the note on each function.
+       *
+       * `name` is the same rule site, unit, planned and member already apply,
+       * and it matters more here than the wording suggests: the workspace GET
+       * tallies jobs by contractor NAME, not by id, so a blanked name does
+       * not just leave a nameless row — it detaches every job that contractor
+       * has ever been sent to.
+       *
+       * `availability` is NOT NULL with a four-label select behind it, and
+       * `text(null, 60)` is "", so `{ availability: null }` wrote an empty
+       * string into a column whose whole purpose is to say which of four
+       * states this is. "" is none of them, and the register prints it as a
+       * blank beside the name. Refused rather than defaulted to "Available",
+       * because a contractor who cannot take work this week must not be
+       * silently advertised as free.
+       */
+      const badName = requiredTextRefusal(data, "name", 140, "A contractor name is required.");
+      if (badName) return badName;
+      // The allow-list, not a non-empty check. The old refusal SAID "one of the
+      // offered states" and enforced no such thing — see CONTRACTOR_AVAILABILITY.
+      const badAvailability = contractorAvailabilityRefusal(data);
+      if (badAvailability) return badAvailability;
+      const badActive = contractorActiveRefusal(data);
+      if (badActive) return badActive;
+      const badEmail = contractorEmailRefusal(data);
+      if (badEmail) return badEmail;
+      const badRate = contractorRateRefusal(data);
+      if (badRate) return badRate;
+      // The row as this organisation can see it, or a 404. Before the update,
+      // so a cross-tenant id refuses instead of answering 200 and logging a
+      // change that never happened. See `contractorTarget`.
+      const target = await contractorTarget(db, orgId, id);
+      if (target.refusal) return target.refusal;
+      const badRestore = contractorResurrectionRefusal(data, target.row);
+      if (badRestore) return badRestore;
       await db.update(contractors).set({
         // Only what was sent — see `supplied`. A partial PATCH used to blank
         // every column it did not mention.
@@ -1183,7 +1673,10 @@ export async function PATCH(request: Request) {
         ...supplied(data, "certifications", (value) => JSON.stringify(stringArray(value))),
         ...supplied(data, "insuranceExpiry", (value) => optionalText(value, 40)),
         ...supplied(data, "availability", (value) => text(value, 60)),
-        ...supplied(data, "rating", (value) => numeric(value, 0, 0, 5)),
+        ...supplied(data, "rating", optionalRating),
+        // `booleanValue` still falls back to TRUE, and that fallback is now
+        // unreachable: `contractorActiveRefusal` above has already refused
+        // everything this cannot read. Same arrangement as the member branch.
         ...supplied(data, "active", booleanValue),
         updatedAt: new Date().toISOString(),
       }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
@@ -1304,6 +1797,24 @@ export async function DELETE(request: Request) {
       entity === "member" ? "deactivate" : "write",
     );
     if (refusal) return refusal;
+    /*
+     * Archiving somebody else's contractor answered 200 `{ ok: true }`.
+     *
+     * The UPDATE below is organisation-scoped, so it changed nothing — proved
+     * against a running server with a second tenant, the row came back
+     * byte-identical. But the caller was told it worked, and `logChange` at
+     * the bottom then filed an "archived" entry against another tenant's id in
+     * THIS organisation's activity feed. An audit trail that records archives
+     * that did not happen is worse than one that records nothing.
+     *
+     * Contractors only. The same silent 200 is true of every branch here and
+     * closing it everywhere is a change to five other screens' error handling;
+     * this is the register that was audited. See `contractorTarget`.
+     */
+    if (entity === "contractor") {
+      const target = await contractorTarget(db, orgId, id);
+      if (target.refusal) return target.refusal;
+    }
     /*
      * All three state columns, in the order `DELETE /api/sites` writes them.
      * Archiving here used to set `lifecycle` alone, leaving `status` at

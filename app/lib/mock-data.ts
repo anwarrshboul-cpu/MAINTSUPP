@@ -5,6 +5,16 @@ import type {
   StoreRecord,
 } from "./types";
 
+/*
+ * `contractorId` is null on every row here, and that is the correct value
+ * rather than a gap waiting to be filled.
+ *
+ * These are the demo fixtures the portal falls back to when a workspace has no
+ * register of its own. A canonical id only means something against real
+ * `contractors` rows, and in the situation that puts these on screen there are
+ * none — so the screens match them to the synthesised fallback roster by name,
+ * exactly as they always have. See the note on `MaintenanceRequest.contractorId`.
+ */
 export const maintenanceRequests: MaintenanceRequest[] = [
   {
     id: "MN-1048",
@@ -23,6 +33,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Attention",
     status: "Waiting for decisions",
     contractor: "UK Safety",
+    contractorId: null,
     assignee: "Sample Coordinator A",
     requestedAt: "2026-07-29T08:20:00.000Z",
     dueAt: "2026-07-29T16:00:00.000Z",
@@ -49,6 +60,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Incoming",
     status: "Awaiting Landlord Approval",
     contractor: "Saed Electrical",
+    contractorId: null,
     assignee: null,
     requestedAt: "2026-07-28T11:40:00.000Z",
     dueAt: "2026-07-30T17:00:00.000Z",
@@ -75,6 +87,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Incoming",
     status: "Pending Approval",
     contractor: null,
+    contractorId: null,
     assignee: "Sample Coordinator B",
     requestedAt: "2026-07-28T09:15:00.000Z",
     dueAt: "2026-08-04T17:00:00.000Z",
@@ -101,6 +114,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Incoming",
     status: "Job Scheduled",
     contractor: "Vision AV",
+    contractorId: null,
     assignee: "Sample Coordinator A",
     requestedAt: "2026-07-27T15:05:00.000Z",
     dueAt: "2026-07-31T12:00:00.000Z",
@@ -127,6 +141,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Booked",
     status: "Job Scheduled",
     contractor: "Midlands Glass",
+    contractorId: null,
     assignee: "Sample Coordinator B",
     requestedAt: "2026-07-21T10:20:00.000Z",
     dueAt: "2026-07-31T09:00:00.000Z",
@@ -153,6 +168,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Booked",
     status: "Third Party Delay",
     contractor: "UK Safety",
+    contractorId: null,
     assignee: "Sample Coordinator A",
     requestedAt: "2026-06-25T09:00:00.000Z",
     dueAt: "2026-08-02T17:00:00.000Z",
@@ -179,6 +195,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Booked",
     status: "Waiting for payment",
     contractor: "Johnny Signage",
+    contractorId: null,
     assignee: "Sample Coordinator B",
     requestedAt: "2026-07-01T08:00:00.000Z",
     dueAt: "2026-07-30T13:00:00.000Z",
@@ -205,6 +222,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Completed",
     status: "Job Completed",
     contractor: "Saed Electrical",
+    contractorId: null,
     assignee: "Sample Coordinator A",
     requestedAt: "2026-07-10T10:00:00.000Z",
     dueAt: "2026-07-14T15:00:00.000Z",
@@ -231,6 +249,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     stage: "Attention",
     status: "Job In Progress",
     contractor: "Climate Response",
+    contractorId: null,
     assignee: "Sample Coordinator A",
     requestedAt: "2026-07-26T07:30:00.000Z",
     dueAt: "2026-07-29T12:00:00.000Z",

@@ -224,16 +224,44 @@ test("the current data carries only links the register could justify", async (t)
   );
 
   /*
-   * Every linked job's stored name still resolves to the contractor it was
-   * linked to. This is the assertion that would fail if the backfill had ever
-   * guessed: a link whose text no longer matches its target is one nobody can
-   * justify from the data.
+   * A link points at a contractor THIS organisation still has. That is what
+   * "nobody can justify this link from the data" reduces to once the register
+   * can be edited.
+   *
+   * W6 CHANGED WHAT THIS TEST MAY ASSERT, and the change is deliberate.
+   *
+   * This used to demand `lower(trim(c.name)) = lower(trim(m.contractor))` on
+   * every linked job — written when the ONLY writer of `contractor_id` was the
+   * boot backfill, which creates a link solely on an exact name match, so the
+   * two could not diverge and a divergence really did mean the backfill had
+   * guessed.
+   *
+   * They can now diverge for a reason that is correct. RENAMING a contractor
+   * deliberately keeps their jobs: `contractor` is the historical record of who
+   * was named on the job and is never rewritten (the brief's 12A — do not erase
+   * the raw label), while `contractor_id` goes on pointing at the renamed row so
+   * the register still counts the work. Before that fix a rename silently zeroed
+   * a contractor's entire history — measured, `assigned 1 / urgent 1 / spend 250`
+   * became `0 / 0 / 0` — precisely BECAUSE the tally keyed on the name this
+   * assertion required to match.
+   *
+   * So the old assertion and the fix cannot both stand: one demands the text
+   * track the name, the other exists so it does not have to. Keeping it would
+   * have meant a suite that goes red the first time anybody renames a
+   * contractor in production. What survives is the half that is still true and
+   * still catches a bad backfill — a link must resolve, and must resolve inside
+   * the same tenant, which the two assertions above already cover — plus this:
+   * a link is never left pointing at a contractor that has been removed.
    */
   assert.equal(
-    n(`SELECT count(*) n FROM maintenance_requests m JOIN contractors c ON c.id = m.contractor_id
-        WHERE lower(trim(c.name)) <> lower(trim(coalesce(m.contractor, '')))`),
+    n(`SELECT count(*) n FROM maintenance_requests m
+        WHERE m.contractor_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM contractors c
+             WHERE c.id = m.contractor_id AND c.organisation_id = m.organisation_id
+          )`),
     0,
-    "every contractor link matches the name the job carries",
+    "every contractor link resolves inside the job's own organisation",
   );
 
   // The legacy text is the record of who was named, and it is never cleared.

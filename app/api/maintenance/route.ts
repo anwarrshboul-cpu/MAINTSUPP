@@ -28,6 +28,7 @@ import { priorityRule } from "../../lib/priority-rules";
 import { unassignedSiteId } from "../../lib/site-reference";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
+import { contractorLinkValues } from "../../lib/contractor-reference";
 import {
   automationContext,
   dispatchAutomationEvents,
@@ -852,6 +853,35 @@ export async function PATCH(request: Request) {
          */
         values.siteId = nextSiteId ?? unassignedSiteId();
       }
+
+      /*
+       * Naming a contractor also REFERENCES one, where the register can say so
+       * without guessing.
+       *
+       * `contractor` is free text and stays free text — it is the record of who
+       * was named on the job, and this never rewrites it to a canonical
+       * spelling. Beside it, `contractor_id` is recomputed from that same text
+       * by `app/lib/contractor-reference.ts`: organisation-scoped, exact
+       * `lower(trim())`, and only where EXACTLY ONE contractor carries the
+       * name. That is not a new policy — it is the rule `db/init.ts:207-231`
+       * already applies at boot, moved onto the write path so a job assigned a
+       * second ago is linked as well as one imported last year.
+       *
+       * `contractorLinkValues` returns `{}` unless `contractor` is part of THIS
+       * write, so a PATCH that changes a priority cannot disturb a link. When
+       * it IS part of the write the id is DERIVED FROM IT, every time: unique
+       * match wins, unknown and ambiguous both clear it. Leaving a previous id
+       * behind would leave a job counted against a contractor it no longer
+       * names, for ever and invisibly — the column is `ON DELETE SET NULL`
+       * (db/init.ts:186) for the same reason.
+       *
+       * `orgId` is the caller's own organisation and the UPDATE below is scoped
+       * to it, so a resolved contractor is always this tenant's.
+       */
+      const { link: contractorLink, ...contractorLinkFields } =
+        await contractorLinkValues(db, orgId, values);
+      Object.assign(values, contractorLinkFields);
+      void contractorLink;
     }
 
     const [before] = await db
