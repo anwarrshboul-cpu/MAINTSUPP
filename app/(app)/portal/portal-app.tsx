@@ -50,7 +50,11 @@ import {
   documentFilterOptions,
   documentName,
   documentOwner,
+  documentPageRange,
   documentSiteLabel,
+  DOCUMENT_PAGE_SIZE,
+  DOCUMENT_WALK_MAX_PAGES,
+  DOCUMENT_WALK_SIZE,
   documentStateClass,
   documentStatus,
   documentTypeLabel,
@@ -1074,6 +1078,12 @@ export default function PortalApp({
   const [workspaceManager, setWorkspaceManager] =
     useState<WorkspaceManagerState | null>(null);
   const [documents, setDocuments] = useState<FileRecord[]>([]);
+  /*
+   * Whether the walk stopped at its bound rather than at the end of the
+   * register. Passed to the view so the reader is told, because a total that
+   * is short without saying so is the defect this walk replaces.
+   */
+  const [documentsTruncated, setDocumentsTruncated] = useState(false);
   const [boardSnapshot, setBoardSnapshot] =
     useState<MaintenanceBoardSnapshot | null>(null);
 
@@ -1267,12 +1277,27 @@ export default function PortalApp({
        * TO, and a document can be restored from the same drawer that archived
        * it. The default view is still live-only; see `visible` there.
        */
-      const response = await fetch("/api/files?limit=100&archived=all", {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as {
-        files?: Array<{
+      /*
+       * EVERY PAGE, NOT THE FIRST HUNDRED — W07-09 and W07-11.
+       *
+       * `/api/files` clamps `limit` to 100, and this caller asked for 100 and
+       * stopped. So the register held at most a hundred documents however many
+       * existed: the 101st was not on another page, it was unreachable, and
+       * every figure derived from this array — the tiles, "Showing X of Y", the
+       * CSV — was `min(real, 100)` while looking like a count. Search and the
+       * five filters ran over that same truncated array, so "across all
+       * documents" was not true either.
+       *
+       * The endpoint has carried `page`, `offset` and a COUNTed `total` since
+       * W7; this is the caller adopting them. Same shape as the fix
+       * `/api/maintenance` already got above, and for the same reason.
+       *
+       * Bounded, and the bound is REPORTED rather than silently applied:
+       * `DOCUMENT_WALK_MAX_PAGES` x `DOCUMENT_WALK_SIZE` is four thousand
+       * documents, and a workspace past that gets a stated limit instead of a
+       * quietly short register.
+       */
+      type DocumentRow = {
           id: string;
           requestId: string | null;
           kind: string;
@@ -1293,9 +1318,28 @@ export default function PortalApp({
           contentType?: string;
           inlineUrl?: string;
           downloadUrl?: string;
-        }>;
       };
-      if (!payload.files || !current()) return;
+      const collected: DocumentRow[] = [];
+      let truncated = false;
+      for (let index = 0; index < DOCUMENT_WALK_MAX_PAGES; index += 1) {
+        const response = await fetch(
+          `/api/files?limit=${DOCUMENT_WALK_SIZE}&page=${index + 1}&archived=all`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!response.ok || !current()) return;
+        const page = (await response.json()) as {
+          files?: DocumentRow[];
+          total?: number;
+        };
+        const batch = page.files ?? [];
+        collected.push(...batch);
+        const total = Number(page.total ?? collected.length);
+        if (batch.length < DOCUMENT_WALK_SIZE || collected.length >= total) break;
+        if (index === DOCUMENT_WALK_MAX_PAGES - 1) truncated = true;
+      }
+      const payload = { files: collected };
+      if (!current()) return;
+      setDocumentsTruncated(truncated);
       /*
        * `site` is left EMPTY here on purpose, and resolved at render time.
        *
@@ -2762,6 +2806,7 @@ export default function PortalApp({
               key={activeSection}
               sectionKey={activeSection}
               files={documentsWithSites}
+              truncated={documentsTruncated}
               onNotify={setToast}
               onChanged={() => void loadDocuments()}
             />
@@ -4330,11 +4375,20 @@ function CalendarView({
 
 function DocumentsView({
   files,
+  truncated,
   sectionKey,
   onNotify,
   onChanged,
 }: {
   files: FileRecord[];
+  /**
+   * The register read its bound rather than the end of the estate.
+   *
+   * Only ever true past four thousand documents. It is surfaced rather than
+   * swallowed: the whole point of the walk that produces this set is that a
+   * short total says so.
+   */
+  truncated: boolean;
   /**
    * WHICH PAGE THIS IS, for the range it remembers.
    *
@@ -4358,6 +4412,16 @@ function DocumentsView({
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
+  /*
+   * Which page of the matching set is on screen — W07-11.
+   *
+   * The register used to render every matching row at once, which was only
+   * survivable because the set could never exceed the hundred the loader
+   * fetched. Now that the loader reads the whole estate, the page is real and
+   * has to be stated: an explicit size, an explicit page, and a total that is
+   * the size of the MATCHING SET rather than of what happens to be rendered.
+   */
+  const [page, setPage] = useState(1);
   /*
    * The five structured filters — W07-11.
    *
@@ -4477,6 +4541,37 @@ function DocumentsView({
     [inRange, today],
   );
   const narrowed = filtered.length !== visible.length;
+  /*
+   * A NEW QUESTION STARTS AT ITS FIRST PAGE.
+   *
+   * Changing the search or a filter while deep in the register would otherwise
+   * leave the reader on page 4 of a result that is now one page long, and the
+   * register would answer "there is nothing here" — a claim about the data
+   * when the truth is a claim about the page. `documentPageRange` clamps as
+   * well, so even a stale page number cannot strand anybody.
+   */
+  const question = `${query}|${JSON.stringify(filters)}|${period}`;
+  const questionRef = useRef(question);
+  useEffect(() => {
+    if (questionRef.current === question) return;
+    questionRef.current = question;
+    setPage(1);
+  }, [question]);
+  const range = documentPageRange({
+    total: filtered.length,
+    page,
+    pageSize: DOCUMENT_PAGE_SIZE,
+  });
+  /*
+   * The rows on screen. Everything ABOVE the table — the three tiles, the
+   * "showing" sentence and the CSV — deliberately keeps reading `filtered`,
+   * the whole matching set, because a tile that counted the page would be the
+   * same lie in a smaller box.
+   */
+  const pageRows = filtered.slice(
+    (range.page - 1) * DOCUMENT_PAGE_SIZE,
+    range.page * DOCUMENT_PAGE_SIZE,
+  );
   const currentMonth = new Date().toISOString().slice(0, 7);
   const attention = filtered.filter((file) => {
     const state = documentStatus(file, today).state;
@@ -4747,7 +4842,7 @@ function DocumentsView({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((file) => {
+                {pageRows.map((file) => {
                   const status = documentStatus(file, today);
                   return (
                     <tr key={file.id}>
@@ -4819,7 +4914,7 @@ function DocumentsView({
           </div>
         ) : (
           <div className="document-grid">
-            {filtered.map((file) => {
+            {pageRows.map((file) => {
               const status = documentStatus(file, today);
               return (
                 <button
@@ -4847,6 +4942,59 @@ function DocumentsView({
                 does, and said the same nothing about any of them. */}
             {!filtered.length && <p className="analytics-empty">{emptyReason}</p>}
           </div>
+        )}
+
+        {/*
+          THE PAGER — W07-11.
+
+          Shown only when there is more than one page, because a control that
+          can only say "1 of 1" is noise on a register most workspaces will
+          never fill. Every number comes from `documentPageRange`: the total is
+          the size of the MATCHING SET, and the page has already been clamped
+          into it, so a stale page number cannot strand a reader on an empty
+          last page.
+
+          `aria-live` sits on the position rather than the buttons. Somebody
+          who presses Next needs to hear where they landed; hearing the two
+          buttons re-announce themselves is not that.
+        */}
+        {range.pageCount > 1 && (
+          <nav className="document-pager" aria-label="Register pages">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setPage(range.page - 1)}
+              disabled={range.page <= 1}
+            >
+              Previous
+            </button>
+            <p aria-live="polite">
+              Showing <strong>{range.first}</strong>–<strong>{range.last}</strong>{" "}
+              of <strong>{filtered.length}</strong> · page {range.page} of{" "}
+              {range.pageCount}
+            </p>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setPage(range.page + 1)}
+              disabled={range.page >= range.pageCount}
+            >
+              Next
+            </button>
+          </nav>
+        )}
+
+        {/*
+          Said, not swallowed. Only reachable past four thousand documents —
+          and a total that is quietly short is precisely the defect the walk
+          behind this register exists to remove, so the bound announces itself.
+        */}
+        {truncated && (
+          <p className="analytics-empty" aria-live="polite">
+            This register is showing the first{" "}
+            {DOCUMENT_WALK_MAX_PAGES * DOCUMENT_WALK_SIZE} documents. Narrow the
+            period or a filter to see the rest.
+          </p>
         )}
       </section>
 

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import {
   activityLog,
@@ -14,6 +14,7 @@ import {
 } from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { reconcileAttachmentCounts } from "../../../lib/attachment-counts";
+import { chunkIds } from "../../../lib/sql-batching";
 import {
   attachmentPayload,
   documentFieldSnapshot,
@@ -295,6 +296,80 @@ export async function GET(
   });
 }
 
+/**
+ * The capability refusal, with the reversible alternative named on it.
+ *
+ * `capabilityDenied` answers "your role does not have data.delete", which is
+ * true and useless: the person reading it pressed Delete on a certificate and
+ * needs to be told that Archive is right there and is theirs. The shape is not
+ * changed — `capability`, `role` and `denied` all survive, so anything
+ * branching on this 403 branches on it exactly as it branches on every other
+ * route's; only the sentence grows and one flag is added.
+ *
+ * The denial is cloned before it is read, so a body this cannot parse is still
+ * returned intact rather than returned consumed.
+ */
+async function archiveInstead(denied: Response) {
+  const body = (await denied
+    .clone()
+    .json()
+    .catch(() => null)) as Record<string, unknown> | null;
+  if (!body || typeof body.error !== "string") return denied;
+  return Response.json(
+    {
+      ...body,
+      error: `${body.error} Deleting a document permanently destroys its file and every earlier version of it. Archive it instead to take it off the register without losing it.`,
+      archiveInstead: true,
+    },
+    { status: denied.status },
+  );
+}
+
+/**
+ * DELETE /api/files/[id] — destroy a document for good.
+ *
+ * W07-06, and two decisions that used to be left to whoever pressed the button.
+ *
+ * 1. `data.delete`, NOT `board.edit`.
+ *
+ *    This handler used to require `board.edit` — the capability that renames a
+ *    row — and its own comment said so approvingly. Measured against the
+ *    running server with a real invited `admin` (holds `board.edit`, does not
+ *    hold `data.delete`, role confirmed from `/api/context`): the request was
+ *    answered 200 and the document, its bytes and its history were gone.
+ *    `/api/trash` had already settled the rule for the identical act on a
+ *    different table — "DELETE `data.delete` — permanent. `data.delete` is
+ *    withheld from `admin` by default precisely so the irreversible verb has to
+ *    be granted deliberately" — and a compliance certificate is not a lesser
+ *    thing than a board row. Archiving and restoring stay on `board.edit` for
+ *    that route's stated reason and for the same one here: demanding the
+ *    destructive capability to undo a mistake pushes people towards leaving the
+ *    mistake in place.
+ *
+ *    An editor is not left with nothing. `PATCH { archived: true }` two
+ *    handlers down is `board.edit`, is reversible, and takes a document off the
+ *    live register, out of the board's photo strips and out of every counter —
+ *    `liveAttachmentRows()` excludes an archived row exactly as it excludes a
+ *    deleted one. Taking a document off the register is an editor's act;
+ *    destroying the evidence is not.
+ *
+ * 2. DELETING THE HEAD DELETES THE LINEAGE.
+ *
+ *    A document is a lineage; a version is not a document. Before this,
+ *    deleting the current version destroyed one row and left the rest behind —
+ *    measured: a three-version certificate deleted at v3 left v1 and v2 in the
+ *    table with `is_current = false` and their bytes in the bucket. Every
+ *    register, counter and photo strip filters on `is_current`, so the lineage
+ *    vanished from the product while remaining in storage for ever, reachable
+ *    by no screen and deletable by no route. The confirmation the browser shows
+ *    already promises "its N versions go with it"; this is the handler keeping
+ *    that promise rather than the dialog telling a lie.
+ *
+ *    Deleting a SUPERSEDED version destroys only that version, which is the
+ *    other half of the same rule: pruning one old copy is not destroying the
+ *    document, and the head — the row every register reads — is untouched. The
+ *    audit event says which of the two happened.
+ */
 export async function DELETE(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -303,24 +378,36 @@ export async function DELETE(
   await ensureDatabase();
 
   /*
-   * Deleting evidence needs `board.edit`, like writing a thumbnail two handlers
-   * up does.
-   *
-   * This was a bare `scopedDb`, which answers "whose data is this" and never
-   * "may you" — so any signed-in member of the workspace, including a `client`
-   * whose capabilities are `board.view` and `data.export` and nothing else,
-   * could permanently destroy any attachment in the tenant: bytes, row,
-   * compliance certificates, completion photographs. The destructive verb was
-   * the one left open while the harmless one was guarded.
+   * Wrapped because `scopedDbWithCapability` THROWS for an anonymous caller
+   * rather than returning a refusal — the same reason PATCH and PUT below wrap
+   * it. Unwrapped, a request from a session that had ended left this handler as
+   * an empty 500 instead of the 401 every sibling route answers.
    */
-  const guard = await scopedDbWithCapability(request, "board.edit");
-  if (guard.denied) return guard.denied;
+  let guard: Awaited<ReturnType<typeof scopedDbWithCapability>>;
+  try {
+    guard = await scopedDbWithCapability(request, "data.delete");
+  } catch (error) {
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    throw error;
+  }
+  if (guard.denied) return archiveInstead(guard.denied);
   const { actor, db, orgId } = guard.scope;
   const [record] = await db
     .select()
     .from(attachments)
     .where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)))
     .limit(1);
+  /*
+   * CROSS-TENANT IS ANSWERED HERE, BEFORE ANYTHING IS DESTROYED.
+   *
+   * The lookup is scoped by `organisation_id`, so another workspace's document
+   * reads as "not found" — the same answer as an id that never existed, so this
+   * route cannot be used to discover what another tenant holds. It matters that
+   * the refusal is here rather than later: every mutation below reads `record`,
+   * so a row in another tenant reaches neither the compliance release, nor the
+   * bucket, nor the delete.
+   */
   if (!record) {
     return Response.json({ error: "File not found." }, { status: 404 });
   }
@@ -329,6 +416,38 @@ export async function DELETE(
   if (!storage) {
     return Response.json({ error: "File storage is unavailable." }, { status: 503 });
   }
+
+  /*
+   * WHAT IS ABOUT TO BE DESTROYED — the lineage, or the one superseded copy.
+   *
+   * `coalesce(root_document_id, id)` is how a lineage is identified everywhere
+   * else in this codebase (see `planVersion`), because version 1 is self-rooted
+   * and stores NULL. Both halves of the OR are needed for that reason, and the
+   * organisation predicate is on the outside, so nothing here can reach past
+   * the tenant even if a `root_document_id` were somehow shared.
+   *
+   * A head always matches its own lineage, so the fallback can only fire if
+   * that read came back empty — in which case destroying the row already in
+   * hand is still correct, and reporting success having destroyed nothing
+   * would not be.
+   */
+  const rootDocumentId = record.rootDocumentId ?? record.id;
+  const found = record.isCurrent
+    ? await db
+        .select()
+        .from(attachments)
+        .where(
+          and(
+            eq(attachments.organisationId, orgId),
+            or(
+              eq(attachments.rootDocumentId, rootDocumentId),
+              eq(attachments.id, rootDocumentId),
+            ),
+          ),
+        )
+    : [record];
+  const doomed = found.length ? found : [record];
+  const doomedIds = doomed.map((row) => row.id);
 
   /*
    * A COMPLIANCE SLOT MUST NOT BE LEFT POINTING AT NOTHING.
@@ -341,16 +460,34 @@ export async function DELETE(
    * PAT certificate, it just no longer holds one, and removing the row would
    * discard the obligation along with the evidence.
    *
-   * Before the row goes, so a failure here stops the delete rather than
+   * Every id in the lineage, not only the one named: a slot filled from version
+   * 2 still names version 2 after version 3 supersedes it.
+   *
+   * Before the rows go, so a failure here stops the delete rather than
    * stranding the pointer.
    */
-  await releaseComplianceLinks(db, orgId, id);
+  await releaseComplianceLinks(db, orgId, doomedIds);
 
-  // The thumbnail goes with it. Without this every deleted photograph leaves
-  // its 96px derivative in the bucket permanently, with nothing left to
-  // reference it.
-  await storage.delete([record.objectKey, `${record.objectKey}.thumb`]);
-  await db.delete(attachments).where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)));
+  /*
+   * The thumbnail goes with it. Without this every deleted photograph leaves
+   * its 96px derivative in the bucket permanently, with nothing left to
+   * reference it — and a superseded version's derivative is no different.
+   *
+   * Chunked at 1000, R2's own ceiling for a batched delete, the way
+   * `purgeColumn` in the trash route does it.
+   */
+  const objectKeys = doomed.flatMap((row) => [
+    row.objectKey,
+    `${row.objectKey}.thumb`,
+  ]);
+  for (const keys of chunkIds(objectKeys, 1000)) {
+    await storage.delete(keys);
+  }
+  for (const chunk of chunkIds(doomedIds)) {
+    await db.delete(attachments).where(
+      and(eq(attachments.organisationId, orgId), inArray(attachments.id, chunk)),
+    );
+  }
 
   let updatedRequest: typeof maintenanceRequests.$inferSelect | undefined;
   if (record.requestId) {
@@ -366,18 +503,51 @@ export async function DELETE(
      * `app/lib/attachment-counts.ts`.
      */
     updatedRequest = await reconcileAttachmentCounts(db, orgId, record.requestId);
+  }
 
+  /*
+   * EVERY OTHER JOB THE LINEAGE TOUCHED.
+   *
+   * A version inherits its predecessor's anchors, but the uploader may override
+   * them, so two rows of one lineage can name two different jobs. Reconciling
+   * only the head's job would leave the other job's four counters promising
+   * photographs that no longer exist — precisely the drift
+   * `reconcileAttachmentCounts` was written to end.
+   */
+  const jobIds = [
+    ...new Set(
+      doomed
+        .map((row) => row.requestId)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+  for (const jobId of jobIds) {
+    if (jobId === record.requestId) continue;
+    await reconcileAttachmentCounts(db, orgId, jobId);
+  }
+
+  /*
+   * The job's own timeline, one line per destroyed row.
+   *
+   * `activity_log` answers the people working the job; `audit_events` answers
+   * whoever has to account for the deletion months later. The two are separate
+   * stores on purpose, and this is the same write it has always been — repeated
+   * for each row that actually went, because a job that held three versions of
+   * a certificate lost three files and its timeline should say so.
+   */
+  for (const row of doomed) {
+    if (!row.requestId) continue;
     await db.insert(activityLog).values({
       id: crypto.randomUUID(),
       organisationId: orgId,
       entityType: "maintenance_request",
-      entityId: record.requestId,
+      entityId: row.requestId,
       action: "request.file_deleted",
       actorEmail: actor.email,
       detail: JSON.stringify({
-        fileId: record.id,
-        fileName: record.originalName,
-        kind: record.kind,
+        fileId: row.id,
+        fileName: row.originalName,
+        kind: row.kind,
       }),
     });
   }
@@ -385,20 +555,27 @@ export async function DELETE(
   /*
    * W07-12 — WRITTEN OUTSIDE `if (record.requestId)`, and that is the fix.
    *
-   * The `activity_log` insert above sits inside that branch because it writes to
-   * a JOB's timeline and a document with no job has no timeline to write to.
-   * The consequence was that an attachment with no `request_id` was permanently
-   * destroyed leaving NO trace in either stream — no timeline entry, and no
-   * audit event, because documents never wrote audit events at all. W07-07 makes
-   * jobless documents ordinary rather than exceptional (a contractor's insurance
-   * certificate has no work order), so that silent hole was about to become the
-   * common case for exactly the documents most worth accounting for.
+   * The `activity_log` writes above belong to a JOB's timeline, and a document
+   * with no job has no timeline to write to. The consequence was that an
+   * attachment with no `request_id` was permanently destroyed leaving NO trace
+   * in either stream — no timeline entry, and no audit event, because documents
+   * never wrote audit events at all. W07-07 makes jobless documents ordinary
+   * rather than exceptional (a contractor's insurance certificate has no work
+   * order), so that silent hole was about to become the common case for exactly
+   * the documents most worth accounting for.
    *
    * Written AFTER the destruction, deliberately. The rule `DELETE /api/trash`
-   * states: the row and its bytes have just been destroyed, so this event is the
-   * only surviving record that they existed — and an event claiming a deletion
-   * that then failed would be worse than no event at all.
+   * states: the rows and their bytes have just been destroyed, so this event is
+   * the only surviving record that they existed — and an event claiming a
+   * deletion that then failed would be worse than no event at all.
+   *
+   * ONE event for the whole act rather than one per row: a lineage destroyed is
+   * a single decision by a single person, and `versions` in the detail is what
+   * makes the size of it readable. Object keys are deliberately absent — the
+   * audit viewer is read by administrators, and a bucket path is not something
+   * a deletion record needs to hand them.
    */
+  const wholeLineage = record.isCurrent && doomed.length > 1;
   await recordAudit({
     db,
     organisationId: orgId,
@@ -406,9 +583,19 @@ export async function DELETE(
     action: "document.deleted",
     entityType: "document",
     entityId: record.id,
-    summary: `Permanently deleted ${record.originalName}.`,
+    summary: wholeLineage
+      ? `Permanently deleted ${record.originalName} and its ${doomed.length - 1} earlier version${doomed.length === 2 ? "" : "s"}.`
+      : `Permanently deleted ${record.originalName}.`,
     detail: {
       permanent: true,
+      /*
+       * Which of the two deletions this was, in one word, because a reader of
+       * the audit trail needs to know whether the document is gone or whether
+       * one of its old copies is.
+       */
+      lineage: record.isCurrent ? "whole" : "one superseded version",
+      versions: doomed.length,
+      versionIds: doomedIds,
       fileId: record.id,
       fileName: record.originalName,
       title: record.title,
@@ -423,16 +610,22 @@ export async function DELETE(
       contractorId: record.contractorId,
       boardColumnId: record.boardColumnId,
       versionNo: record.versionNo,
-      rootDocumentId: record.rootDocumentId ?? record.id,
+      rootDocumentId,
     },
     request,
   });
 
   return Response.json({
     deleted: true,
+    /*
+     * How many rows actually went, so a caller that deleted a versioned
+     * document can say so rather than inferring it from `versionNo`.
+     */
+    versionsDeleted: doomed.length,
     request: updatedRequest ? requestPayload(updatedRequest) : null,
   });
 }
+
 
 /**
  * PATCH /api/files/[id] — the document's own fields.

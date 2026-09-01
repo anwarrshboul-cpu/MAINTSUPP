@@ -6151,6 +6151,48 @@ th.sheet-column--name {
   }
 }
 
+/*
+ * The register's pager. Tokenised throughout so it follows the theme like the
+ * rest of the panel, and `flex-wrap` so the position sentence drops under the
+ * two buttons on a phone rather than pushing the row wider than the viewport —
+ * horizontal overflow on this surface is a tested invariant.
+ *
+ * The 44px floor is the codebase's own touch minimum, applied here rather than
+ * left to the phone-only rule in brand-overrides, because a pager is reached by
+ * pointer as often as by thumb.
+ */
+.document-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.document-pager p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.document-pager strong {
+  color: var(--ink);
+}
+
+.document-pager .secondary-button {
+  min-height: 44px;
+  min-width: 96px;
+  justify-content: center;
+}
+
+.document-pager .secondary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Sites */
 
 .site-stat-grid,

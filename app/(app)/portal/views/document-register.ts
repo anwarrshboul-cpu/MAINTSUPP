@@ -154,6 +154,55 @@ export function documentSiteLabel(
   return "Not linked to a site";
 }
 
+/** The literal `documentSiteLabel` returns when nothing can name the site. */
+export const UNLINKED_SITE_LABEL = "Not linked to a site";
+
+/**
+ * Name every document's site, from the three sources in order of authority.
+ *
+ * This was a `useMemo` in portal-app.tsx and is now a pure function, for one
+ * reason: the CSV export has to name the sites of rows that are NOT on screen.
+ * With the register paged on the server, "the current filtered view" is a set
+ * the component has never rendered, so the naming rule had to become something
+ * two callers can share rather than something one component does to its own
+ * props. Its behaviour is unchanged and is now unit-tested instead of matched
+ * as a regex.
+ *
+ * The workspace's own site list keyed by `siteId` is the real answer — that is
+ * the column the row is filed under. The job's free-text `location` is the
+ * fallback for a document attached before site ids were written, and it is
+ * checked for CONTENT rather than for null: the code this replaces wrote
+ * `job?.location ?? "Shared workspace"`, and `??` is nullish coalescing, so a
+ * job whose location was the empty string sailed straight past the fallback and
+ * produced a BLANK Site cell — six of thirty-seven rows on a local workspace.
+ *
+ * The third source is nothing, and it says so: `documentSiteLabel` turns the
+ * empty string into "Not linked to a site".
+ */
+export function withSiteNames<T extends FileRecord>(
+  files: T[],
+  stores: ReadonlyArray<{ id: string; name: string }>,
+  requests: ReadonlyArray<{
+    id: string;
+    location?: string | null;
+    siteId?: string | null;
+  }>,
+): T[] {
+  const nameOf = (siteId: string | null | undefined) => {
+    if (!siteId) return "";
+    return stores.find((item) => item.id === siteId)?.name?.trim() ?? "";
+  };
+  return files.map((file) => {
+    const direct = nameOf(file.siteId);
+    if (direct) return { ...file, site: direct };
+    const job = requests.find((item) => item.id === file.requestId);
+    const location = job?.location?.trim();
+    if (location) return { ...file, site: location };
+    const viaJob = nameOf(job?.siteId);
+    return { ...file, site: viaJob };
+  });
+}
+
 /* ── Filters ──────────────────────────────────────────────────────────────── */
 
 /**
@@ -347,4 +396,333 @@ export function emptyRegisterReason(input: {
     }. Clear a filter to widen the register.`;
   }
   return `No document in ${input.windowLabel} matches "${query}".`;
+}
+
+/* ── W07-11: the query the SERVER answers ─────────────────────────────────── */
+
+/**
+ * How many documents one page of the register holds.
+ *
+ * Named, and sent explicitly on every request rather than left to the
+ * endpoint's default. `/api/files` clamps `limit` to 1..100 and defaults to
+ * 100, and a caller that relies on a default cannot tell a full page from the
+ * whole register — which is the exact shape of the defect this constant exists
+ * to close. See `documentServerQuery`.
+ */
+export const DOCUMENT_PAGE_SIZE = 25;
+
+/**
+ * The page size used when walking the whole matching set.
+ *
+ * The endpoint's maximum, because a walk that has to happen should take as few
+ * round trips as it can. It is never the size of a page on screen.
+ */
+export const DOCUMENT_WALK_SIZE = 100;
+
+/**
+ * How many walk pages the register will read before it stops and SAYS it
+ * stopped.
+ *
+ * A walk is only ever entered for a predicate `/api/files` cannot express (see
+ * `documentServerQuery`) or for the CSV export, and both are bounded by the
+ * server-side narrowing that has already happened. The cap is here so a
+ * workspace ten times the size of any we hold cannot turn one filter into an
+ * unbounded fetch — and, crucially, hitting it is reported on screen rather
+ * than silently truncating a total.
+ */
+export const DOCUMENT_WALK_MAX_PAGES = 40;
+
+/**
+ * The three labels `documentTypeLabel` falls back to when a document has no
+ * `document_type` of its own. They are KINDS, not types, and `/api/files` has
+ * no predicate for "document_type IS NULL", so selecting one of them is a
+ * filter the server cannot answer exactly.
+ */
+export const KIND_FALLBACK_LABELS: ReadonlySet<string> = new Set([
+  "Issue evidence",
+  "Completion evidence",
+  "Workspace document",
+]);
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * `today + days` as a `YYYY-MM-DD`, counted in whole UTC days.
+ *
+ * The same arithmetic `expiry-status.ts` classifies with, for the same reason:
+ * a date-only expiry has no time and no zone, and going through local midnight
+ * moves a certificate a day for anyone west of Greenwich. If the boundary this
+ * produces disagreed with the classifier's by one day, a certificate could be
+ * amber on the chip and absent from the "Due soon" filter — which is precisely
+ * the class of disagreement the shared classifier exists to prevent.
+ */
+export function registerDay(today: Date, offset: number) {
+  const base = Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate(),
+  );
+  return new Date(base + offset * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/** The expiry bounds that select exactly one `ExpiryState`, or null. */
+function expiryBounds(state: DocumentState, today: Date) {
+  switch (state) {
+    // `daysRemaining < 0`, so everything strictly before today.
+    case "expired":
+      return { from: "", to: registerDay(today, -1) };
+    // `0 <= daysRemaining <= EXPIRY_DUE_SOON_DAYS`, both ends included.
+    case "due-soon":
+      return { from: registerDay(today, 0), to: registerDay(today, EXPIRY_DUE_SOON_DAYS) };
+    // Anything past the amber window.
+    case "valid":
+      return { from: registerDay(today, EXPIRY_DUE_SOON_DAYS + 1), to: "" };
+    default:
+      return null;
+  }
+}
+
+/**
+ * A range no stored date can satisfy, used to express an EMPTY answer exactly.
+ *
+ * "Archived" and "Expires within 60 days" selected together match nothing —
+ * `documentStatus` returns `archived` for a withdrawn document whatever its
+ * expiry, so the register's own rule already answers zero. Left unsent, the
+ * server would count every archived document and the page would then be
+ * narrowed to nothing by the client pass: a total of 14 above an empty table.
+ * Sending an impossible range makes the server COUNT the zero, so the number on
+ * screen is the server's answer in this case too.
+ */
+const IMPOSSIBLE_RANGE = { from: "9999-12-31", to: "0001-01-01" };
+
+/**
+ * The register's UI state, as one value.
+ *
+ * `period` is the raw token rather than a resolved window because the window is
+ * a function of the clock and this object is a cache key.
+ */
+export type DocumentRegisterQuery = {
+  page: number;
+  pageSize: number;
+  query: string;
+  filters: DocumentFilters;
+  period: string;
+};
+
+export type DocumentServerQuery = {
+  /** The query string for `/api/files`, without the leading `?`. */
+  search: string;
+  /**
+   * The same query with `limit=DOCUMENT_WALK_SIZE` and no `page`, for the CSV
+   * export and for the walk. Paging is added by the walker.
+   */
+  walkSearch: string;
+  /**
+   * The register's own set — archive gate only, no filters and no search — at
+   * `limit=DOCUMENT_WALK_SIZE`. The filter selects are built from this, so
+   * choosing one filter cannot empty the other four's options.
+   */
+  optionsSearch: string;
+  /**
+   * The predicates `/api/files` could not express, NAMED.
+   *
+   * Empty is the important case: it means the server's `COUNT(*)` is the
+   * register's total, one page on screen is one request, and nothing has been
+   * inferred from the length of an array. Non-empty means the register must
+   * read the whole matching set to count it honestly — see
+   * `DOCUMENT_WALK_MAX_PAGES`.
+   */
+  residual: string[];
+};
+
+/**
+ * Translate the register's controls into ONE server query.
+ *
+ * This is the whole of W07-11's "across all documents". The register used to
+ * fetch `/api/files?limit=100&archived=all` and filter the result in the
+ * browser, so "search" meant "search the hundred rows that happened to come
+ * back" — the 101st document was not merely on another page, it was
+ * unreachable, and every total inherited the same ceiling while looking like a
+ * count. Every predicate below is applied by the database to the full
+ * authorised set; the count is `COUNT(*)` over that same predicate; and the
+ * page is a `LIMIT/OFFSET` taken afterwards.
+ *
+ * Where the endpoint cannot express a control, this function says so by NAME
+ * rather than quietly dropping it — a filter that is silently ignored is worse
+ * than one that is refused, because the reader gets a plausible answer to a
+ * question nobody asked.
+ */
+export function documentServerQuery(input: {
+  query: string;
+  filters: DocumentFilters;
+  period: string;
+  page: number;
+  pageSize: number;
+  /** A site's display name to the one site id it names, or "" when unknown. */
+  siteIdFor: (label: string) => string;
+  today: Date;
+}): DocumentServerQuery {
+  const { filters } = input;
+  const residual: string[] = [];
+  const params = new URLSearchParams();
+
+  /*
+   * The archive gate is the server's, not a sixth filter.
+   *
+   * With no `archived` parameter `/api/files` applies `liveDocumentFilter()` —
+   * `is_current = 1 AND archived_at IS NULL` — which is exactly the register's
+   * own "current version, not withdrawn" rule. The old loader asked for
+   * `archived=all` and re-implemented both halves in the browser, which is how
+   * a certificate replaced twice became three rows in the table and three in
+   * the tiles beside it.
+   */
+  if (filters.status === "archived") params.set("archived", "true");
+
+  const optionsSearch = new URLSearchParams(params);
+  optionsSearch.set("limit", String(DOCUMENT_WALK_SIZE));
+
+  const query = input.query.trim();
+  if (query) params.set("q", query);
+
+  const documentType = filters.documentType.trim();
+  if (documentType) {
+    if (KIND_FALLBACK_LABELS.has(documentType)) {
+      // "document_type IS NULL AND kind = ?" — `kind` alone is a superset,
+      // because a row can carry both, so this is not sent as a narrowing at all.
+      residual.push("document type");
+    } else {
+      params.set("documentType", documentType);
+    }
+  }
+
+  const site = filters.site.trim();
+  if (site) {
+    const siteId = site === UNLINKED_SITE_LABEL ? "" : input.siteIdFor(site);
+    if (siteId) params.set("siteId", siteId);
+    // Either "Not linked to a site" (`site_id IS NULL`) or a name that no
+    // single store answers to — a label from a job's free-text location.
+    else residual.push("site");
+  }
+
+  if (filters.owner.trim()) residual.push("owner");
+
+  /*
+   * The two expiry selects, INTERSECTED, because they are both in force.
+   *
+   * `matchesDocumentFilters` applies Status and Expiry with AND, and each
+   * names exactly one state, so the intersection is empty or a single state.
+   */
+  /*
+   * Intersected inline rather than through a closure. A helper that reassigns
+   * `states` from inside an arrow function is invisible to TypeScript's
+   * control-flow analysis, so every later read narrowed to `null` and then to
+   * `never` — the compiler was right that nothing it could see ever wrote a
+   * value. Two statements say the same thing and typecheck.
+   */
+  let chosen: DocumentState[] | null = null;
+  if (filters.status) chosen = [filters.status as DocumentState];
+  if (filters.expiry) {
+    const bucket = EXPIRY_FILTERS.find((entry) => entry.value === filters.expiry);
+    const next: ReadonlyArray<DocumentState> = bucket ? bucket.states : [];
+    chosen = chosen === null ? [...next] : chosen.filter((s) => next.includes(s));
+  }
+  if (chosen !== null) {
+    if (chosen.length === 0) {
+      params.set("expiryFrom", IMPOSSIBLE_RANGE.from);
+      params.set("expiryTo", IMPOSSIBLE_RANGE.to);
+    } else if (chosen[0] === "not-recorded") {
+      // `expiry_date IS NULL`. `expiryFrom`/`expiryTo` both require
+      // `IS NOT NULL`, so there is no range that selects the undated rows.
+      residual.push("no expiry set");
+    } else {
+      const bounds = expiryBounds(chosen[0], input.today);
+      if (bounds?.from) params.set("expiryFrom", bounds.from);
+      if (bounds?.to) params.set("expiryTo", bounds.to);
+    }
+  }
+
+  /*
+   * The reporting range is an UPLOAD-date window and `/api/files` has no
+   * `created_at` predicate, so any range but "all records" has to be counted
+   * by reading the matching set. That is also why the register's default range
+   * is "all": a register asked to search ALL documents cannot start by hiding
+   * everything uploaded more than a year ago.
+   */
+  const period = input.period.trim();
+  if (period && period !== "all") residual.push("date range");
+
+  const walkSearch = new URLSearchParams(params);
+  walkSearch.set("limit", String(DOCUMENT_WALK_SIZE));
+
+  params.set("limit", String(input.pageSize));
+  params.set("page", String(Math.max(1, Math.floor(input.page))));
+
+  return {
+    search: params.toString(),
+    walkSearch: walkSearch.toString(),
+    optionsSearch: optionsSearch.toString(),
+    residual,
+  };
+}
+
+/**
+ * The register's narrowing chain, as one pure function.
+ *
+ * range -> CURRENT VERSION -> archive gate -> the five selects -> the search,
+ * and nothing reads a halfway stage. It used to live inline in `DocumentsView`
+ * over whatever `/api/files` had returned; it is here because with the register
+ * paged on the server there are two callers — the page on screen, and the CSV
+ * export, which covers rows the component has never rendered. Two copies of a
+ * narrowing rule is how a table and its own export come to disagree.
+ *
+ * In the ordinary case the server has already applied every one of these and
+ * this pass removes nothing: `documentServerQuery` maps each stage onto a
+ * database predicate, and the server's search fields are a subset of
+ * `matchesDocumentSearch`'s. It is still applied, because a page that showed a
+ * row the filters exclude would be a worse failure than a redundant filter.
+ */
+export function narrowDocuments(
+  files: FileRecord[],
+  input: {
+    withinPeriod: (file: FileRecord) => boolean;
+    filters: DocumentFilters;
+    query: string;
+    today: Date;
+  },
+) {
+  const inRange = files.filter(input.withinPeriod);
+  const current = inRange.filter((file) => file.isCurrent !== false);
+  const visible =
+    input.filters.status === "archived"
+      ? current
+      : current.filter((file) => !file.archivedAt);
+  const matching = visible.filter((file) =>
+    matchesDocumentFilters(file, input.filters, input.today),
+  );
+  const filtered = matching.filter((file) =>
+    matchesDocumentSearch(file, input.query),
+  );
+  return { inRange, current, visible, matching, filtered };
+}
+
+/**
+ * Which rows of the matching set this page shows, and how it is described.
+ *
+ * `total` is the count of the WHOLE matching set — the server's `COUNT(*)`, or
+ * the length of the set the walk read — never the length of the page. The page
+ * is clamped into range rather than left to strand a reader on page 4 of a
+ * result that is now two pages long: a filter that narrows while you are deep
+ * in the register would otherwise answer "there is nothing here", which is a
+ * claim about the data and not about the page.
+ */
+export function documentPageRange(input: {
+  total: number;
+  page: number;
+  pageSize: number;
+}) {
+  const pageCount = Math.max(Math.ceil(input.total / input.pageSize), 1);
+  const page = Math.min(Math.max(Math.floor(input.page), 1), pageCount);
+  const first = input.total === 0 ? 0 : (page - 1) * input.pageSize + 1;
+  const last = Math.min(page * input.pageSize, input.total);
+  return { page, pageCount, first, last };
 }

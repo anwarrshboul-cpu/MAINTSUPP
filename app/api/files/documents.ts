@@ -14,7 +14,7 @@
  * every contractor photograph over ~900 KB skipped the review queue).
  */
 
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   attachments,
   complianceDocuments,
@@ -23,6 +23,7 @@ import {
   units,
 } from "../../../db/schema";
 import { dateOnlyValue } from "../../lib/expiry-status";
+import { chunkIds } from "../../lib/sql-batching";
 import type { ScopedDatabase } from "../../lib/tenant-db";
 
 type Db = ScopedDatabase["db"];
@@ -616,15 +617,30 @@ export async function restorePredecessor(
 export async function releaseComplianceLinks(
   db: Db,
   orgId: string,
-  attachmentId: string,
+  attachmentIds: string | readonly string[],
 ) {
-  await db
-    .update(complianceDocuments)
-    .set({ attachmentId: null, updatedAt: new Date().toISOString() })
-    .where(
-      and(
-        eq(complianceDocuments.attachmentId, attachmentId),
-        eq(complianceDocuments.organisationId, orgId),
-      ),
-    );
+  /*
+   * ONE DOCUMENT OR A WHOLE LINEAGE, because W07-06 destroys a lineage.
+   *
+   * Destroying the head of a versioned document destroys every version of it,
+   * and a compliance slot may point at ANY of them — a slot filled from version
+   * 2 keeps naming version 2 after version 3 supersedes it, because nothing
+   * re-points it. Releasing only the id the caller named would therefore leave
+   * exactly the dangling pointer this function exists to prevent.
+   */
+  const ids = typeof attachmentIds === "string" ? [attachmentIds] : [...attachmentIds];
+  if (!ids.length) return;
+  // Chunked for the same reason every other IN list here is: D1 binds one
+  // variable per element and rejects the statement past its limit.
+  for (const chunk of chunkIds(ids)) {
+    await db
+      .update(complianceDocuments)
+      .set({ attachmentId: null, updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          inArray(complianceDocuments.attachmentId, chunk),
+          eq(complianceDocuments.organisationId, orgId),
+        ),
+      );
+  }
 }
