@@ -37,6 +37,17 @@ import type {
   MaintenanceRequest,
 } from "../../../lib/types";
 import { MobileBoardContext } from "../board-primitives";
+/*
+ * ONE RULE FOR WHAT A DOCUMENT IS CALLED, and it does not live here.
+ *
+ * This cell printed `originalName` — the storage filename, straight off the
+ * column. Renaming a certificate in the Documents register writes `title`, so
+ * the register showed "PAT certificate 2026" and the board cell beside it went
+ * on showing "IMG_4471.jpg" for the same row, for ever, including after a hard
+ * reload. `documentName` is the register's own rule and is now this cell's
+ * too, so the two surfaces cannot disagree about the name of one document.
+ */
+import { documentName } from "../views/document-register";
 import { MediaViewer, openTargetFor } from "../media-viewer";
 import cellsCss from "./cells.css?url";
 
@@ -55,7 +66,20 @@ export type FileCellFile = Pick<
   // The viewer prints both under the filename; a chip that opens it has to
   // carry them.
   | "createdAt"
->;
+> & {
+  /**
+   * The name somebody gave this document, when they gave it one.
+   *
+   * OPTIONAL, and that is deliberate rather than lazy. Every path that reaches
+   * this cell can supply it — `attachmentPayload` has served `title` since
+   * W07-02, and the board payload's file preview carries it — but a cached
+   * board response served before that field existed does not, and a client
+   * that treated its absence as an error would draw an empty chip for a real
+   * certificate. Absent means "no title", which `documentName` already
+   * answers with the filename.
+   */
+  title?: string | null;
+};
 
 /**
  * `chips` is monday's default and what every Store Documentation column now
@@ -91,11 +115,22 @@ export type FileCellSummary = "chips" | "count";
  * certificates behind them were downloadable the entire time.
  */
 export function boardFileCellFiles(
-  preview: readonly MaintenanceBoardFilePreview[],
+  preview: readonly (MaintenanceBoardFilePreview & {
+    /*
+     * Read structurally rather than demanded, so this decoder is correct
+     * whether or not the payload it is handed carries the field. A board
+     * response cached before `title` was added to the preview simply has no
+     * title, and `documentName` falls back to the filename — which is what
+     * this cell showed before, so the worst case is the old behaviour rather
+     * than a blank chip.
+     */
+    title?: string | null;
+  })[],
 ): FileCellFile[] {
   return preview.map((file) => ({
     id: file.id,
     originalName: file.originalName,
+    title: file.title ?? null,
     contentType: file.contentType,
     byteSize: file.byteSize,
     createdAt: file.createdAt,
@@ -138,6 +173,12 @@ const sheetTypes = new Set([
  */
 function fileGlyph(file: FileCellFile): Glyph {
   const type = file.contentType.toLowerCase();
+  /*
+   * THE GLYPH READS THE STORED FILENAME, NOT THE DISPLAY NAME — on purpose.
+   * A title is prose somebody typed ("PAT certificate 2026"); the extension
+   * that says which of five glyphs to draw is a property of the bytes. Reading
+   * a title here would make a PDF renamed without ".pdf" draw a generic mark.
+   */
   const extension = file.originalName.split(".").pop()?.toLowerCase() ?? "";
 
   if (type === "application/pdf" || extension === "pdf") {
@@ -320,7 +361,7 @@ export function FileCell({
     // the confirm is deliberate rather than decorative.
     if (
       !window.confirm(
-        `Remove ${file.originalName} from ${title}? The document is deleted permanently and the compliance record will show this slot as empty.`,
+        `Remove ${documentName(file)} from ${title}? The document is deleted permanently and the compliance record will show this slot as empty.`,
       )
     ) {
       return;
@@ -341,7 +382,7 @@ export function FileCell({
       if (!mountedRef.current) return;
       onSave(files.filter((item) => item.id !== file.id));
       if (payload.request) onRequestChange?.(payload.request);
-      onNotify?.(`${file.originalName} removed from ${title}.`);
+      onNotify?.(`${documentName(file)} removed from ${title}.`);
     } catch (caught) {
       if (!mountedRef.current) return;
       setError(
@@ -568,8 +609,8 @@ export function FileCell({
                   <button
                     className="file-cell__chip-open"
                     type="button"
-                    title={file.originalName}
-                    aria-label={`Open ${title}: ${file.originalName}, ${glyph.label}, ${humanSize(file.byteSize)}`}
+                    title={documentName(file)}
+                    aria-label={`Open ${title}: ${documentName(file)}, ${glyph.label}, ${humanSize(file.byteSize)}`}
                     onClick={(event) => {
                       event.currentTarget.focus();
                       setViewing(file.id);
@@ -588,9 +629,23 @@ export function FileCell({
                        what the old `_blank` did for spreadsheets. */
                     target={target.mode === "tab" ? "_blank" : undefined}
                     rel={target.mode === "tab" ? "noreferrer" : undefined}
-                    download={target.mode === "download" ? file.originalName : undefined}
-                    title={file.originalName}
-                    aria-label={`Open ${title}: ${file.originalName}, ${glyph.label}, ${humanSize(file.byteSize)}`}
+                    /*
+                     * BARE `download`, SO THE SERVER NAMES THE FILE.
+                     *
+                     * A `download` attribute WITH a value overrides
+                     * `Content-Disposition` for a same-origin URL, and
+                     * `/api/files/[id]` now builds that header from the same
+                     * display-name rule this chip draws — the title with the
+                     * stored extension kept, and " (vN)" on a superseded
+                     * version. Naming the file here too would put a second,
+                     * disagreeing naming rule in the client: the chip would say
+                     * "PAT certificate 2026" and the file on disk would say
+                     * IMG_4471.jpg. Empty means "download, and take the name
+                     * from the response", which is the one place it is decided.
+                     */
+                    download={target.mode === "download" ? "" : undefined}
+                    title={documentName(file)}
+                    aria-label={`Open ${title}: ${documentName(file)}, ${glyph.label}, ${humanSize(file.byteSize)}`}
                   >
                     <span className="file-cell__glyph" aria-hidden="true">
                       <GlyphMark glyph={glyph} />
@@ -602,7 +657,7 @@ export function FileCell({
                     className="file-cell__chip-remove"
                     type="button"
                     disabled={busy}
-                    aria-label={`Remove ${title}: ${file.originalName}`}
+                    aria-label={`Remove ${title}: ${documentName(file)}`}
                     onClick={() => void removeFile(file)}
                   >
                     {removing ? (

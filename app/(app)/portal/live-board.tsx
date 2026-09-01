@@ -56,16 +56,20 @@ import { computeJobMeters, jobMeterTrendLabels } from "./dashboard-meters";
 import { PeriodPicker, useStoredPeriod } from "./period-picker";
 import { JobsMeterToggle, useCollapsingMeters } from "./jobs-meter-strip";
 
+/*
+ * The compact wire format lives in its own module: `board-model.ts` has an
+ * enforced 600-line ceiling and the format's reasoning is worth more than the
+ * lines it costs. See `board-compact.ts`.
+ */
+import { type CompactBoardResponse, decodeBoardResponse } from "./board-compact";
 import {
   type BoardDisplayColumn,
   type BoardResponse,
   type ColumnKey,
-  type CompactBoardResponse,
   type EditableFields,
   type MaintenanceBoardSnapshot,
   type MaintenanceBoardSnapshotColumn,
   type Option,
-  decodeBoardResponse,
   editableFallbackOptions,
   fallbackGroups,
   fallbackSystemColumns,

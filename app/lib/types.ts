@@ -176,6 +176,25 @@ export interface MaintenanceBoardFilePreview {
   id: string;
   contentType: string;
   originalName: string;
+  /**
+   * The name somebody gave this document, or null for the great majority that
+   * were never named.
+   *
+   * BOTH FACTS TRAVEL, and the display rule stays in one place. `documentName`
+   * in `app/(app)/portal/views/document-register.ts` is the only function
+   * allowed to decide what a document is called — the title when there is one,
+   * the filename otherwise — so the payload sends the two inputs rather than a
+   * resolved string, which would be a second copy of that rule free to drift
+   * from the register's. `original_name` is still needed in its own right: the
+   * chip's type glyph falls back to the file extension whenever R2 stored
+   * `application/octet-stream`, and a prose title has no extension.
+   *
+   * Optional because the field is younger than the payload. A board response
+   * cached before `/api/board` carried it simply has no title, and a client
+   * that treated its absence as an error would blank a real certificate's chip;
+   * absent means "no title", which is what almost every row is anyway.
+   */
+  title?: string | null;
   byteSize: number;
   createdAt: string;
 }
@@ -208,6 +227,22 @@ export interface AttachmentRecord {
   kind: AttachmentKind;
   boardColumnId?: string | null;
   originalName: string;
+  /**
+   * The name somebody gave this document, or null when nobody has.
+   *
+   * `attachmentPayload` in app/api/files/documents.ts has served this on every
+   * document since W07-02 and this interface simply never declared it — so
+   * every screen holding an `AttachmentRecord` (the job's evidence strips, the
+   * media viewer, the before/after pair) had no way to read a title even
+   * though the title was sitting in the response it had just parsed, and went
+   * on printing the upload filename after a rename. `documentName` in
+   * `app/(app)/portal/views/document-register.ts` is the only thing allowed to
+   * choose between the two.
+   *
+   * Optional because `app/lib/mock-data.ts` builds these too, and because a
+   * row that never had a title is the normal case rather than a fault.
+   */
+  title?: string | null;
   contentType: string;
   byteSize: number;
   createdAt: string;
@@ -492,4 +527,25 @@ export interface FileRecord {
   inlineUrl?: string;
   downloadUrl?: string;
   contentType?: string;
+  /**
+   * The stored `kind`, as the column holds it — "issue" | "completion" |
+   * "general".
+   *
+   * `kind` above is the register's LABEL for it ("Issue evidence",
+   * "Completion evidence", "Workspace document"), mapped in `loadDocuments`
+   * and not reversible without re-stating the mapping. Replacing a document has
+   * to send the kind the predecessor actually had, or a workspace document
+   * comes back as issue evidence and leaves the register for a job's photo
+   * strip. Both spellings are kept because the label is what the reader sees
+   * and this is what the API is told.
+   */
+  attachmentKind?: AttachmentKind;
+  /**
+   * The board file column this document hangs in, when it hangs in one.
+   *
+   * Served by `attachmentPayload` all along. A replacement has to name it, or
+   * the new version lands as loose evidence and the compliance cell the old
+   * one filled reads as empty.
+   */
+  boardColumnId?: string | null;
 }

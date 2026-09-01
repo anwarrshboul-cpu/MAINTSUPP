@@ -125,8 +125,46 @@ test("W07-02: an empty expiry is an answer, and the form says so", async () => {
 test("W07-03: a replacement is a new version, not an overwrite", async () => {
   const drawer = await drawerSource();
 
-  assert.match(drawer, /body\.append\("replaces", file\.id\)/, "the server needs the predecessor");
-  assert.match(drawer, /Upload new version/);
+  /*
+   * The predecessor still travels; the REQUEST no longer does.
+   *
+   * This pinned `body.append("replaces", file.id)` on a `FormData` the drawer
+   * built itself. Hand-rolling that request is what skipped `uploadEvidenceFile`
+   * — and with it the 900 KB direct-upload ceiling, the multipart fallback and
+   * `offerThumbnail`. Measured on this route: 1018 KB answered 201 and 1313 KB
+   * answered 413 with a bare text/plain body carrying no JSON `error`, so a
+   * phone photograph (the owner's own case was IMG_7560.jpeg) failed with the
+   * drawer's generic fallback message and no explanation. `replaces` is now a
+   * named option on the product's uploader, which is where it belonged.
+   */
+  assert.match(drawer, /replaces: file\.id,/, "the server needs the predecessor");
+  assert.match(drawer, /await uploadEvidenceFile\(\{/);
+  const replace = drawer.slice(
+    drawer.indexOf("async function uploadReplacement("),
+    drawer.indexOf("async function setArchived("),
+  );
+  assert.doesNotMatch(
+    replace,
+    /new FormData\(\)/,
+    "a second upload request shape is how the ceiling gets skipped again",
+  );
+  /*
+   * ONE CONTROL FOR W07-03, AND IT NAMES THE ACT BEFORE THE MECHANISM.
+   *
+   * "Upload new version" described how the feature works and left what it DOES
+   * unnamed, so an operator holding a corrected certificate hunted for
+   * "Replace", did not find it, and reached for Remove plus a fresh upload —
+   * which destroys the lineage this button exists to keep. The mechanism stays
+   * in the label because they are the same operation; what must NOT happen is a
+   * second control saying "replace", which would be two ways to do one thing.
+   */
+  assert.match(drawer, /Replace file \/ upload new version/);
+  const replaceControls = drawer.match(/Replace file \/ upload new version/g) ?? [];
+  assert.equal(
+    replaceControls.length,
+    1,
+    "W07-03 is one control; a second replace button would be a second version path",
+  );
   // The promise the control makes, in the words under it.
   assert.match(
     drawer,
@@ -153,7 +191,19 @@ test("W07-03: the history lists number, date, uploader, state and a way in", asy
   assert.match(list, /version\.isCurrent \? "Current" : "Superseded"/, "which one is live");
   // A historical version has to be openable, or the history is a list of names.
   assert.match(list, /href=\{version\.inlineUrl\}/);
-  assert.match(list, /download=\{version\.originalName\}/);
+  /*
+   * The version download is named by the SERVER, not by this list.
+   *
+   * A `download` attribute carrying a value overrides `Content-Disposition`
+   * on a same-origin URL, and `/api/files/[id]` now builds that header from
+   * the canonical display name plus the stored extension, marking a superseded
+   * copy " (vN)". Naming it here as well would be a second naming rule in the
+   * client, free to disagree with the one the drawer prints on screen — which
+   * is the defect this pass removed. Empty is the bare form: download, and take
+   * the name from the response.
+   */
+  assert.match(list, /download=""/);
+  assert.doesNotMatch(list, /download=\{version\.originalName\}/);
   assert.match(list, /aria-label=\{`Open version \$\{version\.versionNo\}/);
 
   /*

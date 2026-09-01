@@ -60,6 +60,156 @@ async function bucket() {
 }
 
 
+/**
+ * WHAT A DOWNLOAD IS CALLED. This is a policy, not a formatting detail.
+ *
+ * THE DEFECT. This route served `record.originalName` — the name the uploading
+ * phone or scanner chose. So a photograph filed as `IMG_7560.jpeg` and then
+ * retitled "Highcross completion photo" in Documents still arrived on disk as
+ * `IMG_7560.jpeg`. Every screen in the product called it by its title and the
+ * one artefact that LEAVES the product called it something else — which is the
+ * worst place for the two to disagree, because the file on a surveyor’s disk is
+ * the copy that gets emailed, filed and argued about months later.
+ *
+ * THE RULE, and it is deliberately the SAME rule the client already applies.
+ * `documentName` in app/(app)/portal/views/document-register.ts is the canonical
+ * display name — "the stored `title` when somebody has set one, and the filename
+ * otherwise […] never a title that is only whitespace". `servedFileName` is that
+ * rule plus the two things a NAME ON A DISK needs and a name on a screen does
+ * not: a real extension, and characters an operating system and an HTTP header
+ * will both accept. A second, disagreeing naming rule is not introduced here. If
+ * the register calls it X, the download is called X.
+ *
+ * THE EXTENSION IS PRESERVED, which is the half a naive rename gets wrong. A
+ * title is prose; it has no extension and must not be given a false one. So the
+ * extension comes from `original_name` — the byte-truth — and is appended to the
+ * title unless the title already ends in it. `IMG_7560.jpeg` retitled "Highcross
+ * completion photo" downloads as "Highcross completion photo.jpeg"; a title that
+ * already reads "…photo.jpeg" keeps a single `.jpeg`.
+ *
+ * `original_name` IS NOT REWRITTEN, and neither is `object_key`. PATCH’s own
+ * contract below says so — "`original_name` in particular stays the byte-truth" —
+ * and it is the provenance that a version history, an audit event and a forensic
+ * question are answered from. `object_key` embeds the attachment id, is unique,
+ * and is served `immutable`; renaming an R2 object so a header reads better would
+ * invalidate that for a cosmetic gain.
+ */
+
+/**
+ * A filename an operating system and an HTTP header will both accept.
+ *
+ * A title is free text an operator typed, and it now reaches a RESPONSE HEADER —
+ * so CR and LF are a header-injection vector and are removed HERE rather than
+ * relied upon to be escaped downstream. Path separators go because `a/b.jpeg` is
+ * a traversal in a save dialog, and the rest of the set (`: * ? " < > |`) is what
+ * Windows refuses outright, so a title containing one would otherwise produce a
+ * file the reader cannot save at all.
+ *
+ * Replaced with a visible `-` rather than deleted: a name with a character
+ * silently removed can read as a different, plausible name.
+ */
+function sanitiseFileName(raw: string) {
+  return (
+    raw
+      // CR, LF, NUL, tab and every other control character. The header defence.
+      .replace(/[\u0000-\u001F\u007F]+/g, " ")
+      // Path separators, quotes, and the characters Windows will not store.
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      // A leading dot hides the file on Unix. A trailing dot or space is dropped
+      // silently by Windows, which would eat the extension just preserved.
+      .replace(/^[.\s]+/, "")
+      .replace(/[.\s]+$/, "")
+  );
+}
+
+/**
+ * The real extension of a stored filename, dot included, or "" when it has none.
+ *
+ * Deliberately strict. "Site report v1.2 final" contains a dot and has no
+ * extension; appending ".2 final" to a title would be worse than appending
+ * nothing. `dot <= 0` stops a dotfile (`.gitignore`) being read as all extension
+ * and no name. Case is preserved — `.JPEG` is what the row actually says.
+ */
+function fileExtension(storedName: string) {
+  const base = storedName.split(/[\\/]/).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0 || dot === base.length - 1) return "";
+  const extension = base.slice(dot);
+  return /^\.[A-Za-z0-9]{1,12}$/.test(extension) ? extension : "";
+}
+
+/** Long enough for any real title, short enough for every filesystem. */
+const MAX_FILE_NAME = 120;
+
+function capLength(name: string) {
+  if (name.length <= MAX_FILE_NAME) return name;
+  const extension = fileExtension(name);
+  const stem = name.slice(0, name.length - extension.length);
+  return `${stem.slice(0, MAX_FILE_NAME - extension.length).trimEnd()}${extension}`;
+}
+
+/**
+ * HISTORICAL VERSIONS — the decided policy, written down because it is a choice.
+ *
+ * A superseded version is its own row with its own `title` and its own
+ * `original_name`, and this route reads ONE row by id, so a historical download
+ * is named from THAT row: its own title if it has one, its own stored filename
+ * otherwise. Naming version 1 from version 3’s title would be a lie about a file
+ * whose bytes are not version 3’s.
+ *
+ * WITH ONE ADDITION: a non-current row carries " (vN)" before the extension.
+ * `planVersion` CARRIES THE TITLE FORWARD — "a new version of a document is the
+ * SAME document" — so every row in a lineage normally shares one title, and
+ * without the marker downloading three versions of one certificate drops
+ * `cert.pdf`, `cert (1).pdf` and `cert (2).pdf` into a folder, numbered by the
+ * order they were CLICKED rather than by version. The entire reason to download a
+ * superseded version is to hold the historical one, and a name that cannot say
+ * which one it is defeats that. The current version is never marked, so the
+ * ordinary download is untouched.
+ */
+function servedFileName(record: {
+  title: string | null;
+  originalName: string;
+  isCurrent: boolean;
+  versionNo: number;
+}) {
+  const stored = sanitiseFileName(record.originalName) || "document";
+  const title = sanitiseFileName(record.title ?? "");
+
+  let name = stored;
+  if (title) {
+    const extension = fileExtension(record.originalName);
+    name =
+      !extension || title.toLowerCase().endsWith(extension.toLowerCase())
+        ? title
+        : `${title}${extension}`;
+  }
+
+  if (!record.isCurrent) {
+    const extension = fileExtension(name);
+    const stem = name.slice(0, name.length - extension.length);
+    name = `${stem} (v${record.versionNo})${extension}`;
+  }
+
+  return capLength(name);
+}
+
+/**
+ * The header itself, and the last line of defence.
+ *
+ * Both forms, always. `filename*=UTF-8''` is what carries a non-ASCII title
+ * intact — every current browser prefers it — and the plain `filename="…"` is the
+ * fallback for anything that does not, which is why it is folded to ASCII rather
+ * than dropped.
+ *
+ * The two replacements below are NOT redundant with `sanitiseFileName`. That
+ * function decides what the file is CALLED; these decide what may appear inside a
+ * quoted header value, and they run for every caller of this helper whether or
+ * not the name reached it through the sanitiser. Belt and braces is the correct
+ * amount of belt and braces on a response header.
+ */
 function contentDisposition(name: string, download: boolean) {
   const ascii = name.replace(/[^\x20-\x7E]+/g, "-").replace(/["\\]/g, "-");
   const mode = download ? "attachment" : "inline";
@@ -262,7 +412,7 @@ export async function GET(
   headers.set("Content-Type", servedType);
   headers.set(
     "Content-Disposition",
-    contentDisposition(record.originalName, forceAttachment),
+    contentDisposition(servedFileName(record), forceAttachment),
   );
   /*
    * Without this a browser may sniff past the type above and run whatever it

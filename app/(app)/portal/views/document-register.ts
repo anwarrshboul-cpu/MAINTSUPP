@@ -106,16 +106,143 @@ export function documentStateClass(state: DocumentState) {
 /* ── The fields the register shows ────────────────────────────────────────── */
 
 /**
- * What to call a document.
+ * WHAT TO CALL A DOCUMENT. THE ONLY FUNCTION ALLOWED TO ANSWER THAT.
  *
  * The stored `title` when somebody has set one, and the filename otherwise.
  * Never both, and never a title that is only whitespace — an operator who
  * clears the box means "go back to the filename", not "call this document
  * nothing at all".
+ *
+ * IT TAKES BOTH SPELLINGS OF THE FILENAME ON PURPOSE. The register's own
+ * `FileRecord` calls it `name`; every other shape in the app — `AttachmentRecord`
+ * on a job, `MaintenanceBoardFilePreview` on a board cell, a version row in the
+ * history — calls it `originalName`, straight off the column. That split is why
+ * a rename used to reach the Documents register and stop there: renaming a
+ * certificate updated `title`, the register read `documentName`, and the linked
+ * board cell, the evidence strip, the media viewer and the Site documents list
+ * all went on printing `originalName` because they had no way to call this
+ * without first reshaping their row. Accepting either spelling removes the
+ * excuse, so there is one rule and no second copy of it.
+ *
+ * THE STORAGE FILENAME IS PROVENANCE, AND IT NO LONGER REACHES THE READER'S
+ * DISK. `original_name` is the byte-truth: it is what the version history
+ * records as the file that was actually filed, and it is where the real
+ * EXTENSION is taken from — a title is prose and has none, so a name on a disk
+ * is built from both. It is not, any more, the name the download is given.
+ *
+ * `servedFileName` in `app/api/files/[id]/route.ts` applies THIS rule on the
+ * server and sends the result in `Content-Disposition`: the title with the
+ * stored extension kept, plus " (vN)" for a superseded version. And
+ * `Content-Disposition` outranks a `download` attribute on a same-origin URL,
+ * so the header is the single deciding voice — which is why every anchor in
+ * this app now carries a BARE `download` rather than a filename of its own.
+ * A second name set in the browser would be a second rule, free to disagree.
+ *
+ * Written out because a comment asserting the old behaviour is exactly how this
+ * defect comes back: the whole failure was two places deciding one name.
  */
-export function documentName(file: Pick<FileRecord, "name" | "title">) {
+export function documentName(file: {
+  title?: string | null;
+  /** `FileRecord`'s spelling. */
+  name?: string | null;
+  /** Everything else's spelling — the `original_name` column, unchanged. */
+  originalName?: string | null;
+}): string {
   const title = file.title?.trim();
-  return title || file.name;
+  if (title) return title;
+  return file.name?.trim() || file.originalName?.trim() || "";
+}
+
+/* ── W07: image documents look like the picture they are ──────────────────── */
+
+/**
+ * The image types the browser may actually RENDER from this app's own origin.
+ *
+ * This is the image half of `INLINE_SAFE_TYPES` in `app/api/files/[id]/route.ts`
+ * — copied deliberately rather than guessed, because that set is the server's
+ * decision about what it will serve with `Content-Disposition: inline`, and a
+ * client that asked for a thumbnail of anything outside it would be asking for
+ * an `application/octet-stream` download to be painted into an `<img>`. The
+ * other four members of the server's set are `application/pdf`, `video/mp4`,
+ * `video/webm` and `video/quicktime`: all inline-safe, none of them an image,
+ * and every one of them a broken-image icon if pointed at an `<img>`.
+ *
+ * `heic`/`heif` are in the server's list and are kept here even though no
+ * desktop browser decodes them: a phone upload gets a WebP derivative from
+ * `offerThumbnail` in `app/lib/client-upload.ts`, so the common case renders,
+ * and the uncommon one falls back to the type icon through the `onError` path
+ * rather than showing a broken image. See `DocumentThumbnail`.
+ */
+export const THUMBNAIL_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+]);
+
+/**
+ * The same answer from the filename, for the rows whose `content_type` is
+ * `application/octet-stream`.
+ *
+ * R2 stores that for anything the uploader's browser could not sniff, which is
+ * routine for a certificate that arrived as an email attachment. `fileGlyph` in
+ * `cells/file-cell.tsx` already treats the extension as a real fallback rather
+ * than a tiebreaker for exactly this reason, and this list is that one.
+ */
+const THUMBNAIL_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "heic",
+  "heif",
+]);
+
+/** Whether this document is a picture, from the MIME type first and the name second. */
+export function isImageDocument(file: {
+  contentType?: string | null;
+  name?: string | null;
+  originalName?: string | null;
+}): boolean {
+  const type = (file.contentType ?? "").trim().toLowerCase();
+  if (type) {
+    if (THUMBNAIL_IMAGE_TYPES.has(type)) return true;
+    // A declared type that is not an image is an answer, not a gap: a PDF must
+    // not be second-guessed into an <img> because it happens to be called
+    // `scan.jpg.pdf`. Only an absent or opaque type falls through to the name.
+    if (type !== "application/octet-stream") return false;
+  }
+  const filename = file.name?.trim() || file.originalName?.trim() || "";
+  const extension = filename.split(".").pop()?.toLowerCase() ?? "";
+  return THUMBNAIL_IMAGE_EXTENSIONS.has(extension);
+}
+
+/**
+ * The URL a thumbnail is drawn from, or null when this document has no picture.
+ *
+ * ALWAYS `GET /api/files/<id>?thumb=1`, and never anything else. That route is
+ * the app's one authorised serving path: it resolves the caller through
+ * `scopedDb`, scopes the row by `organisation_id` so another workspace's
+ * document reads as a plain 404, honours a contractor's job token for that job
+ * alone, and answers with `X-Content-Type-Options: nosniff` and a
+ * `default-src 'none'; … sandbox` CSP. No object key, no bucket URL and no
+ * second image service: a storage path must not be able to reach the DOM, which
+ * is the same rule `FileCellFile` is narrowed for.
+ *
+ * `?thumb=1` serves the `.thumb` WebP derivative when one exists and the
+ * ORIGINAL when it does not — a fresh upload is heavier, never broken.
+ */
+export function documentThumbnailUrl(file: {
+  id: string;
+  contentType?: string | null;
+  name?: string | null;
+  originalName?: string | null;
+}): string | null {
+  if (!file.id || !isImageDocument(file)) return null;
+  return `/api/files/${encodeURIComponent(file.id)}?thumb=1`;
 }
 
 /**

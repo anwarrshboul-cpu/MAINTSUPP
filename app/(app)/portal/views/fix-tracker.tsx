@@ -56,6 +56,13 @@ import { chipStyle as sharedChipStyle } from "../chip-ink";
 import { uploadEvidenceFile } from "../../../lib/client-upload";
 import { type BoardItem, formatDate } from "./view-model";
 import { MediaViewer } from "../media-viewer";
+/*
+ * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the Documents
+ * register's own — the title somebody set, the stored filename otherwise — and
+ * every surface that names a document calls it. Printing `originalName`
+ * directly is what let a rename reach the register and stop there.
+ */
+import { documentName } from "./document-register";
 import "./fix-tracker.css";
 
 type Palette = Record<string, string>;
@@ -70,6 +77,12 @@ type Attachment = {
    */
   boardColumnId: string | null;
   originalName: string;
+  /*
+   * And the title, from the same `attachmentPayload` the three fields below
+   * come from. Without it this screen listed a renamed document under the name
+   * it was uploaded with while the register beside it used the new one.
+   */
+  title?: string | null;
   contentType: string;
   inlineUrl: string;
   /*
@@ -1257,7 +1270,7 @@ function FixTrackerDetail({
                 <li key={file.id}>
                   <a href={file.inlineUrl} target="_blank" rel="noreferrer">
                     <Icon name="document" size={14} />
-                    {file.originalName}
+                    {documentName(file)}
                   </a>
                 </li>
               ))}
@@ -1370,7 +1383,7 @@ function PictureGrid({ files }: { files: Attachment[] }) {
         <button
           key={file.id}
           type="button"
-          title={file.originalName}
+          title={documentName(file)}
           /* Focused explicitly so closing the viewer returns the ring here —
              Safari does not focus a button on tap by itself. */
           onClick={(event) => {
@@ -1381,7 +1394,7 @@ function PictureGrid({ files }: { files: Attachment[] }) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${file.inlineUrl}?thumb=1`}
-            alt={file.originalName}
+            alt={documentName(file)}
             loading="lazy"
             decoding="async"
           />

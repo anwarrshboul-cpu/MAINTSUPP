@@ -1145,6 +1145,26 @@ async function boardPayload(
         columnId: attachments.boardColumnId,
         contentType: attachments.contentType,
         originalName: attachments.originalName,
+        /*
+         * W7 BUG 3 — THE CELL MUST NOT KEEP CALLING IT BY ITS UPLOAD NAME.
+         *
+         * Rename a document in Documents and the register redraws under the new
+         * title, while the board cell it is linked to still read `IMG_7560.jpeg`
+         * — because this projection sent `original_name` and nothing else, so the
+         * chip had no other name available to draw. One document, two names, on
+         * two screens the same person moves between.
+         *
+         * The TITLE is carried, not a resolved display string, and the two are
+         * not the same choice. `documentName` in views/document-register.ts is
+         * the ONE rule that decides what a document is called (`title` when set,
+         * the filename otherwise); resolving it here would put a second copy of
+         * that rule on the server, free to drift. Sending both facts lets the
+         * client apply the single rule it already owns — and keeps
+         * `original_name` present, which the chip still needs: its type glyph
+         * falls back to the extension when R2 stored `application/octet-stream`,
+         * and a prose title has no extension to fall back to.
+         */
+        title: attachments.title,
         byteSize: attachments.byteSize,
         createdAt: attachments.createdAt,
       })
@@ -1196,13 +1216,24 @@ async function boardPayload(
       .orderBy(asc(attachments.createdAt), asc(attachments.id)),
   );
 
+  /*
+   * The preview row as this route sends it: the shared shape plus the document
+   * title, which is `null` for the great majority that were never named.
+   *
+   * Declared here rather than widened in app/lib/types.ts because the client
+   * half of this fix (the chip in portal/cells/file-cell.tsx and the compact
+   * decoder in portal/board-model.ts) is a separate change; the shared
+   * interface is widened there, alongside the code that reads the field.
+   */
+  type BoardFilePreview = MaintenanceBoardFilePreview & { title: string | null };
+
   const grouped = new Map<
     string,
     {
       requestId: string;
       columnId: string;
       count: number;
-      preview: MaintenanceBoardFilePreview[];
+      preview: BoardFilePreview[];
     }
   >();
   for (const row of attachmentRows) {
@@ -1221,6 +1252,7 @@ async function boardPayload(
         id: row.id,
         contentType: row.contentType,
         originalName: row.originalName,
+        title: row.title,
         byteSize: row.byteSize,
         createdAt: row.createdAt,
       });
@@ -1262,6 +1294,9 @@ async function boardPayload(
         kind: attachments.kind,
         contentType: attachments.contentType,
         originalName: attachments.originalName,
+        // The same reason as the column-filed scan above: a renamed photograph
+        // must not keep announcing itself by the name the phone gave it.
+        title: attachments.title,
         byteSize: attachments.byteSize,
         createdAt: attachments.createdAt,
       })
@@ -1310,6 +1345,7 @@ async function boardPayload(
           id: row.id,
           contentType: row.contentType,
           originalName: row.originalName,
+          title: row.title,
           byteSize: row.byteSize,
           createdAt: row.createdAt,
         });
@@ -1543,15 +1579,40 @@ function compactBoard(payload: BoardPayload) {
           rowTable.ref(entry.requestId),
           columnTable.ref(entry.columnId),
           entry.count,
-          entry.preview.map(
-            (file) =>
-              [
-                file.id,
-                mimeTable.ref(file.contentType),
-                file.originalName,
-                file.byteSize,
-                file.createdAt,
-              ] as const,
+          /*
+           * SLOT 6 IS THE TITLE, AND IT IS PRESENT ONLY WHEN THERE IS ONE.
+           *
+           * This encoding is positional and versioned (`compact: 1`), so a new
+           * field is a wire change and has to degrade in BOTH directions. It
+           * does: an older decoder destructures five names and ignores a sixth
+           * element, and a newer decoder reading a cached older payload gets
+           * `undefined` — which `documentName` already treats as "no title",
+           * falling back to the filename exactly as it does for the great
+           * majority of rows. No marker bump is needed for either.
+           *
+           * Emitted only when set rather than as a trailing `null`, because
+           * almost no attachment on the maintenance board has a title and this
+           * list is the widest thing the payload sends — the whole reason the
+           * compact encoding exists is that four bytes times every preview row
+           * is not free.
+           */
+          entry.preview.map((file) =>
+            file.title
+              ? ([
+                  file.id,
+                  mimeTable.ref(file.contentType),
+                  file.originalName,
+                  file.byteSize,
+                  file.createdAt,
+                  file.title,
+                ] as const)
+              : ([
+                  file.id,
+                  mimeTable.ref(file.contentType),
+                  file.originalName,
+                  file.byteSize,
+                  file.createdAt,
+                ] as const),
           ),
         ] as const,
     ),

@@ -19,6 +19,15 @@ import type {
   MaintenanceBoardFilePreview,
   MaintenanceRequest,
 } from "../../lib/types";
+/*
+ * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the Documents
+ * register's own — the title somebody set, the stored filename otherwise. This
+ * panel and the board strips beside it printed `originalName`, so a document
+ * renamed in Documents kept announcing itself here by the name the phone or the
+ * scanner gave it. The EXTENSION marks below still read `originalName`, and
+ * must: a title is prose and has no extension.
+ */
+import { documentName } from "./views/document-register";
 
 const tabs: Array<{ value: AttachmentKind | "all"; label: string }> = [
   { value: "all", label: "All files" },
@@ -78,7 +87,7 @@ function FilePreview({
     return (
       <img
         src={`/api/files/${file.id}?thumb=1`}
-        alt={file.originalName}
+        alt={documentName(file)}
         loading="lazy"
         decoding="async"
       />
@@ -288,7 +297,7 @@ export function EvidenceManager({
   }
 
   async function deleteFile(file: AttachmentRecord) {
-    if (!window.confirm(`Delete ${file.originalName}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${documentName(file)}? This cannot be undone.`)) return;
     setMenuId(null);
     try {
       const response = await fetch(`/api/files/${file.id}`, { method: "DELETE" });
@@ -311,7 +320,7 @@ export function EvidenceManager({
         const successor = viewableFiles[at + 1] ?? viewableFiles[at - 1] ?? null;
         setViewerId(successor?.id ?? null);
       }
-      onNotify(`${file.originalName} deleted.`);
+      onNotify(`${documentName(file)} deleted.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The file could not be deleted.");
     }
@@ -465,7 +474,7 @@ export function EvidenceManager({
                       event.currentTarget.focus();
                       openFile(file);
                     }}
-                    title={`Open ${file.originalName}`}
+                    title={`Open ${documentName(file)}`}
                   >
                     <FilePreview file={file} />
                     {file.contentType.startsWith("video/") && (
@@ -475,7 +484,7 @@ export function EvidenceManager({
                   <button
                     className="evidence-card__menu-button"
                     type="button"
-                    aria-label={`Actions for ${file.originalName}`}
+                    aria-label={`Actions for ${documentName(file)}`}
                     onClick={() => setMenuId((current) => current === file.id ? null : file.id)}
                   >
                     <Icon name="more" size={18} />
@@ -499,7 +508,7 @@ export function EvidenceManager({
                     </div>
                   )}
                   <footer>
-                    <strong title={file.originalName}>{file.originalName}</strong>
+                    <strong title={documentName(file)}>{documentName(file)}</strong>
                     <span>
                       {columnTitle || kindLabel(file.kind)} · {humanSize(file.byteSize)}
                     </span>
@@ -686,7 +695,14 @@ export function FileHoverPreview({
    * like the other surfaces.
    */
   const [menu, setMenu] = useState<{
-    file: { id: string; originalName: string; contentType: string };
+    file: {
+      id: string;
+      originalName: string;
+      /* The title, so the menu and its verbs name the document the way every
+         other surface does. Optional: a cached board payload predates it. */
+      title?: string | null;
+      contentType: string;
+    };
     left: number;
     top: number;
   } | null>(null);
@@ -776,7 +792,14 @@ export function FileHoverPreview({
    */
   const toggleMenuAt = (
     anchor: Element,
-    file: { id: string; originalName: string; contentType: string },
+    file: {
+      id: string;
+      originalName: string;
+      /* The title, so the menu and its verbs name the document the way every
+         other surface does. Optional: a cached board payload predates it. */
+      title?: string | null;
+      contentType: string;
+    },
   ) => {
     if (menu?.file.id === file.id) {
       setMenu(null);
@@ -906,7 +929,14 @@ export function FileHoverPreview({
    * the browser cannot show falls back to a download. No pretend actions.
    */
   const fileAct = (
-    file: { id: string; originalName: string; contentType: string },
+    file: {
+      id: string;
+      originalName: string;
+      /* The title, so the menu and its verbs name the document the way every
+         other surface does. Optional: a cached board payload predates it. */
+      title?: string | null;
+      contentType: string;
+    },
     mode: "open" | "download" | "delete",
   ) => {
     const inlineUrl = `/api/files/${file.id}`;
@@ -922,7 +952,7 @@ export function FileHoverPreview({
       followFileTarget({ mode: "download", href: downloadUrl });
       return;
     }
-    if (!window.confirm(`Delete ${file.originalName}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${documentName(file)}? This cannot be undone.`)) return;
     void fetch(inlineUrl, { method: "DELETE" })
       .then((response) => {
         if (!response.ok) throw new Error();
@@ -1131,7 +1161,7 @@ export function FileHoverPreview({
               {hoveredFile.contentType.startsWith("image/") ? (
                 <img
                   src={`/api/files/${hoveredFile.id}`}
-                  alt={hoveredFile.originalName}
+                  alt={documentName(hoveredFile)}
                   loading="lazy"
                   decoding="async"
                 />
@@ -1161,7 +1191,7 @@ export function FileHoverPreview({
             <button
               type="button"
               className="sheet-file-hover__more"
-              aria-label={`Actions for ${hoveredFile.originalName}`}
+              aria-label={`Actions for ${documentName(hoveredFile)}`}
               aria-haspopup="menu"
               aria-expanded={menu?.file.id === hoveredFile.id}
               onClick={(event) => toggleMenuAt(event.currentTarget, hoveredFile)}
@@ -1169,7 +1199,7 @@ export function FileHoverPreview({
               <Icon name="more" size={15} />
             </button>
             <span className="sheet-file-hover__name">
-              <strong title={hoveredFile.originalName}>{hoveredFile.originalName}</strong>
+              <strong title={documentName(hoveredFile)}>{documentName(hoveredFile)}</strong>
               <small>{humanSize(hoveredFile.byteSize)}</small>
             </span>
             {actionError && <small className="sheet-file-hover__error">{actionError}</small>}
@@ -1210,8 +1240,8 @@ export function FileHoverPreview({
                       <Icon name={glyphFor(file.contentType)} size={14} />
                     )}
                   </span>
-                  <span className="sheet-file-overflow__name" title={file.originalName}>
-                    {file.originalName}
+                  <span className="sheet-file-overflow__name" title={documentName(file)}>
+                    {documentName(file)}
                   </span>
                   {/*
                     monday's row affordance: ONE "…" revealed on the row,
@@ -1224,7 +1254,7 @@ export function FileHoverPreview({
                     className={`sheet-file-overflow__menu${
                       menu?.file.id === file.id ? " is-open" : ""
                     }`}
-                    aria-label={`Actions for ${file.originalName}`}
+                    aria-label={`Actions for ${documentName(file)}`}
                     aria-haspopup="menu"
                     aria-expanded={menu?.file.id === file.id}
                     onClick={(event) => toggleMenuAt(event.currentTarget, file)}
@@ -1247,7 +1277,7 @@ export function FileHoverPreview({
           <span
             className="sheet-file-menu"
             role="menu"
-            aria-label={`Actions for ${menu.file.originalName}`}
+            aria-label={`Actions for ${documentName(menu.file)}`}
             style={{ left: menu.left, top: menu.top }}
             onPointerEnter={cancelClose}
             onPointerLeave={mouseLeave}

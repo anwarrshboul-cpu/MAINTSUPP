@@ -6308,6 +6308,37 @@ th.sheet-column--name {
   font-size: 9px;
 }
 
+/*
+ * THE FILE COLUMN'S THUMBNAIL — the same 29px box the glyph already had.
+ *
+ * The register drew `Icon name="document"` for every row, so a page of site
+ * photographs was a page of identical grey glyphs. The picture goes INSIDE the
+ * box the row already reserved rather than beside it: the row height is
+ * untouched, the title stays where it was, and a 4284x5712 camera JPEG cannot
+ * make one row taller than its neighbours.
+ *
+ * `overflow: hidden` plus `object-fit: cover` is the whole fit rule — the crop
+ * is centred, the aspect is preserved, and nothing is stretched. `.has-thumb`
+ * is set by the component only once an image is actually being drawn, so the
+ * tinted plate stays visible behind a glyph and disappears behind a picture
+ * instead of showing as a rim around it.
+ */
+.file-name-cell__media {
+  overflow: hidden;
+  flex: none;
+}
+
+.file-name-cell__media.has-thumb {
+  background: var(--line);
+}
+
+.file-name-cell__media > img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
 .type-chip,
 .role-chip {
   display: inline-flex;
@@ -7124,9 +7155,45 @@ th.sheet-column--name {
   opacity: 0.55;
 }
 
+/*
+ * THE CARD GRID, AND WHY BOTH TRACK MINIMUMS ARE ZERO.
+ *
+ * THE DEFECT. This read `repeat(4, minmax(180px, 1fr))`, with a `1fr 1fr`
+ * override below 650px. Both declarations gave every track a MINIMUM the track
+ * could not shrink below, and `1fr` is the worse of the two because it looks
+ * innocent: `1fr` IS `minmax(auto, 1fr)`, and that `auto` minimum is the item's
+ * own automatic minimum size — a floor, not a preference. Measured on the
+ * deployed preview at 41d7fa2, the two tracks at a 390px viewport resolved to
+ * 430.9px and 252.5px inside a 364px box.
+ *
+ * WHAT THE READER SAW. `.panel.documents-panel` above carries
+ * `overflow: hidden`, so the grid never produced a scrollbar — the right-hand
+ * cards were silently CUT OFF, mid-border, with the page reporting zero
+ * horizontal overflow on both `body` and `documentElement`. That is why this
+ * survived so long: every "is the page overflowing" check said no, because the
+ * panel was eating the evidence. Overhang against the grid's own content box,
+ * measured at 41d7fa2: 361px at 390, 376 at 375, 391 at 360, 431 at 320, and
+ * 44-165px anywhere between 651 and 1024.
+ *
+ * THE FIX IS THE WIDTH ARITHMETIC, NOT MORE `overflow: hidden`. A zero minimum
+ * lets a track shrink to whatever the row can actually give it, so the four (or
+ * two) columns always sum to the container. `min-width: 0` on the card and
+ * `overflow-wrap: anywhere` on its children were both tried and changed nothing
+ * once the minimum was zero — the card's real min-content floor is 161px
+ * against 176px available, so content was never the constraint. They are not
+ * added here as cargo.
+ *
+ * THE 180px WAS UNSATISFIABLE BELOW 786px AND SO WAS NEVER A PROMISE.
+ * 4 x 180 + 3 x 12 gap + 2 x 15 padding = 786px, so every viewport under that
+ * was already overflowing rather than honouring it. Dropping it costs nothing
+ * that was ever delivered, and the `1fr` maximum still shares the row equally,
+ * which is what made the cards look uniform in the first place.
+ *
+ * No new breakpoint. The two existing declarations were the whole bug.
+ */
 .document-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   padding: 15px;
 }
@@ -7147,15 +7214,45 @@ th.sheet-column--name {
   box-shadow: var(--shadow-md);
 }
 
+/*
+ * THE CARD'S MEDIA BOX — one footprint, whether it holds a picture or a glyph.
+ *
+ * 54px with 16px beneath it is the SAME 70px the 46px glyph and its 24px gap
+ * occupied, so no card grew and no grid row is now ragged. That equality is the
+ * point: a row holding one photograph beside three PDFs must stay a row of
+ * equal cards, and a taller media block for the image would have stretched
+ * every card in the row to match it.
+ *
+ * The picture is fitted, never stretched — `object-fit: cover` on a box with
+ * `overflow: hidden`, so the crop is centred and the aspect is preserved. The
+ * radius is the card's own 10px, one step in from the card's border.
+ */
 .document-grid__icon {
   display: grid;
+  overflow: hidden;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  margin-bottom: 24px;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 16px;
   border-radius: 10px;
   background: #e8eff3;
   color: var(--navy-700);
+}
+
+/*
+ * Only while a picture is really being drawn. A thumbnail that 404s, is denied
+ * across organisations, or is a HEIC the browser will not decode falls back to
+ * the glyph, and the glyph needs its tinted plate back.
+ */
+.document-grid__icon.has-thumb {
+  background: var(--line);
+}
+
+.document-grid__icon > img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
 }
 
 .document-grid strong {
@@ -7166,14 +7263,38 @@ th.sheet-column--name {
   white-space: nowrap;
 }
 
+/*
+ * THE TWO LINES UNDER THE TITLE — the document type, and "site · size".
+ *
+ * `overflow-wrap: anywhere` because these two WRAP rather than clamp, and
+ * wrapping only helps text that has somewhere to break. The title above them is
+ * a deliberate single-line ellipsis and needs nothing; these are not, so a
+ * document type or a site name that is one long unbroken token — a reference
+ * code, a scanner's filename used as a type — had no break opportunity and its
+ * content ran straight out of the card. Measured after the grid tracks were
+ * fixed: 10px past the box at 393, 12 at 390, 19 at 375, 27 at 360 and 47 at
+ * 320, on a row whose type was a 22-character code.
+ *
+ * `anywhere` rather than `break-word` on purpose: only `anywhere` lets the
+ * broken token also shrink the element's MIN-CONTENT size, which is what stops
+ * it forcing a grid track wider than its share. `break-word` breaks the line
+ * but still reports the whole token as the minimum, so the track grows and the
+ * card comes back — the same class of floor that `minmax(0, 1fr)` above exists
+ * to remove.
+ *
+ * Ordinary prose is untouched: text that already has spaces breaks at them
+ * first, exactly as it does now.
+ */
 .document-grid > button > span:not(.document-grid__icon) {
   margin-top: 6px;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: 8px;
 }
 
 .document-grid small {
   margin-top: auto;
+  overflow-wrap: anywhere;
   color: var(--muted-2);
   font-size: 7px;
 }
@@ -9007,8 +9128,15 @@ th.sheet-column--name {
     overflow-x: auto;
   }
 
+  /*
+   * `minmax(0, 1fr)`, not `1fr`. See the note on `.document-grid` above: `1fr`
+   * is `minmax(auto, 1fr)` and that `auto` is a floor the track cannot go
+   * below, so on a phone the two tracks resolved to 430.9px and 252.5px inside
+   * a 364px box and the second card was clipped by the panel's hidden overflow.
+   * This is the declaration the owner was looking at.
+   */
   .document-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .team-list > div {

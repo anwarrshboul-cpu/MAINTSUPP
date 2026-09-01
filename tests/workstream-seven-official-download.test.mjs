@@ -50,6 +50,11 @@ test("W07-04 the download names the file it is serving", async () => {
     /filename\*=UTF-8''/,
     "a filename with a non-ASCII character must survive the header, so the RFC 5987 form is required alongside the plain one",
   );
+  assert.match(
+    route,
+    /contentDisposition\(servedFileName\(record\), forceAttachment\)/,
+    "the file it is serving is the DOCUMENT, and a document's name is its title when it has one — serving original_name renamed nothing",
+  );
 });
 
 test("W07-04 a document that cannot be shown inline is handed over, not rendered", async () => {
@@ -193,10 +198,26 @@ test("live: W07-04 both the current and the superseded version download intact",
     /attachment/,
     "?download=1 must force a download",
   );
+  /*
+   * THE NAME THE READER GETS IS THE NAME THE PRODUCT USES.
+   *
+   * This assertion used to demand `W7OFF-dl-v2.txt` — "the name the file was
+   * uploaded under" — and that was the DEFECT written down as a requirement.
+   * Version 1 was uploaded with the title "W7OFF downloadable" and `planVersion`
+   * carries a title forward, so this document is called "W7OFF downloadable" on
+   * every screen in the product; serving `original_name` meant the one artefact
+   * that LEAVES the product disagreed with all of them, and an owner testing
+   * Documents by hand found it. The rule is `documentName`'s — the title when
+   * one is set, the stored filename otherwise — and the extension still comes
+   * from `original_name`, so what lands on the disk is still a `.txt`.
+   *
+   * The full policy, its sanitisation and its version-marker case are pinned in
+   * tests/workstream-seven-official-document-naming.test.mjs.
+   */
   assert.match(
     asAttachment.headers.get("content-disposition") ?? "",
-    /W7OFF-dl-v2\.txt/,
-    "the reader must get the name the file was uploaded under",
+    /filename="W7OFF downloadable\.txt"/,
+    "a titled document must download under its title, with the real extension kept",
   );
 
   const inline = await sendRetrying(`${BASE_URL}/api/files/${v2.id}`, {
@@ -219,10 +240,17 @@ test("live: W07-04 both the current and the superseded version download intact",
     sha(V1),
     "the superseded bytes must be the ORIGINAL bytes, not the replacement wearing the old id",
   );
+  /*
+   * And named from ITS OWN ROW, with the version it is. A lineage shares one
+   * title by design, so without the marker downloading three versions of one
+   * certificate leaves `cert.txt`, `cert (1).txt` and `cert (2).txt` in a folder
+   * — numbered by the order they were CLICKED, not by version, which defeats the
+   * only reason to download a superseded copy.
+   */
   assert.match(
     historical.headers.get("content-disposition") ?? "",
-    /W7OFF-dl-v1\.txt/,
-    "and under its own original filename",
+    /filename="W7OFF downloadable \(v1\)\.txt"/,
+    "a superseded version must say which version it is",
   );
 });
 

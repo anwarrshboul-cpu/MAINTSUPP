@@ -483,43 +483,6 @@ export const columnTypeDefinitions: ColumnTypeDefinition[] = [
   },
 ];
 
-/*
- * The board payload with its repeated identifiers sent once.
- *
- * `GET /api/board?compact=1` replaces every repeated id with an index into a
- * table sent once, and every row object with a positional array. On the live
- * maintenance board that is the difference between 3,131 KB and 686 KB, almost
- * all of it in `cells`: 8,565 rows whose median VALUE is ten characters, each
- * previously carrying a 57-character column id, a 36-character request id and
- * the property names `requestId`/`columnId`/`value` spelt out again.
- *
- * See `compactBoard` in app/api/board/route.ts for the encoder. The two are one
- * change and must move together.
- */
-export type CompactFilePreview = [
-  id: string,
-  mimeIndex: number,
-  originalName: string,
-  byteSize: number,
-  createdAt: string,
-];
-
-export type CompactBoardResponse = {
-  compact?: number;
-  groups?: MaintenanceGroup[];
-  options?: BoardColumnOption[];
-  columns?: MaintenanceBoardColumn[];
-  notRequired?: unknown;
-  rowIds?: string[];
-  columnIds?: string[];
-  groupIds?: string[];
-  mimeTypes?: string[];
-  items?: Array<[rowIndex: number, groupIndex: number, position: number]>;
-  cells?: Array<[rowIndex: number, columnIndex: number, value: string]>;
-  fileCounts?: Array<
-    [rowIndex: number, columnIndex: number, count: number, preview: CompactFilePreview[]]
-  >;
-};
 
 export type BoardResponse = {
   groups?: MaintenanceGroup[];
@@ -529,53 +492,3 @@ export type BoardResponse = {
   cells?: MaintenanceBoardCell[];
   fileCounts?: MaintenanceBoardFileCount[];
 };
-
-/**
- * Rebuilds the objects the uncompacted payload used to send.
- *
- * Deliberately lossless and deliberately dull: every field the legacy shape
- * carried comes back with the same value, so the grid below this function
- * cannot tell which encoding it was served and a rendered board can be compared
- * row for row against one drawn before the change.
- *
- * A response without the `compact` marker is returned as-is. That is not
- * defensive clutter — a cached response, or a client that reaches this code
- * before the route it is paired with has deployed, is a real way to arrive here
- * holding the old shape, and decoding one as the other would silently produce a
- * board of `undefined` ids.
- */
-export function decodeBoardResponse(payload: CompactBoardResponse & BoardResponse): BoardResponse {
-  if (payload.compact !== 1) return payload as BoardResponse;
-  const rowIds = payload.rowIds ?? [];
-  const columnIds = payload.columnIds ?? [];
-  const groupIds = payload.groupIds ?? [];
-  const mimeTypes = payload.mimeTypes ?? [];
-  const compact = payload as CompactBoardResponse;
-  return {
-    groups: compact.groups,
-    options: compact.options,
-    columns: compact.columns,
-    items: (compact.items ?? []).map(([row, group, position]) => ({
-      requestId: rowIds[row],
-      groupId: groupIds[group],
-      position,
-    })),
-    cells: (compact.cells ?? []).map(([row, column, value]) => ({
-      requestId: rowIds[row],
-      columnId: columnIds[column],
-      value,
-    })),
-    fileCounts: (compact.fileCounts ?? []).map(([row, column, count, preview]) => ({
-      requestId: rowIds[row],
-      columnId: columnIds[column],
-      count,
-      preview: preview.map(([id, mime, originalName, byteSize, createdAt]) => ({
-        id,
-        contentType: mimeTypes[mime] ?? "",
-        originalName,
-        byteSize,
-        createdAt,
-      })),
-    })),
-  };
-}

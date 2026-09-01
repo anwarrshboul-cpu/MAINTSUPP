@@ -97,7 +97,21 @@ test("the file drawer is a dialog, and Escape gets out of it", async () => {
 
   assert.match(drawer, /role="dialog"/, "a surface that covers the page is a dialog");
   assert.match(drawer, /aria-modal="true"/);
-  assert.match(drawer, /aria-label=\{`File details: \$\{file\.name\}`\}/, "it must say which file");
+  /*
+   * It must say which file, BY THE NAME THE HEADING SAYS.
+   *
+   * This pinned `file.name` — the stored filename — while the `<h2>` two
+   * lines below it already printed `documentName(file)`. So a document
+   * retitled in this very drawer was announced to a screen reader under the
+   * name the camera gave it and shown on screen under the name a person
+   * chose: two names for one dialog, and the spoken one was the one nobody
+   * picked. `documentName` is the single rule both now use.
+   */
+  assert.match(
+    drawer,
+    /aria-label=\{`File details: \$\{documentName\(file\)\}`\}/,
+    "it must say which file, by the name the heading gives it",
+  );
   assert.match(drawer, /tabIndex=\{-1\}/, "the container has to be focusable to be focused");
 
   // Escape closes it, and does NOT steal the key from a field or a popover.
@@ -137,7 +151,26 @@ test("a file that cannot be previewed says so, and can still be downloaded", asy
     "a record with no bytes behind it is a different thing again",
   );
   assert.match(drawer, /Open in new tab/);
-  assert.match(drawer, /download=\{file\.name\}/, "the download keeps the original filename");
+  /*
+   * The download is named by the SERVER now, and this assertion moved with it.
+   *
+   * It used to read `download={file.name}` — "the download keeps the original
+   * filename" — which was right while `Content-Disposition` also said
+   * `original_name`. It is not right any more: `/api/files/[id]` builds that
+   * header from the canonical display name with the stored extension kept, so a
+   * client-side `download` VALUE (which overrides the header on a same-origin
+   * URL) would put a second naming rule in the browser and hand somebody a file
+   * called IMG_4471.jpg for a document every screen calls "PAT certificate
+   * 2026". The bare attribute keeps the download and takes the name from the
+   * response. The stored filename is still preserved — in `original_name`,
+   * which nothing rewrites, and on screen in the version history.
+   */
+  assert.match(drawer, /download=""/, "the download is named by Content-Disposition");
+  assert.doesNotMatch(
+    drawer,
+    /download=\{file\.name\}/,
+    "a client-side download name would override the server's and disagree with it",
+  );
   assert.match(
     drawer,
     /href=\{file\.downloadUrl \?\? `\$\{file\.inlineUrl\}\?download=1`\}/,

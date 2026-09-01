@@ -90,6 +90,10 @@ test("callers of live-board are unaffected by the split", async () => {
 test("no board file exceeds a reviewable size", async () => {
   const limits = {
     "app/(app)/portal/board-model.ts": 600,
+    // Split out of board-model when the compact wire format grew a sixth slot.
+    // Capped from the start: a file created to relieve a ceiling is the easiest
+    // place for the next thing to be dropped without anyone noticing.
+    "app/(app)/portal/board-compact.ts": 300,
     "app/(app)/portal/board-ordering.ts": 200,
     "app/(app)/portal/board-format.ts": 400,
     "app/(app)/portal/board-primitives.tsx": 200,

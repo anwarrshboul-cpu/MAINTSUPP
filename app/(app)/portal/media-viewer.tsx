@@ -28,11 +28,28 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../../components";
 import { formatShortDateTime } from "../../lib/format-date";
+/*
+ * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the register's,
+ * and every surface that names a document now calls it: the title somebody set,
+ * the stored filename otherwise. Printing `originalName` directly is what let a
+ * rename reach the Documents register and stop there.
+ */
+import { documentName } from "./views/document-register";
 import "./media-viewer.css";
 
 export interface MediaViewerFile {
   id: string;
   originalName: string;
+  /**
+   * The name somebody gave this document, when they gave it one.
+   *
+   * The viewer is opened from the board's photo strips, the job's evidence
+   * grid and the Fix Tracker, and every one of those hands it a row that has
+   * carried `title` since W07-02 — the viewer simply had no field to put it
+   * in, so a renamed photograph opened under the name the phone gave it while
+   * the strip behind it said something else. `documentName` chooses.
+   */
+  title?: string | null;
   contentType: string;
   byteSize: number;
   createdAt: string;
@@ -224,7 +241,7 @@ function MediaSlide({
       <img
         className={`mv-image mv-image--full${fullLoaded ? " is-loaded" : ""}`}
         src={file.inlineUrl}
-        alt={file.originalName}
+        alt={documentName(file)}
         decoding="async"
         draggable={false}
         onLoad={() => setFullLoaded(true)}
@@ -677,8 +694,8 @@ export function MediaViewer({
     >
       <header className="mv-bar mv-bar--top">
         <div className="mv-meta">
-          <strong id={titleId} title={current.originalName}>
-            {current.originalName}
+          <strong id={titleId} title={documentName(current)}>
+            {documentName(current)}
           </strong>
           <small>
             {[
@@ -803,7 +820,7 @@ export function MediaViewer({
           className="mv-button"
           href={current.downloadUrl}
           download
-          aria-label={`Download ${current.originalName}`}
+          aria-label={`Download ${documentName(current)}`}
         >
           <Icon name="download" size={19} />
         </a>
@@ -812,7 +829,7 @@ export function MediaViewer({
             className="mv-button mv-button--danger"
             type="button"
             onClick={() => void onDelete(current.id)}
-            aria-label={`Delete ${current.originalName}`}
+            aria-label={`Delete ${documentName(current)}`}
           >
             <TrashMark />
           </button>

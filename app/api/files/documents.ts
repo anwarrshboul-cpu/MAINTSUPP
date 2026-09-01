@@ -266,6 +266,132 @@ export function anchorRefusal(anchors: Anchors): Response | null {
 }
 
 /**
+ * WHAT A REPLACEMENT IS FILED AGAINST — supplied, or inherited from its parent.
+ *
+ * `anchorRefusal` above answers a question about a DOCUMENT, and both upload
+ * routes were asking it about a REQUEST. For a new version those are not the
+ * same thing: a new version belongs to a logical document that is already filed
+ * somewhere, so the anchors it will be stored with are the ones sent PLUS the
+ * ones carried forward from the predecessor. Both routes already wrote the row
+ * that way — `requestId || version.plan.carried.requestId`, `resolveSiteId(...)`
+ * and so on at the insert — and then refused the request long before
+ * `planVersion` had been called, so the refusal was decided on half the facts.
+ *
+ * Measured symptom: a document visibly showing "Site: Highcross Leicester" and
+ * "Work order: MN-1058" answered 400 "A document must be filed against a work
+ * order, a site, a unit or a contractor." to "Upload new version", because the
+ * replacement form does not re-send relationships nobody asked it to change.
+ *
+ * This is the SAME precedence the inserts use — anything supplied wins, the
+ * predecessor's value is the floor — expressed once so the check and the write
+ * cannot disagree. Note what it deliberately does NOT do: it invents nothing. If
+ * the predecessor is itself unanchored, every field here stays empty and
+ * `anchorRefusal` still refuses. Inheritance is not a way past the rule, it is
+ * the rest of the evidence the rule is entitled to.
+ *
+ * `carried` is nullable so the caller can pass the plan for a replacement and
+ * `null` for an original without branching: an original has no parent, so the
+ * effective anchors ARE the supplied ones and the rule is unchanged.
+ */
+/**
+ * THE KIND A NEW VERSION KEEPS, narrowed rather than cast.
+ *
+ * `attachments.kind` is a `text` column, so a predecessor's kind arrives typed
+ * `string` while the insert wants an `AttachmentKind`. A blind cast would let a
+ * legacy row — the monday import wrote kinds this product no longer offers —
+ * put an unrecognised value into a new row that a person just created, which is
+ * a worse outcome than the fallback: the old row stays exactly as it is and
+ * only the NEW row is held to the current vocabulary.
+ *
+ * `allowed` is passed in because each route owns its own set; the rule is
+ * shared, the vocabulary is the caller's.
+ */
+export function carriedKind<K extends string>(
+  carried: string | null | undefined,
+  allowed: ReadonlySet<K>,
+  fallback: K,
+): K {
+  return carried && allowed.has(carried as K) ? (carried as K) : fallback;
+}
+
+export function effectiveAnchors(
+  anchors: Anchors,
+  carried: AnchorSource | null | undefined,
+): Anchors {
+  if (!carried) return anchors;
+  return {
+    requestId: anchors.requestId || carried.requestId || "",
+    siteId: anchors.siteId || carried.siteId || "",
+    unitId: anchors.unitId || carried.unitId || "",
+    contractorId: anchors.contractorId || carried.contractorId || "",
+  };
+}
+
+/** Anything that can tell `effectiveAnchors` where a predecessor is filed. */
+export type AnchorSource = Pick<
+  AttachmentRow,
+  "requestId" | "siteId" | "unitId" | "contractorId"
+>;
+
+/**
+ * THE ANCHORS THE OBJECT KEY IS NAMED AFTER — for the multipart route, which
+ * has to name the key before it knows anything else.
+ *
+ * `POST /api/files` can compute this inline: it has the whole request, calls
+ * `planVersion`, and mints the key afterwards. The multipart route cannot.
+ * `start` reserves a key, each PUT part re-derives the same prefix through
+ * `validUploadKey` to prove a resumed upload is writing where it said it would,
+ * and only `complete` — three or four requests later — creates a row. So a
+ * replacement's key was minted from the SUPPLIED anchors alone and a >900 KB new
+ * version of a document filed against MN-1058 was stored under
+ * `.../maintenance/unfiled/...` while the row it created named MN-1058.
+ * Measured, before this existed:
+ *
+ *   row: req=MN-1136 site=store-aldgate
+ *   key: org_…/maintenance/unfiled/general/69f4a903-…-v2.txt
+ *
+ * WHY THIS DOES NOT REFUSE, AND THAT IS THE POINT. An id that names no row in
+ * this tenant is answered by returning the supplied anchors unchanged — the same
+ * key an unanchored upload would get — rather than 404. `start` and the part
+ * handler therefore learn NOTHING about which ids exist in another workspace,
+ * which a 404-versus-something-else would tell them. The real refusals are
+ * unchanged and still come from `planVersion` at `complete`: 404 for a
+ * predecessor that is missing or another tenant's, 409 for archived, 409 for a
+ * version that is not the current head. A wrong `replaces` therefore costs the
+ * caller an upload and then the truthful error, and buys them no information.
+ *
+ * WHY IT IS RACE-FREE. It reads only `request_id`, `site_id`, `unit_id` and
+ * `contractor_id`, and no route writes those after insert — `PATCH
+ * /api/files/[id]` updates the title, type, description, expiry and archive flag
+ * and nothing else. So `start` and every part read the same four values however
+ * long the upload takes, and deliberately WITHOUT `planVersion`'s liveness
+ * conditions: if the predecessor is archived or superseded mid-upload the parts
+ * must keep agreeing with the key `start` minted, and `complete` is where that
+ * is refused.
+ */
+export async function anchorsForKey(
+  db: Db,
+  orgId: string,
+  anchors: Anchors,
+  replacesId: string,
+): Promise<Anchors> {
+  if (!replacesId) return anchors;
+  const [predecessor] = await db
+    .select({
+      requestId: attachments.requestId,
+      siteId: attachments.siteId,
+      unitId: attachments.unitId,
+      contractorId: attachments.contractorId,
+    })
+    .from(attachments)
+    .where(
+      and(eq(attachments.id, replacesId), eq(attachments.organisationId, orgId)),
+    )
+    .limit(1);
+  return effectiveAnchors(anchors, predecessor ?? null);
+}
+
+/**
  * Every supplied anchor names a row IN THIS TENANT, or the upload is refused.
  *
  * Checked in code rather than left to the database, and deliberately so. The

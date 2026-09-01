@@ -333,31 +333,47 @@ async function multipartUpload(
 ) {
   const { file, requestId, kind, columnId, uploadToken, onProgress } = options;
   /*
-   * The anchors must be identical on all three calls.
+   * WHAT NAMES THE KEY MUST BE IDENTICAL ON ALL FOUR CALLS.
    *
-   * `start` names the R2 key after whichever anchor the document has, and the
-   * part handler re-derives that same prefix to prove a resumed upload is
-   * writing where it said it would. Sending the anchors to `start` and not to
-   * the parts would make a jobless document begin successfully and then have
-   * every one of its parts refused.
+   * `start` names the R2 key after whatever the document is filed against, and
+   * the part handler and `abort` re-derive that same prefix to prove a resumed
+   * upload is writing where it said it would. Sending these to `start` and not
+   * to the parts would make a document begin successfully and then have every
+   * one of its parts refused.
+   *
+   * `replaces` belongs in this set and used to travel on `complete` alone, which
+   * was half of a real defect. A new version inherits its predecessor's filing,
+   * so the server names its key after the PREDECESSOR's anchors — and could not,
+   * because at `start` it had no idea the upload was a replacement. Two
+   * consequences, both measured: a >900 KB new version of a document filed
+   * against MN-1058 was stored under `.../maintenance/unfiled/...` while the row
+   * it created named MN-1058, and `start` could not tell an unanchored original
+   * from a replacement, so it either refused every replacement that did not
+   * needlessly re-send its parent's relationships or could refuse neither.
+   *
+   * `complete` still carries it too, through `documentJsonFields` — that is
+   * where the lineage is actually planned and the row written. This is only what
+   * the key is named after.
    */
   /*
    * `Record<string, string>` rather than an inferred literal: spreading a
    * variable whose keys are optional gives them a `string | undefined` type,
    * which does not satisfy `HeadersInit`. Spreading the conditionals inline
-   * would work, but repeating three of them across four fetches is how the two
+   * would work, but repeating four of them across four fetches is how the two
    * halves of an upload drift apart.
    */
-  const anchorHeaders: Record<string, string> = {};
-  if (options.siteId) anchorHeaders["X-Upload-Site-Id"] = options.siteId;
-  if (options.unitId) anchorHeaders["X-Upload-Unit-Id"] = options.unitId;
+  const keyHeaders: Record<string, string> = {};
+  if (options.siteId) keyHeaders["X-Upload-Site-Id"] = options.siteId;
+  if (options.unitId) keyHeaders["X-Upload-Unit-Id"] = options.unitId;
   if (options.contractorId) {
-    anchorHeaders["X-Upload-Contractor-Id"] = options.contractorId;
+    keyHeaders["X-Upload-Contractor-Id"] = options.contractorId;
   }
-  const anchorBody = {
+  if (options.replaces) keyHeaders["X-Upload-Replaces"] = options.replaces;
+  const keyBody = {
     ...(options.siteId ? { siteId: options.siteId } : {}),
     ...(options.unitId ? { unitId: options.unitId } : {}),
     ...(options.contractorId ? { contractorId: options.contractorId } : {}),
+    ...(options.replaces ? { replaces: options.replaces } : {}),
   };
 
   const start = await readApi<MultipartStartResponse>(
@@ -373,7 +389,7 @@ async function multipartUpload(
         contentType: file.type || "application/octet-stream",
         byteSize: file.size,
         uploadToken,
-        ...anchorBody,
+        ...keyBody,
       }),
     }),
   );
@@ -401,7 +417,7 @@ async function multipartUpload(
           "X-Upload-Id": start.uploadId,
           "X-Upload-Part": String(index + 1),
           ...(uploadToken ? { "X-Upload-Token": uploadToken } : {}),
-          ...anchorHeaders,
+          ...keyHeaders,
         },
         body: chunk,
       });
@@ -450,9 +466,10 @@ async function multipartUpload(
         key: start.key,
         uploadId: start.uploadId,
         uploadToken,
-        // The anchors again: `abort` re-validates the key the same way the parts
-        // do, so a jobless upload must be able to clean up after itself.
-        ...anchorBody,
+        // The key fields again: `abort` re-validates the key the same way the
+        // parts do, so a jobless upload — or a replacement, whose key is named
+        // after anchors it never sent — must be able to clean up after itself.
+        ...keyBody,
       }),
     }).catch(() => undefined);
     throw error;

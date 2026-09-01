@@ -66,7 +66,21 @@ test("every action targets the exact file it was invoked on", async () => {
   const act = manager.slice(manager.indexOf("const fileAct"), manager.indexOf("const visibleIds"));
   assert.match(act, /const inlineUrl = `\/api\/files\/\$\{file\.id\}`/);
   assert.match(act, /`\/api\/files\/\$\{file\.id\}\?download=1`/);
-  assert.match(act, /window\.confirm\(`Delete \$\{file\.originalName\}/);
+  /*
+   * The confirm names the file it was invoked on — still the point of this
+   * assertion — but by the name the rest of the product uses for it.
+   *
+   * It used to pin `file.originalName`, which was right while nothing could
+   * rename a document. W07-02 can: `documentName` in
+   * app/(app)/portal/views/document-register.ts is the one rule that decides
+   * what a document is called (the title when somebody set one, the stored
+   * filename otherwise), and a dialog offering to destroy "IMG_7560.jpeg"
+   * when every surface around it says "Highcross completion photo" is asking
+   * about a document the reader cannot identify. `documentName(file)` still
+   * reads THIS file's own identity, which is what rule 1 of this file is for.
+   */
+  assert.match(act, /window\.confirm\(`Delete \$\{documentName\(file\)\}/);
+  assert.doesNotMatch(act, /\$\{file\.originalName\}\? This cannot be undone/);
   assert.match(act, /maintsupp:refresh-board/, "delete repaints the board, no reload");
   assert.doesNotMatch(manager, /window\.location\.reload/);
 });

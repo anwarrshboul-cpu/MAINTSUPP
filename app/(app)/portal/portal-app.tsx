@@ -65,6 +65,14 @@ import {
   matchesDocumentSearch,
   type DocumentFilters,
 } from "./views/document-register";
+/*
+ * An image document is drawn as the picture it is, through the one authorised
+ * serving path. See the file's own note for why it is a component rather than
+ * an `<img>` inlined twice: the register draws it in the table and again on the
+ * card, and the fallback-to-icon rule has to be identical in both or one of
+ * them shows a broken image.
+ */
+import { DocumentThumbnail } from "./views/document-thumbnail";
 import { AccountMenu } from "./account-menu";
 import {
   formatDayMonth,
@@ -1315,6 +1323,7 @@ export default function PortalApp({
           rootDocumentId?: string | null;
           versionNo?: number | null;
           isCurrent?: boolean | null;
+          boardColumnId?: string | null;
           contentType?: string;
           inlineUrl?: string;
           downloadUrl?: string;
@@ -1361,6 +1370,20 @@ export default function PortalApp({
             : file.kind === "issue"
               ? "Issue evidence"
               : "Workspace document",
+        /*
+         * The RAW kind and the board column, kept beside the label.
+         *
+         * The label above is for the reader. Replacing a document has to tell
+         * the API what this document IS and where it is filed, and mapping the
+         * label back would be the same three-way rule written twice.
+         */
+        attachmentKind:
+          file.kind === "completion"
+            ? "completion"
+            : file.kind === "issue"
+              ? "issue"
+              : "general",
+        boardColumnId: file.boardColumnId ?? null,
         documentType: file.documentType ?? null,
         description: file.description ?? null,
         site: "",
@@ -4852,9 +4875,19 @@ function DocumentsView({
                           className="file-name-cell"
                           onClick={() => setSelectedFile(file)}
                         >
-                          <span>
-                            <Icon name="document" size={17} />
-                          </span>
+                          {/*
+                            The picture, at the size the row already reserved
+                            for the glyph — 29px, unchanged, so a register of
+                            photographs does not become a register of tall
+                            rows. A non-image keeps the document icon, and so
+                            does an image whose bytes cannot be read.
+                          */}
+                          <DocumentThumbnail
+                            file={file}
+                            className="file-name-cell__media"
+                            fallbackSize={17}
+                            box={{ width: 29, height: 29 }}
+                          />
                           <strong>{documentName(file)}</strong>
                         </button>
                       </td>
@@ -4922,9 +4955,19 @@ function DocumentsView({
                   key={file.id}
                   onClick={() => setSelectedFile(file)}
                 >
-                  <span className="document-grid__icon">
-                    <Icon name="document" size={24} />
-                  </span>
+                  {/*
+                    Same box the icon already occupied, so a grid row holding
+                    one photograph and three PDFs stays a row of equal cards.
+                    `object-fit: cover` in the stylesheet keeps the crop centred
+                    and the aspect honest; the name stays underneath, where it
+                    was, because a thumbnail is not a label.
+                  */}
+                  <DocumentThumbnail
+                    file={file}
+                    className="document-grid__icon"
+                    fallbackSize={24}
+                    box={{ width: 54, height: 54 }}
+                  />
                   <strong>{documentName(file)}</strong>
                   <span>{documentTypeLabel(file)}</span>
                   <small>
@@ -4999,7 +5042,22 @@ function DocumentsView({
       </section>
 
       {openFile && (
+        /*
+         * KEYED BY THE DOCUMENT, SO A REFUSAL CANNOT OUTLIVE THE DOCUMENT IT
+         * WAS ABOUT.
+         *
+         * Without the key React reuses one drawer instance for every row the
+         * reader opens, and the drawer's `error` is component state. A replace
+         * that was refused on document A left its red banner sitting above
+         * document B — a document nothing had been attempted on — which reads
+         * as "this certificate is broken" about a certificate that is fine.
+         * `openFile` is recomputed from the register after every write, so the
+         * OBJECT changes constantly while the id does not: keying on the id
+         * remounts when the reader moves to another document and leaves an
+         * ordinary refresh alone.
+         */
         <FileDetailDrawer
+          key={openFile.id}
           file={openFile}
           today={today}
           onClose={() => setSelectedFile(null)}
@@ -8169,6 +8227,14 @@ function previewKindFor(contentType: string | undefined) {
 type DocumentVersion = {
   id: string;
   originalName: string;
+  /*
+   * Each version carries its own title, and the history has to read it.
+   * `/api/files?versionsOf=` answers with `attachmentPayload`, which has served
+   * `title` since W07-02; this type simply never declared it, so the list drew
+   * `original_name` and a renamed certificate went on being listed under the
+   * camera filename it was uploaded with.
+   */
+  title?: string | null;
   createdAt: string;
   uploadedByEmail: string | null;
   versionNo: number;
@@ -8356,19 +8422,56 @@ function FileDetailDrawer({
     setBusy("replace");
     setError(null);
     try {
-      const body = new FormData();
-      body.append("file", chosen);
-      // W07-03: the server makes this a NEW row that supersedes the old one, so
-      // the document the register lists is the new version and the old one
-      // stays readable in the history rather than being overwritten.
-      body.append("replaces", file.id);
-      const response = await fetch("/api/files", { method: "POST", body });
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(payload.error || "The new version could not be uploaded.");
-      }
+      /*
+       * THROUGH THE PRODUCT'S OWN UPLOADER, NOT A HAND-ROLLED POST.
+       *
+       * This built a bare `FormData` and called `fetch("/api/files")` itself,
+       * and skipping `uploadEvidenceFile` skipped three things that live inside
+       * it — the reason it exists at all.
+       *
+       * 1. THE 900 KB CEILING AND THE MULTIPART FALLBACK. Measured on this
+       *    route: 1018 KB answered 201, and 1313 KB answered 413 with a bare
+       *    `text/plain` body carrying no JSON `error` field at all. The catch
+       *    below reads `response.json()` and falls back to `{}`, so the reader
+       *    got the generic "The new version could not be uploaded." for a file
+       *    that was simply too big for the direct path. The defect the owner
+       *    reported was on `IMG_7560.jpeg`, and a phone photograph is 2-5 MB —
+       *    so every fix to the anchor rules still left the operation failing,
+       *    with a message that named nothing. `uploadEvidenceFile` sends
+       *    anything over `DIRECT_UPLOAD_LIMIT` through the multipart route, and
+       *    retries there on a 413 as well.
+       *
+       * 2. `replaces` ON THE MULTIPART PATH. Nothing in this product passed
+       *    `replaces` through multipart before, so the multipart route's
+       *    version handling was unreachable from any screen.
+       *
+       * 3. `offerThumbnail`. The derivative is generated inside
+       *    `uploadEvidenceFile` after the row exists. Without it a replaced
+       *    photograph has no `.thumb`, and `?thumb=1` — which the register's
+       *    own thumbnails and every board strip read — falls back to the
+       *    full-size original: measured as thumbnail bytes equal to original
+       *    bytes.
+       *
+       * The anchors are the document's own, so the new version lands where the
+       * old one was rather than as loose evidence in a job's photo strip. The
+       * metadata fields are deliberately NOT sent: `appendDocumentFields` only
+       * writes a key it was given, and an absent key means "carry the
+       * predecessor's forward", which is what a replacement should do with a
+       * title, a type and an expiry nobody has been asked to re-enter.
+       */
+      await uploadEvidenceFile({
+        file: chosen,
+        // W07-03: the server makes this a NEW row that supersedes the old one,
+        // so the document the register lists is the new version and the old one
+        // stays readable in the history rather than being overwritten.
+        replaces: file.id,
+        ...(file.requestId ? { requestId: file.requestId } : {}),
+        // The stored kind, not the register's label for it — see
+        // `attachmentKind` on `FileRecord`. A workspace document replaced as
+        // "issue" would leave the register for a job's fault strip.
+        kind: file.attachmentKind ?? "general",
+        ...(file.boardColumnId ? { columnId: file.boardColumnId } : {}),
+      });
       onNotify(`${chosen.name} filed as the new version of ${documentName(file)}.`);
       setVersions(null);
       onChanged();
@@ -8485,7 +8588,14 @@ function FileDetailDrawer({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label={`File details: ${file.name}`}
+        /*
+         * The DISPLAY name, like the heading two lines down. A screen-reader
+         * user who renamed "IMG_4471.jpg" to "PAT certificate 2026" was told
+         * the dialog was called IMG_4471.jpg while the visible heading said
+         * otherwise — two names for one document, and the one nobody chose was
+         * the spoken one.
+         */
+        aria-label={`File details: ${documentName(file)}`}
       >
         <div className="detail-drawer__header">
           <div>
@@ -8508,13 +8618,13 @@ function FileDetailDrawer({
               <img
                 className="file-preview__media"
                 src={file.inlineUrl}
-                alt={file.name}
+                alt={documentName(file)}
               />
             ) : preview === "pdf" && canOpen ? (
               <iframe
                 className="file-preview__media"
                 src={file.inlineUrl}
-                title={`Preview of ${file.name}`}
+                title={`Preview of ${documentName(file)}`}
               />
             ) : preview === "video" && canOpen ? (
               <video className="file-preview__media" src={file.inlineUrl} controls />
@@ -8551,7 +8661,19 @@ function FileDetailDrawer({
               <a
                 className="secondary-button"
                 href={file.downloadUrl ?? `${file.inlineUrl}?download=1`}
-                download={file.name}
+                /*
+                 * NAMED BY THE SERVER, NOT HERE.
+                 *
+                 * This used to carry the stored filename, so a certificate
+                 * retitled in this very drawer still landed on disk as
+                 * IMG_4471.jpg. A `download` attribute WITH a value overrides
+                 * `Content-Disposition` on a same-origin URL, and
+                 * `/api/files/[id]` now builds that header from the same
+                 * display-name rule this drawer's heading uses, keeping the
+                 * stored extension. Empty keeps the download behaviour and lets
+                 * the one authoritative name through.
+                 */
+                download=""
               >
                 <Icon name="download" size={17} />
                 Download
@@ -8581,7 +8703,20 @@ function FileDetailDrawer({
                 <button
                   type="button"
                   className="link-button"
-                  onClick={() => setEditing(true)}
+                  /*
+                   * "Edit details" IS the metadata editor — name, type, expiry
+                   * and description, the four W07-02 fields. There is no second
+                   * "Edit metadata" control and there must not be one.
+                   *
+                   * Opening it clears whatever refusal is on screen. A banner
+                   * left over from a failed replace has nothing to do with the
+                   * form the reader has just opened, and leaving it there makes
+                   * the form look pre-broken before a key has been pressed.
+                   */
+                  onClick={() => {
+                    setError(null);
+                    setEditing(true);
+                  }}
                 >
                   <Icon name="edit" size={15} />
                   Edit details
@@ -8811,10 +8946,31 @@ function FileDetailDrawer({
                           v{version.versionNo}
                         </span>
                         <span className="document-versions__body">
-                          <strong>{version.originalName}</strong>
+                          {/*
+                            THE NAME PEOPLE GAVE IT, AND THE FILE THAT WAS
+                            FILED, ARE BOTH FACTS — so both are here, and
+                            neither pretends to be the other.
+
+                            The heading is the display name, the same rule the
+                            register, the card, the board cell and the drawer
+                            heading all use, because a history that lists a
+                            renamed certificate under the camera filename reads
+                            as a different document from the one above it.
+
+                            The stored filename stays as PROVENANCE, printed
+                            beside the date whenever it differs — that is the
+                            byte-truth of what was uploaded, it is what
+                            `Content-Disposition` sends and what the Download
+                            control writes to disk, and a version history is the
+                            one screen where somebody genuinely needs it.
+                          */}
+                          <strong>{documentName(version)}</strong>
                           <small>
                             {formatDate(version.createdAt, true)} ·{" "}
                             {version.uploadedByEmail?.trim() || "uploader not recorded"}
+                            {documentName(version) !== version.originalName
+                              ? ` · ${version.originalName}`
+                              : ""}
                           </small>
                         </span>
                         <span
@@ -8840,7 +8996,9 @@ function FileDetailDrawer({
                               href={
                                 version.downloadUrl ?? `${version.inlineUrl}?download=1`
                               }
-                              download={version.originalName}
+                              /* The server names a historical version too, and
+                                 marks it: title, stored extension, " (vN)". */
+                              download=""
                               aria-label={`Download version ${version.versionNo} of ${documentName(file)}`}
                             >
                               <Icon name="download" size={15} />
@@ -8894,7 +9052,19 @@ function FileDetailDrawer({
                 onClick={() => replaceInputRef.current?.click()}
               >
                 <Icon name="upload" size={17} />
-                {busy === "replace" ? "Uploading…" : "Upload new version"}
+                {/*
+                  W07-03 HAS ONE CONTROL, AND THIS IS IT.
+                  "Upload new version" described the mechanism and left the act
+                  unnamed, so an operator holding a corrected certificate looked
+                  for "Replace" and, not finding it, reached for Remove and a
+                  fresh upload — which destroys the lineage this button exists
+                  to keep. The verb comes first and the mechanism stays after
+                  it, because they are the same operation and a second control
+                  saying "replace" would be a second way to do one thing.
+                */}
+                {busy === "replace"
+                  ? "Uploading…"
+                  : "Replace file / upload new version"}
               </button>
               <small>
                 The current file is kept and marked superseded, not overwritten.

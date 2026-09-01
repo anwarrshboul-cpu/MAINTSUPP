@@ -14,6 +14,13 @@ import {
   type SiteRecord,
   type UnitRecord,
 } from "./site-types";
+/*
+ * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the Documents
+ * register's own — the title somebody set, the stored filename otherwise — and
+ * every surface that names a document calls it. Printing `originalName`
+ * directly is what let a rename reach the register and stop there.
+ */
+import { documentName } from "../views/document-register";
 import { expiryStatus } from "../../../lib/expiry-status";
 import type { ComplianceState } from "../../../lib/types";
 
@@ -31,6 +38,12 @@ type JobRow = {
 type FileRow = {
   id: string;
   originalName: string;
+  /*
+   * `/api/sites?id=` selects the whole `attachments` row, so the title has
+   * always been in this payload; the type never named it, so the Site
+   * documents tab linked a renamed certificate under its upload filename.
+   */
+  title?: string | null;
   kind: string;
   byteSize: number;
   createdAt: string;
@@ -417,7 +430,7 @@ export function SiteDetail({
           <ul className="file-list">
             {data.files.map((file) => (
               <li key={file.id}>
-                <a href={`/api/files/${file.id}`}>{file.originalName}</a>
+                <a href={`/api/files/${file.id}`}>{documentName(file)}</a>
                 <span className="drawer-label">
                   {file.kind} · {fileSize(file.byteSize)} · {formatDate(file.createdAt)}
                 </span>

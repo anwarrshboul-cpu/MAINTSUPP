@@ -17,8 +17,11 @@ import {
 import {
   anchorRefusal,
   anchorReferencesRefusal,
+  anchorSegment,
   attachmentPayload,
+  carriedKind,
   documentFieldUpdates,
+  effectiveAnchors,
   liveDocumentFilter,
   planVersion,
   readAnchors,
@@ -423,8 +426,18 @@ export async function POST(request: Request) {
      */
     const form = await request.formData();
     const file = form.get("file");
-    const requestedKind = String(form.get("kind") ?? "issue") as AttachmentKind;
+    /*
+     * `"issue"` IS ALSO THE DEFAULT, so "the caller asked for issue" and "the
+     * caller said nothing" have to stay distinguishable — see where a
+     * replacement inherits its predecessor's kind below. Reading the raw form
+     * entry is the only way to tell them apart once the `??` has run.
+     */
+    const suppliedKind = form.get("kind");
+    const requestedKind = String(suppliedKind ?? "issue") as AttachmentKind;
+    const kindWasChosen = suppliedKind !== null && allowedKinds.has(requestedKind);
     let kind = allowedKinds.has(requestedKind) ? requestedKind : "issue";
+    /* Set when the file column overrules the request — the rule at `kindForColumnKey` below. */
+    let kindFromColumn = false;
     const boardColumnId = String(form.get("columnId") ?? "")
       .trim()
       .slice(0, 100);
@@ -457,8 +470,33 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) {
       return Response.json({ error: "A file is required." }, { status: 400 });
     }
-    const missingAnchor = anchorRefusal(anchors);
-    if (missingAnchor) return missingAnchor;
+    /*
+     * THE ANCHOR RULE IS ABOUT THE DOCUMENT, NOT ABOUT THE REQUEST.
+     *
+     * This ran unconditionally and answered 400 on the SUPPLIED anchors alone —
+     * 216 lines before `planVersion` below had looked at the predecessor at all.
+     * So a new version of a document already filed against a site and a job was
+     * refused for having no anchors, while the insert further down inherits them
+     * correctly and always did. Measured: a document showing "Site: Highcross
+     * Leicester" and "Work order: MN-1058" answered "A document must be filed
+     * against a work order, a site, a unit or a contractor." to "Upload new
+     * version", because the replacement form does not re-send relationships
+     * nobody asked it to change.
+     *
+     * An ORIGINAL is decided here, exactly as before and as early as before: no
+     * `replaces`, no parent, no further facts to wait for. A REPLACEMENT is
+     * decided after `planVersion`, against supplied-or-inherited anchors —
+     * `anchorRefusal` is called there too, so a parent that is itself unanchored
+     * is still refused and nothing is invented to satisfy the rule.
+     *
+     * Deferring loses no safety: `planVersion` 404s a predecessor that does not
+     * exist or belongs to another tenant, 409s an archived one and 409s one that
+     * is not the current head, and every one of those runs before the R2 put.
+     */
+    if (!replacesId) {
+      const missingAnchor = anchorRefusal(anchors);
+      if (missingAnchor) return missingAnchor;
+    }
     if (!isAllowedFile(file)) {
       return Response.json(
         {
@@ -629,6 +667,7 @@ export async function POST(request: Request) {
        * checked, and now it is checked against what will actually be written.
        */
       kind = kindForColumnKey(column.key);
+      kindFromColumn = true;
     }
 
     /*
@@ -685,6 +724,47 @@ export async function POST(request: Request) {
       if (!version.ok) return version.denied;
     }
 
+    /*
+     * The anchors this row will actually be stored with — the second half of the
+     * check skipped above for a replacement.
+     *
+     * A new version inherits its parent's filing, so the rule is satisfied by
+     * what is supplied OR what is carried. Refused here, still before the R2
+     * put, so a replacement of an unanchored parent leaves no orphaned bytes.
+     */
+    const filedAgainst = effectiveAnchors(
+      anchors,
+      version?.ok ? version.plan.carried : null,
+    );
+    if (replacesId) {
+      const missingAnchor = anchorRefusal(filedAgainst);
+      if (missingAnchor) return missingAnchor;
+    }
+
+    /*
+     * A NEW VERSION KEEPS THE DOCUMENT'S KIND, for the same reason it keeps its
+     * title and its expiry: it is the same document.
+     *
+     * `planVersion` has always computed `carried.kind`, and no insert on either
+     * upload route ever read it — so `kind` fell to its `"issue"` default and a
+     * workspace document silently became issue evidence the moment somebody
+     * replaced it. Measured: a `general` document filed against a site came back
+     * `issue` after "Upload new version", and the drawer's Type flipped from
+     * "Workspace document" to "Issue evidence". Latent until now, because the
+     * portal could not complete a replacement at all; the anchor fix above is
+     * what makes it reachable, so it is fixed in the same pass.
+     *
+     * PRECEDENCE, and it is the existing precedence rather than a new one: an
+     * explicitly requested kind still wins, and the file column still overrules
+     * both — "THE COLUMN DECIDES THE KIND" above is unchanged, and a version
+     * filed into the fault-picture column is fault evidence whatever its parent
+     * was. The predecessor is consulted only where the request said nothing and
+     * no column spoke, which is exactly the case that was defaulting.
+     */
+    if (version?.ok && !kindWasChosen && !kindFromColumn) {
+      kind = carriedKind(version.plan.carried.kind, allowedKinds, kind);
+    }
+
     const { env } = await import("cloudflare:workers");
     const runtimeEnv = env as unknown as { BUCKET?: R2Bucket };
     if (!runtimeEnv.BUCKET) {
@@ -732,21 +812,26 @@ export async function POST(request: Request) {
      * `.../maintenance/undefined/general/...` would be unreadable in the bucket
      * and would collide across every jobless document, and `object_key` carries
      * a UNIQUE constraint, so the second such upload would fail on a name.
+     *
+     * Derived from `filedAgainst`, not from the supplied anchors: a new version
+     * that inherits its parent's job would otherwise be stored under `unfiled`
+     * while the row it creates names that job, and the key is the only thing a
+     * person reading the bucket has to go on. Same order as `anchorSegment` in
+     * `./documents.ts`, which is where the rule now lives — the multipart route
+     * re-derives the prefix from it to prove a resumed upload is writing where
+     * its `start` said it would, and two spellings of one rule is how those two
+     * halves drift apart.
      */
-    const anchorSegment =
-      requestId ||
-      anchors.contractorId ||
-      anchors.siteId ||
-      anchors.unitId ||
-      "unfiled";
-    const key = `${orgId}/maintenance/${anchorSegment}/${kind}/${id}-${cleanName}`;
+    const key = `${orgId}/maintenance/${anchorSegment(filedAgainst)}/${kind}/${id}-${cleanName}`;
     await runtimeEnv.BUCKET.put(key, await file.arrayBuffer(), {
       httpMetadata: {
         contentType: file.type || "application/octet-stream",
         contentDisposition: `inline; filename="${cleanName}"`,
       },
       customMetadata: {
-        requestId,
+        // The job the ROW will name, so the object and the row agree: a version
+        // that inherits its parent's job would otherwise carry an empty one.
+        requestId: filedAgainst.requestId,
         kind,
         ...(boardColumnId ? { boardColumnId } : {}),
         uploadedBy: actor?.email ?? "public-form",

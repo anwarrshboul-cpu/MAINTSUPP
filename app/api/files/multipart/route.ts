@@ -19,8 +19,11 @@ import {
   anchorRefusal,
   anchorReferencesRefusal,
   anchorSegment,
+  anchorsForKey,
   attachmentPayload,
+  carriedKind,
   documentFieldUpdates,
+  effectiveAnchors,
   planVersion,
   readAnchors,
   resolveSiteId,
@@ -175,6 +178,21 @@ async function authorizeUpload(
    * need not repeat the lookups for every 5 MB chunk.
    */
   extraAnchors: Partial<Anchors> = {},
+  /*
+   * W07-03. The document this upload will supersede, carried on EVERY action
+   * because the key is named after what the document is filed against and a
+   * replacement inherits that from its predecessor. `start` reserves the key,
+   * every part re-derives the same prefix, `abort` re-derives it too, and all
+   * four must agree — see `anchorsForKey`.
+   */
+  replacesId = "",
+  /*
+   * Whether the CALLER named a kind, as opposed to the `?? "issue"` default
+   * standing in for silence. A replacement that named none inherits its
+   * predecessor's kind, and without this flag "issue" and "unspecified" are the
+   * same value by the time this function sees them.
+   */
+  chosenKind = false,
 ) {
   await ensureDatabase();
   /*
@@ -202,6 +220,13 @@ async function authorizeUpload(
   const kind = allowedKinds.has(requestedKind as AttachmentKind)
     ? (requestedKind as AttachmentKind)
     : null;
+  /*
+   * `"issue"` is also what an ABSENT kind becomes at the caller below, so the
+   * flag records whether anybody actually chose it. A replacement that chose
+   * nothing inherits its predecessor's kind rather than defaulting — see the
+   * note at the insert in `complete`.
+   */
+  const kindWasChosen = chosenKind && allowedKinds.has(requestedKind as AttachmentKind);
   const boardColumnId = requestedColumnId.trim().slice(0, 100);
   const anchors = readAnchors({
     requestId,
@@ -217,9 +242,36 @@ async function authorizeUpload(
       ),
     } as const;
   }
-  // W07-07 — a job is no longer mandatory, but SOMETHING is.
-  const missingAnchor = anchorRefusal(anchors);
-  if (missingAnchor) return { response: missingAnchor } as const;
+  /*
+   * W07-07 — a job is no longer mandatory, but SOMETHING is. ASKED ONLY OF AN
+   * ORIGINAL, and this is the multipart half of the "Upload new version" defect.
+   *
+   * `anchorRefusal(anchors)` stood here unconditionally, and `authorizeUpload`
+   * runs for EVERY action — `start`, each PUT part, `complete` and `abort`. The
+   * lineage was read 470 lines below, inside `complete` alone. So a new version
+   * of a document already filed against a site and a job was refused at `start`,
+   * before one byte moved, for having no anchors — and a replacement has no
+   * reason to re-send relationships nobody asked it to change. That is every
+   * replacement over ~900 KB, which is every photograph a phone takes.
+   *
+   * A REPLACEMENT IS DECIDED WHERE THE ROW IS WRITTEN. `complete` calls
+   * `planVersion`, then `effectiveAnchors` + `anchorRefusal` against
+   * supplied-or-inherited anchors, and deletes the bytes if it refuses. So this
+   * is a COURTESY refusal that saves an unanchored original its upload, not the
+   * guard: a replacement whose predecessor is itself unanchored is still refused
+   * with this same message, and nothing is invented to satisfy the rule.
+   *
+   * `replacesId` reaches this function on every action because
+   * `app/lib/client-upload.ts` now sends it on `start`, on each part and on
+   * `abort` as well as on `complete`. It used to travel on `complete` alone,
+   * which is why this check could not tell an unanchored original from a new
+   * version and why the key below was named `.../unfiled/...` for a replacement
+   * whose row named a job.
+   */
+  if (!replacesId) {
+    const missingAnchor = anchorRefusal(anchors);
+    if (missingAnchor) return { response: missingAnchor } as const;
+  }
 
   /*
    * THE TOKEN IS RESOLVED BEFORE THE JOB IS LOOKED UP, because it decides which
@@ -275,6 +327,20 @@ async function authorizeUpload(
   if (badAnchor) return { response: badAnchor } as const;
 
   /*
+   * WHAT THE OBJECT KEY IS NAMED AFTER — supplied, plus whatever a replacement
+   * inherits. ONE expression, resolved here, so `start`, every part and `abort`
+   * derive the identical prefix; deriving it two ways is what would make a
+   * replacement begin successfully and then have every part refused.
+   *
+   * Separate from `anchors` on purpose, and the two are not interchangeable.
+   * `anchors` is what the CALLER sent and is what the row's precedence rules are
+   * applied to at `complete` — in particular `resolveSiteId(anchors.siteId,
+   * workOrder?.siteId ?? carried.siteId)`, where a newly named job's site beats
+   * the predecessor's. `keyAnchors` is only ever a name for a bucket path.
+   */
+  const keyAnchors = await anchorsForKey(db, orgId, anchors, replacesId);
+
+  /*
    * THE COLUMN IS RESOLVED BEFORE THE GRANT IS CHECKED, and it did not used to
    * be.
    *
@@ -291,6 +357,8 @@ async function authorizeUpload(
    * is checked against exactly that.
    */
   let storedKind = kind;
+  /* Set when the file column overrules the request — see `kindForColumnKey`. */
+  let kindFromColumn = false;
   if (boardColumnId && workOrder) {
     // Scoped to the work order's own board, not the literal "maintenance" —
     // Store Documentation's twelve file columns live on another board and were
@@ -320,6 +388,7 @@ async function authorizeUpload(
       } as const;
     }
     storedKind = kindForColumnKey(column.key);
+    kindFromColumn = true;
   }
 
   /*
@@ -357,8 +426,11 @@ async function authorizeUpload(
     scope,
     orgId,
     kind: storedKind,
+    kindWasChosen,
+    kindFromColumn,
     workOrder,
     anchors,
+    keyAnchors,
     via: authority.via,
     db,
     boardColumnId: boardColumnId || null,
@@ -385,6 +457,11 @@ async function authorizeUpload(
  * directly, because a document with no job is now legitimate and its key is
  * named after whichever anchor it does have. Deriving it two different ways
  * would let a jobless multipart upload begin and then be refused at every part.
+ *
+ * It must be given `keyAnchors` — supplied PLUS inherited — and never the raw
+ * supplied anchors, for exactly that reason: `start` names a replacement's key
+ * after the predecessor's filing, so a part handler computing the prefix from an
+ * empty `siteId` would refuse every chunk of a perfectly good new version.
  */
 function validUploadKey(
   key: string,
@@ -467,6 +544,17 @@ export async function POST(request: Request) {
     const requestedKind = String(payload.kind ?? "issue");
     const uploadToken = String(payload.uploadToken ?? "").trim();
     const requestedColumnId = String(payload.columnId ?? "").trim();
+    /*
+     * Read on EVERY action, not only on `complete`.
+     *
+     * `complete` is still the only place a lineage is planned and a row written,
+     * but `start` has to name the key after what the document is filed against,
+     * and a replacement inherits that. Reading it there as well is what stopped a
+     * >900 KB new version of an MN-1058 document being stored under
+     * `.../maintenance/unfiled/...`, and what lets the anchor rule refuse an
+     * unanchored ORIGINAL before its bytes are sent.
+     */
+    const replacesId = String(payload.replaces ?? "").trim().slice(0, 120);
     const authorization = await authorizeUpload(
       request,
       requestId,
@@ -480,17 +568,22 @@ export async function POST(request: Request) {
         unitId: String(payload.unitId ?? "").trim(),
         contractorId: String(payload.contractorId ?? "").trim(),
       },
+      replacesId,
+      payload.kind !== undefined && payload.kind !== null,
     );
     if ("response" in authorization) return authorization.response;
     const {
       db,
       kind,
+      kindWasChosen,
+      kindFromColumn,
       workOrder,
       actorEmail,
       boardColumnId,
       orgId,
       scopedToken,
       anchors,
+      keyAnchors,
       scope,
       via,
     } = authorization;
@@ -548,15 +641,39 @@ export async function POST(request: Request) {
 
       const fileId = crypto.randomUUID();
       const cleanName = safeFileName(originalName) || `upload-${fileId}`;
-      // Named after whichever anchor this document has — see `anchorSegment`.
-      const key = `${orgId}/maintenance/${anchorSegment(anchors)}/${kind}/${fileId}-${cleanName}`;
+      /*
+       * Named after whichever anchor this document has — INCLUDING one it
+       * inherits. See `anchorSegment` and `anchorsForKey`.
+       *
+       * `anchorSegment(anchors)` stood here, and `anchors` is what the caller
+       * sent. A replacement sends none, so a >900 KB new version of a document
+       * filed against MN-1058 was stored under `.../maintenance/unfiled/...`
+       * while the row it created named MN-1058 — measured, and the same
+       * mismatch `../route.ts` had until the single-shot key was moved onto its
+       * effective anchors. The key is the only thing a person reading the bucket
+       * has to go on, and the two routes must not disagree about a rule that
+       * lives in one function precisely so they cannot.
+       */
+      const key = `${orgId}/maintenance/${anchorSegment(keyAnchors)}/${kind}/${fileId}-${cleanName}`;
       const upload = await storage.createMultipartUpload(key, {
         httpMetadata: {
           contentType,
           contentDisposition: `inline; filename="${cleanName}"`,
         },
         customMetadata: {
-          requestId,
+          /*
+           * The job the ROW will name, so the object and the row agree — the
+           * same value `../route.ts` writes. `keyAnchors`, not `requestId`,
+           * because a replacement inherits its job and would otherwise store an
+           * empty one beside a key that names it.
+           *
+           * `completeMetadata` compares this back at `complete` to prove the
+           * object it is finishing is the one `start` reserved, and is given the
+           * SAME expression there. Both sides read `keyAnchors.requestId` off
+           * one `anchorsForKey` call per request, and the four anchor columns are
+           * never written after insert, so the two reads cannot disagree.
+           */
+          requestId: keyAnchors.requestId,
           organisationId: orgId,
           kind,
           ...(boardColumnId ? { boardColumnId } : {}),
@@ -575,7 +692,7 @@ export async function POST(request: Request) {
 
     const key = String(payload.key ?? "");
     const uploadId = String(payload.uploadId ?? "");
-    if (!key || !uploadId || !validUploadKey(key, orgId, anchors, kind)) {
+    if (!key || !uploadId || !validUploadKey(key, orgId, keyAnchors, kind)) {
       return Response.json(
         { error: "The upload session is invalid." },
         { status: 400 },
@@ -614,7 +731,8 @@ export async function POST(request: Request) {
       await multipart.complete(parts);
       const completed = await completeMetadata(
         key,
-        requestId,
+        // The same expression `start` wrote — see the note beside it.
+        keyAnchors.requestId,
         kind,
         boardColumnId,
       );
@@ -683,7 +801,12 @@ export async function POST(request: Request) {
         return Response.json({ error: fields.error }, { status: 400 });
       }
 
-      const replacesId = String(payload.replaces ?? "").trim().slice(0, 120);
+      /*
+       * `replacesId` is read at the top of this handler now, not here: `start`
+       * needs it to name the key after the anchors a replacement inherits, and
+       * one reading of it is the only way `start`, the parts and `abort` can
+       * agree on that key.
+       */
       let version: Awaited<ReturnType<typeof planVersion>> | null = null;
       if (replacesId) {
         if (via !== "capability") {
@@ -698,6 +821,37 @@ export async function POST(request: Request) {
           await storage.delete(key);
           return version.denied;
         }
+      }
+
+      /*
+       * W07-07 — EVERY DOCUMENT BELONGS TO SOMETHING, asked here because here is
+       * where the row is written and here is the first moment the answer is
+       * knowable. `authorizeUpload` used to ask it at `start`, on the supplied
+       * anchors alone, and so refused every new version that did not re-send its
+       * parent's relationships — see the long note there.
+       *
+       * Supplied wins, the predecessor's filing is the floor, and nothing is
+       * invented: an original with no anchor, or a replacement whose parent is
+       * itself unanchored, is refused with the same message it always gave.
+       *
+       * BEFORE `standDownPredecessor`, not after. Standing the parent down and
+       * then refusing would leave the lineage with no current version at all —
+       * the document would vanish from every register while both its rows still
+       * existed.
+       */
+      const filedAgainst = effectiveAnchors(
+        anchors,
+        version?.ok ? version.plan.carried : null,
+      );
+      const missingAnchor = anchorRefusal(filedAgainst);
+      if (missingAnchor) {
+        // The bytes are already in the bucket; a refused row must not leave them
+        // there, exactly as the metadata and size refusals above do not.
+        await storage.delete(key);
+        return missingAnchor;
+      }
+
+      if (version?.ok) {
         await standDownPredecessor(db, orgId, version.predecessor.id);
       }
 
@@ -717,7 +871,22 @@ export async function POST(request: Request) {
             unitId: anchors.unitId || version?.plan.carried.unitId || null,
             contractorId:
               anchors.contractorId || version?.plan.carried.contractorId || null,
-            kind,
+            /*
+             * A NEW VERSION KEEPS THE DOCUMENT'S KIND — the same rule and the
+             * same precedence as `../route.ts`, written here too because this
+             * is the path every file over ~900 KB takes.
+             *
+             * `planVersion` has always computed `carried.kind` and neither
+             * insert ever read it, so a `general` workspace document came back
+             * as `issue` evidence after "Upload new version". An explicitly
+             * requested kind still wins and the file column still overrules
+             * both; the predecessor is consulted only where the request said
+             * nothing and no column spoke.
+             */
+            kind:
+              version?.ok && !kindWasChosen && !kindFromColumn
+                ? carriedKind(version.plan.carried.kind, allowedKinds, kind)
+                : kind,
             boardColumnId,
             objectKey: key,
             originalName: completed.originalName,
@@ -914,6 +1083,13 @@ export async function PUT(request: Request) {
         contractorId:
           request.headers.get("X-Upload-Contractor-Id")?.trim() ?? "",
       },
+      /*
+       * And the document being replaced, for the same reason: a replacement's
+       * key is named after the anchors it INHERITS, so a part handler that could
+       * not see `replaces` would compute `.../unfiled/...`, disagree with the key
+       * `start` reserved, and refuse every chunk of a valid new version.
+       */
+      request.headers.get("X-Upload-Replaces")?.trim().slice(0, 120) ?? "",
     );
     if ("response" in authorization) return authorization.response;
     if (
@@ -921,7 +1097,12 @@ export async function PUT(request: Request) {
       !uploadId ||
       !Number.isInteger(partNumber) ||
       partNumber < 1 ||
-      !validUploadKey(key, authorization.orgId, authorization.anchors, authorization.kind)
+      !validUploadKey(
+        key,
+        authorization.orgId,
+        authorization.keyAnchors,
+        authorization.kind,
+      )
     ) {
       return Response.json(
         { error: "The upload part is invalid." },

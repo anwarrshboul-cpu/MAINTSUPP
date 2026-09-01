@@ -25,6 +25,13 @@ import { useEffect, useState } from "react";
 import { Icon } from "../../components";
 import { MediaViewer, type MediaViewerFile } from "./media-viewer";
 import type { AttachmentRecord } from "../../lib/types";
+/*
+ * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the Documents
+ * register's own — the title somebody set, the stored filename otherwise — and
+ * every surface that names a document calls it. Printing `originalName`
+ * directly is what let a rename reach the register and stop there.
+ */
+import { documentName } from "./views/document-register";
 
 /** Photographs only. A PDF quote in the issue column is not a "before". */
 function pictures(files: AttachmentRecord[], kind: string) {
@@ -58,7 +65,7 @@ function Half({
             <li key={file.id}>
               <button
                 type="button"
-                title={file.originalName}
+                title={documentName(file)}
                 onClick={(event) => {
                   // Focused explicitly so closing the viewer returns the ring
                   // here — Safari does not focus a button on tap.
@@ -69,7 +76,7 @@ function Half({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`${file.inlineUrl}?thumb=1`}
-                  alt={file.originalName}
+                  alt={documentName(file)}
                   loading="lazy"
                   decoding="async"
                 />
