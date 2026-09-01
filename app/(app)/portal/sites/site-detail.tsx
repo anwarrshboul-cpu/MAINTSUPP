@@ -5,7 +5,6 @@ import { SectionPanel, SectionTabs } from "./section-tabs";
 import { useLoader } from "./use-loader";
 import {
   api,
-  daysUntil,
   formatDate,
   formatMoney,
   labelFor,
@@ -15,6 +14,8 @@ import {
   type SiteRecord,
   type UnitRecord,
 } from "./site-types";
+import { expiryStatus } from "../../../lib/expiry-status";
+import type { ComplianceState } from "../../../lib/types";
 
 type JobRow = {
   id: string;
@@ -89,18 +90,54 @@ function fileSize(bytes: number) {
 }
 
 /**
- * Expiry colouring uses the same vocabulary the compliance register will use in
- * Stage 5, so the language does not change under the user's feet later.
+ * The colour for each of the five register states.
+ *
+ * These five hexes are the product's existing compliance palette, taken from the
+ * Dashboard's compliance donut (`complianceSegments` in portal-app.tsx) so that
+ * a document which is amber on the Dashboard is the same amber here. "Not
+ * required" has no donut segment — it is excluded from the counts rather than
+ * coloured — so it takes the neutral grey this screen already used for a state
+ * that is not a finding.
  */
-function expiryState(expiry: string | null, notRequired: boolean) {
-  if (notRequired) return { label: "Not required", tone: "#5c82af" };
-  if (!expiry) return { label: "No expiry recorded", tone: "#808799" };
-  const days = daysUntil(expiry);
-  if (days === null) return { label: "No expiry recorded", tone: "#808799" };
-  if (days < 0) return { label: `Expired ${Math.abs(days)} days ago`, tone: "#e2445c" };
-  if (days <= 30) return { label: `Expires in ${days} days`, tone: "#f0a91f" };
-  return { label: `Valid to ${formatDate(expiry)}`, tone: "#12b4a8" };
-}
+const COMPLIANCE_TONES: Record<ComplianceState, string> = {
+  Compliant: "#12b4a8",
+  "Expiring soon": "#f0a91f",
+  Expired: "#e2445c",
+  Missing: "#5c82af",
+  "Not required": "#808799",
+};
+
+/*
+ * WHAT USED TO BE HERE, AND WHY IT IS GONE.
+ *
+ * A local `expiryState(expiry, notRequired)` that classified certificates with
+ * its own ladder:
+ *
+ *     if (days < 0)   "Expired N days ago"
+ *     if (days <= 30) "Expires in N days"
+ *     else            "Valid to DD/MM/YYYY"
+ *
+ * Its docblock said the colouring "uses the same vocabulary the compliance
+ * register will use in Stage 5, so the language does not change under the
+ * user's feet later". The register then shipped with a DIFFERENT vocabulary —
+ * Compliant / Expiring soon / Expired / Missing / Not required — and a
+ * DIFFERENT threshold, `EXPIRY_DUE_SOON_DAYS = 60`, and this file was never
+ * brought across. So the promise inverted itself: the language did change under
+ * the user's feet, and this screen became the one place still speaking the old
+ * one.
+ *
+ * The consequence was not cosmetic. A certificate 45 days from expiry is
+ * "Expiring soon" on the Dashboard, on the Compliance Tracker and in the digest,
+ * and read "Valid to 15/10/2026" in reassuring green on the page for the
+ * individual store — the one screen a manager opens when they are asking about
+ * that specific shop.
+ *
+ * There is no local classifier now. The five-word state arrives already derived
+ * from `readSiteComplianceRecords`, which computes it with `complianceStateFor`
+ * — the same function the register, the board and the digest use — and
+ * `expiryStatus` supplies the sentence for the accessible description, so the
+ * one remaining piece of date arithmetic on this screen is also the shared one.
+ */
 
 export function SiteDetail({
   siteId,
@@ -294,13 +331,31 @@ export function SiteDetail({
               </thead>
               <tbody>
                 {data.compliance.map((record) => {
-                  const state = expiryState(record.expiryDate, record.notRequired);
+                  /*
+                   * The chip says the STATE; its title says WHY, in the shared
+                   * classifier's own words ("expires 12 March 2026, in 45
+                   * days"). Splitting them this way is what lets the visible
+                   * label be one of the five words every other screen uses
+                   * while the day count — the thing the old local ladder built
+                   * its label out of — is still on the page for anyone who
+                   * needs it.
+                   */
+                  const status = expiryStatus(record.expiryDate);
+                  const detail = record.notRequired
+                    ? "not required at this site"
+                    : record.tracksExpiry || record.expiryDate
+                      ? status.description
+                      : "no expiry date is tracked for this document";
                   return (
                     <tr key={record.id}>
                       <td data-label="Document">{record.kind}</td>
                       <td data-label="State">
-                        <span className="status-chip" style={{ backgroundColor: state.tone }}>
-                          {state.label}
+                        <span
+                          className="status-chip"
+                          style={{ backgroundColor: COMPLIANCE_TONES[record.status] ?? "#808799" }}
+                          title={`${record.kind}: ${detail}`}
+                        >
+                          {record.status}
                         </span>
                       </td>
                       <td data-label="Expiry">{formatDate(record.expiryDate)}</td>

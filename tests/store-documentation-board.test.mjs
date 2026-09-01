@@ -289,13 +289,23 @@ test("an imported cell resolves to its choice even though it holds the label", a
   assert.match(format, /export function findChoice/);
   assert.match(format, /choice\.label\.trim\(\)\.toLowerCase\(\) === needle/);
 
+  /*
+   * `CustomChoiceCell` moved out of live-board.tsx into cells/custom-column-cell.tsx
+   * — a verbatim lift to buy headroom under the 6,000-line cap in
+   * stage-eight-board-split.test.mjs. The assertion is unchanged; only the file
+   * it reads moved. Both files are checked so that neither the new home nor the
+   * old one can reintroduce the id-only lookup.
+   */
+  const cell = await read("app/(app)/portal/cells/custom-column-cell.tsx");
+  assert.match(cell, /const selected = findChoice\(choices, value\)/);
   const board = await read("app/(app)/portal/live-board.tsx");
-  assert.match(board, /const selected = findChoice\(choices, value\)/);
-  assert.doesNotMatch(
-    board,
-    /choices\.find\(\(choice\) => choice\.id === value\)/,
-    "the id-only lookup is what blanked the imported cells",
-  );
+  for (const source of [cell, board]) {
+    assert.doesNotMatch(
+      source,
+      /choices\.find\(\(choice\) => choice\.id === value\)/,
+      "the id-only lookup is what blanked the imported cells",
+    );
+  }
 });
 
 test("the board serves the rows it places", async () => {

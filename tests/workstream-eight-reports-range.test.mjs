@@ -689,8 +689,26 @@ test("the two registers say why they are empty", async () => {
   const source = await read(PORTAL);
   const documents = componentBody(source, "DocumentsView");
   assert.match(documents, /!filtered\.length &&/, "Documents draws a header over nothing");
-  assert.match(documents, /No documents were uploaded in \$\{window\.label\}/);
-  assert.match(documents, /window\.reason/, "an unreadable window must say so");
+  /*
+   * The sentences moved, and there are three of them now.
+   *
+   * W07-11 added five structured filters to this register, so a blank table has
+   * a third possible cause — the range, a filter, or the search — and each is
+   * fixed with a different control. `emptyRegisterReason` in
+   * views/document-register.ts picks the right one and is unit-tested against
+   * all four cases in workstream-seven-official-register.test.mjs; the view
+   * calls it and renders the answer. Both halves are asserted here so the
+   * wiring cannot rot: the view must ask, and the module must still be able to
+   * say all three things.
+   */
+  assert.match(documents, /const emptyReason = emptyRegisterReason\(\{/);
+  assert.match(documents, /\{emptyReason\}/, "and it must actually be rendered");
+  assert.match(documents, /windowReason: window\.reason/, "an unreadable window must say so");
+
+  const register = await read("app/(app)/portal/views/document-register.ts");
+  assert.match(register, /No documents were uploaded in \$\{input\.windowLabel\}/);
+  assert.match(register, /Clear a filter to widen the register/);
+  assert.match(register, /if \(!input\.windowRecognised\) return input\.windowReason;/);
 
   assert.match(
     componentBody(source, "ContractorsView"),

@@ -6785,6 +6785,303 @@ th.sheet-column--name {
   color: var(--muted);
 }
 
+/* ---- The document register's derived status ----------------------------- */
+
+/*
+ * KEYED ON THE STATE, NOT ON THE LABEL.
+ *
+ * The old chips were built as `file-status--${file.status.toLowerCase()
+ * .replaceAll(" ", "-")}`, so the stylesheet was coupled to the exact wording
+ * of a user-visible string: renaming "Expiring soon" to anything else silently
+ * dropped the amber and left the chip reading as a pass. The class now comes
+ * from `documentStateClass`, which returns the `ExpiryState` — a typed union
+ * that cannot be reworded by accident.
+ *
+ * Every colour is a token, so both themes are covered by the palette that
+ * already exists rather than by a second block of hex.
+ */
+.document-status--valid {
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.document-status--due-soon {
+  background: var(--amber-100);
+  color: var(--amber-600);
+}
+
+.document-status--expired {
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+/*
+ * Deliberately neutral, and deliberately not green.
+ *
+ * Most rows in this register are photographs, which have no expiry and cannot
+ * have one. A green chip on them would read as "checked and in date" — a claim
+ * about compliance that nobody has made. Grey says only what is true: nothing
+ * is recorded here.
+ */
+.document-status--not-recorded,
+.document-status--archived {
+  background: var(--line-soft);
+  color: var(--muted);
+}
+
+/* ---- Filters on the register (W07-11) ----------------------------------- */
+
+.documents-panel .workspace-toolbar {
+  flex-wrap: wrap;
+}
+
+.document-filter-clear {
+  white-space: nowrap;
+}
+
+.document-filter-summary {
+  margin: 0;
+  padding: 0 15px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---- The document drawer: editor, versions, danger zone ----------------- */
+
+.drawer-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawer-section__head .drawer-label {
+  margin-bottom: 13px;
+}
+
+/*
+ * A button that reads as a link, but is a button.
+ *
+ * "Edit details" and "Show history" change what is on the screen; they do not
+ * navigate. Using an <a> for either would put them in the wrong place in a
+ * screen reader's link list and offer a context menu full of things that
+ * cannot be done.
+ */
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  /* 44px of touch target without 44px of ink: the visible text stays where the
+     eye expects it and the hit area grows around it. */
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, var(--green-700));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.drawer-error {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 12px;
+}
+
+.document-archived-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--line-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.document-status-note,
+.document-description {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.document-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.document-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.document-editor input,
+.document-editor textarea {
+  /* The 44px floor the rest of the app's touch targets keep. A date input in
+     particular is tapped, not typed, on every phone. */
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.document-editor textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.document-editor label small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.document-editor__actions,
+.document-danger-actions,
+.document-version-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.document-version-upload {
+  margin-top: 12px;
+}
+
+.document-version-upload small,
+.drawer-section--danger small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.document-versions {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-versions li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+
+.document-versions li.is-current {
+  border-color: var(--green-700);
+}
+
+.document-versions__no {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.document-versions__body {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+
+.document-versions__body strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-versions__body small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.document-versions__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.document-versions__actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Two icon-only links side by side: each needs its own touch target, or the
+     wrong version gets opened on a phone. */
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--muted);
+}
+
+.document-versions__actions a:hover {
+  color: inherit;
+}
+
+.drawer-section--danger {
+  border-top-color: var(--line);
+}
+
+/*
+ * The one destructive control on this surface, and it looks like one.
+ *
+ * It sits beside Archive on purpose: the two verbs are one decision, and
+ * putting them together is what lets somebody who reaches for "remove" notice
+ * that "archive" is what they actually meant.
+ */
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--red-600);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--red-600);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 640;
+  cursor: pointer;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: var(--red-100);
+}
+
+.danger-button:disabled,
+.document-editor__actions button:disabled,
+.document-version-upload button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .document-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));

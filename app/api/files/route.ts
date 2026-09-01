@@ -1,11 +1,6 @@
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import type { AttachmentKind, MaintenanceRequest } from "../../lib/types";
 import { ensureDatabase } from "../../../db/init";
-import {
-  type EvidenceKind,
-  recordTokenUse,
-  resolveJobToken,
-} from "../../lib/job-tokens";
 import {
   activityLog,
   attachments,
@@ -13,12 +8,29 @@ import {
   maintenanceRequests,
 } from "../../../db/schema";
 import { boardKeyForRequest } from "../../lib/board-registry";
-import { demoIdentityAllowed } from "../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { auditActor, recordAudit } from "../../lib/audit";
 import {
   kindForColumnKey,
   reconcileAttachmentCounts,
 } from "../../lib/attachment-counts";
+import {
+  anchorRefusal,
+  anchorReferencesRefusal,
+  attachmentPayload,
+  documentFieldUpdates,
+  liveDocumentFilter,
+  planVersion,
+  readAnchors,
+  resolveSiteId,
+  restorePredecessor,
+  standDownPredecessor,
+} from "./documents";
+import {
+  pendingReview,
+  resolveUploadAuthority,
+  resolveUploadTenant,
+} from "./upload-authority";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -120,24 +132,6 @@ function isAllowedFile(file: File) {
   return typeOk && allowedExtensions.has(fileExtension(file.name));
 }
 
-function attachmentPayload(row: typeof attachments.$inferSelect) {
-  return {
-    id: row.id,
-    requestId: row.requestId,
-    kind: row.kind,
-    boardColumnId: row.boardColumnId,
-    originalName: row.originalName,
-    contentType: row.contentType,
-    byteSize: row.byteSize,
-    createdAt: row.createdAt,
-    // Read by the viewer's "Added by …" line. The column has always been
-    // written; it was simply never served.
-    uploadedByEmail: row.uploadedByEmail,
-    inlineUrl: `/api/files/${row.id}`,
-    downloadUrl: `/api/files/${row.id}?download=1`,
-  };
-}
-
 function requestPayload(
   row: typeof maintenanceRequests.$inferSelect,
 ): MaintenanceRequest {
@@ -152,13 +146,11 @@ function requestPayload(
   return payload as unknown as MaintenanceRequest;
 }
 
-async function sha256(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+/*
+ * `sha256` used to live here, for the legacy request-token comparison. It moved
+ * to `./upload-authority.ts` with the check it served, so the two upload routes
+ * cannot end up hashing the same token two different ways.
+ */
 
 function unavailable(error?: unknown) {
   // A session that has ended is not an outage: 503 tells a browser to retry
@@ -186,6 +178,10 @@ export async function GET(request: Request) {
   }
 }
 
+function text(value: string | null, max: number) {
+  return value?.trim().slice(0, max) ?? "";
+}
+
 async function listFiles(request: Request) {
   const search = new URL(request.url).searchParams;
   const requestId = search.get("requestId")?.trim();
@@ -195,6 +191,47 @@ async function listFiles(request: Request) {
     ? requestedKind
     : null;
   const limit = Math.min(Math.max(Number(search.get("limit")) || 100, 1), 100);
+  /*
+   * W07-11 — OFFSET, BECAUSE THERE WAS NO WAY PAST THE FIRST HUNDRED.
+   *
+   * `limit` has always been clamped to 100 and there was no offset, no page and
+   * no cursor, so the 101st document in a workspace was unreachable through this
+   * API at all — and worse than unreachable, invisible: a caller totalling what
+   * it received got `min(real, 100)` and had no way to know the number was a
+   * ceiling rather than a count. That is how a register ends up confidently
+   * reporting 100 certificates when it holds 340.
+   *
+   * `page` is accepted as well as `offset` because it is what a paginated UI
+   * naturally holds; whichever is given, the answer carries `total`, `page` and
+   * `pageCount` so the caller never has to infer them from the length of the
+   * array. `/api/audit` answers in exactly this shape.
+   */
+  const page = Math.max(Number(search.get("page")) || 1, 1);
+  const offset = Math.max(
+    Number(search.get("offset")) || (page - 1) * limit,
+    0,
+  );
+
+  // W07-11 filters. Each is optional and each is an exact id or an explicit
+  // range — no name matching, so nothing here can quietly widen a query.
+  const siteId = text(search.get("siteId"), 120);
+  const unitId = text(search.get("unitId"), 120);
+  const contractorId = text(search.get("contractorId"), 120);
+  const documentType = text(search.get("documentType"), 80);
+  const expiryFrom = text(search.get("expiryFrom"), 10);
+  const expiryTo = text(search.get("expiryTo"), 10);
+  const query = text(search.get("q"), 120);
+  /*
+   * `archived` is tri-state, and the default is the load-bearing part.
+   *
+   * Absent means LIVE DOCUMENTS ONLY — current version, not archived — because
+   * that is what every existing caller means by "the files on this cell", and a
+   * default that included superseded versions would triple the board's photo
+   * strip the first time a certificate was replaced. "true" asks for the archive
+   * specifically; "all" is the audit view, and is the only way to see history.
+   */
+  const archived = text(search.get("archived"), 10).toLowerCase();
+  const versionsOf = text(search.get("versionsOf"), 120);
 
   await ensureDatabase();
   /*
@@ -252,12 +289,86 @@ async function listFiles(request: Request) {
       : eq(attachments.boardColumnId, columnId);
   }
 
+  /*
+   * The version/archive predicate. See `liveDocumentFilter` for why the default
+   * is not merely a convenience.
+   *
+   * `versionsOf` overrides it entirely: asking for a document's history means
+   * asking for its superseded versions, so filtering them out would answer the
+   * question with an empty list. It is scoped to one lineage, so it cannot be
+   * used to dump every version in the workspace by accident.
+   */
+  const lineageFilter = versionsOf
+    ? or(
+        eq(attachments.rootDocumentId, versionsOf),
+        eq(attachments.id, versionsOf),
+      )
+    : undefined;
+  const stateFilter = versionsOf
+    ? undefined
+    : archived === "all"
+      ? undefined
+      : archived === "true"
+        ? and(eq(attachments.isCurrent, true), isNotNull(attachments.archivedAt))
+        : liveDocumentFilter();
+
   const where = and(
     eq(attachments.organisationId, orgId),
     requestId ? eq(attachments.requestId, requestId) : undefined,
     kind ? eq(attachments.kind, kind) : undefined,
     columnFilter,
+    siteId ? eq(attachments.siteId, siteId) : undefined,
+    unitId ? eq(attachments.unitId, unitId) : undefined,
+    contractorId ? eq(attachments.contractorId, contractorId) : undefined,
+    documentType ? eq(attachments.documentType, documentType) : undefined,
+    /*
+     * An expiry range NEVER matches an undated document, in either direction.
+     *
+     * `expiry_date IS NULL >= '2027-01-01'` is unknown, not false, so a bare
+     * comparison already excludes them — but only by accident of SQL's
+     * three-valued logic, and only while the comparison stays a comparison. Said
+     * explicitly so that "expiring in the next 30 days" cannot ever be answered
+     * with a pile of certificates that have no expiry recorded at all, which is
+     * the opposite of what the person asking is chasing.
+     */
+    expiryFrom
+      ? and(isNotNull(attachments.expiryDate), gte(attachments.expiryDate, expiryFrom))
+      : undefined,
+    expiryTo
+      ? and(isNotNull(attachments.expiryDate), lte(attachments.expiryDate, expiryTo))
+      : undefined,
+    /*
+     * Search covers the three names a person might remember it by: the title
+     * they gave it, the filename it arrived as, and its type. `original_name`
+     * is included because for most of this table's life it was the ONLY name a
+     * document had, so a search that ignored it would fail on every row
+     * uploaded before W07-02 existed.
+     */
+    query
+      ? or(
+          like(attachments.title, `%${query}%`),
+          like(attachments.originalName, `%${query}%`),
+          like(attachments.documentType, `%${query}%`),
+        )
+      : undefined,
+    lineageFilter,
+    stateFilter,
   );
+
+  /*
+   * The total is COUNTED, not inferred from the page.
+   *
+   * Without it a caller cannot tell a full page from the last page, and the only
+   * number it could report — the length of `files` — is the page size. That is
+   * the specific way this endpoint was misleading: silently truthful about the
+   * rows it returned and silently wrong about how many there are.
+   */
+  const [totals] = await db
+    .select({ total: sql<number>`COUNT(*)` })
+    .from(attachments)
+    .where(where);
+  const total = Number(totals?.total ?? 0);
+
   const rows = await db
     .select()
     .from(attachments)
@@ -265,11 +376,29 @@ async function listFiles(request: Request) {
     /*
      * Newest first, with the id as the tiebreak — a phone batch lands several
      * rows in the same second, and `created_at` alone leaves the database
-     * free to return those in a different order per query.
+     * free to return those in a different order per query. With an OFFSET that
+     * stops being cosmetic: an unstable order means page 2 can repeat a row
+     * from page 1 and drop another entirely.
+     *
+     * A version history reads the other way round — oldest first — because that
+     * is the order the versions happened in, and v1 to v4 is how a person reads
+     * a document's story.
      */
-    .orderBy(desc(attachments.createdAt), desc(attachments.id))
-    .limit(limit);
-  return Response.json({ files: rows.map(attachmentPayload) });
+    .orderBy(
+      ...(versionsOf
+        ? [asc(attachments.versionNo), asc(attachments.id)]
+        : [desc(attachments.createdAt), desc(attachments.id)]),
+    )
+    .limit(limit)
+    .offset(offset);
+  return Response.json({
+    files: rows.map(attachmentPayload),
+    total,
+    limit,
+    offset,
+    page: Math.floor(offset / limit) + 1,
+    pageCount: Math.max(Math.ceil(total / limit), 1),
+  });
 }
 
 export async function POST(request: Request) {
@@ -285,42 +414,51 @@ export async function POST(request: Request) {
      * tenant would otherwise write into the first. See `tokenOrgId` below.
      */
     const scope = await scopedDb(request, { allowAnonymous: true });
-    const { actor, authenticated, db } = scope;
+    const { actor, db } = scope;
     /*
-     * Somebody operating the dashboard, as opposed to a contractor holding a
-     * link.
-     *
-     * `authenticated` alone was wrong here, and it is why uploading from the
-     * board failed with "This upload link has expired. Submit a new request."
-     * The role switcher in the sidebar — "Preview User / TESTING ACCESS" — is a
-     * demo identity, and a demo identity is deliberately NOT `authenticated`.
-     * So every branch below read a signed-in coordinator as an anonymous
-     * stranger, looked for the job link they do not have, and refused them.
-     *
-     * `scopedDbWithCapability` already draws the line in exactly this place and
-     * for exactly this reason; this only says the same thing on the upload
-     * path. `demoIdentityAllowed()` is `NODE_ENV !== "production"`, so in
-     * production this is identical to the check it replaces and no stranger
-     * gains anything.
+     * `isOperator = authenticated || demoIdentityAllowed()` used to stand here
+     * and decide everything below it. It is gone; see
+     * `./upload-authority.ts` for what replaced it and why the ORDER in which a
+     * token and a session are consulted is the whole of the fix.
      */
-    const isOperator = authenticated || demoIdentityAllowed();
-    let orgId = scope.orgId;
     const form = await request.formData();
     const file = form.get("file");
-    const requestId = String(form.get("requestId") ?? "").trim();
     const requestedKind = String(form.get("kind") ?? "issue") as AttachmentKind;
     let kind = allowedKinds.has(requestedKind) ? requestedKind : "issue";
     const boardColumnId = String(form.get("columnId") ?? "")
       .trim()
       .slice(0, 100);
     const uploadToken = String(form.get("uploadToken") ?? "").trim();
+    /*
+     * W07-07 — WHAT THIS DOCUMENT BELONGS TO.
+     *
+     * `requestId` was mandatory, which is exactly why a contractor's insurance
+     * certificate had nowhere to go: it is a fact about the contractor, not
+     * evidence about a work order, and the route answered 400 because there was
+     * no job id to give. It is now one of four canonical anchors and at least one
+     * is required — nothing floats free, and nothing has to be invented to
+     * satisfy a column.
+     */
+    const anchors = readAnchors({
+      requestId: form.get("requestId"),
+      siteId: form.get("siteId"),
+      unitId: form.get("unitId"),
+      contractorId: form.get("contractorId"),
+    });
+    const requestId = anchors.requestId;
+    /*
+     * W07-03 — the document this one supersedes, if any. A replacement is a NEW
+     * row in the same lineage, never a rewrite of the old bytes: `GET` serves
+     * objects `immutable` precisely because no id's bytes ever change.
+     */
+    const replacesId = String(form.get("replaces") ?? "").trim().slice(0, 120);
+    let orgId = scope.orgId;
 
-    if (!(file instanceof File) || !requestId) {
-      return Response.json(
-        { error: "A file and work order ID are required." },
-        { status: 400 },
-      );
+    if (!(file instanceof File)) {
+      return Response.json({ error: "A file is required." }, { status: 400 });
     }
+    const missingAnchor = anchorRefusal(anchors);
+    if (missingAnchor) return missingAnchor;
     if (!isAllowedFile(file)) {
       return Response.json(
         {
@@ -387,12 +525,17 @@ export async function POST(request: Request) {
       *
       * Taking the organisation from the token removes the coincidence. A
       * session-backed caller keeps the tenant their membership resolved.
+      *
+      * It is now resolved UNCONDITIONALLY rather than only for a caller with no
+      * session. That is deliberate and is the load-bearing half of the W07-01
+      * fix: a signed-in `client` who opens a public form link in the same
+      * browser is exercising the LINK's grant, and skipping the token because a
+      * session happens to exist would refuse them while an anonymous stranger
+      * holding the identical link is allowed.
       */
-    let scopedToken: Awaited<ReturnType<typeof resolveJobToken>> = null;
-    if (!isOperator && uploadToken) {
-      scopedToken = await resolveJobToken(db, uploadToken);
-      if (scopedToken) orgId = scopedToken.organisationId;
-    }
+    const tenant = await resolveUploadTenant(db, orgId, uploadToken);
+    orgId = tenant.orgId;
+    const scopedToken = tenant.token;
 
     /*
      * A job in the recycle bin does not accept new files. Its row survives a
@@ -401,33 +544,40 @@ export async function POST(request: Request) {
      * file would appear out of nowhere if the job were later restored.
      * "Not found" rather than a specific refusal: as far as this route is
      * concerned a binned job is not there.
+     *
+     * The lookup is skipped entirely when no job was named — a contractor's
+     * insurance certificate has no work order, and W07-07 no longer pretends it
+     * must. Every use of `workOrder` below is therefore optional-chained.
      */
-    const [workOrder] = await db
-      .select()
-      .from(maintenanceRequests)
-      .where(
-        and(
-          eq(maintenanceRequests.id, requestId),
-          eq(maintenanceRequests.organisationId, orgId),
-          isNull(maintenanceRequests.deletedAt),
-        ),
-      )
-      .limit(1);
-    if (!workOrder) {
+    const [workOrder] = requestId
+      ? await db
+          .select()
+          .from(maintenanceRequests)
+          .where(
+            and(
+              eq(maintenanceRequests.id, requestId),
+              eq(maintenanceRequests.organisationId, orgId),
+              isNull(maintenanceRequests.deletedAt),
+            ),
+          )
+          .limit(1)
+      : [];
+    if (requestId && !workOrder) {
       return Response.json({ error: "Work order not found." }, { status: 404 });
     }
 
-    // Belt and braces: the token's tenant and the job's must be the same one.
-    // The lookup above already guarantees it; this says so, so that a future
-    // change to either cannot quietly separate them.
-    if (scopedToken && scopedToken.organisationId !== workOrder.organisationId) {
-      return Response.json(
-        { error: "This link does not belong to that job." },
-        { status: 403 },
-      );
-    }
+    /*
+     * The other three anchors, checked against THIS tenant before anything is
+     * written. The database will not do it — there is no foreign key on
+     * `site_id` or `unit_id` in the deployed DDL whatever `db/schema.ts`
+     * declares — so this is the only thing standing between a typo and a
+     * document filed against a row that does not exist. Before the R2 put, not
+     * merely before the insert, or a refusal would leave orphaned bytes.
+     */
+    const badAnchor = await anchorReferencesRefusal(db, orgId, anchors);
+    if (badAnchor) return badAnchor;
 
-    if (boardColumnId) {
+    if (boardColumnId && workOrder) {
       // The column must belong to the board this work order is placed on —
       // not to "maintenance" as a literal, which refused every Store
       // Documentation certificate. See `boardKeyForRequest`.
@@ -481,63 +631,58 @@ export async function POST(request: Request) {
       kind = kindForColumnKey(column.key);
     }
 
-    // Z3 — a scoped contractor link carries its own permitted evidence kinds.
-    //
-    // The legacy reporter token below is left untouched: it exists so someone
-    // submitting the public form can attach fault photos, and widening it would
-    // let any reporter link write completion evidence. A contractor link is a
-    // different grant, so it is checked first and separately.
     /*
-     * `!isOperator`, not `!actor`.
+     * W07-01 — MAY YOU, not merely who are you.
      *
-     * `getWorkspaceActor` never fails — it returns a preview identity when
-     * there is no session — so `actor` is always truthy and `!actor` was always
-     * false. Every branch below was therefore unreachable: the contractor
-     * link's job binding and allowed-kinds check, `recordTokenUse`, the public
-     * token's hash and expiry, and the "issue evidence only" rule. The route
-     * accepted an `uploadToken` form field and ignored it entirely.
+     * Three pages of `!isOperator` branches stood here: the contractor link's
+     * job binding and allowed-kinds check, `recordTokenUse`, the public token's
+     * hash and expiry, and the "issue evidence only" rule. Every one of them was
+     * skipped for any caller with a session, whatever that session could
+     * actually do — so the one thing the block never checked was permission.
+     *
+     * `resolveUploadAuthority` is that same set of rules with a capability floor
+     * underneath and one change of order: a presented token answers first, a
+     * session's capability answers only when no token was presented. It is
+     * called AFTER the column has coerced the kind, because the grant must be
+     * checked against what will actually be written — checking the requested
+     * kind is what made the contractor page's issue slot answer 403 for a
+     * request its link plainly permitted.
      */
-    if (!isOperator && uploadToken) {
-      if (scopedToken && scopedToken.requestId !== workOrder.id) {
-        return Response.json(
-          { error: "This link does not belong to that job." },
-          { status: 403 },
-        );
-      }
-      if (scopedToken && !scopedToken.allowedKinds.includes(kind as EvidenceKind)) {
-        return Response.json(
-          { error: `This link cannot upload ${kind} evidence.` },
-          { status: 403 },
-        );
-      }
-      if (scopedToken) {
-        // Counts towards the link's usage so a coordinator can see whether the
-        // contractor ever opened it.
-        await recordTokenUse(db, scopedToken.id);
-      }
-    }
+    const authority = await resolveUploadAuthority({
+      request,
+      scope,
+      orgId,
+      workOrder: workOrder ?? null,
+      storedKind: kind,
+      uploadToken,
+      jobToken: scopedToken,
+    });
+    if (authority.denied) return authority.denied;
 
-    if (!isOperator && !scopedToken) {
-      const validUntil = workOrder.publicUploadTokenExpiresAt
-        ? new Date(workOrder.publicUploadTokenExpiresAt).getTime()
-        : 0;
-      const suppliedHash = uploadToken ? await sha256(uploadToken) : "";
-      if (
-        !workOrder.publicUploadTokenHash ||
-        suppliedHash !== workOrder.publicUploadTokenHash ||
-        validUntil < Date.now()
-      ) {
+    /*
+     * W07-03 — a replacement is planned before any bytes move.
+     *
+     * Read separately from the write so a missing, archived or already-superseded
+     * predecessor is refused cleanly. Doing it after the R2 put would mean the
+     * UNIQUE index on `coalesce(root_document_id, id) WHERE is_current` rejects
+     * the insert once the object is already stored: an orphan in the bucket and a
+     * 503 for something that is really a 409.
+     *
+     * Only the capability path may replace. A contractor link and a public form
+     * token are grants to ADD evidence to a job, not to supersede a document
+     * somebody else filed — and a token holder cannot see the register well
+     * enough to know what they would be standing down.
+     */
+    let version: Awaited<ReturnType<typeof planVersion>> | null = null;
+    if (replacesId) {
+      if (authority.via !== "capability") {
         return Response.json(
-          { error: "This upload link has expired. Submit a new request." },
+          { error: "This link cannot replace an existing document." },
           { status: 403 },
         );
       }
-      if (kind !== "issue") {
-        return Response.json(
-          { error: "Public requests can only add issue evidence." },
-          { status: 403 },
-        );
-      }
+      version = await planVersion(db, orgId, replacesId);
+      if (!version.ok) return version.denied;
     }
 
     const { env } = await import("cloudflare:workers");
@@ -549,9 +694,52 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * W07-02 — the document's own identity, supplied at upload time.
+     *
+     * Optional throughout: an evidence photograph from a phone has no title and
+     * needs none, and requiring one would break every existing caller. A
+     * replacement inherits its predecessor's metadata (`version.plan.carried`)
+     * and anything sent here overrides that — so re-uploading an expired
+     * certificate with a new date is one request, and re-uploading it with no
+     * fields at all keeps the title and type it already had rather than blanking
+     * them.
+     */
+    const fields = documentFieldUpdates({
+      ...(form.has("title") ? { title: form.get("title") } : {}),
+      ...(form.has("documentType")
+        ? { documentType: form.get("documentType") }
+        : {}),
+      ...(form.has("description")
+        ? { description: form.get("description") }
+        : {}),
+      ...(form.has("expiryDate") ? { expiryDate: form.get("expiryDate") } : {}),
+    });
+    // A malformed expiry is answered here, before anything is stored. The
+    // Postgres CHECK on `expiry_date` would otherwise turn it into a 503.
+    if (!fields.ok) {
+      return Response.json({ error: fields.error }, { status: 400 });
+    }
+
     const id = crypto.randomUUID();
     const cleanName = safeFileName(file.name) || `upload-${id}`;
-    const key = `${orgId}/maintenance/${requestId}/${kind}/${id}-${cleanName}`;
+    /*
+     * The object key names what the document is filed against.
+     *
+     * `requestId` used to be interpolated unconditionally and was mandatory, so
+     * it was always present. Now that a document may have no job, the segment
+     * falls back to whichever anchor it does have — a key reading
+     * `.../maintenance/undefined/general/...` would be unreadable in the bucket
+     * and would collide across every jobless document, and `object_key` carries
+     * a UNIQUE constraint, so the second such upload would fail on a name.
+     */
+    const anchorSegment =
+      requestId ||
+      anchors.contractorId ||
+      anchors.siteId ||
+      anchors.unitId ||
+      "unfiled";
+    const key = `${orgId}/maintenance/${anchorSegment}/${kind}/${id}-${cleanName}`;
     await runtimeEnv.BUCKET.put(key, await file.arrayBuffer(), {
       httpMetadata: {
         contentType: file.type || "application/octet-stream",
@@ -566,20 +754,72 @@ export async function POST(request: Request) {
       },
     });
 
+    /*
+     * The predecessor stands down BEFORE the successor is inserted.
+     *
+     * The database permits exactly one `is_current` row per lineage, so the other
+     * order is rejected outright — and being rejected is the constraint doing its
+     * job, not something to design around. The instant in which a lineage has no
+     * current version is the safe direction to fail: a missing document reads as
+     * an open finding, two current versions read as a doubled count that nobody
+     * notices. `restorePredecessor` closes the window if the insert then fails.
+     */
+    if (version?.ok) {
+      await standDownPredecessor(db, orgId, version.predecessor.id);
+    }
+
     try {
       const [created] = await db
         .insert(attachments)
         .values({
           id,
           organisationId: orgId,
-          requestId,
-          siteId: workOrder.siteId,
+          /*
+           * The anchors, and the precedence that matters: AN EXPLICIT `siteId`
+           * WINS OVER THE JOB'S. Both upload routes wrote `workOrder.siteId`
+           * unconditionally, which is why all 19 pre-migration rows carry a site
+           * identical to their job's and why the column looked derived. It is
+           * not: a document can concern a different site from the job that
+           * surfaced it, and a document with no job has only this.
+           */
+          requestId: requestId || version?.plan.carried.requestId || null,
+          siteId: resolveSiteId(
+            anchors.siteId,
+            workOrder?.siteId ?? version?.plan.carried.siteId,
+          ),
+          /*
+           * Written for real, not declared and left null. A column with a reader
+           * and no writer is the most misleading shape a schema can have — it
+           * reads as a feature that exists and answers every question with
+           * "nothing recorded".
+           */
+          unitId: anchors.unitId || version?.plan.carried.unitId || null,
+          contractorId:
+            anchors.contractorId || version?.plan.carried.contractorId || null,
           kind,
-          boardColumnId: boardColumnId || null,
+          boardColumnId:
+            boardColumnId || version?.plan.carried.boardColumnId || null,
           objectKey: key,
           originalName: file.name,
           contentType: file.type || "application/octet-stream",
           byteSize: file.size,
+          // W07-02 metadata: the predecessor's values, then this request's.
+          title: fields.values.title ?? version?.plan.carried.title ?? null,
+          documentType:
+            fields.values.documentType ??
+            version?.plan.carried.documentType ??
+            null,
+          description:
+            fields.values.description ??
+            version?.plan.carried.description ??
+            null,
+          expiryDate:
+            fields.values.expiryDate ?? version?.plan.carried.expiryDate ?? null,
+          // W07-03 lineage. Absent `replaces`, a document is version 1 of itself:
+          // `root_document_id` stays NULL and resolves as `coalesce(root, id)`.
+          rootDocumentId: version?.ok ? version.plan.rootDocumentId : null,
+          versionNo: version?.ok ? version.plan.versionNo : 1,
+          isCurrent: true,
           /*
            * Who really uploaded this.
            *
@@ -605,7 +845,13 @@ export async function POST(request: Request) {
            * rejection could never match a row. Anonymous evidence published
            * itself straight onto the job.
            */
-          pending: Boolean(scopedToken),
+          /*
+           * Keyed on the GRANT, not on `!isOperator`. The two expressions happen
+           * to agree today and would stop agreeing the moment a signed-in client
+           * used a contractor link — the review queue would then silently skip
+           * exactly the upload it exists to catch. See `pendingReview`.
+           */
+          pending: pendingReview(authority.via),
           submittedVia: scopedToken ? scopedToken.id : null,
         })
         .returning();
@@ -621,26 +867,90 @@ export async function POST(request: Request) {
        * five photographs against three rows. A COUNT converges from whatever
        * the counter had drifted to. See `app/lib/attachment-counts.ts`.
        */
-      const updatedRequest = await reconcileAttachmentCounts(db, orgId, requestId);
+      const updatedRequest = requestId
+        ? await reconcileAttachmentCounts(db, orgId, requestId)
+        : null;
 
-      await db.insert(activityLog).values({
-        id: crypto.randomUUID(),
+      /*
+       * The job's own timeline. Skipped where there is no job — a contractor's
+       * insurance certificate has no work order to appear on — which is why the
+       * audit event below is written unconditionally rather than beside it.
+       */
+      if (requestId) {
+        await db.insert(activityLog).values({
+          id: crypto.randomUUID(),
+          organisationId: orgId,
+          entityType: "maintenance_request",
+          entityId: requestId,
+          action: "request.file_uploaded",
+          actorEmail: actor?.email ?? "public-form",
+          detail: JSON.stringify({
+            fileId: id,
+            fileName: file.name,
+            kind,
+            boardColumnId: boardColumnId || null,
+            contentType: file.type,
+          }),
+        });
+      }
+
+      /*
+       * W07-12 — THE AUDIT VIEWER'S STREAM, which documents never reached.
+       *
+       * `activity_log` above and `audit_events` here are deliberately separate
+       * stores answering different readers: the first is the job's timeline for
+       * the people working it, the second is the system trail for whoever has to
+       * answer a question months later. Documents wrote only the first, so
+       * `/api/audit` — 1171 rows — contained not one document event, and the
+       * question "who put this certificate here" had no answer on the screen
+       * built to answer it. ADDED beside, never moved.
+       *
+       * `recordAudit` never throws, so this cannot fail an upload that has
+       * already succeeded.
+       */
+      await recordAudit({
+        db,
+        // Never null: a NULL-organisation event is invisible to every reader who
+        // is not a super admin, which would be a log nobody can read.
         organisationId: orgId,
-        entityType: "maintenance_request",
-        entityId: requestId,
-        action: "request.file_uploaded",
-        actorEmail: actor?.email ?? "public-form",
-        detail: JSON.stringify({
+        actor: auditActor(scope),
+        action: version?.ok ? "document.version_added" : "document.uploaded",
+        entityType: "document",
+        entityId: id,
+        summary: version?.ok
+          ? `Replaced ${version.predecessor.originalName} with ${file.name} (version ${version.plan.versionNo}).`
+          : `Uploaded ${file.name}.`,
+        detail: {
           fileId: id,
           fileName: file.name,
+          contentType: file.type,
+          byteSize: file.size,
           kind,
           boardColumnId: boardColumnId || null,
-          contentType: file.type,
-        }),
+          requestId: requestId || null,
+          siteId: anchors.siteId || workOrder?.siteId || null,
+          unitId: anchors.unitId || null,
+          contractorId: anchors.contractorId || null,
+          // How this upload was authorised. The single most useful fact when
+          // reading the log after the event: a job link, a public form, or a
+          // person holding `board.edit`.
+          via: authority.via,
+          ...(version?.ok
+            ? {
+                replacedFileId: version.predecessor.id,
+                rootDocumentId: version.plan.rootDocumentId,
+                versionNo: version.plan.versionNo,
+              }
+            : {}),
+        },
+        request,
       });
 
       return Response.json(
-        { file: attachmentPayload(created), request: requestPayload(updatedRequest) },
+        {
+          file: attachmentPayload(created),
+          request: updatedRequest ? requestPayload(updatedRequest) : null,
+        },
         { status: 201 },
       );
     } catch (error) {
@@ -648,6 +958,17 @@ export async function POST(request: Request) {
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
       await runtimeEnv.BUCKET.delete(key);
+      /*
+       * Put the previous version back at the head of its lineage.
+       *
+       * The insert has failed, so the successor does not exist — and the
+       * predecessor was already stood down to make room for it. Left alone, the
+       * lineage would have NO current version and the document would vanish from
+       * every register, as though a failed upload had deleted it.
+       */
+      if (version?.ok) {
+        await restorePredecessor(db, orgId, version.predecessor.id);
+      }
       throw error;
     }
   } catch (error) {

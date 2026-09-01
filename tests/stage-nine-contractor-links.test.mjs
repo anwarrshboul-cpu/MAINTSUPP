@@ -58,25 +58,56 @@ test("an invalid, expired and revoked token are indistinguishable", async () => 
 });
 
 test("a token is scoped to one job", async () => {
+  /*
+   * The binding moved out of the route and into
+   * `app/api/files/upload-authority.ts`, which both upload paths now share.
+   * Pinning the shared module rather than one route is the stronger claim: the
+   * rule can no longer be true in one path and absent from the other.
+   */
+  const authority = await read("app/api/files/upload-authority.ts");
+  assert.match(
+    authority,
+    /jobToken\.requestId !== workOrder\.id/,
+    "a link for one job must not upload to another",
+  );
   const route = await read("app/api/files/route.ts");
   assert.match(
     route,
-    /scopedToken\.requestId !== workOrder\.id/,
-    "a link for one job must not upload to another",
+    /resolveUploadAuthority/,
+    "the route must delegate the decision rather than making its own",
   );
 });
 
 test("the legacy reporter guard was not simply widened", async () => {
-  const route = await read("app/api/files/route.ts");
-  // The original rule must still exist for reporter tokens.
+  /*
+   * Same module move as above. The two grants remain DIFFERENT grants, which is
+   * the whole point of this test: a reporter link may attach fault photographs
+   * and nothing else, while a contractor link is checked against the kinds its
+   * own grant names. The variable is `storedKind` now — the kind that will
+   * actually be written, rather than the one the caller asked for — which makes
+   * the check stricter than the one this test originally pinned.
+   */
+  const authority = await read("app/api/files/upload-authority.ts");
   assert.match(
-    route,
+    authority,
     /Public requests can only add issue evidence/,
     "the reporter path must keep its original restriction",
   );
-  // And the contractor path must be a separate, scoped check.
-  assert.match(route, /allowedKinds\.includes\(kind as EvidenceKind\)/);
-  assert.match(route, /is left untouched/, "the reasoning must be recorded in the code");
+  assert.match(
+    authority,
+    /storedKind !== "issue"/,
+    "and that restriction must be enforced on the stored kind",
+  );
+  assert.match(
+    authority,
+    /allowedKinds\.includes\(storedKind as EvidenceKind\)/,
+    "the contractor path must be a separate, scoped check",
+  );
+  assert.match(
+    authority,
+    /widening it would let any reporter link write completion evidence/,
+    "the reasoning must be recorded in the code",
+  );
 });
 
 test("a contractor cannot close a job", async () => {

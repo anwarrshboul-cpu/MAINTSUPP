@@ -2,6 +2,7 @@ import { and, count, desc, eq, inArray, isNotNull, isNull, not, sql } from "driz
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
+  attachments,
   complianceDocuments,
   contractors,
   maintenanceBoardColumns,
@@ -44,6 +45,7 @@ import {
   maintenanceRequests as sampleRequests,
   stores as sampleStores,
 } from "../../lib/mock-data";
+import { dateOnlyValue, isRealCalendarDate } from "../../lib/expiry-status";
 import type { ComplianceState, StoreRecord } from "../../lib/types";
 import {
   defaultWorkspaceSettings,
@@ -71,6 +73,81 @@ function text(value: unknown, max = 240) {
 function optionalText(value: unknown, max = 240) {
   const result = text(value, max);
   return result || null;
+}
+
+/* ── Text that is actually text ───────────────────────────────────────────── */
+
+/*
+ * Characters that are invisible on screen, and therefore invisible in review.
+ *
+ * Whitespace matching does not cover them. U+200B ZERO WIDTH SPACE is a format
+ * character, not whitespace, so an address carrying one satisfies an email
+ * shape check, prints in the register with the character absent, and bounces
+ * every time anybody mails it with no visible reason why. The bidi overrides
+ * are worse: they can make a stored value READ as a different value than the
+ * one that will be used. Refusing them is the only way the operator ever finds
+ * out they are there.
+ *
+ * This lived further down beside `contractorEmailRefusal`, its first caller. It
+ * is up here now because it turned out not to be an email rule at all: the same
+ * hole let a compliance requirement be named three zero-width spaces, which the
+ * register then drew as a blank row nobody could search for, describe, or tell
+ * apart from the row above it. One definition of "characters that are not
+ * really there", shared by the address check and by `visibleText` below.
+ */
+const INVISIBLE_CHARACTERS =
+  /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/;
+
+/** The same set, for stripping rather than detecting. `.replace` needs the flag. */
+const INVISIBLE_CHARACTERS_GLOBAL = new RegExp(INVISIBLE_CHARACTERS.source, "g");
+
+/**
+ * `text()`, but a string of invisible characters counts as empty.
+ *
+ * WHY THIS EXISTS. `text()` is `value.trim().slice(0, max)`, and
+ * `String.prototype.trim` strips whitespace as Unicode defines it — which does
+ * NOT include the zero-width characters above. So a `kind` of three U+200B
+ * spaces walked straight through `if (!text(data.kind, 120))`, and a compliance
+ * requirement was created whose name rendered as nothing at all: an invisible
+ * row in the register, un-findable by search, impossible to tell from the row
+ * above it, and impossible to describe to support over the phone.
+ *
+ * The invisible characters are removed for the emptiness TEST and the cleaned
+ * value is what gets stored, because a name that is partly invisible is a name
+ * that cannot be typed back in by whoever has to find it later.
+ */
+function visibleText(value: unknown, max = 240) {
+  if (typeof value !== "string") return "";
+  return value.replace(INVISIBLE_CHARACTERS_GLOBAL, "").trim().slice(0, max);
+}
+
+/* ── The compliance vocabulary and the compliance date ───────────────────── */
+
+/**
+ * The five words a compliance row's state may be, and nothing else.
+ *
+ * `ComplianceState` (app/lib/types.ts) is a compile-time union, which does
+ * nothing at all for a value arriving in a JSON body. This route used to take
+ * `text(data.state, 40) || "Missing"` and write it straight into
+ * `compliance_documents.status`, so the column accepted any string a caller
+ * cared to send — and `notRequired` was then derived from it by an equality test
+ * against one exact spelling, meaning "not required" or "Not Required" set the
+ * status word while silently leaving the flag false.
+ *
+ * The list is the same one the register CRUD panel already offers in its own
+ * select (app/(app)/portal/workspace-data-manager.tsx:171), so this enforces
+ * what the UI has always assumed rather than narrowing anything a user can do.
+ */
+const COMPLIANCE_STATES: readonly ComplianceState[] = [
+  "Compliant",
+  "Expiring soon",
+  "Expired",
+  "Missing",
+  "Not required",
+];
+
+function isComplianceState(value: string): value is ComplianceState {
+  return (COMPLIANCE_STATES as readonly string[]).includes(value);
 }
 
 /**
@@ -466,6 +543,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     activities,
     register,
     documentationColumnRows,
+    contractorDocumentRows,
   ] = await Promise.all([
     db.select().from(sites).where(eq(sites.organisationId, orgId)).orderBy(sites.name),
     db.select().from(units).where(eq(units.organisationId, orgId)).orderBy(units.name),
@@ -633,6 +711,33 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
           isNull(maintenanceBoardColumns.deletedAt),
         ),
       ),
+    /*
+     * ── A contractor's documents, counted ──────────────────────────────────
+     *
+     * W07-07: a document may now be filed against a contractor, and the link has
+     * to be reachable from the contractor's side or it is only half a
+     * relationship. Counted in SQL and grouped, for the same reason the two job
+     * tallies above are: the rows themselves are not wanted here, only how many
+     * there are, and this workspace's attachment table is the largest in the
+     * schema.
+     *
+     * Live versions only — `is_current` and no `archived_at` — so a lease
+     * replaced four times counts once and a document somebody archived stops
+     * counting. That is the same rule the site's Documents tab applies, so
+     * "has documents" cannot mean two different things on two screens.
+     */
+    db
+      .select({ contractorId: attachments.contractorId, total: count() })
+      .from(attachments)
+      .where(
+        and(
+          eq(attachments.organisationId, orgId),
+          isNotNull(attachments.contractorId),
+          isNull(attachments.archivedAt),
+          eq(attachments.isCurrent, true),
+        ),
+      )
+      .groupBy(attachments.contractorId),
   ]);
 
   /*
@@ -791,6 +896,12 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     };
   });
 
+  const documentsByContractor = new Map(
+    (contractorDocumentRows as Array<{ contractorId: string | null; total: number }>)
+      .filter((row): row is { contractorId: string; total: number } => Boolean(row.contractorId))
+      .map((row) => [row.contractorId, Number(row.total)]),
+  );
+
   const contractorsPayload: WorkspaceContractor[] = contractorRows.map((contractor) => {
     /*
      * Their linked jobs plus their unlinked-by-name jobs. Disjoint sets, so
@@ -823,6 +934,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       completedJobs: Number(byId?.completed ?? 0) + Number(byName?.completed ?? 0),
       urgentJobs: Number(byId?.urgent ?? 0) + Number(byName?.urgent ?? 0),
       spend: Number(byId?.spend ?? 0) + Number(byName?.spend ?? 0),
+      /* Zero is a real answer here, not an absent one — see the type. */
+      documentCount: documentsByContractor.get(contractor.id) ?? 0,
     };
   });
 
@@ -998,15 +1111,42 @@ export async function POST(request: Request) {
       id = newId("store", name);
       await db.insert(sites).values({ id, organisationId: orgId, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", lifecycle: text(data.lifecycle, 40) || "Current", address: text(data.address, 300), manager: optionalText(data.manager, 120) });
     } else if (entity === "compliance") {
-      const siteId = text(data.siteId, 100);
-      const kind = text(data.kind, 120);
+      /*
+       * The same validation the PATCH does, for the same reasons — see the long
+       * note there. A route that refuses on edit what it accepted on create just
+       * moves the bad row's birthday: the invisible `kind` and the "not-a-date"
+       * expiry both got in through here.
+       *
+       * `state` and `expiry` are OPTIONAL on create, unlike on the PATCH, and the
+       * asymmetry is deliberate rather than an oversight. On create there is no
+       * stored value for an omitted key to erase, and a new requirement with
+       * nothing recorded yet is exactly what "Missing" and "no expiry date" mean.
+       * On update there IS a stored value, and silence must never be read as an
+       * instruction to destroy it.
+       */
+      const siteId = visibleText(data.siteId, 100);
+      const kind = visibleText(data.kind, 120);
       if (!siteId || !kind) throw new Error("A site and requirement are required.");
+      const state = visibleText(data.state, 40) || "Missing";
+      if (!isComplianceState(state)) {
+        return Response.json(
+          { error: `A status must be one of: ${COMPLIANCE_STATES.join(", ")}.` },
+          { status: 400 },
+        );
+      }
+      const rawExpiry = visibleText(data.expiry, 40);
+      const expiry = rawExpiry && isRealCalendarDate(rawExpiry) ? dateOnlyValue(rawExpiry) : "";
+      if (rawExpiry && !expiry) {
+        return Response.json(
+          { error: "An expiry date must be a calendar date, as YYYY-MM-DD." },
+          { status: 400 },
+        );
+      }
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
       const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
       if (badReference) return badReference;
       id = newId("compliance", `${siteId}-${kind}`);
-      const state = text(data.state, 40) || "Missing";
-      await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: optionalText(data.expiry, 40), notRequired: state === "Not required" });
+      await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required" });
     } else if (entity === "unit") {
       const name = text(data.name, 140);
       const siteId = text(data.siteId, 100);
@@ -1399,19 +1539,6 @@ function contractorActiveRefusal(data: Record<string, unknown>): Response | null
  */
 const CONTRACTOR_EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-/*
- * Characters that are invisible on screen, and therefore invisible in review.
- *
- * `\s` does not cover them. U+200B ZERO WIDTH SPACE is a format character, not
- * whitespace, so "a\u200bb@c.com" satisfies the shape above, prints in the
- * register as "ab@c.com", and bounces every time anybody mails it with no
- * visible reason why. The bidi overrides are worse: they can make a stored
- * address READ as a different address than the one that will be used. Refusing
- * them is the only way the operator ever finds out they are there.
- */
-const INVISIBLE_CHARACTERS =
-  /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/;
-
 /**
  * A contractor's email, refused when it is a string that cannot be an address.
  *
@@ -1786,33 +1913,82 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
     } else if (entity === "compliance") {
-      const state = text(data.state, 40) || "Missing";
       /*
-       * Reference validation only. The UPDATE below names every column
-       * unconditionally on purpose — the calendar's compliance PATCH sends all
-       * four keys and depends on the full replace — so it is left exactly as it
-       * was. See tests/acceptance-correction-one-calendar-data.test.mjs.
+       * THE FULL REPLACE IS DELIBERATE AND IS KEPT. The UPDATE at the end of
+       * this branch names every column unconditionally, because the calendar's
+       * compliance PATCH depends on it: dragging a certificate to a new date
+       * sends site, requirement, state and expiry together
+       * (app/(app)/portal/portal-app.tsx and `CalendarWriteTarget` in
+       * calendar-model.ts, which documents why). Manage register sends the same
+       * four. So the fix is NOT to make the statement partial — it is to refuse
+       * the partial REQUEST, because with a full-replace statement an omitted
+       * key is not a no-op, it is an erasure.
+       *
+       * Every key is therefore required, and every value is validated before
+       * anything is written:
+       *
+       *  - `siteId` and `kind` were already required (a `{state}` -only PATCH
+       *    used to answer 200 while blanking both).
+       *  - `state` was `text(data.state, 40) || "Missing"`, so omitting it
+       *    SILENTLY DOWNGRADED a Compliant document to Missing, and any string
+       *    at all was accepted into the column.
+       *  - `expiry` was `optionalText(data.expiry, 40)`, so omitting it CLEARED
+       *    the expiry date, and "not-a-date" was stored happily — after which
+       *    the compliance digest's date parser rejected it and `continue`d, so
+       *    the document silently never alerted again while still rendering on
+       *    screen. A malformed date is worse than a missing one.
+       *  - `kind` went through `text()`, whose `trim()` does not strip
+       *    zero-width characters, so a requirement named U+200B U+200B U+200B
+       *    was created and rendered as nothing.
+       *
+       * An EXPLICIT null or "" for `expiry` still clears it. Clearing on purpose
+       * is legitimate; clearing because a key was left out of a JSON body is not.
        */
-      /*
-       * Required UNCONDITIONALLY, unlike every other branch's guard. Those
-       * branches only write a column when it was sent, so an omitted key is
-       * harmless; this UPDATE names `site_id` and `kind` whatever arrives, so
-       * OMITTING them is the request that does the damage — a
-       * `{ state: "Valid" }` PATCH would answer 200 while blanking the
-       * document's site and its requirement name. Refusing the partial keeps
-       * the full replace the calendar depends on and closes the hole it opens.
-       */
-      if (!text(data.siteId, 100)) {
+      const siteId = visibleText(data.siteId, 100);
+      if (!siteId) {
         return Response.json({ error: "A site is required." }, { status: 400 });
       }
-      if (!text(data.kind, 120)) {
+      const kind = visibleText(data.kind, 120);
+      if (!kind) {
         return Response.json({ error: "A requirement is required." }, { status: 400 });
       }
+      if (!("state" in data)) {
+        return Response.json(
+          { error: "A status is required. Send the document's current status to leave it unchanged." },
+          { status: 400 },
+        );
+      }
+      const state = visibleText(data.state, 40);
+      if (!isComplianceState(state)) {
+        return Response.json(
+          { error: `A status must be one of: ${COMPLIANCE_STATES.join(", ")}.` },
+          { status: 400 },
+        );
+      }
+      if (!("expiry" in data)) {
+        return Response.json(
+          { error: "An expiry date is required. Send null to clear it." },
+          { status: 400 },
+        );
+      }
+      const rawExpiry = visibleText(data.expiry, 40);
+      /*
+       * Normalised through the platform's own parser, so what is stored is what
+       * every reader — the register, the digest, the calendar, the board cells —
+       * will agree it is. `dateOnlyValue` returns "" for anything it cannot read.
+       */
+      const expiry = rawExpiry && isRealCalendarDate(rawExpiry) ? dateOnlyValue(rawExpiry) : "";
+      if (rawExpiry && !expiry) {
+        return Response.json(
+          { error: "An expiry date must be a calendar date, as YYYY-MM-DD." },
+          { status: 400 },
+        );
+      }
       const badReference = await referencesRefusal(db, orgId, [
-        { kind: "site", value: text(data.siteId, 100) },
+        { kind: "site", value: siteId },
       ]);
       if (badReference) return badReference;
-      await db.update(complianceDocuments).set({ siteId: text(data.siteId, 100), kind: text(data.kind, 120), status: state, expiryDate: optionalText(data.expiry, 40), notRequired: state === "Not required", updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+      await db.update(complianceDocuments).set({ siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required", updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     } else if (entity === "unit") {
       /*
        * Only what was sent — see `supplied`. `siteId`, `name`, `category` and

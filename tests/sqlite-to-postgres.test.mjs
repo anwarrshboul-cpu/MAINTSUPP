@@ -417,7 +417,14 @@ test("a 0/1 inside a string literal is never a boolean", () => {
 
 test("the boolean name set and the per-table map agree", () => {
   const flat = Object.values(BOOLEAN_COLUMNS).flat();
-  assert.equal(flat.length, 27, "the migration converted 27 columns");
+  /*
+   * 28 since Workstream 7: `attachments.is_current` joined the set. This file
+   * is the only thing that turns drizzle's SQLite-shaped `1` into Postgres's
+   * `true`, so an unlisted boolean is not a translation gap anyone reads — it
+   * is a 503 on upload saying "column is_current is of type boolean but
+   * expression is of type integer".
+   */
+  assert.equal(flat.length, 28, "the migration converted 28 columns");
   for (const name of flat) assert.ok(BOOLEAN_COLUMN_NAMES.has(name));
 });
 

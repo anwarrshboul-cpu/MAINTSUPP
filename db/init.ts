@@ -928,10 +928,158 @@ async function ensureBoardEngineColumns(d1: D1DatabaseLike) {
      * numbered file is a column that does not exist anywhere it is read.
      */
     ["contractors", "whatsapp_number", "TEXT"],
+    /*
+     * WORKSTREAM 7 — a document's own identity. See the block comment on
+     * `attachments` in db/schema.ts for what each column is for.
+     *
+     * They belong in THIS list for the reason the WhatsApp note above gives:
+     * drizzle/meta stops at 0005, and this list is what actually reconciles a
+     * live database on boot, in both dialects via `sqlite-to-postgres.ts`. The
+     * Postgres side already has these columns from the Workstream 7 migration —
+     * `addColumn` guards on `PRAGMA table_info`, so on that deployment every one
+     * of these is a no-op, and on a fresh SQLite file they are what makes the
+     * feature exist at all. A column declared only in the schema file is a
+     * column that does not exist anywhere it is read.
+     *
+     * Every one is nullable or carries a default that reproduces the
+     * pre-migration meaning: an existing attachment reads NULL title, NULL
+     * expiry, NULL lineage, `version_no = 1` and `is_current = 1`, which is
+     * exactly "the only version of itself, live". Nothing has to be back-filled.
+     *
+     * The two UNIQUE version indexes and the CHECK on `expiry_date` are NOT
+     * created here. They exist on Postgres, where the data they protect lives,
+     * and SQLite cannot add either to an existing table without rebuilding it —
+     * which this boot path must never do to a table holding evidence. The code
+     * validates both regardless (`expiryRefusal`, and the read-modify-write in
+     * `addDocumentVersion`), so correctness does not depend on which dialect is
+     * underneath; on Postgres the constraints are the second line of defence.
+     */
+    ["attachments", "title", "TEXT"],
+    ["attachments", "document_type", "TEXT"],
+    ["attachments", "description", "TEXT"],
+    ["attachments", "expiry_date", "TEXT"],
+    ["attachments", "metadata_updated_at", "TEXT"],
+    ["attachments", "metadata_updated_by", "TEXT"],
+    ["attachments", "contractor_id", "TEXT"],
+    ["attachments", "archived_at", "TEXT"],
+    ["attachments", "archived_by", "TEXT"],
+    ["attachments", "root_document_id", "TEXT"],
+    ["attachments", "version_no", "INTEGER NOT NULL DEFAULT 1"],
+    ["attachments", "is_current", "INTEGER NOT NULL DEFAULT 1"],
   ];
 
   for (const [table, column, definition] of additions) {
     await addColumn(d1, table, column, definition);
+  }
+
+  await ensureDocumentVersionInvariant(d1);
+}
+
+/**
+ * ONE CURRENT VERSION PER LINEAGE, ENFORCED BY THE DATABASE.
+ *
+ * Workstream 7 gave documents version lineage and left the invariant to the
+ * code: `standDownPredecessor` clears the old head, then the successor is
+ * inserted as the new one. Those are two statements with no transaction around
+ * them, so they are not atomic — and on D1 nothing else was stopping a race.
+ * Three concurrent `POST /api/files` carrying the same `replaces` all answered
+ * 201 and left the lineage with THREE rows at `is_current = 1`; the board and
+ * the file list then showed one certificate three times.
+ *
+ * Postgres never had that problem, because the Workstream 7 migration created
+ * these two indexes there: the second head is rejected by the database, the
+ * insert throws, and the route's catch deletes the orphaned object and restores
+ * the predecessor. `db/init.ts` is the authority for the D1/SQLite schema and it
+ * created neither — it added the three columns and stopped. So the invariant
+ * existed on one backend of two, and the one it was missing from is what local
+ * development and every Cloudflare deployment run on.
+ *
+ * SQLite has supported partial indexes since 3.8.0 and indexes on expressions
+ * since 3.9.0, so both are expressible verbatim. The names are the ones already
+ * on Staging, so on the Postgres path each statement is an IF NOT EXISTS no-op
+ * rather than a second, differently-named copy of an index that exists.
+ *
+ * `is_current = 1` rather than a bare `WHERE is_current`: the column is INTEGER
+ * on D1 and a real `boolean` on Postgres, and `db/sqlite-to-postgres.ts` rewrites
+ * `= 1` to `= true` for the columns it knows are boolean — which is exactly why
+ * `is_current` had to be added to `BOOLEAN_COLUMNS`. A bare predicate would be
+ * valid SQLite and invalid Postgres, and the rewriter has nothing to grip on.
+ */
+async function ensureDocumentVersionInvariant(d1: D1DatabaseLike) {
+  /*
+   * A UNIQUE INDEX CANNOT BE CREATED OVER DATA THAT ALREADY VIOLATES IT, and
+   * this file runs on the boot path of EVERY request. A database that raced
+   * before this shipped holds duplicate heads, so creating the index first would
+   * throw on every request and take the whole application down — the same
+   * failure mode `addColumn` exists to prevent for ALTER.
+   *
+   * So the duplicates are repaired first, and the repair is the rule the write
+   * path already uses: the HIGHEST `version_no` in a lineage is the head, and
+   * every other row in it is stood down. Highest rather than newest by
+   * `created_at`, because `version_no` is what orders a lineage everywhere else
+   * and it is the value the second index protects.
+   *
+   * Ties break on `id` so the choice is deterministic: two rows that raced to
+   * the same `version_no` are indistinguishable by date at this resolution, and
+   * an arbitrary-but-stable winner beats a repair that picks a different row on
+   * every boot.
+   */
+  try {
+    await d1
+      .prepare(
+        `UPDATE attachments SET is_current = 0
+          WHERE is_current = 1
+            AND id NOT IN (
+              SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY organisation_id, COALESCE(root_document_id, id)
+                         ORDER BY version_no DESC, id DESC
+                       ) AS position
+                  FROM attachments
+                 WHERE is_current = 1
+              ) ranked
+              WHERE ranked.position = 1
+            )`,
+      )
+      .run();
+  } catch (error) {
+    /*
+     * Swallowed, loudly. A repair that cannot run must not stop the application
+     * from starting — and if it did not run, the index below simply fails to be
+     * created and the invariant stays exactly where it was rather than becoming
+     * an outage.
+     */
+    console.error("[init] could not repair duplicate document heads", error);
+  }
+
+  /*
+   * Each index in its own statement and its own catch, NOT in a `batch()`.
+   *
+   * A batch fails as a unit, so one index that could not be created would
+   * discard the other, and the two are independent guarantees. Catching means a
+   * database whose duplicates the repair could not resolve still boots, and an
+   * unenforced invariant is reported rather than turned into a 500 on every
+   * request.
+   */
+  const indexes = [
+    // ONE head per lineage. This is the one that stops the concurrent replace.
+    `CREATE UNIQUE INDEX IF NOT EXISTS attachments_current_version_idx
+       ON attachments (organisation_id, COALESCE(root_document_id, id))
+       WHERE is_current = 1`,
+    // And no two rows claiming to be the same version of the same document.
+    `CREATE UNIQUE INDEX IF NOT EXISTS attachments_root_version_idx
+       ON attachments (organisation_id, COALESCE(root_document_id, id), version_no)`,
+  ];
+  for (const statement of indexes) {
+    try {
+      await d1.prepare(statement).run();
+    } catch (error) {
+      console.error(
+        "[init] could not create a document version index; the one-current-head invariant is NOT enforced on this database",
+        { statement, error },
+      );
+    }
   }
 }
 

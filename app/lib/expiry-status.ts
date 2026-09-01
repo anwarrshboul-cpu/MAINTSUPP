@@ -232,3 +232,41 @@ export function expiryStatus(
     description: `valid until ${longDate}, ${pluraliseDays(daysRemaining)} remaining`,
   };
 }
+
+/* ── Dates that exist ─────────────────────────────────────────────────────── */
+
+/**
+ * Whether a `YYYY-MM-DD` names a day that is actually on the calendar.
+ *
+ * `dateOnlyValue` above answers a different question, and deliberately so: it
+ * asks whether a value has the SHAPE of a date, because its job is to normalise
+ * the three forms a board date column stores and it must not start rejecting
+ * cells that are already in the database.
+ *
+ * Shape is not existence. `2027-13-45` matches `^\d{4}-\d{2}-\d{2}$` perfectly
+ * and is not a date — there is no thirteenth month. Left alone it does not fail
+ * loudly either, which is the dangerous part: `Date.UTC(2027, 12, 45)` rolls the
+ * overflow forward and yields a real instant in February 2028, so a certificate
+ * filed with a typo silently acquires an expiry date nobody chose, three months
+ * from the one they meant, and every screen agrees about it.
+ *
+ * The round trip is the check — parse the three numbers, build the UTC day, and
+ * require it to render back to the same three numbers. Anything that rolled over
+ * comes back different. Note that Postgres's own CHECK constraint on
+ * `attachments.expiry_date` is the same shape-only regex, so the database will
+ * not catch this either; it has to be refused at the API boundary.
+ *
+ * Used by the write paths, which can refuse. Readers keep using `dateOnlyValue`,
+ * because a value already stored has to render somehow.
+ */
+export function isRealCalendarDate(value: string | null | undefined): boolean {
+  const date = dateOnlyValue(value);
+  if (!date) return false;
+  const [year, month, day] = date.split("-").map(Number);
+  const built = new Date(Date.UTC(year, month - 1, day));
+  return (
+    built.getUTCFullYear() === year &&
+    built.getUTCMonth() === month - 1 &&
+    built.getUTCDate() === day
+  );
+}

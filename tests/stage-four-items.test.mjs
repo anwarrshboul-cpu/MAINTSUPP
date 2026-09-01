@@ -179,8 +179,15 @@ test("seeding is idempotent and never resurrects a deleted column", async () => 
 
 test("cell writes are validated through the column type registry", async () => {
   const source = await read("app/api/board/items/route.ts");
-  assert.match(source, /normaliseCellValue\(column\.type, body\.value\)/);
-  assert.match(source, /definition\.readOnly/, "computed columns must reject writes");
+  /*
+   * `normalizeBoardCellValue`, not `normaliseCellValue`: Workstream 7 moved cell
+   * writes onto the shared normaliser the board's own editor and the automation
+   * engine use, so a date written through the API is byte-identical to one
+   * written from the grid. The claim this test makes is unchanged — a write goes
+   * through the registry, not around it — only the registry's entry point moved.
+   */
+  assert.match(source, /normalizeBoardCellValue\(type, body\.value\)/);
+  assert.match(source, /definition\?\.readOnly/, "computed columns must reject writes");
   assert.match(source, /column\.required && !value/, "required columns must reject blanks");
 });
 

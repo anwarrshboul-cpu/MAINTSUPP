@@ -233,7 +233,19 @@ function tighten(
  * have caught all three.
  */
 export const BOOLEAN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
-  attachments: ["pending"],
+  /*
+   * `is_current` joined `pending` with the Workstream 7 migration. It MUST be
+   * listed: this file is the only thing that turns drizzle's SQLite-shaped `1`
+   * into Postgres's `true`, so without the entry every version write would be
+   * rejected with "column is_current is of type boolean but expression is of
+   * type integer" — and the failure would be a 503 on upload, not a schema
+   * error anyone would read as a translation gap.
+   *
+   * Verified safe for the bare-name rule below, by the query that rule's own
+   * comment prescribes: `is_current` exists on exactly one table in `portal` and
+   * is boolean there.
+   */
+  attachments: ["pending", "is_current"],
   board_views: ["is_default", "system"],
   boards: ["archived"],
   compliance_documents: ["not_required"],

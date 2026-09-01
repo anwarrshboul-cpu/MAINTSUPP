@@ -64,7 +64,24 @@ test("a failed load clears what was there rather than leaving it", async () => {
     /if \(active\) \{\s*\n\s*setRequests\(\[\]\);\s*\n\s*setDataMode\("unavailable"\);/,
     "the jobs are cleared AND the mode is set — the second without the first was the second bug",
   );
-  assert.match(source, /if \(active\) setDocuments\(\[\]\);/);
+  /*
+   * The document register's loader is no longer a fire-once effect, so its
+   * guard is no longer an `active` flag. W07-13 made it a re-callable
+   * `useCallback` — the drawer runs it again after every edit, new version,
+   * archive and delete — which means two loads can be in flight and the slower
+   * one can land last. The flag was replaced by a sequence number that only
+   * lets the newest response write, and it covers unmount as well.
+   *
+   * The assertion this file is making is unchanged: a failed load CLEARS the
+   * register rather than leaving a document listed that the server no longer
+   * has. Only the name of the guard moved.
+   */
+  assert.match(source, /if \(current\(\)\) setDocuments\(\[\]\);/);
+  assert.match(
+    source,
+    /const ticket = \(documentsLoadRef\.current \+= 1\);/,
+    "a re-callable loader needs a per-call guard, not a per-mount one",
+  );
 });
 
 test("the chip describes the jobs, and only the jobs", async () => {

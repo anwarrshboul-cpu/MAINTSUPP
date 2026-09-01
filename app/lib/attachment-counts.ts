@@ -71,13 +71,55 @@
  * honest place for it.
  */
 
-import { and, count, eq, inArray, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { attachments, maintenanceBoardColumns, maintenanceRequests } from "../../db/schema";
 import { boardKeyForRequest } from "./board-registry";
 import { chunkIds } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
+
+/**
+ * A SUPERSEDED VERSION IS NOT A SECOND PHOTOGRAPH.
+ *
+ * W07-03 gave documents version lineage, and versioning a counter that counts
+ * ROWS is the fastest way to make it lie again — which is the exact failure this
+ * whole module exists to end. A PAT certificate replaced twice is ONE document
+ * with three rows: without this predicate the board's photo strip would show
+ * three tiles for it, the job card would say "3 photos", the CSV export would
+ * agree, and the compliance register's `fileCount > 0` would keep a slot
+ * "Compliant" on the strength of a certificate that had been replaced precisely
+ * because it expired.
+ *
+ * Archived rows are excluded for the same reason from the other direction:
+ * archiving is the reversible half of "archive or remove" (W07-05), so an
+ * archived document must leave the counters exactly as deleting it would, or
+ * archiving would be visibly different from removing and nobody would trust it.
+ *
+ * Both columns carry defaults that reproduce the pre-versioning meaning —
+ * `is_current = true`, `archived_at = NULL` — so every row that existed before
+ * this satisfies the predicate untouched and no back-fill was needed.
+ *
+ * Built with drizzle's own helpers rather than written as raw SQL, because the
+ * boolean has to survive both dialects: SQLite stores 0/1 and Postgres stores a
+ * real `boolean`, and `db/sqlite-to-postgres.ts` rewrites the comparison on the
+ * way through — which it can only do for a bound parameter it recognises, not
+ * for a literal `= true` embedded in a template.
+ */
+export const liveAttachmentRows = () =>
+  and(eq(attachments.isCurrent, true), isNull(attachments.archivedAt));
+
+/**
+ * The same predicate, kept private under its old name for this module's own use.
+ *
+ * Exported above because the counters are NOT the only reader that has to agree
+ * about it: `/api/board` builds the file cells from its own scans of
+ * `attachments`, and when those scans lacked this predicate the cell said 3 for
+ * a certificate replaced twice while the counter beside it said 1 — the exact
+ * contradiction this module's header exists to end, reintroduced by versioning
+ * through a different door.
+ */
+const liveRows = liveAttachmentRows;
 
 /** The storage kinds `attachments.kind` may actually hold. */
 export type CountedKind = "issue" | "completion" | "general";
@@ -230,6 +272,8 @@ export async function attachmentCountsByRequest(
         and(
           eq(attachments.organisationId, orgId),
           inArray(attachments.requestId, chunk),
+          // Superseded versions and archived documents are not extra files.
+          liveRows(),
         ),
       )
       .groupBy(attachments.requestId, attachments.boardColumnId, attachments.kind);
@@ -318,7 +362,15 @@ export async function reconcileAttachmentCounts(
 ) {
   const columns = await pictureColumnsFor(db, orgId, requestId);
 
-  const total = sql`(select count(*) from ${attachments} where ${attachments.requestId} = ${requestId})`;
+  /*
+   * `live` is interpolated into every subquery below, so the counter and the
+   * list the board draws beside it are answering the same question. A predicate
+   * applied to some of the four counters and not the others would make them stop
+   * summing, which is precisely the contradiction this module exists to end.
+   */
+  const live = liveRows();
+
+  const total = sql`(select count(*) from ${attachments} where ${attachments.requestId} = ${requestId} and ${live})`;
   /*
    * Column first, then kind — `bucketFor` expressed in SQL. A board with no
    * such column can hold nothing under it, so the predicate collapses to the
@@ -326,8 +378,8 @@ export async function reconcileAttachmentCounts(
    */
   const bucket = (columnId: string | null, kind: CountedKind) =>
     columnId
-      ? sql`(select count(*) from ${attachments} where ${attachments.requestId} = ${requestId} and (${attachments.boardColumnId} = ${columnId} or (${attachments.boardColumnId} is null and ${attachments.kind} = ${kind})))`
-      : sql`(select count(*) from ${attachments} where ${attachments.requestId} = ${requestId} and ${attachments.boardColumnId} is null and ${attachments.kind} = ${kind})`;
+      ? sql`(select count(*) from ${attachments} where ${attachments.requestId} = ${requestId} and ${live} and (${attachments.boardColumnId} = ${columnId} or (${attachments.boardColumnId} is null and ${attachments.kind} = ${kind})))`
+      : sql`(select count(*) from ${attachments} where ${attachments.requestId} = ${requestId} and ${live} and ${attachments.boardColumnId} is null and ${attachments.kind} = ${kind})`;
 
   const issue = bucket(columns.issue, "issue");
   const completion = bucket(columns.completion, "completion");

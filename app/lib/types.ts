@@ -415,13 +415,70 @@ export interface StoreRecord {
 
 export interface FileRecord {
   id: string;
+  /** The stored filename — `originalName`. Always present. */
   name: string;
+  /**
+   * The title somebody gave this document, or null for the great majority that
+   * have never been named. `documentName` in views/document-register.ts decides
+   * which of the two to show; nothing else should.
+   */
+  title: string | null;
   kind: string;
+  /** The document type an operator chose, or null. Falls back to `kind`. */
+  documentType: string | null;
+  description: string | null;
   site: string;
+  /**
+   * The site this document is filed against, authoritatively.
+   *
+   * The register used to derive its Site column by matching the attachment's
+   * job against the job list and reading that job's free-text `location`. The
+   * row carries a real site id, so the id is what it is filed under and the
+   * name is a lookup from it.
+   */
+  siteId: string | null;
   requestId: string | null;
   uploadedAt: string;
+  /** Who uploaded it. Served all along; the register simply never read it. */
+  uploadedByEmail: string | null;
   size: string;
-  status: "Current" | "Expiring soon" | "Archived";
+  /**
+   * `YYYY-MM-DD`, or null when this document has no expiry.
+   *
+   * Null is not a bad value and must never be rendered as one: most rows in
+   * this register are photographs and invoices that cannot expire. The column
+   * is CHECK-constrained to that shape on the server, so anything stored here
+   * is a real date.
+   */
+  expiryDate: string | null;
+  /** When it was withdrawn from the live register, or null while it is live. */
+  archivedAt: string | null;
+  archivedBy: string | null;
+  /**
+   * VERSION LINEAGE. `rootDocumentId` is the id every version of one document
+   * shares — served already resolved, so a client never reimplements the
+   * `coalesce(root, id)` that version 1 needs. `isCurrent` marks the one
+   * version that is the document today.
+   */
+  rootDocumentId: string;
+  versionNo: number;
+  isCurrent: boolean;
+  /*
+   * THERE IS NO `status` FIELD, AND THAT IS THE POINT.
+   *
+   * It used to be `status: "Current" | "Expiring soon" | "Archived"`, and
+   * `loadDocuments` wrote the literal `"Current"` into every row it built from
+   * the API — so the register's Status column was a constant with a type
+   * around it, and the "Require attention" tile that counted "Expiring soon"
+   * could never count anything. The two values that were not "Current" were
+   * reachable only from `mock-data.ts`.
+   *
+   * A document's status is a function of its expiry date and whether it has
+   * been archived, both of which are stored above. `documentStatus` in
+   * views/document-register.ts derives it from the shared classifier in
+   * `app/lib/expiry-status.ts`, so this register and the Compliance Tracker
+   * cannot disagree about the same certificate. Nothing may store it back.
+   */
   /*
    * WHERE THE BYTES ARE. `/api/files` has always returned these three —
    * `attachmentPayload` in app/api/files/route.ts:130-137 builds

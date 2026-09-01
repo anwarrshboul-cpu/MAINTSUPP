@@ -229,7 +229,24 @@
   margin-left: auto;
 }
 
+/*
+ * "Show all N overdue renewals" — a text link with a 44px hit area.
+ *
+ * MEASURED at 163x20 from 768px up and 175x21 at 430 and below: `padding: 0`
+ * and `border: 0` left its box as the 12px line box, so the tappable area was
+ * the height of the words. It is the control that reveals the rest of an
+ * overdue list on a compliance calendar — the one thing on the panel somebody
+ * reaches for on a phone — and it was the smallest target on the screen.
+ *
+ * `min-height` with the text centred rather than padding: the ink does not
+ * move, so the panel looks exactly as it did and the hit area grows around the
+ * words. Unconditional rather than phone-only, because 20px is under the floor
+ * at every width and this calendar is read on tablets.
+ */
 .store-expiry__overdue-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   margin-top: 8px;
   padding: 0;
   border: 0;

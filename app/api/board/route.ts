@@ -49,6 +49,7 @@ import { summariesFor } from "../../lib/column-types";
 import { exposeRequest } from "../../lib/request-payload";
 import {
   attachmentCountsByRequest,
+  liveAttachmentRows,
   reconcileAttachmentCounts,
   withCountedAttachments,
 } from "../../lib/attachment-counts";
@@ -661,6 +662,18 @@ function normalizeCellValue(type: BoardColumnType, raw: unknown): string {
   return normalizeBoardCellValue(type, raw);
 }
 
+/**
+ * Every file filed under a column, destroyed with it.
+ *
+ * DELIBERATELY NOT FILTERED BY `liveAttachmentRows()`, unlike the two scans that
+ * build the board's file cells. Those answer "what does this cell show", where a
+ * superseded version is not a second document. This answers "what must be
+ * destroyed when the column itself is destroyed", and the answer is everything:
+ * filtering here would leave superseded versions and archived documents in the
+ * table pointing at a column that no longer exists, and their R2 objects would
+ * never be deleted by anything — an invisible row and a permanent storage leak,
+ * both unreachable through any screen.
+ */
 async function deleteFilesForColumn(db: BoardDb, orgId: string, columnId: string) {
   const fileRows = await db
     .select({
@@ -1141,6 +1154,25 @@ async function boardPayload(
           isNotNull(attachments.boardColumnId),
           eq(attachments.organisationId, orgId),
           inArray(attachments.boardColumnId, chunk),
+          /*
+           * THE CELL COUNTS WHAT THE COUNTER COUNTS — and for a while it did not.
+           *
+           * Workstream 7 gave documents version lineage and an archive flag, and
+           * filtered them in `/api/files` and in `reconcileAttachmentCounts`. This
+           * scan is a THIRD reader of the same table and was left out, so a
+           * certificate replaced twice drew three thumbnails in its cell while
+           * the counter beside it said one, and an archived certificate stayed
+           * visible and openable on the board after it had left every other
+           * screen. Measured on MN-1050: the cell went 1, 2, 3 across three
+           * versions.
+           *
+           * That is precisely the contradiction the note below this query exists
+           * to record having fixed once already — "the number on the cell is the
+           * number behind it" — reintroduced through a different door. The
+           * predicate is imported rather than restated so a fourth reader cannot
+           * disagree with the other three.
+           */
+          liveAttachmentRows(),
         ),
       )
       /*
@@ -1239,6 +1271,9 @@ async function boardPayload(
           eq(attachments.organisationId, orgId),
           isNull(attachments.boardColumnId),
           inArray(attachments.kind, [...kindColumns.keys()]),
+          // The same rule as the column-filed scan above: a superseded version is
+          // not a second photograph, and an archived one is not on the board.
+          liveAttachmentRows(),
         ),
       )
       /*

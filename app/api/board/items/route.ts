@@ -21,7 +21,30 @@ import {
   itemMovedEvent,
   requestFieldEvents,
 } from "../../../lib/automations";
-import { getColumnType, normaliseCellValue } from "../../../lib/column-types";
+/*
+ * THE BOARD'S VOCABULARY, NOT THE TYPE REGISTRY'S — and the difference was a
+ * measured defect.
+ *
+ * `getColumnType` resolves against `app/lib/column-types.ts`, whose keys are the
+ * N2/N3 design set: `single_select`, `file`, `person`, `date_range`. The DATABASE
+ * stores the board's own set: `dropdown`, `files`, `people`, `timeline`, `status`,
+ * `subitems`. The two overlap on only eight types, so this route could never
+ * validate a `status`, `dropdown`, `people`, `timeline` or `subitems` column at
+ * all — it answered 409 `Column type "dropdown" is not known` for the Store
+ * Documentation board's own Store Type column, which the board's editor writes
+ * without complaint.
+ *
+ * `app/lib/board-cell-values.ts` is the shared normaliser, and its own header
+ * says why it exists: "Extracted from PATCH /api/board (update_cell) so the
+ * automation engine stores a custom-column value through exactly the validation
+ * the board's own editor goes through. One normaliser, two callers." This route
+ * was the third caller and never adopted it.
+ */
+import {
+  BOARD_COLUMN_TYPES,
+  normalizeBoardCellValue,
+} from "../../../lib/board-cell-values";
+import { getColumnType } from "../../../lib/column-types";
 import { chunkIds, selectInChunks } from "../../../lib/sql-batching";
 import { isUnassignedSite, unassignedSiteId } from "../../../lib/site-reference";
 
@@ -484,7 +507,29 @@ export async function PATCH(request: Request) {
     // O6 — set a cell value, validated through the column type registry.
     if (body.intent === "cell") {
       const requestId = text(body.itemId, 64);
-      const columnId = text(body.columnId, 64);
+      /*
+       * 100, NOT 64 — AND THE 64 WAS SILENTLY REFUSING 19 OF 25 COLUMNS.
+       *
+       * `text()` truncates rather than rejecting, so an id longer than the limit
+       * was quietly shortened and the lookup below missed. Store Documentation
+       * column ids are `seed-<orgId>-store-documentation-<key>`, which run from
+       * 58 to 77 characters: nineteen of that board's twenty-five columns are
+       * over 64, and every one of them answered 404 "Column not found." for a
+       * column plainly sitting on the board. Measured across all 25 — every id
+       * over 64 failed, every id at or under 64 did not, with no other variable.
+       *
+       * The failure was invisible in the worst way: 404 is what this route says
+       * about a column that has been deleted, so the answer looked like a stale
+       * client rather than a truncated id, and the certificate expiry dates the
+       * compliance register runs on could not be set through this endpoint at
+       * all.
+       *
+       * 100 is not a new number — it is what `PATCH /api/board`'s `update_cell`
+       * already uses (`trimString(payload.columnId, 100)`), which is why that
+       * route writes all 25 columns, and it is the same width both upload routes
+       * use for the same ids. `itemId` above stays at 64: job ids are `MN-<n>`.
+       */
+      const columnId = text(body.columnId, 100);
       if (!requestId || !columnId) return bad("An item and a column are both required.");
 
       const [column] = await db
@@ -545,16 +590,54 @@ export async function PATCH(request: Request) {
         }
         value = decoration;
       } else {
+        const type = column.type as BoardColumnType;
+        /*
+         * Validated against the BOARD's type set, which is what the database
+         * actually stores. See the import note: `getColumnType` speaks a
+         * different vocabulary, and asking it about a `dropdown` or a `files`
+         * column returned null — so this route refused three of the Store
+         * Documentation board's editable columns as "not known" while the
+         * board's own editor wrote them.
+         */
+        if (!BOARD_COLUMN_TYPES.has(type)) {
+          return bad(`Column type "${column.type}" is not known.`, 409);
+        }
+        /*
+         * A FILE COLUMN IS NOT A CELL, and it must stay that way.
+         *
+         * Its contents are `attachments` rows written by the upload routes; a
+         * cell value shadowing them would be a second, disagreeing answer to
+         * "what documents are in this slot" — and the compliance register counts
+         * the rows, so the cell would be invisible to it while showing on the
+         * board. This is the identical rule and the identical status
+         * `PATCH /api/board`'s `update_cell` applies (`|| type === "files"`),
+         * with its message, so a caller cannot tell the two routes apart.
+         *
+         * `subitems` likewise: it is a relationship, not a value.
+         */
+        if (type === "files" || type === "subitems") {
+          return bad("This column cannot be edited as a regular cell.");
+        }
+        /*
+         * Calculated columns stay read-only. The board vocabulary has no
+         * `formula`/`mirror`/`item_id` members, but the registry does and a
+         * column may legitimately carry one of those types, so it is still
+         * asked — widening the accepted set must not quietly make a derived
+         * value writable.
+         */
         const definition = getColumnType(column.type);
-        if (!definition) return bad(`Column type "${column.type}" is not known.`, 409);
-        if (definition.readOnly) {
+        if (definition?.readOnly) {
           return bad(`${column.title} is calculated and cannot be edited.`, 409);
         }
-        const normalised = normaliseCellValue(column.type, body.value);
-        if (normalised === null) {
-          return bad(`That value is not valid for a ${definition.label} column.`);
-        }
-        value = normalised;
+        /*
+         * `normalizeBoardCellValue` rather than `normaliseCellValue`: the shared
+         * normaliser the board's editor and the automation engine both use, so a
+         * date written here is byte-identical to one written from the grid. It
+         * returns "" for a value it cannot read rather than null, and an empty
+         * value is legitimate — that is how a cell is CLEARED — so emptiness is
+         * only an error where the column is required, which is checked below.
+         */
+        value = normalizeBoardCellValue(type, body.value);
         if (column.required && !value) {
           return bad(`${column.title} is required.`);
         }

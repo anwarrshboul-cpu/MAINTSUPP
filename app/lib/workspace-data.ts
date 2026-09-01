@@ -123,6 +123,26 @@ export type WorkspaceContractor = {
   notes: string | null;
   /** Pence. Null means nobody has recorded a rate, which is not a rate of £0. */
   dayRatePence: number | null;
+  /**
+   * How many live documents are filed against this contractor.
+   *
+   * W07-07 asks that a document can be linked to a contractor and that the link
+   * is reachable from the contractor's side. Until the `contractor_id` column
+   * existed there was no link to reach: `attachments` could name a job, a site
+   * and a unit, and the register held insurance and certification as free text
+   * on the contractor row with no file behind either.
+   *
+   * A COUNT rather than the rows, because this payload describes a register of
+   * contractors rather than any one of them, and it is what a list can show
+   * ("3 documents") and what tells a screen whether opening a document panel
+   * would find anything. Current, unarchived versions only — the same rule the
+   * site's Documents tab uses, so the two cannot disagree about what "has
+   * documents" means.
+   *
+   * Optional in the type because `app/lib/mock-data.ts` also builds these and
+   * has no storage behind them; absent reads as "not known", not as zero.
+   */
+  documentCount?: number;
   serviceCategories: string[];
   coverageAreas: string[];
   certifications: string[];

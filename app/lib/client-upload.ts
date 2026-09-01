@@ -226,45 +226,140 @@ function validateFile(file: File) {
   }
 }
 
-async function directUpload({
-  file,
-  requestId,
-  kind,
-  columnId,
-  uploadToken,
-}: {
-  file: File;
-  requestId: string;
-  kind: AttachmentKind;
-  columnId?: string;
-  uploadToken?: string;
-}) {
+/**
+ * What a document is filed against, and what it says about itself.
+ *
+ * W07-07: `requestId` is no longer the only anchor and no longer required — a
+ * contractor's insurance certificate belongs to the contractor, not to a work
+ * order — but AT LEAST ONE of the four is, and the server refuses an upload that
+ * names none. Every field here is optional at this layer precisely so the server
+ * stays the single place that rule is enforced; a client-side copy of it would
+ * be one more thing to keep in step.
+ */
+export type DocumentAnchors = {
+  requestId?: string;
+  siteId?: string;
+  unitId?: string;
+  contractorId?: string;
+};
+
+export type DocumentFields = {
+  title?: string;
+  documentType?: string;
+  description?: string;
+  /** `YYYY-MM-DD`. Anything else is refused by the server with a 400. */
+  expiryDate?: string;
+};
+
+type UploadOptions = DocumentAnchors &
+  DocumentFields & {
+    file: File;
+    kind: AttachmentKind;
+    columnId?: string;
+    uploadToken?: string;
+    /**
+     * W07-03. The id of the document this one supersedes.
+     *
+     * The result is a NEW row in the same lineage, never a rewrite: the
+     * predecessor keeps its bytes and its id and simply stops being current, so
+     * the version history survives and every URL ever issued still resolves.
+     * That is also why `GET /api/files/[id]` may serve objects `immutable`.
+     */
+    replaces?: string;
+  };
+
+/** The optional text fields, set only where actually supplied. */
+function appendDocumentFields(form: FormData, options: UploadOptions) {
+  if (options.siteId) form.set("siteId", options.siteId);
+  if (options.unitId) form.set("unitId", options.unitId);
+  if (options.contractorId) form.set("contractorId", options.contractorId);
+  if (options.replaces) form.set("replaces", options.replaces);
+  /*
+   * `!== undefined` rather than truthiness, so an explicit empty string CLEARS
+   * the field. On a replacement that is the only way to say "this new version
+   * genuinely has no expiry", because an absent key means "carry the
+   * predecessor's forward".
+   */
+  if (options.title !== undefined) form.set("title", options.title);
+  if (options.documentType !== undefined) {
+    form.set("documentType", options.documentType);
+  }
+  if (options.description !== undefined) {
+    form.set("description", options.description);
+  }
+  if (options.expiryDate !== undefined) {
+    form.set("expiryDate", options.expiryDate);
+  }
+}
+
+/** The same fields for the JSON routes. Omitted keys mean "unchanged". */
+function documentJsonFields(options: UploadOptions) {
+  return {
+    ...(options.siteId ? { siteId: options.siteId } : {}),
+    ...(options.unitId ? { unitId: options.unitId } : {}),
+    ...(options.contractorId ? { contractorId: options.contractorId } : {}),
+    ...(options.replaces ? { replaces: options.replaces } : {}),
+    ...(options.title !== undefined ? { title: options.title } : {}),
+    ...(options.documentType !== undefined
+      ? { documentType: options.documentType }
+      : {}),
+    ...(options.description !== undefined
+      ? { description: options.description }
+      : {}),
+    ...(options.expiryDate !== undefined
+      ? { expiryDate: options.expiryDate }
+      : {}),
+  };
+}
+
+async function directUpload(options: UploadOptions) {
+  const { file, requestId, kind, columnId, uploadToken } = options;
   const form = new FormData();
   form.set("file", file);
-  form.set("requestId", requestId);
+  // Sent only when there is one. An empty `requestId` would satisfy the old
+  // mandatory check and name no job, which is exactly the shape W07-07 replaced.
+  if (requestId) form.set("requestId", requestId);
   form.set("kind", kind);
   if (columnId) form.set("columnId", columnId);
   if (uploadToken) form.set("uploadToken", uploadToken);
+  appendDocumentFields(form, options);
   return readApi<UploadResponse>(
     await fetch("/api/files", { method: "POST", body: form }),
   );
 }
 
-async function multipartUpload({
-  file,
-  requestId,
-  kind,
-  columnId,
-  uploadToken,
-  onProgress,
-}: {
-  file: File;
-  requestId: string;
-  kind: AttachmentKind;
-  columnId?: string;
-  uploadToken?: string;
-  onProgress?: (progress: number) => void;
-}) {
+async function multipartUpload(
+  options: UploadOptions & { onProgress?: (progress: number) => void },
+) {
+  const { file, requestId, kind, columnId, uploadToken, onProgress } = options;
+  /*
+   * The anchors must be identical on all three calls.
+   *
+   * `start` names the R2 key after whichever anchor the document has, and the
+   * part handler re-derives that same prefix to prove a resumed upload is
+   * writing where it said it would. Sending the anchors to `start` and not to
+   * the parts would make a jobless document begin successfully and then have
+   * every one of its parts refused.
+   */
+  /*
+   * `Record<string, string>` rather than an inferred literal: spreading a
+   * variable whose keys are optional gives them a `string | undefined` type,
+   * which does not satisfy `HeadersInit`. Spreading the conditionals inline
+   * would work, but repeating three of them across four fetches is how the two
+   * halves of an upload drift apart.
+   */
+  const anchorHeaders: Record<string, string> = {};
+  if (options.siteId) anchorHeaders["X-Upload-Site-Id"] = options.siteId;
+  if (options.unitId) anchorHeaders["X-Upload-Unit-Id"] = options.unitId;
+  if (options.contractorId) {
+    anchorHeaders["X-Upload-Contractor-Id"] = options.contractorId;
+  }
+  const anchorBody = {
+    ...(options.siteId ? { siteId: options.siteId } : {}),
+    ...(options.unitId ? { unitId: options.unitId } : {}),
+    ...(options.contractorId ? { contractorId: options.contractorId } : {}),
+  };
+
   const start = await readApi<MultipartStartResponse>(
     await fetch("/api/files/multipart", {
       method: "POST",
@@ -278,6 +373,7 @@ async function multipartUpload({
         contentType: file.type || "application/octet-stream",
         byteSize: file.size,
         uploadToken,
+        ...anchorBody,
       }),
     }),
   );
@@ -294,13 +390,18 @@ async function multipartUpload({
         method: "PUT",
         headers: {
           "Content-Type": "application/octet-stream",
-          "X-Upload-Request-Id": requestId,
+          // `?? ""` because a document may now have no job (W07-07). An empty
+          // header is trimmed to "" server-side, which is the same thing the
+          // absent header would mean — and a header value of `undefined` is a
+          // type error rather than an omission.
+          "X-Upload-Request-Id": requestId ?? "",
           "X-Upload-Kind": kind,
           ...(columnId ? { "X-Upload-Column-Id": columnId } : {}),
           "X-Upload-Key": start.key,
           "X-Upload-Id": start.uploadId,
           "X-Upload-Part": String(index + 1),
           ...(uploadToken ? { "X-Upload-Token": uploadToken } : {}),
+          ...anchorHeaders,
         },
         body: chunk,
       });
@@ -325,6 +426,13 @@ async function multipartUpload({
           uploadId: start.uploadId,
           parts,
           uploadToken,
+          /*
+           * The document's own fields go on `complete`, not on `start`: `start`
+           * only reserves a key, and the row does not exist until here — so this
+           * is the first moment they can be written, and an abandoned upload has
+           * changed nothing.
+           */
+          ...documentJsonFields(options),
         }),
       }),
     );
@@ -342,6 +450,9 @@ async function multipartUpload({
         key: start.key,
         uploadId: start.uploadId,
         uploadToken,
+        // The anchors again: `abort` re-validates the key the same way the parts
+        // do, so a jobless upload must be able to clean up after itself.
+        ...anchorBody,
       }),
     }).catch(() => undefined);
     throw error;
@@ -407,21 +518,10 @@ async function offerThumbnail(file: File, attachmentId: string) {
   }
 }
 
-export async function uploadEvidenceFile({
-  file,
-  requestId,
-  kind,
-  columnId,
-  uploadToken,
-  onProgress,
-}: {
-  file: File;
-  requestId: string;
-  kind: AttachmentKind;
-  columnId?: string;
-  uploadToken?: string;
-  onProgress?: (progress: number) => void;
-}): Promise<UploadResponse> {
+export async function uploadEvidenceFile(
+  options: UploadOptions & { onProgress?: (progress: number) => void },
+): Promise<UploadResponse> {
+  const { file, onProgress } = options;
   validateFile(file);
   onProgress?.(0);
 
@@ -431,40 +531,16 @@ export async function uploadEvidenceFile({
   };
 
   if (file.size > DIRECT_UPLOAD_LIMIT) {
-    return finish(
-      await multipartUpload({
-        file,
-        requestId,
-        kind,
-        columnId,
-        uploadToken,
-        onProgress,
-      }),
-    );
+    return finish(await multipartUpload(options));
   }
 
   try {
-    const result = await directUpload({
-      file,
-      requestId,
-      kind,
-      columnId,
-      uploadToken,
-    });
+    const result = await directUpload(options);
     onProgress?.(100);
     return finish(result);
   } catch (error) {
     if (error instanceof UploadApiError && error.status === 413) {
-      return finish(
-        await multipartUpload({
-          file,
-          requestId,
-          kind,
-          columnId,
-          uploadToken,
-          onProgress,
-        }),
-      );
+      return finish(await multipartUpload(options));
     }
     throw error;
   }

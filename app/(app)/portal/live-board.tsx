@@ -260,7 +260,42 @@ export function LiveMaintenanceBoard({
      paint by the boot script and kept in step by the topbar toggle. */
   const themePreference = useThemeChoice();
   const resolvedTheme = useResolvedTheme();
-  const [groups, setGroups] = useState<MaintenanceGroup[]>(fallbackGroups);
+  /*
+   * THE FALLBACK SEED BELONGS TO THE MAINTENANCE BOARD, AND ONLY TO IT.
+   *
+   * `fallbackGroups` and `fallbackSystemColumns` are derived from
+   * `monday-board-spec.ts` — they are the maintenance board's four groups and
+   * its twenty-five columns, by name. They were seeded unconditionally, so
+   * every OTHER board mounted showing the maintenance board's schema: on
+   * /dashboard/store-documentation the grid painted "New Requests / In
+   * Progress / …" with Priority, Engineer and the two photo columns, fully
+   * drawn and complete with Add-item affordances, for the whole time
+   * `/api/board?board=store-documentation` was in flight — measured at ~9.4s on
+   * a cold load. No rows leaked, because `scopedRequests` gates those on
+   * `placementsLoaded`; it was the SCHEMA that was wrong, which is worse than
+   * blank in a specific way. A reader who acts on a column heading that is
+   * about to be replaced has been told something false about the register,
+   * whereas nobody mistakes an empty frame for data.
+   *
+   * So the seed is now conditional on being that board. Maintenance keeps its
+   * instant first paint exactly as before — no regression there, and it is the
+   * board the seed was written for. Every other board starts with nothing and
+   * paints its real groups and columns when they arrive, which is one
+   * transition instead of two and never a wrong one. The toolbar already says
+   * "Syncing board" and the mobile header already says "Loading…" during it,
+   * so the interval is accounted for rather than silent.
+   *
+   * `boardId` is read in the initialiser, which runs on mount only. That is
+   * correct here: the board id identifies the mounted board, and every caller
+   * passes a constant — `portal-app.tsx` and `store-documentation-board.tsx`
+   * each name one literal. A board id that changed under a live component
+   * would need the load effect to re-seed, and that effect already keys on
+   * `boardId` and overwrites both pieces of state when it answers.
+   */
+  const isMaintenanceBoard = boardId === "maintenance";
+  const [groups, setGroups] = useState<MaintenanceGroup[]>(
+    isMaintenanceBoard ? fallbackGroups : [],
+  );
   const [items, setItems] = useState<MaintenanceGroupItem[]>([]);
   /** Whether the board snapshot has arrived — see `scopedRequests`. */
   const [placementsLoaded, setPlacementsLoaded] = useState(false);
@@ -279,8 +314,9 @@ export function LiveMaintenanceBoard({
   const [customColumns, setCustomColumns] = useState<MaintenanceBoardColumn[]>(
     [],
   );
+  /* Conditional for the reason spelled out above `groups`. */
   const [systemColumns, setSystemColumns] = useState<MaintenanceBoardColumn[]>(
-    fallbackSystemColumns,
+    isMaintenanceBoard ? fallbackSystemColumns : [],
   );
   const [customCells, setCustomCells] = useState<Record<string, string>>({});
   /*
@@ -584,10 +620,19 @@ export function LiveMaintenanceBoard({
           const loadedSystemColumns = payload.columns.filter(
             (column) => column.system,
           );
+          /*
+           * The same rule as the initial seed above: the fallback is the
+           * maintenance board's twenty-five columns, so offering it to a board
+           * that answered with none of its own substitutes another board's
+           * schema for an honest empty one. Maintenance keeps the safety net —
+           * it is the board the net was woven for.
+           */
           setSystemColumns(
             loadedSystemColumns.length
               ? loadedSystemColumns
-              : fallbackSystemColumns,
+              : boardId === "maintenance"
+                ? fallbackSystemColumns
+                : [],
           );
           setCustomColumns(
             payload.columns.filter((column) => !column.system),
@@ -4512,575 +4557,6 @@ export function LiveMaintenanceBoard({
   );
 }
 
-function CustomColumnCell({
-  boardId,
-  column,
-  value,
-  fileCount,
-  filePreview,
-  requestId,
-  onChange,
-  onUpdateSettings,
-  onOpenFiles,
-}: {
-  boardId: string;
-  column: MaintenanceBoardColumn;
-  value: string;
-  fileCount: number;
-  /** First few files in this cell, for the tiles. */
-  filePreview: MaintenanceBoardFilePreview[];
-  requestId: string;
-  onChange: (
-    value: string | boolean | { start: string; end: string },
-  ) => void;
-  onUpdateSettings: (settings: BoardColumnSettings) => Promise<void>;
-  onOpenFiles: () => void;
-}) {
-  if (
-    column.type === "status" ||
-    column.type === "dropdown" ||
-    column.type === "people"
-  ) {
-    return (
-      <CustomChoiceCell
-        column={column}
-        value={value}
-        onChange={onChange}
-        onUpdateSettings={onUpdateSettings}
-      />
-    );
-  }
-  if (column.type === "date") {
-    /*
-     * On the Store Documentation board every date column is a certificate
-     * expiry, so it renders with its RAG state rather than as a bare date. A
-     * date sitting in a cell tells you nothing; "expired 147 days ago" is the
-     * whole reason the column exists. Maintenance keeps the plain date cell.
-     */
-    if (boardId === "store-documentation") {
-      return (
-        <ExpiryCell
-          title={column.title}
-          value={value}
-          metadataValue={value}
-          onSave={(_next, metadata) => onChange(metadata)}
-        />
-      );
-    }
-    return (
-      <DateCell
-        title={column.title}
-        value={value}
-        metadataValue={value}
-        onSave={(_next, metadata) => onChange(metadata)}
-      />
-    );
-  }
-  if (column.type === "timeline") {
-    let timeline: { start?: string; end?: string } = {};
-    try {
-      timeline = value ? (JSON.parse(value) as typeof timeline) : {};
-    } catch {
-      timeline = {};
-    }
-    return (
-      <TimelineCell
-        title={column.title}
-        start={timeline.start}
-        end={timeline.end}
-        onSave={(start, end) =>
-          onChange({ start: start ?? "", end: end ?? "" })
-        }
-      />
-    );
-  }
-  if (column.type === "checkbox") {
-    return (
-      <label className="sheet-custom-checkbox">
-        <input
-          type="checkbox"
-          checked={value === "true"}
-          aria-label={column.title}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span><Icon name="check" size={13} /></span>
-      </label>
-    );
-  }
-  if (column.type === "files") {
-    /*
-     * The twelve document columns are what the Store Documentation board is
-     * for, so they get real per-file chips. Maintenance keeps the hover preview
-     * it has always had — changing it was not asked for and board parity tests
-     * pin its behaviour.
-     */
-    if (boardId === "store-documentation") {
-      return (
-        <FileCell
-          title={column.title}
-          requestId={requestId}
-          columnId={column.id}
-          // The real documents, not `[]`. See `boardFileCellFiles`: with no
-          // files the cell drew one anonymous digit per certificate. All
-          // twelve columns now draw chips — the `column.key === "rams"`
-          // special case is gone, because `summary` in the board spec is the
-          // group-footer aggregation ("battery", "min", "sum"), never a cell
-          // renderer, and monday types all twelve columns identically.
-          files={boardFileCellFiles(filePreview)}
-          count={fileCount}
-          onSave={() => {
-            // Counts live in the board snapshot, so a new or removed document
-            // has to come back through the board rather than be patched here.
-            window.dispatchEvent(new Event("maintsupp:refresh-board"));
-          }}
-          onOpen={onOpenFiles}
-        />
-      );
-    }
-    /* Every maintenance file column takes THIS path, not the `case
-       "issuePictures"` blocks below — which is why the photo columns drew a
-       paperclip and a number instead of the photographs. */
-    return (
-      <FileHoverPreview
-        requestId={requestId}
-        columnId={column.id}
-        mondayMediaStyle
-        count={fileCount}
-        preview={filePreview}
-        onOpen={onOpenFiles}
-      />
-    );
-  }
-  return (
-    <InlineTextCell
-      title={column.title}
-      value={value}
-      emptyLabel="Add value"
-      multiline={column.type === "long_text"}
-      inputMode={
-        column.type === "number"
-          ? "decimal"
-          : column.type === "email"
-            ? "email"
-            : column.type === "phone"
-              ? "tel"
-              : column.type === "link"
-                ? "url"
-                : "text"
-      }
-      onSave={onChange}
-    />
-  );
-}
-
-
-function CustomChoiceCell({
-  column,
-  value,
-  onChange,
-  onUpdateSettings,
-}: {
-  column: MaintenanceBoardColumn;
-  value: string;
-  onChange: (value: string) => void;
-  onUpdateSettings: (settings: BoardColumnSettings) => Promise<void>;
-}) {
-  const mobile = useContext(MobileBoardContext);
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [newLabel, setNewLabel] = useState("");
-  const [newColor, setNewColor] = useState("#579bfc");
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const choices = choiceList(column);
-  const selected = findChoice(choices, value);
-  const settingsKey = column.type === "people" ? "people" : "choices";
-
-  useRevealBoardPopover(open && !mobile, ref, editing);
-
-  useEffect(() => {
-    if (!open || mobile) return;
-    const close = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) {
-        setOpen(false);
-        setEditing(false);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [mobile, open]);
-
-  const closeEditor = () => {
-    setOpen(false);
-    setEditing(false);
-    setSearch("");
-  };
-
-  const visibleChoices = choices.filter((choice) =>
-    choice.label.toLowerCase().includes(search.trim().toLowerCase()),
-  );
-
-  const saveChoices = async (nextChoices: BoardColumnChoice[]) => {
-    setWorking(true);
-    setError(null);
-    try {
-      await onUpdateSettings({
-        ...column.settings,
-        [settingsKey]: nextChoices,
-      });
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The options could not be saved.",
-      );
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const addChoice = async () => {
-    const label = newLabel.trim();
-    if (!label || working) return;
-    const idBase = label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    const id = `${idBase || "choice"}-${crypto.randomUUID()}`;
-    await saveChoices([...choices, { id, label, color: newColor }]);
-    setNewLabel("");
-  };
-
-  return (
-    <div className="sheet-option-cell sheet-custom-choice" ref={ref}>
-      <button
-        type="button"
-        /*
-         * Two different problems, so two different answers.
-         *
-         * EMPTY: no option is selected, so there is no data colour and the
-         * chip is pure design — it belongs to the theme and goes through the
-         * neutral-chip tokens. The literal pair it replaces (#8a979f on
-         * #eef1f3, 2.64:1) was the same in light and dark and failed in both,
-         * on 2,229 cells.
-         *
-         * FILLED: the ground is monday's colour for that label and must not
-         * move. Only the label colour is ours to choose, and `chipInk` keeps
-         * the stored one whenever it is legible on that exact ground.
-         */
-        style={
-          selected
-            ? chipStyle(selected.color, selected.textColor)
-            : {
-                background: "var(--chip-neutral-bg)",
-                color: "var(--chip-neutral-fg)",
-              }
-        }
-        onClick={() => {
-          setOpen((current) => !current);
-          setEditing(false);
-          setSearch("");
-        }}
-      >
-        {selected?.label ?? "—"}
-      </button>
-      {open && !mobile && !editing && (
-        <div className="sheet-option-popover">
-          <div className="sheet-option-grid">
-            <button
-              type="button"
-              className="sheet-option-clear"
-              onClick={() => {
-                onChange("");
-                setOpen(false);
-              }}
-            >
-              Clear value
-            </button>
-            {choices.map((choice) => (
-              <button
-                key={choice.id}
-                type="button"
-                style={chipStyle(choice.color, choice.textColor)}
-                onClick={() => {
-                  onChange(choice.id);
-                  setOpen(false);
-                }}
-              >
-                {choice.label}
-              </button>
-            ))}
-          </div>
-          <button
-            className="sheet-option-edit"
-            type="button"
-            onClick={() => setEditing(true)}
-          >
-            <Icon name="settings" size={15} />
-            {column.type === "people" ? "Edit people" : "Edit labels"}
-          </button>
-        </div>
-      )}
-      {open && !mobile && editing && (
-        <div className="sheet-option-popover sheet-label-editor">
-          <header>
-            <button type="button" onClick={() => setEditing(false)}>‹</button>
-            <strong>
-              {column.type === "people" ? "Edit people" : "Edit labels"}
-            </strong>
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setEditing(false);
-              }}
-            >
-              <Icon name="close" size={15} />
-            </button>
-          </header>
-          <div className="sheet-label-editor__list">
-            {choices.map((choice) => (
-              <div key={`${choice.id}-${choice.label}-${choice.color}`}>
-                <input
-                  type="color"
-                  aria-label={`Color for ${choice.label}`}
-                  value={choice.color}
-                  disabled={working}
-                  onChange={(event) =>
-                    saveChoices(
-                      choices.map((item) =>
-                        item.id === choice.id
-                          ? { ...item, color: event.target.value }
-                          : item,
-                      ),
-                    )
-                  }
-                />
-                <input
-                  defaultValue={choice.label}
-                  aria-label={`Name for ${choice.label}`}
-                  disabled={working}
-                  onBlur={(event) => {
-                    const label = event.currentTarget.value.trim();
-                    if (!label || label === choice.label) return;
-                    saveChoices(
-                      choices.map((item) =>
-                        item.id === choice.id ? { ...item, label } : item,
-                      ),
-                    );
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-                <button
-                  type="button"
-                  className="is-danger"
-                  disabled={working}
-                  title="Delete option"
-                  onClick={() =>
-                    saveChoices(
-                      choices.filter((item) => item.id !== choice.id),
-                    )
-                  }
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="sheet-label-editor__new">
-            <input
-              type="color"
-              aria-label="New option color"
-              value={newColor}
-              onChange={(event) => setNewColor(event.target.value)}
-            />
-            <input
-              value={newLabel}
-              placeholder="+ New option"
-              onChange={(event) => setNewLabel(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") addChoice();
-              }}
-            />
-            <button
-              type="button"
-              disabled={!newLabel.trim() || working}
-              onClick={addChoice}
-            >
-              Add
-            </button>
-          </div>
-          {error && (
-            <small className="sheet-label-editor__error">{error}</small>
-          )}
-        </div>
-      )}
-      {open && mobile && (
-        <MobileCellSheet
-          title={editing ? `Edit ${column.title}` : column.title}
-          subtitle={
-            editing
-              ? "Changes are saved to this board"
-              : selected
-                ? `Current: ${selected.label}`
-                : "No value selected"
-          }
-          onClose={closeEditor}
-          className="mobile-choice-sheet"
-          footer={
-            editing ? (
-              <>
-                <button type="button" onClick={() => setEditing(false)}>
-                  Back
-                </button>
-                <button className="primary-button" type="button" onClick={closeEditor}>
-                  Done
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange("");
-                    closeEditor();
-                  }}
-                >
-                  Clear
-                </button>
-                <button className="primary-button" type="button" onClick={() => setEditing(true)}>
-                  {column.type === "people" ? "Manage people" : "Manage labels"}
-                </button>
-              </>
-            )
-          }
-        >
-          {!editing ? (
-            <>
-              <label className="mobile-sheet-search">
-                <Icon name="search" size={17} />
-                <input
-                  type="search"
-                  value={search}
-                  placeholder={column.type === "people" ? "Search people" : "Search options"}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </label>
-              <div
-                className={`mobile-choice-list${
-                  column.type === "people" ? " mobile-choice-list--people" : ""
-                }`}
-              >
-                {visibleChoices.map((choice) => (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    className={choice.id === value ? "is-selected" : ""}
-                    onClick={() => {
-                      onChange(choice.id);
-                      closeEditor();
-                    }}
-                  >
-                    <span style={{ background: choice.color }}>
-                      {column.type === "people"
-                        ? choice.label
-                            .split(/\s+/)
-                            .slice(0, 2)
-                            .map((part) => part[0])
-                            .join("")
-                            .toUpperCase()
-                        : ""}
-                    </span>
-                    <strong>{choice.label}</strong>
-                    {choice.id === value && <Icon name="check" size={18} />}
-                  </button>
-                ))}
-                {!visibleChoices.length && (
-                  <p className="mobile-choice-empty">No matching options.</p>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="mobile-option-manager">
-              <div className="mobile-option-manager__list">
-                {choices.map((choice) => (
-                  <div key={`${choice.id}-${choice.label}-${choice.color}`}>
-                    <input
-                      type="color"
-                      aria-label={`Color for ${choice.label}`}
-                      value={choice.color}
-                      disabled={working}
-                      onChange={(event) =>
-                        void saveChoices(
-                          choices.map((item) =>
-                            item.id === choice.id
-                              ? { ...item, color: event.target.value }
-                              : item,
-                          ),
-                        )
-                      }
-                    />
-                    <input
-                      defaultValue={choice.label}
-                      aria-label={`Name for ${choice.label}`}
-                      disabled={working}
-                      onBlur={(event) => {
-                        const label = event.currentTarget.value.trim();
-                        if (!label || label === choice.label) return;
-                        void saveChoices(
-                          choices.map((item) =>
-                            item.id === choice.id ? { ...item, label } : item,
-                          ),
-                        );
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
-                      }}
-                    />
-                    <button
-                      type="button"
-                      aria-label={`Delete ${choice.label}`}
-                      disabled={working || choices.length <= 1}
-                      onClick={() =>
-                        void saveChoices(
-                          choices.filter((item) => item.id !== choice.id),
-                        )
-                      }
-                    >
-                      <Icon name="close" size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="mobile-option-manager__new">
-                <input
-                  type="color"
-                  aria-label="New option color"
-                  value={newColor}
-                  onChange={(event) => setNewColor(event.target.value)}
-                />
-                <input
-                  value={newLabel}
-                  placeholder={column.type === "people" ? "New person" : "New label"}
-                  onChange={(event) => setNewLabel(event.target.value)}
-                />
-                <button type="button" disabled={!newLabel.trim() || working} onClick={() => void addChoice()}>
-                  Add
-                </button>
-              </div>
-              {error && <p className="mobile-sheet-error">{error}</p>}
-            </div>
-          )}
-        </MobileCellSheet>
-      )}
-    </div>
-  );
-}
-
 function BoardRow({
   boardId,
   request,
@@ -5993,3 +5469,4 @@ import {
   TimelineCell,
 } from "./board-cells";
 import { SubitemRows, SubitemsCell } from "./board-subitems";
+import { CustomColumnCell } from "./cells/custom-column-cell";

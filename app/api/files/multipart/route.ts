@@ -8,17 +8,30 @@ import {
   maintenanceRequests,
 } from "../../../../db/schema";
 import { boardKeyForRequest } from "../../../lib/board-registry";
-import { demoIdentityAllowed } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
-import {
-  recordTokenUse,
-  resolveJobToken,
-  type EvidenceKind,
-} from "../../../lib/job-tokens";
+import { auditActor, recordAudit } from "../../../lib/audit";
 import {
   kindForColumnKey,
   reconcileAttachmentCounts,
 } from "../../../lib/attachment-counts";
+import {
+  type Anchors,
+  anchorRefusal,
+  anchorReferencesRefusal,
+  anchorSegment,
+  attachmentPayload,
+  documentFieldUpdates,
+  planVersion,
+  readAnchors,
+  resolveSiteId,
+  restorePredecessor,
+  standDownPredecessor,
+} from "../documents";
+import {
+  pendingReview,
+  resolveUploadAuthority,
+  resolveUploadTenant,
+} from "../upload-authority";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -122,20 +135,13 @@ function isAllowedFile(originalName: string, contentType: string) {
   return typeOk && allowedExtensions.has(fileExtension(originalName));
 }
 
-function attachmentPayload(row: typeof attachments.$inferSelect) {
-  return {
-    id: row.id,
-    requestId: row.requestId,
-    kind: row.kind,
-    boardColumnId: row.boardColumnId,
-    originalName: row.originalName,
-    contentType: row.contentType,
-    byteSize: row.byteSize,
-    createdAt: row.createdAt,
-    inlineUrl: `/api/files/${row.id}`,
-    downloadUrl: `/api/files/${row.id}?download=1`,
-  };
-}
+/*
+ * `attachmentPayload` used to be declared here as well, and the two copies had
+ * already drifted: this one omitted `uploadedByEmail`, so which fields a caller
+ * received depended on how large their file was. It now comes from
+ * `../documents` along with the field rules, so there is one answer to the
+ * question "what is a document".
+ */
 
 function requestPayload(
   row: typeof maintenanceRequests.$inferSelect,
@@ -163,6 +169,12 @@ async function authorizeUpload(
   requestedKind: string,
   uploadToken: string,
   requestedColumnId: string,
+  /*
+   * The other three anchors (W07-07). Optional so the PUT part handler — which
+   * carries them in headers and has already had them validated by `start` —
+   * need not repeat the lookups for every 5 MB chunk.
+   */
+  extraAnchors: Partial<Anchors> = {},
 ) {
   await ensureDatabase();
   /*
@@ -175,32 +187,39 @@ async function authorizeUpload(
    * they got was "sign in", which is not something a job link can do.
    */
   const scope = await scopedDb(request, { allowAnonymous: true });
-  const { actor, authenticated, db } = scope;
+  const { actor, db } = scope;
   let orgId = scope.orgId;
   /*
-   * See the matching note in `../route.ts`. A demo identity — the sidebar's
-   * "Preview User / TESTING ACCESS" switcher — is deliberately not
-   * `authenticated`, and this route read that as "anonymous stranger with no
-   * job link" and answered "This link does not belong to that job."
-   *
-   * This is the path every file over 900 KB takes, so it is the one a real
-   * photograph or video actually hits: a phone picture is 2–5 MB. That is why
-   * uploading images and videos failed from the board while a small test file
-   * went through — they are different routes.
+   * `isOperator = authenticated || demoIdentityAllowed()` used to stand here and
+   * decide every branch below. It is gone — see `../upload-authority.ts`. What
+   * it was covering for is real and is preserved: the sidebar's "Preview User /
+   * TESTING ACCESS" switcher is deliberately not `authenticated`, and reading
+   * that as "anonymous stranger with no job link" is what made uploading a
+   * photograph from the board answer "This link does not belong to that job."
+   * A capability check reads the switcher's ROLE instead, so it keeps working
+   * and now says something true in production as well.
    */
-  const isOperator = authenticated || demoIdentityAllowed();
   const kind = allowedKinds.has(requestedKind as AttachmentKind)
     ? (requestedKind as AttachmentKind)
     : null;
   const boardColumnId = requestedColumnId.trim().slice(0, 100);
-  if (!requestId || !kind) {
+  const anchors = readAnchors({
+    requestId,
+    siteId: extraAnchors.siteId,
+    unitId: extraAnchors.unitId,
+    contractorId: extraAnchors.contractorId,
+  });
+  if (!kind) {
     return {
       response: Response.json(
-        { error: "A work order and valid file section are required." },
+        { error: "A valid file section is required." },
         { status: 400 },
       ),
     } as const;
   }
+  // W07-07 — a job is no longer mandatory, but SOMETHING is.
+  const missingAnchor = anchorRefusal(anchors);
+  if (missingAnchor) return { response: missingAnchor } as const;
 
   /*
    * THE TOKEN IS RESOLVED BEFORE THE JOB IS LOOKED UP, because it decides which
@@ -216,30 +235,44 @@ async function authorizeUpload(
    * identical ids. Taking the organisation from the token removes the
    * coincidence. A session-backed caller keeps the tenant their membership
    * resolved.
+   *
+   * Resolved UNCONDITIONALLY now, not only when there is no session: see the
+   * matching note in `../route.ts`. A signed-in client holding a public link is
+   * exercising the LINK's grant, and skipping the token because a session exists
+   * would refuse them where an anonymous visitor passes.
    */
-  let scopedToken: Awaited<ReturnType<typeof resolveJobToken>> = null;
-  if (!isOperator && uploadToken) {
-    scopedToken = await resolveJobToken(db, uploadToken);
-    if (scopedToken) orgId = scopedToken.organisationId;
-  }
+  const tenant = await resolveUploadTenant(db, orgId, uploadToken);
+  orgId = tenant.orgId;
+  const scopedToken = tenant.token;
 
   // A binned job takes no uploads — see the same filter on the direct path.
-  const [workOrder] = await db
-    .select()
-    .from(maintenanceRequests)
-    .where(
-      and(
-        eq(maintenanceRequests.id, requestId),
-        eq(maintenanceRequests.organisationId, orgId),
-        isNull(maintenanceRequests.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (!workOrder) {
+  // Skipped entirely for a document with no job (W07-07).
+  const [workOrder] = requestId
+    ? await db
+        .select()
+        .from(maintenanceRequests)
+        .where(
+          and(
+            eq(maintenanceRequests.id, requestId),
+            eq(maintenanceRequests.organisationId, orgId),
+            isNull(maintenanceRequests.deletedAt),
+          ),
+        )
+        .limit(1)
+    : [];
+  if (requestId && !workOrder) {
     return {
       response: Response.json({ error: "Work order not found." }, { status: 404 }),
     } as const;
   }
+
+  /*
+   * The other three anchors, checked against THIS tenant before any bytes move.
+   * The deployed DDL has no foreign key on `site_id` or `unit_id`, so this is the
+   * only thing standing between a typo and a document filed against nothing.
+   */
+  const badAnchor = await anchorReferencesRefusal(db, orgId, anchors);
+  if (badAnchor) return { response: badAnchor } as const;
 
   /*
    * THE COLUMN IS RESOLVED BEFORE THE GRANT IS CHECKED, and it did not used to
@@ -258,7 +291,7 @@ async function authorizeUpload(
    * is checked against exactly that.
    */
   let storedKind = kind;
-  if (boardColumnId) {
+  if (boardColumnId && workOrder) {
     // Scoped to the work order's own board, not the literal "maintenance" —
     // Store Documentation's twelve file columns live on another board and were
     // refused outright. See `boardKeyForRequest`.
@@ -290,50 +323,43 @@ async function authorizeUpload(
   }
 
   /*
-   * What the link is allowed to do, now that we know whose it is.
+   * WHAT THE CALLER IS ALLOWED TO DO — the W07-01 fix, shared with `../route.ts`.
    *
-   * The token was resolved above because it chooses the tenant; this is the
-   * authorisation half — it must belong to THIS job, and it must permit this
-   * kind of evidence. An unauthenticated caller without one gets nothing.
+   * This used to be `if (!isOperator) { …token checks… }`, which is to say the
+   * checks ran for everyone EXCEPT a caller with a session, and no check at all
+   * ran for one. Authorisation on the path every file over ~900 KB takes — which
+   * is every photograph a phone produces — was `scopedDb` alone, and `scopedDb`
+   * never refuses on grounds of permission.
    *
-   * (The `uploadToken` argument spent a long time being accepted and never
+   * `resolveUploadAuthority` is those same token rules with a `board.edit` floor
+   * underneath, and with the token consulted BEFORE the session rather than only
+   * in its absence. See `../upload-authority.ts` for why that order is the whole
+   * of the fix.
+   *
+   * (The `uploadToken` argument also spent a long time being accepted and never
    * read: declared in the signature, sent faithfully by `client-upload.ts` from
    * both the POST body and the `X-Upload-Token` header, and referenced by
-   * nothing — so authorisation on the path every large file takes was
-   * `scopedDb` alone, which never refuses.)
+   * nothing.)
    */
-  if (!isOperator) {
-    if (
-      !scopedToken ||
-      scopedToken.requestId !== workOrder.id ||
-      // Belt and braces, as on the direct route: the lookup above already used
-      // the token's organisation, so this cannot fail — it is here so that a
-      // future change to either side cannot quietly separate them.
-      scopedToken.organisationId !== workOrder.organisationId
-    ) {
-      return {
-        response: Response.json(
-          { error: "This link does not belong to that job." },
-          { status: 403 },
-        ),
-      } as const;
-    }
-    if (!scopedToken.allowedKinds.includes(storedKind as EvidenceKind)) {
-      return {
-        response: Response.json(
-          { error: `This link cannot upload ${storedKind} evidence.` },
-          { status: 403 },
-        ),
-      } as const;
-    }
-    await recordTokenUse(db, scopedToken.id);
-  }
+  const authority = await resolveUploadAuthority({
+    request,
+    scope,
+    orgId,
+    workOrder: workOrder ?? null,
+    storedKind,
+    uploadToken,
+    jobToken: scopedToken,
+  });
+  if (authority.denied) return { response: authority.denied } as const;
 
   return {
     actor,
+    scope,
     orgId,
     kind: storedKind,
     workOrder,
+    anchors,
+    via: authority.via,
     db,
     boardColumnId: boardColumnId || null,
     actorEmail: actor.email,
@@ -352,14 +378,22 @@ async function authorizeUpload(
   } as const;
 }
 
+/**
+ * A resumed upload is writing where its `start` said it would.
+ *
+ * The prefix is re-derived from `anchorSegment` rather than from `requestId`
+ * directly, because a document with no job is now legitimate and its key is
+ * named after whichever anchor it does have. Deriving it two different ways
+ * would let a jobless multipart upload begin and then be refused at every part.
+ */
 function validUploadKey(
   key: string,
   orgId: string,
-  requestId: string,
+  anchors: Anchors,
   kind: AttachmentKind,
 ) {
   return (
-    key.startsWith(`${orgId}/maintenance/${requestId}/${kind}/`) &&
+    key.startsWith(`${orgId}/maintenance/${anchorSegment(anchors)}/${kind}/`) &&
     key.length < 512
   );
 }
@@ -375,7 +409,15 @@ async function completeMetadata(
   if (!head) return null;
   const metadata = head.customMetadata ?? {};
   if (
-    metadata.requestId !== requestId ||
+    /*
+     * `|| ""` on both sides, because a jobless document (W07-07) starts its
+     * upload with an empty `requestId` and R2 does not promise to round-trip an
+     * empty custom-metadata value — it may come back as `undefined`. Comparing
+     * the raw values would then make every contractor certificate over ~900 KB
+     * fail at `complete` with "The completed file metadata is invalid", after
+     * every byte had already been uploaded.
+     */
+    (metadata.requestId || "") !== (requestId || "") ||
     metadata.kind !== kind ||
     (metadata.boardColumnId || null) !== boardColumnId ||
     !metadata.fileId ||
@@ -431,10 +473,27 @@ export async function POST(request: Request) {
       requestedKind,
       uploadToken,
       requestedColumnId,
+      // W07-07 — the other three anchors, so a document with no job can be
+      // filed against a site, a unit or a contractor instead.
+      {
+        siteId: String(payload.siteId ?? "").trim(),
+        unitId: String(payload.unitId ?? "").trim(),
+        contractorId: String(payload.contractorId ?? "").trim(),
+      },
     );
     if ("response" in authorization) return authorization.response;
-    const { db, kind, workOrder, actorEmail, boardColumnId, orgId, scopedToken } =
-      authorization;
+    const {
+      db,
+      kind,
+      workOrder,
+      actorEmail,
+      boardColumnId,
+      orgId,
+      scopedToken,
+      anchors,
+      scope,
+      via,
+    } = authorization;
     /*
      * WHO REALLY UPLOADED THIS — the same rule `../route.ts` applies, which
      * this route was missing.
@@ -489,7 +548,8 @@ export async function POST(request: Request) {
 
       const fileId = crypto.randomUUID();
       const cleanName = safeFileName(originalName) || `upload-${fileId}`;
-      const key = `${orgId}/maintenance/${requestId}/${kind}/${fileId}-${cleanName}`;
+      // Named after whichever anchor this document has — see `anchorSegment`.
+      const key = `${orgId}/maintenance/${anchorSegment(anchors)}/${kind}/${fileId}-${cleanName}`;
       const upload = await storage.createMultipartUpload(key, {
         httpMetadata: {
           contentType,
@@ -515,7 +575,7 @@ export async function POST(request: Request) {
 
     const key = String(payload.key ?? "");
     const uploadId = String(payload.uploadId ?? "");
-    if (!key || !uploadId || !validUploadKey(key, orgId, requestId, kind)) {
+    if (!key || !uploadId || !validUploadKey(key, orgId, anchors, kind)) {
       return Response.json(
         { error: "The upload session is invalid." },
         { status: 400 },
@@ -594,8 +654,51 @@ export async function POST(request: Request) {
       if (existing) {
         return Response.json({
           file: attachmentPayload(existing),
-          request: requestPayload(workOrder),
+          request: workOrder ? requestPayload(workOrder) : null,
         });
+      }
+
+      /*
+       * W07-02 metadata and W07-03 lineage, read from the `complete` body.
+       *
+       * Both are read here rather than at `start` because `start` only reserves
+       * a key: the row does not exist until now, so this is the first moment
+       * either can be written, and a caller that abandons an upload has not
+       * changed anything.
+       */
+      const fields = documentFieldUpdates({
+        ...("title" in payload ? { title: payload.title } : {}),
+        ...("documentType" in payload
+          ? { documentType: payload.documentType }
+          : {}),
+        ...("description" in payload
+          ? { description: payload.description }
+          : {}),
+        ...("expiryDate" in payload ? { expiryDate: payload.expiryDate } : {}),
+      });
+      if (!fields.ok) {
+        // The bytes are already in the bucket; a refused row must not leave them
+        // there, or an abandoned certificate accumulates storage for ever.
+        await storage.delete(key);
+        return Response.json({ error: fields.error }, { status: 400 });
+      }
+
+      const replacesId = String(payload.replaces ?? "").trim().slice(0, 120);
+      let version: Awaited<ReturnType<typeof planVersion>> | null = null;
+      if (replacesId) {
+        if (via !== "capability") {
+          await storage.delete(key);
+          return Response.json(
+            { error: "This link cannot replace an existing document." },
+            { status: 403 },
+          );
+        }
+        version = await planVersion(db, orgId, replacesId);
+        if (!version.ok) {
+          await storage.delete(key);
+          return version.denied;
+        }
+        await standDownPredecessor(db, orgId, version.predecessor.id);
       }
 
       try {
@@ -604,8 +707,16 @@ export async function POST(request: Request) {
           .values({
             id: completed.fileId,
             organisationId: orgId,
-            requestId,
-            siteId: workOrder.siteId,
+            // W07-07 anchors, with an explicit site beating the job's inherited
+            // one — see `resolveSiteId`.
+            requestId: requestId || version?.plan.carried.requestId || null,
+            siteId: resolveSiteId(
+              anchors.siteId,
+              workOrder?.siteId ?? version?.plan.carried.siteId,
+            ),
+            unitId: anchors.unitId || version?.plan.carried.unitId || null,
+            contractorId:
+              anchors.contractorId || version?.plan.carried.contractorId || null,
             kind,
             boardColumnId,
             objectKey: key,
@@ -613,6 +724,22 @@ export async function POST(request: Request) {
             contentType: completed.contentType,
             byteSize,
             uploadedByEmail,
+            title: fields.values.title ?? version?.plan.carried.title ?? null,
+            documentType:
+              fields.values.documentType ??
+              version?.plan.carried.documentType ??
+              null,
+            description:
+              fields.values.description ??
+              version?.plan.carried.description ??
+              null,
+            expiryDate:
+              fields.values.expiryDate ??
+              version?.plan.carried.expiryDate ??
+              null,
+            rootDocumentId: version?.ok ? version.plan.rootDocumentId : null,
+            versionNo: version?.ok ? version.plan.versionNo : 1,
+            isCurrent: true,
             /*
              * EVIDENCE FROM A PUBLIC LINK WAITS FOR A COORDINATOR — and until
              * now it did so only if it was small enough.
@@ -626,8 +753,11 @@ export async function POST(request: Request) {
              * 0012, on the path that carries the real photographs.
              *
              * A signed-in operator's upload is not pending, here as there.
+             *
+             * Keyed on the GRANT rather than on the presence of a token object —
+             * see `pendingReview`.
              */
-            pending: Boolean(scopedToken),
+            pending: pendingReview(via),
             submittedVia: scopedToken ? scopedToken.id : null,
           })
           .returning();
@@ -643,28 +773,76 @@ export async function POST(request: Request) {
          * five photographs against three rows. A COUNT converges from whatever
          * the counter had drifted to. See `app/lib/attachment-counts.ts`.
          */
-        const updatedRequest = await reconcileAttachmentCounts(db, orgId, requestId);
+        const updatedRequest = requestId
+          ? await reconcileAttachmentCounts(db, orgId, requestId)
+          : null;
 
-        await db.insert(activityLog).values({
-          id: crypto.randomUUID(),
+        // The job's own timeline, where there is a job.
+        if (requestId) {
+          await db.insert(activityLog).values({
+            id: crypto.randomUUID(),
+            organisationId: orgId,
+            entityType: "maintenance_request",
+            entityId: requestId,
+            action: "request.file_uploaded",
+            actorEmail,
+            detail: JSON.stringify({
+              fileId: completed.fileId,
+              fileName: completed.originalName,
+              kind,
+              boardColumnId,
+              contentType: completed.contentType,
+              multipart: true,
+            }),
+          });
+        }
+
+        /*
+         * W07-12 — the Audit viewer's stream, which this route never reached.
+         * Written whether or not there is a job, because a contractor's
+         * certificate has no timeline to appear on and is exactly the document
+         * somebody will later need to account for. See `../route.ts` for the
+         * naming convention; the two routes must produce indistinguishable
+         * events, or document history splits by file size.
+         */
+        await recordAudit({
+          db,
           organisationId: orgId,
-          entityType: "maintenance_request",
-          entityId: requestId,
-          action: "request.file_uploaded",
-          actorEmail,
-          detail: JSON.stringify({
+          actor: auditActor(scope),
+          action: version?.ok ? "document.version_added" : "document.uploaded",
+          entityType: "document",
+          entityId: completed.fileId,
+          summary: version?.ok
+            ? `Replaced ${version.predecessor.originalName} with ${completed.originalName} (version ${version.plan.versionNo}).`
+            : `Uploaded ${completed.originalName}.`,
+          detail: {
             fileId: completed.fileId,
             fileName: completed.originalName,
+            contentType: completed.contentType,
+            byteSize,
             kind,
             boardColumnId,
-            contentType: completed.contentType,
+            requestId: requestId || null,
+            siteId: anchors.siteId || workOrder?.siteId || null,
+            unitId: anchors.unitId || null,
+            contractorId: anchors.contractorId || null,
+            via,
             multipart: true,
-          }),
+            ...(version?.ok
+              ? {
+                  replacedFileId: version.predecessor.id,
+                  rootDocumentId: version.plan.rootDocumentId,
+                  versionNo: version.plan.versionNo,
+                }
+              : {}),
+          },
+          request,
         });
+
         return Response.json(
           {
             file: attachmentPayload(created),
-            request: requestPayload(updatedRequest),
+            request: updatedRequest ? requestPayload(updatedRequest) : null,
           },
           { status: 201 },
         );
@@ -673,6 +851,10 @@ export async function POST(request: Request) {
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
         await storage.delete(key);
+        // The lineage must not be left headless by a failed insert.
+        if (version?.ok) {
+          await restorePredecessor(db, orgId, version.predecessor.id);
+        }
         throw error;
       }
     }
@@ -719,6 +901,19 @@ export async function PUT(request: Request) {
       requestedKind,
       uploadToken,
       requestedColumnId,
+      /*
+       * The same anchors `start` was given, so `validUploadKey` below re-derives
+       * the identical prefix. Without them a jobless document would `start`
+       * successfully against a `.../unfiled/...` key and then have every part
+       * refused, because the part handler would compute a different prefix from
+       * an empty `requestId`.
+       */
+      {
+        siteId: request.headers.get("X-Upload-Site-Id")?.trim() ?? "",
+        unitId: request.headers.get("X-Upload-Unit-Id")?.trim() ?? "",
+        contractorId:
+          request.headers.get("X-Upload-Contractor-Id")?.trim() ?? "",
+      },
     );
     if ("response" in authorization) return authorization.response;
     if (
@@ -726,7 +921,7 @@ export async function PUT(request: Request) {
       !uploadId ||
       !Number.isInteger(partNumber) ||
       partNumber < 1 ||
-      !validUploadKey(key, authorization.orgId, requestId, authorization.kind)
+      !validUploadKey(key, authorization.orgId, authorization.anchors, authorization.kind)
     ) {
       return Response.json(
         { error: "The upload part is invalid." },

@@ -3,7 +3,6 @@ import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
   attachments,
-  complianceDocuments,
   maintenanceRequests,
   siteGroupMembers,
   sites,
@@ -11,6 +10,7 @@ import {
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
+import { readSiteComplianceRecords } from "../../lib/compliance-register";
 import {
   cleanAddress,
   codeConflict,
@@ -557,15 +557,32 @@ export async function GET(request: Request) {
           .select()
           .from(units)
           .where(and(eq(units.organisationId, orgId), eq(units.siteId, id))),
-        db
-          .select()
-          .from(complianceDocuments)
-          .where(
-            and(
-              eq(complianceDocuments.organisationId, orgId),
-              eq(complianceDocuments.siteId, id),
-            ),
-          ),
+        /*
+         * THE DERIVED REGISTER, not the override table.
+         *
+         * This was `db.select().from(complianceDocuments).where(siteId = id)`,
+         * and it was wrong in three ways at once:
+         *
+         *  - It could not see the board. `compliance_documents` is the override
+         *    and annotation layer (app/lib/compliance-register.ts); the record
+         *    is the Store Documentation board. So a site whose certificates all
+         *    live on the board showed an empty Compliance tab and a "Documents
+         *    held" count of zero, and Staging holds ZERO rows in that table, so
+         *    that was every one of the 31 sites.
+         *  - It served a stored `status` nothing recomputes. A row written
+         *    "Compliant" in 2026 stayed Compliant for ever, on the one screen
+         *    that talks about a single site rather than a total.
+         *  - `db.select()` with no projection is SELECT *, so the payload
+         *    carried `organisationId`, `legacyClientId`, `lastAlertAt`,
+         *    `lastAlertStage`, `createdAt` and `updatedAt` out to the browser
+         *    for no reason at all.
+         *
+         * `readSiteComplianceRecords` returns the field set this screen already
+         * reads — `id`, `kind`, `expiryDate`, `notRequired` — with the derived
+         * `state`, a real `fileCount` and the board provenance beside them, so
+         * the tab keeps working and can adopt the enrichment one field at a time.
+         */
+        readSiteComplianceRecords(db, orgId, id),
         db
           .select({ siteGroupId: siteGroupMembers.siteGroupId })
           .from(siteGroupMembers)
@@ -575,10 +592,36 @@ export async function GET(request: Request) {
               eq(siteGroupMembers.siteId, id),
             ),
           ),
+        /*
+         * A SITE'S DOCUMENTS — the current ones, and not the archived ones.
+         *
+         * This was every `attachments` row carrying the site id, which was right
+         * while a document was a single immutable upload. It is not right now
+         * that documents have versions and can be archived
+         * (`root_document_id` / `version_no` / `is_current`, and
+         * `archived_at`): a lease replaced four times listed five times here,
+         * with nothing on the row to say which one is in force, and a document
+         * somebody archived on purpose went on being listed as if it had not
+         * been. Both are W07-13 failures — a removal or a replacement has to
+         * reach every connected view, and this is one of them.
+         *
+         * `isNull(archivedAt)` and `isCurrent` are the two filters that make
+         * this list mean "the documents this site has", which is the question
+         * the tab is asking. The version history behind each row is reachable
+         * through `root_document_id` and is a different question, asked
+         * elsewhere.
+         */
         db
           .select()
           .from(attachments)
-          .where(and(eq(attachments.organisationId, orgId), eq(attachments.siteId, id)))
+          .where(
+            and(
+              eq(attachments.organisationId, orgId),
+              eq(attachments.siteId, id),
+              isNull(attachments.archivedAt),
+              eq(attachments.isCurrent, true),
+            ),
+          )
           .orderBy(desc(attachments.createdAt))
           .limit(200),
         db

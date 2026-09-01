@@ -9,6 +9,7 @@
 
 import { chipInk } from "../chip-ink";
 import { formatDate as sharedFormatDate } from "../../../lib/format-date";
+import type { ComplianceState } from "../../../lib/types";
 
 export type OptionChoice = {
   id: string;
@@ -131,14 +132,40 @@ export type ServiceRecord = {
   recordedByEmail: string | null;
 };
 
+/**
+ * One compliance requirement for one site, as `GET /api/sites?id=` serves it.
+ *
+ * This used to be a raw `compliance_documents` row and `status` used to be
+ * whatever string was stored in that column, whenever it was written. It is now
+ * the DERIVED register record (`readSiteComplianceRecords` in
+ * app/lib/compliance-register.ts): `status` is recomputed on every read and is
+ * one of the five words the whole product speaks, and the board's own documents
+ * appear here for the first time — previously the tab could only ever show
+ * override rows, of which the client's workspace has none.
+ *
+ * The four fields the screen already read — `id`, `kind`, `expiryDate`,
+ * `notRequired` — are unchanged and in the same places, which is why the reader
+ * was built to return this shape rather than the register's leaner
+ * `ComplianceItem`.
+ */
 export type ComplianceRecord = {
   id: string;
   siteId: string;
   kind: string;
-  status: string;
+  /** The derived five-word state. Never a stored string. */
+  status: ComplianceState;
   expiryDate: string | null;
   attachmentId: string | null;
   notRequired: boolean;
+  /** The same value as `status`, under the name the rest of the platform uses. */
+  state: ComplianceState;
+  /** Real attachment count — board file columns included. */
+  fileCount: number;
+  /** The Store Documentation row this came from, or null. */
+  itemId: string | null;
+  slotKey: string | null;
+  /** Whether a date is expected for this requirement at all. */
+  tracksExpiry: boolean;
 };
 
 export type DuplicateWarning = { id: string; name: string; status: string };

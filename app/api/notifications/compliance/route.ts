@@ -2,7 +2,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { complianceDocuments } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
-import { readComplianceRegister, type RegisterEntry } from "../../../lib/compliance-register";
+import {
+  readComplianceRegister,
+  withinOperationalEstate,
+  type RegisterEntry,
+} from "../../../lib/compliance-register";
+import { expiryStatus } from "../../../lib/expiry-status";
 import {
   complianceDigestTemplate,
   notificationTargets,
@@ -18,21 +23,27 @@ export const dynamic = "force-dynamic";
  */
 const STAGES = [90, 60, 30, 14, 7, 0] as const;
 
+/**
+ * Which reminder a document has earned, or null when it is too far out to nag.
+ *
+ * THIS IS A CADENCE, NOT A STATUS. It answers "have we said anything about this
+ * yet, and at what distance", which is a different question from
+ * `expiryStatus`'s "is this certificate in date" — that one has a single amber
+ * boundary at `EXPIRY_DUE_SOON_DAYS` (60) and it must not be confused with these
+ * six. The 90/60/30/14/7/0 ladder is also the promise the marketing site makes
+ * in as many words (app/(marketing)/_sections/content.ts:133,265), so it stays.
+ *
+ * Note for anyone rendering this: the `expiring` bucket below is `daysAway >= 0`
+ * — every future date that has reached a stage — so "expiring" here means "has
+ * crossed a reminder threshold", NOT the "Expiring soon" state the register
+ * speaks. Do not label it with that phrase in the UI.
+ */
 function stageFor(daysAway: number): string | null {
   if (daysAway < 0) return "overdue";
   for (const stage of STAGES) {
     if (daysAway <= stage) return String(stage);
   }
   return null;
-}
-
-function daysBetween(from: Date, iso: string) {
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return null;
-  const start = new Date(from);
-  start.setUTCHours(0, 0, 0, 0);
-  target.setUTCHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - start.getTime()) / 86_400_000);
 }
 
 type Scanned = {
@@ -78,8 +89,31 @@ async function scan(
   // Stage 7 pinned: a requirement marked "Not required" never alerts.
   for (const row of entries) {
     if (row.notRequired) continue;
+    /*
+     * ESTATE SCOPE. Europe and placeholder rows never alert, and a closed store
+     * stays fully readable everywhere while generating no CURRENT operational
+     * alert. The predicate lives with the register
+     * (`withinOperationalEstate`) so there is one definition of the active UK
+     * estate; it is applied HERE and not inside `readComplianceRegister`,
+     * because the screens must keep showing the whole board.
+     */
+    if (!withinOperationalEstate(row)) continue;
     if (!row.expiry) continue;
-    const daysAway = daysBetween(today, row.expiry);
+    /*
+     * ONE DATE PARSER FOR THE PLATFORM.
+     *
+     * This file used to own a private `daysBetween` built on `new Date(iso)`,
+     * which is not the shape rule `dateOnlyValue` enforces everywhere else. Two
+     * consequences, both real: a value this parser rejected was `continue`d and
+     * so never alerted AGAIN, silently, for the life of the row — while the same
+     * value still rendered on a screen through the register's own parser; and a
+     * date-only string went through `new Date`, which anchors it to UTC
+     * midnight, so the two could disagree by a day about when a certificate
+     * lapsed. `expiryStatus` is the classifier the register, the board cells and
+     * the Compliance Tracker all read, and its `daysRemaining` is counted in
+     * whole UTC days from the same instant for every row in the scan.
+     */
+    const daysAway = expiryStatus(row.expiry, today).daysRemaining;
     if (daysAway === null) continue;
     const stage = stageFor(daysAway);
     if (!stage) continue;
@@ -137,6 +171,34 @@ async function recordStage(
 
   const { itemId, slotKey } = item.entry;
   if (!itemId || !slotKey) return;
+
+  /*
+   * A BOARD ROW WITH NO LINKED SITE GETS NO BOOKKEEPING ROW.
+   *
+   * `RegisterEntry.siteId` falls back to the BOARD ITEM ID when no site matches
+   * by name (app/lib/compliance-register.ts — `siteId: linkedSiteId ?? store.id`),
+   * and that is correct there: the register refuses to fuzzy-match, so an
+   * unlinked row keeps its own identity rather than being attached to the wrong
+   * store. What was NOT correct was writing that value into
+   * `compliance_documents.site_id`, a NOT NULL column whose whole meaning is "a
+   * site" — minting a row that claims `MN-1066` is a site.
+   *
+   * Nothing in the database stops it. There is no foreign key on
+   * `compliance_documents.site_id`, by the deferred-FK convention this schema
+   * uses, so the insert succeeds and the bad reference is permanent. On Staging
+   * this is live, not hypothetical: both Store Documentation rows are titled
+   * "New store", no site, monday name or alias matches that, so all 24 of their
+   * register entries carry a board item id as their `siteId`.
+   *
+   * Skipping the write costs one thing and it is the honest cost: an unlinked
+   * board row will be re-reported on every run instead of once, because there is
+   * nowhere to record that we have mentioned it. That is the right way round. A
+   * repeated alert about a real lapsed certificate is noise someone can fix by
+   * linking the store; a fabricated site reference is data corruption nobody
+   * will notice until something joins on it.
+   */
+  if (item.entry.siteId === itemId) return;
+
   await db
     .insert(complianceDocuments)
     .values({
@@ -144,7 +206,19 @@ async function recordStage(
       organisationId: orgId,
       siteId: item.entry.siteId,
       kind: item.kind,
-      status: item.entry.state,
+      /*
+       * "Missing" is the column DEFAULT, and this row is bookkeeping — it exists
+       * to hold `last_alert_stage` and nothing else.
+       *
+       * It used to write `item.entry.state`, which stamped a derived verdict into
+       * a stored column as of the moment an email went out. That is precisely the
+       * stale stored status the register was rebuilt to stop depending on, and
+       * writing one here re-seeded it from the one place guaranteed to run
+       * unattended. `readComplianceRegister` takes the state from the board and
+       * reads only `not_required` back out of this table, so the value here is
+       * inert — which is exactly why it must not pretend to be an answer.
+       */
+      status: "Missing",
       expiryDate: item.entry.expiry,
       attachmentId: null,
       notRequired: false,

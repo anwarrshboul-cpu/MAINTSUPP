@@ -13,6 +13,13 @@ import {
   type StoredFormConfig,
 } from "../../../lib/form-config";
 import { formOptionOverrides } from "../../../lib/form-options";
+/*
+ * The board key list, from the shared copy in the automation store rather than
+ * the private `const BOARD_IDS` inside `/api/board`. A third transcription of
+ * the same two strings is a third place to forget a board.
+ */
+import { BOARD_IDS, type BoardId } from "../../../lib/automations/store";
+import { DEFAULT_BOARD_KEY } from "../../../lib/board-registry";
 import {
   anonymousRefusal,
   scopedDb,
@@ -102,11 +109,34 @@ function serialiseForm(
   };
 }
 
+/**
+ * Which board's form this request is about.
+ *
+ * `?board=` WAS IGNORED. `loadForm(db, orgId)` defaults its `boardId` argument to
+ * the literal "maintenance" (`app/lib/form-config.ts:130`), and neither handler
+ * here ever passed one — so opening the form builder on Store Documentation
+ * loaded, displayed and SAVED the maintenance board's form. The share link the
+ * dialog offered was the maintenance form's link, and a PATCH from that screen
+ * silently rewrote a different board's public form: the operator's own board
+ * appeared to have no form of its own however many times they configured it, and
+ * the form real submitters were filling in changed under them.
+ *
+ * Validated against `BOARD_IDS` rather than passed through, so an unknown value
+ * falls back to the default instead of resolving to no board at all. That is the
+ * rule `/api/board`'s own `boardIdFrom` applies, and the two must agree — the
+ * builder is opened from the board this reads the key from.
+ */
+function boardIdFrom(request: Request): string {
+  const raw = new URL(request.url).searchParams.get("board")?.trim() ?? "";
+  return BOARD_IDS.includes(raw as BoardId) ? raw : DEFAULT_BOARD_KEY;
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const { db, orgId } = await scopedDb(request);
-    const record = await loadForm(db, orgId);
+    const boardId = boardIdFrom(request);
+    const record = await loadForm(db, orgId, boardId);
     if (!record) return failure("This board has no form.", 404);
 
     /*
@@ -170,7 +200,10 @@ export async function PATCH(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
 
-    const record = await loadForm(db, orgId);
+    // The SAME board the GET above read. Without this a save from the Store
+    // Documentation builder rewrote the maintenance board's public form.
+    const boardId = boardIdFrom(request);
+    const record = await loadForm(db, orgId, boardId);
     if (!record) return failure("This board has no form.", 404);
 
     const body = (await request.json()) as PatchBody;
@@ -336,7 +369,7 @@ export async function PATCH(request: Request) {
     updates.updatedAt = sql`CURRENT_TIMESTAMP`;
     await db.update(formConfigurations).set(updates).where(eq(formConfigurations.id, record.id));
 
-    const saved = await loadForm(db, orgId);
+    const saved = await loadForm(db, orgId, boardId);
     return Response.json({
       ok: true,
       form:

@@ -396,18 +396,39 @@ test("a register-only expiry carries back everything the PATCH would otherwise b
   /*
    * The route's UPDATE names every one of these columns unconditionally, and
    * derives `notRequired` from `state`. Sending the expiry alone would blank
-   * the site and the requirement and silently un-mark a Not-required row.
+   * the site and the requirement and silently un-mark a Not-required row —
+   * which is why this calendar path sends all four keys and why the statement
+   * must stay a full replace.
+   *
+   * TWO THINGS CHANGED HERE, AND NEITHER WEAKENS THE PIN.
+   *
+   * 1. The slice ran to the FIRST NEWLINE after `db.update(complianceDocuments)`,
+   *    so the whole assertion silently depended on the statement being written
+   *    on one line. It now runs to the statement's own terminator, which is what
+   *    it was always trying to describe.
+   * 2. `expiryDate: optionalText(data.expiry` became `expiryDate` alone, because
+   *    the value is now validated into a variable before the write — an omitted
+   *    `expiry` is refused with a 400 instead of quietly clearing the stored
+   *    date, and "not-a-date" and "2027-13-45" are refused instead of being
+   *    stored and then silently skipped by the compliance digest for ever.
+   *    The column is still replaced; only where its value is computed moved.
+   *
+   * The behaviour this file cares about — drag a certificate to a new day and
+   * the site, requirement and state survive — is asserted directly against a
+   * running server in
+   * tests/workstream-seven-official-compliance-contract.test.mjs.
    */
   const route = await read("app/api/workspace/route.ts");
   const update = route.slice(
     route.indexOf('} else if (entity === "compliance") {', route.indexOf("export async function PATCH")),
   );
-  const statement = update.slice(0, update.indexOf("\n", update.indexOf("db.update(complianceDocuments)")));
+  const updateAt = update.indexOf("db.update(complianceDocuments)");
+  const statement = update.slice(updateAt, update.indexOf(";", updateAt) + 1);
   for (const column of [
-    "siteId: text(data.siteId",
-    "kind: text(data.kind",
+    "siteId",
+    "kind",
     "status: state",
-    "expiryDate: optionalText(data.expiry",
+    "expiryDate",
     'notRequired: state === "Not required"',
   ]) {
     assert.ok(statement.includes(column), `the PATCH still replaces ${column}`);

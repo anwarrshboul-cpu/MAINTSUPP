@@ -98,10 +98,22 @@ test("the board payload merges kind-filed and column-filed rows into one order",
   assert.match(merge.slice(0, 1700), /Math\.min\(entry\.preview\.length, 4\)/);
 
   const files = await read("app/api/files/route.ts");
+  /*
+   * Still newest-first with the id tiebreak, but the call is now a conditional
+   * spread: a version history reads OLDEST first, because v1 to v4 is the order
+   * the versions happened in and the order a person reads a document's story.
+   * The tiebreak matters more than it did — with paging, an unstable order means
+   * page 2 can repeat a row from page 1 and drop another entirely.
+   */
   assert.match(
     files,
-    /\.orderBy\(desc\(attachments\.createdAt\), desc\(attachments\.id\)\)/,
+    /\[desc\(attachments\.createdAt\), desc\(attachments\.id\)\]/,
     "the file index needs the same tiebreak or same-second batches reorder per query",
+  );
+  assert.match(
+    files,
+    /\[asc\(attachments\.versionNo\), asc\(attachments\.id\)\]/,
+    "and a version history must read oldest-first, by version number",
   );
 });
 

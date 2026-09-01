@@ -74,7 +74,7 @@ import {
   type StoreDocumentSlot,
 } from "../../../../db/monday-board-spec";
 import type { StoreRecord } from "../../../lib/types";
-import { EXPIRY_DUE_SOON_DAYS, expiryStatus } from "../cells/expiry-cell";
+import { EXPIRY_DUE_SOON_DAYS, expiryStatus } from "../../../lib/expiry-status";
 import { formatDate } from "./view-model";
 import trackerCss from "./store-compliance-tracker.css?url";
 
@@ -141,114 +141,57 @@ const ACTIONABLE: CellState[] = ["expired", "missing", "due"];
 /* ── Expiry ──────────────────────────────────────────────────────────────── */
 
 /**
- * Local reading of the expiry cell's verdict.
+ * The expiry verdict, read off the classifier's typed union.
  *
- * `expiryStatus` belongs to the expiry cell and its return shape is that cell's
- * business, not this view's — so the value is taken as `unknown`, a string
- * token is pulled out of it whether it arrives bare or wrapped in an object,
- * and the token is matched on meaning rather than on an exact spelling this
- * file would then have to be kept in step with. Anything unrecognised falls
- * through to `verdictFromDays`, so a shape change downgrades the tracker's
- * precision instead of blanking the matrix.
+ * WHAT THIS REPLACED, AND WHY IT WAS WRONG IN PRINCIPLE RATHER THAN IN EFFECT.
+ *
+ * This file used to treat `expiryStatus`'s answer as `unknown` — on the stated
+ * grounds that the return shape "belongs to the expiry cell and is not this
+ * view's business" — then probe seven candidate field names for something
+ * string-shaped (`tokenFrom`), then match that string against four groups of
+ * substrings (`verdictFromToken`), with a comment explaining that "expired"
+ * had to be tested before "expiring soon" because the two share a prefix. Below
+ * that sat `daysUntil` and `verdictFromDays`, a second complete implementation
+ * of the same classification, reachable only when the first returned "unknown"
+ * — which this file's own note at the time admitted never happened.
+ *
+ * The premise was false. `expiryStatus` does not belong to the expiry cell: it
+ * lives in `app/lib/expiry-status.ts`, which exists precisely so that a route
+ * handler, a React view and a test can share one verdict, and it exports
+ * `ExpiryState` — a four-member union — as part of its contract. Reading
+ * `.state` is not depending on an implementation detail; it is using the API.
+ * And it is strictly safer than the prose matching it replaces: a new state
+ * becomes a compile error in the switch below instead of falling through the
+ * regexes to "unknown" and then to a duplicate that might disagree.
+ *
+ * The prefix hazard disappears with it. So does the possibility of the two
+ * implementations drifting, which is exactly how this file came to print "Due
+ * within 30 days" over a tile filled by a 60-day window.
  */
-type ExpiryVerdict = "expired" | "due" | "valid" | "unrecorded" | "unknown";
+type ExpiryVerdict = "expired" | "due" | "valid" | "unrecorded";
 
-/*
- * There is no local due-soon window any more.
+/**
+ * One certificate's verdict and how many days are left on it.
  *
- * This file declared `DUE_SOON_DAYS = 30`, printed "Due within 30 days" on the
- * tile from it, and then filled that tile from `expiryStatus`, whose window is
- * `EXPIRY_DUE_SOON_DAYS = 60`. `verdictFromDays` — the only code that used the
- * 30 — was unreachable, because `readVerdict` asks `expiryStatus` first and it
- * always answers. The discrepancy was invisible only because no date in the
- * seeded register fell between 31 and 60 days out; a certificate 45 days from
- * expiry was counted in a tile that said 30.
- *
- * Sixty is the number that survives: it is the board grid's own amber
- * threshold, so a cell that is amber on the Main table is amber here, and the
- * label is now printed from the same constant that decides it. One threshold,
- * one name — see app/lib/expiry-status.ts for why it is sixty.
+ * Both come from the same call. `daysUntil` used to compute the number here
+ * with its own UTC-midnight arithmetic while `expiryStatus` computed the same
+ * number internally to decide the state — two clocks, one date, and nothing
+ * making them agree. `daysRemaining` is on the returned object.
  */
-
-const TOKEN_KEYS = [
-  "status",
-  "state",
-  "kind",
-  "tone",
-  "level",
-  "severity",
-  "label",
-] as const;
-
-function tokenFrom(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of TOKEN_KEYS) {
-      const nested = record[key];
-      if (typeof nested === "string") return nested;
-    }
-  }
-  return null;
-}
-
-function verdictFromToken(token: string): ExpiryVerdict {
-  const text = token.toLowerCase();
-  // "expired" is tested first because "expiring soon" also contains "expir".
-  if (text.includes("expired") || text.includes("lapsed") || text.includes("overdue")) {
-    return "expired";
-  }
-  if (
-    text.includes("soon") ||
-    text.includes("due") ||
-    text.includes("expiring") ||
-    text.includes("warn")
-  ) {
-    return "due";
-  }
-  if (
-    text.includes("valid") ||
-    text.includes("current") ||
-    text.includes("compliant") ||
-    text.includes("in date") ||
-    text === "ok"
-  ) {
-    return "valid";
-  }
-  if (
-    text.includes("not") ||
-    text.includes("none") ||
-    text.includes("empty") ||
-    text.includes("missing") ||
-    text.includes("unknown")
-  ) {
-    return "unrecorded";
-  }
-  return "unknown";
-}
-
-/** Whole days from `today` to an ISO date. Negative means it has gone by. */
-function daysUntil(iso: string | null, today: Date): number | null {
-  if (!iso) return null;
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return null;
-  target.setUTCHours(0, 0, 0, 0);
-  const start = new Date(today);
-  start.setUTCHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - start.getTime()) / 86_400_000);
-}
-
-function verdictFromDays(days: number | null): ExpiryVerdict {
-  if (days === null) return "unrecorded";
-  if (days < 0) return "expired";
-  if (days <= EXPIRY_DUE_SOON_DAYS) return "due";
-  return "valid";
-}
-
-function readVerdict(iso: string | null, today: Date, days: number | null): ExpiryVerdict {
-  const token = tokenFrom(expiryStatus(iso, today) as unknown);
-  const verdict = token === null ? "unknown" : verdictFromToken(token);
-  return verdict === "unknown" ? verdictFromDays(days) : verdict;
+function readExpiry(
+  iso: string | null,
+  today: Date,
+): { verdict: ExpiryVerdict; daysAway: number | null } {
+  const status = expiryStatus(iso, today);
+  const verdict: ExpiryVerdict =
+    status.state === "expired"
+      ? "expired"
+      : status.state === "due-soon"
+        ? "due"
+        : status.state === "valid"
+          ? "valid"
+          : "unrecorded";
+  return { verdict, daysAway: status.daysRemaining };
 }
 
 /* ── The matrix ──────────────────────────────────────────────────────────── */
@@ -314,8 +257,7 @@ function cellFor(
     };
   }
 
-  const daysAway = daysUntil(record.expiry, today);
-  const verdict = readVerdict(record.expiry, today, daysAway);
+  const { verdict, daysAway } = readExpiry(record.expiry, today);
   const status: CellState =
     verdict === "expired"
       ? "expired"

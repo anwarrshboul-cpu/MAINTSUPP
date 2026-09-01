@@ -37,6 +37,30 @@ import type {
   RequestStage,
   StoreRecord,
 } from "../../lib/types";
+/*
+ * The document register's model — what a document's status IS, and what the
+ * filter bar filters. Pure, and deliberately out of this file: the status
+ * verdict is shared with the Compliance Tracker through
+ * `app/lib/expiry-status.ts`, and a derivation that lives inside an
+ * eight-thousand-line component is a derivation nothing can test.
+ */
+import { EXPIRY_DUE_SOON_DAYS } from "../../lib/expiry-status";
+import {
+  activeFilterCount,
+  documentFilterOptions,
+  documentName,
+  documentOwner,
+  documentSiteLabel,
+  documentStateClass,
+  documentStatus,
+  documentTypeLabel,
+  emptyDocumentFilters,
+  emptyRegisterReason,
+  hasActiveFilters,
+  matchesDocumentFilters,
+  matchesDocumentSearch,
+  type DocumentFilters,
+} from "./views/document-register";
 import { AccountMenu } from "./account-menu";
 import {
   formatDayMonth,
@@ -902,23 +926,51 @@ function jobStatusSegments(requests: MaintenanceRequest[]): DonutSegment[] {
   }));
 }
 
-function downloadFileRegister(files: FileRecord[]) {
+function downloadFileRegister(files: FileRecord[], now = new Date()) {
+  /*
+   * The fields that are stored, listed explicitly.
+   *
+   * Explicit rather than `Object.keys`, because widening `FileRecord` is
+   * exactly how three storage urls would end up in a spreadsheet the client
+   * opens — `inlineUrl` is the capability for the bytes. Anything added to the
+   * record has to be added here on purpose.
+   */
   const columns: (keyof FileRecord)[] = [
     "id",
     "name",
+    "title",
     "kind",
+    "documentType",
+    "description",
     "site",
+    "siteId",
     "requestId",
     "uploadedAt",
+    "uploadedByEmail",
     "size",
-    "status",
+    "expiryDate",
+    "versionNo",
+    "isCurrent",
+    "archivedAt",
   ];
+  /*
+   * And the one column that is not stored anywhere.
+   *
+   * Status is derived, so it cannot be read off the record — but a register
+   * export whose Status column disagreed with the Status column on screen
+   * would be worse than one that omitted it. Same function, same clock: `now`
+   * is passed in and used for every row, so a long export cannot straddle
+   * midnight and classify its first rows against a different day from its last.
+   */
   const escapeCell = (value: unknown) =>
     `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [
-    columns.join(","),
+    [...columns, "status"].join(","),
     ...files.map((file) =>
-      columns.map((column) => escapeCell(file[column])).join(","),
+      [
+        ...columns.map((column) => escapeCell(file[column])),
+        escapeCell(documentStatus(file, now).label),
+      ].join(","),
     ),
   ].join("\n");
   const link = document.createElement("a");
@@ -1050,6 +1102,10 @@ export default function PortalApp({
     requestsRef.current = requests;
   }, [requests]);
 
+  /** Which `loadDocuments` call is the current one — see the note there. */
+  const documentsLoadRef = useRef(0);
+
+
   const loadRuntimeContext = useCallback(async () => {
     const response = await fetch("/api/context", {
       headers: { Accept: "application/json" },
@@ -1164,63 +1220,178 @@ export default function PortalApp({
     };
   }, [loadWorkspace]);
 
-  useEffect(() => {
-    let active = true;
-    async function loadDocuments() {
-      try {
-        const response = await fetch("/api/files?limit=100", {
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) return;
-        const payload = (await response.json()) as {
-          files?: Array<{
-            id: string;
-            requestId: string | null;
-            kind: string;
-            originalName: string;
-            byteSize: number;
-            createdAt: string;
-            contentType?: string;
-            inlineUrl?: string;
-            downloadUrl?: string;
-          }>;
-        };
-        if (!active || !payload.files) return;
-        const liveFiles: FileRecord[] = payload.files.map((file) => ({
-          id: file.id,
-          name: file.originalName,
-          kind:
-            file.kind === "completion"
-              ? "Completion evidence"
-              : file.kind === "issue"
-                ? "Issue evidence"
-                : "Workspace document",
-          site:
-            requestsRef.current.find((item) => item.id === file.requestId)?.location ??
-            "Shared workspace",
-          requestId: file.requestId,
-          uploadedAt: file.createdAt,
-          size: formatFileSize(file.byteSize),
-          status: "Current",
-          inlineUrl: file.inlineUrl,
-          downloadUrl: file.downloadUrl,
-          contentType: file.contentType,
-        }));
-        setDocuments(liveFiles);
-      } catch {
+  /*
+   * THE REGISTER RELOADS, BECAUSE THINGS HAPPEN TO DOCUMENTS.
+   *
+   * This was a `useEffect` with `[]` deps and no way to run it again, so the
+   * register was a photograph of the workspace taken once per full page load.
+   * Delete a file from the board's evidence strip and it stayed listed on
+   * /dashboard/documents — with a live `inlineUrl`, so the row still opened
+   * something that had been deleted — and both stat tiles kept counting it,
+   * until somebody reloaded the whole page. W07-13 asks that removing a
+   * document updates the views connected to it; a list that cannot be asked
+   * again cannot do that.
+   *
+   * So it is a stable `useCallback` the drawer's own verbs call after they
+   * succeed, and it also listens for `maintsupp:refresh-board` — the event the
+   * board, the evidence manager and the file cells already dispatch after they
+   * change a file. That event is how the Compliance Tracker and the renewal
+   * calendar already stay in step; this register was simply not listening.
+   */
+  const loadDocuments = useCallback(async () => {
+    /*
+     * ONLY THE NEWEST ANSWER COUNTS.
+     *
+     * The old effect guarded its writes with an `active` flag its cleanup
+     * cleared, which is the right shape for a loader that runs once on mount.
+     * This one is called again after every edit, new version, archive and
+     * delete, so two loads can be in flight at once and the SLOWER one can
+     * land last — putting a document that was just removed back on the screen
+     * with a live `inlineUrl`. A sequence number is the version of that guard
+     * that survives being callable: a response is applied only if no later
+     * request has started since, which also covers the unmount case the flag
+     * was there for.
+     */
+    const ticket = (documentsLoadRef.current += 1);
+    const current = () => documentsLoadRef.current === ticket;
+    try {
+      /*
+       * `archived=all`, and the register hides them itself.
+       *
+       * The endpoint's default is live documents only, which is right for the
+       * board's photo strips — but it made archiving a one-way door here: the
+       * moment a document was archived it left the payload, the open drawer
+       * lost the row it was showing, and there was no way back to it because
+       * the register could never list it again. Fetching everything and letting
+       * `DocumentsView` decide means "Archived" is a status somebody can filter
+       * TO, and a document can be restored from the same drawer that archived
+       * it. The default view is still live-only; see `visible` there.
+       */
+      const response = await fetch("/api/files?limit=100&archived=all", {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        files?: Array<{
+          id: string;
+          requestId: string | null;
+          kind: string;
+          originalName: string;
+          byteSize: number;
+          createdAt: string;
+          uploadedByEmail?: string | null;
+          siteId?: string | null;
+          title?: string | null;
+          documentType?: string | null;
+          description?: string | null;
+          expiryDate?: string | null;
+          archivedAt?: string | null;
+          archivedBy?: string | null;
+          rootDocumentId?: string | null;
+          versionNo?: number | null;
+          isCurrent?: boolean | null;
+          contentType?: string;
+          inlineUrl?: string;
+          downloadUrl?: string;
+        }>;
+      };
+      if (!payload.files || !current()) return;
+      /*
+       * `site` is left EMPTY here on purpose, and resolved at render time.
+       *
+       * Baking the site name in at fetch time is what the old code did, and it
+       * was a race nobody had noticed: this request and the one that loads the
+       * job list are in flight together, so whichever lost gave every document
+       * the fallback label for ever. The lookup never ran again, because the
+       * effect had `[]` deps. `documentsWithSites` below recomputes the label
+       * whenever the documents, the jobs or the site list change, so a document
+       * gets its site as soon as anything that can name it has arrived.
+       */
+      const liveFiles: FileRecord[] = payload.files.map((file) => ({
+        id: file.id,
+        name: file.originalName,
+        title: file.title ?? null,
+        kind:
+          file.kind === "completion"
+            ? "Completion evidence"
+            : file.kind === "issue"
+              ? "Issue evidence"
+              : "Workspace document",
+        documentType: file.documentType ?? null,
+        description: file.description ?? null,
+        site: "",
+        siteId: file.siteId ?? null,
+        requestId: file.requestId,
+        uploadedAt: file.createdAt,
+        uploadedByEmail: file.uploadedByEmail ?? null,
+        size: formatFileSize(file.byteSize),
         /*
-         * The register stays empty rather than falling back to the bundled
-         * files. A document list is read to answer "do we hold the certificate"
-         * — the one question a stand-in answers wrongly, and confidently.
+         * Carried, never invented. There is no `status:` line here any more —
+         * this used to write the literal "Current" into every row, and the
+         * table rendered it as a Status column. `documentStatus` derives the
+         * verdict from these two fields and the shared expiry classifier.
          */
-        if (active) setDocuments([]);
-      }
+        expiryDate: file.expiryDate ?? null,
+        archivedAt: file.archivedAt ?? null,
+        archivedBy: file.archivedBy ?? null,
+        rootDocumentId: file.rootDocumentId ?? file.id,
+        versionNo: file.versionNo ?? 1,
+        isCurrent: file.isCurrent ?? true,
+        inlineUrl: file.inlineUrl,
+        downloadUrl: file.downloadUrl,
+        contentType: file.contentType,
+      }));
+      if (current()) setDocuments(liveFiles);
+    } catch {
+      /*
+       * The register stays empty rather than falling back to the bundled
+       * files. A document list is read to answer "do we hold the certificate"
+       * — the one question a stand-in answers wrongly, and confidently.
+       */
+      if (current()) setDocuments([]);
     }
-    loadDocuments();
-    return () => {
-      active = false;
-    };
   }, []);
+
+  useEffect(() => {
+    void loadDocuments();
+    window.addEventListener("maintsupp:refresh-board", loadDocuments);
+    return () =>
+      window.removeEventListener("maintsupp:refresh-board", loadDocuments);
+  }, [loadDocuments]);
+
+  /**
+   * The register, with each document's site named.
+   *
+   * Three sources, in order of authority. The workspace's own site list keyed
+   * by `siteId` is the real answer — that is the column the row is filed
+   * under. The job's free-text `location` is the fallback for a document
+   * attached before site ids were written, and it is checked for CONTENT
+   * rather than for null: the code this replaces wrote
+   * `job?.location ?? "Shared workspace"`, and `??` is nullish coalescing, so
+   * a job whose location was the empty string sailed straight past the
+   * fallback and produced a BLANK Site cell — six of thirty-seven rows on a
+   * local workspace, with the drawer rendering the label "Site" over nothing.
+   *
+   * The third source is nothing, and it says so: `documentSiteLabel` turns the
+   * empty string into "Not linked to a site", which is a fact about the
+   * document rather than a placeholder that reads like a place.
+   */
+  const documentsWithSites = useMemo(() => {
+    const stores = workspace?.stores ?? [];
+    const nameOf = (siteId: string | null | undefined) => {
+      if (!siteId) return "";
+      return stores.find((item) => item.id === siteId)?.name?.trim() ?? "";
+    };
+    return documents.map((file) => {
+      const direct = nameOf(file.siteId);
+      if (direct) return { ...file, site: direct };
+      const job = requests.find((item) => item.id === file.requestId);
+      const location = job?.location?.trim();
+      if (location) return { ...file, site: location };
+      const viaJob = nameOf(job?.siteId);
+      return { ...file, site: viaJob };
+    });
+  }, [documents, requests, workspace]);
 
   useEffect(() => {
     const syncSectionFromHistory = () => {
@@ -2587,7 +2758,13 @@ export default function PortalApp({
             />
           )}
           {activeSurface === "documents" && (
-            <DocumentsView key={activeSection} sectionKey={activeSection} files={documents} />
+            <DocumentsView
+              key={activeSection}
+              sectionKey={activeSection}
+              files={documentsWithSites}
+              onNotify={setToast}
+              onChanged={() => void loadDocuments()}
+            />
           )}
           {activeSurface === "reports" && dataMode === "unavailable" && (
             <WorkspaceUnavailable
@@ -4154,6 +4331,8 @@ function CalendarView({
 function DocumentsView({
   files,
   sectionKey,
+  onNotify,
+  onChanged,
 }: {
   files: FileRecord[];
   /**
@@ -4166,10 +4345,32 @@ function DocumentsView({
    * moment somebody renamed a menu item.
    */
   sectionKey: string;
+  onNotify: (message: string) => void;
+  /**
+   * Re-read the register from the server.
+   *
+   * Called after every verb that changes a document — edit, new version,
+   * archive, restore, delete — because the row on screen is a copy and the
+   * server is the register. See `loadDocuments`.
+   */
+  onChanged: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedFile, setSelectedFile] = useState<FileRecord | null>(null);
+  /*
+   * The five structured filters — W07-11.
+   *
+   * Search alone was never enough for a register: "Aldgate" typed into the box
+   * matches a site, a filename that mentions it and a description, and there
+   * was no way at all to ask "which certificates expire soon", which is the
+   * question a compliance register exists to answer. Each one is a plain
+   * string, empty when inactive, exactly as the Sites register's two selects
+   * already work.
+   */
+  const [filters, setFilters] = useState<DocumentFilters>(emptyDocumentFilters);
+  const setFilter = (key: keyof DocumentFilters, value: string) =>
+    setFilters((current) => ({ ...current, [key]: value }));
   /*
    * This page's own reporting range, defaulting to a year because a document
    * register is consulted over a longer horizon than a job board. It is this
@@ -4177,8 +4378,8 @@ function DocumentsView({
    * reader to Reports.
    *
    * It filters the register itself, not just the label: `withinPeriod` is
-   * applied before the search, so the counts above the table, the export and
-   * the rows all describe the same set.
+   * applied before the filters and the search, so the counts above the table,
+   * the export and the rows all describe the same set.
    */
   const [period, setPeriod] = useStoredPeriod(sectionKey, "12m");
   /*
@@ -4192,6 +4393,15 @@ function DocumentsView({
   const now = useCurrentTime();
   const window = resolvePeriod(period, now);
   /*
+   * One instant for every verdict on this paint.
+   *
+   * `documentStatus` takes the day it is classifying against, and a register
+   * of a hundred rows must not straddle midnight halfway down. `useCurrentTime`
+   * ticks on the minute, so this is stable for the whole of a render pass and
+   * changes only when the clock does.
+   */
+  const today = useMemo(() => new Date(now), [now]);
+  /*
    * `stampWithinPeriod`, not `Date.parse`, and the difference is a day.
    *
    * `uploadedAt` arrives in the two forms this database stores — a bare
@@ -4200,24 +4410,92 @@ function DocumentsView({
    * built from LOCAL midnight. West of Greenwich a file uploaded on the first
    * of the month fell out of that month. The comparator that knows about both
    * forms is the one the reporting screens already share.
-   *
-   * It also replaces a guard that could never fire: `resolvePeriod` always
-   * returns an object, so `if (!window) return true` was dead, and a
-   * half-typed custom range left `start`/`end` as NaN — every comparison
-   * false, every file hidden, and the register silently empty with no reason
-   * given. `stampWithinPeriod` returns false for an unrecognised window and
-   * the panel below now says why.
    */
   const withinPeriod = (file: FileRecord) =>
     stampWithinPeriod(file.uploadedAt, period, now);
   const inRange = files.filter(withinPeriod);
-  const filtered = inRange.filter((file) =>
-    [file.name, file.kind, file.site, file.requestId ?? ""]
-      .join(" ")
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
+  /*
+   * THE ONE SET, BUILT ONCE.
+   *
+   * range -> the five selects -> the search. Everything below reads `filtered`
+   * and nothing reads a halfway stage, which is the whole of W07-11's "the
+   * visible totals and the export must honour the filtered set".
+   *
+   * They did not. The three tiles used to count `inRange` while the table and
+   * the export used the post-search set, so searching "nameplate" on a local
+   * workspace took the table from 37 rows to 2 while all three tiles carried on
+   * saying 37 — the register disagreeing with itself in the same viewport, and
+   * the CSV agreeing with neither.
+   */
+  /*
+   * ARCHIVED DOCUMENTS ARE OUT OF THE REGISTER UNTIL SOMEBODY ASKS FOR THEM.
+   *
+   * The loader fetches them so that archiving is reversible — see the note
+   * there — but "archived" means withdrawn, and a withdrawn certificate must
+   * not sit in the default list or be counted by the tiles above it. Selecting
+   * "Archived" in the Status filter is the one way to see them, which is also
+   * the only route back to Restore.
+   */
+  const showingArchive = filters.status === "archived";
+  /*
+   * A SUPERSEDED VERSION IS NOT A DOCUMENT, IT IS A VERSION.
+   *
+   * The loader asks for `archived=all`, and that switch drops BOTH halves of
+   * the server's live predicate — `is_current` as well as `archived_at`
+   * (`liveDocumentFilter` in app/api/files/documents.ts). It is fetched that
+   * way on purpose, because archiving a document used to remove it from the
+   * payload entirely and there was then no way to list it in order to restore
+   * it. But the register only ever gated on `archivedAt`, so every superseded
+   * version came back as a row of its own: a certificate replaced twice was
+   * three documents in the table and three in the tiles beside it.
+   *
+   * Measured on this workspace before the fix: 47 rows and tiles against 39
+   * live documents. It is the same arithmetic that tripled the board's photo
+   * strip and the compliance register's `fileCount`, arriving one surface
+   * later — a table whose rows are counted has to say which rows are documents.
+   *
+   * Both branches, not just the default: the archive view exists so a document
+   * can be restored, and a superseded version is not something you restore. Its
+   * history is reachable where it belongs, in the version list on the drawer.
+   *
+   * `!== false` rather than a truthiness test, so a record built without the
+   * field — app/lib/mock-data.ts has no lineage — is still shown rather than
+   * silently vanishing from the register.
+   */
+  const current = inRange.filter((file) => file.isCurrent !== false);
+  const visible = showingArchive
+    ? current
+    : current.filter((file) => !file.archivedAt);
+  const matching = visible.filter((file) =>
+    matchesDocumentFilters(file, filters, today),
   );
+  const filtered = matching.filter((file) => matchesDocumentSearch(file, query));
+  /* Options come from everything in range INCLUDING the archive, so
+     "Archived" is offered whenever there is one to look at. */
+  const options = useMemo(
+    () => documentFilterOptions(inRange, today),
+    [inRange, today],
+  );
+  const narrowed = filtered.length !== visible.length;
   const currentMonth = new Date().toISOString().slice(0, 7);
+  const attention = filtered.filter((file) => {
+    const state = documentStatus(file, today).state;
+    return state === "expired" || state === "due-soon";
+  }).length;
+  const emptyReason = emptyRegisterReason({
+    windowRecognised: window.recognised,
+    windowReason: window.reason,
+    windowLabel: window.label,
+    inRangeCount: visible.length,
+    afterFiltersCount: matching.length,
+    filters,
+    query,
+  });
+
+  /* Keep the open drawer pointing at the server's copy, not a stale one. */
+  const openFile = selectedFile
+    ? (files.find((file) => file.id === selectedFile.id) ?? null)
+    : null;
 
   return (
     <div className="section-stack">
@@ -4227,7 +4505,7 @@ function DocumentsView({
             <Icon name="folder" size={15} />
             Searchable evidence
           </span>
-          <h1>Documents & evidence</h1>
+          <h1>Documents &amp; evidence</h1>
           <p>
             Maintenance photos, certificates, approvals and invoices with a
             clear owner and source.
@@ -4238,7 +4516,7 @@ function DocumentsView({
           <button
             className="secondary-button"
             type="button"
-            onClick={() => downloadFileRegister(filtered)}
+            onClick={() => downloadFileRegister(filtered, today)}
           >
             <Icon name="download" size={17} />
             Export register
@@ -4250,22 +4528,34 @@ function DocumentsView({
         <div>
           <Icon name="folder" size={20} />
           <span>
-            <small>Documents in range</small>
-            <strong>{inRange.length}</strong>
+            {/*
+              It says "shown", not "in range", because it now counts what is on
+              screen. A tile labelled "Documents in range" that ignored the
+              filter below it was the fabrication in miniature.
+            */}
+            <small>{narrowed ? "Documents shown" : "Documents in range"}</small>
+            <strong>{filtered.length}</strong>
           </span>
         </div>
         <div>
           <Icon name="upload" size={20} />
           <span>
             <small>Added this month</small>
-            <strong>{inRange.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}</strong>
+            <strong>
+              {filtered.filter((file) => file.uploadedAt.startsWith(currentMonth)).length}
+            </strong>
           </span>
         </div>
         <div>
           <Icon name="alert" size={20} />
           <span>
-            <small>Require attention</small>
-            <strong>{inRange.filter((file) => file.status === "Expiring soon").length}</strong>
+            {/*
+              A real count at last. This counted `status === "Expiring soon"`
+              against a field every row had hard-coded to "Current", so it was
+              zero however many certificates had lapsed.
+            */}
+            <small>Expiring or expired</small>
+            <strong>{attention}</strong>
           </span>
         </div>
       </section>
@@ -4276,12 +4566,110 @@ function DocumentsView({
             <Icon name="search" size={18} />
             <input
               aria-label="Search documents"
-              placeholder="Search files, sites or work order IDs…"
+              placeholder="Search files, sites, owners or work order IDs…"
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
+          {/*
+            Bare selects as DIRECT children of `.workspace-toolbar`, and a
+            visually-hidden label for each: the pattern the Sites register
+            already uses. It is not a style preference — `.workspace-toolbar >
+            select` carries the phone treatment in brand-overrides.css at
+            `@media (max-width: 768px)`, so these inherit a 44px-tall,
+            correctly-radiused, wrapping row on a handset without a single new
+            breakpoint being introduced for them.
+
+            Every option is built from the rows in range. A filter that offers a
+            value the workspace does not hold answers an empty register, and the
+            reader cannot tell that from a broken one.
+          */}
+          <label htmlFor="document-type-filter" className="visually-hidden">
+            Filter by document type
+          </label>
+          <select
+            id="document-type-filter"
+            value={filters.documentType}
+            onChange={(event) => setFilter("documentType", event.target.value)}
+          >
+            <option value="">All types</option>
+            {options.documentTypes.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="document-status-filter" className="visually-hidden">
+            Filter by status
+          </label>
+          <select
+            id="document-status-filter"
+            value={filters.status}
+            onChange={(event) => setFilter("status", event.target.value)}
+          >
+            <option value="">All statuses</option>
+            {options.statuses.map((status) => (
+              <option key={status.value} value={status.value}>
+                {status.label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="document-expiry-filter" className="visually-hidden">
+            Filter by expiry
+          </label>
+          <select
+            id="document-expiry-filter"
+            value={filters.expiry}
+            onChange={(event) => setFilter("expiry", event.target.value)}
+          >
+            <option value="">Any expiry</option>
+            {options.expiry.map((bucket) => (
+              <option key={bucket.value} value={bucket.value}>
+                {bucket.label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="document-site-filter" className="visually-hidden">
+            Filter by site
+          </label>
+          <select
+            id="document-site-filter"
+            value={filters.site}
+            onChange={(event) => setFilter("site", event.target.value)}
+          >
+            <option value="">All sites</option>
+            {options.sites.map((site) => (
+              <option key={site} value={site}>
+                {site}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="document-owner-filter" className="visually-hidden">
+            Filter by owner
+          </label>
+          <select
+            id="document-owner-filter"
+            value={filters.owner}
+            onChange={(event) => setFilter("owner", event.target.value)}
+          >
+            <option value="">All owners</option>
+            {options.owners.map((owner) => (
+              <option key={owner} value={owner}>
+                {owner}
+              </option>
+            ))}
+          </select>
+          {hasActiveFilters(filters) && (
+            <button
+              type="button"
+              className="secondary-button document-filter-clear"
+              onClick={() => setFilters(emptyDocumentFilters)}
+            >
+              Clear {activeFilterCount(filters)}{" "}
+              {activeFilterCount(filters) === 1 ? "filter" : "filters"}
+            </button>
+          )}
           <div className="view-switch" aria-label="Change document view">
             <button
               type="button"
@@ -4301,9 +4689,48 @@ function DocumentsView({
             </button>
           </div>
         </div>
+        {/*
+          Said out loud, and politely: a reader who has narrowed the register
+          should never mistake the subset for the whole of it. `aria-live` so a
+          screen reader hears the count change as filters are applied, rather
+          than tabbing into a table that has quietly shrunk.
+        */}
+        {narrowed && (
+          <p className="document-filter-summary" aria-live="polite">
+            {/*
+              The denominator is `visible`, which INCLUDES the archive while
+              the archive is being shown — so the sentence may not call all of
+              them archived. It says what was counted instead.
+            */}
+            Showing {filtered.length} of {visible.length} documents in{" "}
+            {window.label}
+            {showingArchive ? ", including the archive" : ""}.
+          </p>
+        )}
 
         {viewMode === "list" ? (
-          <div className="table-scroll">
+          /*
+           * A SCROLLING REGION A KEYBOARD CAN REACH.
+           *
+           * The register now carries ten columns and scrolls sideways on
+           * anything narrower than a laptop. axe reports
+           * `scrollable-region-focusable` (serious) against this container
+           * whenever the table holds nothing focusable — which is exactly the
+           * empty state, where the only content is the "no document matches…"
+           * row. With rows present the buttons inside make it reachable by
+           * accident; with none, a keyboard user could not scroll it at all.
+           *
+           * `tabIndex={0}` makes the region itself a tab stop so the arrow keys
+           * scroll it, and the `role`/`aria-label` pair stops that stop being
+           * an unexplained one — a focusable div with no name is a worse
+           * failure than the one being fixed.
+           */
+          <div
+            className="table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Document register"
+          >
             <table className="data-table document-table">
               <thead>
                 <tr>
@@ -4311,69 +4738,79 @@ function DocumentsView({
                   <th>Type</th>
                   <th>Site</th>
                   <th>Work order</th>
+                  <th>Owner</th>
                   <th>Uploaded</th>
                   <th>Size</th>
+                  <th>Expiry</th>
                   <th>Status</th>
                   <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((file) => (
-                  <tr key={file.id}>
-                    <td>
-                      <button
-                        type="button"
-                        className="file-name-cell"
-                        onClick={() => setSelectedFile(file)}
-                      >
-                        <span>
-                          <Icon name="document" size={17} />
+                {filtered.map((file) => {
+                  const status = documentStatus(file, today);
+                  return (
+                    <tr key={file.id}>
+                      <td>
+                        <button
+                          type="button"
+                          className="file-name-cell"
+                          onClick={() => setSelectedFile(file)}
+                        >
+                          <span>
+                            <Icon name="document" size={17} />
+                          </span>
+                          <strong>{documentName(file)}</strong>
+                        </button>
+                      </td>
+                      <td>{documentTypeLabel(file)}</td>
+                      <td>{documentSiteLabel(file)}</td>
+                      <td>{file.requestId ?? "—"}</td>
+                      <td>{documentOwner(file)}</td>
+                      <td>{formatDate(file.uploadedAt)}</td>
+                      <td>{file.size}</td>
+                      {/*
+                        An expiry that does not exist is an em dash, never a
+                        date. Most rows in this register are photographs, and a
+                        photograph with an invented expiry would be counted as a
+                        lapsing certificate by every screen downstream.
+                      */}
+                      <td>
+                        {file.expiryDate ? formatDate(file.expiryDate) : "—"}
+                      </td>
+                      <td>
+                        <span
+                          className={`file-status ${documentStateClass(status.state)}`}
+                          title={status.description}
+                        >
+                          {status.label}
                         </span>
-                        <strong>{file.name}</strong>
-                      </button>
-                    </td>
-                    <td>{file.kind}</td>
-                    <td>{file.site}</td>
-                    <td>{file.requestId ?? "—"}</td>
-                    <td>{formatDate(file.uploadedAt)}</td>
-                    <td>{file.size}</td>
-                    <td>
-                      <span
-                        className={`file-status file-status--${file.status
-                          .toLowerCase()
-                          .replaceAll(" ", "-")}`}
-                      >
-                        {file.status}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        className="icon-button table-open"
-                        type="button"
-                        aria-label={`Open ${file.name}`}
-                        onClick={() => setSelectedFile(file)}
-                      >
-                        <Icon name="chevron" size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        <button
+                          className="icon-button table-open"
+                          type="button"
+                          aria-label={`Open ${documentName(file)}`}
+                          onClick={() => setSelectedFile(file)}
+                        >
+                          <Icon name="chevron" size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {/*
                   A register that filters had no way of saying it had filtered
                   everything out: an empty range drew a header row over
                   nothing, which reads as a broken page rather than an answer.
-                  The range and the search fail differently and are named
-                  separately, and an unrecognised window says what is missing
-                  from it instead of pretending the estate holds no documents.
+                  The range, the filters and the search fail differently and
+                  are named separately, so the reader is sent to the control
+                  that will actually widen the register.
                 */}
                 {!filtered.length && (
                   <tr>
-                    <td className="analytics-empty" colSpan={8}>
-                      {!window.recognised
-                        ? window.reason
-                        : inRange.length
-                          ? `No document in ${window.label} matches "${query.trim()}".`
-                          : `No documents were uploaded in ${window.label}.`}
+                    <td className="analytics-empty" colSpan={10}>
+                      {emptyReason}
                     </td>
                   </tr>
                 )}
@@ -4382,41 +4819,44 @@ function DocumentsView({
           </div>
         ) : (
           <div className="document-grid">
-            {filtered.map((file) => (
-              <button
-                type="button"
-                key={file.id}
-                onClick={() => setSelectedFile(file)}
-              >
-                <span className="document-grid__icon">
-                  <Icon name="document" size={24} />
-                </span>
-                <strong>{file.name}</strong>
-                <span>{file.kind}</span>
-                <small>
-                  {file.site} · {file.size}
-                </small>
-              </button>
-            ))}
-            {/* The card view empties for the same two reasons the table does,
-                and said the same nothing about either. */}
-            {!filtered.length && (
-              <p className="analytics-empty">
-                {!window.recognised
-                  ? window.reason
-                  : inRange.length
-                    ? `No document in ${window.label} matches "${query.trim()}".`
-                    : `No documents were uploaded in ${window.label}.`}
-              </p>
-            )}
+            {filtered.map((file) => {
+              const status = documentStatus(file, today);
+              return (
+                <button
+                  type="button"
+                  key={file.id}
+                  onClick={() => setSelectedFile(file)}
+                >
+                  <span className="document-grid__icon">
+                    <Icon name="document" size={24} />
+                  </span>
+                  <strong>{documentName(file)}</strong>
+                  <span>{documentTypeLabel(file)}</span>
+                  <small>
+                    {documentSiteLabel(file)} · {file.size}
+                  </small>
+                  <span
+                    className={`file-status ${documentStateClass(status.state)}`}
+                  >
+                    {status.label}
+                  </span>
+                </button>
+              );
+            })}
+            {/* The card view empties for the same three reasons the table
+                does, and said the same nothing about any of them. */}
+            {!filtered.length && <p className="analytics-empty">{emptyReason}</p>}
           </div>
         )}
       </section>
 
-      {selectedFile && (
+      {openFile && (
         <FileDetailDrawer
-          file={selectedFile}
+          file={openFile}
+          today={today}
           onClose={() => setSelectedFile(null)}
+          onNotify={onNotify}
+          onChanged={onChanged}
         />
       )}
     </div>
@@ -7571,12 +8011,38 @@ function previewKindFor(contentType: string | undefined) {
   return "none" as const;
 }
 
+/**
+ * One version of a document, as the history list shows it.
+ *
+ * The same payload `/api/files` serves for anything else; only the fields the
+ * history needs are named, so a change to the rest of the record cannot
+ * silently change what the history claims.
+ */
+type DocumentVersion = {
+  id: string;
+  originalName: string;
+  createdAt: string;
+  uploadedByEmail: string | null;
+  versionNo: number;
+  isCurrent: boolean;
+  expiryDate: string | null;
+  inlineUrl?: string;
+  downloadUrl?: string;
+};
+
 function FileDetailDrawer({
   file,
+  today,
   onClose,
+  onNotify,
+  onChanged,
 }: {
   file: FileRecord;
+  /** The instant every verdict in this drawer is classified against. */
+  today: Date;
   onClose: () => void;
+  onNotify: (message: string) => void;
+  onChanged: () => void;
 }) {
   /*
    * THE DRAWER IS A DIALOG, AND HAS TO BEHAVE LIKE ONE.
@@ -7616,6 +8082,8 @@ function FileDetailDrawer({
       /*
        * Escape inside a box means "abandon what I am typing" everywhere else in
        * this app, and the register's own search field is one Tab from here.
+       * It matters more now that the drawer holds an editor: Escape in the
+       * title field must not throw away the whole form.
        */
       const target = event.target;
       if (
@@ -7632,6 +8100,228 @@ function FileDetailDrawer({
 
   const preview = previewKindFor(file.contentType);
   const canOpen = Boolean(file.inlineUrl);
+  const status = documentStatus(file, today);
+  const archived = Boolean(file.archivedAt);
+
+  /* ── W07-02: the metadata editor ──────────────────────────────────────── */
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    title: file.title ?? "",
+    documentType: file.documentType ?? "",
+    description: file.description ?? "",
+    expiryDate: file.expiryDate ?? "",
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const titleFieldRef = useRef<HTMLInputElement | null>(null);
+
+  /*
+   * The form is re-seeded whenever the record changes underneath it.
+   *
+   * The register reloads after every write, so `file` is a new object each
+   * time; without this the boxes would go on showing what was typed before the
+   * save rather than what the server stored, and a value the server trimmed or
+   * refused would look as though it had been kept.
+   */
+  useEffect(() => {
+    setDraft({
+      title: file.title ?? "",
+      documentType: file.documentType ?? "",
+      description: file.description ?? "",
+      expiryDate: file.expiryDate ?? "",
+    });
+  }, [file.id, file.title, file.documentType, file.description, file.expiryDate]);
+
+  useEffect(() => {
+    if (editing) titleFieldRef.current?.focus();
+  }, [editing]);
+
+  async function saveMetadata(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy("save");
+    setError(null);
+    try {
+      const response = await fetch(`/api/files/${encodeURIComponent(file.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        /*
+         * All four keys, always. `documentFieldUpdates` on the server reads
+         * `"title" in body`, so an omitted key means "leave it alone" and an
+         * empty string means "clear it" — sending the whole form is what lets
+         * somebody remove a title they no longer want, which omitting the key
+         * could never express.
+         */
+        body: JSON.stringify({
+          title: draft.title.trim() || null,
+          documentType: draft.documentType.trim() || null,
+          description: draft.description.trim() || null,
+          expiryDate: draft.expiryDate.trim() || null,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "The document could not be saved.");
+      }
+      setEditing(false);
+      onNotify(`${documentName(file)} updated.`);
+      onChanged();
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "The document could not be saved.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /* ── W07-03: version history, and replacing a document ────────────────── */
+
+  const [versions, setVersions] = useState<DocumentVersion[] | null>(null);
+  const [showVersions, setShowVersions] = useState(false);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadVersions = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/files?versionsOf=${encodeURIComponent(file.rootDocumentId)}&archived=all&limit=100`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!response.ok) return;
+      const payload = (await response.json()) as { files?: DocumentVersion[] };
+      setVersions(payload.files ?? []);
+    } catch {
+      /* The panel says it could not read the history rather than showing none:
+         an empty history and an unreadable one mean opposite things. */
+      setVersions(null);
+    }
+  }, [file.rootDocumentId]);
+
+  useEffect(() => {
+    if (showVersions) void loadVersions();
+  }, [showVersions, loadVersions]);
+
+  async function uploadReplacement(chosen: File) {
+    setBusy("replace");
+    setError(null);
+    try {
+      const body = new FormData();
+      body.append("file", chosen);
+      // W07-03: the server makes this a NEW row that supersedes the old one, so
+      // the document the register lists is the new version and the old one
+      // stays readable in the history rather than being overwritten.
+      body.append("replaces", file.id);
+      const response = await fetch("/api/files", { method: "POST", body });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "The new version could not be uploaded.");
+      }
+      onNotify(`${chosen.name} filed as the new version of ${documentName(file)}.`);
+      setVersions(null);
+      onChanged();
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
+      onClose();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The new version could not be uploaded.",
+      );
+    } finally {
+      setBusy(null);
+      if (replaceInputRef.current) replaceInputRef.current.value = "";
+    }
+  }
+
+  /* ── W07-05 / W07-06: archive, restore and remove ─────────────────────── */
+
+  async function setArchived(next: boolean) {
+    setBusy("archive");
+    setError(null);
+    try {
+      const response = await fetch(`/api/files/${encodeURIComponent(file.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: next }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.error ||
+            (next
+              ? "The document could not be archived."
+              : "The document could not be restored."),
+        );
+      }
+      onNotify(
+        next
+          ? `${documentName(file)} archived. It stays readable in the archive.`
+          : `${documentName(file)} restored to the live register.`,
+      );
+      onChanged();
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "The document could not be updated.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeDocument() {
+    /*
+     * W07-06. The wording is `cells/file-cell.tsx`'s, and deliberately so: it
+     * names the file, where it is filed, that the bytes go, and what the
+     * compliance record will say afterwards. A confirm that says only "are you
+     * sure" is a speed bump; this one is the last place somebody can find out
+     * that deleting an EICR is not the same as tidying a folder.
+     *
+     * Archive is offered right beside it, which is the honest alternative for
+     * anyone who reaches this dialog and realises they meant "take it off the
+     * list", not "destroy it".
+     */
+    if (
+      !window.confirm(
+        `Remove ${documentName(file)} from ${documentSiteLabel(file)}? The document is deleted permanently, its ${
+          file.versionNo > 1 ? `${file.versionNo} versions go with it, ` : ""
+        }and the compliance record will show this slot as empty. Archive it instead to keep it readable.`,
+      )
+    ) {
+      return;
+    }
+    setBusy("delete");
+    setError(null);
+    try {
+      const response = await fetch(`/api/files/${encodeURIComponent(file.id)}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "The document could not be removed.");
+      }
+      onNotify(`${documentName(file)} removed from the register.`);
+      onChanged();
+      // W07-13: the board's photo strips, the tracker and the calendar all
+      // listen for this, so a document removed here disappears from them too.
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
+      onClose();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "The document could not be removed.",
+      );
+      setBusy(null);
+    }
+  }
 
   return (
     <>
@@ -7652,7 +8342,7 @@ function FileDetailDrawer({
         <div className="detail-drawer__header">
           <div>
             <span>{file.id}</span>
-            <h2>{file.name}</h2>
+            <h2>{documentName(file)}</h2>
           </div>
           <button
             className="icon-button"
@@ -7683,7 +8373,7 @@ function FileDetailDrawer({
             ) : (
               <>
                 <Icon name="document" size={38} />
-                <strong>{file.kind}</strong>
+                <strong>{documentTypeLabel(file)}</strong>
                 <span>{file.size}</span>
                 {/*
                  * Said rather than implied. The server sends this file as
@@ -7720,22 +8410,377 @@ function FileDetailDrawer({
               </a>
             </div>
           )}
+
+          {error && (
+            <p className="drawer-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          {archived && (
+            <p className="document-archived-note">
+              <Icon name="alert" size={15} />
+              Archived {formatDate(file.archivedAt ?? "", true)}
+              {file.archivedBy ? ` by ${file.archivedBy}` : ""}. It is out of the
+              live register and does not count towards compliance.
+            </p>
+          )}
+
           <section className="drawer-section">
-            <span className="drawer-label">File details</span>
-            <div className="detail-grid">
-              <DetailItem icon="store" label="Site" value={file.site} />
-              <DetailItem
-                icon="wrench"
-                label="Work order"
-                value={file.requestId ?? "Not linked"}
-              />
-              <DetailItem
-                icon="calendar"
-                label="Uploaded"
-                value={formatDate(file.uploadedAt, true)}
-              />
-              <DetailItem icon="shield" label="Status" value={file.status} />
+            <div className="drawer-section__head">
+              <span className="drawer-label">File details</span>
+              {!editing && (
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => setEditing(true)}
+                >
+                  <Icon name="edit" size={15} />
+                  Edit details
+                </button>
+              )}
             </div>
+            {editing ? (
+              /* W07-02 — the four fields a document register lets somebody set. */
+              <form className="document-editor" onSubmit={saveMetadata}>
+                <label htmlFor="document-title">
+                  Title
+                  <input
+                    id="document-title"
+                    ref={titleFieldRef}
+                    type="text"
+                    maxLength={200}
+                    value={draft.title}
+                    placeholder={file.name}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, title: event.target.value }))
+                    }
+                  />
+                  <small>Leave empty to keep using the filename.</small>
+                </label>
+                <label htmlFor="document-type">
+                  Document type
+                  <input
+                    id="document-type"
+                    type="text"
+                    maxLength={80}
+                    value={draft.documentType}
+                    placeholder={file.kind}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        documentType: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label htmlFor="document-expiry">
+                  Expiry date
+                  <input
+                    id="document-expiry"
+                    type="date"
+                    value={draft.expiryDate}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        expiryDate: event.target.value,
+                      }))
+                    }
+                  />
+                  {/*
+                    Empty is a real answer, and the commonest one. Most rows in
+                    this register are photographs; an expiry invented for one
+                    would be counted as a lapsing certificate by every screen
+                    downstream of the shared classifier.
+                  */}
+                  <small>
+                    Leave empty if this document does not expire. Certificates
+                    turn amber {EXPIRY_DUE_SOON_DAYS} days before the date.
+                  </small>
+                </label>
+                <label htmlFor="document-description">
+                  Description
+                  <textarea
+                    id="document-description"
+                    rows={3}
+                    maxLength={2000}
+                    value={draft.description}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <div className="document-editor__actions">
+                  <button
+                    className="primary-button"
+                    type="submit"
+                    disabled={busy === "save"}
+                  >
+                    {busy === "save" ? "Saving…" : "Save details"}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setError(null);
+                      setDraft({
+                        title: file.title ?? "",
+                        documentType: file.documentType ?? "",
+                        description: file.description ?? "",
+                        expiryDate: file.expiryDate ?? "",
+                      });
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="detail-grid">
+                  <DetailItem
+                    icon="store"
+                    label="Site"
+                    value={documentSiteLabel(file)}
+                  />
+                  <DetailItem
+                    icon="wrench"
+                    label="Work order"
+                    value={file.requestId ?? "Not linked"}
+                  />
+                  <DetailItem
+                    icon="folder"
+                    label="Type"
+                    value={documentTypeLabel(file)}
+                  />
+                  <DetailItem
+                    icon="user"
+                    label="Uploaded by"
+                    value={documentOwner(file)}
+                  />
+                  <DetailItem
+                    icon="calendar"
+                    label="Uploaded"
+                    value={formatDate(file.uploadedAt, true)}
+                  />
+                  {/*
+                    W07-10. The expiry is the date when there is one and says so
+                    in words when there is not — never a placeholder date, and
+                    never blank, which is what the Site cell used to be.
+                  */}
+                  <DetailItem
+                    icon="calendar"
+                    label="Expiry"
+                    value={
+                      file.expiryDate ? formatDate(file.expiryDate, false) : "No expiry set"
+                    }
+                  />
+                  <DetailItem icon="shield" label="Status" value={status.label} />
+                  <DetailItem
+                    icon="paperclip"
+                    label="Version"
+                    value={
+                      file.isCurrent
+                        ? `${file.versionNo} (current)`
+                        : `${file.versionNo} (superseded)`
+                    }
+                  />
+                </div>
+                <p className="document-status-note">{status.description}</p>
+                {file.description && (
+                  <p className="document-description">{file.description}</p>
+                )}
+              </>
+            )}
+          </section>
+
+          {/* ── W07-03: version history ─────────────────────────────────── */}
+          <section className="drawer-section">
+            <div className="drawer-section__head">
+              <span className="drawer-label">Version history</span>
+              <button
+                type="button"
+                className="link-button"
+                aria-expanded={showVersions}
+                onClick={() => setShowVersions((open) => !open)}
+              >
+                {showVersions ? "Hide history" : "Show history"}
+              </button>
+            </div>
+            {showVersions && (
+              <>
+                {versions === null ? (
+                  <p className="analytics-empty">
+                    The version history could not be read.
+                  </p>
+                ) : versions.length === 0 ? (
+                  <p className="analytics-empty">
+                    No history yet — this is the only version of this document.
+                  </p>
+                ) : (
+                  <>
+                    {/*
+                     * SAY THAT THE HISTORY IS SHORT. DO NOT SAY WHY.
+                     *
+                     * `versionNo` can be 3 on a lineage that lists one row. Drawing
+                     * "Version 3 (current)" above a single entry and saying nothing
+                     * invites the reader to treat a partial list as a complete audit
+                     * trail, which is not something a compliance register may leave to
+                     * inference.
+                     *
+                     * This used to end "Earlier versions are no longer held in the
+                     * workspace" — a claim about STORAGE that this component cannot
+                     * check, and that was wrong. Every short lineage seen while building
+                     * this was a shared dev server mid-teardown: a fixture teardown ran
+                     * between two calls, so a lineage listed complete on one and absent
+                     * on the next. Checked properly afterwards across the whole
+                     * workspace — thirteen rows with `versionNo > 1`, every one of their
+                     * roots present in the same listing. Nothing loses history.
+                     *
+                     * So it reports the observation and stops. A count is something the
+                     * client knows; a reason is not.
+                     */}
+                    {versions.length < file.versionNo && (
+                      <p className="document-status-note">
+                        This document is version {file.versionNo}, but only{" "}
+                        {versions.length === 1
+                          ? "one version is"
+                          : `${versions.length} versions are`}{" "}
+                        listed here. Treat this history as incomplete.
+                      </p>
+                    )}
+                    <ol className="document-versions">
+                      {versions.map((version) => (
+                      <li
+                        key={version.id}
+                        className={version.isCurrent ? "is-current" : ""}
+                      >
+                        <span className="document-versions__no">
+                          v{version.versionNo}
+                        </span>
+                        <span className="document-versions__body">
+                          <strong>{version.originalName}</strong>
+                          <small>
+                            {formatDate(version.createdAt, true)} ·{" "}
+                            {version.uploadedByEmail?.trim() || "uploader not recorded"}
+                          </small>
+                        </span>
+                        <span
+                          className={`file-status ${
+                            version.isCurrent
+                              ? "document-status--valid"
+                              : "document-status--archived"
+                          }`}
+                        >
+                          {version.isCurrent ? "Current" : "Superseded"}
+                        </span>
+                        {version.inlineUrl && (
+                          <span className="document-versions__actions">
+                            <a
+                              href={version.inlineUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Open version ${version.versionNo} of ${documentName(file)}`}
+                            >
+                              <Icon name="search" size={15} />
+                            </a>
+                            <a
+                              href={
+                                version.downloadUrl ?? `${version.inlineUrl}?download=1`
+                              }
+                              download={version.originalName}
+                              aria-label={`Download version ${version.versionNo} of ${documentName(file)}`}
+                            >
+                              <Icon name="download" size={15} />
+                            </a>
+                          </span>
+                        )}
+                      </li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+              </>
+            )}
+            <div className="document-version-upload">
+              {/*
+               * THE HIDDEN FILE INPUT STILL NEEDS A NAME, AND MUST NOT BE A TAB STOP.
+               *
+               * `visually-hidden` moves it off screen; it does NOT take it out of the
+               * accessibility tree. So this was a focusable file input with no label,
+               * no aria-label and no aria-labelledby — axe `label`, impact CRITICAL,
+               * present at all ten widths in both themes whenever the drawer was open,
+               * and a screen reader landed on an unnamed "choose file" control.
+               *
+               * Two attributes, because one alone is wrong in each direction.
+               * `aria-label` names it for the reader that does reach it — a file input
+               * is still operable from the keyboard once focused, so it must say what
+               * it does. `tabIndex={-1}` takes it out of the tab ORDER, because the
+               * button below is the real control and two stops for one action is a
+               * confusing sequence, not an accessible one.
+               *
+               * NOT `aria-hidden`: hiding a focusable element from the tree is its own
+               * violation (aria-hidden-focus), and it would leave a keyboard user able
+               * to reach something a screen reader refuses to describe.
+               */}
+              <input
+                ref={replaceInputRef}
+                id="document-replace"
+                className="visually-hidden"
+                type="file"
+                aria-label={`Choose a replacement file for ${documentName(file)}`}
+                tabIndex={-1}
+                onChange={(event) => {
+                  const chosen = event.target.files?.[0];
+                  if (chosen) void uploadReplacement(chosen);
+                }}
+              />
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy === "replace"}
+                onClick={() => replaceInputRef.current?.click()}
+              >
+                <Icon name="upload" size={17} />
+                {busy === "replace" ? "Uploading…" : "Upload new version"}
+              </button>
+              <small>
+                The current file is kept and marked superseded, not overwritten.
+              </small>
+            </div>
+          </section>
+
+          {/* ── W07-05 / W07-06: archive and remove ─────────────────────── */}
+          <section className="drawer-section drawer-section--danger">
+            <span className="drawer-label">Manage this document</span>
+            <div className="document-danger-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy === "archive"}
+                onClick={() => void setArchived(!archived)}
+              >
+                <Icon name="folder" size={17} />
+                {archived ? "Restore to register" : "Archive"}
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={busy === "delete"}
+                onClick={() => void removeDocument()}
+              >
+                <Icon name="trash" size={17} />
+                {busy === "delete" ? "Removing…" : "Remove permanently"}
+              </button>
+            </div>
+            <small>
+              Archiving keeps the document readable and takes it out of the live
+              register. Removing deletes the stored file and cannot be undone.
+            </small>
           </section>
         </div>
       </aside>

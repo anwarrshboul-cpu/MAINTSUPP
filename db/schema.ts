@@ -822,12 +822,87 @@ export const attachments = sqliteTable(
     submittedVia: text("submitted_via"),
     reviewedAt: text("reviewed_at"),
     reviewedBy: text("reviewed_by"),
+    /*
+     * WORKSTREAM 7 — a document's own identity, separate from its bytes.
+     *
+     * Until these existed an attachment was only ever "the file that happens to
+     * hang off this cell": its name was the uploader's filename, it had no type
+     * anyone could filter on, no expiry the compliance register could read, and
+     * no way to say that one PDF supersedes another. Every one of the official
+     * criteria W07-02, 03, 05, 07, 10, 11 and 12 needed a column that was not
+     * there.
+     *
+     * `title` is a DISPLAY name and `original_name` stays the byte-truth: the
+     * file a person downloads must keep the name it was uploaded under, or the
+     * copy on their disk stops matching the register.
+     */
+    title: text("title"),
+    documentType: text("document_type"),
+    description: text("description"),
+    /*
+     * `YYYY-MM-DD` and nothing else. The Postgres side carries a CHECK
+     * constraint saying so, which means a malformed date is a DATABASE ERROR
+     * rather than a bad row — so every writer must normalise through
+     * `dateOnlyValue` and answer 400 before the insert. See the note on
+     * `expiryRefusal` in app/api/files/document-fields.ts.
+     */
+    expiryDate: text("expiry_date"),
+    /*
+     * `timestamptz` on Postgres, declared `text` here.
+     *
+     * This is the dual-build pattern `reviewedAt` above already uses, and it is
+     * deliberate rather than lazy: this file is compiled for BOTH the SQLite
+     * build and the Postgres one, drizzle's sqlite `integer({mode:"timestamp"})`
+     * would emit an integer comparison against a timestamptz column, and the
+     * only thing either build ever does with these values is write an ISO
+     * string and hand it back. Text is what both dialects agree on.
+     */
+    metadataUpdatedAt: text("metadata_updated_at"),
+    metadataUpdatedBy: text("metadata_updated_by"),
+    /*
+     * WHOSE document this is, when it is nobody's job.
+     *
+     * A contractor's public liability certificate is not evidence about a work
+     * order — it is a fact about the contractor — and before this column the
+     * upload route refused it outright, because `requestId` was mandatory. See
+     * the anchor rule in `app/api/files/anchors.ts`.
+     */
+    contractorId: text("contractor_id"),
+    /** Soft removal. NULL means live; a timestamp means archived, not destroyed. */
+    archivedAt: text("archived_at"),
+    archivedBy: text("archived_by"),
+    /*
+     * VERSION LINEAGE.
+     *
+     * `root_document_id` names the FIRST version of a document; version 1 is
+     * self-rooted (NULL, resolved as `coalesce(root_document_id, id)`), so
+     * nothing had to be back-filled to adopt this. `version_no` counts up from
+     * 1 and `is_current` marks the single head.
+     *
+     * Two UNIQUE indexes on the Postgres side enforce what code must not be
+     * trusted to remember:
+     *   attachments_current_version_idx  UNIQUE (coalesce(root_document_id, id))
+     *                                    WHERE is_current  — ONE head, ever.
+     *   attachments_root_version_idx     UNIQUE (coalesce(root_document_id, id),
+     *                                    version_no)        — no duplicate n.
+     * So a new version MUST clear its predecessor's `is_current` in the same
+     * transaction, and a concurrent `max + 1` LOSES and must retry rather than
+     * mint a second version 4. Being rejected is the feature: it is the database
+     * refusing to hold two current versions of one certificate, which is the
+     * state that would make the compliance register count a document twice.
+     */
+    rootDocumentId: text("root_document_id"),
+    versionNo: integer("version_no").notNull().default(1),
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
     index("attachments_organisation_idx").on(table.organisationId),
     index("attachments_request_idx").on(table.requestId),
     index("attachments_site_idx").on(table.siteId),
+    index("attachments_contractor_idx").on(table.contractorId),
+    index("attachments_root_idx").on(table.rootDocumentId),
+    index("attachments_expiry_idx").on(table.expiryDate),
     index("attachments_unit_idx").on(table.unitId),
     index("attachments_update_idx").on(table.updateId),
     index("attachments_board_column_idx").on(

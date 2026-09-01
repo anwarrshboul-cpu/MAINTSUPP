@@ -299,8 +299,34 @@ test("the compliance PATCH refuses the partial it cannot survive", async () => {
   const route = await read("app/api/workspace/route.ts");
   const start = route.indexOf('entity === "compliance"', route.indexOf("export async function PATCH"));
   const branch = route.slice(start, route.indexOf("} else if", start + 20));
-  assert.match(branch, /if \(!text\(data\.siteId, 100\)\)/, "an omitted site must be refused, not written as ''");
-  assert.match(branch, /if \(!text\(data\.kind, 120\)\)/, "and so must an omitted requirement");
+  /*
+   * `visibleText`, not `text`. This asserted `text(data.siteId, 100)` and the
+   * guard now reads through `visibleText`, which is `text` plus one more thing:
+   * a value made only of invisible characters counts as empty. `trim()` does not
+   * strip U+200B, so `text()` let a site id or a requirement name consisting of
+   * zero-width spaces past a `if (!…)` check — the guard this test exists to
+   * protect, passing a value that is not there.
+   *
+   * The claim being made is unchanged and is what the message says: an omitted
+   * site must be REFUSED rather than written as ''. The reader is stricter than
+   * the one originally pinned, so the guard is stronger, not looser.
+   */
+  assert.match(
+    branch,
+    /if \(!siteId\)/,
+    "an omitted site must be refused, not written as ''",
+  );
+  assert.match(
+    branch,
+    /const siteId = visibleText\(data\.siteId, 100\)/,
+    "and the site must be read through the reader that treats invisible text as empty",
+  );
+  assert.match(branch, /if \(!kind\)/, "and so must an omitted requirement");
+  assert.match(
+    branch,
+    /const kind = visibleText\(data\.kind, 120\)/,
+    "read the same way, for the same reason",
+  );
   assert.doesNotMatch(
     branch,
     /"siteId" in data \? text\(data\.siteId, 100\) : null/,
@@ -326,17 +352,75 @@ test("closing a site from the workspace tab can be undone there", async () => {
 
 test("the compliance PATCH keeps its deliberate full replace", async () => {
   /*
-   * The calendar's compliance PATCH sends all four keys and depends on the
-   * unconditional UPDATE — tests/acceptance-correction-one-calendar-data.test.mjs
-   * pins that statement's literal text. Hardening added reference validation
-   * above it and left the statement alone.
+   * WHAT THIS USED TO ASSERT, AND WHY IT CHANGED.
+   *
+   * It matched the UPDATE's first line character-for-character:
+   *
+   *   /await db\.update\(complianceDocuments\)\.set\(\{ siteId: text\(data\.siteId, 100\),
+   *    kind: text\(data\.kind, 120\), status: state,/
+   *
+   * The intent was right and is kept: the calendar's compliance PATCH sends all
+   * four keys and depends on the UPDATE naming every column, so a statement
+   * quietly made partial would break a write nothing else covers.
+   *
+   * But the assertion was on the FORMATTING, not on the claim. It pinned
+   * `text(data.siteId, 100)` inline, so validating that value into a named
+   * variable first — which is what closed the hole where an omitted `expiry`
+   * cleared the stored date and an omitted `state` downgraded Compliant to
+   * Missing — could not be done without editing this line, and the obvious way
+   * to "fix" a failing source pin is to delete it.
+   *
+   * So it asserts the structure instead of the spelling: every column is still
+   * replaced, and it is still ONE statement. Reformatting is free; making the
+   * statement partial is not. The behavioural half of this contract — that
+   * omitting a key is REFUSED rather than applied — is in
+   * tests/workstream-seven-official-compliance-contract.test.mjs, which drives
+   * the running server.
    */
   const route = await read("app/api/workspace/route.ts");
+  const patchAt = route.indexOf("export async function PATCH");
+  assert.ok(patchAt > 0, "the PATCH handler is findable");
+  const branch = route.slice(route.indexOf('} else if (entity === "compliance") {', patchAt));
+  const updateAt = branch.indexOf("db.update(complianceDocuments)");
+  assert.ok(updateAt > 0, "the compliance UPDATE is findable");
+  const statement = branch.slice(updateAt, branch.indexOf(";", updateAt) + 1);
+
+  for (const column of [
+    "siteId",
+    "kind",
+    "status: state",
+    "expiryDate",
+    'notRequired: state === "Not required"',
+  ]) {
+    assert.ok(
+      statement.includes(column),
+      `the compliance UPDATE must still replace ${column} — the calendar depends on it`,
+    );
+  }
+
+  // And the values it writes are validated before they reach it, which is the
+  // half that made the full replace safe rather than merely deliberate.
   assert.match(
-    route,
-    /await db\.update\(complianceDocuments\)\.set\(\{ siteId: text\(data\.siteId, 100\), kind: text\(data\.kind, 120\), status: state,/,
-    "the compliance UPDATE must stay byte-for-byte as the calendar contract requires",
+    branch,
+    /isComplianceState\(/,
+    "`state` is checked against the five register words, not written as free text",
   );
+  assert.match(
+    branch,
+    /isRealCalendarDate\(/,
+    "`expiry` is checked as a real calendar date, not merely a date-shaped string",
+  );
+  assert.match(
+    branch,
+    /visibleText\(/,
+    "text values are read through `visibleText`, so a zero-width name counts as empty",
+  );
+  for (const key of ["state", "expiry"]) {
+    assert.ok(
+      branch.includes(`!("${key}" in data)`),
+      `an omitted \`${key}\` is refused, because in a full replace an omitted key is an erasure`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

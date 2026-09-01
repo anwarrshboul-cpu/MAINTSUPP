@@ -69,7 +69,10 @@ import {
   storeDocumentationResponsibility,
   storeDocumentationUndated,
 } from "../../../../db/monday-board-spec";
-import { expiryStatus } from "../cells/expiry-cell";
+import {
+  EXPIRY_DUE_SOON_DAYS,
+  expiryStatus,
+} from "../../../lib/expiry-status";
 import type { BoardItem } from "./view-model";
 import "./store-expiry-calendar.css";
 
@@ -195,73 +198,58 @@ function describeOffset(offset: number) {
 
 /* ── Status ──────────────────────────────────────────────────────────────── */
 
-/**
- * The renewal window, in days.
+/** What this view draws. Every value is an `ExpiryState` the classifier returns. */
+type DrawnTone = "expired" | "due-soon" | "valid";
+
+/*
+ * THE WINDOW IS PRINTED FROM THE CONSTANT THAT DECIDES IT.
  *
- * 30 is the register's own default: `workspace-data.ts` ships planned
- * maintenance with `reminderDays: 30`, and the compliance screens call the same
- * window "Expiring soon". Nothing new is being invented here.
+ * This hint used to read `within ${DUE_SOON_DAYS} days` against a local
+ * `const DUE_SOON_DAYS = 30`, while the classifier that actually put rows in
+ * this bucket uses `EXPIRY_DUE_SOON_DAYS`, which is 60. So the rail labelled
+ * its amber column "within 30 days" and filled it with certificates up to 60
+ * days out — a reader checking a 45-day renewal against that hint would
+ * conclude the calendar had put it in the wrong bucket.
+ *
+ * The old constant's docblock defended the 30 as `reminderDays: 30` from
+ * planned maintenance. That is a maintenance REMINDER cadence, not a
+ * certificate renewal window; the justification was about a different number
+ * for a different thing. `EXPIRY_DUE_SOON_DAYS` carries the reasoning for this
+ * one — the multi-week round trip of quoting, raising a PO and getting a
+ * contractor on site — and it is the only number allowed to name this window.
  */
-const DUE_SOON_DAYS = 30;
-
-/** What this view draws. `unknown` only ever exists between the two functions below. */
-type ExpiryTone = "expired" | "due-soon" | "valid" | "unknown";
-
-type DrawnTone = Exclude<ExpiryTone, "unknown">;
-
 const TONES: Record<DrawnTone, { word: string; icon: IconName; hint: string }> = {
   expired: { word: "Overdue", icon: "alert", hint: "lapsed — book a contractor" },
-  "due-soon": { word: "Due soon", icon: "clock", hint: `within ${DUE_SOON_DAYS} days` },
+  "due-soon": {
+    word: "Due soon",
+    icon: "clock",
+    hint: `within ${EXPIRY_DUE_SOON_DAYS} days`,
+  },
   valid: { word: "Renewal", icon: "calendar", hint: "in date, scheduled ahead" },
 };
 
 /**
- * Narrows whatever `expiryStatus` hands back.
- *
- * The cell module owns that function and its return shape is not this view's to
- * depend on — it may be a string today and an object tomorrow. So the value is
- * taken as `unknown`, a token is looked for in the shapes it could plausibly
- * take, and anything unrecognised falls through to `unknown` for the caller to
- * decide. Order matters: "expired" and "expiring" share a prefix, so the
- * lapsed wording is tested first.
- */
-function readTone(value: unknown): ExpiryTone {
-  let token: string | null = null;
-  if (typeof value === "string") {
-    token = value;
-  } else if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const field of ["tone", "status", "state", "key", "level", "kind", "label"]) {
-      const candidate = record[field];
-      if (typeof candidate === "string") {
-        token = candidate;
-        break;
-      }
-    }
-  }
-  if (!token) return "unknown";
-
-  const text = token.toLowerCase();
-  if (/expired|overdue|lapsed|out of date/.test(text)) return "expired";
-  if (/soon|expiring|warn|due|amber/.test(text)) return "due-soon";
-  if (/valid|compliant|current|in date|ok|good/.test(text)) return "valid";
-  return "unknown";
-}
-
-/**
  * The tone drawn for one renewal.
  *
- * The date decides whether something is overdue, not the imported helper: a
- * disagreement between the two must never be able to hide a lapsed certificate
- * from the rail. Everything still in the future asks `expiryStatus` first, so
- * this view and the board's own expiry cells agree on where "soon" starts, and
- * only falls back to the window above when the answer is not recognised.
+ * `.state` OFF THE TYPED UNION, not a string sniffed out of the return value.
+ *
+ * This used to take `expiryStatus`'s answer as `unknown`, probe seven possible
+ * field names for something string-shaped, then regex the result — and it had
+ * to test /expired/ before /expiring/ because the two share a prefix, a hazard
+ * that only exists because the value was being read as prose. `ExpiryState` is
+ * a four-member union exported from `app/lib/expiry-status.ts` and has been all
+ * along; reading it means the compiler checks this agreement instead of a
+ * regular expression guessing at it, and a new state would be a type error here
+ * rather than a silent fall-through to green.
+ *
+ * The date still overrules for anything already past: `not-recorded` cannot
+ * reach this function (`buildEntries` skips a row with no readable date), and a
+ * day in the past is overdue whatever else is said about it.
  */
 function toneFor(day: DayNumber, today: DayNumber, iso: string): DrawnTone {
   if (day < today) return "expired";
-  const reported = readTone(expiryStatus(iso, utcOf(today)));
-  if (reported === "due-soon" || reported === "valid") return reported;
-  return daysBetween(today, day) <= DUE_SOON_DAYS ? "due-soon" : "valid";
+  const state = expiryStatus(iso, utcOf(today)).state;
+  return state === "expired" || state === "due-soon" ? state : "valid";
 }
 
 /* ── Model ───────────────────────────────────────────────────────────────── */

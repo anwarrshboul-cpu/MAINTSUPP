@@ -257,22 +257,44 @@ test("a malformed origin falls back rather than minting a broken link", async (t
 /* ------------------------------------------------------------------ */
 
 test("both upload routes bind a token to one job and one tenant", async () => {
+  /*
+   * THE GUARD MOVED, AND THE CLAIM GOT STRONGER.
+   *
+   * This used to require the same three expressions inside BOTH routes, which
+   * is the shape of assertion you write when a rule is copied. W7 lifted the
+   * decision into one module — `app/api/files/upload-authority.ts` — so the
+   * honest pin is now: the binding exists ONCE, and neither route decides for
+   * itself. Two copies agreeing today is exactly how they came to disagree
+   * before; a single definition cannot.
+   */
+  const authority = codeOnly(await source("app/api/files/upload-authority.ts"));
+  assert.match(
+    authority,
+    /jobToken\.requestId !== workOrder\.id/,
+    "a link for one job must not upload to another",
+  );
+  assert.match(
+    authority,
+    /jobToken\.organisationId !== workOrder\.organisationId/,
+    "a link from one tenant must not upload into another",
+  );
+  assert.match(
+    authority,
+    /export async function resolveUploadTenant/,
+    "the tenant must come from the token, and it must be resolved before the job is looked up",
+  );
+
   for (const path of ["app/api/files/route.ts", "app/api/files/multipart/route.ts"]) {
     const code = codeOnly(await source(path));
     assert.match(
       code,
-      /scopedToken\.requestId !== workOrder\.id/,
-      `${path}: a link for one job must not upload to another`,
+      /resolveUploadAuthority/,
+      `${path}: must delegate the decision rather than making its own`,
     );
-    assert.match(
+    assert.doesNotMatch(
       code,
-      /scopedToken\.organisationId !== workOrder\.organisationId/,
-      `${path}: a link from one tenant must not upload into another`,
-    );
-    assert.match(
-      code,
-      /scopedToken = await resolveJobToken\(db, uploadToken\);\s*if \(scopedToken\) orgId = scopedToken\.organisationId;/,
-      `${path}: the tenant must come from the token, before the job is looked up`,
+      /jobToken\.requestId !== workOrder\.id/,
+      `${path}: must not re-implement the binding it delegates`,
     );
   }
 });
@@ -292,20 +314,39 @@ test("a file column decides the kind, and the grant is checked against it", asyn
 
   const multipart = codeOnly(await source("app/api/files/multipart/route.ts"));
   assert.match(multipart, /storedKind = kindForColumnKey\(column\.key\);/);
+  /*
+   * The grant check itself now lives beside the binding, in
+   * upload-authority.ts, and reads the kind that will ACTUALLY be written
+   * rather than the one the client asked for.
+   */
+  const authority = codeOnly(await source("app/api/files/upload-authority.ts"));
+  assert.match(
+    authority,
+    /allowedKinds\.includes\(storedKind as EvidenceKind\)/,
+    "the grant must be checked against what will actually be written",
+  );
   assert.doesNotMatch(
     multipart,
     /Custom file columns require the general file section/,
     "the large-file path refused the issue column outright",
   );
-  assert.match(
-    multipart,
-    /allowedKinds\.includes\(storedKind as EvidenceKind\)/,
-    "the grant must be checked against what will actually be written",
-  );
+  /*
+   * The ORDER still matters, but it is now a fact about two files rather than
+   * one. The grant check moved into the authority module, so what this route
+   * has to get right is that it resolves the column's kind BEFORE it hands the
+   * decision over — a `storedKind` computed after the call would be checked
+   * against nothing. Asserting the call site rather than the comparison keeps
+   * the original claim ("resolved before checked") true at its new seam.
+   */
   assert.ok(
     multipart.indexOf("storedKind = kindForColumnKey") <
-      multipart.indexOf("allowedKinds.includes(storedKind"),
+      multipart.indexOf("resolveUploadAuthority({"),
     "the column must be resolved before the grant is checked, not after",
+  );
+  assert.match(
+    multipart,
+    /storedKind,/,
+    "and the resolved kind must actually be the one handed to the authority",
   );
 
   // One mapping, in one place, shared with the counting rule.
@@ -317,8 +358,20 @@ test("a file column decides the kind, and the grant is checked against it", asyn
 
 test("the large-file path files public evidence for review, like the small one", async () => {
   const code = codeOnly(await source("app/api/files/multipart/route.ts"));
-  assert.match(code, /pending: Boolean\(scopedToken\)/);
+  /*
+   * `Boolean(scopedToken)` became `pendingReview(via)`: a signed-in operator
+   * holding a stale token is not filing public evidence, so the queue keys on
+   * the GRANT that answered rather than on a token merely being present. Both
+   * routes call the same helper, which is the point of pinning the call.
+   */
+  assert.match(code, /pending: pendingReview\(/);
   assert.match(code, /submittedVia: scopedToken \? scopedToken\.id : null/);
+  const direct = codeOnly(await source("app/api/files/route.ts"));
+  assert.match(
+    direct,
+    /pending: pendingReview\(/,
+    "the small path must queue public evidence the same way",
+  );
   assert.match(
     code,
     /uploadedByEmail = scopedToken\s*\?\s*`contractor-link:\$\{scopedToken\.id\}`/,

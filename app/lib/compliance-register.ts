@@ -46,11 +46,13 @@ import {
   maintenanceBoardCells,
   maintenanceBoardColumns,
   maintenanceGroupItems,
+  maintenanceGroups,
   maintenanceRequests,
   siteAliases,
   sites,
 } from "../../db/schema";
 import { storeDocumentationCertificates } from "../../db/monday-board-spec";
+import { liveAttachmentRows } from "./attachment-counts";
 import { normaliseSiteName } from "./sites-repository";
 import {
   boardRowsFrom,
@@ -98,6 +100,17 @@ export type RegisterEntry = {
   notRequired: boolean;
   /** The last warning stage the digest sent for this document. */
   lastAlertStage: string | null;
+  /**
+   * The board group this document's store sits in, or null for a register-only
+   * row. Carried so the digest can scope itself without a second query — see
+   * `withinOperationalEstate`.
+   */
+  boardGroup: string | null;
+  /**
+   * Whether the linked site is closed, from `sites.lifecycle` / `sites.status`.
+   * False when there is no linked site to ask.
+   */
+  siteClosed: boolean;
 };
 
 export type ComplianceRegister = {
@@ -112,6 +125,84 @@ const slotKeyByKind = new Map(
 );
 
 /**
+ * Whether the board tracks an expiry date for a requirement NAME.
+ *
+ * Used for register-only rows, which carry a `kind` and no slot. It is how a
+ * dated requirement with no date recorded is told apart from one that never has
+ * a date — see the `state` derivation in `readComplianceRegister`.
+ */
+const tracksExpiryByKind = new Map(
+  storeDocumentationCertificates.map((slot) => [slot.label, slot.expiryColumn !== null]),
+);
+
+/* ── Operational scope ───────────────────────────────────────────────────── */
+
+/**
+ * The board groups whose rows are not part of the active UK operation.
+ *
+ * `europe` is the only geographic discriminator this data has. Every one of the
+ * client's 31 sites is `region = 'UK'` in the database, so region cannot
+ * separate anything; the two non-UK rows — Mall of Netherlands and the
+ * placeholder "Item 5" — are identified by sitting in the board's Europe group
+ * and by nothing else. Neither may ever become a UK canonical site.
+ *
+ * `closed` is a lifecycle discriminator, not a geographic one, and it is the
+ * reason this is a set rather than a single check.
+ */
+const NON_OPERATIONAL_GROUPS = new Set(["europe", "closed"]);
+
+/**
+ * Whether a document counts towards the ACTIVE UK OPERATIONAL view — which
+ * today means: whether the compliance digest may raise an alert about it.
+ *
+ * WHAT THIS IS NOT. It is not a visibility rule. `readComplianceRegister`
+ * returns every row whatever this says, and every screen keeps showing the
+ * whole board. A closed store's expired fire alarm certificate stays fully
+ * readable on the board, in the register, on the Compliance Tracker and in the
+ * CSV export — it simply stops generating a CURRENT operational alert, because
+ * nobody is going to book a contractor for a shop that is not trading, and an
+ * alert nobody can action is what teaches people to filter the digest to junk.
+ *
+ * THE TWO EXCLUSIONS, and why each is drawn where it is:
+ *
+ *  - EUROPE / non-UK. Excluded outright. These rows are outside the estate this
+ *    digest speaks for.
+ *  - CLOSED. Excluded from alerting, kept everywhere else. Read from the board
+ *    group AND from the linked site's own lifecycle, because the two can
+ *    disagree: a store can be marked Closed on the site record before anyone
+ *    moves its board row, and the safe reading of "closed" for the purpose of
+ *    NOT nagging someone is either source saying so.
+ *
+ * Everything else is in, "Current stores" and "Other" alike. Internal and
+ * warehouse rows keep exactly the treatment they have today: the code has never
+ * said anything special about them and this is not the place to invent a policy
+ * for them.
+ *
+ * A row with no board group and no resolvable site is INCLUDED. Silently
+ * dropping it would re-create, in the opposite direction, the exact failure this
+ * module exists to end — a digest that is loud about fiction and silent about
+ * the estate. If we cannot tell, we tell someone.
+ */
+export function withinOperationalEstate(entry: {
+  boardGroup: string | null;
+  siteClosed: boolean;
+}): boolean {
+  const group = (entry.boardGroup ?? "").trim().toLowerCase();
+  if (group && NON_OPERATIONAL_GROUPS.has(group)) return false;
+  if (entry.siteClosed) return false;
+  return true;
+}
+
+/** The `sites` lifecycle/status words that mean a store is not trading. */
+const CLOSED_SITE_WORDS = new Set(["closed", "archived", "inactive"]);
+
+function siteIsClosed(site: { lifecycle?: string | null; status?: string | null }) {
+  const lifecycle = (site.lifecycle ?? "").trim().toLowerCase();
+  const status = (site.status ?? "").trim().toLowerCase();
+  return CLOSED_SITE_WORDS.has(lifecycle) || CLOSED_SITE_WORDS.has(status);
+}
+
+/**
  * Every Store Documentation row with its cells and file counts.
  *
  * Filtered by organisation *and* board, with soft-deleted rows excluded, so a
@@ -121,8 +212,19 @@ async function readStoreDocumentationRows(
   db: Database,
   orgId: string,
 ): Promise<BoardStoreRow[]> {
+  /*
+   * `groupId` comes back with the placement now.
+   *
+   * It costs nothing — this query already runs, and the column is NOT NULL on
+   * `maintenance_group_items` — and it is the only thing on this board that
+   * separates the UK estate from the European rows. See `BoardStoreRow.boardGroup`
+   * and `withinOperationalEstate` for what it is for.
+   */
   const placements = await db
-    .select({ requestId: maintenanceGroupItems.requestId })
+    .select({
+      requestId: maintenanceGroupItems.requestId,
+      groupId: maintenanceGroupItems.groupId,
+    })
     .from(maintenanceGroupItems)
     .where(
       and(
@@ -131,7 +233,22 @@ async function readStoreDocumentationRows(
       ),
     );
   if (placements.length === 0) return [];
-  const placed = new Set(placements.map((row: { requestId: string }) => row.requestId));
+  const placedRows = placements as Array<{ requestId: string; groupId: string }>;
+  const placed = new Set(placedRows.map((row) => row.requestId));
+  const groupIdByRequest = new Map(placedRows.map((row) => [row.requestId, row.groupId]));
+
+  const groupRows = await db
+    .select({ id: maintenanceGroups.id, name: maintenanceGroups.name })
+    .from(maintenanceGroups)
+    .where(
+      and(
+        eq(maintenanceGroups.organisationId, orgId),
+        eq(maintenanceGroups.boardId, STORE_DOCUMENTATION_BOARD_ID),
+      ),
+    );
+  const groupNameById = new Map(
+    (groupRows as Array<{ id: string; name: string }>).map((row) => [row.id, row.name]),
+  );
 
   const [requestRows, columnRows, cellRows, fileRows] = await Promise.all([
     db
@@ -166,10 +283,35 @@ async function readStoreDocumentationRows(
         ),
       ),
     /*
-     * A certificate is "held" when a file hangs off its file column, so the
+     * A certificate is "held" when a LIVE file hangs off its file column, so the
      * count matters rather than the existence of a row somewhere. Grouped in
      * SQL because this organisation has 2,968 attachments and only a few dozen
      * of them are on this board.
+     *
+     * `liveAttachmentRows()` IS THE WHOLE CORRECTNESS OF THIS COUNT, and it was
+     * missing here. Without it the count is of ROWS, and a row is not a
+     * document once documents have versions:
+     *
+     *   upload a PAT certificate        → 1
+     *   replace it                      → 2
+     *   replace it again                → 3
+     *   archive the current version     → 3
+     *
+     * One certificate, replaced twice, counted three times; and archiving the
+     * live version changed nothing at all. That number is not cosmetic here —
+     * `complianceStateFor` decides a slot is HELD by asking `fileCount > 0`, so
+     * a slot stayed "Compliant" on the strength of superseded certificates,
+     * including ones superseded precisely BECAUSE they had expired, and an
+     * archived certificate went on holding its slot open. This is the exact
+     * failure the register was rebuilt to end, re-entering through versioning
+     * rather than through a stale status column.
+     *
+     * The predicate is imported, never re-typed. It already existed and was
+     * already correct in `reconcileAttachmentCounts` and in `GET /api/files`;
+     * it was applied to two of the four readers of this table, and the two that
+     * missed it disagreed with the two that did. A third hand-written copy of
+     * `is_current AND archived_at IS NULL` is how that divergence happens, so
+     * the shared helper is the fix and the copy is the bug.
      */
     db
       .select({
@@ -182,6 +324,7 @@ async function readStoreDocumentationRows(
         and(
           eq(attachments.organisationId, orgId),
           isNotNull(attachments.boardColumnId),
+          liveAttachmentRows(),
         ),
       )
       .groupBy(attachments.requestId, attachments.boardColumnId),
@@ -190,7 +333,12 @@ async function readStoreDocumentationRows(
   const columnIds = new Set(columnRows.map((column: { id: string }) => column.id));
 
   return boardRowsFrom({
-    requests: requestRows.filter((row: { id: string }) => placed.has(row.id)),
+    requests: (requestRows as Array<{ id: string; title: string | null }>)
+      .filter((row) => placed.has(row.id))
+      .map((row) => ({
+        ...row,
+        group: groupNameById.get(groupIdByRequest.get(row.id) ?? "") ?? null,
+      })),
     columns: columnRows,
     cells: cellRows,
     fileCounts: fileRows.filter(
@@ -412,6 +560,14 @@ export async function readComplianceRegister(
         name: sites.name,
         mondayComplianceName: sites.mondayComplianceName,
         mondayMaintenanceName: sites.mondayMaintenanceName,
+        /*
+         * For `withinOperationalEstate`. Both columns, because they can
+         * disagree — Staging holds four sites at `lifecycle='Closed',
+         * status='closed'` and three at `lifecycle='Closed', status='other'`,
+         * and the second group is just as shut as the first.
+         */
+        lifecycle: sites.lifecycle,
+        status: sites.status,
       })
       .from(sites)
       .where(eq(sites.organisationId, orgId)),
@@ -441,6 +597,15 @@ export async function readComplianceRegister(
 
   const siteNameById = new Map<string, string>(
     (siteRows as Array<{ id: string; name: string }>).map((site) => [site.id, site.name]),
+  );
+  const siteClosedById = new Map<string, boolean>(
+    (
+      siteRows as Array<{ id: string; lifecycle: string | null; status: string | null }>
+    ).map((site) => [site.id, siteIsClosed(site)]),
+  );
+  /** Board group NAME per board item, for `withinOperationalEstate`. */
+  const groupByItemId = new Map<string, string | null>(
+    boardRows.map((row) => [row.id, row.boardGroup]),
   );
   const boardRowIds = new Set(boardRows.map((row) => row.id));
   const { siteIdByItemId, itemIdBySiteId } = linkBoardRowsToSites(
@@ -498,6 +663,8 @@ export async function readComplianceRegister(
         fileCount: document.fileCount,
         notRequired: document.state === "Not required",
         lastAlertStage: registerRow?.lastAlertStage ?? null,
+        boardGroup: groupByItemId.get(store.id) ?? null,
+        siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
       });
       if (linkedSiteId) {
         remember(linkedSiteId, {
@@ -513,22 +680,49 @@ export async function readComplianceRegister(
   /*
    * Register rows the board does not speak for. Their state is recomputed from
    * their own expiry date for the same reason the board's is: a stored status
-   * string is a statement about the day it was written. Where there is no date
-   * to compute from, the stored word is all there is and it stands.
+   * string is a statement about the day it was written.
+   *
+   * THE STORED STATUS IS NO LONGER A FALLBACK. This branch used to end
+   * `: (row.status as ComplianceState)` — so a row with no expiry date served
+   * whatever word was written into `compliance_documents.status`, whenever that
+   * was, and by whoever. It was the last path in the codebase by which a stale
+   * stored status could still reach a screen, and it was also an unchecked cast:
+   * the PATCH accepted arbitrary text for `state`, so the "ComplianceState" this
+   * produced could be any string at all, including one no screen has a colour
+   * for.
+   *
+   * It is derived instead, from the same classifier everything else uses.
+   * `tracksExpiry` comes from the requirement NAME: for one of the twelve board
+   * slots we know whether a date is expected, so a dated requirement with no
+   * date lands on "Expiring soon" (we hold the certificate and cannot say it is
+   * in date — the amber case) or "Missing", exactly as it would on the board.
+   * For a requirement outside the twelve we cannot know, so held-or-not is the
+   * whole question and the answer is Compliant or Missing.
    */
   for (const row of rows) {
     if (covered.has(row.id)) continue;
     const fileCount = row.attachmentId ? 1 : 0;
     const state: ComplianceState = row.notRequired
       ? "Not required"
-      : row.expiryDate
-        ? complianceStateFor({
-            tracksExpiry: true,
-            expiry: row.expiryDate,
-            fileCount,
-            today,
-          })
-        : (row.status as ComplianceState);
+      : complianceStateFor({
+          /*
+           * A date ON THE ROW counts, even for a requirement the board does not
+           * know. Somebody recorded an expiry against it, which is the only
+           * evidence there is that this requirement has one — and dropping that
+           * evidence would classify a register-only certificate with a perfectly
+           * good date two years out as "Missing", because `complianceStateFor`
+           * ignores `expiry` entirely when `tracksExpiry` is false.
+           *
+           * The `tracksExpiryByKind` half is what makes the NO-DATE case right:
+           * one of the twelve board requirements with no date recorded is amber
+           * or Missing, not silently "Compliant", exactly as it would be on the
+           * board.
+           */
+          tracksExpiry: (tracksExpiryByKind.get(row.kind) ?? false) || Boolean(row.expiryDate),
+          expiry: row.expiryDate,
+          fileCount,
+          today,
+        });
     entries.push({
       itemId: null,
       slotKey: null,
@@ -544,6 +738,9 @@ export async function readComplianceRegister(
       fileCount,
       notRequired: row.notRequired || state === "Not required",
       lastAlertStage: row.lastAlertStage,
+      /* No board row, so no group. The site's own lifecycle is all there is. */
+      boardGroup: null,
+      siteClosed: siteClosedById.get(row.siteId) ?? false,
     });
     remember(row.siteId, {
       kind: row.kind,
@@ -562,4 +759,100 @@ export async function readComplianceRegister(
   );
 
   return { entries, bySite };
+}
+
+/* ── One site's documents ────────────────────────────────────────────────── */
+
+/**
+ * One compliance requirement for one site, in the shape `/api/sites` has always
+ * served, ENRICHED with the derived state.
+ *
+ * WHY THE OLD SHAPE IS KEPT RATHER THAN REPLACED. `GET /api/sites?id=` used to
+ * return raw `compliance_documents` rows, and `site-detail.tsx` reads four
+ * fields off them: `id` (the React key), `kind`, `expiryDate` and `notRequired`.
+ * The register's own per-site type, `ComplianceItem`, has none of those three
+ * last ones — it is `{kind, state, expiry, fileCount}` — so handing that over
+ * instead would have given every row `key={undefined}` and
+ * `formatDate(undefined)`, and the Compliance tab would have rendered a table of
+ * "No expiry recorded" while looking like it was working. The compatible fields
+ * stay, the derived ones arrive beside them, and the screen can move across one
+ * field at a time.
+ *
+ * `status` is the DERIVED word, not the stored one. Nothing outside this module
+ * should ever read `compliance_documents.status` again.
+ */
+export type SiteComplianceRecord = {
+  /* ── The `ComplianceRecord` contract site-detail.tsx already reads ─────── */
+  id: string;
+  siteId: string;
+  kind: string;
+  /** The derived five-word state. Named `status` for payload compatibility. */
+  status: ComplianceState;
+  expiryDate: string | null;
+  attachmentId: string | null;
+  notRequired: boolean;
+  /* ── Enrichment ───────────────────────────────────────────────────────── */
+  /** The same value as `status`, under the name the rest of the platform uses. */
+  state: ComplianceState;
+  /** Real attachment count — board file columns included, not a 0/1 pointer. */
+  fileCount: number;
+  /** The board row this came from, or null for a register-only requirement. */
+  itemId: string | null;
+  slotKey: string | null;
+  /** Whether a date is expected for this requirement at all. */
+  tracksExpiry: boolean;
+};
+
+/**
+ * Every compliance requirement for ONE site, derived.
+ *
+ * Built on `readComplianceRegister` on purpose: a second query path is a second
+ * definition, and the whole point of that module is that there is one. The
+ * register is already on the Dashboard's critical path, so this is not a new
+ * class of cost; if it ever needs narrowing, the place to narrow it is inside
+ * `readComplianceRegister`, where every caller benefits.
+ *
+ * Returns [] for a site with nothing recorded, which is a real answer and not an
+ * error. Note that a BOARD row with no matching site is deliberately absent
+ * here: a document belongs to a site only through a verified name link (see
+ * `siteIdByBoardName`), and inventing one would attach one store's fire alarm
+ * certificate to another store's page.
+ */
+export async function readSiteComplianceRecords(
+  db: Database,
+  orgId: string,
+  siteId: string,
+  options: { today?: Date } = {},
+): Promise<SiteComplianceRecord[]> {
+  const { entries } = await readComplianceRegister(db, orgId, options);
+  return entries
+    .filter((entry) => entry.siteId === siteId)
+    .map((entry) => ({
+      id: entry.id,
+      siteId: entry.siteId,
+      kind: entry.kind,
+      status: entry.state,
+      expiryDate: entry.expiry,
+      /*
+       * Null for a board slot: its files hang off the board's file COLUMN, not
+       * off a single `attachment_id` pointer, and `fileCount` beside this is the
+       * truthful answer to "is it held". The pointer only ever meant anything
+       * for a register-only row, and even there it is write-dead — every
+       * assignment of `compliance_documents.attachment_id` in the codebase is a
+       * literal null.
+       */
+      attachmentId: null,
+      notRequired: entry.notRequired,
+      state: entry.state,
+      fileCount: entry.fileCount,
+      itemId: entry.itemId,
+      slotKey: entry.slotKey,
+      /*
+       * The same rule that CLASSIFIED the row, so the field cannot contradict
+       * the state beside it: one of the twelve dated board requirements, or any
+       * requirement that actually has a date recorded against it.
+       */
+      tracksExpiry:
+        (tracksExpiryByKind.get(entry.kind) ?? false) || Boolean(entry.expiry),
+    }));
 }

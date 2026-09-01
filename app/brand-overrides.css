@@ -7203,6 +7203,22 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
   .portal-shell .admin-toggle {
     min-width: 44px;
   }
+
+  /*
+   * W7, measured on the document register.
+   *
+   *   .detail-drawer--file .detail-drawer__header .icon-button   42x44
+   *       The only way out of the file drawer other than Escape and the scrim,
+   *       and 42 wide at 320, 360 and 430 alike — the height was already right,
+   *       so this is two pixels of width and nothing else.
+   *
+   * (The period picker measured 168x40 here too. Its floor is set beside the
+   * rule it has to outrank, further down this file — see the note there.)
+   */
+  .detail-drawer--file .detail-drawer__header .icon-button {
+    min-width: 44px;
+  }
+
 }
 
 /*
@@ -8059,6 +8075,49 @@ label.live-board-tool {
   min-width: 108px;
   max-width: 152px;
 }
+
+/*
+ * ---- The period picker's touch target, on a phone -----------------------
+ *
+ * MEASURED 168x40 on /dashboard/documents at 430, 393, 390, 375, 360 and 320,
+ * in both themes: four pixels under the floor, on the control that sets what
+ * the whole register is showing.
+ *
+ * WHY THE FIX IS HERE AND NOT IN THE W7 BLOCK ABOVE. The 40px floor is set by
+ * `.section-header__* > .analytics-period :is(select, input)`, which is
+ * (0,2,1). The obvious `.portal-shell .analytics-period select` is ALSO
+ * (0,2,1) — a tie, decided by source order, and that rule sits earlier in this
+ * file. It was written, it looked right, and it did nothing; S5's independent
+ * axe-and-measure run is what caught that it had never taken effect. So the
+ * override matches the selector it has to beat, shape for shape, and sits
+ * immediately after it, where the tie falls the other way.
+ *
+ * The chip goes up with it. The chip is `min-height: 42px` and the control
+ * inside it `align-self: stretch`, so raising only the control would make it
+ * taller than the box it is drawn in. 44 on both keeps the chip and its hit
+ * area the same object, which is the point of the chip.
+ *
+ * PHONE ONLY. Desktop keeps 42/40 — an unchanged pointer target, and no
+ * unrelated chrome resized. 768 is on the agreed breakpoint list that
+ * stage-five-board-chrome and stage-six-views enforce; no new one is added.
+ *
+ * This is the picker's THIRD home. `.analytics-toolbar` (Overview, Reports)
+ * already clears the floor through its own copy of the chip; the section
+ * header serves Documents, Contractors and Calendar, and the control is
+ * identical on all three, so it is fixed once rather than hooked to one page.
+ */
+@media (max-width: 768px) {
+  .section-header__actions > .analytics-period,
+  .section-header__controls > .analytics-period {
+    min-height: 44px;
+  }
+
+  .section-header__actions > .analytics-period :is(select, input),
+  .section-header__controls > .analytics-period :is(select, input) {
+    min-height: 44px;
+  }
+}
+
 
 /*
  * A FOCUS RING, which the toolbar's copy of this control got in Stage 23 and

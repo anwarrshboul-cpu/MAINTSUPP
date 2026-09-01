@@ -12,7 +12,14 @@ import {
   scopedDb,
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
+import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { reconcileAttachmentCounts } from "../../../lib/attachment-counts";
+import {
+  attachmentPayload,
+  documentFieldSnapshot,
+  documentFieldUpdates,
+  releaseComplianceLinks,
+} from "../documents";
 
 /**
  * The only types rendered inline in the browser.
@@ -323,6 +330,22 @@ export async function DELETE(
     return Response.json({ error: "File storage is unavailable." }, { status: 503 });
   }
 
+  /*
+   * A COMPLIANCE SLOT MUST NOT BE LEFT POINTING AT NOTHING.
+   *
+   * `compliance_documents.attachment_id` is declared with `.references()` in
+   * `db/schema.ts` and HAS NO FOREIGN KEY in the deployed Postgres DDL, so
+   * nothing cascades and nothing refuses — deleting a document simply leaves the
+   * compliance row naming an id that no longer resolves, and the register offers
+   * a certificate link that 404s. Nulled, not deleted: the store still needs a
+   * PAT certificate, it just no longer holds one, and removing the row would
+   * discard the obligation along with the evidence.
+   *
+   * Before the row goes, so a failure here stops the delete rather than
+   * stranding the pointer.
+   */
+  await releaseComplianceLinks(db, orgId, id);
+
   // The thumbnail goes with it. Without this every deleted photograph leaves
   // its 96px derivative in the bucket permanently, with nothing left to
   // reference it.
@@ -359,10 +382,211 @@ export async function DELETE(
     });
   }
 
+  /*
+   * W07-12 — WRITTEN OUTSIDE `if (record.requestId)`, and that is the fix.
+   *
+   * The `activity_log` insert above sits inside that branch because it writes to
+   * a JOB's timeline and a document with no job has no timeline to write to.
+   * The consequence was that an attachment with no `request_id` was permanently
+   * destroyed leaving NO trace in either stream — no timeline entry, and no
+   * audit event, because documents never wrote audit events at all. W07-07 makes
+   * jobless documents ordinary rather than exceptional (a contractor's insurance
+   * certificate has no work order), so that silent hole was about to become the
+   * common case for exactly the documents most worth accounting for.
+   *
+   * Written AFTER the destruction, deliberately. The rule `DELETE /api/trash`
+   * states: the row and its bytes have just been destroyed, so this event is the
+   * only surviving record that they existed — and an event claiming a deletion
+   * that then failed would be worse than no event at all.
+   */
+  await recordAudit({
+    db,
+    organisationId: orgId,
+    actor: auditActor(guard.scope),
+    action: "document.deleted",
+    entityType: "document",
+    entityId: record.id,
+    summary: `Permanently deleted ${record.originalName}.`,
+    detail: {
+      permanent: true,
+      fileId: record.id,
+      fileName: record.originalName,
+      title: record.title,
+      documentType: record.documentType,
+      expiryDate: record.expiryDate,
+      kind: record.kind,
+      byteSize: record.byteSize,
+      contentType: record.contentType,
+      requestId: record.requestId,
+      siteId: record.siteId,
+      unitId: record.unitId,
+      contractorId: record.contractorId,
+      boardColumnId: record.boardColumnId,
+      versionNo: record.versionNo,
+      rootDocumentId: record.rootDocumentId ?? record.id,
+    },
+    request,
+  });
+
   return Response.json({
     deleted: true,
     request: updatedRequest ? requestPayload(updatedRequest) : null,
   });
+}
+
+/**
+ * PATCH /api/files/[id] — the document's own fields.
+ *
+ * W07-02 and W07-05. There was no PATCH on either file route at all: the only
+ * other verb that writes here is `PUT`, and that stores a WebP thumbnail. So a
+ * document's title, type, description and expiry could be set at upload and
+ * never corrected, and "archive" did not exist — the only way to remove
+ * something was to destroy it.
+ *
+ * WHAT THIS MAY NOT TOUCH, and the list is the point. Not the bytes, not
+ * `object_key`, not `original_name`, not the organisation, not the uploader, not
+ * the job, the site or the version lineage. Editing a document's description
+ * must not be able to move it to another tenant's site or re-point it at another
+ * job — those are anchor changes, and an anchor change is a different, auditable
+ * operation. `original_name` in particular stays the byte-truth: the file a
+ * person downloaded must keep matching the copy on their disk, which is why
+ * `title` is a separate column rather than a rename.
+ *
+ * PATCH semantics throughout: an absent key is unchanged, an explicit value is
+ * set, an explicit null clears. That is why `documentFieldUpdates` returns a
+ * SPARSE object — spreading a complete one into `.set()` would rewrite every
+ * field on every edit, so renaming a certificate would silently erase its expiry
+ * date and the register would read it as permanently compliant.
+ */
+export async function PATCH(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params;
+  await ensureDatabase();
+
+  /*
+   * `board.edit`, like DELETE two handlers up and like the thumbnail PUT below.
+   * Editing a document's expiry date changes what the compliance register says
+   * about a store, so it is an editor's action, not a reader's.
+   *
+   * Wrapped because `scopedDbWithCapability` THROWS for an anonymous caller
+   * rather than returning a refusal — the same reason PUT wraps it.
+   */
+  let guard: Awaited<ReturnType<typeof scopedDbWithCapability>>;
+  try {
+    guard = await scopedDbWithCapability(request, "board.edit");
+  } catch (error) {
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    throw error;
+  }
+  if (guard.denied) return guard.denied;
+  const { db, orgId, actor } = guard.scope;
+
+  const body = (await request.json().catch(() => null)) as unknown;
+  // A body of literal `null` PARSES, so the catch never fires and every
+  // `body.x` below would throw straight into a 503. An array is not a record
+  // either. Same guard `/api/board` and the multipart route both use.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return Response.json(
+      { error: "The request body must be a JSON object." },
+      { status: 400 },
+    );
+  }
+  const payload = body as Record<string, unknown>;
+
+  const [record] = await db
+    .select()
+    .from(attachments)
+    .where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)))
+    .limit(1);
+  if (!record) {
+    return Response.json({ error: "File not found." }, { status: 404 });
+  }
+
+  const fields = documentFieldUpdates(payload);
+  // A malformed expiry is answered here. The Postgres CHECK on `expiry_date`
+  // would otherwise make it a database error, and the route's catch-all would
+  // report an outage for what is really a typo.
+  if (!fields.ok) {
+    return Response.json({ error: fields.error }, { status: 400 });
+  }
+  const values: Partial<typeof attachments.$inferSelect> = { ...fields.values };
+
+  /*
+   * W07-05 — ARCHIVE, the half of "archive or remove" that did not exist.
+   *
+   * Soft and reversible, which is the whole difference from DELETE: the bytes
+   * stay, the row stays, and the document simply stops being live. `listFiles`
+   * filters archived rows out by default, so an archived certificate leaves the
+   * register exactly as a deleted one would — without being unrecoverable.
+   *
+   * `archived: true` on an already-archived document keeps the original
+   * timestamp rather than refreshing it: when it was archived is a fact, and an
+   * idempotent request must not rewrite history.
+   */
+  let archiveAction: "archived" | "restored" | null = null;
+  if ("archived" in payload) {
+    const wantArchived = payload.archived === true;
+    const isArchived = Boolean(record.archivedAt);
+    if (wantArchived && !isArchived) {
+      values.archivedAt = new Date().toISOString();
+      values.archivedBy = actor.email;
+      archiveAction = "archived";
+    } else if (!wantArchived && isArchived) {
+      values.archivedAt = null;
+      values.archivedBy = null;
+      archiveAction = "restored";
+    }
+  }
+
+  if (!Object.keys(values).length) {
+    // Nothing was asked for. A no-op is not an error, and answering 400 would
+    // make a form that submits unchanged fields look broken.
+    return Response.json({ file: attachmentPayload(record), unchanged: true });
+  }
+
+  values.metadataUpdatedAt = new Date().toISOString();
+  values.metadataUpdatedBy = actor.email;
+
+  const [updated] = await db
+    .update(attachments)
+    .set(values)
+    .where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)))
+    .returning();
+
+  /*
+   * W07-12. `changeDetail` reduces the edit to the fields that actually moved,
+   * so the Audit viewer renders a before/after table rather than a blob — and so
+   * an edit that touched one field does not read as having touched everything.
+   */
+  await recordAudit({
+    db,
+    organisationId: orgId,
+    actor: auditActor(guard.scope),
+    action:
+      archiveAction === "archived"
+        ? "document.archived"
+        : archiveAction === "restored"
+          ? "document.restored"
+          : "document.metadata_updated",
+    entityType: "document",
+    entityId: id,
+    summary:
+      archiveAction === "archived"
+        ? `Archived ${updated.title || updated.originalName}.`
+        : archiveAction === "restored"
+          ? `Restored ${updated.title || updated.originalName} from the archive.`
+          : `Updated the details of ${updated.title || updated.originalName}.`,
+    detail: changeDetail(
+      documentFieldSnapshot(record),
+      documentFieldSnapshot(updated),
+    ),
+    request,
+  });
+
+  return Response.json({ file: attachmentPayload(updated) });
 }
 
 /** A thumbnail is a few kilobytes. Anything larger is not a thumbnail. */

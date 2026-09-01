@@ -73,6 +73,25 @@ export type BoardStoreRow = {
   cells: Record<string, string>;
   /** Attachment counts keyed by column key, e.g. `{ patCertificate: 4 }`. */
   fileCounts: Record<string, number>;
+  /**
+   * The board GROUP this row sits in — "Current stores", "Closed", "Europe",
+   * "Other" — or null when the caller did not resolve one.
+   *
+   * WHY THE REGISTER CARRIES IT. The group is the only thing on this board that
+   * separates the UK estate from everything else. Every one of the client's 31
+   * sites is `region = 'UK'` in the database, so region cannot do it: the two
+   * European rows (Mall of Netherlands, and the placeholder "Item 5") are
+   * distinguished by sitting in the Europe group and by nothing else. The
+   * compliance digest has to know, because alerting an operations team about a
+   * Dutch store's employer's liability certificate is noise that trains them to
+   * ignore the email.
+   *
+   * It travels on the ROW rather than being re-queried by the digest so there is
+   * one definition of which group a document came from. `readComplianceRegister`
+   * still returns every row whatever its group — see `withinOperationalEstate`
+   * in compliance-register.ts, which the DIGEST applies and the screens do not.
+   */
+  boardGroup: string | null;
 };
 
 /* ── Output shapes ───────────────────────────────────────────────────────── */
@@ -141,7 +160,17 @@ function tidy(value: string | undefined): string {
  * this is where that join is written down.
  */
 export function boardRowsFrom(input: {
-  requests: Array<{ id: string; title?: string | null; reference?: string | null }>;
+  /**
+   * `group` is the board group's NAME when the caller resolved one. Optional
+   * because the browser-side callers read `/api/board`, which already knows the
+   * group by id; the server-side reader joins `maintenance_groups` for it.
+   */
+  requests: Array<{
+    id: string;
+    title?: string | null;
+    reference?: string | null;
+    group?: string | null;
+  }>;
   columns: RegisterColumn[];
   cells: RegisterCell[];
   fileCounts?: RegisterFileCount[];
@@ -171,6 +200,7 @@ export function boardRowsFrom(input: {
     name: (request.title ?? "").trim() || request.reference || request.id,
     cells: cellsByRequest.get(request.id) ?? {},
     fileCounts: filesByRequest.get(request.id) ?? {},
+    boardGroup: (request.group ?? "").trim() || null,
   }));
 }
 
