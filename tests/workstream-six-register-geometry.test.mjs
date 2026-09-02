@@ -35,6 +35,16 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 const GRID = "app/(app)/portal/contractor-register.tsx";
 const PANEL = "app/(app)/portal/register/register-columns-panel.tsx";
+/**
+ * Where "which column is frozen" is decided, for every register.
+ *
+ * It used to be decided inside the grid. It moved because the grid, the columns
+ * panel and the ordering helpers all have to agree about which column is out of
+ * the scrolling run — see GEO-9/10/17 below, and
+ * `tests/register-source-of-truth.test.mjs`, which exercises the rule by
+ * calling it rather than by reading it.
+ */
+const CLIENT = "app/(app)/portal/register/register-client.ts";
 const GLOBALS = "app/globals.css";
 const BRAND = "app/brand-overrides.css";
 
@@ -185,10 +195,33 @@ test("GEO-15/16 unticking a measurement takes it OFF the table, it does not move
     /if \(scrolling\.some\(\(column\) => column\.key === extra\.key\)\) continue;/,
     "asking the VISIBLE run turns a hide into a move to the end of the row",
   );
+  /*
+   * RE-POINTED FROM `scrolling` TO `tableColumns`, AND THE CONTRACT IS THE SAME
+   * ONE, STATED MORE STRICTLY.
+   *
+   * What this line has always asserted is the SECOND argument pair: `gridLanes`
+   * is handed the run it should draw AND `snap.columns`, the full set, so the
+   * measurement fallback above can tell "no row for this key" from "not on the
+   * table". Both are still here.
+   *
+   * The first argument changed name because the derivation moved. The grid used
+   * to build the run itself — `shown.filter((column) => !frozen || column.id
+   * !== frozen.id)` — and `registerTableColumns` in `register-client.ts` now
+   * returns the frozen lane followed by that same filtered run, as ONE ordered
+   * list. The reason is the defect beside this one: the columns panel and the
+   * ordering helpers have to agree with the table about which column is out of
+   * the scrolling run, and a filter written inside the grid was a third answer
+   * they could not see.
+   */
   assert.match(
     code,
-    /const lanes = gridLanes\(scrolling, frozen, identityColumn, extraColumns, snap\.columns\);/,
-    "and the full column set is what is handed to it",
+    /const tableColumns = registerTableColumns\(snap\.columns, frozen\);/,
+    "the run is derived once, by the shared rule",
+  );
+  assert.match(
+    code,
+    /const lanes = gridLanes\(tableColumns, frozen, identityColumn, extraColumns, snap\.columns\);/,
+    "and the full column set is still what is handed to it beside that run",
   );
 });
 
@@ -359,12 +392,25 @@ test("GEO-9/10/17 the frozen lane is a pinned column, and an unpinned register s
   const code = codeOnly(await read(GRID));
 
   /*
-   * ASKED OF THE REGISTER, NOT RE-DERIVED. `pinned` is computed on the server
-   * from `register_columns.settings`; there is no `pinned` SQL column and this
-   * grid must not grow a second reading of that JSON.
+   * RE-POINTED FROM THE GRID TO `register-client.ts`, AND THE CONTRACT GOT
+   * STRICTER RATHER THAN LOOSER.
+   *
+   * Both assertions used to read `frozenRegisterColumn` out of the grid's own
+   * source, because that is where the rule lived. It has moved next door for a
+   * reason this test file is one of three witnesses to: the grid, the columns
+   * panel and the ordering helpers all have to agree about which column is out
+   * of the scrolling run, and three readings of `settings` were three chances
+   * to disagree. The rule now has one home and the grid imports it, so the
+   * assertions follow it there.
+   *
+   * ASKED OF THE REGISTER, NOT RE-DERIVED, is unchanged: `pinned` is computed
+   * on the server from `register_columns.settings`, there is no `pinned` SQL
+   * column, and nothing above the shim may grow a second reading of that JSON.
    */
-  assert.match(code, /const pinned = pinnedColumn\(columns\);/);
+  const rule = codeOnly(await read(CLIENT));
+  assert.match(rule, /const pinned = pinnedColumn\(columns\);/);
   assert.match(code, /pinRegisterColumn\("contractors", column\.id, next\)/, "and Pin is wired to the panel");
+  assert.match(code, /frozenRegisterColumn/, "and the grid asks the shared rule for its lane");
 
   /*
    * THE FALLBACK IS THE POINT. Not one organisation in either database carries
@@ -372,22 +418,80 @@ test("GEO-9/10/17 the frozen lane is a pinned column, and an unpinned register s
    * created after it existed and nobody else. "Nothing is pinned" is therefore
    * the state of every live register, and a lane gated on the flag alone would
    * take the contractor's name and phone number off the owner's Preview.
+   *
+   * RE-POINTED, AND WITH THE CLAUSE THAT WAS MISSING. The old line was
+   * `return columns.find((column) => column.nativeField === "name") ?? null;`
+   * with no `hidden` check anywhere in the function, which is why unticking
+   * "Contractor" in the columns panel changed `hidden_at` and left the lane on
+   * the table: the checkbox wrote, and the very next render put the lane back
+   * from the same column. The fallback survives — it is still what freezes the
+   * identity on a register nobody has pinned — and it is now spelt with the
+   * visibility rule the owner's press depends on.
+   */
+  /*
+   * RE-POINTED — the fallback now reads the IDENTITY'S OWN refusal, and the
+   * rule this pin protects is narrower rather than weaker.
+   *
+   * "Visibility wins" is unchanged and is still asserted, one line down. What
+   * moved is WHO gets to decline the lane. The old shape asked whether ANY
+   * column in the register carried settings.pinned === false, which let one
+   * column's history speak for the whole table: the live contractors register
+   * carries that flag on contactName and email because somebody pinned each of
+   * them once and unpinned it, so the day the identity's own pin was cleared
+   * the register would have rendered no frozen lane at all — for a reason
+   * nobody chose and nothing on screen explained.
+   *
+   * A refusal is a choice about one column, so it is read off that column.
    */
   assert.match(
-    code,
-    /return columns\.find\(\(column\) => column\.nativeField === "name"\) \?\? null;/,
-    "an unpinned register freezes its identity anyway",
+    rule,
+    /const identity = identityRegisterColumn\(columns\);\s*if \(!identity \|\| identity\.hidden\) return null;/,
+    "the identity is resolved, and a hidden one freezes nothing",
+  );
+  assert.match(
+    rule,
+    /identity\.settings\.pinned === false/,
+    "and only the identity's own refusal withdraws the fallback lane",
+  );
+  assert.doesNotMatch(
+    rule,
+    /columns\.some\(/,
+    "no register-wide flag may decide it: one column's history is not the table's",
+  );
+  assert.match(
+    rule,
+    /return declined \? null : identity;/,
+    "an unpinned register freezes its identity anyway, but never a hidden one",
+  );
+  assert.match(
+    rule,
+    /if \(pinned\) return pinned\.hidden \? null : pinned;/,
+    "and visibility wins over the pin in the other branch too",
   );
 
   /*
    * PINNED MEANS DRAWN ONCE. The lane and a still-visible copy of the same
    * column is the contractor's name printed twice on every row, which is what
    * the live register did before this.
+   *
+   * RE-POINTED TO `registerTableColumns`, WHICH IS WHERE THAT FILTER LIVES NOW.
+   * The grid used to write `shown.filter((column) => !frozen || column.id !==
+   * frozen.id)` inline; the shared rule now returns the frozen lane followed by
+   * the same filtered run, as one ordered list, so the table, the columns panel
+   * and the ordering helpers cannot disagree about which column is out of the
+   * run. The assertion follows the code and gains a second half it could not
+   * have made before: `tests/register-source-of-truth.test.mjs` CALLS this and
+   * checks that no column is drawn twice, on the owner's own column list.
    */
   assert.match(
-    code,
-    /shown\.filter\(\(column\) => !frozen \|\| column\.id !== frozen\.id\)/,
+    rule,
+    /const scrolling = visibleColumns\(columns\)\.filter\(\s*\(column\) => !frozen \|\| column\.id !== frozen\.id,\s*\);/,
     "the pinned column is removed from the scrolling run",
+  );
+  assert.match(
+    rule,
+    /return frozen \? \[frozen, \.\.\.scrolling\] : scrolling;/,
+    "and drawn once, at the front, or not at all",
   );
 
   /*
@@ -409,12 +513,29 @@ test("GEO-9/10/17 the frozen lane is a pinned column, and an unpinned register s
   );
 
   /*
-   * AND THE IDENTITY IS NEVER ABSENT. A row that does not say whose row it is
-   * was the defect the lane was built for; unpinning must not be a way back to
-   * it, so the rendering is put back at the front when the column is neither
-   * frozen nor visible.
+   * AND THE IDENTITY IS NEVER ABSENT — WHEN THE REGISTER HAS NO ROW FOR IT.
+   *
+   * RE-POINTED, AND THIS PIN WAS HALF OF DEFECT 1. It read `if
+   * (!lanes.some((lane) => lane.identity))`, which fires whenever the identity
+   * is not among the drawn lanes — and a column the operator has UNTICKED is
+   * not among the drawn lanes. So unticking "Contractor" wrote `hidden_at`,
+   * the column left the run, and this line put the composite lane straight back
+   * at the front as an unfrozen cell. The press was unanswerable: the checkbox
+   * was correct, the API was correct, and the lane never went away.
+   *
+   * The condition it should always have been is `identity === null`: the
+   * fallback exists for a register that has no ROW for the identity at all —
+   * one seeded before the catalogue described it — and "no row" and "unticked"
+   * are different facts. The original reasoning survives intact, because a
+   * register with no row cannot have been unticked, so a row that does not say
+   * whose row it is is still impossible for the reason it always was.
    */
-  assert.match(code, /if \(!lanes\.some\(\(lane\) => lane\.identity\)\) \{/);
+  assert.match(code, /if \(identity === null\) \{/, "the fallback fires only when there is no row");
+  assert.doesNotMatch(
+    code,
+    /if \(!lanes\.some\(\(lane\) => lane\.identity\)\) \{/,
+    "asking the DRAWN lanes makes unticking the identity impossible",
+  );
 });
 
 test("GEO-25 the card layout and the frozen lane switch at the SAME agreed width", async () => {

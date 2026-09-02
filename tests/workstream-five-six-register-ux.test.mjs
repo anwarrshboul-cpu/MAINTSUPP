@@ -36,6 +36,15 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const GRID = "app/(app)/portal/contractor-register.tsx";
 const PANEL = "app/(app)/portal/register/register-columns-panel.tsx";
 const SITES_GRID = "app/(app)/portal/register/register-grid.tsx";
+/**
+ * The browser's half of the register, and now the home of the frozen rule.
+ *
+ * "Which column is the frozen lane" and "what does one press of Move earlier
+ * mean" are decided here rather than inside a grid, because the grid, the
+ * columns panel and the ordering helpers all have to give the same answer.
+ * `tests/register-source-of-truth.test.mjs` exercises both by calling them.
+ */
+const CLIENT = "app/(app)/portal/register/register-client.ts";
 const CATALOGUE = "app/lib/register-catalogue.ts";
 const GLOBALS = "app/globals.css";
 const APP = "app/(app)/portal/portal-app.tsx";
@@ -251,7 +260,26 @@ test("UX-2 one columns panel component serves both registers, over one hidden-co
    * write failed.
    */
   assert.doesNotMatch(codeOnly(panel), /useState|useEffect|fetch\(/, "the panel stores nothing");
-  assert.match(panel, /import type \{ RegisterColumn \}/, "it takes the server's shape");
+  /*
+   * RE-POINTED FROM `import type { RegisterColumn }` TO THE SAME LINE CARRYING
+   * ONE PURE FUNCTION BESIDE IT, and the contract is untouched.
+   *
+   * What this asserts is that the panel takes the SERVER'S SHAPE rather than
+   * modelling a column of its own, and it still does — `RegisterColumn` is
+   * imported as a type from the one module that defines it. What joined it is
+   * `canMoveRegisterColumn`, which decides whether Move earlier / Move later
+   * would change the table: a pure question about the columns it was handed,
+   * with no state, no fetch and no memory. It is imported rather than
+   * re-derived for exactly the reason this test exists — the panel must not
+   * hold a second answer to a question something else already answers — and
+   * `index === 0` was that second answer: a test on the FULL list, which left
+   * the button live on a column already first ON THE TABLE.
+   */
+  assert.match(
+    panel,
+    /import \{ canMoveRegisterColumn, type RegisterColumn \} from "\.\/register-client";/,
+    "it takes the server's shape, and the shared rule for what a press would do",
+  );
 
   // The one verb, called from the grids and nowhere else.
   assert.doesNotMatch(codeOnly(panel), /setRegisterColumnHidden/, "the grid owns the call");
@@ -305,11 +333,30 @@ test("UX-1/UX-4 the frozen lane is one column, it is never absent, and nothing i
   /*
    * THE FROZEN COLUMN IS NOT ALSO IN THE SCROLLING RUN. This is the assertion
    * that stops the duplicate name coming back.
+   *
+   * RE-POINTED TO `registerTableColumns`, WHICH IS WHERE THE FILTER LIVES NOW,
+   * and the contract is stronger for the move rather than weaker. The grid used
+   * to write the filter inline; the shared rule now returns the frozen lane
+   * followed by that same run, as ONE ordered list, because the table, the
+   * columns panel and the ordering helpers all have to agree about which column
+   * is out of the run — and while that filter was inside the grid, the panel's
+   * Move earlier could hand a column past a lane it could not see.
    */
+  const rule = codeOnly(await read(CLIENT));
+  assert.match(
+    rule,
+    /const scrolling = visibleColumns\(columns\)\.filter\(\s*\(column\) => !frozen \|\| column\.id !== frozen\.id,\s*\);/,
+    "the pinned column is removed from the scrolling set",
+  );
+  assert.match(
+    rule,
+    /return frozen \? \[frozen, \.\.\.scrolling\] : scrolling;/,
+    "and drawn as the lane, exactly once",
+  );
   assert.match(
     code,
-    /shown\.filter\(\(column\) => !frozen \|\| column\.id !== frozen\.id\)/,
-    "the pinned column is drawn as the lane and removed from the scrolling set",
+    /const tableColumns = registerTableColumns\(snap\.columns, frozen\);/,
+    "and the grid draws the answer rather than deriving a second one",
   );
 
   /*
@@ -318,17 +365,67 @@ test("UX-1/UX-4 the frozen lane is one column, it is never absent, and nothing i
    * flag at seed time only — so "nothing is pinned" is the state of every live
    * register, and a lane gated on the flag alone would take the name and the
    * phone number off the owner's Preview.
+   *
+   * RE-POINTED FROM THE GRID TO `register-client.ts`, WITH THE CLAUSE THE OWNER
+   * FOUND MISSING.
+   *
+   * The rule moved next door because three surfaces have to agree about which
+   * column is out of the scrolling run — the grid, the columns panel and the
+   * ordering helpers — and three readings of `settings` were three chances to
+   * disagree. It also grew the check whose absence was a defect: the fallback
+   * ended `columns.find((column) => column.nativeField === "name") ?? null`
+   * with no `hidden` test anywhere in the function, so unticking "Contractor"
+   * in the columns panel wrote `hidden_at` and the very next render put the
+   * lane straight back from the same column. Visibility now wins in BOTH
+   * branches. The fallback itself is untouched and still the point of the
+   * function.
    */
   assert.match(
-    code,
+    rule,
     /const pinned = pinnedColumn\(columns\);/,
     "the register's own answer is asked first",
   );
   assert.match(
-    code,
-    /return columns\.find\(\(column\) => column\.nativeField === "name"\) \?\? null;/,
-    "and an unpinned register freezes its identity anyway",
+    rule,
+    /if \(pinned\) return pinned\.hidden \? null : pinned;/,
+    "and a pinned column that is off the register freezes nothing",
   );
+  /*
+   * RE-POINTED — the fallback now reads the IDENTITY'S OWN refusal, and the
+   * rule this pin protects is narrower rather than weaker.
+   *
+   * "Visibility wins" is unchanged and is still asserted, one line down. What
+   * moved is WHO gets to decline the lane. The old shape asked whether ANY
+   * column in the register carried settings.pinned === false, which let one
+   * column's history speak for the whole table: the live contractors register
+   * carries that flag on contactName and email because somebody pinned each of
+   * them once and unpinned it, so the day the identity's own pin was cleared
+   * the register would have rendered no frozen lane at all — for a reason
+   * nobody chose and nothing on screen explained.
+   *
+   * A refusal is a choice about one column, so it is read off that column.
+   */
+  assert.match(
+    rule,
+    /const identity = identityRegisterColumn\(columns\);\s*if \(!identity \|\| identity\.hidden\) return null;/,
+    "the identity is resolved, and a hidden one freezes nothing",
+  );
+  assert.match(
+    rule,
+    /identity\.settings\.pinned === false/,
+    "and only the identity's own refusal withdraws the fallback lane",
+  );
+  assert.doesNotMatch(
+    rule,
+    /columns\.some\(/,
+    "no register-wide flag may decide it: one column's history is not the table's",
+  );
+  assert.match(
+    rule,
+    /return declined \? null : identity;/,
+    "and an unpinned register freezes its identity anyway, unless it was unticked",
+  );
+  assert.match(code, /frozenRegisterColumn/, "the grid asks the shared rule for its lane");
 
   /*
    * The lane's LABEL follows a rename of the `name` column, because renaming is
@@ -338,16 +435,40 @@ test("UX-1/UX-4 the frozen lane is one column, it is never absent, and nothing i
    * whether the column is shown or hidden, because a label belongs to a column
    * rather than to its visibility.
    */
+  /*
+   * RE-POINTED FROM THE GRID'S OWN `find` TO THE SHARED LOOKUP, AND FROM THE
+   * LITERAL "Contractor" TO THE CONSTANT THAT NAMES IT.
+   *
+   * The rule is word for word what it was — matched on `nativeField`, never on
+   * position, and found whether the column is shown or hidden — and it is now
+   * spelt once, in `register-client.ts`, where the frozen rule and the ordering
+   * helpers read the same answer. The grid had a second copy of this `find`
+   * beside `frozenRegisterColumn`'s, which is how the two came to disagree
+   * about a hidden identity: one treated "hidden" as "gone" and the other did
+   * not, and the composite lane survived a press that had already hidden it.
+   *
+   * `CONTRACTOR_COLUMN_TITLE` is the same string, named. It is reachable only
+   * on a register with no row for the identity at all, and it is the DEFAULT
+   * label rather than the lane's — a rename to "Supplier" still renames the
+   * lane, which is the half of this assertion that matters.
+   */
   assert.match(
     code,
-    /snap\.columns\.find\(\(column\) => column\.nativeField === "name"\) \?\? null;/,
-    "the identity column is found by its native field",
+    /const identityColumn = identityRegisterColumn\(snap\.columns\);/,
+    "the identity column is found by its native field, by the shared lookup",
   );
   assert.match(
     code,
-    /identityColumn\?\.title \?\? "Contractor"/,
+    /identityColumn\?\.title \?\? CONTRACTOR_COLUMN_TITLE/,
     "and the lane takes its title from that column when there is one",
   );
+  const client = await read(CLIENT);
+  assert.match(
+    client,
+    /return columns\.find\(\(column\) => column\.nativeField === CONTRACTOR_COLUMN_KEY\) \?\? null;/,
+    "and the shared lookup is still a match on the native field",
+  );
+  assert.match(client, /export const CONTRACTOR_COLUMN_TITLE = "Contractor";/);
 
   /*
    * THE IDENTITY IS READ OFF THE ROW, not off the register. This is the whole
@@ -934,6 +1055,34 @@ test("UX-12 the columns panel is ONE compact checklist with every column in it e
   assert.match(code, /checked=\{!column\.hidden\}/, "checked means on the register");
   assert.match(code, /onSetHidden\(column, !event\.target\.checked\)/);
   assert.doesNotMatch(code, /useState|useEffect|fetch\(/, "the panel still stores nothing");
+
+  /*
+   * AND THE TOOLTIP ON THAT TICK DESCRIBES THE PRESS THE PRODUCT ACTUALLY
+   * MAKES. It read "Hiding it will unpin it." — the contract of the server that
+   * shipped before `frozenRegisterColumn` learnt that visibility beats pinning.
+   * `PATCH /api/registers` now LEAVES the pin alone when it hides (the round
+   * trip is in `workstream-five-six-register-columns.test.mjs`), so that
+   * promise was false on the one control the owner's defect report was about:
+   * untick Contractor, tick it again, and the frozen lane comes back exactly
+   * where it was. A label describing behaviour the product no longer has is
+   * worse than no label, because a reader who believes it will not try the
+   * press. Pinned here so the string cannot drift back.
+   */
+  assert.doesNotMatch(
+    code,
+    /Hiding it will unpin it/,
+    "the tick must not promise an unpin the server no longer performs",
+  );
+  assert.match(
+    code,
+    /is pinned\. Hiding it takes it off the register and keeps the pin; showing it again brings it back pinned\./,
+    "it says the press is reversible, which is what hiding a pinned column now is",
+  );
+  assert.doesNotMatch(
+    code,
+    /frozen lane/,
+    "and says it without naming a lane, because Sites shares this panel and has none",
+  );
 
   /*
    * COMPACT AND MULTI-COLUMN, AND IT WRAPS RATHER THAN CLIPS.

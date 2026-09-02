@@ -2,16 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components";
+import { AnchoredPopover } from "./overlay/anchored";
 import { RegisterColumnsPanel } from "./register/register-columns-panel";
 import {
+  CONTRACTOR_COLUMN_TITLE,
   RegisterError,
   addRegisterColumn,
+  canMoveRegisterColumn,
   fetchRegister,
+  frozenRegisterColumn,
   hiddenColumns,
-  orderAfterMove,
+  identityRegisterColumn,
+  orderAfterStep,
   pinRegisterColumn,
-  pinnedColumn,
   registerCellValue,
+  registerTableColumns,
   removeRegisterColumn,
   renameRegisterColumn,
   reorderRegisterColumns,
@@ -73,14 +78,21 @@ import {
  * that, leaving rows of rates and postcodes with no name anywhere on them.
  *
  * WHAT IS PINNED IS A COLUMN, NOT A LANE INVENTED BESIDE ONE. The pin lives in
- * `register_columns.settings` as `{"pinned": true}`, at most one per register,
- * and pinning implies visible — see `frozenRegisterColumn` below. So there is
- * one place a column's identity, order, title and width are recorded, and
- * "frozen" is one more property of the column rather than a second idea of what
- * a column is. A pinned column is drawn ONCE, as the lane, and is not also in
- * the scrolling set: the previous version drew the lane beside a `name` column
- * that was still on the table, and the live register printed the contractor's
- * name twice on every row.
+ * `register_columns.settings` as `{"pinned": true}`, at most one per register.
+ * So there is one place a column's identity, order, title and width are
+ * recorded, and "frozen" is one more property of the column rather than a
+ * second idea of what a column is. A pinned column is drawn ONCE, as the lane,
+ * and is not also in the scrolling set: the previous version drew the lane
+ * beside a `name` column that was still on the table, and the live register
+ * printed the contractor's name twice on every row.
+ *
+ * AND VISIBILITY BEATS PINNING. `frozenRegisterColumn` in `register-client.ts`
+ * is the one answer to "what is frozen", and it returns null for a HIDDEN
+ * column in every branch — pin included. Unticking "Contractor" therefore takes
+ * the whole composite lane off the table: header, name, contact block, sticky
+ * geometry, divider and shadow, with no spacer and no reserved offset left
+ * behind. The stored pin is left alone rather than repaired, so showing the
+ * column again returns it to the lane it was in.
  *
  * UNPINNED, it is an ordinary column: no sticky, no reserved offset, no
  * shadow, and it takes its configured position among the others. The only
@@ -151,22 +163,35 @@ type GridLane<Row> = {
 /**
  * The lanes of one render, in the order they are drawn.
  *
- * THE FROZEN COLUMN IS REMOVED FROM THE SCROLLING SET rather than drawn beside
- * it. A lane and a column carrying the same value is the contractor's name
- * printed twice on every row, which is what the live register did.
+ * THE ORDER ARRIVES ALREADY DECIDED. `registerTableColumns` in
+ * `register-client.ts` answers "what is on the table, in the order it is
+ * drawn" — the frozen column lifted to the front and dropped from the scrolling
+ * run, every other visible column in its configured place. This adds only what
+ * the register cannot know: which lane draws the identity, and which one draws
+ * a figure the page measured. A second opinion about the ORDER here is a table
+ * whose labels stop matching its values.
+ *
+ * THE FROZEN COLUMN IS DRAWN ONCE. A lane and a column carrying the same value
+ * is the contractor's name printed twice on every row, which is what the live
+ * register did — so `frozen` is a FLAG on the lane the run already contains,
+ * never a lane pushed in beside it.
  *
  * THE MEASUREMENTS TRAIL THE REGISTER'S OWN COLUMNS. They are not register
  * columns — `register-catalogue.ts` says why — so nothing records a position
  * for them and the page's declaration order is the only order there is. It is
  * read from ONE array here rather than written into the JSX twice.
  *
- * THE IDENTITY IS NEVER ABSENT. If the identity column is neither the frozen
- * lane nor in the visible set, its rendering is put back at the front as an
- * ordinary (unfrozen) cell: a row that does not say whose row it is was the
- * defect this lane was built for, and unpinning must not be a way back to it.
+ * THE IDENTITY IS PUT BACK ONLY WHEN THERE IS NO COLUMN TO HIDE. `identity` is
+ * null on a register seeded before the catalogue described the Contractor
+ * column, and a row that does not say whose row it is was the defect the lane
+ * was built for — so that case gets the rendering back at the front. A column
+ * that EXISTS and is hidden is the reader's own decision and gets nothing: the
+ * fallback used to fire on "no lane has the identity", which is also true of a
+ * hidden one, so unticking "Contractor" put the composite lane straight back on
+ * the table and the checkbox appeared to do nothing.
  */
 function gridLanes<Row>(
-  scrolling: readonly RegisterColumn[],
+  table: readonly RegisterColumn[],
   frozen: RegisterColumn | null,
   identity: RegisterColumn | null,
   extras: readonly ExtraColumn<Row>[],
@@ -203,8 +228,9 @@ function gridLanes<Row>(
   const extraByKey = new Map(extras.map((extra) => [extra.key, extra]));
 
   const lanes: GridLane<Row>[] = [];
-  if (frozen) lanes.push(laneOf(frozen, true));
-  for (const column of scrolling) lanes.push(laneOf(column, false));
+  for (const column of table) {
+    lanes.push(laneOf(column, frozen !== null && column.id === frozen.id));
+  }
   /*
    * Only measurements with NO column of their own are appended. On a register
    * seeded before the catalogue declared them there is briefly no row — and a
@@ -212,9 +238,9 @@ function gridLanes<Row>(
    * right to call that a regression, so the page keeps drawing them until the
    * reconcile in `loadRegisterColumns` catches up on the next read.
    *
-   * ASKED OF `known` AND NOT OF `scrolling`, and the difference is a defect
-   * report. `scrolling` is what is ON THE TABLE, so a measurement the operator
-   * had just UNTICKED fell out of it and was immediately re-appended here — the
+   * ASKED OF `known` AND NOT OF `table`, and the difference is a defect
+   * report. `table` is what is ON THE TABLE, so a measurement the operator had
+   * just UNTICKED fell out of it and was immediately re-appended here — the
    * press moved the column to the end of the row rather than taking it off, and
    * a second press could not help because the state it was reading had already
    * changed. `known` is every column the register holds, hidden ones included,
@@ -231,10 +257,10 @@ function gridLanes<Row>(
       identity: false,
     });
   }
-  if (!lanes.some((lane) => lane.identity)) {
+  if (identity === null) {
     lanes.splice(frozen ? 1 : 0, 0, {
       key: "identity",
-      title: identity?.title ?? "Contractor",
+      title: CONTRACTOR_COLUMN_TITLE,
       frozen: false,
       column: null,
       extra: null,
@@ -331,53 +357,105 @@ const ROW_INTERACTIVE_SELECTOR = [
   '[contenteditable="true"]',
 ].join(", ");
 
-/**
- * WHICH COLUMN IS THE FROZEN LANE.
+/*
+ * WHICH COLUMN IS THE FROZEN LANE — ASKED OF `register-client.ts`, NOT ANSWERED
+ * HERE.
  *
- * `pinnedColumn` is the register's own answer and is asked FIRST — `pinned` is
- * derived on the server from `register_columns.settings`, there is no `pinned`
- * SQL column, and this must not grow a second reading of that JSON.
+ * `frozenRegisterColumn` used to live in this file, and that was the whole of
+ * defect 1: the columns panel decided what "frozen" meant from the stored pin
+ * while this grid decided it from the pin OR a fallback to the identity column,
+ * so unticking "Contractor" wrote `hidden_at`, the panel agreed, and the grid
+ * re-derived the same lane from the same column on the very next render. One
+ * rule, one home. It answers the pin first, honours a stored `pinned: false`,
+ * falls back to the identity on a register nobody has pinned — and returns null
+ * for a HIDDEN column in every one of those branches, which is what makes the
+ * checkbox take the lane off the table.
  *
- * THE FALLBACK IS THE WHOLE POINT OF THIS FUNCTION. Not one organisation in
- * either database has a pinned column: the seed sets the flag once, at seed, so
- * it reaches a workspace created after the flag existed and nobody else. The
- * owner's Staging register — twenty-five contractor columns, all hidden — comes
- * back with `pinned` false on every one of them. "No column is pinned" is
- * therefore the state of every live register, and rendering no lane for it
- * would take the contractor's name and phone number off the very Preview this
- * work is for. So an unpinned register freezes its IDENTITY, and pinning is how
- * a reader moves the lane elsewhere rather than how they get one.
- *
- * Matched on `nativeField`, never on position — the reader may have moved the
- * column anywhere, and the default belongs to the identity wherever it sits.
- *
- * A STORED `pinned: false` IS STILL HONOURED, and this is the one place that
- * reads `settings` directly. It is a LIVE branch, not a placeholder: unpinning
- * writes `{"pinned": false}` rather than removing the key (see
- * `settingsWithPin`), precisely so "somebody chose no" is distinguishable from
- * "nobody ever chose". `{}` means the second and falls back; an explicit
- * `false` means the first and leaves no frozen lane at all — which is the only
- * way a reader can turn the lane OFF, because the fallback would otherwise
- * freeze the identity again on the very next render.
- *
- * Measured at 1440, both themes, through the real PATCH verb: `{}` gives one
- * sticky lane with the divider and the fall-off; `{"pinned": false}` gives zero
- * sticky cells, zero shadowed cells, zero left offsets, and the first cell's
- * left edge sitting exactly on the scroll container's content box.
+ * `registerTableColumns` is the same answer as an ORDER: the frozen column
+ * lifted to the front and dropped from the scrolling run, so the value cannot
+ * be drawn twice and an unfrozen register simply starts with its first
+ * scrolling column — there is no empty lane to leave behind and no offset to
+ * reset.
  */
-export function frozenRegisterColumn(
-  columns: readonly RegisterColumn[],
-): RegisterColumn | null {
-  const pinned = pinnedColumn(columns);
-  if (pinned) return pinned;
-  const refused = columns.some(
-    (column) =>
-      column.settings &&
-      typeof column.settings === "object" &&
-      column.settings.pinned === false,
+
+/**
+ * THE COLUMN MENU, ON THE SHARED OVERLAY LAYER RATHER THAN INSIDE THE CELL.
+ *
+ * THE DEFECT, MEASURED. The menu was an `absolute` div inside the header cell,
+ * carrying `z-index: var(--z-popover)` — a tier far above the lane's
+ * `--z-sticky` — and on the PINNED column it was still invisible. A sticky cell
+ * with a z-index is a stacking CONTEXT, so a descendant's 1000 is resolved
+ * inside the header cell's own 40 and never against the page; the body's lane
+ * cells are on the same tier and come later in the document, so they paint over
+ * it. Sampled at 1440 through the DevTools protocol, at scrollLeft 0, 600 and
+ * the far right: 45 of 45 points inside the open menu's rect hit
+ * `td.contractor-register__lane` or its contents instead of the menu. Raising
+ * the number could not have helped, and every z-index at or above 10 in this
+ * codebase has to be a tier token anyway — `tests/ui-batch-overlays.test.mjs`
+ * refuses a raw one.
+ *
+ * SO THE MENU LEAVES THE TABLE. `AnchoredPopover` portals it to the shared
+ * layer host on `<body>` and positions it against this trigger in viewport
+ * coordinates, which is the same mechanism the board's eight menus use. No
+ * ancestor's stacking context, `overflow` or `transform` can reach it — and the
+ * second half of that matters as much as the first: `.table-scroll` is
+ * `overflow-x: auto`, so a menu opened near the right of a thirty-column
+ * register used to be clipped by the scroller as well as painted under the
+ * lane.
+ *
+ * A COMPONENT PER HEADER, FOR ONE REASON: the anchor. `useAnchoredPosition`
+ * measures `anchorRef.current`, and thirty headers in a `.map` need thirty
+ * stable refs — one shared ref would place every menu against whichever button
+ * rendered last. Owning the trigger here is what makes the ref belong to it.
+ *
+ * The menu's own skin stays on `.contractor-register__menu`, which is now a
+ * plain box inside the positioned surface; see `globals.css`.
+ */
+function RegisterHeadMenu({
+  label,
+  open,
+  onToggle,
+  onClose,
+  children,
+}: {
+  /** The column's title, for the trigger's accessible name and the menu's. */
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  return (
+    <span className="contractor-register__menu-anchor">
+      <button
+        ref={anchorRef}
+        type="button"
+        className="icon-button"
+        aria-label={`Options for ${label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <Icon name="more" size={15} />
+      </button>
+      {/*
+        `AnchoredPopover` carries the `role="menu"` on the surface it positions,
+        so the box below is a plain `div`: two nested menus would be one menu
+        too many for a screen reader, and the items are already
+        `role="menuitem"`.
+      */}
+      <AnchoredPopover
+        open={open}
+        anchorRef={anchorRef}
+        onClose={onClose}
+        placement="bottom-end"
+        label={`Options for ${label}`}
+      >
+        <div className="contractor-register__menu">{children}</div>
+      </AnchoredPopover>
+    </span>
   );
-  if (refused) return null;
-  return columns.find((column) => column.nativeField === "name") ?? null;
 }
 
 export function ContractorRegister<Row extends RegisterEntityRow>({
@@ -496,23 +574,16 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
   }, [nonce]);
 
   /*
-   * A press anywhere else closes the open column menu.
+   * NOTHING HERE CLOSES THE MENU, and that is the fix rather than an omission.
    *
-   * `pointerdown` rather than `click`, so the menu is gone before the press
-   * lands on whatever is underneath it — a menu that closes on `click` eats the
-   * first press on the control behind it.
+   * This carried a `pointerdown` listener that closed the menu unless the press
+   * was inside `.contractor-register__menu-anchor`. The menu now renders on the
+   * shared overlay layer — a portal to `<body>`, outside that anchor — so the
+   * listener would have fired on the menu's OWN items, unmounting them before
+   * the click landed and turning every entry into a no-op. `AnchoredPopover`
+   * owns the press-outside, the Escape and the focus return, and it tests
+   * containment against the surface it actually rendered.
    */
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!openMenu) return;
-    const close = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest(".contractor-register__menu-anchor")) return;
-      setOpenMenu(null);
-    };
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [openMenu]);
 
   /** Run one register verb, reload, and surface the server's refusal verbatim. */
   const run = useCallback(
@@ -620,35 +691,47 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
    * "Contractor" is the fallback for the only case with no column to ask: a
    * snapshot from before the catalogue seeded.
    */
-  const identityColumn =
-    snap.columns.find((column) => column.nativeField === "name") ?? null;
-  const identityTitle = identityColumn?.title ?? "Contractor";
+  const identityColumn = identityRegisterColumn(snap.columns);
+  const identityTitle = identityColumn?.title ?? CONTRACTOR_COLUMN_TITLE;
 
   /*
-   * THE FROZEN LANE, AND THE SCROLLING SET IT IS NOT IN.
+   * THE FROZEN LANE, AND THE ONE ORDERED RUN IT IS THE FRONT OF.
    *
    * `frozen` is a column of this register — the identity by default and
-   * whichever column the reader pinned instead — and it is filtered OUT of
-   * `scrolling` so it is drawn once. Pinning implies visible, so a pinned
-   * column that is nonetheless recorded hidden still gets its lane: the lane is
-   * the strongest statement anybody has made about it.
+   * whichever column the reader pinned instead — and `registerTableColumns`
+   * returns it at the head of the visible run with the duplicate dropped, so it
+   * is drawn once. A HIDDEN column is frozen by nothing: `frozenRegisterColumn`
+   * answers null for one, the run does not contain it, and the lane is gone
+   * with it rather than left behind as a spacer.
+   *
+   * ONE ANSWER, PASSED DOWN. `frozen` is handed to `gridLanes` as well as to
+   * the run so the sticky FLAG and the ORDER come from the same reading; asking
+   * twice is how a lane and a scrolling copy of the same column came to be
+   * drawn side by side.
    */
   const frozen = frozenRegisterColumn(snap.columns);
-  const scrolling = shown.filter((column) => !frozen || column.id !== frozen.id);
-  const lanes = gridLanes(scrolling, frozen, identityColumn, extraColumns, snap.columns);
+  const frozenKey = frozen ? frozen.key : null;
+  const tableColumns = registerTableColumns(snap.columns, frozen);
+  const lanes = gridLanes(tableColumns, frozen, identityColumn, extraColumns, snap.columns);
 
-  /** Move one column to a new slot and send the WHOLE order. */
+  /** One press of Move earlier / Move later, sent as the WHOLE order. */
   function move(column: RegisterColumn, delta: number) {
     if (!snap) return;
-    const index = snap.columns.findIndex((entry) => entry.id === column.id);
-    if (index < 0) return;
     /*
-     * `orderAfterMove` operates on the FULL column list, hidden ones included,
-     * and returns every key — which is what `reorderRegisterColumns` wants. A
-     * pair of indices could not express this: a list cannot hold two columns in
-     * one place, so the invalid state is unrepresentable rather than validated.
+     * `orderAfterStep` swaps the column with its next neighbour ON THE TABLE,
+     * however many hidden columns lie between, and returns every key — which is
+     * what `reorderRegisterColumns` wants. Stepping ±1 through the FULL list is
+     * what made the press do nothing: this register's visible positions are
+     * sparse, so almost every press swapped a column on the table with a HIDDEN
+     * one, wrote a real new order, and left the table looking identical.
+     *
+     * `frozenKey` is passed rather than left to the default, because this
+     * register's lane can be the identity FALLBACK — a column carrying no pin
+     * for the default to read. The header menu draws its two buttons disabled
+     * from `canMoveRegisterColumn` with the same key, so what is offered and
+     * what is written cannot disagree.
      */
-    const order = orderAfterMove(snap.columns, column.key, index + delta);
+    const order = orderAfterStep(snap.columns, column.key, delta, frozenKey);
     void run(`move:${column.id}`, () => reorderRegisterColumns("contractors", order));
   }
 
@@ -661,7 +744,7 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
   }
 
   return (
-    <section className="panel sites-panel contractor-register" ref={gridRef}>
+    <section className="panel sites-panel contractor-register">
       <header className="contractor-register__toolbar">
         <div>
           <strong>Register columns</strong>
@@ -873,15 +956,6 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
               {lanes.map((lane) => {
                 const column = lane.column;
                 /*
-                 * The index the Move controls read is the position among the
-                 * SCROLLING columns, so "Move left" is greyed on the one that
-                 * is already leftmost on the table rather than on the one that
-                 * happens to be first in a list containing the frozen lane.
-                 */
-                const scrollIndex = column
-                  ? scrolling.findIndex((entry) => entry.id === column.id)
-                  : -1;
-                /*
                  * THE WIDTH LIVES ON THE HEADER CELL, NOT IN A `<colgroup>`.
                  *
                  * A `<col>` constrains the table at every width, including the
@@ -925,83 +999,101 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                     {column && snap.canConfigure ? (
                       <span className="contractor-register__head">
                         <span className="contractor-register__head-title">{lane.title}</span>
-                        <span className="contractor-register__menu-anchor">
+                        <RegisterHeadMenu
+                          label={lane.title}
+                          open={openMenu === column.id}
+                          onToggle={() =>
+                            setOpenMenu((open) => (open === column.id ? null : column.id))
+                          }
+                          onClose={() => setOpenMenu(null)}
+                        >
                           <button
                             type="button"
-                            className="icon-button"
-                            aria-label={`Options for ${lane.title}`}
-                            aria-expanded={openMenu === column.id}
-                            onClick={() =>
-                              setOpenMenu((open) => (open === column.id ? null : column.id))
-                            }
+                            role="menuitem"
+                            onClick={() => {
+                              setOpenMenu(null);
+                              rename(column);
+                            }}
                           >
-                            <Icon name="more" size={15} />
+                            Rename
                           </button>
-                          {openMenu === column.id && (
-                            <div className="contractor-register__menu" role="menu">
-                              <button type="button" role="menuitem" onClick={() => rename(column)}>
-                                Rename
-                              </button>
-                              {/*
-                                A FROZEN COLUMN CANNOT BE MOVED OR HIDDEN, and
-                                the controls say so rather than disappearing.
-                                It is the lane — there is nowhere left of it to
-                                move to — and pinning implies visible, so a Hide
-                                offered here would be a press that unhides
-                                itself on the next load. Unpin is in the Columns
-                                panel, beside the pin that put it there.
-                              */}
-                              <button
-                                type="button"
-                                role="menuitem"
-                                disabled={lane.frozen || scrollIndex <= 0}
-                                onClick={() => move(column, -1)}
-                              >
-                                Move left
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                disabled={lane.frozen || scrollIndex === scrolling.length - 1}
-                                onClick={() => move(column, 1)}
-                              >
-                                Move right
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                disabled={lane.frozen}
-                                onClick={() =>
-                                  void run(`hide:${column.id}`, () =>
-                                    setRegisterColumnHidden(column.id, true),
-                                  )
-                                }
-                              >
-                                Hide
-                              </button>
-                              {/*
-                                Offered on a native column too, and refused by
-                                the server with an instruction rather than a
-                                status code. Hiding the control would hide the
-                                instruction with it, and "remove this column"
-                                and "stop showing me this column" are the same
-                                sentence in a reader's head.
-                              */}
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="contractor-register__menu-danger"
-                                onClick={() =>
-                                  void run(`delete:${column.id}`, () =>
-                                    removeRegisterColumn(column.id),
-                                  )
-                                }
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          )}
-                        </span>
+                          {/*
+                            OFFERED OR REFUSED FROM THE SAME ANSWER THE PRESS
+                            WRITES. `canMoveRegisterColumn` asks whether there is
+                            a neighbour ON THE TABLE to swap with — the frozen
+                            lane has none, and is never movable — so a button
+                            that is live always changes something the reader can
+                            see. The old test was `scrollIndex <= 0`, an index
+                            into the visible run, which left Move left live on a
+                            column whose only earlier neighbours were hidden.
+                          */}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={!canMoveRegisterColumn(snap.columns, column, -1, frozenKey)}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              move(column, -1);
+                            }}
+                          >
+                            Move left
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={!canMoveRegisterColumn(snap.columns, column, 1, frozenKey)}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              move(column, 1);
+                            }}
+                          >
+                            Move right
+                          </button>
+                          {/*
+                            HIDE IS OFFERED ON THE FROZEN LANE TOO, and that is
+                            the change. It used to be disabled because pinning
+                            implied visible, so the press would have unhidden
+                            itself on the next load. Visibility now beats
+                            pinning — `frozenRegisterColumn` answers null for a
+                            hidden column — so this is the same verb as the
+                            checklist's tick and takes the whole lane off the
+                            table. The stored pin is left alone, so showing the
+                            column again returns it to the lane it was in.
+                          */}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setOpenMenu(null);
+                              void run(`hide:${column.id}`, () =>
+                                setRegisterColumnHidden(column.id, true),
+                              );
+                            }}
+                          >
+                            Hide
+                          </button>
+                          {/*
+                            Offered on a native column too, and refused by the
+                            server with an instruction rather than a status
+                            code. Hiding the control would hide the instruction
+                            with it, and "remove this column" and "stop showing
+                            me this column" are the same sentence in a reader's
+                            head.
+                          */}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="contractor-register__menu-danger"
+                            onClick={() => {
+                              setOpenMenu(null);
+                              void run(`delete:${column.id}`, () =>
+                                removeRegisterColumn(column.id),
+                              );
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </RegisterHeadMenu>
                         {/* A lane has no draggable edge; its width is the
                             identity stack's, not a preference. */}
                         {!lane.frozen && (

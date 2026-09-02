@@ -374,13 +374,21 @@ export async function POST(request: Request) {
  *   pinned in the same organisation and register. Two frozen lanes on a narrow
  *   screen is a table with no scrolling half left.
  *
- *   PINNED IMPLIES SHOWN, from both directions. Pinning CLEARS `hidden_at`,
- *   because a pinned column is the frozen lane and a hidden one would be a lane
- *   that renders nothing — and this is not theoretical: the live contractors
- *   register has all twenty-five of its native columns hidden, so a pin that
- *   respected `hidden_at` would have produced a lane nobody could see and no
- *   control that explained why. Hiding a PINNED column releases the pin for the
- *   same reason, rather than leaving the contradiction for the next reader.
+ *   PINNING SHOWS THE COLUMN. Pinning CLEARS `hidden_at`, because asking for a
+ *   column to be the frozen lane is asking to see it, and the live contractors
+ *   register had all twenty-five of its native columns hidden — so a pin that
+ *   ignored that would have produced a lane nobody could explain.
+ *
+ *   HIDING DOES NOT CLEAR THE PIN, and that asymmetry is deliberate. The two
+ *   directions are not symmetric because the requests are not: "make this the
+ *   frozen lane" implies wanting to see it, while "take this off the register
+ *   for now" says nothing about where it should sit when it comes back.
+ *   `frozenRegisterColumn` decides what is frozen and applies VISIBILITY WINS,
+ *   so a hidden column is never drawn as a lane no matter what its settings
+ *   carry; the stored pin is a remembered preference, not an instruction the
+ *   renderer has to obey. Ticking the column again returns the lane the
+ *   operator had.
+ *
  *   Unpinning leaves the column exactly where it is, shown; "stop freezing
  *   this" and "take this off the register" are different requests and the
  *   panel offers both.
@@ -542,17 +550,29 @@ export async function PATCH(request: Request) {
         changes.push(body.hidden ? `hid "${existing.title}"` : `showed "${existing.title}"`);
       }
       /*
-       * HIDING A PINNED COLUMN RELEASES THE PIN — the second direction of
-       * "pinned implies shown". Left alone, the row would carry a pin nothing
-       * could draw, and the next reader would have to decide whether to honour
-       * it. Taking a column off the register is a thing an operator is entitled
-       * to do to any column, pinned or not; what it cannot do is leave the
-       * register in a state the pin verb can never produce.
+       * HIDING A PINNED COLUMN KEEPS THE PIN, and this used to do the opposite.
+       *
+       * The old rule was the second direction of "pinned implies shown": a
+       * hidden pinned column would carry a pin nothing could draw, so hiding
+       * released it rather than leaving the contradiction for the next reader.
+       * That reasoning depended on the renderer honouring a pin regardless of
+       * visibility — which is exactly the defect the owner found. It does not
+       * any more: `frozenRegisterColumn` applies VISIBILITY WINS in both its
+       * branches, so a hidden column is never the frozen lane whatever its
+       * settings say, and there is no contradiction left to resolve here.
+       *
+       * Keeping it is what the register is asked to do. Unticking the
+       * Contractor column and ticking it again should give back the lane the
+       * operator had, not silently demote it to an ordinary column and make
+       * them re-pin it — the pin is a preference about presentation, and hiding
+       * something is not a decision to forget your preferences about it.
+       *
+       * A REQUEST for `{ pinned: true, hidden: true }` is still refused above:
+       * asking for both AT ONCE is contradictory, and that refusal is about the
+       * request rather than about the state. The state itself is reachable, has
+       * one meaning — "pinned, and currently off the register" — and one reader
+       * that agrees with it.
        */
-      if (body.hidden === true && toRegisterColumn(existing).pinned) {
-        patch.settings = settingsWithPin(existing.settings, false);
-        changes.push(`unpinned "${existing.title}"`);
-      }
     }
 
     if (body.pinned !== undefined) {

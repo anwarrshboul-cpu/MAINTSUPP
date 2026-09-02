@@ -1023,10 +1023,38 @@ test("W06-11 the pin verb is dispatched on body shape and refuses what it cannot
     /await unpinOtherRegisterColumns\(/,
     "and releases whatever else was pinned, in the same request",
   );
-  assert.match(
+  /*
+   * RE-POINTED — HIDING NO LONGER CLEARS THE PIN, and the rule it used to
+   * enforce turned out to be the defect rather than the guard.
+   *
+   * The old pin asserted the second direction of "pinned implies shown":
+   * hiding a pinned column released the pin, so the register could never be
+   * read in a state the pin verb could not produce. That was only necessary
+   * while the RENDERER honoured a pin regardless of visibility — and that is
+   * exactly what the owner found by unticking "Contractor" and watching the
+   * frozen lane stay on the table. `frozenRegisterColumn` now applies
+   * visibility-wins in both of its branches, so a hidden column is never drawn
+   * as a lane whatever its settings say, and there is no contradiction left for
+   * this branch to resolve.
+   *
+   * What is asserted instead is the behaviour the register is asked for:
+   * unticking a column and ticking it again gives back the lane the operator
+   * had. A pin is a remembered preference about presentation, and hiding
+   * something is not a decision to forget your preferences about it.
+   *
+   * The REQUEST for both at once is still refused — see the assertion for
+   * `{ pinned: true, hidden: true }` above. That refusal is about a
+   * contradictory request; this is about a reachable state with one meaning.
+   */
+  assert.doesNotMatch(
     route,
     /if \(body\.hidden === true && toRegisterColumn\(existing\)\.pinned\) \{/,
-    "and hiding a pinned column releases the pin, the other direction of the same rule",
+    "hiding must not clear the pin: the renderer decides what is frozen, not the store",
+  );
+  assert.match(
+    route,
+    /HIDING A PINNED COLUMN KEEPS THE PIN/,
+    "and the reason is written where the branch used to be",
   );
 
   // The contradiction is refused rather than resolved: either half of
@@ -1158,12 +1186,27 @@ test("W06-11 pinning shows the column, unpins the other, and survives a reload",
     "exactly one pinned column, and it is the one just pinned",
   );
 
-  // HIDING A PINNED COLUMN RELEASES THE PIN — the other direction of "pinned
-  // implies shown", so the register cannot be read in a state the pin verb
-  // could never produce.
+  // RE-POINTED with the rule above: HIDING KEEPS THE PIN, because the renderer
+  // applies visibility-wins and a hidden column is never the frozen lane
+  // whatever its settings carry. Ticking the column again must give back the
+  // lane the operator had rather than silently demoting it to an ordinary
+  // column — which is what the round trip below asserts.
   const hidden = await call("PATCH", "/api/registers", { id: two.id, hidden: true });
   assert.equal(hidden.status, 200, JSON.stringify(hidden.body));
-  assert.equal(hidden.body.column.pinned, false, "hiding a pinned column unpins it");
+  assert.equal(hidden.body.column.hidden, true, "hiding hides it");
+  assert.equal(
+    hidden.body.column.pinned,
+    true,
+    "and the pin is remembered rather than cleared",
+  );
+  const shownAgain = await call("PATCH", "/api/registers", { id: two.id, hidden: false });
+  assert.equal(shownAgain.status, 200, JSON.stringify(shownAgain.body));
+  assert.equal(shownAgain.body.column.hidden, false, "showing shows it");
+  assert.equal(
+    shownAgain.body.column.pinned,
+    true,
+    "and it comes back pinned, without the operator re-pinning it",
+  );
   assert.equal(hidden.body.column.hidden, true);
 
   // UNPINNING LEAVES THE COLUMN WHERE IT IS. "Stop freezing this" and "take

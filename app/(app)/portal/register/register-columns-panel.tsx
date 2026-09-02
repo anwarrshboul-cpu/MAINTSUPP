@@ -53,6 +53,17 @@
  * button that does nothing — and a host adding one later gets the control by
  * passing a function, with nothing to restyle.
  *
+ * IT DOES ASK ONE QUESTION OF ITS OWN, and it asks it of the shared rule rather
+ * than answering it here. Move earlier and Move later are drawn disabled when
+ * the press would not change the TABLE, which is not the same as "this column
+ * is first in the list" — the list holds hidden columns and the frozen lane,
+ * and neither is a place the reader can see a column move to or from. That was
+ * the panel's one piece of local reasoning (`index === 0`) and it was wrong on
+ * the register the owner has, so it now calls `canMoveRegisterColumn`, the same
+ * function `orderAfterStep` moves by. Pure, stateless, and one answer: a
+ * disabled button and a write that disagree is the defect this whole file is
+ * organised against.
+ *
  * ── WHY `<details>` AND NOT AN OPEN/CLOSED `useState` ─────────────────────
  *
  * The per-column menu is a native `<details>`. A `useState` holding which menu
@@ -74,7 +85,7 @@
  * The Contractors-only list rules are gone with the markup they styled.
  */
 
-import type { RegisterColumn } from "./register-client";
+import { canMoveRegisterColumn, type RegisterColumn } from "./register-client";
 
 /**
  * How far one press of Wider or Narrower moves a column.
@@ -132,10 +143,16 @@ export function RegisterColumnsPanel({
   /** Show or hide one column. The grid owns the call and the re-read. */
   onSetHidden: (column: RegisterColumn, hidden: boolean) => void;
   /**
-   * Move one column `delta` places through the FULL order, hidden columns
-   * included. Signed rather than a target index because the panel knows where
-   * the column is now and nothing else; the grid builds the whole order from it
-   * with `orderAfterMove`, since a list cannot express two columns in one place.
+   * Move one column one place EARLIER (-1) or LATER (+1).
+   *
+   * A DIRECTION, NOT A DISTANCE, and the difference is the defect this signature
+   * used to describe. It said "`delta` places through the FULL order, hidden
+   * columns included", and that is exactly what the grid did: on a register with
+   * 22 hidden columns, a press swapped a column on the table with a hidden
+   * neighbour, so the metadata changed, this checklist showed it, and the table
+   * did not move. `orderAfterStep` now owns what one press means — past the next
+   * column ON THE TABLE — and the grid still builds the whole order from it,
+   * since a list cannot express two columns in one place.
    */
   onMove?: (column: RegisterColumn, delta: number) => void;
   /**
@@ -168,6 +185,13 @@ export function RegisterColumnsPanel({
    * nothing, and should: it persists a pin but draws no frozen lane, so there
    * the stored flag IS the whole truth and inventing one here would be a label
    * describing something the reader cannot see.
+   *
+   * IT ALSO DECIDES WHICH MOVES ARE OFFERED. A column drawn in a lane of its
+   * own is not in the run the table orders, so no press on it — and no press
+   * carrying another column over it — can change what the reader sees. Passed
+   * on to `canMoveRegisterColumn` so the disabled state and the write agree;
+   * omitted (Sites) it falls back to the stored pin, which is exactly what that
+   * grid hoists to the front of its own run.
    */
   frozenKey?: string | null;
   /**
@@ -185,7 +209,7 @@ export function RegisterColumnsPanel({
   return (
     <div className="register-columns-panel">
       <ul className="register-columns-panel__grid" style={GRID_LAYOUT}>
-        {columns.map((column, index) => {
+        {columns.map((column) => {
           /*
            * PINNED AS THE READER SEES IT, not only as the row records it.
            * `frozenKey` is how a fallback lane tells this panel that it is
@@ -218,16 +242,26 @@ export function RegisterColumnsPanel({
                  */
                 aria-label={`Show ${column.title} on the register`}
                 /*
-                 * Hiding a PINNED column releases the pin — the server does it
-                 * in the same write, because a pinned column that is not on the
-                 * register is a frozen lane with nothing in it. Said here so
-                 * the press is not a surprise; the checkbox is not disabled,
-                 * because taking a column off the register is something an
-                 * operator is entitled to do to any column.
+                 * HIDING A PINNED COLUMN KEEPS THE PIN, and this tooltip used to
+                 * promise the reader the opposite — "Hiding it will unpin it" —
+                 * which was true of the server that shipped before
+                 * `frozenRegisterColumn` learnt that visibility beats pinning.
+                 * It is not true now: `PATCH /api/registers` leaves the pin
+                 * alone on hide, because a hidden column is never drawn as a
+                 * lane whatever its settings carry, so there is no contradiction
+                 * left for the write to resolve. What the operator needs told is
+                 * therefore the opposite fact — the press is REVERSIBLE, and
+                 * ticking the box again brings the column back still pinned,
+                 * into the frozen lane on Contractors and to the front of the
+                 * run on Sites. Worded for BOTH, because this component is the
+                 * one panel and a sentence naming a frozen lane would be false
+                 * on the register that has none. The checkbox is not disabled:
+                 * taking a column off the register is something an operator is
+                 * entitled to do to any column.
                  */
                 title={
                   pinnedHere
-                    ? `${column.title} is pinned. Hiding it will unpin it.`
+                    ? `${column.title} is pinned. Hiding it takes it off the register and keeps the pin; showing it again brings it back pinned.`
                     : undefined
                 }
                 onChange={(event) => onSetHidden(column, !event.target.checked)}
@@ -269,12 +303,26 @@ export function RegisterColumnsPanel({
                   <span aria-hidden="true">···</span>
                 </summary>
                 <div className="register-columns-panel__actions">
+                  {/*
+                    DISABLED WHEN THE PRESS WOULD NOT MOVE THE TABLE, which is
+                    not the same question as `index === 0`.
+
+                    That test read the FULL list, so on a register with hidden
+                    columns interleaved it left both buttons live on a column
+                    that was already first or last ON THE TABLE — and on the
+                    frozen column, which is drawn in a lane of its own and has no
+                    place in the run to change. Every one of those presses wrote
+                    a new order the reader could not see. `canMoveRegisterColumn`
+                    is the same rule `orderAfterStep` moves by, asked before the
+                    control is offered rather than discovered afterwards, so the
+                    button and the write cannot disagree.
+                  */}
                   {onMove ? (
                     <>
                       <button
                         type="button"
                         className="secondary-button"
-                        disabled={busy || index === 0}
+                        disabled={busy || !canMoveRegisterColumn(columns, column, -1, frozenKey)}
                         aria-label={`Move ${column.title} earlier`}
                         onClick={() => onMove(column, -1)}
                       >
@@ -283,7 +331,7 @@ export function RegisterColumnsPanel({
                       <button
                         type="button"
                         className="secondary-button"
-                        disabled={busy || index === columns.length - 1}
+                        disabled={busy || !canMoveRegisterColumn(columns, column, 1, frozenKey)}
                         aria-label={`Move ${column.title} later`}
                         onClick={() => onMove(column, 1)}
                       >

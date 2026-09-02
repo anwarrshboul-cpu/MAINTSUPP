@@ -729,12 +729,32 @@ test("W06-11 the Contractors register mounts the shared engine, through the one 
   assert.match(grid, /setRegisterColumnHidden\(column\.id, /, "hide and show");
   assert.match(grid, /resizeRegisterColumn\(drag\.id, settled\.width\)/, "resize");
   /*
-   * Reorder sends the WHOLE order, computed by `orderAfterMove` over the FULL
-   * column list. A pair of indices cannot express this: a list cannot hold two
-   * columns in one place, so the invalid state is unrepresentable rather than
-   * validated.
+   * Reorder sends the WHOLE order. A pair of indices cannot express this: a
+   * list cannot hold two columns in one place, so the invalid state is
+   * unrepresentable rather than validated.
+   *
+   * RE-POINTED FROM `orderAfterMove(snap.columns, column.key, index + delta)`
+   * TO `orderAfterStep`, BECAUSE THAT EXPRESSION WAS A DEFECT REPORT.
+   *
+   * `index` was the column's place in the FULL list, hidden columns included,
+   * so `index + delta` stepped one place through a list the reader cannot see.
+   * On the owner's register — 22 hidden columns, visible positions 0, 15, 20,
+   * 21, 26…30 — almost every press of Move earlier swapped a column on the
+   * table with a HIDDEN neighbour: the order really changed, the checklist
+   * really showed it, and the table could not move because nothing on it had.
+   * Pressed enough times it eventually jumped, which is the shape of the bug
+   * report the owner sent.
+   *
+   * `orderAfterStep(snap.columns, column.key, delta, frozenKey)` takes a
+   * DIRECTION and steps past the next column ON THE TABLE, so one press is one
+   * visible change. It still returns the whole order over every column, hidden
+   * ones included, so what is persisted is still a total order and a reload
+   * still draws what the press produced. `frozenKey` is what keeps a press from
+   * carrying a column over the frozen lane, which is drawn outside the run and
+   * so cannot show a move. The contract this test protects — the whole order,
+   * never a pair of indices — is unchanged.
    */
-  assert.match(grid, /orderAfterMove\(snap\.columns, column\.key, index \+ delta\)/);
+  assert.match(grid, /orderAfterStep\(snap\.columns, column\.key, delta, frozenKey\)/);
   assert.match(grid, /reorderRegisterColumns\("contractors", order\)/);
 
   // A refusal is shown in the server's own words.

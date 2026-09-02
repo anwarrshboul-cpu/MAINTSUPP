@@ -15765,22 +15765,38 @@ body.is-dragging-board-column {
   white-space: nowrap;
 }
 
+/*
+ * The trigger's wrapper, and NOT the box the menu is positioned against — the
+ * menu is portalled to the shared overlay layer and placed in viewport
+ * coordinates against the button itself. This holds the button in the header
+ * row and nothing else.
+ */
 .contractor-register__menu-anchor {
-  position: relative;
   flex: 0 0 auto;
 }
 
+/*
+ * THE SKIN ONLY. NO POSITION, NO OFFSET, NO DEPTH — and their absence is the
+ * fix for "the column menu renders underneath the sticky lane".
+ *
+ * This was `position: absolute` inside the header cell on `--z-popover`, which
+ * is a tier far above the lane's `--z-sticky`, and on the PINNED column the
+ * menu was invisible anyway: a sticky cell carrying a z-index is a stacking
+ * CONTEXT, so the menu's 1000 was resolved inside the header cell's own 40 and
+ * never against the page, and the body's lane cells — same tier, later in the
+ * document — painted straight over it. Measured at 1440: 45 of 45 sample points
+ * inside the open menu hit `td.contractor-register__lane` instead of the menu.
+ * A bigger number could not have reached out of that context, and the tier
+ * tokens exist precisely so nobody tries.
+ *
+ * `AnchoredPopover` now renders this box inside `.ms-popover` on the shared
+ * layer, which is `position: fixed` on `--z-popover` in `overlay.css` and a
+ * child of `<body>` — outside the table's stacking context and outside
+ * `.table-scroll`'s `overflow-x`, which used to clip the menus of the columns
+ * to the right. So the depth is the LAYER's, declared once, and this rule keeps
+ * what a reader can see: the border, the ground and the shadow.
+ */
 .contractor-register__menu {
-  position: absolute;
-  /*
-   * A TIER TOKEN, never a raw number. `--z-popover` is what every other menu
-   * that opens over a table already sits on, and the tokens exist so a new
-   * surface cannot invent a depth that happens to work today and slides under
-   * the drawer tomorrow. The column menu is a popover; it says so.
-   */
-  z-index: var(--z-popover);
-  top: 100%;
-  right: 0;
   display: grid;
   min-width: 150px;
   padding: 4px;
