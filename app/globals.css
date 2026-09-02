@@ -15725,36 +15725,21 @@ body.is-dragging-board-column {
   font-size: 12px;
 }
 
+/*
+ * THE PANEL'S WRAPPER, and nothing else.
+ *
+ * There used to be a `ul` / `li` / `label` list here — this register's own
+ * checkbox rendering of shown-and-hidden. It is gone with the markup it styled:
+ * both registers now mount `register-columns-panel.tsx`, which answers to
+ * `.register-columns-panel` in `brand-overrides.css`. That is the SAME
+ * component on both screens rather than a shared name two different ones
+ * happen to use, which is the distinction the note at the top of this section
+ * is drawing. All this contributes now is the gutter that lines the panel up
+ * with the toolbar above it, because the panel sits inside a `.panel` and the
+ * shared styles cannot know that.
+ */
 .contractor-register__panel {
   padding: 0 14px 12px;
-}
-
-.contractor-register__panel ul {
-  display: grid;
-  /*
-   * `auto-fill` at a fixed minimum rather than a column count, so the panel is
-   * one column on a phone and as many as fit on a desktop without a breakpoint
-   * deciding where the change happens.
-   */
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  margin: 8px 0 0;
-  padding: 0;
-  gap: 6px 14px;
-  list-style: none;
-}
-
-.contractor-register__panel li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.contractor-register__panel label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
 }
 
 /*
@@ -15880,18 +15865,255 @@ body.is-dragging-board-column {
   font-size: 16px;
 }
 
-.contractor-register__hidden {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px 14px;
+/* ---- The two pinned lanes, and the lines between the columns ------------ */
+
+/*
+ * `separate` INSTEAD OF `.data-table`'s `collapse`, and that is the price of a
+ * sticky cell rather than a preference.
+ *
+ * Under `border-collapse: collapse` the borders belong to the TABLE, not to the
+ * cells that declare them, so a `position: sticky` cell slides out from under
+ * its own border and leaves the divider behind in the scroll — the frozen
+ * column arrives at the left edge with a line drawn through the middle of the
+ * table. `border-spacing: 0` keeps every measurement identical to the collapsed
+ * layout: each cell still paints one 1px line beneath itself, and nothing moves
+ * by a pixel. `.analytics-table--mobile-cards` already makes exactly this swap
+ * on a phone for the same class of reason.
+ */
+.contractor-register__table {
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
-.contractor-register__hidden-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/*
+ * THIN VERTICAL DIVIDERS, so a reader can see where one column ends.
+ *
+ * `--line-soft` and never `--line`: this is a reading aid, not a grid drawn
+ * around the data, and the heavier token turns twenty-four columns into a
+ * spreadsheet. Only `border-right` is ever set — no cell declares a matching
+ * `border-left` — so a junction between two cells carries ONE line and there is
+ * no doubling to hunt for under `border-collapse: separate`. `box-sizing:
+ * border-box` is declared for `*` at the top of this file, so the pixel comes
+ * out of the width the column was resized to rather than being added to it:
+ * the header and the body stay aligned and the table does not creep wider
+ * every time somebody drags a column.
+ */
+.contractor-register__table th,
+.contractor-register__table td {
+  border-right: 1px solid var(--line-soft);
+}
+
+.contractor-register__table th:last-child,
+.contractor-register__table td:last-child {
+  border-right: 0;
+}
+
+/*
+ * THE LANES.
+ *
+ * Two cells per row that are not register columns: the identity at the start
+ * and the details chevron at the end. They stay put while the twenty-five
+ * columns between them scroll, which is the whole point — the live register was
+ * twenty-four columns wide, so opening a contractor meant scrolling four
+ * thousand pixels to reach the only control that did it, and hiding the name
+ * column left rows with no identity on them at all.
+ *
+ * OPAQUE, because the rows scroll UNDERNEATH a sticky cell and a transparent
+ * one shows them doing it — which reads as a rendering fault rather than as a
+ * frozen column. `--paper` is what `.panel` paints behind the table in both
+ * themes and what `.data-table td` therefore shows, so the lane matches its own
+ * row exactly; the head and hover grounds below match `.data-table`'s.
+ *
+ * `--z-sticky` and not a number. Every frozen table column in this product
+ * sits on that tier, `tests/ui-batch-overlays.test.mjs` refuses a raw value at
+ * or above 10, and the column menus are on `--z-popover` far above it — so a
+ * menu still opens OVER a lane rather than sliding under it.
+ */
+.contractor-register {
+  --register-lane-edge: rgba(7, 24, 38, 0.1);
+  --register-lane-depth: rgba(7, 24, 38, 0.14);
+  /*
+   * The row hover, as `brand-overrides.css` paints it on an ordinary cell —
+   * `.data-table tbody tr:hover td`. Repeated as a token rather than referenced
+   * because a sticky cell cannot take it as a background COLOUR; see below.
+   */
+  --register-lane-hover-tint: rgba(18, 180, 168, 0.055);
+}
+
+body[data-theme="dark"] .contractor-register {
+  --register-lane-edge: #2b414b;
+  /* Black on a near-black ground says nothing. The dark theme carries the
+     separation on the edge line alone and drops the depth shadow. */
+  --register-lane-depth: transparent;
+}
+
+.contractor-register__lane {
+  position: sticky;
+  z-index: var(--z-sticky);
+}
+
+/*
+ * THE GROUNDS, MATCHED TO WHAT THE ROW ITSELF PAINTS — in both themes, and
+ * without depending on the `!important` that happens to be there today.
+ *
+ * `--surface-card` and not `--paper`, which is the trap this walked into once
+ * already: in LIGHT the two are both #ffffff and either reads correct, but in
+ * DARK `--paper` is #121c24 while the dark override in `brand-overrides.css`
+ * paints every `.data-table td` #182830 — `--surface-card`. A lane on `--paper`
+ * was a strip of a different colour running down the left of every row, which
+ * the `!important` next door was quietly hiding. `--surface-head` does the same
+ * job for the header in both themes (#eef3f5 / #14232c), and using it fixed a
+ * measured light-theme mismatch against the neighbouring `th`.
+ *
+ * Element + class, so these out-rank the `.data-table` rules they are agreeing
+ * with rather than depending on source order to settle a tie.
+ */
+.contractor-register__table td.contractor-register__lane {
+  background: var(--surface-card);
+}
+
+.contractor-register__table th.contractor-register__lane {
+  background: var(--surface-head);
+}
+
+/*
+ * THE HOVER, LAID OVER AN OPAQUE BASE RATHER THAN REPLACING IT.
+ *
+ * `.data-table tbody tr:hover td` is a 5.5%-alpha teal wash. On an ordinary
+ * cell that is exactly right; on a STICKY one it is a hole — at 94.5%
+ * transparency the rows sliding underneath the pinned lane are visible through
+ * it, and only while the pointer is on the row, which is the kind of defect
+ * that never shows up in a screenshot. The wash rides as a `background-image`
+ * over an opaque `background-color`, so the colour is identical to the rest of
+ * the row and nothing shows through.
+ *
+ * The dark theme needs none of this: its hover is an opaque #203740 declared
+ * `!important`, which lands on this rule and on the rest of the row alike.
+ */
+.contractor-register__table tbody tr:hover td.contractor-register__lane {
+  background-color: var(--surface-card);
+  background-image: linear-gradient(
+    var(--register-lane-hover-tint),
+    var(--register-lane-hover-tint)
+  );
+}
+
+/*
+ * The edge line first, then a soft fall-off outwards. The 1px is the divider —
+ * the same one every other column boundary gets, drawn as a shadow because the
+ * cell's own `border-right` would be the wrong side for the end lane. The
+ * second shadow is the only thing that says "there is more table under here";
+ * `-8px` spread keeps it off the cell itself so nothing bleeds inward.
+ */
+.contractor-register__lane--start {
+  left: 0;
+  box-shadow: 1px 0 0 var(--register-lane-edge), 8px 0 10px -8px var(--register-lane-depth);
+}
+
+.contractor-register__lane--end {
+  right: 0;
+  box-shadow: -1px 0 0 var(--register-lane-edge), -8px 0 10px -8px var(--register-lane-depth);
+}
+
+/*
+ * The identity lane is the widest thing on the row and the width is declared
+ * rather than measured: the name, the archived badge and up to three contact
+ * rows all live in it, and an auto width would move every column behind it
+ * whenever a longer name arrived. Not resizable, because it is not a column.
+ */
+.contractor-register__table .contractor-register__lane--start {
+  width: 250px;
+  min-width: 250px;
+}
+
+/* Two icon buttons and their gap. Any wider and the lane starts eating the
+   columns it is supposed to be an escape from. */
+.contractor-register__table .contractor-register__lane--end {
+  width: 86px;
+  min-width: 86px;
+}
+
+/*
+ * `.data-table td` is `white-space: nowrap` for a one-line cell. The identity
+ * lane is a stack of several, so it opts out — otherwise a long trading name
+ * pushes the contact rows out of a lane with a fixed width.
+ */
+.contractor-register__identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  white-space: normal;
+}
+
+.contractor-register__row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/*
+ * THE WHOLE ROW OPENS THE CONTRACTOR, so the whole row says so.
+ *
+ * The pointer is the only signal a row-level press exists — there is no
+ * underline to give it away and no control under the cursor over most of the
+ * row. `is-openable` is set by the component only when it was actually given
+ * an `onOpen`, so a grid mounted without one shows a pointer over nothing.
+ */
+.contractor-register__row.is-openable {
+  cursor: pointer;
+}
+
+/*
+ * NOTHING IS PINNED ON A PHONE, and that is the same rule the board keeps.
+ *
+ * `.analytics-table--mobile-cards` stops this being a table at all in the phone
+ * band — `tbody` becomes a grid of cards, `thead` is hidden, and every cell
+ * takes its label from `data-label` — so there is no horizontal scroll for a
+ * frozen column to be frozen against, and a sticky cell with a fixed 250px
+ * width inside a card is just a card that will not fit. Both lanes go back to
+ * being ordinary cells, the vertical dividers come off because the cards draw
+ * their own edges, and the widths are released.
+ *
+ * 767 rather than the 760 the card layout itself switches at: 767 is one of
+ * this codebase's five agreed breakpoints and 760 is not — several stage tests
+ * hold that line. The seven pixels between them are a window where the table is
+ * still a table with neither pinning nor dividers, which is a plain scrolling
+ * table and not a defect.
+ */
+@media (max-width: 767px) {
+  .contractor-register__lane {
+    position: static;
+    z-index: auto;
+    box-shadow: none;
+  }
+
+  .contractor-register__table .contractor-register__lane--start,
+  .contractor-register__table .contractor-register__lane--end {
+    width: auto;
+    min-width: 0;
+  }
+
+  .contractor-register__table th,
+  .contractor-register__table td {
+    border-right: 0;
+  }
+
+  /*
+   * AND THE ROW HEIGHT IS RELEASED, which is the one thing the card layout
+   * could not do for itself.
+   *
+   * `.data-table td` declares `height: 56px`. On a real table cell that is a
+   * MINIMUM — cells grow to their content — but
+   * `.analytics-table--mobile-cards` makes every cell `display: grid`, and on a
+   * grid container 56px is a definite height that content simply overflows.
+   * Measured at 390px: the identity cell's name (21px) plus its contact block
+   * (44px) came to 69px inside a 56px box, so the email was drawn across the
+   * card row below it. The card sets its own `min-height: 44px`, so nothing
+   * here gets shorter than a thumb.
+   */
+  .contractor-register__table td {
+    height: auto;
+  }
 }
 
 /*

@@ -5524,21 +5524,26 @@ function ContractorsView({
               </span>
             )
           }
+          /*
+           * THE ACTIONABLE FORM of three columns the register also holds as
+           * text — Email, Phone and WhatsApp. Not a duplication to be tidied
+           * away: `wa.me` refuses a national number, so the WhatsApp link
+           * exists only where `whatsappHref` can build one, and the raw columns
+           * stay readable (and hideable) for every row where it cannot. A
+           * reader who wants one and not the other hides the others, which is
+           * what this register is for.
+           *
+           * IT WAS AN `extraColumn` TITLED "Reach them", and it moved. As an
+           * extra it was drawn after every register column, so on a
+           * twenty-four-column register the number you needed was four thousand
+           * pixels to the right of the name it belonged to — and when the
+           * operator hid the name column, "Reach them" became the first thing
+           * on the row with no indication of whose contact details it was. It
+           * is now the second half of the grid's pinned identity lane, beneath
+           * the name, where the question "who do I ring" is actually asked.
+           */
+          contact={(contractor) => <ContractorContact contractor={contractor} />}
           extraColumns={[
-            {
-              /*
-               * THE ACTIONABLE FORM of three columns the register also holds as
-               * text — Email, Phone and WhatsApp. Not a duplication to be
-               * tidied away: `wa.me` refuses a national number, so the WhatsApp
-               * link exists only where `whatsappHref` can build one, and the
-               * raw columns stay readable (and hideable) for every row where it
-               * cannot. A reader who wants one and not the other hides the
-               * others, which is what this register is for.
-               */
-              key: "reach",
-              title: "Reach them",
-              render: (contractor) => <ContractorContact contractor={contractor} />,
-            },
             {
               key: "assigned",
               title: "Assigned",

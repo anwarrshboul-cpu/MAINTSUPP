@@ -8712,24 +8712,58 @@ label.live-board-tool {
   font-weight: 700;
 }
 
+/*
+ * THE THREE LIGHT INKS WERE ALL UNDER 4.5:1, AND AXE SAID SO.
+ *
+ * Measured with axe-core 4.11.4 against the composited wash each chip paints
+ * on the light card, at this chip's own 11px/700:
+ *
+ *   is-valid     #0f8f86 on #e3f6f5   3.54:1   (axe, serious)
+ *   is-expired   #e2445c on #fbe7ea   3.42:1
+ *   is-due-soon  #b57113 on #fff2e2   3.57:1
+ *
+ * Only the first was reported, because a "Valid" chip was the one on screen;
+ * the other two are the same failure waiting for a contractor whose insurance
+ * has lapsed. The wash and the border are unchanged — they are what makes the
+ * state readable at a glance — and only the INK moved, far enough to clear AA
+ * with room to spare:
+ *
+ *   is-valid     #0a736c   5.10:1
+ *   is-expired   #c02b41   4.85:1
+ *   is-due-soon  #9a5f0c   4.77:1
+ *
+ * The chip has always printed the WORD as well as the colour, so this is not
+ * the only thing keeping the state legible — but a word nobody can read is
+ * not much better than a colour nobody can distinguish. W06-13 put this chip
+ * on the contractor Summary, which is what surfaced it; the record editor,
+ * which has drawn it since W06-08, gets the fix with it.
+ *
+ * THE DARK SIDE NEEDED ONE TOO, and it was a latent failure rather than one
+ * this change caused: `is-expired` had no dark override at all, so #e2445c
+ * painted on the dark card at 3.36:1 — measured the moment an expired chip
+ * was finally on a dark screen, which no run before this one had produced.
+ * #f77b8c is 5.27:1 there. The other two dark inks were already clear
+ * (#29d3c6 is 8.1:1, #fdab3d is 5.9:1) and are untouched.
+ */
 .workspace-expiry-chip.is-expired {
   border-color: rgba(226, 68, 92, .45);
   background: rgba(226, 68, 92, .13);
-  color: #e2445c;
+  color: #c02b41;
 }
 
 .workspace-expiry-chip.is-due-soon {
   border-color: rgba(253, 171, 61, .5);
   background: rgba(253, 171, 61, .15);
-  color: #b57113;
+  color: #9a5f0c;
 }
 
 .workspace-expiry-chip.is-valid {
   border-color: rgba(18, 180, 168, .45);
   background: rgba(18, 180, 168, .12);
-  color: #0f8f86;
+  color: #0a736c;
 }
 
+body[data-theme="dark"] .workspace-expiry-chip.is-expired { color: #f77b8c; }
 body[data-theme="dark"] .workspace-expiry-chip.is-due-soon { color: #fdab3d; }
 body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
 
@@ -8997,4 +9031,239 @@ body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
     left: auto;
     right: 0;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   W06-13 — THE CONTRACTOR SUMMARY, AND THE DRAWER STRIP ABOVE IT.
+
+   The contractor drawer was one continuous scroll of `.contractor-profile__
+   section` rules separated by hairlines. That reads correctly for four
+   headings; the Summary is six groups of two to six rows each, and a hairline
+   between them makes six paragraphs rather than six things. So the summary's
+   groups are CARDS — a border, a radius and the card surface — and the four
+   detail views keep the sections they already had.
+
+   Every colour is a token, so the dark skin follows with no second copy: the
+   pairs used here (`--line` / `--line-strong`, `--surface-card` /
+   `--surface-sunken`, `--ink` / `--muted`) are all declared for both themes in
+   globals.css.
+
+   ONE BREAKPOINT, at 640, and it is inside the agreed set
+   (640 / 767 / 768 / 1024 / 1280) that stage-five and stage-six hold this file
+   to from their section markers to the end of the file. It is where a label
+   column stops being worth the width it costs: below it the label sits above
+   its value, above it the two sit side by side. `.detail-row` in globals.css
+   turns at exactly the same width for exactly the same reason.
+
+   The tab strip needs no query at all — `.view-switch--text` already wraps
+   rather than scrolls and already takes its 44px touch height at 768.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/*
+ * The strip is a sibling of the header and the body, not a child of either.
+ * `.detail-drawer` is a flex column in which `.detail-drawer__body` is the only
+ * thing that grows, so a row placed between them stays put while a fifty-row
+ * job table scrolls underneath it. Inside the body it would have scrolled away,
+ * and switching view would have meant scrolling back up to find the control.
+ */
+.contractor-profile__tabs {
+  flex: none;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.contractor-profile__tabs .view-switch--text {
+  margin: 0;
+}
+
+.contractor-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /*
+   * A CONTAINING BLOCK for the `.visually-hidden` spans inside this panel, and
+   * it is load-bearing rather than tidy — the same fix `.contractor-contact__plain`
+   * and `.contractor-archived-chip` both carry, for the same measured reason.
+   * That utility is `position: absolute` with no offsets and a legacy `clip`,
+   * which removes the paint and not the layout overflow: with no positioned
+   * ancestor the span resolves against the initial containing block, takes a
+   * static position off to the right, and adds real horizontal scroll to the
+   * document. 45px of body overflow at 320px, the last time.
+   */
+  position: relative;
+}
+
+.contractor-summary__card {
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.contractor-summary__card > h3 {
+  margin: 0 0 9px;
+  font-size: 15px;
+}
+
+.contractor-summary__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.contractor-summary__row:first-child {
+  padding-top: 0;
+}
+
+.contractor-summary__row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/*
+ * `.drawer-label` is written for a caption ABOVE a block: it is `display:
+ * block` with a 13px bottom margin. As the label half of a pair that margin is
+ * a gap nobody asked for, so it is taken back here rather than by giving the
+ * summary a second uppercase label class that would drift from this one.
+ */
+.contractor-summary__row > .drawer-label {
+  margin-bottom: 0;
+}
+
+.contractor-summary__value {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  /*
+   * An email address, a finance reference and a policy number are all single
+   * unbroken words that are wider than a 320px column. Without this they push
+   * the card — and with it the body — sideways instead of wrapping.
+   */
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 640px) {
+  .contractor-summary__row {
+    grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+    gap: 16px;
+    align-items: baseline;
+  }
+}
+
+/*
+ * A value and the chip that qualifies it — the expiry date and its state.
+ * `inline-flex` with wrap, so the chip drops under the date on a narrow card
+ * rather than squeezing it.
+ */
+.contractor-summary__pair {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * The trades and the coverage areas. A real list, because that is what they
+ * are — several sibling values of equal weight — and a screen reader should say
+ * "list, 2 items" rather than read one long comma-separated string.
+ */
+.contractor-summary__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contractor-summary__chips > li {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+/*
+ * THE REGISTER STATE, in the same shape as `.contractor-archived-chip`.
+ *
+ * The two are a pair — "Active" and "Archived" are the two values of one
+ * column — so they have to be the same object in two states rather than a
+ * green chip beside a grey one that happen to sit in the same row. The
+ * geometry below is the archived chip's, restated; only the colour differs,
+ * and it is the same teal `.workspace-expiry-chip.is-valid` already uses so
+ * that "in date" and "on the register" do not read as two different greens.
+ */
+.contractor-summary__state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 640;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.contractor-summary__state.is-active {
+  border-color: rgba(18, 180, 168, 0.45);
+  background: rgba(18, 180, 168, 0.12);
+  color: #0f8f86;
+}
+
+/* The dark card needs the lighter teal; #0f8f86 on it is under 3:1. */
+body[data-theme="dark"] .contractor-summary__state.is-active {
+  color: #29d3c6;
+}
+
+/*
+ * The sentence under a group. It carries the things a figure cannot say for
+ * itself — that agreed terms are not spend, that declared coverage is not the
+ * site relation, that a status was derived from a date — so it is quiet but it
+ * is not decoration, and it keeps `--muted` rather than dropping to a lighter
+ * grey that would fail on the card.
+ */
+.contractor-summary__note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* The same sentence where it introduces the group rather than qualifying it. */
+.contractor-summary__note--lead {
+  margin: 0 0 10px;
+}
+
+/*
+ * What is not recorded, said once at the end of the panel rather than as four
+ * empty cards. It is the panel's quietest line on purpose: an absence is a
+ * fact about the register, not a fault to be flagged.
+ */
+.contractor-summary__missing {
+  margin: 0;
+}
+
+/*
+ * The Details tab's certification rows reuse the profile's own file-list grid
+ * (`minmax(0, 1fr) auto`, the detail line on row 2). The chip takes the second
+ * column explicitly rather than by auto-placement, so a certificate with no
+ * expiry date cannot shuffle it under the name.
+ */
+.contractor-profile__section .file-list li > .workspace-expiry-chip {
+  grid-row: 1;
+  grid-column: 2;
 }

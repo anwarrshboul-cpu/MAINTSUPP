@@ -125,13 +125,21 @@ export type NativeColumnSeed = {
   /**
    * Seeded hidden rather than omitted.
    *
-   * Three kinds of field earn this: one superseded by a newer column and kept
+   * Four kinds of field earn this: one superseded by a newer column and kept
    * only so old reads keep working (`type`, `lifecycle`, `manager`), one that
    * belongs to the import rather than to the business (`mondayMaintenanceName`),
-   * and one whose place is the archive control rather than a grid cell
-   * (`active`). Hiding rather than dropping them means an operator who does
-   * want the legacy value can turn it on, and nobody who does not is made to
-   * scroll past it.
+   * one whose place is the archive control rather than a grid cell (`active`),
+   * and — on Contractors — one that is simply not part of the DEFAULT
+   * operational view. Hiding rather than dropping them means an operator who
+   * does want the value can turn it on from the Columns panel, and nobody who
+   * does not is made to scroll past it.
+   *
+   * WHAT `hidden` IS NOT. It is a SEED, read once by `ensureRegisterColumns`
+   * when an organisation's register is first created. Changing a flag here
+   * changes what a NEW workspace starts with and touches no existing one:
+   * every organisation that has already seeded keeps whatever its operators
+   * have shown and hidden since, which is the only behaviour that does not
+   * quietly undo somebody's configuration on deploy.
    */
   hidden?: boolean;
 };
@@ -229,43 +237,79 @@ export const SITE_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
  * The four missing are `id`, `organisationId`, `createdAt` and `updatedAt`.
  * Money is integer pence throughout, and the four cost fields are AGREED TERMS
  * rather than money spent — nothing sums them, here or anywhere.
+ *
+ * ── WHY ALMOST ALL OF THEM SEED HIDDEN ───────────────────────────────────
+ *
+ * All twenty-five used to seed SHOWN, and the owner's first act on the live
+ * register was to hide twenty-five of them one at a time — twenty-five
+ * `hidden_at` stamps spread over five and a half minutes on Staging. That is
+ * not a preference the product should make somebody express by hand: a
+ * contractor record has twenty-five fields and an operational screen has room
+ * for about six, so the DEFAULT has to be the six and the rest has to be one
+ * press away in the Columns panel.
+ *
+ * WHAT STAYS SHOWN, and why it is only `availability`. The Contractors page
+ * draws six figures beside the register that are NOT register columns —
+ * assigned, completed, completion rate, open urgent, documents and spend (see
+ * `ExtraColumn` in `app/(app)/portal/contractor-register.tsx`) — and the grid
+ * draws the contractor's identity and contact details in a pinned lane of its
+ * own. So the default view is already seven lanes wide before a single native
+ * column is on it. `availability` is the one field that changes which
+ * contractor a coordinator rings NEXT, so it earns the eighth.
+ *
+ * AND `name` SEEDS HIDDEN, which reads like a mistake and is not. The grid's
+ * pinned identity lane prints the contractor's name on every row and cannot be
+ * hidden away — that lane exists precisely because a register whose name
+ * column had been hidden showed rows with no identity on them at all. A
+ * `name` column shown as well would print the same string twice on one row.
+ * It stays in the catalogue (a register column somebody may want for its own
+ * sake, and the entry that stops `name` being usable as a CUSTOM column key)
+ * and it is one press away, but the default does not draw it twice.
+ *
+ * None of this touches an organisation that has already seeded. See
+ * `NativeColumnSeed.hidden`.
  */
 export const CONTRACTOR_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
-  // Identity and contact.
-  { field: "name", title: "Contractor", type: "text", width: 220 },
-  { field: "contactName", title: "Contact", type: "text" },
-  { field: "email", title: "Email", type: "email" },
-  { field: "phone", title: "Phone", type: "phone" },
-  { field: "whatsappNumber", title: "WhatsApp", type: "phone" },
-  { field: "address", title: "Address", type: "text", width: 220 },
-  { field: "postcode", title: "Postcode", type: "text", width: 120 },
+  // Identity and contact. Drawn in the grid's pinned identity lane instead —
+  // the name, the archived badge and the actionable phone/WhatsApp/email are
+  // all there — so none of these seed onto the table as well.
+  { field: "name", title: "Contractor", type: "text", width: 220, hidden: true },
+  { field: "contactName", title: "Contact", type: "text", hidden: true },
+  { field: "email", title: "Email", type: "email", hidden: true },
+  { field: "phone", title: "Phone", type: "phone", hidden: true },
+  { field: "whatsappNumber", title: "WhatsApp", type: "phone", hidden: true },
+  { field: "address", title: "Address", type: "text", width: 220, hidden: true },
+  { field: "postcode", title: "Postcode", type: "text", width: 120, hidden: true },
 
-  // What they do and whether they are free to do it.
-  { field: "serviceCategories", title: "Services", type: "multi_select", width: 220 },
-  { field: "coverageAreas", title: "Coverage", type: "multi_select" },
-  { field: "certifications", title: "Certifications", type: "multi_select" },
+  // What they do and whether they are free to do it. `availability` is the
+  // one native column the default view keeps: it is what decides which
+  // contractor gets rung next, and it is a single short word per row.
+  { field: "serviceCategories", title: "Services", type: "multi_select", width: 220, hidden: true },
+  { field: "coverageAreas", title: "Coverage", type: "multi_select", hidden: true },
+  { field: "certifications", title: "Certifications", type: "multi_select", hidden: true },
   { field: "availability", title: "Availability", type: "single_select" },
-  { field: "rating", title: "Rating", type: "rating" },
+  { field: "rating", title: "Rating", type: "rating", hidden: true },
 
-  // Agreed commercial terms.
-  { field: "dayRatePence", title: "Day rate", type: "currency" },
-  { field: "hourlyRatePence", title: "Hourly rate", type: "currency" },
-  { field: "callOutCostPence", title: "Call-out", type: "currency" },
-  { field: "otherCostPence", title: "Other cost", type: "currency" },
-  { field: "otherCostLabel", title: "Other cost is for", type: "text" },
-  { field: "paymentTerms", title: "Payment terms", type: "single_select" },
+  // Agreed commercial terms. Reference material for a negotiation rather than
+  // something read across a roster, so they live in the Columns panel.
+  { field: "dayRatePence", title: "Day rate", type: "currency", hidden: true },
+  { field: "hourlyRatePence", title: "Hourly rate", type: "currency", hidden: true },
+  { field: "callOutCostPence", title: "Call-out", type: "currency", hidden: true },
+  { field: "otherCostPence", title: "Other cost", type: "currency", hidden: true },
+  { field: "otherCostLabel", title: "Other cost is for", type: "text", hidden: true },
+  { field: "paymentTerms", title: "Payment terms", type: "single_select", hidden: true },
   // Points at the supplier record in the accounting system. There is
   // deliberately no bank column anywhere near this table.
-  { field: "financeReference", title: "Finance reference", type: "text" },
+  { field: "financeReference", title: "Finance reference", type: "text", hidden: true },
 
   // Insurance. The expiry alone could say a date but never which cover it was
   // the end of, which is why the insurer and the policy sit beside it.
-  { field: "insurerName", title: "Insurer", type: "text" },
-  { field: "policyNumber", title: "Policy number", type: "text" },
-  { field: "insuranceExpiry", title: "Insurance expiry", type: "date" },
-  { field: "insuranceNotes", title: "Insurance notes", type: "long_text" },
+  { field: "insurerName", title: "Insurer", type: "text", hidden: true },
+  { field: "policyNumber", title: "Policy number", type: "text", hidden: true },
+  { field: "insuranceExpiry", title: "Insurance expiry", type: "date", hidden: true },
+  { field: "insuranceNotes", title: "Insurance notes", type: "long_text", hidden: true },
 
-  { field: "notes", title: "Notes", type: "long_text" },
+  { field: "notes", title: "Notes", type: "long_text", hidden: true },
   { field: "active", title: "Active", type: "checkbox", hidden: true },
 ];
 

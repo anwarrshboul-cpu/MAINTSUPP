@@ -21,13 +21,36 @@ import { documentName } from "./views/document-register";
  */
 import { useBodyScrollLock } from "./overlay/scroll-lock";
 /*
- * THE SAME CONTACT CELL THE REGISTER DRAWS, not a second copy of it. `wa.me`
- * answers a national number with "the phone number shared via url is invalid",
- * so the rule about when a WhatsApp link may be built at all lives in one
- * component and one helper — a hand-written `tel:`/`wa.me` pair here would be
- * the second place to get that wrong.
+ * W06-13 — THE SUMMARY, AND THE TWO PIECES IT LENDS BACK.
+ *
+ * `ContractorSummary` is the view this drawer opens on. `ContractorRow` and
+ * `ContractorExpiryChip` are its labelled row and its expiry chip, imported
+ * rather than written again here so the Details tab beside it looks like the
+ * Summary rather than like a second designer's idea of the same thing.
+ *
+ * The contact cell moved WITH it. `wa.me` answers a national number with "the
+ * phone number shared via url is invalid", so the rule about when a WhatsApp
+ * link may be built at all lives in one component over one helper; the drawer
+ * header no longer draws a second copy of the same three values a few
+ * centimetres above the Summary's "Reach them" card.
  */
-import { ContractorContact } from "./contractor-contact";
+import {
+  ContractorExpiryChip,
+  ContractorRow,
+  ContractorSummary,
+  type SummaryContractor,
+} from "./contractor-summary";
+/*
+ * THE TAB PATTERN THE SITES SCREENS ALREADY IMPLEMENT, imported rather than
+ * approximated. It is the WAI-ARIA tabs contract in full — `aria-controls` on
+ * every tab, `role="tabpanel"` and `aria-labelledby` on every panel, a roving
+ * tabindex so the strip is one tab stop, and Arrow/Home/End moving selection
+ * with focus. The item drawer's own `.detail-drawer__tabs` is a `<nav>` of
+ * plain buttons with none of that, and copying it here would have been the
+ * third place in this product to declare a tablist and then not behave like
+ * one.
+ */
+import { SectionPanel, SectionTabs } from "./sites/section-tabs";
 
 /**
  * W06-10 — THE CONTRACTOR PROFILE: jobs, sites, documents, performance.
@@ -63,15 +86,26 @@ import { ContractorContact } from "./contractor-contact";
 
 const formatDate = sharedFormatDate;
 
-type ContractorSummary = {
+/**
+ * The register row this drawer describes.
+ *
+ * `SummaryContractor` and a handful more, rather than a list of its own. The
+ * Summary card already names every field it reads and the reason each is
+ * optional — two producers build these records, and the Contractors page's
+ * synthesised fallback roster knows almost nothing — so restating them here
+ * would be a second declaration to keep in step with the first.
+ *
+ * What the drawer needs on top of it is the identity it fetches by and the
+ * fields the DETAILS tab shows and the Summary deliberately does not.
+ */
+type ContractorRecord = SummaryContractor & {
   id: string;
-  name: string;
-  contactName: string | null;
-  email: string | null;
-  phone: string | null;
-  whatsappNumber: string | null;
-  availability: string | null;
-  active: boolean;
+  address?: string | null;
+  postcode?: string | null;
+  notes?: string | null;
+  policyNumber?: string | null;
+  insuranceNotes?: string | null;
+  rating?: number | null;
 };
 
 type SiteSummary = {
@@ -150,6 +184,32 @@ function money(value: number) {
   }).format(value);
 }
 
+/**
+ * W06-13 — THE FIVE VIEWS, AND WHY SUMMARY IS FIRST.
+ *
+ * The drawer used to be one long scroll: Performance, then Sites, then
+ * Documents, then up to fifty job rows. Opening it put a stat grid on screen
+ * and everything a person had actually come for — the number to ring, whether
+ * the insurance is in date, what was agreed — either below four hundred pixels
+ * of table or nowhere in the product at all. The question a contractor drawer
+ * is opened to answer is "who are they and can I use them", so that is what it
+ * opens on.
+ *
+ * DETAILS IS SECOND AND IS NOT A SECOND SUMMARY. It holds precisely the fields
+ * the Summary leaves out — the address, the postcode, the notes, the policy
+ * number, the rating, and every certification rather than the one expiring
+ * soonest — so the two together are the whole record with nothing said twice.
+ * The three that follow are the relations, in the order they were already in.
+ *
+ * Editing still happens in "Manage contractors". This drawer reads the record;
+ * it writes only the two things that are relations rather than fields — a site
+ * link, and a document filed against them.
+ */
+const TABS = ["Summary", "Details", "Sites", "Documents", "Jobs"] as const;
+
+/** Namespaces the tab and panel ids, so nothing on the page can collide. */
+const TAB_PREFIX = "contractor-profile";
+
 export function ContractorProfile({
   contractor,
   jobs,
@@ -158,7 +218,7 @@ export function ContractorProfile({
   onClose,
   onNotify,
 }: {
-  contractor: ContractorSummary;
+  contractor: ContractorRecord;
   jobs: ProfileJob[];
   performance: ContractorPerformance;
   /** What window the performance figures were measured over. */
@@ -166,6 +226,16 @@ export function ContractorProfile({
   onClose: () => void;
   onNotify: (message: string) => void;
 }) {
+  /*
+   * SUMMARY, ALWAYS, ON EVERY OPEN.
+   *
+   * Deliberately not remembered. The drawer is keyed on the contractor's id at
+   * its call site, so it remounts per contractor anyway; and a drawer that
+   * reopened on whichever tab was last used would answer a question the reader
+   * asked about somebody else. The overview is cheap to leave and one key press
+   * from anything else.
+   */
+  const [tab, setTab] = useState<(typeof TABS)[number]>("Summary");
   const [links, setLinks] = useState<LinkPayload | null>(null);
   const [documents, setDocuments] = useState<DocumentRow[] | null>(null);
   const [search, setSearch] = useState("");
@@ -391,8 +461,38 @@ export function ContractorProfile({
 
   const canEditSites = links?.canEdit ?? false;
   const canManageDocuments = links?.canManageDocuments ?? false;
-  const completion = Math.round(
-    (performance.completedJobs / Math.max(performance.assignedJobs, 1)) * 100,
+  /*
+   * The two relation counts the Summary shows, taken from the rows this drawer
+   * has ALREADY LISTED rather than from a number it cannot check. Null while
+   * the fetch is in flight — the Summary prints an em dash for that and a zero
+   * for zero, because "they hold nothing" is a claim and "not loaded yet" is
+   * not the same claim.
+   *
+   * The site profile's own Overview once made the opposite mistake: its
+   * "Documents held" card read the length of the COMPLIANCE register and
+   * printed 265 while the Documents tab below it listed two files.
+   */
+  const documentsHeld = documents ? documents.length : null;
+  const sitesLinked = links ? links.links.length : null;
+  /** Every certification the register holds — the Details tab's list. */
+  const certifications = contractor.certificationEntries ?? [];
+  /*
+   * WHETHER THE DETAILS TAB HAS A RECORD TO SHOW.
+   *
+   * The same rule the Summary's cards use, and the same reason: a panel of six
+   * em dashes reads as a screen that failed rather than as a record nobody has
+   * filled in. `rating` is tested for null AND undefined because two producers
+   * build these rows — `/api/workspace` sends null, and the Contractors page's
+   * synthesised fallback roster does not send the key at all.
+   */
+  const hasRating = contractor.rating !== null && contractor.rating !== undefined;
+  const hasRecordDetail = Boolean(
+    contractor.address ||
+      contractor.postcode ||
+      contractor.policyNumber ||
+      contractor.insuranceNotes ||
+      contractor.notes ||
+      hasRating,
   );
 
   return (
@@ -417,20 +517,50 @@ export function ContractorProfile({
         tabIndex={-1}
         ref={surfaceRef}
       >
+        {/*
+          THE HEADER IS THE IDENTITY AND NOTHING ELSE NOW.
+
+          It used to print the availability word, an " · archived" suffix and a
+          full copy of the contact cell. Two of those three were wrong the
+          moment the Summary existed: joining `availability` to `active` with a
+          dot presents two different columns as one state — the exact reading
+          the register's own subtitle was rewritten to stop — and the contact
+          cell was about to appear twice within one screenful. Both now live in
+          the Summary, under two separate labels and a sentence saying they are
+          not the same claim.
+
+          The ARCHIVED flag stays here, because it is the one fact that must be
+          visible on every tab: reading a job list or filing a document against
+          somebody who is off the register is a mistake nobody makes on purpose.
+          Availability does not, because it changes weekly and is not a reason
+          to stop reading.
+        */}
         <div className="detail-drawer__header">
           <div>
             <span>
-              {contractor.availability || "Availability not recorded"}
+              Contractor
               {contractor.active ? "" : " · archived"}
             </span>
             <h2>{contractor.name}</h2>
-            <p className="drawer-label">
-              <ContractorContact contractor={contractor} />
-            </p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close contractor profile">
             <Icon name="close" size={18} />
           </button>
+        </div>
+        {/*
+          The strip sits BETWEEN the header and the scrolling body rather than
+          inside it, so it does not scroll away under a fifty-row job table.
+          `.detail-drawer` is a flex column and `.detail-drawer__body` is the
+          only thing in it that grows.
+        */}
+        <div className="contractor-profile__tabs">
+          <SectionTabs
+            idPrefix={TAB_PREFIX}
+            label="Contractor sections"
+            sections={TABS}
+            active={tab}
+            onChange={setTab}
+          />
         </div>
         <div className="detail-drawer__body contractor-profile">
 
@@ -440,47 +570,108 @@ export function ContractorProfile({
           </p>
         )}
 
-        {/* ── PERFORMANCE ────────────────────────────────────────────────── */}
-        <section className="contractor-profile__section">
-          <h3>Performance</h3>
+        {/* ── SUMMARY ────────────────────────────────────────────────────── */}
+        <SectionPanel
+          idPrefix={TAB_PREFIX}
+          section="Summary"
+          focusable
+          active={tab === "Summary"}
+        >
+          <ContractorSummary
+            contractor={contractor}
+            performance={performance}
+            periodLabel={periodLabel}
+            documentsHeld={documentsHeld}
+            sitesLinked={sitesLinked}
+          />
+        </SectionPanel>
+
+        {/* ── DETAILS ────────────────────────────────────────────────────── */}
+        {/*
+          THE REST OF THE RECORD, and only the rest of it. Every row here is a
+          field the Summary deliberately does not carry: the postal detail, the
+          free text, the policy number, the rating, and the full certification
+          list of which the Summary shows one. Nothing is printed on both tabs.
+        */}
+        <SectionPanel
+          idPrefix={TAB_PREFIX}
+          section="Details"
+          focusable
+          active={tab === "Details"}
+        >
+          <section className="contractor-profile__section">
+            <h3>Details</h3>
+            <div className="contractor-summary__rows">
+              <ContractorRow label="Address" when={Boolean(contractor.address)}>
+                {contractor.address}
+              </ContractorRow>
+              <ContractorRow label="Postcode" when={Boolean(contractor.postcode)}>
+                {contractor.postcode}
+              </ContractorRow>
+              <ContractorRow label="Policy number" when={Boolean(contractor.policyNumber)}>
+                {contractor.policyNumber}
+              </ContractorRow>
+              <ContractorRow label="Insurance notes" when={Boolean(contractor.insuranceNotes)}>
+                {contractor.insuranceNotes}
+              </ContractorRow>
+              {/*
+                A rating out of five, printed as what it is. `rating` is a
+                `real` and null means nobody has rated them — which is not the
+                same as a rating of zero, so the row simply does not appear.
+              */}
+              <ContractorRow label="Rating" when={hasRating}>
+                {contractor.rating} out of 5
+              </ContractorRow>
+              <ContractorRow label="Notes" when={Boolean(contractor.notes)}>
+                {contractor.notes}
+              </ContractorRow>
+            </div>
+            {!hasRecordDetail && (
+              <p className="analytics-empty">
+                No further record detail is held for {contractor.name}. The address, the
+                notes and the policy number are edited under Manage contractors.
+              </p>
+            )}
+          </section>
+
+          {/* ── CERTIFICATIONS ───────────────────────────────────────────── */}
           {/*
-            The window is NAMED. These four are period-scoped measurements, not
-            facts about the contractor, and a completion rate with no window
-            beside it is a number nobody can check. The agreed day rate, the
-            call-out and the hourly rate are deliberately absent: they are
-            agreed TERMS, and summing a rate into a spend total does not
-            summarise cost, it invents it.
+            EVERY ticket, where the Summary shows the one expiring soonest. The
+            state beside each is the one `/api/workspace` classified with
+            `app/lib/expiry-status.ts`; this list picks nothing and decides
+            nothing, so a certificate cannot read "Due soon" here and "Valid"
+            in the record editor.
           */}
-          <p className="drawer-label">Measured over {periodLabel}.</p>
-          <div className="site-stat-grid">
-            <div className="panel">
-              <span className="drawer-label">Assigned jobs</span>
-              <strong>{performance.assignedJobs}</strong>
-            </div>
-            <div className="panel">
-              <span className="drawer-label">Completed</span>
-              <strong>{performance.completedJobs}</strong>
-            </div>
-            <div className="panel">
-              <span className="drawer-label">Completion rate</span>
-              <strong>{completion}%</strong>
-            </div>
-            <div className="panel">
-              <span className="drawer-label">Open urgent</span>
-              <strong>{performance.urgentJobs}</strong>
-            </div>
-            <div className="panel">
-              <span className="drawer-label">Tracked spend</span>
-              <strong>{money(performance.spend)}</strong>
-            </div>
-            <div className="panel">
-              <span className="drawer-label">Documents held</span>
-              <strong>{documents ? documents.length : "—"}</strong>
-            </div>
-          </div>
-        </section>
+          {certifications.length > 0 && (
+            <section className="contractor-profile__section">
+              <h3>Certifications</h3>
+              <ul className="file-list">
+                {certifications.map((entry, index) => (
+                  <li key={`${entry.name}-${index}`}>
+                    <strong>{entry.name}</strong>
+                    <span className="drawer-label">
+                      {entry.expiresOn
+                        ? `Expires ${formatDate(entry.expiresOn)}`
+                        : "No expiry recorded"}
+                    </span>
+                    <ContractorExpiryChip
+                      state={entry.expiryState}
+                      label={entry.expiryLabel}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </SectionPanel>
 
         {/* ── SITES ──────────────────────────────────────────────────────── */}
+        <SectionPanel
+          idPrefix={TAB_PREFIX}
+          section="Sites"
+          focusable
+          active={tab === "Sites"}
+        >
         <section className="contractor-profile__section">
           <h3>Sites</h3>
           {canEditSites && links && (
@@ -582,8 +773,15 @@ export function ContractorProfile({
             </div>
           )}
         </section>
+        </SectionPanel>
 
         {/* ── DOCUMENTS ──────────────────────────────────────────────────── */}
+        <SectionPanel
+          idPrefix={TAB_PREFIX}
+          section="Documents"
+          focusable
+          active={tab === "Documents"}
+        >
         <section className="contractor-profile__section">
           <h3>Documents</h3>
           {canManageDocuments && (
@@ -645,8 +843,15 @@ export function ContractorProfile({
             </ul>
           )}
         </section>
+        </SectionPanel>
 
         {/* ── JOBS ───────────────────────────────────────────────────────── */}
+        <SectionPanel
+          idPrefix={TAB_PREFIX}
+          section="Jobs"
+          focusable
+          active={tab === "Jobs"}
+        >
         <section className="contractor-profile__section">
           <h3>Assigned jobs</h3>
           {jobs.length === 0 ? (
@@ -698,6 +903,7 @@ export function ContractorProfile({
             </div>
           )}
         </section>
+        </SectionPanel>
         </div>
       </aside>
     </>

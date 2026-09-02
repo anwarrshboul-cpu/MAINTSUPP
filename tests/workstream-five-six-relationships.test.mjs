@@ -395,6 +395,45 @@ test("W05-09/W06-10 nothing in the relation's path reads coverage_areas", async 
     assert.doesNotMatch(code, /coverageAreas/, `${path} must not read coverage areas`);
     assert.doesNotMatch(code, /coverage_areas/, `${path} must not read coverage areas`);
   }
+
+  /*
+   * W06-13 — THE SUMMARY IS THE ONE PLACE COVERAGE IS ALLOWED TO APPEAR, AND
+   * IT IS ALLOWED TO DO EXACTLY ONE THING WITH IT: PRINT IT.
+   *
+   * The owner asked for the declared service areas on the contractor overview,
+   * and that is a legitimate fact about the register row — somebody typed it
+   * into the record and a reader is entitled to see what they typed. It is a
+   * different act from the one the three absences above refuse, which is
+   * INFERRING the contractor-site relation from it. So this file is added to
+   * the test rather than left out of it, with the narrower rule that actually
+   * expresses the contract: coverage may be rendered, and may never be
+   * compared, searched, filtered or matched against anything.
+   *
+   * `coverage_areas` — the raw column — is still refused outright: nothing in
+   * the browser has any business naming it, and a SQL-shaped identifier here
+   * would mean somebody had gone looking for the table.
+   */
+  const summary = codeOnly(await read("app/(app)/portal/contractor-summary.tsx"));
+  assert.doesNotMatch(summary, /coverage_areas/, "the summary must not name the column");
+  assert.match(summary, /const areas = contractor\.coverageAreas \?\? \[\];/, "read once");
+  assert.equal(
+    (summary.match(/coverageAreas/g) ?? []).length,
+    2,
+    "coverage is read exactly twice: the type that declares it, and the one read",
+  );
+  for (const verb of ["includes", "some", "every", "filter", "find", "indexOf", "match"]) {
+    assert.doesNotMatch(
+      summary,
+      new RegExp(`areas\\s*\\.\\s*${verb}\\b`),
+      `a coverage ${verb}() is an inference, not a rendering`,
+    );
+  }
+  // And the screen SAYS so, so the reader cannot draw the conclusion either.
+  assert.match(
+    summary,
+    /It does not decide which sites\s*\n?\s*they are appointed to/,
+    "the summary has to say that declared coverage is not the site relation",
+  );
 });
 
 test("W05-09/W06-10 both ids are checked against this tenant BEFORE any write", async () => {
@@ -462,9 +501,39 @@ test("W05-09 the site profile has a Contractors tab that lists, links and unlink
 
 test("W06-10 the contractor profile answers all four questions on one screen", async () => {
   const profile = await read("app/(app)/portal/contractor-profile.tsx");
-  for (const heading of ["Performance", "Sites", "Documents", "Assigned jobs"]) {
+  /*
+   * RE-POINTED BY W06-13, NOT RELAXED.
+   *
+   * The contract this test protects is that a reader can answer all four
+   * questions — which jobs, which sites, which documents, how are they
+   * performing — from the contractor drawer, without leaving it for another
+   * screen. That is unchanged. What changed is the drawer's shape: it is now
+   * five tabbed views rather than one continuous scroll, and the Performance
+   * stat grid moved into the Summary card that opens first, beside the
+   * contact, status, coverage, compliance and agreed-terms groups it never
+   * had. So "one screen" is now "one surface", and the surface is these two
+   * files: the drawer, and the summary it renders.
+   *
+   * Each heading is still asserted, and each is asserted in the file that
+   * actually owns it — a heading matched against a concatenation of both files
+   * would pass if BOTH copies ended up in one of them.
+   */
+  const summary = await read("app/(app)/portal/contractor-summary.tsx");
+  for (const heading of ["Sites", "Documents", "Assigned jobs"]) {
     assert.match(profile, new RegExp(`<h3>${heading}</h3>`), `${heading} is missing`);
   }
+  assert.match(summary, /<h3>Performance<\/h3>/, "Performance is missing from the summary");
+  /*
+   * AND THE SUMMARY IS WHAT OPENS. A drawer that had the overview and opened on
+   * the job table would have moved the answer rather than surfaced it.
+   */
+  assert.match(
+    profile,
+    /useState<\(typeof TABS\)\[number\]>\("Summary"\)/,
+    "the drawer must open on the Summary",
+  );
+  assert.match(profile, /const TABS = \["Summary",/, "and Summary must be the first tab");
+
   assert.match(profile, /\/api\/contractor-sites\?contractorId=/);
   assert.match(profile, /\/api\/files\?contractorId=/);
 
@@ -472,11 +541,16 @@ test("W06-10 the contractor profile answers all four questions on one screen", a
    * ATTRIBUTION IS NOT RECOMPUTED HERE. The rule lives in
    * `app/lib/contractor-attribution.ts` and the page applies it once; a panel
    * with a second copy would be a second answer to "whose job was that", which
-   * is the exact failure W06-12 found in `ContractorScorecard`.
+   * is the exact failure W06-12 found in `ContractorScorecard`. Asserted of the
+   * summary as well as the drawer, because the summary is where the work
+   * figures are now printed and is therefore where a re-derivation would be
+   * tempting.
    */
-  const code = codeOnly(profile);
-  assert.doesNotMatch(code, /attributeContractorWork/, "the profile must be handed its jobs");
-  assert.doesNotMatch(code, /contractorId === /, "and must not re-derive attribution");
+  for (const source of [profile, summary]) {
+    const code = codeOnly(source);
+    assert.doesNotMatch(code, /attributeContractorWork/, "the profile must be handed its jobs");
+    assert.doesNotMatch(code, /contractorId === /, "and must not re-derive attribution");
+  }
 
   const app = await read("app/(app)/portal/portal-app.tsx");
   assert.match(app, /jobs=\{openContractor\.jobs\}/, "the page hands over the attributed jobs");
@@ -596,12 +670,30 @@ test("W06-08 documentCount is rendered, not merely computed", async () => {
     "absent is not zero",
   );
 
+  /*
+   * RE-POINTED BY W06-13, AND THE CLAIM IS UNCHANGED.
+   *
+   * The figure is still on the drawer and is still the count of the rows the
+   * drawer itself listed rather than a number it cannot check. It simply moved
+   * one file: the Summary card renders it, and the drawer — which is what holds
+   * the fetched documents — hands the count over. The null is the same em dash
+   * it always was, and it still is not a zero: "not loaded yet" and "they hold
+   * nothing" are two different statements.
+   */
   const profile = await read("app/(app)/portal/contractor-profile.tsx");
-  assert.match(profile, /Documents held/, "the profile shows the figure too");
   assert.match(
     profile,
-    /\{documents \? documents\.length : "—"\}/,
-    "and there it counts the rows it just listed rather than a number it cannot check",
+    /const documentsHeld = documents \? documents\.length : null;/,
+    "the drawer counts the rows it just listed rather than a number it cannot check",
+  );
+  assert.match(profile, /documentsHeld=\{documentsHeld\}/, "and hands that count to the summary");
+
+  const summary = await read("app/(app)/portal/contractor-summary.tsx");
+  assert.match(summary, /Documents held/, "the summary shows the figure");
+  assert.match(
+    summary,
+    /\{documentsHeld === null \? "—" : documentsHeld\}/,
+    "an em dash for not-yet-loaded, and a zero for zero",
   );
 });
 

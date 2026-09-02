@@ -42,6 +42,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../../components";
 import { formatDate, formatMoney } from "../sites/site-types";
+import { RegisterColumnsPanel } from "./register-columns-panel";
 import {
   RegisterError,
   addRegisterColumn,
@@ -352,65 +353,22 @@ export function RegisterGrid({
         The hidden list is the half that matters. "Remove" on a native column
         MEANS hide, so without somewhere to see what is hidden a column would be
         removable and unrecoverable, which is a delete wearing a different word.
+
+        The markup MOVED to `register-columns-panel.tsx` and is not merely
+        extracted for tidiness: the Contractors register drew a second panel of
+        its own plus a permanent block of "hidden column" chips under its rows,
+        so one fact — `register_columns.hidden_at` — had three renderings.
+        Both registers now mount the same component, and this grid keeps what
+        was always its own: the call, and the re-read after it.
       */}
       {panelOpen && canConfigure ? (
-        <div className="register-columns-panel">
-          <div>
-            <h4>Shown</h4>
-            <ul>
-              {shown.map((column) => (
-                <li key={column.id}>
-                  <span>
-                    {column.title}
-                    {column.native ? <small> built-in</small> : null}
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={busy}
-                    onClick={() => void run(() => setRegisterColumnHidden(column.id, true))}
-                  >
-                    Hide
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <h4>Hidden</h4>
-            {hidden.length ? (
-              <ul>
-                {hidden.map((column) => (
-                  <li key={column.id}>
-                    <span>
-                      {column.title}
-                      {column.native ? <small> built-in</small> : null}
-                    </span>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={() => void run(() => setRegisterColumnHidden(column.id, false))}
-                    >
-                      Show
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="form-hint">Nothing is hidden.</p>
-            )}
-            {/*
-              A CUSTOM column removed with the Delete verb is SOFT-removed: its
-              cells survive and `restoreRegisterColumn` brings both back. It
-              stops appearing in either list above, so the only way to offer the
-              undo is to say so here.
-            */}
-            <p className="form-hint">
-              Deleting a column you added keeps its cells — ask an administrator to restore it.
-            </p>
-          </div>
-        </div>
+        <RegisterColumnsPanel
+          columns={columns}
+          busy={busy}
+          onSetHidden={(column, next) =>
+            void run(() => setRegisterColumnHidden(column.id, next))
+          }
+        />
       ) : null}
 
       <div className="table-scroll">
