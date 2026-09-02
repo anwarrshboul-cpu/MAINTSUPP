@@ -15865,7 +15865,7 @@ body.is-dragging-board-column {
   font-size: 16px;
 }
 
-/* ---- The two pinned lanes, and the lines between the columns ------------ */
+/* ---- The frozen lane, and the lines between the columns ----------------- */
 
 /*
  * `separate` INSTEAD OF `.data-table`'s `collapse`, and that is the price of a
@@ -15909,14 +15909,21 @@ body.is-dragging-board-column {
 }
 
 /*
- * THE LANES.
+ * THE FROZEN LANE — ONE, AND ONLY WHEN THE READER ASKED FOR IT.
  *
- * Two cells per row that are not register columns: the identity at the start
- * and the details chevron at the end. They stay put while the twenty-five
- * columns between them scroll, which is the whole point — the live register was
- * twenty-four columns wide, so opening a contractor meant scrolling four
- * thousand pixels to reach the only control that did it, and hiding the name
- * column left rows with no identity on them at all.
+ * There were two: the identity at the start and a chevron-and-pencil action
+ * lane at the end. The end lane is gone with the markup that drew it. It held
+ * eighty-six permanent pixels of a table the owner had already called too wide,
+ * to offer a press the whole row now answers and an editor the profile drawer
+ * now carries. Nothing here may put a sticky cell back on the right.
+ *
+ * WHAT IS LEFT IS ONE LANE, AND IT IS A COLUMN. `.contractor-register__lane` is
+ * put on a cell by `contractor-register.tsx` only while that column is PINNED
+ * — `register_columns.settings.pinned`, at most one per register. Unpinned, the
+ * class is simply absent, so there is no sticky position to unset, no stale
+ * `left` offset to reset and no shadow to hide: the cell is an ordinary cell
+ * because it never became anything else. That is why none of this is written as
+ * an override.
  *
  * OPAQUE, because the rows scroll UNDERNEATH a sticky cell and a transparent
  * one shows them doing it — which reads as a rendering fault rather than as a
@@ -15999,38 +16006,46 @@ body[data-theme="dark"] .contractor-register {
 }
 
 /*
- * The edge line first, then a soft fall-off outwards. The 1px is the divider —
- * the same one every other column boundary gets, drawn as a shadow because the
- * cell's own `border-right` would be the wrong side for the end lane. The
- * second shadow is the only thing that says "there is more table under here";
- * `-8px` spread keeps it off the cell itself so nothing bleeds inward.
+ * ONE LINE PER BOUNDARY, AND THE FROZEN ONE IS THE SAME LINE IN A DARKER INK.
+ *
+ * This carried `1px 0 0 var(--register-lane-edge)` as a shadow AS WELL AS the
+ * `border-right` every cell in this table draws, which is a 1px soft divider
+ * with a second 1px line painted immediately outside it — a double border on
+ * the one boundary that most needed to look deliberate, and a pixel of shadow
+ * lying over the first scrolling column. Re-colouring the border the lane
+ * already has says the same thing with one line, inside the cell's own box, so
+ * nothing overlaps the column beside it.
+ *
+ * The fall-off is then the only thing that says "there is more table under
+ * here", and `-8px` spread keeps it off the cell so nothing bleeds inward. It
+ * is `transparent` in dark — see the token above; black on a near-black ground
+ * says nothing, and there the darker edge line carries the whole signal.
  */
 .contractor-register__lane--start {
   left: 0;
-  box-shadow: 1px 0 0 var(--register-lane-edge), 8px 0 10px -8px var(--register-lane-depth);
-}
-
-.contractor-register__lane--end {
-  right: 0;
-  box-shadow: -1px 0 0 var(--register-lane-edge), -8px 0 10px -8px var(--register-lane-depth);
+  box-shadow: 8px 0 10px -8px var(--register-lane-depth);
 }
 
 /*
  * The identity lane is the widest thing on the row and the width is declared
  * rather than measured: the name, the archived badge and up to three contact
  * rows all live in it, and an auto width would move every column behind it
- * whenever a longer name arrived. Not resizable, because it is not a column.
+ * whenever a longer name arrived. No resize handle is drawn on it — a lane's
+ * width belongs to the stack inside it rather than to a preference — so this
+ * is the only place it is set.
+ *
+ * ELEMENT + CLASS, and that is what makes the edge colour stick. The divider
+ * every cell draws is `.contractor-register__table th, td` — two classes and an
+ * element — so a bare `.contractor-register__lane--start` loses the tie and the
+ * frozen boundary silently stayed `--line-soft`, indistinguishable from the
+ * twenty-four ordinary ones. Measured: `border-right` read
+ * `rgb(234, 240, 243)` until this selector was raised to match.
  */
-.contractor-register__table .contractor-register__lane--start {
+.contractor-register__table th.contractor-register__lane--start,
+.contractor-register__table td.contractor-register__lane--start {
   width: 250px;
   min-width: 250px;
-}
-
-/* Two icon buttons and their gap. Any wider and the lane starts eating the
-   columns it is supposed to be an escape from. */
-.contractor-register__table .contractor-register__lane--end {
-  width: 86px;
-  min-width: 86px;
+  border-right-color: var(--register-lane-edge);
 }
 
 /*
@@ -16045,12 +16060,6 @@ body[data-theme="dark"] .contractor-register {
   white-space: normal;
 }
 
-.contractor-register__row-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
 /*
  * THE WHOLE ROW OPENS THE CONTRACTOR, so the whole row says so.
  *
@@ -16058,6 +16067,12 @@ body[data-theme="dark"] .contractor-register {
  * underline to give it away and no control under the cursor over most of the
  * row. `is-openable` is set by the component only when it was actually given
  * an `onOpen`, so a grid mounted without one shows a pointer over nothing.
+ *
+ * A POINTER IS NOT A KEYBOARD ROUTE, which is why the name in the identity
+ * cell is a real `<button>` and not a `<tr>` wearing `tabindex`. It is now the
+ * ONLY way in without a mouse — the chevron that used to be the other one has
+ * gone with the action lane — and it takes the page's own 3px `:focus-visible`
+ * ring, so the stop is visible in both themes.
  */
 .contractor-register__row.is-openable {
   cursor: pointer;
@@ -16070,15 +16085,20 @@ body[data-theme="dark"] .contractor-register {
  * band — `tbody` becomes a grid of cards, `thead` is hidden, and every cell
  * takes its label from `data-label` — so there is no horizontal scroll for a
  * frozen column to be frozen against, and a sticky cell with a fixed 250px
- * width inside a card is just a card that will not fit. Both lanes go back to
- * being ordinary cells, the vertical dividers come off because the cards draw
- * their own edges, and the widths are released.
+ * width inside a card is just a card that will not fit. The lane goes back to
+ * being an ordinary cell, the vertical dividers come off because the cards draw
+ * their own edges, and the width is released. The stored pin is untouched: it
+ * simply has nothing to do until the table is a table again.
  *
- * 767 rather than the 760 the card layout itself switches at: 767 is one of
- * this codebase's five agreed breakpoints and 760 is not — several stage tests
- * hold that line. The seven pixels between them are a window where the table is
- * still a table with neither pinning nor dividers, which is a plain scrolling
- * table and not a defect.
+ * 767 AND THE CARDS NOW SWITCH AT 767 TOO, which is what closes the band this
+ * comment used to excuse. The card layout in `brand-overrides.css` switched at
+ * 760 while this unstuck at 767, so 761–767 was a plain wide table with neither
+ * pinning nor dividers — the owner found it, and "a plain scrolling table and
+ * not a defect" was the wrong answer to give them. The two numbers had to meet
+ * and only one of them is allowed: 767 is one of this codebase's five agreed
+ * breakpoints (640 / 767 / 768 / 1024 / 1280) and 760 is not, so the card rules
+ * moved up to 767 rather than this moving down. See the block that carries
+ * `.analytics-table--mobile-cards` in `brand-overrides.css`.
  */
 @media (max-width: 767px) {
   .contractor-register__lane {
@@ -16087,8 +16107,15 @@ body[data-theme="dark"] .contractor-register {
     box-shadow: none;
   }
 
-  .contractor-register__table .contractor-register__lane--start,
-  .contractor-register__table .contractor-register__lane--end {
+  /*
+   * Element + class HERE TOO, and measured rather than assumed. The desktop
+   * width had to be raised to `th.`/`td.` to out-rank the shared divider rule
+   * (see above); this release was left one specificity step below it and lost,
+   * so at 762 the identity cell measured 250px wide inside a card — exactly the
+   * "a card that will not fit" this block exists to prevent.
+   */
+  .contractor-register__table th.contractor-register__lane--start,
+  .contractor-register__table td.contractor-register__lane--start {
     width: auto;
     min-width: 0;
   }

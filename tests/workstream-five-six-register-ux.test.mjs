@@ -267,18 +267,68 @@ test("UX-2 one columns panel component serves both registers, over one hidden-co
   assert.doesNotMatch(css, /\.contractor-register__panel li \{/);
 });
 
-test("UX-1/UX-4 the two pinned lanes are structure, not columns, and cannot be hidden away", async () => {
+test("UX-1/UX-4 the frozen lane is one column, it is never absent, and nothing is pinned right", async () => {
   const grid = await read(GRID);
   const code = codeOnly(grid);
 
-  // Each lane is rendered outside the `shown.map` that draws register columns:
-  // the identity lane before it, the action lane after the extras.
-  const headStart = code.indexOf('className="contractor-register__lane contractor-register__lane--start"');
-  const columnsStart = code.indexOf("{shown.map((column: RegisterColumn, index: number) => (");
-  assert.ok(headStart > 0 && columnsStart > headStart, "the identity header precedes the columns");
+  /*
+   * RE-POINTED, AND THE CONTRACT MOVED UNDER IT — twice, in the same pass.
+   *
+   * It read "the two pinned lanes are structure, not columns". There are no
+   * longer two and the one that is left IS a column:
+   *
+   *   1. THE ACTION LANE IS GONE. The owner asked for the permanent chevron and
+   *      pencil to be removed, so a test that required an `--end` lane was
+   *      requiring the defect. The assertion is inverted rather than deleted —
+   *      "no sticky lane on the right" is the thing to hold now, and holding it
+   *      is what stops the eighty-six pixels coming back.
+   *   2. THE START LANE IS A PINNED COLUMN, not a lane invented beside one.
+   *      `register_columns.settings.pinned`, at most one per register, so the
+   *      identity is drawn ONCE — as the lane, and dropped from the scrolling
+   *      run. The old shape drew the lane beside a still-visible `name` column
+   *      and the live register printed the contractor's name twice per row.
+   *
+   * What the original was protecting survives in the last two assertions and in
+   * the fallback below: the row always says whose row it is.
+   */
+  const headStart = code.indexOf("contractor-register__lane contractor-register__lane--start");
+  const lanesBuilt = code.indexOf("const lanes = gridLanes(");
+  assert.ok(headStart > 0 && lanesBuilt > 0 && lanesBuilt < headStart, "the lanes are decided before they are drawn");
 
   assert.match(code, /contractor-register__lane--start/, "a start lane");
-  assert.match(code, /contractor-register__lane--end/, "an end lane");
+  assert.doesNotMatch(
+    code,
+    /contractor-register__lane--end/,
+    "no sticky action lane on the right — the row press and the profile drawer carry those two verbs",
+  );
+
+  /*
+   * THE FROZEN COLUMN IS NOT ALSO IN THE SCROLLING RUN. This is the assertion
+   * that stops the duplicate name coming back.
+   */
+  assert.match(
+    code,
+    /shown\.filter\(\(column\) => !frozen \|\| column\.id !== frozen\.id\)/,
+    "the pinned column is drawn as the lane and removed from the scrolling set",
+  );
+
+  /*
+   * AND A REGISTER WITH NOTHING PINNED STILL HAS ITS IDENTITY FROZEN. Not one
+   * organisation in either database carries a pinned column — the seed sets the
+   * flag at seed time only — so "nothing is pinned" is the state of every live
+   * register, and a lane gated on the flag alone would take the name and the
+   * phone number off the owner's Preview.
+   */
+  assert.match(
+    code,
+    /const pinned = pinnedColumn\(columns\);/,
+    "the register's own answer is asked first",
+  );
+  assert.match(
+    code,
+    /return columns\.find\(\(column\) => column\.nativeField === "name"\) \?\? null;/,
+    "and an unpinned register freezes its identity anyway",
+  );
 
   /*
    * The lane's LABEL follows a rename of the `name` column, because renaming is
@@ -290,8 +340,13 @@ test("UX-1/UX-4 the two pinned lanes are structure, not columns, and cannot be h
    */
   assert.match(
     code,
-    /snap\.columns\.find\(\(column\) => column\.nativeField === "name"\)\?\.title \?\? "Contractor"/,
-    "the identity lane takes its title from the name column when there is one",
+    /snap\.columns\.find\(\(column\) => column\.nativeField === "name"\) \?\? null;/,
+    "the identity column is found by its native field",
+  );
+  assert.match(
+    code,
+    /identityColumn\?\.title \?\? "Contractor"/,
+    "and the lane takes its title from that column when there is one",
   );
 
   /*
@@ -310,9 +365,15 @@ test("UX-1/UX-4 the two pinned lanes are structure, not columns, and cannot be h
   );
 });
 
-test("UX-1/UX-4 the lanes sit on a tier token and are opaque in both themes", async () => {
+test("UX-1/UX-4 the frozen lane sits on a tier token and is opaque in both themes", async () => {
   const css = await read(GLOBALS);
-  const lanes = css.slice(css.indexOf("---- The two pinned lanes"));
+  /*
+   * RE-POINTED at the section's new heading, which changed with its subject:
+   * "The two pinned lanes" became "The frozen lane" when the right-hand action
+   * lane was deleted. The slice is what scopes every assertion below to this
+   * register's styling, so it follows the heading rather than being widened.
+   */
+  const lanes = css.slice(css.indexOf("---- The frozen lane,"));
   assert.ok(lanes.length > 0, "globals.css must carry the lane section");
 
   // A raw number here is what `tests/ui-batch-overlays.test.mjs` refuses, and
@@ -348,10 +409,33 @@ test("UX-1/UX-4 the lanes sit on a tier token and are opaque in both themes", as
   assert.match(lanes, /background-color: var\(--surface-card\);/);
   assert.match(lanes, /background-image: linear-gradient\(/);
 
-  // Both lanes carry a visible edge, and the dark theme drops the depth
-  // shadow rather than painting black on near-black.
+  /*
+   * THE LANE CARRIES A VISIBLE EDGE, AND EXACTLY ONE LINE DRAWS IT.
+   *
+   * The `--end` half of this pair is gone with the action lane it described.
+   * What replaced it is the stronger claim: the frozen boundary is the SAME
+   * `border-right` every other cell draws, re-coloured — not a second 1px line
+   * painted outside the first as a shadow, which is what it was and which is a
+   * double border on the one boundary meant to look deliberate. The selector
+   * has to be element + class or the shared divider rule out-ranks it and the
+   * edge silently stays `--line-soft`; that was measured, not assumed.
+   */
   assert.match(lanes, /\.contractor-register__lane--start \{\s*left: 0;/);
-  assert.match(lanes, /\.contractor-register__lane--end \{\s*right: 0;/);
+  assert.doesNotMatch(
+    lanes,
+    /\.contractor-register__lane--end/,
+    "nothing is pinned to the right of this table any more",
+  );
+  assert.match(
+    lanes,
+    /th\.contractor-register__lane--start,\s*\.contractor-register__table td\.contractor-register__lane--start \{[^}]*border-right-color: var\(--register-lane-edge\);/,
+    "the frozen edge is the cell's own divider in a darker ink, so there is one line and no bleed",
+  );
+  assert.doesNotMatch(
+    lanes,
+    /box-shadow: 1px 0 0 var\(--register-lane-edge\)/,
+    "a hard 1px shadow beside the border is the double line this replaced",
+  );
   assert.match(lanes, /--register-lane-edge: #2b414b;/, "a dark edge colour");
 
   /*
@@ -377,7 +461,9 @@ test("UX-1/UX-4 the lanes sit on a tier token and are opaque in both themes", as
 
 test("UX-5 the column dividers are one thin line per boundary, and the table does not drift wider", async () => {
   const css = await read(GLOBALS);
-  const lanes = css.slice(css.indexOf("---- The two pinned lanes"));
+  // RE-POINTED at the section's new heading: "The two pinned lanes" became
+  // "The frozen lane" when the right-hand action lane was deleted.
+  const lanes = css.slice(css.indexOf("---- The frozen lane,"));
 
   /*
    * `separate` is not a preference. Under `border-collapse: collapse` the
@@ -459,48 +545,65 @@ test("UX-3 the whole row opens the contractor, and nothing interactive is swallo
   assert.match(css, /\.contractor-register__row\.is-openable \{\s*cursor: pointer;/);
 });
 
-test("UX-4 the details chevron is pinned at the right and the editor keeps its own way in", async () => {
+test("UX-4 there is no permanent action lane, and both of its verbs still have a home", async () => {
   const grid = await read(GRID);
   const code = codeOnly(grid);
 
-  const lane = code.slice(code.indexOf('data-label="Actions"'));
-  const cell = lane.slice(0, lane.indexOf("</td>"));
-
-  // The chevron OPENS the contractor — the visible twin of the row press —
-  // and lives in the lane that never scrolls away.
-  assert.match(cell, /aria-label=\{`Open \$\{row\.name\}`\}/, "named for what it does");
-  assert.match(cell, /onOpen\(row\.id\)/, "and it opens rather than edits");
-
   /*
-   * The pencil is the row's ONLY route to the ordinary editor, which is the
-   * only place a native field can be written. Losing it would leave "Manage
-   * contractors" in the page header — which opens with nobody selected — as
-   * the way to edit one particular contractor.
+   * RE-POINTED, AND THE SUBJECT INVERTED — deliberately, because the owner
+   * asked for exactly what this test used to require.
+   *
+   * It read "the details chevron is pinned at the right and the editor keeps
+   * its own way in", and it was right at the time: a chevron four thousand
+   * pixels along a twenty-four-column row is unreachable, so pinning it was the
+   * fix. What the owner then saw was the cost — a frozen lane holding a chevron
+   * and a pencil on every row at every width, eighty-six pixels of a table they
+   * had already called too wide, for a press the whole row now answers and an
+   * editor the profile drawer now carries.
+   *
+   * So the contract it was protecting is not dropped, it MOVED, and each half
+   * is asserted where it went:
+   *   · OPEN  — the row press, guarded by `ROW_INTERACTIVE_SELECTOR`, plus the
+   *             name button that gives a keyboard the same route. Both are
+   *             covered by the UX-3 test above; what is asserted here is that
+   *             nothing replaced the lane.
+   *   · EDIT  — the profile drawer. `onManage` stays declared on the grid so
+   *             the page's existing wiring type-checks, and is drawn nowhere
+   *             here.
    */
-  assert.match(cell, /aria-label=\{`Edit \$\{row\.name\}`\}/);
-  assert.match(cell, /onManage\(row\.id\)/);
-
-  // Both stop the press reaching the row. Redundant with the guard above and
-  // kept because it states the intent where a reader looks for it.
   assert.equal(
-    (cell.match(/event\.stopPropagation\(\);/g) ?? []).length,
-    2,
-    "each action states that it is not a row press",
+    code.indexOf('data-label="Actions"'),
+    -1,
+    "no Actions cell — that lane is gone, not moved",
+  );
+  assert.doesNotMatch(code, /aria-label=\{`Open \$\{row\.name\}`\}/, "no permanent chevron column");
+  assert.doesNotMatch(code, /aria-label=\{`Edit \$\{row\.name\}`\}/, "no permanent pencil column");
+  assert.doesNotMatch(code, /contractor-register__row-actions/, "and nothing to hold them in");
+  assert.doesNotMatch(
+    code,
+    /<th scope="col" className="contractor-register__lane contractor-register__lane--end">/,
+    "nor a header for a column that no longer exists",
   );
 
   /*
-   * The action lane's header is named in TEXT and not by `aria-label`: axe
-   * flags an empty `<th>` (`empty-table-header`) because a header cell's
-   * accessible name is what a screen reader announces on every cell beneath it.
+   * THE EDITOR'S PROP SURVIVES THE CONTROL. Dropping it from the type would
+   * make the page that has always passed it a compile error in somebody else's
+   * file, and the comment beside it is where a reader will look for the pencil.
    */
-  assert.match(
-    code,
-    /<th scope="col" className="contractor-register__lane contractor-register__lane--end">\s*<span className="visually-hidden">Actions<\/span>/,
+  assert.match(code, /onManage\?: \(id: string\) => void;/, "still declared, deliberately unused");
+  assert.equal(
+    (code.match(/onManage\(/g) ?? []).length,
+    0,
+    "and called nowhere in the grid",
   );
 
-  // The empty-state row spans the register's columns, the page's figures AND
-  // the two lanes — a short colSpan leaves a stray bordered cell beside it.
-  assert.match(code, /colSpan=\{shown\.length \+ extraColumns\.length \+ 2\}/);
+  /*
+   * The empty-state row spans EVERY LANE THE HEADER DREW, counted from the same
+   * list the header drew it from. It was `shown.length + extraColumns.length +
+   * 2` — the two lanes hard-coded into the sum — which is a second derivation
+   * of the width and goes wrong the first time the two disagree.
+   */
+  assert.match(code, /colSpan=\{lanes\.length\}/);
 });
 
 test("UX-1 the contact block is drawn once, in the pinned lane, and not as a scrolling column", async () => {
@@ -554,32 +657,102 @@ test("UX-8 the contractor catalogue's default view is the operational one, not a
   const seeds = [...block.matchAll(/\{ field: "([A-Za-z0-9_]+)"[^}]*\}/g)].map((match) => ({
     field: match[1],
     hidden: /hidden: true/.test(match[0]),
+    pinned: /pinned: true/.test(match[0]),
   }));
-  assert.equal(seeds.length, 25, `the catalogue still describes 25 fields, saw ${seeds.length}`);
+  /*
+   * RE-POINTED FROM 25 TO 31 — the six measurement columns joined the
+   * catalogue, and the contract this test protects is unchanged by it.
+   *
+   * What it has always been about is that the DEFAULT VIEW is the operational
+   * one rather than every field the table holds, and that is still exactly what
+   * is asserted below. The six figures — assigned, completed, completion rate,
+   * open urgent, documents, spend — used to be drawn beside the register from a
+   * hardcoded list in the page, which meant the reader could see them and could
+   * not move or hide them: `reorderRegisterColumns` drops any key with no row
+   * behind it, and the Columns panel cannot list what it has no record of.
+   * Declaring them here is what makes the official requirement that they be
+   * reorderable true, and it costs the register nothing — they carry
+   * `measurement: true`, the grid pairs each with the `extraColumns` renderer
+   * of the same key, and nothing reads a stored value for them.
+   *
+   * So the count moved and the meaning did not. The two assertions that follow
+   * are the real contract and are deliberately left alone.
+   */
+  assert.equal(seeds.length, 31, `the catalogue describes 25 fields and 6 measurements, saw ${seeds.length}`);
+  assert.equal(
+    [...block.matchAll(/measurement: true/g)].length,
+    6,
+    "and exactly six of them are measurements",
+  );
 
   /*
-   * ONE column on by default, and it is `availability`. The page draws six
-   * figures beside the register that are not columns at all — assigned,
-   * completed, completion rate, open urgent, documents, spend — and the grid
-   * draws identity and contact in a pinned lane, so the default view is seven
-   * lanes wide before a native column is on it. `availability` is the field
-   * that decides who gets rung next, so it earns the eighth.
+   * ONE STORED FIELD on by default, and it is `availability`. The six figures
+   * — assigned, completed, completion rate, open urgent, documents, spend —
+   * are now catalogue columns too, so that they can be reordered and hidden
+   * like anything else, but they are computed rather than stored and are
+   * counted separately above. The grid draws identity and contact in a frozen
+   * lane, so the default view is seven lanes wide before a stored field is on
+   * it. `availability` is the field that decides who gets rung next, so it
+   * earns the eighth.
    */
   const visible = seeds.filter((seed) => !seed.hidden).map((seed) => seed.field);
-  assert.deepEqual(visible, ["availability"], "only availability seeds onto the table");
+  /*
+   * RE-POINTED alongside the count above. The six measurements seed VISIBLE
+   * because they are the default operational view the owner asked for — the
+   * register reads Reach them, Assigned, Completed, Completion rate, Open
+   * urgent, Documents, Spend — and they are listed here in catalogue order so a
+   * silent reordering of the default view fails this test rather than shipping.
+   * The contract is unchanged: exactly ONE stored field is on by default, and
+   * it is still `availability`.
+   */
+  assert.deepEqual(
+    visible,
+    [
+      "name",
+      "assigned",
+      "completed",
+      "completion",
+      "urgent",
+      "documents",
+      "spend",
+      "availability",
+    ],
+    "the default view is the identity lane, the six figures, and availability",
+  );
+  assert.deepEqual(
+    visible.filter((field) => !["name", "assigned", "completed", "completion", "urgent", "documents", "spend"].includes(field)),
+    ["availability"],
+    "exactly one STORED field seeds onto the scrolling table",
+  );
 
   /*
-   * `name` SEEDS HIDDEN, which reads like a mistake and is not: the pinned
-   * identity lane prints the contractor's name on every row and cannot be
-   * hidden, so a `name` column shown as well would print the same string twice.
-   * It stays in the catalogue — it is the entry that stops `name` being usable
-   * as a CUSTOM column key — and the Columns panel is one press away.
+   * `name` SEEDS PINNED, AND THIS PIN WAS RE-POINTED RATHER THAN DROPPED.
+   *
+   * It used to assert that `name` seeded HIDDEN, and the reason was sound: the
+   * identity lane printed the contractor's name on every row, so a `name`
+   * column shown as well would have printed the same string twice. The contract
+   * it was protecting is "the contractor's name appears once", and that has not
+   * changed — what changed is where the lane's content comes from. The lane is
+   * now the PINNED column rather than hard-coded structure, so `name` is the
+   * lane: it seeds shown-and-pinned, the grid draws it frozen at the left
+   * instead of in the scrolling run, and it is still printed once.
+   *
+   * Seeding it hidden would now be the bug, because a pinned-and-hidden column
+   * is a frozen lane with nothing in it — which is why the engine refuses to
+   * write that pair at all.
    */
-  assert.ok(
-    seeds.find((seed) => seed.field === "name")?.hidden,
-    "the name column seeds hidden because the lane already prints it",
+  const name = seeds.find((seed) => seed.field === "name");
+  assert.ok(name?.pinned, "the name column seeds pinned, which is what puts it in the lane");
+  assert.ok(!name?.hidden, "and a pinned column is on the register by definition");
+  assert.match(catalogue, /AND `name` SEEDS PINNED RATHER THAN HIDDEN/);
+
+  // Exactly one, on this register. Two frozen lanes on a phone is a table with
+  // no scrolling half left, and the API enforces the same rule on every write.
+  assert.equal(
+    seeds.filter((seed) => seed.pinned).length,
+    1,
+    "at most one pinned column per register, at seed as well as at runtime",
   );
-  assert.match(catalogue, /AND `name` SEEDS HIDDEN, which reads like a mistake and is not/);
 
   /*
    * AND THIS CHANGES NOTHING FOR AN ORGANISATION THAT HAS ALREADY SEEDED.
@@ -590,7 +763,19 @@ test("UX-8 the contractor catalogue's default view is the operational one, not a
    */
   assert.match(catalogue, /WHAT `hidden` IS NOT\. It is a SEED, read once by `ensureRegisterColumns`/);
   const engine = await read("app/lib/register-columns.ts");
-  assert.match(engine, /hiddenAt: seed\.hidden \? now : null,/, "the seed is applied on insert only");
+  /*
+   * RE-POINTED, NOT WEAKENED. This was `hiddenAt: seed.hidden ? now : null` and
+   * it was pinning one thing: that the seed is applied on INSERT and never
+   * re-applied. It still is. The expression grew a second term because `pinned`
+   * now shares the seed and the two contradict each other — a column that is
+   * both is a frozen lane with nothing in it — so the precedence is stated in
+   * the code rather than left to whichever verb somebody presses first.
+   */
+  assert.match(
+    engine,
+    /hiddenAt: seed\.hidden && !seed\.pinned \? now : null,/,
+    "the seed is applied on insert only, and a pin beats a hide",
+  );
   assert.match(engine, /onConflictDoNothing\(\)/, "and never re-applied to an existing row");
 
   // Sites is untouched: its own hidden set is the superseded and import-only
@@ -712,5 +897,332 @@ test("UX-11 the Columns panel's show and hide are the same data model the rest o
     assert.ok(residue[0].deleted_at, "and it carries the timestamp that says so");
   } finally {
     db.close();
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UX-12/13 — the panel the owner accepted: one compact checklist, every verb
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+test("UX-12 the columns panel is ONE compact checklist with every column in it exactly once", async () => {
+  const panel = await read(PANEL);
+  const code = codeOnly(panel);
+
+  /*
+   * ONE MAP, so a column cannot be drawn twice.
+   *
+   * The panel's first version split the columns into Shown and Hidden and drew
+   * two lists. That is the obvious design and the wrong one: toggling a column
+   * moved it to the other side of the panel, so the thing under the pointer
+   * jumped away and had to be found again to undo the press — and it made "is
+   * this column on the table?" a question about which list the reader happened
+   * to be looking at, which on the live contractors register was twenty-five
+   * entries down one side and none down the other.
+   */
+  assert.equal(
+    (code.match(/columns\.map\(/g) ?? []).length,
+    1,
+    "every column is rendered from one map over the whole list",
+  );
+  assert.equal((code.match(/<ul/g) ?? []).length, 1, "and there is one list, not one per kind");
+  assert.doesNotMatch(code, /<h4>/, "no Shown / Hidden headings");
+  assert.doesNotMatch(code, /Nothing is hidden|Nothing is on the table/, "and no empty state for a list that is gone");
+
+  // THE TICK IS THE VISIBILITY, read straight off the server's answer. Nothing
+  // in this component remembers what is hidden.
+  assert.match(code, /type="checkbox"/);
+  assert.match(code, /checked=\{!column\.hidden\}/, "checked means on the register");
+  assert.match(code, /onSetHidden\(column, !event\.target\.checked\)/);
+  assert.doesNotMatch(code, /useState|useEffect|fetch\(/, "the panel still stores nothing");
+
+  /*
+   * COMPACT AND MULTI-COLUMN, AND IT WRAPS RATHER THAN CLIPS.
+   *
+   * `minmax(min(100%, …), 1fr)` is the whole responsive rule: wide gives five
+   * or six across, narrow gives fewer, and a container narrower than one item
+   * gives exactly one. The `min(100%, …)` is what makes that last case wrap
+   * instead of forcing a track wider than the panel and pushing the grid out
+   * through the side of the page. A single full-width vertical list — forty
+   * site columns down one column — is what this refuses.
+   */
+  assert.match(
+    panel,
+    /repeat\(auto-fill, minmax\(min\(100%, \d+px\), 1fr\)\)/,
+    "the checklist is an auto-filling grid, not a single column",
+  );
+  assert.doesNotMatch(
+    panel,
+    /@media/,
+    "it breaks at no width, so it cannot disagree with the five the stylesheets may use",
+  );
+
+  /*
+   * BUILT IN MARKS A NATIVE COLUMN and says the one thing about a column a
+   * reader cannot get from its name: where the value lives, and therefore why
+   * this one can be hidden but never deleted.
+   */
+  assert.match(code, /\{column\.native \? \(/);
+  assert.match(code, /register-columns-panel__badge">Built in</);
+});
+
+test("UX-12 every register verb is reachable per column from the panel, and Remove is custom-only", async () => {
+  const panel = await read(PANEL);
+  const code = codeOnly(panel);
+
+  /*
+   * THE PANEL IS THE ONLY WAY IN FOR A HIDDEN COLUMN. The header menu is
+   * reachable only from a column that is ON the table, so without these a
+   * hidden column could be shown and nothing else — no rename, no move, no
+   * width — until it had been shown, adjusted and hidden again.
+   */
+  for (const label of ["Move earlier", "Move later", "Rename", "Wider", "Narrower", "Remove"]) {
+    assert.match(code, new RegExp(`^\\s*${label}\\s*$`, "m"), `the menu offers ${label}`);
+  }
+
+  // Each verb draws a control only when the host wired it, so a register that
+  // has not adopted one shows nothing rather than a button that does nothing.
+  for (const prop of ["onMove", "onRename", "onResize", "onPin"]) {
+    assert.match(code, new RegExp(`\\{${prop} \\? \\(`), `${prop} gates its own control`);
+  }
+
+  /*
+   * PIN SAYS WHICH WAY IT WILL GO, in the label and in the accessible name.
+   * "Pin" on an already-pinned column would be a control named for the state
+   * rather than for the action, and a screen reader user has no strip of frozen
+   * colour to read the state from.
+   */
+  /*
+   * RE-POINTED FROM `column.pinned` TO `pinnedHere`, and the contract this
+   * protects got STRICTER rather than looser.
+   *
+   * The rule stated just above is that the control is named for the ACTION,
+   * never for the state. Reading the stored flag alone broke that rule on the
+   * register the owner actually has: nobody there has ever pressed Pin, so
+   * every column reports `pinned: false` — including the one visibly sitting
+   * in the frozen lane, because the grid falls back to freezing the identity
+   * column. The button therefore read "Pin" on an already-pinned column, which
+   * is the exact thing this test exists to forbid, and turning the lane off
+   * took two presses: one to make the implicit state explicit, another to
+   * reverse it.
+   *
+   * `pinnedHere` is "pinned as the reader can see it" rather than only as the
+   * row records it. The two assertions below are unchanged.
+   */
+  assert.match(code, /\{pinnedHere \? "Unpin" : "Pin"\}/);
+  assert.match(
+    code,
+    /const pinnedHere =[\s\S]{0,120}?column\.key === frozenKey\);/,
+    "and the effective state is derived once rather than re-computed per control",
+  );
+  assert.match(code, /Unpin \$\{column\.title\} from the left of the register/);
+  assert.match(code, /Pin \$\{column\.title\} to the left of the register/);
+
+  /*
+   * REMOVE IS ABSENT ON A NATIVE COLUMN rather than refused. The header menu
+   * offers Delete on a native column deliberately, so the server's instruction
+   * — "Native columns cannot be deleted. Hide it instead." — is read at the
+   * moment somebody tries; here the tick that does exactly that is two
+   * centimetres to the left, so a refusal would teach nothing.
+   */
+  assert.match(code, /\{onRemove && !column\.native \? \(/, "Remove is offered on custom columns only");
+
+  /*
+   * AND A CUSTOM COLUMN IS IN THE SAME GRID. There is no second list for the
+   * ones somebody added — that was the shape this panel replaced, and it made
+   * the register's own columns and the operator's columns look like two
+   * different kinds of thing when the only difference is where the value lives.
+   */
+  assert.equal(
+    (code.match(/columns\.map\(/g) ?? []).length,
+    1,
+    "custom columns come out of the same map as the built-in ones",
+  );
+
+  // Every control is named for its column. Forty buttons called "Rename" is a
+  // menu a screen reader cannot navigate.
+  for (const name of ["Move ${column.title} earlier", "Rename ${column.title}", "Make ${column.title} wider"]) {
+    assert.ok(code.includes(name), `${name} must be the accessible name`);
+  }
+});
+
+test("UX-13 the Columns button is what opens the panel, on both registers", async () => {
+  /*
+   * REQUIREMENT 21. The checklist is behind a control rather than always on
+   * screen: it is forty rows on the sites register, and a settings panel parked
+   * permanently above a table is a table that starts below the fold. The
+   * control has to say whether it is open — `aria-expanded` — or a keyboard
+   * user presses it and is told nothing happened.
+   */
+  for (const [name, path] of [
+    ["the Contractors register", GRID],
+    ["the Sites register", SITES_GRID],
+  ]) {
+    const source = await read(path);
+    const at = source.search(/\n\s*Columns\n/);
+    assert.ok(at > 0, `${name} has a Columns control`);
+
+    const before = source.slice(Math.max(0, at - 800), at);
+    const expanded = before.match(/aria-expanded=\{(\w+)\}/);
+    assert.ok(expanded, `${name}'s Columns control says whether it is expanded`);
+
+    const flag = expanded[1];
+    assert.match(
+      codeOnly(source),
+      new RegExp(`\\{${flag} &&`),
+      `${name} mounts the panel behind the same flag the button reports`,
+    );
+    assert.match(
+      source,
+      new RegExp(`\\[${flag}, set\\w+\\] = useState\\(false\\)`),
+      `${name}'s panel starts closed`,
+    );
+  }
+});
+
+test("UX-14 one order drives the headers and the cells, so a move takes the column with it", async () => {
+  const sites = await read(SITES_GRID);
+  const code = codeOnly(sites);
+
+  /*
+   * THE SAME ARRAY, TWICE. The header row and every body row map `shown`, so a
+   * reorder cannot move a header without moving the cells under it — the
+   * failure that would put a postcode under a column headed "City" and look
+   * like corrupted data rather than like a rendering bug.
+   */
+  assert.equal(
+    (code.match(/\{shown\.map\(/g) ?? []).length,
+    2,
+    "the headers and the cells come from one ordered list",
+  );
+
+  /*
+   * AND THE ORDER IS THE SERVER'S. There is no local layout and no
+   * `localStorage` key: position, width, label and hidden all live in
+   * `register_columns`, so a reload — or the same person on a second device —
+   * sees the register as it was configured. This is the whole of "persists
+   * across reload".
+   */
+  assert.doesNotMatch(code, /localStorage/, "the layout is not remembered by the browser");
+  assert.match(code, /const next = await fetchRegister\(register\);/);
+  assert.match(code, /setReloadToken\(\(token\) => token \+ 1\);/, "a write is followed by a re-read");
+
+  /*
+   * A PINNED COLUMN LEADS THE TABLE, and nothing is written to put it there.
+   * `column.position` is untouched, so unpinning puts the column straight back
+   * where the operator had it rather than leaving it stranded at the front with
+   * no record of where it came from.
+   */
+  assert.match(code, /const pinned = visible\.filter\(\(column\) => column\.pinned\);/);
+  assert.match(code, /\[\.\.\.pinned, \.\.\.visible\.filter\(\(column\) => !column\.pinned\)\]/);
+});
+
+test("UX-14 a reorder from the panel moves the column and survives a reload", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+
+  /*
+   * ON A COLUMN THIS FILE CREATED. A reorder renumbers every position on the
+   * register, so the assertion has to be about where THIS column landed rather
+   * than about the whole order — the shared development register is somebody
+   * else's screen and they may be dragging it at the same time.
+   */
+  const added = await call("POST", "/api/registers", {
+    register: "contractors",
+    title: `${RUN} ZZQA-PANEL-order`,
+  });
+  assert.equal(added.status, 201, JSON.stringify(added.body));
+  const column = added.body.column;
+  createdColumnIds.push(column.id);
+
+  // The panel's Move sends the WHOLE order, built from the full column list —
+  // hidden columns included, so dropping next to a hidden one does not silently
+  // reshuffle the columns nobody can see.
+  let snapshot = await call("GET", "/api/registers?register=contractors");
+  const keys = snapshot.body.columns.map((entry) => entry.key);
+  const without = keys.filter((key) => key !== column.key);
+  const target = 2;
+  without.splice(target, 0, column.key);
+
+  const moved = await call("PATCH", "/api/registers", {
+    register: "contractors",
+    order: without,
+  });
+  assert.equal(moved.status, 200, JSON.stringify(moved.body));
+
+  // A SECOND GET IS WHAT A RELOADED PAGE DOES. The order is a row, not a
+  // browser's memory of one.
+  snapshot = await call("GET", "/api/registers?register=contractors");
+  const seen = snapshot.body.columns.find((entry) => entry.id === column.id);
+  assert.equal(seen.position, target, "the column is where it was dropped, after a reload");
+
+  // Positions stay dense and unique, which is what stops two columns sharing a
+  // slot and being ordered by a tiebreaker that differs between SQLite and
+  // Postgres.
+  const positions = snapshot.body.columns.map((entry) => entry.position);
+  assert.deepEqual(
+    positions,
+    positions.map((_, index) => index),
+    "0..n-1 with no gaps and no duplicates",
+  );
+
+  // The other panel verbs answer on the same column, which is what "the panel
+  // uses the same data model" has to mean in practice.
+  assert.equal(
+    (await call("PATCH", "/api/registers", { id: column.id, title: `${RUN} ZZQA-PANEL-renamed` }))
+      .status,
+    200,
+    "rename",
+  );
+  assert.equal(
+    (await call("PATCH", "/api/registers", { id: column.id, width: 260 })).status,
+    200,
+    "resize",
+  );
+  snapshot = await call("GET", "/api/registers?register=contractors");
+  const after = snapshot.body.columns.find((entry) => entry.id === column.id);
+  assert.equal(after.title, `${RUN} ZZQA-PANEL-renamed`);
+  assert.equal(after.width, 260);
+
+  // And the custom-column remove the panel offers is the soft one.
+  const removed = await call("DELETE", `/api/registers?id=${encodeURIComponent(column.id)}`);
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  snapshot = await call("GET", "/api/registers?register=contractors");
+  assert.equal(
+    snapshot.body.columns.find((entry) => entry.id === column.id),
+    undefined,
+    "a removed column leaves the register",
+  );
+});
+
+test("UX-12 both registers wire every column verb into the one panel", async () => {
+  /*
+   * REQUIREMENT 18 — the Sites register gets the identical panel, and the
+   * identity is the COMPONENT rather than a shape two screens agree on. That is
+   * settled by `UX-2 one columns panel component serves both registers`. This
+   * test holds the other half: the panel makes every verb but show/hide
+   * optional, so a host that mounts it and passes only `onSetHidden` gets a
+   * checklist and nothing else — the same component, a different register.
+   *
+   * The props are asserted by NAME rather than by what they are bound to,
+   * because each host already owns handlers of the right shapes (`move(column,
+   * delta)`, `rename(column)`) and the wiring is meant to be the function
+   * rather than an adapter around it.
+   */
+  for (const [name, path] of [
+    ["the Contractors register", GRID],
+    ["the Sites register", SITES_GRID],
+  ]) {
+    const source = await read(path);
+    const mount = source.slice(source.indexOf("<RegisterColumnsPanel"));
+    const props = mount.slice(0, mount.indexOf("/>"));
+    for (const prop of ["columns", "busy", "onSetHidden", "onMove", "onRename", "onResize", "onPin", "onRemove"]) {
+      assert.match(
+        props,
+        new RegExp(`\\b${prop}=`),
+        `${name} must pass ${prop} to the panel — the panel draws no control for a verb nobody wired`,
+      );
+    }
   }
 });

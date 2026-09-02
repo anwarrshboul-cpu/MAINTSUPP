@@ -49,6 +49,7 @@ import {
   fetchRegister,
   hiddenColumns,
   orderAfterMove,
+  pinRegisterColumn,
   registerCellValue,
   removeRegisterColumn,
   renameRegisterColumn,
@@ -205,7 +206,28 @@ export function RegisterGrid({
   }, []);
 
   const columns = useMemo(() => snapshot?.columns ?? [], [snapshot]);
-  const shown = useMemo(() => visibleColumns(columns), [columns]);
+  /*
+   * THE PINNED COLUMN IS DRAWN FIRST, whatever its stored position.
+   *
+   * A pin says "keep this where I can see it", and the half of that this grid
+   * can honour without a stylesheet it does not own is the ORDER: the pinned
+   * column leads the table instead of sitting wherever the reader last dragged
+   * it. Freezing it against the horizontal scroll is the other half and belongs
+   * to the register's CSS.
+   *
+   * A REORDER OF THE STORED POSITIONS IS NOT WHAT THIS IS. Nothing is written
+   * here: `column.position` is untouched, so unpinning puts the column straight
+   * back where the operator had it rather than leaving it stranded at the front
+   * with no record of where it came from. `visibleColumns` still decides what
+   * is on the table at all, so a pinned column that somehow arrived hidden
+   * draws nothing rather than reappearing — the server does not permit that
+   * pair, and a grid that quietly repaired it would hide the day it did.
+   */
+  const shown = useMemo(() => {
+    const visible = visibleColumns(columns);
+    const pinned = visible.filter((column) => column.pinned);
+    return pinned.length ? [...pinned, ...visible.filter((column) => !column.pinned)] : visible;
+  }, [columns]);
   const hidden = useMemo(() => hiddenColumns(columns), [columns]);
   const canConfigure = Boolean(snapshot?.canConfigure);
   const canEditValues = Boolean(snapshot?.canEditValues);
@@ -362,13 +384,40 @@ export function RegisterGrid({
         was always its own: the call, and the re-read after it.
       */}
       {panelOpen && canConfigure ? (
-        <RegisterColumnsPanel
-          columns={columns}
-          busy={busy}
-          onSetHidden={(column, next) =>
-            void run(() => setRegisterColumnHidden(column.id, next))
-          }
-        />
+        <>
+          {/*
+            The sentence the panel cannot carry itself, because the Contractors
+            register draws its own above the same component and two would read
+            as a rendering fault. Here rather than in the panel for that reason
+            alone.
+          */}
+          <p className="drawer-label">
+            Every column on this register. Unticking one takes it off the table
+            and keeps its data — hiding is how a built-in column is removed from
+            view without throwing the site&rsquo;s record away.
+          </p>
+          <RegisterColumnsPanel
+            columns={columns}
+            busy={busy}
+            onSetHidden={(column, next) =>
+              void run(() => setRegisterColumnHidden(column.id, next))
+            }
+            /*
+              EVERY VERB THE HEADER MENU HAS, from the panel too. The menu is
+              reachable only from a column that is ON the table, so without
+              these a hidden column could be shown and nothing else — no rename,
+              no move, no width — until it had been shown, adjusted and hidden
+              again. `move` and `rename` are the grid's own handlers, unchanged:
+              the panel deliberately takes the same shapes so the wiring is the
+              function and not an adapter around it.
+            */
+            onMove={move}
+            onRename={rename}
+            onResize={(column, width) => void run(() => resizeRegisterColumn(column.id, width))}
+            onPin={(column, next) => void run(() => pinRegisterColumn(register, column.id, next))}
+            onRemove={(column) => void run(() => removeRegisterColumn(column.id))}
+          />
+        </>
       ) : null}
 
       <div className="table-scroll">

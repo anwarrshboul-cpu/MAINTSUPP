@@ -189,7 +189,15 @@ async function snapshotRegister(register) {
   try {
     const rows = db
       .prepare(
-        `SELECT id, title, width, position, hidden_at, deleted_at
+        /*
+         * `settings` IS IN THE SNAPSHOT because a pin lives in it. Before pins
+         * this column was metadata nothing wrote, so leaving it out of the
+         * restore cost nothing; now a test that pinned a column would hand the
+         * shared development register back with a frozen lane the next person
+         * did not ask for — and, since pinning also clears `hidden_at`, with a
+         * column showing that they had hidden.
+         */
+        `SELECT id, title, width, position, hidden_at, deleted_at, settings
            FROM register_columns
           WHERE organisation_id = ? AND register_key = ?`,
       )
@@ -227,9 +235,9 @@ after(async () => {
       if (createdColumnIds.includes(id)) continue;
       db.prepare(
         `UPDATE register_columns
-            SET title = ?, width = ?, position = ?, hidden_at = ?, deleted_at = ?
+            SET title = ?, width = ?, position = ?, hidden_at = ?, deleted_at = ?, settings = ?
           WHERE id = ?`,
-      ).run(row.title, row.width, row.position, row.hidden_at, row.deleted_at, id);
+      ).run(row.title, row.width, row.position, row.hidden_at, row.deleted_at, row.settings, id);
       db.prepare("DELETE FROM audit_events WHERE entity_id = ?").run(id);
     }
   } catch (error) {
@@ -915,4 +923,290 @@ test("W05-01/W05-08 structural writes are capability-gated and cross-org ids are
     `${RUN} Guarded column`,
     "nothing was mutated before the refusal",
   );
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   The pin — one frozen column per register, and the two rules that hold it
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+test("W06-11 a pin lives in settings and never becomes a column of its own", async () => {
+  const engine = await read("app/lib/register-columns.ts");
+  const schema = await read("db/schema.ts");
+  const route = await read("app/api/registers/route.ts");
+  const client = await read("app/(app)/portal/register/register-client.ts");
+
+  /*
+   * NO MIGRATION, AND NOT BECAUSE ONE WAS AWKWARD. `register_columns.settings`
+   * is a TEXT column of JSON defaulting to an empty object and it exists
+   * precisely so a presentation choice can be added without touching the
+   * schema. A `pinned INTEGER` column would also have walked into the trap this
+   * table was shaped to avoid: `db/sqlite-to-postgres.ts` rewrites comparisons
+   * on the strength of a column NAME, so a flag named for a boolean is a flag
+   * that can be silently mis-rewritten on deployed Postgres while passing
+   * locally on SQLite.
+   */
+  const registerBlock = schema.slice(
+    schema.indexOf("export const registerColumns"),
+    schema.indexOf("export const registerValues"),
+  );
+  assert.match(registerBlock, /settings: text\("settings"\)\.notNull\(\)/);
+  assert.doesNotMatch(registerBlock, /pinned/, "no pinned column on register_columns");
+
+  const init = await read("db/init.ts");
+  const created = init.slice(init.indexOf("CREATE TABLE IF NOT EXISTS register_columns"));
+  assert.doesNotMatch(
+    created.slice(0, created.indexOf("`")),
+    /pinned/,
+    "and none in the migration that creates the table",
+  );
+
+  // Derived on the way out, exactly like `hidden` and `native`, so no reader
+  // has to know that a missing key means false.
+  assert.match(engine, /export const PINNED_SETTING = "pinned";/);
+  assert.match(engine, /pinned: settings\[PINNED_SETTING\] === true,/);
+  assert.match(client, /pinned: boolean;/, "the wire shape carries it");
+
+  /*
+   * RE-POINTED — UNPINNING NOW WRITES `false` INSTEAD OF DELETING THE KEY, and
+   * the pin is stronger for it rather than weaker.
+   *
+   * The original rule was that `{"pinned": false}` and `{}` mean the same
+   * thing, so only one spelling should exist. That was true of the STORE and
+   * false of the PRODUCT. A register with no pinned column falls back to
+   * freezing the identity lane — a row that does not say whose row it is was
+   * the defect the lane was built for — so with only one spelling there was no
+   * way for a reader to turn the frozen lane OFF. Unpinning was
+   * indistinguishable from never having configured anything, and the fallback
+   * re-froze the column on the next render. The official requirement asks for
+   * unpinning to leave "no sticky left", which the old storage could not say.
+   *
+   *   {}                     nobody has ever chosen  -> fall back, freeze identity
+   *   {"pinned": false}      somebody chose no       -> no frozen lane
+   *   {"pinned": true}       somebody chose this one -> freeze it
+   *
+   * The cost is that a reader must test `=== true` rather than the key's
+   * presence, which is what `pinned:` on the line above already asserts.
+   */
+  assert.match(engine, /settings\[PINNED_SETTING\] = pinned;/);
+  assert.doesNotMatch(
+    engine,
+    /delete settings\[PINNED_SETTING\]/,
+    "unpinning must be sayable out loud, not expressed as an absence",
+  );
+
+  // And the write merges rather than replaces, so a later release's metadata is
+  // not lost because somebody pressed Pin.
+  assert.match(engine, /export function settingsWithPin\(/);
+  assert.match(route, /settingsWithPin\(existing\.settings, body\.pinned\)/);
+});
+
+test("W06-11 the pin verb is dispatched on body shape and refuses what it cannot resolve", async () => {
+  const route = await read("app/api/registers/route.ts");
+  const client = await read("app/(app)/portal/register/register-client.ts");
+
+  // Same dispatch as `title` / `width` / `hidden` / `restore`: the shape of the
+  // body says which verb it is, so a fifth endpoint was not needed for a fifth
+  // fact about presentation.
+  assert.match(route, /\{ id, pinned: boolean \}`\s+freeze this column at the left/);
+  assert.match(route, /if \(body\.pinned !== undefined\) \{/);
+  assert.match(route, /A column is pinned or it is not; say true or false\./);
+
+  /*
+   * BOTH INVARIANTS ARE IN THE WRITE, because neither has an index behind it.
+   * A pin is a key inside a JSON string, and a partial index over
+   * `json_extract(settings, '$.pinned')` is exactly the kind of expression the
+   * SQLite-to-Postgres shim would need a special case for.
+   */
+  assert.match(route, /patch\.hiddenAt = null;/, "pinning clears hidden_at");
+  assert.match(
+    route,
+    /await unpinOtherRegisterColumns\(/,
+    "and releases whatever else was pinned, in the same request",
+  );
+  assert.match(
+    route,
+    /if \(body\.hidden === true && toRegisterColumn\(existing\)\.pinned\) \{/,
+    "and hiding a pinned column releases the pin, the other direction of the same rule",
+  );
+
+  // The contradiction is refused rather than resolved: either half of
+  // `{ pinned: true, hidden: true }` could be the one the caller meant.
+  assert.match(route, /A pinned column is on the register\. Unpin it before hiding it\./);
+
+  // The client sends the register as well as the id, and a mismatch is answered
+  // like any other id that is not this organisation's.
+  assert.match(client, /export async function pinRegisterColumn\(/);
+  assert.match(client, /send\("PATCH", "\/api\/registers", \{ register, id, pinned \}\)/);
+  assert.match(
+    route,
+    /if \(body\.register !== undefined && body\.register !== existing\.registerKey\) \{/,
+  );
+});
+
+test("W06-11 the contractors identity column seeds pinned, and a seed is read once", async () => {
+  const catalogue = await read("app/lib/register-catalogue.ts");
+  const engine = await read("app/lib/register-columns.ts");
+
+  const block = catalogue.slice(
+    catalogue.indexOf("export const CONTRACTOR_NATIVE_COLUMNS"),
+    catalogue.indexOf("/** The native columns a register starts with"),
+  );
+  const name = block.match(/\{ field: "name"[^}]*\}/)[0];
+  assert.match(name, /pinned: true/, "the identity column is the frozen lane");
+  assert.doesNotMatch(name, /hidden: true/, "and a pinned column is on the register");
+
+  /*
+   * SITES IS UNTOUCHED. Requirement 18 asked for the same PANEL on both
+   * registers, not for the same register; nothing in the sites catalogue pins
+   * anything, and this is the assertion that says the pin work did not quietly
+   * redesign the other screen.
+   */
+  const sites = catalogue.slice(
+    catalogue.indexOf("export const SITE_NATIVE_COLUMNS"),
+    catalogue.indexOf("export const CONTRACTOR_NATIVE_COLUMNS"),
+  );
+  assert.doesNotMatch(sites, /pinned: true/, "no sites column seeds pinned");
+
+  /*
+   * READ ONCE, AT SEED — the same promise `hidden` makes, and it has to be made
+   * again because a pin is more visible than a hidden column. An organisation
+   * that has already seeded keeps whatever it has pinned since, including
+   * nothing; `onConflictDoNothing` is what stops the flag being re-applied to a
+   * row that already exists.
+   */
+  assert.match(engine, /settings: settingsWithPin\("\{\}", seed\.pinned === true\),/);
+  assert.match(engine, /onConflictDoNothing\(\)/);
+
+  /*
+   * AND PINNED WINS OVER HIDDEN AT SEED. A row that is both is a frozen lane
+   * with nothing in it, and it would be repaired differently depending on which
+   * verb somebody pressed first. RE-POINTED from the older
+   * `hiddenAt: seed.hidden ? now : null` in this file's sibling: the seed is
+   * still applied on insert only, which is what that pin was protecting, and
+   * what changed is that the two flags now have a stated precedence rather than
+   * a silent one.
+   */
+  assert.match(engine, /hiddenAt: seed\.hidden && !seed\.pinned \? now : null,/);
+});
+
+test("W06-11 pinning shows the column, unpins the other, and survives a reload", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+  await snapshotRegister("sites");
+
+  /*
+   * EXERCISED ON TWO COLUMNS THIS FILE CREATED. The pin is the one verb that
+   * changes another column as a side effect, so testing it on seeded columns
+   * would leave the shared development register with somebody else's lane
+   * released — and pinning also SHOWS a column, so it would undo a hide as
+   * well. `snapshotRegister` carries `settings` for the same reason.
+   */
+  const first = await call("POST", "/api/registers", {
+    register: "sites",
+    title: "ZZQA-PANEL-pin-first",
+  });
+  const second = await call("POST", "/api/registers", {
+    register: "sites",
+    title: "ZZQA-PANEL-pin-second",
+  });
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  assert.equal(second.status, 201, JSON.stringify(second.body));
+  const one = first.body.column;
+  const two = second.body.column;
+  createdColumnIds.push(one.id, two.id);
+  assert.equal(one.pinned, false, "a new column is not pinned");
+
+  // HIDE IT FIRST, so the next step proves the thing that matters: the live
+  // contractors register has every native column hidden, and a pin that
+  // respected `hidden_at` would have frozen a lane nobody could see.
+  assert.equal((await call("PATCH", "/api/registers", { id: one.id, hidden: true })).status, 200);
+
+  const pinned = await call("PATCH", "/api/registers", {
+    register: "sites",
+    id: one.id,
+    pinned: true,
+  });
+  assert.equal(pinned.status, 200, JSON.stringify(pinned.body));
+  assert.equal(pinned.body.column.pinned, true);
+  assert.equal(pinned.body.column.hidden, false, "PINNING A HIDDEN COLUMN SHOWS IT");
+
+  // Stored in `settings`, which is the whole of the storage contract.
+  assert.deepEqual(pinned.body.column.settings, { pinned: true });
+
+  // PERSISTENCE IS A ROW, so a second GET is what a reloaded page would do.
+  let snapshot = await call("GET", "/api/registers?register=sites");
+  assert.deepEqual(
+    snapshot.body.columns.filter((entry) => entry.pinned).map((entry) => entry.id),
+    [one.id],
+    "the pin survived the reload and it is the only one",
+  );
+
+  // AT MOST ONE PER REGISTER. Pinning the second releases the first in the same
+  // write, so the register is never read with two frozen lanes.
+  const moved = await call("PATCH", "/api/registers", {
+    register: "sites",
+    id: two.id,
+    pinned: true,
+  });
+  assert.equal(moved.status, 200, JSON.stringify(moved.body));
+  snapshot = await call("GET", "/api/registers?register=sites");
+  assert.deepEqual(
+    snapshot.body.columns.filter((entry) => entry.pinned).map((entry) => entry.id),
+    [two.id],
+    "exactly one pinned column, and it is the one just pinned",
+  );
+
+  // HIDING A PINNED COLUMN RELEASES THE PIN — the other direction of "pinned
+  // implies shown", so the register cannot be read in a state the pin verb
+  // could never produce.
+  const hidden = await call("PATCH", "/api/registers", { id: two.id, hidden: true });
+  assert.equal(hidden.status, 200, JSON.stringify(hidden.body));
+  assert.equal(hidden.body.column.pinned, false, "hiding a pinned column unpins it");
+  assert.equal(hidden.body.column.hidden, true);
+
+  // UNPINNING LEAVES THE COLUMN WHERE IT IS. "Stop freezing this" and "take
+  // this off the register" are different requests.
+  await call("PATCH", "/api/registers", { register: "sites", id: two.id, hidden: false });
+  await call("PATCH", "/api/registers", { register: "sites", id: two.id, pinned: true });
+  const released = await call("PATCH", "/api/registers", {
+    register: "sites",
+    id: two.id,
+    pinned: false,
+  });
+  assert.equal(released.body.column.pinned, false);
+  assert.equal(released.body.column.hidden, false, "unpinning does not hide");
+  // RE-POINTED with the rule above: an explicit `false` is what distinguishes
+  // "unpinned" from "never configured", and only the first of those may leave
+  // the register with no frozen lane.
+  assert.deepEqual(
+    released.body.column.settings,
+    { pinned: false },
+    "unpinning records the choice rather than erasing it",
+  );
+
+  // THE REFUSALS, before anything is written.
+  assert.equal(
+    (await call("PATCH", "/api/registers", { id: two.id, pinned: true, hidden: true })).status,
+    400,
+    "a pinned-and-hidden column is refused rather than resolved",
+  );
+  assert.equal(
+    (await call("PATCH", "/api/registers", { id: two.id, pinned: "yes" })).status,
+    400,
+    "and a pin is a boolean",
+  );
+  const wrongRegister = await call("PATCH", "/api/registers", {
+    register: "contractors",
+    id: two.id,
+    pinned: true,
+  });
+  assert.equal(wrongRegister.status, 404, "a column named on the wrong register is not found");
+
+  // And the refusals changed nothing.
+  snapshot = await call("GET", "/api/registers?register=sites");
+  const after = snapshot.body.columns.find((entry) => entry.id === two.id);
+  assert.equal(after.pinned, false);
+  assert.equal(after.hidden, false);
 });

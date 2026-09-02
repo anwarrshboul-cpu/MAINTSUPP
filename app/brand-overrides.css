@@ -2393,75 +2393,6 @@ button.analytics-score-panel {
     color: var(--table-head-fg);
   }
 
-  .analytics-table--mobile-cards {
-    min-width: 0;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-
-  .analytics-table--mobile-cards thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-  }
-
-  .analytics-table--mobile-cards tbody {
-    display: grid;
-    gap: 10px;
-    padding: 12px;
-  }
-
-  .analytics-table--mobile-cards tr {
-    display: grid;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--surface-head);
-  }
-
-  .analytics-table--mobile-cards td {
-    display: grid;
-    min-height: 44px;
-    grid-template-columns: minmax(88px, 34%) minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
-    background: var(--surface-card);
-    white-space: normal;
-  }
-
-  .analytics-table--mobile-cards td:last-child {
-    border-bottom: 0;
-  }
-
-  .analytics-table--mobile-cards td::before {
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 650;
-    content: attr(data-label);
-  }
-
-  .analytics-table--mobile-cards td > :is(strong, span, button) {
-    min-width: 0;
-    justify-self: start;
-  }
-
-  .analytics-table--mobile-cards .analytics-empty {
-    display: block;
-    padding: 20px 12px;
-    text-align: center !important;
-  }
-
-  .analytics-table--mobile-cards .analytics-empty::before {
-    display: none;
-  }
-
   .analytics-status {
     min-height: 30px;
     color: var(--accent-fg);
@@ -2803,6 +2734,106 @@ button.analytics-score-panel {
   .topbar-create,
   .primary-button {
     min-height: 44px;
+  }
+}
+
+/*
+ * THE CARD LAYOUT, AT 767 RATHER THAN 760 — and that seven pixels was a defect
+ * report.
+ *
+ * These ten rules were the tail of the `max-width: 760px` block above. Nine
+ * screens turn a table into a stack of cards with them, and every one of those
+ * tables ALSO has styling that switches at one of this codebase's five agreed
+ * breakpoints — 640 / 767 / 768 / 1024 / 1280. The contractors register is
+ * where the mismatch showed: `globals.css` unsticks its frozen lane and drops
+ * its column dividers at 767, so between 761 and 767 the register was a plain
+ * wide table with no pinning, no dividers and no cards — a layout nobody
+ * designed, reachable on a real tablet, and reported by the owner.
+ *
+ * MOVED RATHER THAN DUPLICATED. Copying the card rules into a 767 block scoped
+ * to one table would have left two card layouts to keep in step and the same
+ * dead band on the other eight screens. Lifting them out whole gives the estate
+ * ONE width at which a table becomes cards, and it is a width on the list.
+ *
+ * The rules stay BELOW the 760 block so the cascade is unchanged everywhere it
+ * already applied: at 760 and under both blocks match and this one is later, so
+ * every declaration it makes still wins exactly as it did when it was the last
+ * thing inside that block. Between 761 and 767 it is the only one of the two in
+ * play, which is the whole point.
+ *
+ * The one honest consequence: in that seven-pixel band the cards take their
+ * type and padding from the desktop `.analytics-table` rules rather than the
+ * phone ones — 14px instead of 13px. The layout is right; one step of the type
+ * scale is not, and that is a better trade than a band with no layout at all.
+ */
+@media (max-width: 767px) {
+  .analytics-table--mobile-cards {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .analytics-table--mobile-cards thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .analytics-table--mobile-cards tbody {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .analytics-table--mobile-cards tr {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-head);
+  }
+
+  .analytics-table--mobile-cards td {
+    display: grid;
+    min-height: 44px;
+    grid-template-columns: minmax(88px, 34%) minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-card);
+    white-space: normal;
+  }
+
+  .analytics-table--mobile-cards td:last-child {
+    border-bottom: 0;
+  }
+
+  .analytics-table--mobile-cards td::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+    content: attr(data-label);
+  }
+
+  .analytics-table--mobile-cards td > :is(strong, span, button) {
+    min-width: 0;
+    justify-self: start;
+  }
+
+  .analytics-table--mobile-cards .analytics-empty {
+    display: block;
+    padding: 20px 12px;
+    text-align: center !important;
+  }
+
+  .analytics-table--mobile-cards .analytics-empty::before {
+    display: none;
   }
 }
 
@@ -8830,45 +8861,62 @@ body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
 .register-add-column .form-field { flex: 1 1 220px; min-width: 0; }
 
 /*
- * SHOWN AND HIDDEN, SIDE BY SIDE. The hidden list is the half that matters:
- * "remove" on a built-in column means HIDE, so without somewhere to see what is
- * hidden the removal would be unrecoverable, which is a delete wearing a
- * different word.
+ * ONE CHECKLIST, NOT TWO LISTS SIDE BY SIDE.
+ *
+ * It was `grid-template-columns: repeat(2, minmax(0, 1fr))`, because the panel
+ * drew a Shown list and a Hidden list and the hidden half had to be visible
+ * beside the shown one. The panel now draws ONE grid of every column with a
+ * tick against the ones on the register, so the two-column rule had nothing
+ * left to lay out and put the explanatory note in a column BESIDE the list
+ * instead of under it. The panel stacks: list, then note.
+ *
+ * NOT ONE MEDIA QUERY IN THIS SECTION, and that is deliberate. Every track here
+ * is `auto-fill` with a `min(100%, ...)` floor, which narrows to one column on
+ * its own at any width -- so there is no breakpoint to declare and nothing that
+ * can disagree with the five this file is allowed to use (640 / 767 / 768 /
+ * 1024 / 1280). The rule that used to unstack the panel at 767 went with the
+ * two columns it was unstacking.
  */
 .register-columns-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
   padding: 14px;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: var(--surface-sunken);
 }
 
-.register-columns-panel h4 {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.register-columns-panel ul {
+/*
+ * The track is declared in the component as an inline style as well, on the
+ * grounds that a panel should not arrive without the layout it cannot render
+ * without while its stylesheet is in another hand. The two are the same three
+ * declarations; this is the copy that survives when the inline one is deleted.
+ * `min(100%, 172px)` and not a bare 172px: a fixed floor inside a narrower
+ * panel forces a track wider than its container and pushes the grid out through
+ * the side of the page.
+ */
+.register-columns-panel__grid {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 172px), 1fr));
   gap: 6px;
-  margin: 0 0 8px;
+  margin: 0;
   padding: 0;
-  max-height: 260px;
-  overflow-y: auto;
   list-style: none;
 }
 
-.register-columns-panel li {
+/*
+ * A ROW OF THE CHECKLIST. The tick and its label take the space, the badges sit
+ * after them and the menu is last, so forty of them line up whatever the column
+ * is called. `min-width: 0` because the label ellipsises and a flex item floors
+ * at its min-content, which would let one long title widen the whole track past
+ * the one the auto-fill chose.
+ */
+.register-columns-panel__item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 5px 8px;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px 4px 4px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-card);
@@ -8876,8 +8924,131 @@ body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
   font-size: 12px;
 }
 
-.register-columns-panel li small { color: var(--muted-2); font-size: 10px; }
-.register-columns-panel li .secondary-button { padding: 3px 9px; font-size: 11px; }
+/*
+ * OFF THE REGISTER, AND SAYING SO WITHOUT SAYING IT TWICE. The tick is already
+ * clear; this is the second, glanceable signal in a grid of forty. Both grounds
+ * are theme tokens, so it reads the same in light and dark.
+ */
+.register-columns-panel__item.is-hidden {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.register-columns-panel__item.is-pinned {
+  border-color: var(--accent-fg);
+}
+
+/*
+ * THE 44px TOUCH FLOOR, taken on the LABEL rather than on the checkbox. The box
+ * is a 13px control and enlarging it makes an outsized tick; the label
+ * activates it, so the target is the whole row of text and the box stays the
+ * size it looks.
+ */
+.register-columns-panel__check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.register-columns-panel__check input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.register-columns-panel__label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * "BUILT IN" -- uppercased HERE and written "Built in" in the markup, because
+ * the accessible name a screen reader announces should be a phrase and not an
+ * abbreviation shouted at it. The pin says its one word the same way.
+ */
+.register-columns-panel__badge,
+.register-columns-panel__pin {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.register-columns-panel__pin {
+  color: var(--accent-fg);
+}
+
+/* The disclosure is the anchor for its own menu, so a menu can never open under
+   the column next to it. */
+.register-columns-panel__menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.register-columns-panel__more {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  list-style: none;
+}
+
+/* Safari draws its own triangle on a `summary` and ignores `list-style`. */
+.register-columns-panel__more::-webkit-details-marker {
+  display: none;
+}
+
+.register-columns-panel__more:hover,
+.register-columns-panel__menu[open] > .register-columns-panel__more {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+/*
+ * `--z-popover` and never a number: `tests/ui-batch-overlays.test.mjs` refuses a
+ * raw value at or above 10, and every other menu that opens over a list in this
+ * product is on that tier.
+ */
+.register-columns-panel__actions {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-card);
+  box-shadow: 0 12px 30px rgba(7, 24, 38, .18);
+}
+
+.register-columns-panel__actions .secondary-button {
+  justify-content: flex-start;
+  /* The same 44px the checklist row takes, for the same thumb. */
+  min-height: 44px;
+  padding: 4px 10px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.register-columns-panel__note {
+  margin: 0;
+}
 
 /* The header cell is the anchor for its own menu, so the menu can never open
    under a neighbouring column. */
@@ -9007,10 +9178,6 @@ body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
  * Show / Hide button wraps under a truncated column name.
  */
 @media (max-width: 767px) {
-  .register-columns-panel {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .register-view-switch {
     width: 100%;
   }
@@ -9218,13 +9385,29 @@ body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
   white-space: nowrap;
 }
 
+/*
+ * THE INK IS #0a736c, WHICH IS WHERE IT WAS ALWAYS MEANT TO BE.
+ *
+ * The comment above says this chip uses the same teal as
+ * `.workspace-expiry-chip.is-valid`, so that "in date" and "on the register"
+ * do not read as two different greens. It stopped being true: that chip's ink
+ * moved from #0f8f86 to #0a736c when axe reported the whole family at under
+ * 4.5:1, and this copy was left behind at the old value -- 3.54:1 on the
+ * #e3f6f5 the wash composites to, reported serious, on the one chip in the
+ * drawer's Status card.
+ *
+ * So the fix is not a new colour picked to clear the floor; it is the sibling's,
+ * which clears it with room (5.10:1 on the same composited ground, measured
+ * there) and restores the invariant the comment claims. The wash and the border
+ * are untouched -- they are what makes the state readable at a glance.
+ */
 .contractor-summary__state.is-active {
   border-color: rgba(18, 180, 168, 0.45);
   background: rgba(18, 180, 168, 0.12);
-  color: #0f8f86;
+  color: #0a736c;
 }
 
-/* The dark card needs the lighter teal; #0f8f86 on it is under 3:1. */
+/* The dark card needs the lighter teal; the light ink on it is under 3:1. */
 body[data-theme="dark"] .contractor-summary__state.is-active {
   color: #29d3c6;
 }

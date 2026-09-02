@@ -203,7 +203,10 @@ function money(value: number) {
  *
  * Editing still happens in "Manage contractors". This drawer reads the record;
  * it writes only the two things that are relations rather than fields — a site
- * link, and a document filed against them.
+ * link, and a document filed against them. What it now also does is CARRY THE
+ * WAY IN to that editor — see `openEditor` below. The register's pinned pencil
+ * is gone, so this header is the only route a person has to the one editor, and
+ * the drawer had to grow the affordance rather than grow a form.
  */
 const TABS = ["Summary", "Details", "Sites", "Documents", "Jobs"] as const;
 
@@ -216,6 +219,7 @@ export function ContractorProfile({
   performance,
   periodLabel,
   onClose,
+  onManage,
   onNotify,
 }: {
   contractor: ContractorRecord;
@@ -224,6 +228,17 @@ export function ContractorProfile({
   /** What window the performance figures were measured over. */
   periodLabel: string;
   onClose: () => void;
+  /**
+   * Open the ordinary contractor editor — the only way to write a native field.
+   *
+   * THE SAME CALLBACK THE REGISTER IS HANDED, passed straight through by the
+   * Contractors page, so pressing Edit here and pressing Edit anywhere else
+   * reaches one `openWorkspaceManager("contractor", id)` and one record editor.
+   * Required rather than optional on purpose: with the table's pinned pencil
+   * removed, an unwired drawer is a product with no way to edit a contractor,
+   * and that is a failure the type checker should catch rather than the owner.
+   */
+  onManage: (id: string) => void;
   onNotify: (message: string) => void;
 }) {
   /*
@@ -279,6 +294,40 @@ export function ContractorProfile({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  /**
+   * EDIT — HAND THE RECORD TO THE ONE EDITOR, AND GET OUT OF ITS WAY.
+   *
+   * `onManage` is the page's own callback, unchanged and unwrapped: it opens
+   * `WorkspaceDataManager` on the contractor tab with this row selected. There
+   * is no second form here and there must not be one — the register editor is
+   * where the 25 native fields, their validation and their save verb live, and
+   * a drawer-local copy of any of it is a second answer to "what did we agree
+   * their day rate was".
+   *
+   * THE DRAWER CLOSES FIRST, and that ordering is not cosmetic. Both this panel
+   * and the manager listen for Escape on `window`, and the manager's handler
+   * (workspace-data-manager.tsx, "ONE LAYER AT A TIME") does not
+   * `preventDefault()` — so leaving this open underneath would mean one Escape
+   * dismissing two overlays at once, which is the exact layering bug that
+   * handler was written to avoid. Closing also hands the focus chain over
+   * cleanly: React runs this panel's effect cleanup before the manager's mount
+   * effect, so focus lands back on the register's name button and the manager
+   * captures THAT as the control to restore to when it closes. Press Edit,
+   * save, close, and the focus ring is back on the contractor you started from.
+   *
+   * `contractor.id` AND NOTHING DERIVED FROM IT. The manager finds its record
+   * with `recordsFor("contractor", workspace).find(item => item.id === …)`, so
+   * the id is the whole contract. On the page's synthesised fallback roster —
+   * the one built out of job text when the register is EMPTY — that lookup
+   * finds nothing and the manager opens on its (empty) contractor list. That is
+   * the truthful landing, it is what the register's pencil did with the same
+   * id before it was removed, and it must not be "fixed" by inventing a record.
+   */
+  const openEditor = useCallback(() => {
+    onClose();
+    onManage(contractor.id);
+  }, [onClose, onManage, contractor.id]);
 
   /*
    * TWO COUNTERS, TWO EFFECTS, NO CALLABLE LOADERS.
@@ -534,6 +583,12 @@ export function ContractorProfile({
           somebody who is off the register is a mistake nobody makes on purpose.
           Availability does not, because it changes weekly and is not a reason
           to stop reading.
+
+          WHAT IS NEW IS THE PENCIL, and it is here rather than on the Summary
+          because the Summary is one of five tabs. Somebody who reads the Jobs
+          list and decides the day rate is wrong should not have to go back a
+          tab to say so; the header is the one strip that is on screen whichever
+          view they are in, and it already holds the drawer's other verb.
         */}
         <div className="detail-drawer__header">
           <div>
@@ -543,9 +598,36 @@ export function ContractorProfile({
             </span>
             <h2>{contractor.name}</h2>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close contractor profile">
-            <Icon name="close" size={18} />
-          </button>
+          {/*
+            TWO BUTTONS IN THE SHARED ACTIONS CLUSTER, not two loose children.
+            `.detail-drawer__actions` (overlay/overlay.css) is the same wrapper
+            the item drawer uses for exactly this — the `margin-left: auto` and
+            the 6px gap live on it once, and the phone rule that sizes a drawer
+            header button to 42x42 already names it. A second bare `<button>`
+            beside the close would have taken `margin-left: auto` a second time
+            and been styled by a rule written for a single control.
+
+            THE NAME SAYS WHOSE RECORD IT IS. "Edit" alone is what a screen
+            reader would announce out of context, and this drawer is opened from
+            a table of thirty contractors; `Edit {name}` is the wording the
+            register's own pencil used before it was removed, so nothing has to
+            be relearned. The word is repeated in `title` for a pointer user,
+            because an icon-only control names itself to nobody else.
+          */}
+          <div className="detail-drawer__actions">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={openEditor}
+              aria-label={`Edit ${contractor.name}`}
+              title={`Edit ${contractor.name}`}
+            >
+              <Icon name="edit" size={17} />
+            </button>
+            <button type="button" className="icon-button" onClick={onClose} aria-label="Close contractor profile">
+              <Icon name="close" size={18} />
+            </button>
+          </div>
         </div>
         {/*
           The strip sits BETWEEN the header and the scrolling body rather than

@@ -55,6 +55,12 @@ type ColumnRow = typeof registerColumns.$inferSelect;
  * carried alongside `native` rather than left to be inferred, because the
  * client needs the field NAME to read and write the value and would otherwise
  * need its own copy of the catalogue.
+ *
+ * `pinned` is derived too, and from a THIRD place: `settings.pinned`. It is not
+ * a SQL column and must not become one — see `PINNED_SETTING` — but a grid that
+ * had to reach into `settings` and remember that a missing key means false
+ * would be a grid that eventually read `settings.pin` or `settings.frozen`
+ * instead. Derived once, here, like the other two.
  */
 export type RegisterColumn = {
   id: string;
@@ -67,6 +73,8 @@ export type RegisterColumn = {
   native: boolean;
   nativeField: string | null;
   hidden: boolean;
+  /** Frozen at the left of the register. At most one per register, and shown. */
+  pinned: boolean;
   settings: Record<string, unknown>;
 };
 
@@ -140,8 +148,108 @@ export function toRegisterColumn(row: ColumnRow): RegisterColumn {
     native: row.nativeField !== null,
     nativeField: row.nativeField,
     hidden: row.hiddenAt !== null,
+    pinned: settings[PINNED_SETTING] === true,
     settings,
   };
+}
+
+/**
+ * WHERE A PIN LIVES, and why it is not a column.
+ *
+ * `register_columns.settings` is a TEXT column holding JSON and defaulting to
+ * `'{}'`; it exists precisely so a presentation choice can be added without a
+ * migration. A `pinned INTEGER` column would have needed one — and worse, a
+ * BOOLEAN-shaped name on this table is the trap the header of this file spends
+ * a paragraph on: `db/sqlite-to-postgres.ts` rewrites comparisons on the
+ * strength of a column NAME, so a flag named for a boolean is a flag that can
+ * be silently mis-rewritten on deployed Postgres while passing locally.
+ *
+ * Named once here so the key cannot drift. Nothing outside this module should
+ * spell it: readers take `column.pinned`, writers call `settingsWithPin`.
+ */
+export const PINNED_SETTING = "pinned";
+
+/**
+ * The `settings` JSON a column should be stored with, pinned or not.
+ *
+ * MERGES rather than replaces. `settings` is shared metadata — a later release
+ * that puts a format or a default in there must not lose it because somebody
+ * pressed Pin — so the existing object is read, one key is set or DELETED, and
+ * the rest is written back untouched.
+ *
+ * Unpinning WRITES `false` rather than removing the key, and the difference
+ * carries meaning: `{}` is "nobody has ever chosen", `{"pinned": false}` is
+ * "somebody chose no". The renderer needs both, because a register with no
+ * pinned column falls back to freezing the identity lane — a row that does not
+ * say whose row it is was the defect the lane was built for. Without an
+ * explicit `false` there is no way for a reader to turn the frozen lane OFF:
+ * the unpin would be indistinguishable from a register that had never been
+ * configured, and the fallback would immediately freeze it again.
+ *
+ * The cost is that a query over this JSON must read `=== true` rather than
+ * test for the key's presence. Every reader already does — see `pinnedColumn`.
+ */
+export function settingsWithPin(existing: string | null | undefined, pinned: boolean): string {
+  let settings: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(existing || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      settings = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Unparseable metadata is replaced rather than preserved: the alternative
+    // is refusing to pin a column because of a string nothing can read.
+  }
+  settings[PINNED_SETTING] = pinned;
+  return JSON.stringify(settings);
+}
+
+/**
+ * Clear the pin from every column of one register EXCEPT the one being pinned.
+ *
+ * AT MOST ONE PINNED COLUMN PER REGISTER, and this is the whole of the
+ * enforcement. Not a unique index: the flag is a key inside a JSON string, and
+ * a partial index over `json_extract(settings, '$.pinned')` is exactly the kind
+ * of expression the SQLite-to-Postgres shim would have to grow a special case
+ * for. Enforced in the write instead, in the same request that sets the new
+ * pin, so the register never has two frozen lanes even for a moment.
+ *
+ * Loops rather than issuing one `UPDATE ... WHERE settings LIKE '%pinned%'`
+ * because the value being written is a REWRITE of each row's own JSON — see
+ * `settingsWithPin`, which must not throw away metadata it does not know about.
+ * At most one row is ever touched: that is the invariant this maintains, and a
+ * register that somehow held two is repaired by the same pass.
+ */
+export async function unpinOtherRegisterColumns(
+  db: RegisterDb,
+  orgId: string,
+  register: RegisterKey,
+  keepId: string,
+): Promise<void> {
+  const rows = await db
+    .select()
+    .from(registerColumns)
+    .where(
+      and(
+        eq(registerColumns.organisationId, orgId),
+        eq(registerColumns.registerKey, register),
+        isNull(registerColumns.deletedAt),
+      ),
+    );
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    if (row.id === keepId) continue;
+    if (!/"pinned"\s*:\s*true/.test(row.settings || "")) continue;
+    await db
+      .update(registerColumns)
+      .set({ settings: settingsWithPin(row.settings, false), updatedAt: now })
+      .where(
+        and(
+          eq(registerColumns.id, row.id),
+          eq(registerColumns.organisationId, orgId),
+        ),
+      );
+  }
 }
 
 /**
@@ -193,8 +301,19 @@ async function seedNativeColumns(db: RegisterDb, orgId: string, register: Regist
     position: index,
     width: seed.width ?? defaultWidthFor(seed.type),
     nativeField: seed.field,
-    settings: "{}",
-    hiddenAt: seed.hidden ? now : null,
+    /* The seed's pin, written where every later reader and writer expects it.
+       `settingsWithPin` rather than a literal so there is one spelling of the
+       key in the codebase — see `PINNED_SETTING`. */
+    settings: settingsWithPin("{}", seed.pinned === true),
+    /*
+     * PINNED WINS OVER HIDDEN, because a column that is both is a frozen lane
+     * with nothing in it. `NativeColumnSeed` says the two flags contradict each
+     * other and this is where that is resolved: a catalogue entry that set both
+     * would otherwise seed a row the pin and hide verbs would immediately have
+     * to repair, and it would be repaired differently depending on which one
+     * somebody pressed first.
+     */
+    hiddenAt: seed.hidden && !seed.pinned ? now : null,
     createdAt: now,
     updatedAt: now,
   }));
@@ -234,6 +353,8 @@ export async function loadRegisterColumns(
   let rows = await read();
   if (rows.length === 0) {
     await seedNativeColumns(db, orgId, register);
+    rows = await read();
+  } else if (await addMissingNativeColumns(db, orgId, register, rows)) {
     rows = await read();
   }
   return rows
@@ -445,4 +566,70 @@ export async function loadRegisterValues(
     (grouped[row.entityId] ??= {})[row.columnKey] = row.value;
   }
   return grouped;
+}
+
+/**
+ * Add catalogue columns an ALREADY-SEEDED register has never heard of.
+ *
+ * `seedNativeColumns` runs once, when a register has no rows at all. That was
+ * enough while the catalogue only ever described columns that existed on the
+ * day an organisation started — but a field added to the product afterwards
+ * reached NO existing workspace, and the only register anybody actually uses is
+ * an existing one. The measurement columns are the case that made it matter:
+ * they are declared in the catalogue so their ORDER is configurable, and an
+ * organisation that seeded before they were declared could not reorder or hide
+ * them because it had no row to move.
+ *
+ * WHAT THIS IS NOT. It is not a re-seed and it cannot become one. It inserts
+ * only `column_key`s the register does not already hold, so a column an
+ * operator renamed, resized, reordered, hid or removed is never revisited — the
+ * unique index is on `(organisation, register, column_key)` and a soft-deleted
+ * row still occupies it. Nobody's configuration is undone by a deploy, which is
+ * the property `NativeColumnSeed.hidden` promises and this must not break.
+ *
+ * New rows land at the END (`max(position) + 1`) rather than at their
+ * catalogue index, because the catalogue's order is a starting suggestion and
+ * an existing register's order is somebody's decision. Appending is the only
+ * placement that adds a column without moving one.
+ *
+ * Returns whether anything was written, so the caller re-reads only then.
+ */
+async function addMissingNativeColumns(
+  db: RegisterDb,
+  orgId: string,
+  register: RegisterKey,
+  existing: readonly { columnKey: string; position: number }[],
+): Promise<boolean> {
+  const held = new Set(existing.map((row) => row.columnKey));
+  const missing = nativeCatalogue(register).filter((seed) => !held.has(seed.field));
+  if (missing.length === 0) return false;
+
+  const now = new Date().toISOString();
+  // max(position) + 1, not `existing.length`: a register whose columns have
+  // been reordered and soft-deleted has gaps, and counting rows would land the
+  // new column on top of one that is already there.
+  let next =
+    existing.reduce((high, row) => (row.position > high ? row.position : high), -1) + 1;
+  const rows = missing.map((seed) => ({
+    id: `rcol_${crypto.randomUUID().replace(/-/g, "")}`,
+    organisationId: orgId,
+    registerKey: register,
+    columnKey: seed.field,
+    title: seed.title,
+    type: seed.type,
+    position: next++,
+    width: seed.width ?? defaultWidthFor(seed.type),
+    nativeField: seed.field,
+    // A pin is a per-organisation choice and this register already has one, or
+    // has deliberately not made one. Arriving late is not a reason to take the
+    // frozen lane off whatever currently holds it.
+    settings: "{}",
+    hiddenAt: seed.hidden ? now : null,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  for (const chunk of chunkRows(rows, SEED_COLUMNS_PER_ROW)) {
+    await db.insert(registerColumns).values(chunk).onConflictDoNothing();
+  }
+  return true;
 }

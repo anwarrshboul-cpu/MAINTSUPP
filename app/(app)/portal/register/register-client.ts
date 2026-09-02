@@ -38,6 +38,16 @@ export type RegisterColumn = {
   native: boolean;
   nativeField: string | null;
   hidden: boolean;
+  /**
+   * Frozen at the left of the register. DERIVED from `settings.pinned` by the
+   * server — there is no `pinned` SQL column and there must not be one.
+   *
+   * At most one column per register carries this, and a pinned column is always
+   * shown: `/api/registers` clears `hidden_at` when it pins and clears the pin
+   * when it hides, so a client can read `pinned` without also checking `hidden`
+   * and can render the frozen lane from the answer alone.
+   */
+  pinned: boolean;
   settings: Record<string, unknown>;
 };
 
@@ -145,6 +155,37 @@ export async function setRegisterColumnHidden(
 }
 
 /**
+ * Freeze this column at the left of the register, or release it.
+ *
+ * TAKES THE REGISTER as well as the id, and sends both. The id alone would
+ * identify the row perfectly well — every other single-column verb here is
+ * addressed by id — but "at most one pinned column" is a claim about a
+ * REGISTER, and pinning a contractors column while believing it to be a sites
+ * one would silently release the other screen's lane. The server answers a
+ * mismatch 404, the same as a foreign id, so the guard costs a caller nothing
+ * it does not already know.
+ *
+ * THE TWO THINGS THIS DOES BESIDES SET A FLAG, both on the server, both worth
+ * knowing before calling it:
+ *
+ *   It UNPINS whatever else was pinned on this register.
+ *   It SHOWS the column — pinning clears `hidden_at`. The live contractors
+ *   register has every native column hidden, so a pin that respected that
+ *   would freeze a lane nobody could see.
+ *
+ * Unpinning does neither: the column stays exactly where it is, still shown.
+ * "Stop freezing this" is not "take this off the register".
+ */
+export async function pinRegisterColumn(
+  register: RegisterKey,
+  id: string,
+  pinned: boolean,
+): Promise<RegisterColumn> {
+  const body = await send("PATCH", "/api/registers", { register, id, pinned });
+  return body.column as RegisterColumn;
+}
+
+/**
  * Commit a new order. `order` may hold keys or ids, mixed.
  *
  * Send the whole visible order, not a pair of indices: a list cannot express
@@ -242,6 +283,23 @@ export function visibleColumns(columns: readonly RegisterColumn[]): RegisterColu
 /** The columns a "show hidden" panel offers to bring back. */
 export function hiddenColumns(columns: readonly RegisterColumn[]): RegisterColumn[] {
   return columns.filter((column) => column.hidden);
+}
+
+/**
+ * The one frozen column, or null.
+ *
+ * "At most one" is the server's invariant, not a hope — see the pin verb in
+ * `app/api/registers/route.ts` — so this returns a column rather than a list,
+ * and a grid drawing the frozen lane cannot accidentally render two of them if
+ * a stale answer ever carried two. `find` takes the first in stored order,
+ * which is the same one every reader would pick.
+ *
+ * A grid that freezes a lane should ALSO drop that column from the scrolling
+ * run — `visibleColumns(...).filter((c) => !c.pinned)` — or the value is drawn
+ * twice on every row.
+ */
+export function pinnedColumn(columns: readonly RegisterColumn[]): RegisterColumn | null {
+  return columns.find((column) => column.pinned) ?? null;
 }
 
 /**

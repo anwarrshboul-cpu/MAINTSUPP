@@ -17,10 +17,52 @@
  * So the panel is a component rather than a shape two grids happen to agree on.
  * Both registers mount THIS. There is still exactly one hidden-column state and
  * it is the server's — the panel holds none of its own, takes the columns it is
- * given, and reports a press back to the grid, which calls
- * `setRegisterColumnHidden` and re-reads. A panel that remembered which columns
- * were hidden would be a second answer to a question the database already
- * answers.
+ * given, and reports a press back to the grid, which makes the call and
+ * re-reads. A panel that remembered which columns were hidden would be a second
+ * answer to a question the database already answers.
+ *
+ * ── WHY ONE CHECKLIST AND NOT TWO LISTS ──────────────────────────────────
+ *
+ * The first version of this component drew Shown on the left and Hidden on the
+ * right, which is the obvious design and the wrong one. A column moved between
+ * the lists when it was toggled, so the thing under the pointer jumped to the
+ * other side of the panel and the reader had to find it again to undo the
+ * press. Worse, the two lists made the answer to "is this column on the table?"
+ * a matter of WHICH LIST the reader happened to be looking at — twenty-five
+ * entries down one side and none down the other, on the live contractors
+ * register — so the panel was widest exactly when it was least useful.
+ *
+ * Every column appears EXACTLY ONCE, in stored order, with a checkbox that says
+ * whether it is on the register. Nothing moves when it is toggled. The list is
+ * one compact grid of short rows rather than a column of full-width ones,
+ * because forty site columns as a single vertical list is a scroll bar over a
+ * settings panel, and because the label is the only long thing on a row.
+ *
+ * ── WHAT THE PANEL DOES AND DOES NOT DO ──────────────────────────────────
+ *
+ * It renders and it reports. Every verb — show, hide, move, rename, resize,
+ * pin, remove — is a CALLBACK the grid supplies, and the grid owns the request
+ * and the re-read afterwards. That is not ceremony: several of these calls
+ * change columns the caller did not name (a reorder renumbers every position, a
+ * resize is clamped by the server, a pin unpins another column and shows this
+ * one), so the snapshot the server holds is the only one that is right and the
+ * panel must not be holding a second copy to merge into.
+ *
+ * EVERY VERB BUT SHOW/HIDE IS OPTIONAL, and a verb with no callback draws no
+ * control. A register that has not wired Pin should show no Pin rather than a
+ * button that does nothing — and a host adding one later gets the control by
+ * passing a function, with nothing to restyle.
+ *
+ * ── WHY `<details>` AND NOT AN OPEN/CLOSED `useState` ─────────────────────
+ *
+ * The per-column menu is a native `<details>`. A `useState` holding which menu
+ * is open would be the panel's first piece of state, and the rule above — the
+ * panel remembers nothing — is much easier to keep when there is no `useState`
+ * in the file at all than when there is one that a later change can quietly
+ * widen. `<details>` also arrives with the keyboard behaviour, the ARIA and the
+ * Escape handling already correct, and it expands IN FLOW rather than over the
+ * panel, so nothing is clipped by the grid it sits in and no menu can open past
+ * the edge of a phone.
  *
  * ── WHY THE CLASS NAMES ARE THE BARE ONES ────────────────────────────────
  *
@@ -34,10 +76,54 @@
 
 import type { RegisterColumn } from "./register-client";
 
+/**
+ * How far one press of Wider or Narrower moves a column.
+ *
+ * The same twenty pixels the Sites grid's own column menu steps by, stated
+ * again rather than imported because the grid imports the panel and the arrow
+ * must not point back. A column resized from the header menu and one resized
+ * from this panel have to move the same distance — two step sizes would read as
+ * one of the controls being broken. The server clamps to `widthRange`, so a
+ * press at either end of the range stops rather than failing.
+ */
+const WIDTH_STEP = 20;
+
+/**
+ * The checklist's layout, inline, and the reason it is not in a stylesheet.
+ *
+ * `repeat(auto-fill, minmax(min(100%, 172px), 1fr))` is the responsive rule
+ * this panel needs and the whole of it: wide gives five or six across, narrow
+ * gives fewer, and a container narrower than one item gives exactly one. The
+ * `min(100%, …)` is what makes that last case WRAP rather than overflow — a
+ * bare `minmax(172px, 1fr)` forces a 172px track inside a 150px panel and
+ * pushes the grid out through the side of the page, which is the failure this
+ * idiom exists to prevent (`brand-overrides.css` carries the same note over the
+ * same fix). There is not one media query in it, so there is no width for it to
+ * break at and nothing here can disagree with the five the stylesheets are
+ * allowed to use.
+ *
+ * Inline because this component's stylesheets are being changed by another
+ * hand in the same piece of work and a layout the panel cannot render without
+ * should not be the half that arrives separately. It is layout only — no
+ * colour, no border, no type — so moving it into `.register-columns-panel__grid`
+ * later is a copy and a delete.
+ */
+const GRID_LAYOUT = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 172px), 1fr))",
+  gap: "6px",
+} as const;
+
 export function RegisterColumnsPanel({
   columns,
   busy,
   onSetHidden,
+  onMove,
+  onRename,
+  onResize,
+  onPin,
+  onRemove,
+  frozenKey,
 }: {
   /** EVERY column the register has, hidden ones included, in stored order. */
   columns: RegisterColumn[];
@@ -45,85 +131,265 @@ export function RegisterColumnsPanel({
   busy: boolean;
   /** Show or hide one column. The grid owns the call and the re-read. */
   onSetHidden: (column: RegisterColumn, hidden: boolean) => void;
+  /**
+   * Move one column `delta` places through the FULL order, hidden columns
+   * included. Signed rather than a target index because the panel knows where
+   * the column is now and nothing else; the grid builds the whole order from it
+   * with `orderAfterMove`, since a list cannot express two columns in one place.
+   */
+  onMove?: (column: RegisterColumn, delta: number) => void;
+  /**
+   * Rename one column. Takes NO title: the grid already owns the prompt, its
+   * wording and its trimming, and a second one here would be a second set of
+   * rules about what an empty answer means.
+   */
+  onRename?: (column: RegisterColumn) => void;
+  /** Resize to an absolute width. The server clamps, so an overshoot stops. */
+  onResize?: (column: RegisterColumn, width: number) => void;
+  /**
+   * Freeze this column at the left of the register, or release it. Pinning
+   * unpins whatever else was pinned AND shows this column — both on the server,
+   * both in the same write — so the panel neither has to nor may do either.
+   */
+  onPin?: (column: RegisterColumn, pinned: boolean) => void;
+  /**
+   * The column the register is ACTUALLY freezing, when that is not the one the
+   * data says is pinned.
+   *
+   * A register where nobody has ever pressed Pin still has a frozen lane: the
+   * grid falls back to the identity column, because a row that does not say
+   * whose row it is was the defect the lane was built for. On such a register
+   * `column.pinned` is `false` for every column — including the one visibly
+   * frozen — so a control labelled from `pinned` alone reads "Pin" on the
+   * column that is already pinned, and turning the lane off takes two presses:
+   * one to make the implicit state explicit, another to reverse it.
+   *
+   * The grid passes the key of whatever it is really freezing. Sites passes
+   * nothing, and should: it persists a pin but draws no frozen lane, so there
+   * the stored flag IS the whole truth and inventing one here would be a label
+   * describing something the reader cannot see.
+   */
+  frozenKey?: string | null;
+  /**
+   * Remove a CUSTOM column. Soft: the cells survive and a restore brings both
+   * back. Never offered on a native column — see the note by the control.
+   */
+  onRemove?: (column: RegisterColumn) => void;
 }) {
   /*
-   * Split here rather than by asking the caller for two lists, because the
-   * split IS the panel's subject: a column is on the table or it is not, and
-   * a caller that could hand over a column in neither list — or in both —
-   * would be a state this panel cannot draw.
+   * Counted here rather than taken as props, so the two numbers cannot
+   * disagree with the list they are describing. `columns` is the register.
    */
-  const shown = columns.filter((column) => !column.hidden);
-  const hidden = columns.filter((column) => column.hidden);
+  const shownCount = columns.filter((column) => !column.hidden).length;
 
   return (
     <div className="register-columns-panel">
-      <div>
-        <h4>Shown</h4>
-        {shown.length ? (
-          <ul>
-            {shown.map((column) => (
-              <li key={column.id}>
-                <span>
-                  {column.title}
-                  {column.native ? <small> built-in</small> : null}
-                </span>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={busy}
-                  /*
-                   * The column's TITLE in the accessible name, not just "Hide".
-                   * A screen reader moving through this list otherwise hears
-                   * "Hide, Hide, Hide" twenty-five times with nothing to say
-                   * which one is about to leave the table.
-                   */
-                  aria-label={`Hide ${column.title}`}
-                  onClick={() => onSetHidden(column, true)}
-                >
-                  Hide
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="form-hint">Nothing is on the table.</p>
-        )}
-      </div>
-      <div>
-        <h4>Hidden</h4>
-        {hidden.length ? (
-          <ul>
-            {hidden.map((column) => (
-              <li key={column.id}>
-                <span>
-                  {column.title}
-                  {column.native ? <small> built-in</small> : null}
-                </span>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={busy}
-                  aria-label={`Show ${column.title}`}
-                  onClick={() => onSetHidden(column, false)}
-                >
-                  Show
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="form-hint">Nothing is hidden.</p>
-        )}
-        {/*
-          A CUSTOM column removed with the Delete verb is SOFT-removed: its
-          cells survive and `restoreRegisterColumn` brings both back. It stops
-          appearing in either list above, so the only way to offer the undo is
-          to say so here.
-        */}
-        <p className="form-hint">
-          Deleting a column you added keeps its cells — ask an administrator to restore it.
-        </p>
-      </div>
+      <ul className="register-columns-panel__grid" style={GRID_LAYOUT}>
+        {columns.map((column, index) => {
+          /*
+           * PINNED AS THE READER SEES IT, not only as the row records it.
+           * `frozenKey` is how a fallback lane tells this panel that it is
+           * frozen without a stored flag — see the prop. Everything the reader
+           * is shown about the pin is derived from this one value, so the
+           * badge, the hint, the button's word and the direction of the press
+           * cannot disagree with each other or with the table.
+           */
+          const pinnedHere =
+            column.pinned || (frozenKey != null && column.key === frozenKey);
+          return (
+          <li
+            key={column.id}
+            className={`register-columns-panel__item${column.hidden ? " is-hidden" : ""}${
+              pinnedHere ? " is-pinned" : ""
+            }`}
+          >
+            <label className="register-columns-panel__check">
+              <input
+                type="checkbox"
+                checked={!column.hidden}
+                disabled={busy}
+                /*
+                 * THE COLUMN'S TITLE IN THE ACCESSIBLE NAME, and what ticking it
+                 * means. A screen reader moving down this grid otherwise hears
+                 * "checkbox, checked" forty times with nothing to say which
+                 * column it is about or what the tick is claiming. The visible
+                 * label is inside the name rather than replaced by it, which is
+                 * what lets somebody say "tick Postcode" to a voice control.
+                 */
+                aria-label={`Show ${column.title} on the register`}
+                /*
+                 * Hiding a PINNED column releases the pin — the server does it
+                 * in the same write, because a pinned column that is not on the
+                 * register is a frozen lane with nothing in it. Said here so
+                 * the press is not a surprise; the checkbox is not disabled,
+                 * because taking a column off the register is something an
+                 * operator is entitled to do to any column.
+                 */
+                title={
+                  pinnedHere
+                    ? `${column.title} is pinned. Hiding it will unpin it.`
+                    : undefined
+                }
+                onChange={(event) => onSetHidden(column, !event.target.checked)}
+              />
+              <span className="register-columns-panel__label">{column.title}</span>
+            </label>
+
+            {/*
+              THE BADGE SAYS WHERE THE VALUE LIVES, which is the one thing about
+              a column a reader cannot see from its name. A built-in column is a
+              view onto a real field on the site or contractor row: it can be
+              renamed, moved, resized, pinned and hidden, and it can never be
+              deleted, because deleting it would be an offer to throw away the
+              postcode along with the decision to stop looking at it.
+            */}
+            {column.native ? (
+              <small className="register-columns-panel__badge">Built in</small>
+            ) : null}
+            {pinnedHere ? (
+              <small className="register-columns-panel__pin">Pinned</small>
+            ) : null}
+
+            {/*
+              ONE MENU PER COLUMN, holding every verb that is not the checkbox.
+              Kept behind a disclosure rather than laid out beside the label
+              because six controls per row on forty rows is a settings panel
+              nobody can find a column in — and because the checkbox is what
+              almost every visit here is for.
+            */}
+            {onMove || onRename || onResize || onPin || onRemove ? (
+              <details className="register-columns-panel__menu">
+                <summary className="register-columns-panel__more">
+                  {/*
+                    Named for the column, not "Options". A `<summary>` with no
+                    text is an unnamed control, and forty of them named the same
+                    thing is the same problem the checkbox's label solves.
+                  */}
+                  <span className="visually-hidden">{`Options for ${column.title}`}</span>
+                  <span aria-hidden="true">···</span>
+                </summary>
+                <div className="register-columns-panel__actions">
+                  {onMove ? (
+                    <>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy || index === 0}
+                        aria-label={`Move ${column.title} earlier`}
+                        onClick={() => onMove(column, -1)}
+                      >
+                        Move earlier
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy || index === columns.length - 1}
+                        aria-label={`Move ${column.title} later`}
+                        onClick={() => onMove(column, 1)}
+                      >
+                        Move later
+                      </button>
+                    </>
+                  ) : null}
+
+                  {onRename ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      aria-label={`Rename ${column.title}`}
+                      onClick={() => onRename(column)}
+                    >
+                      Rename
+                    </button>
+                  ) : null}
+
+                  {onResize ? (
+                    <>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        aria-label={`Make ${column.title} wider`}
+                        onClick={() => onResize(column, column.width + WIDTH_STEP)}
+                      >
+                        Wider
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        aria-label={`Make ${column.title} narrower`}
+                        onClick={() => onResize(column, column.width - WIDTH_STEP)}
+                      >
+                        Narrower
+                      </button>
+                    </>
+                  ) : null}
+
+                  {/*
+                    PIN, AND ITS NAME SAYS WHICH WAY IT WILL GO. "Pin" on an
+                    already-pinned column would be a control whose label is the
+                    state rather than the action, and a screen reader user has
+                    no strip of frozen colour to read the state from.
+                  */}
+                  {onPin ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      aria-label={
+                        pinnedHere
+                          ? `Unpin ${column.title} from the left of the register`
+                          : `Pin ${column.title} to the left of the register`
+                      }
+                      onClick={() => onPin(column, !pinnedHere)}
+                    >
+                      {pinnedHere ? "Unpin" : "Pin"}
+                    </button>
+                  ) : null}
+
+                  {/*
+                    REMOVE IS FOR CUSTOM COLUMNS ONLY, and the control is absent
+                    rather than refused. The header menu offers Delete on a
+                    native column deliberately, so the server's instruction —
+                    "Native columns cannot be deleted. Hide it instead." — is
+                    read at the moment somebody tries; here the tick that does
+                    exactly that is two centimetres to the left, so a refusal
+                    would teach nothing the row is not already showing.
+                  */}
+                  {onRemove && !column.native ? (
+                    <button
+                      type="button"
+                      className="secondary-button is-destructive"
+                      disabled={busy}
+                      aria-label={`Remove ${column.title} from this register`}
+                      onClick={() => onRemove(column)}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
+          </li>
+          );
+        })}
+      </ul>
+
+      {/*
+        The two facts a reader of this panel needs that the grid above cannot
+        show: what an unticked box costs (nothing), and what Remove costs on the
+        one kind of column that has it. A CUSTOM column removed here is
+        SOFT-removed — its cells survive and a restore brings both back — and it
+        stops appearing in this grid at all, so this is the only place the undo
+        can be offered.
+      */}
+      <p className="form-hint register-columns-panel__note">
+        {shownCount} of {columns.length} on the register. Unticking a column keeps
+        its data — nothing is deleted. A column you added keeps its cells when it
+        is removed; ask an administrator to restore it.
+      </p>
     </div>
   );
 }

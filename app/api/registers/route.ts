@@ -59,7 +59,9 @@ import {
   loadRegisterValues,
   nextColumnPosition,
   reorderRegisterColumns,
+  settingsWithPin,
   toRegisterColumn,
+  unpinOtherRegisterColumns,
 } from "../../lib/register-columns";
 
 export const dynamic = "force-dynamic";
@@ -343,15 +345,16 @@ export async function POST(request: Request) {
 }
 
 /**
- * PATCH — reorder, rename, resize, hide, show, restore.
+ * PATCH — reorder, rename, resize, hide, show, pin, restore.
  *
  * Dispatches on the body's SHAPE, which is the pattern the board already uses
- * and the reason the four single-column verbs do not need four endpoints:
+ * and the reason the five single-column verbs do not need five endpoints:
  *
  *   `{ register, order: [...] }`  bulk reorder, positions rewritten densely
  *   `{ id, title }`               rename — the LABEL only, never the field
  *   `{ id, width }`               resize, clamped rather than refused
  *   `{ id, hidden: boolean }`     hide or show
+ *   `{ id, pinned: boolean }`     freeze this column at the left, or release it
  *   `{ id, restore: true }`       bring back a removed custom column
  *
  * A rename is allowed on a native column and changes `title` and nothing else.
@@ -359,6 +362,28 @@ export async function POST(request: Request) {
  * register without `sites.name` being touched, so every join, every import and
  * every other screen keeps working while the label reads the way the business
  * talks.
+ *
+ * ── THE TWO PIN INVARIANTS, ENFORCED HERE AND NOWHERE ELSE ───────────────
+ *
+ * A pin is a key in `register_columns.settings` (see `PINNED_SETTING`), so
+ * there is no index and no constraint holding either of these. Both are
+ * maintained by the writes below, in the same request, so the register can
+ * never be READ in a state that breaks them:
+ *
+ *   AT MOST ONE PINNED COLUMN PER REGISTER. Pinning unpins whatever else was
+ *   pinned in the same organisation and register. Two frozen lanes on a narrow
+ *   screen is a table with no scrolling half left.
+ *
+ *   PINNED IMPLIES SHOWN, from both directions. Pinning CLEARS `hidden_at`,
+ *   because a pinned column is the frozen lane and a hidden one would be a lane
+ *   that renders nothing — and this is not theoretical: the live contractors
+ *   register has all twenty-five of its native columns hidden, so a pin that
+ *   respected `hidden_at` would have produced a lane nobody could see and no
+ *   control that explained why. Hiding a PINNED column releases the pin for the
+ *   same reason, rather than leaving the contradiction for the next reader.
+ *   Unpinning leaves the column exactly where it is, shown; "stop freezing
+ *   this" and "take this off the register" are different requests and the
+ *   panel offers both.
  */
 export async function PATCH(request: Request) {
   try {
@@ -442,6 +467,35 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "That column does not exist." }, { status: 404 });
     }
 
+    /*
+     * AN OPTIONAL SECOND FILTER, ANSWERED THE SAME WAY AS A FOREIGN ID.
+     *
+     * The single-column verbs are addressed by id alone and always have been.
+     * `pinRegisterColumn` also sends the register it believes the column is on,
+     * because "at most one pinned column per register" is a claim about a
+     * register and a client that named the wrong one would silently unpin a
+     * lane on the other screen. A mismatch is 404 rather than 400 for the
+     * reason every lookup here is: it is indistinguishable from an id that
+     * belongs to somebody else, and telling those apart would say which ids
+     * exist. Ignored when absent, so the four older verbs are untouched.
+     */
+    if (body.register !== undefined && body.register !== existing.registerKey) {
+      return Response.json({ error: "That column does not exist." }, { status: 404 });
+    }
+
+    /*
+     * REFUSED RATHER THAN RESOLVED. `{ pinned: true, hidden: true }` asks for a
+     * frozen lane that renders nothing, and either half of it could reasonably
+     * be the one the caller meant. Picking one would be a request that half
+     * worked; saying so is a client bug caught where somebody can see it.
+     */
+    if (body.pinned === true && body.hidden === true) {
+      return Response.json(
+        { error: "A pinned column is on the register. Unpin it before hiding it." },
+        { status: 400 },
+      );
+    }
+
     const patch: Partial<typeof registerColumns.$inferInsert> = {
       updatedAt: new Date().toISOString(),
     };
@@ -486,6 +540,53 @@ export async function PATCH(request: Request) {
       if ((existing.hiddenAt !== null) !== body.hidden) {
         patch.hiddenAt = hiddenAt;
         changes.push(body.hidden ? `hid "${existing.title}"` : `showed "${existing.title}"`);
+      }
+      /*
+       * HIDING A PINNED COLUMN RELEASES THE PIN — the second direction of
+       * "pinned implies shown". Left alone, the row would carry a pin nothing
+       * could draw, and the next reader would have to decide whether to honour
+       * it. Taking a column off the register is a thing an operator is entitled
+       * to do to any column, pinned or not; what it cannot do is leave the
+       * register in a state the pin verb can never produce.
+       */
+      if (body.hidden === true && toRegisterColumn(existing).pinned) {
+        patch.settings = settingsWithPin(existing.settings, false);
+        changes.push(`unpinned "${existing.title}"`);
+      }
+    }
+
+    if (body.pinned !== undefined) {
+      if (typeof body.pinned !== "boolean") {
+        return Response.json(
+          { error: "A column is pinned or it is not; say true or false." },
+          { status: 400 },
+        );
+      }
+      const wasPinned = toRegisterColumn(existing).pinned;
+      patch.settings = settingsWithPin(existing.settings, body.pinned);
+      if (body.pinned) {
+        /*
+         * PINNING CLEARS `hidden_at`, and this is the line the whole contract
+         * turns on. The live contractors register has every native column
+         * hidden; a pin that respected that would have frozen a lane the
+         * operator could not see, with no control anywhere saying why. Written
+         * unconditionally rather than behind an `if`, because the value is
+         * `null` either way and a second read of `existing.hiddenAt` to decide
+         * whether to write a null is a branch that can only be wrong.
+         */
+        patch.hiddenAt = null;
+        if (existing.hiddenAt !== null) changes.push(`showed "${existing.title}"`);
+        /* AT MOST ONE, and released in the same request rather than by a later
+           sweep — a register must never be READ with two frozen lanes. */
+        await unpinOtherRegisterColumns(
+          scope.db,
+          scope.orgId,
+          existing.registerKey as RegisterKey,
+          id,
+        );
+      }
+      if (wasPinned !== body.pinned) {
+        changes.push(body.pinned ? `pinned "${existing.title}"` : `unpinned "${existing.title}"`);
       }
     }
 

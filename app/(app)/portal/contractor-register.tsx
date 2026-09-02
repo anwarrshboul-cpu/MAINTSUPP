@@ -9,6 +9,8 @@ import {
   fetchRegister,
   hiddenColumns,
   orderAfterMove,
+  pinRegisterColumn,
+  pinnedColumn,
   registerCellValue,
   removeRegisterColumn,
   renameRegisterColumn,
@@ -63,24 +65,36 @@ import {
  * two would disagree the moment anybody used the ordinary editor. "Manage
  * contractors" is the way in, and the cell says so.
  *
- * ── THE TWO LANES THAT ARE NOT COLUMNS ───────────────────────────────────
+ * ── ONE FROZEN LANE, AND THE READER DECIDES WHETHER IT IS FROZEN ─────────
  *
- * The table has a pinned lane at each end, and neither is a register column.
- * That is the whole point of them.
+ * THE IDENTITY LANE — who the contractor is and how to reach them — is the
+ * `name` register column drawn as the row's first cell. It exists because the
+ * register let an operator hide that column, and the live register did exactly
+ * that, leaving rows of rates and postcodes with no name anywhere on them.
  *
- * THE IDENTITY LANE, first and stuck to the left, carries who the contractor is
- * and how to reach them. It exists because the register let an operator hide
- * the `name` column — and the live register did exactly that, leaving rows of
- * rates and postcodes with no name anywhere on them. A lane that is not a
- * column cannot be hidden, renamed away or reordered off the front, so the row
- * always says whose row it is however the other twenty-five are arranged.
+ * WHAT IS PINNED IS A COLUMN, NOT A LANE INVENTED BESIDE ONE. The pin lives in
+ * `register_columns.settings` as `{"pinned": true}`, at most one per register,
+ * and pinning implies visible — see `frozenRegisterColumn` below. So there is
+ * one place a column's identity, order, title and width are recorded, and
+ * "frozen" is one more property of the column rather than a second idea of what
+ * a column is. A pinned column is drawn ONCE, as the lane, and is not also in
+ * the scrolling set: the previous version drew the lane beside a `name` column
+ * that was still on the table, and the live register printed the contractor's
+ * name twice on every row.
  *
- * THE ACTION LANE, last and stuck to the right, carries the details chevron.
- * Before this it was an ordinary last cell, which on a table twenty-four
- * columns wide meant scrolling four thousand pixels sideways to open a
- * contractor. Pinned, the affordance is where the reader is.
+ * UNPINNED, it is an ordinary column: no sticky, no reserved offset, no
+ * shadow, and it takes its configured position among the others. The only
+ * thing that survives is the identity RENDERING — the name, the archived badge
+ * and the actionable phone/WhatsApp/email travel with the column wherever it
+ * goes, and are drawn in exactly one place either way.
  *
- * Both lanes are OPAQUE and above the scrolling cells — see
+ * THE ACTION LANE IS GONE. It was a second frozen lane at the right carrying a
+ * chevron and a pencil, permanently occupying eighty-six pixels of a table the
+ * owner already found too wide, to offer a press the whole row now answers and
+ * an editor the profile drawer now carries. Deleting it is the point: there is
+ * no permanent actions column on this table.
+ *
+ * The frozen lane is OPAQUE and above the scrolling cells — see
  * `.contractor-register__lane` in `globals.css`. A translucent sticky cell
  * shows the rows sliding underneath it, which reads as a rendering fault.
  */
@@ -108,6 +122,127 @@ export type ExtraColumn<Row> = {
   title: string;
   render: (row: Row) => React.ReactNode;
 };
+
+/**
+ * ONE ORDERED DEFINITION OF WHAT IS ON THE TABLE, drawn twice.
+ *
+ * `<thead>` and `<tbody>` map the SAME array. That is not tidiness: a header
+ * loop over one list beside a cell loop over another is a table whose labels
+ * stop matching its values the first time anything is reordered, hidden or
+ * pinned, and nothing about it fails — the figures simply appear under the
+ * wrong headings, which is the one rendering fault a reader will believe. The
+ * order is decided once, in `gridLanes`, and both loops are a `.map` over it.
+ *
+ * `frozen` is what makes a lane sticky. `column` is set for a register column
+ * and `extra` for one of the page's period-scoped figures; `identity` says the
+ * cell draws the name, the archived badge and the actionable contact block
+ * rather than a stored value, and travels with the identity column whether it
+ * is the frozen lane or an ordinary cell somewhere in the middle.
+ */
+type GridLane<Row> = {
+  key: string;
+  title: string;
+  frozen: boolean;
+  column: RegisterColumn | null;
+  extra: ExtraColumn<Row> | null;
+  identity: boolean;
+};
+
+/**
+ * The lanes of one render, in the order they are drawn.
+ *
+ * THE FROZEN COLUMN IS REMOVED FROM THE SCROLLING SET rather than drawn beside
+ * it. A lane and a column carrying the same value is the contractor's name
+ * printed twice on every row, which is what the live register did.
+ *
+ * THE MEASUREMENTS TRAIL THE REGISTER'S OWN COLUMNS. They are not register
+ * columns — `register-catalogue.ts` says why — so nothing records a position
+ * for them and the page's declaration order is the only order there is. It is
+ * read from ONE array here rather than written into the JSX twice.
+ *
+ * THE IDENTITY IS NEVER ABSENT. If the identity column is neither the frozen
+ * lane nor in the visible set, its rendering is put back at the front as an
+ * ordinary (unfrozen) cell: a row that does not say whose row it is was the
+ * defect this lane was built for, and unpinning must not be a way back to it.
+ */
+function gridLanes<Row>(
+  scrolling: readonly RegisterColumn[],
+  frozen: RegisterColumn | null,
+  identity: RegisterColumn | null,
+  extras: readonly ExtraColumn<Row>[],
+  /*
+   * EVERY COLUMN THE REGISTER HOLDS, hidden ones included — and it has to be
+   * every one, not the visible run. The fallback below draws a measurement the
+   * register has no ROW for; "no row" and "not on the table" are different
+   * facts, and reading the second for the first is what made hiding a
+   * measurement move it to the end of the row instead of taking it off.
+   * Measured: hiding "Assigned" left thirty headers with Assigned last.
+   */
+  known: readonly RegisterColumn[],
+): GridLane<Row>[] {
+  const laneOf = (column: RegisterColumn, isFrozen: boolean): GridLane<Row> => ({
+    key: `column:${column.key}`,
+    title: column.title,
+    frozen: isFrozen,
+    column,
+    extra: extraByKey.get(column.key) ?? null,
+    identity: identity !== null && column.id === identity.id,
+  });
+
+  /*
+   * A MEASUREMENT IS A COLUMN THAT KNOWS HOW TO DRAW ITSELF.
+   *
+   * The six counts are declared in `register-catalogue.ts`, so they arrive here
+   * as ordinary register columns carrying an order the operator chose. What
+   * they do not carry is a value: the number lives on the row this page loaded,
+   * and the `extraColumns` entry keyed the same way is what turns it into "0%"
+   * or "£0". Pairing them by key is what lets ONE ordered list drive both — the
+   * alternative, a configurable list beside a hardcoded tail, is exactly the
+   * two-orders problem this function exists to refuse.
+   */
+  const extraByKey = new Map(extras.map((extra) => [extra.key, extra]));
+
+  const lanes: GridLane<Row>[] = [];
+  if (frozen) lanes.push(laneOf(frozen, true));
+  for (const column of scrolling) lanes.push(laneOf(column, false));
+  /*
+   * Only measurements with NO column of their own are appended. On a register
+   * seeded before the catalogue declared them there is briefly no row — and a
+   * reader who lost their figures because a migration had not run yet would be
+   * right to call that a regression, so the page keeps drawing them until the
+   * reconcile in `loadRegisterColumns` catches up on the next read.
+   *
+   * ASKED OF `known` AND NOT OF `scrolling`, and the difference is a defect
+   * report. `scrolling` is what is ON THE TABLE, so a measurement the operator
+   * had just UNTICKED fell out of it and was immediately re-appended here — the
+   * press moved the column to the end of the row rather than taking it off, and
+   * a second press could not help because the state it was reading had already
+   * changed. `known` is every column the register holds, hidden ones included,
+   * so this fires only when there is genuinely no row to configure.
+   */
+  for (const extra of extras) {
+    if (known.some((column) => column.key === extra.key)) continue;
+    lanes.push({
+      key: `extra:${extra.key}`,
+      title: extra.title,
+      frozen: false,
+      column: null,
+      extra,
+      identity: false,
+    });
+  }
+  if (!lanes.some((lane) => lane.identity)) {
+    lanes.splice(frozen ? 1 : 0, 0, {
+      key: "identity",
+      title: identity?.title ?? "Contractor",
+      frozen: false,
+      column: null,
+      extra: null,
+      identity: true,
+    });
+  }
+  return lanes;
+}
 
 /**
  * A cell, as the reader should see it.
@@ -173,7 +308,11 @@ type Busy = string | null;
  *
  * `label` is here because pressing one activates the control it labels, and
  * `[role="menuitem"]` because the column menu's items are buttons inside a
- * `div` the guard would otherwise have to walk past.
+ * `div` the guard would otherwise have to walk past. The `role=` entries after
+ * it cover the controls this product draws on a `div` rather than on the
+ * element a browser would recognise — a pin toggle, a switch, a checkbox
+ * standing in for one — so a press on any of them is the control's and not the
+ * row's.
  */
 const ROW_INTERACTIVE_SELECTOR = [
   "a",
@@ -186,8 +325,60 @@ const ROW_INTERACTIVE_SELECTOR = [
   '[role="menu"]',
   '[role="menuitem"]',
   '[role="separator"]',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="switch"]',
   '[contenteditable="true"]',
 ].join(", ");
+
+/**
+ * WHICH COLUMN IS THE FROZEN LANE.
+ *
+ * `pinnedColumn` is the register's own answer and is asked FIRST — `pinned` is
+ * derived on the server from `register_columns.settings`, there is no `pinned`
+ * SQL column, and this must not grow a second reading of that JSON.
+ *
+ * THE FALLBACK IS THE WHOLE POINT OF THIS FUNCTION. Not one organisation in
+ * either database has a pinned column: the seed sets the flag once, at seed, so
+ * it reaches a workspace created after the flag existed and nobody else. The
+ * owner's Staging register — twenty-five contractor columns, all hidden — comes
+ * back with `pinned` false on every one of them. "No column is pinned" is
+ * therefore the state of every live register, and rendering no lane for it
+ * would take the contractor's name and phone number off the very Preview this
+ * work is for. So an unpinned register freezes its IDENTITY, and pinning is how
+ * a reader moves the lane elsewhere rather than how they get one.
+ *
+ * Matched on `nativeField`, never on position — the reader may have moved the
+ * column anywhere, and the default belongs to the identity wherever it sits.
+ *
+ * A STORED `pinned: false` IS STILL HONOURED, and this is the one place that
+ * reads `settings` directly. It is a LIVE branch, not a placeholder: unpinning
+ * writes `{"pinned": false}` rather than removing the key (see
+ * `settingsWithPin`), precisely so "somebody chose no" is distinguishable from
+ * "nobody ever chose". `{}` means the second and falls back; an explicit
+ * `false` means the first and leaves no frozen lane at all — which is the only
+ * way a reader can turn the lane OFF, because the fallback would otherwise
+ * freeze the identity again on the very next render.
+ *
+ * Measured at 1440, both themes, through the real PATCH verb: `{}` gives one
+ * sticky lane with the divider and the fall-off; `{"pinned": false}` gives zero
+ * sticky cells, zero shadowed cells, zero left offsets, and the first cell's
+ * left edge sitting exactly on the scroll container's content box.
+ */
+export function frozenRegisterColumn(
+  columns: readonly RegisterColumn[],
+): RegisterColumn | null {
+  const pinned = pinnedColumn(columns);
+  if (pinned) return pinned;
+  const refused = columns.some(
+    (column) =>
+      column.settings &&
+      typeof column.settings === "object" &&
+      column.settings.pinned === false,
+  );
+  if (refused) return null;
+  return columns.find((column) => column.nativeField === "name") ?? null;
+}
 
 export function ContractorRegister<Row extends RegisterEntityRow>({
   rows,
@@ -195,7 +386,6 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
   badge,
   contact,
   onOpen,
-  onManage,
 }: {
   rows: Row[];
   /** Period-scoped measurements, drawn after the register's own columns. */
@@ -229,8 +419,20 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
   contact?: (row: Row) => React.ReactNode;
   /** Open the row's profile — jobs, sites, documents and performance. */
   onOpen?: (id: string) => void;
-  /** Open the ordinary contractor editor — the only way to write a native field. */
-  onManage: (id: string) => void;
+  /**
+   * Open the ordinary contractor editor — accepted and no longer drawn HERE.
+   *
+   * The pencil that used to call it lived in a frozen action lane at the right
+   * of every row, which cost eighty-six pixels of a table the owner had already
+   * called too wide and put a second, quieter way in beside a chevron that did
+   * what the whole row now does. Both are gone. The editor is reached from the
+   * profile the row opens, where the rest of a contractor's detail already is.
+   *
+   * The prop stays declared so the page that has always passed it still
+   * type-checks, and so this comment is where somebody looks when they wonder
+   * where the pencil went.
+   */
+  onManage?: (id: string) => void;
 }) {
   const [snap, setSnap] = useState<RegisterSnapshot | null>(null);
   const [error, setError] = useState("");
@@ -408,20 +610,32 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
     dragWidth && dragWidth.id === column.id ? dragWidth.width : column.width;
 
   /*
-   * WHAT THE PINNED IDENTITY LANE IS CALLED.
+   * WHAT THE IDENTITY LANE IS AND WHAT IT IS CALLED.
    *
-   * Taken from the `name` column's title when the register has one, so renaming
-   * "Contractor" to "Supplier" renames the lane with it — the rename verb keeps
-   * meaning what it says even for the one lane it cannot move or hide. Matched
-   * on `nativeField`, never on position: the reader may have put the column
-   * anywhere, and it is found here whether it is shown or hidden because the
-   * LABEL is a property of the column and not of its visibility.
+   * Matched on `nativeField`, never on position: the reader may have put the
+   * column anywhere, and it is found here whether it is shown or hidden because
+   * a column's LABEL is a property of the column and not of its visibility.
+   * Renaming "Contractor" to "Supplier" therefore renames the lane with it.
    *
    * "Contractor" is the fallback for the only case with no column to ask: a
    * snapshot from before the catalogue seeded.
    */
-  const identityTitle =
-    snap.columns.find((column) => column.nativeField === "name")?.title ?? "Contractor";
+  const identityColumn =
+    snap.columns.find((column) => column.nativeField === "name") ?? null;
+  const identityTitle = identityColumn?.title ?? "Contractor";
+
+  /*
+   * THE FROZEN LANE, AND THE SCROLLING SET IT IS NOT IN.
+   *
+   * `frozen` is a column of this register — the identity by default and
+   * whichever column the reader pinned instead — and it is filtered OUT of
+   * `scrolling` so it is drawn once. Pinning implies visible, so a pinned
+   * column that is nonetheless recorded hidden still gets its lane: the lane is
+   * the strongest statement anybody has made about it.
+   */
+  const frozen = frozenRegisterColumn(snap.columns);
+  const scrolling = shown.filter((column) => !frozen || column.id !== frozen.id);
+  const lanes = gridLanes(scrolling, frozen, identityColumn, extraColumns, snap.columns);
 
   /** Move one column to a new slot and send the WHOLE order. */
   function move(column: RegisterColumn, delta: number) {
@@ -581,8 +795,16 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
         of the twenty-five — that block was twenty-five buttons parked below the
         rows for good, so the page never ended and the only thing it listed was
         the half that was NOT on the table. Both are gone. `RegisterColumnsPanel`
-        draws shown and hidden side by side, the Sites register mounts the same
-        component, and `register_columns.hidden_at` has one rendering.
+        draws ONE checklist of every column with a tick against the ones on the
+        register — not two lists side by side, which was the shape before it and
+        which could not say where a column was without the reader comparing
+        them. The Sites register mounts the same component, and
+        `register_columns.hidden_at` has one rendering.
+
+        AND IT IS WHERE PIN LIVES. Every optional handler below is one verb the
+        panel draws per column; a register that passes only `onSetHidden` gets a
+        tidy checklist and silently loses reorder, rename, resize, remove — and
+        the pin, which is the only control that decides which column is frozen.
 
         Gated on `canConfigure` for the same reason every other control here is:
         a reader who may not rearrange the register is shown no controls that
@@ -595,11 +817,41 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
             is how a built-in column is removed from view without throwing the
             contractor&rsquo;s data away.
           </p>
+          {/*
+            EVERY VERB, NOT JUST THE CHECKBOX. The panel's per-column menu is
+            optional prop by optional prop, so a register that hands it only
+            `onSetHidden` gets a tidy checklist and silently loses reorder,
+            rename, resize, pin and remove — which is what this screen did, and
+            it is where Pin lives. The handlers are the same ones the header
+            menu calls; there is no second implementation of any of them.
+          */}
           <RegisterColumnsPanel
             columns={snap.columns}
             busy={busy !== null}
             onSetHidden={(column, next) =>
               void run(`hide:${column.id}`, () => setRegisterColumnHidden(column.id, next))
+            }
+            onMove={move}
+            onRename={rename}
+            onResize={(column, width) =>
+              void run(`width:${column.id}`, () => resizeRegisterColumn(column.id, width))
+            }
+            /*
+             * WHAT IS ACTUALLY FROZEN, which on a register nobody has pinned is
+             * the fallback identity column rather than anything carrying a
+             * stored flag. Without it the panel offers "Pin" on the column
+             * already sitting in the frozen lane, and turning the lane off
+             * would take two presses: one to make the implicit state explicit,
+             * another to reverse it.
+             */
+            frozenKey={frozen ? frozen.key : null}
+            onPin={(column, next) =>
+              void run(`pin:${column.id}`, () =>
+                pinRegisterColumn("contractors", column.id, next),
+              )
+            }
+            onRemove={(column) =>
+              void run(`remove:${column.id}`, () => removeRegisterColumn(column.id))
             }
           />
         </div>
@@ -612,17 +864,23 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
             added.
           </caption>
           <thead>
+            {/*
+              ONE `.map`, OVER THE SAME `lanes` THE BODY USES. A header loop
+              over one list beside a cell loop over another is a table whose
+              labels quietly stop matching its values; see `GridLane`.
+            */}
             <tr>
-              {/*
-                THE PINNED IDENTITY LANE'S HEADER. `--start` rather than
-                `--left`, because the property that pins it is `inset-inline
-                -start` in spirit — and because "left" would be a lie the day
-                this product is read right-to-left.
-              */}
-              <th scope="col" className="contractor-register__lane contractor-register__lane--start">
-                {identityTitle}
-              </th>
-              {shown.map((column: RegisterColumn, index: number) => (
+              {lanes.map((lane) => {
+                const column = lane.column;
+                /*
+                 * The index the Move controls read is the position among the
+                 * SCROLLING columns, so "Move left" is greyed on the one that
+                 * is already leftmost on the table rather than on the one that
+                 * happens to be first in a list containing the frozen lane.
+                 */
+                const scrollIndex = column
+                  ? scrolling.findIndex((entry) => entry.id === column.id)
+                  : -1;
                 /*
                  * THE WIDTH LIVES ON THE HEADER CELL, NOT IN A `<colgroup>`.
                  *
@@ -637,121 +895,138 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                  * behaviour wanted. `minWidth` as well as `width`, or the
                  * browser's auto layout ignores a drag that made a column
                  * narrower than its content.
+                 *
+                 * The FROZEN lane declares none of it: the identity is a stack
+                 * of a name, a badge and up to three contact rows, and its
+                 * width belongs with the rule that lays that stack out. See
+                 * `.contractor-register__lane--start` in `globals.css`.
                  */
-                <th
-                  key={column.id}
-                  scope="col"
-                  style={{ width: `${widthOf(column)}px`, minWidth: `${widthOf(column)}px` }}
-                >
-                  <span className="contractor-register__head">
-                    <span className="contractor-register__head-title">{column.title}</span>
-                    {snap.canConfigure && (
-                      <span className="contractor-register__menu-anchor">
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`Options for ${column.title}`}
-                          aria-expanded={openMenu === column.id}
-                          onClick={() =>
-                            setOpenMenu((open) => (open === column.id ? null : column.id))
-                          }
-                        >
-                          <Icon name="more" size={15} />
-                        </button>
-                        {openMenu === column.id && (
-                          <div className="contractor-register__menu" role="menu">
-                            <button type="button" role="menuitem" onClick={() => rename(column)}>
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={index === 0}
-                              onClick={() => move(column, -1)}
-                            >
-                              Move left
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={index === shown.length - 1}
-                              onClick={() => move(column, 1)}
-                            >
-                              Move right
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() =>
-                                void run(`hide:${column.id}`, () =>
-                                  setRegisterColumnHidden(column.id, true),
-                                )
-                              }
-                            >
-                              Hide
-                            </button>
-                            {/*
-                              Offered on a native column too, and refused by the
-                              server with an instruction rather than a status
-                              code. Hiding the control would hide the
-                              instruction with it, and "remove this column" and
-                              "stop showing me this column" are the same
-                              sentence in a reader's head.
-                            */}
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="contractor-register__menu-danger"
-                              onClick={() =>
-                                void run(`delete:${column.id}`, () =>
-                                  removeRegisterColumn(column.id),
-                                )
-                              }
-                            >
-                              Remove
-                            </button>
-                          </div>
+                const sized =
+                  column && !lane.frozen
+                    ? { width: `${widthOf(column)}px`, minWidth: `${widthOf(column)}px` }
+                    : undefined;
+                return (
+                  <th
+                    key={lane.key}
+                    scope="col"
+                    /*
+                     * `--start` rather than `--left`, because the property that
+                     * pins it is `inset-inline-start` in spirit — and because
+                     * "left" would be a lie the day this product is read
+                     * right-to-left.
+                     */
+                    className={
+                      lane.frozen
+                        ? "contractor-register__lane contractor-register__lane--start"
+                        : undefined
+                    }
+                    style={sized}
+                  >
+                    {column && snap.canConfigure ? (
+                      <span className="contractor-register__head">
+                        <span className="contractor-register__head-title">{lane.title}</span>
+                        <span className="contractor-register__menu-anchor">
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Options for ${lane.title}`}
+                            aria-expanded={openMenu === column.id}
+                            onClick={() =>
+                              setOpenMenu((open) => (open === column.id ? null : column.id))
+                            }
+                          >
+                            <Icon name="more" size={15} />
+                          </button>
+                          {openMenu === column.id && (
+                            <div className="contractor-register__menu" role="menu">
+                              <button type="button" role="menuitem" onClick={() => rename(column)}>
+                                Rename
+                              </button>
+                              {/*
+                                A FROZEN COLUMN CANNOT BE MOVED OR HIDDEN, and
+                                the controls say so rather than disappearing.
+                                It is the lane — there is nowhere left of it to
+                                move to — and pinning implies visible, so a Hide
+                                offered here would be a press that unhides
+                                itself on the next load. Unpin is in the Columns
+                                panel, beside the pin that put it there.
+                              */}
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={lane.frozen || scrollIndex <= 0}
+                                onClick={() => move(column, -1)}
+                              >
+                                Move left
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={lane.frozen || scrollIndex === scrolling.length - 1}
+                                onClick={() => move(column, 1)}
+                              >
+                                Move right
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={lane.frozen}
+                                onClick={() =>
+                                  void run(`hide:${column.id}`, () =>
+                                    setRegisterColumnHidden(column.id, true),
+                                  )
+                                }
+                              >
+                                Hide
+                              </button>
+                              {/*
+                                Offered on a native column too, and refused by
+                                the server with an instruction rather than a
+                                status code. Hiding the control would hide the
+                                instruction with it, and "remove this column"
+                                and "stop showing me this column" are the same
+                                sentence in a reader's head.
+                              */}
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="contractor-register__menu-danger"
+                                onClick={() =>
+                                  void run(`delete:${column.id}`, () =>
+                                    removeRegisterColumn(column.id),
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )}
+                        </span>
+                        {/* A lane has no draggable edge; its width is the
+                            identity stack's, not a preference. */}
+                        {!lane.frozen && (
+                          <span
+                            className="contractor-register__resize"
+                            role="separator"
+                            aria-label={`Resize ${lane.title}`}
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              dragRef.current = {
+                                id: column.id,
+                                startX: event.clientX,
+                                startWidth: column.width,
+                              };
+                              setDragWidth({ id: column.id, width: column.width });
+                            }}
+                          />
                         )}
                       </span>
+                    ) : (
+                      lane.title
                     )}
-                    {snap.canConfigure && (
-                      <span
-                        className="contractor-register__resize"
-                        role="separator"
-                        aria-label={`Resize ${column.title}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          dragRef.current = {
-                            id: column.id,
-                            startX: event.clientX,
-                            startWidth: column.width,
-                          };
-                          setDragWidth({ id: column.id, width: column.width });
-                        }}
-                      />
-                    )}
-                  </span>
-                </th>
-              ))}
-              {extraColumns.map((column) => (
-                <th key={column.key} scope="col">
-                  {column.title}
-                </th>
-              ))}
-              {/*
-                THE ACTION LANE'S HEADER, named in TEXT rather than by
-                `aria-label`.
-
-                It carried `aria-label="Actions"` and nothing inside it, which
-                axe flags as `empty-table-header`: a header cell's accessible
-                name is meant to come from its content, because that is what a
-                screen reader announces when it reaches a cell in this column.
-                `.visually-hidden` gives it the content without giving the
-                column a heading nobody needs to read.
-              */}
-              <th scope="col" className="contractor-register__lane contractor-register__lane--end">
-                <span className="visually-hidden">Actions</span>
-              </th>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -779,42 +1054,68 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                 }
               >
                 {/*
-                  THE PINNED IDENTITY LANE. Who this is, whether they are still
-                  on the register, and how to reach them — in that order,
-                  because a number nobody has a name for is the one that gets
-                  dialled last.
-
-                  The name is a real `<button>`, not the row's click handler
-                  wearing a pointer: the row is a `<tr>` and a `<tr>` cannot be
-                  focused, labelled or pressed with a keyboard. This is the
-                  focusable trigger; the row handler is the convenience laid
-                  over it. Nothing is nested — no button inside a button, no
-                  anchor inside an anchor — which is why the row is not itself
-                  a control.
+                  THE SAME `lanes` THE HEADER MAPPED, in the same order. One
+                  ordered definition, drawn twice.
                 */}
-                <td
-                  className="contractor-register__lane contractor-register__lane--start"
-                  data-label={identityTitle}
-                >
-                  <span className="contractor-register__identity">
-                    <span className="site-name-cell">
-                      {onOpen ? (
-                        <button
-                          type="button"
-                          className="contractor-register__cell contractor-register__cell--name"
-                          onClick={() => onOpen(row.id)}
-                        >
-                          <strong>{row.name}</strong>
-                        </button>
-                      ) : (
-                        <strong>{row.name}</strong>
-                      )}
-                      {badge?.(row)}
-                    </span>
-                    {contact?.(row)}
-                  </span>
-                </td>
-                {shown.map((column) => {
+                {lanes.map((lane) => {
+                  const column = lane.column;
+                  const laneClass = lane.frozen
+                    ? "contractor-register__lane contractor-register__lane--start"
+                    : undefined;
+
+                  /*
+                    THE IDENTITY. Who this is, whether they are still on the
+                    register, and how to reach them — in that order, because a
+                    number nobody has a name for is the one that gets dialled
+                    last. It rides with the identity COLUMN, so it is here
+                    whether that column is the frozen lane or an ordinary cell
+                    somewhere in the middle of the scroll.
+
+                    The name is a real `<button>`, not the row's click handler
+                    wearing a pointer: the row is a `<tr>` and a `<tr>` cannot
+                    be focused, labelled or pressed with a keyboard. With the
+                    action lane gone this is the ONLY keyboard route into a
+                    contractor, so it is a real control with a real focus ring
+                    and the row handler is the convenience laid over it.
+                    Nothing is nested — no button inside a button, no anchor
+                    inside an anchor — which is why the row is not itself a
+                    control.
+                  */
+                  if (lane.identity) {
+                    return (
+                      <td key={lane.key} className={laneClass} data-label={identityTitle}>
+                        <span className="contractor-register__identity">
+                          <span className="site-name-cell">
+                            {onOpen ? (
+                              <button
+                                type="button"
+                                className="contractor-register__cell contractor-register__cell--name"
+                                onClick={() => onOpen(row.id)}
+                              >
+                                <strong>{row.name}</strong>
+                              </button>
+                            ) : (
+                              <strong>{row.name}</strong>
+                            )}
+                            {badge?.(row)}
+                          </span>
+                          {contact?.(row)}
+                        </span>
+                      </td>
+                    );
+                  }
+
+                  /* A period-scoped figure. Not a stored value, so it never
+                     reaches the one reader below. */
+                  if (lane.extra) {
+                    return (
+                      <td key={lane.key} className={laneClass} data-label={lane.title}>
+                        {lane.extra.render(row)}
+                      </td>
+                    );
+                  }
+                  if (!column) return null;
+
                   /*
                    * THE ONE READER. Native reads the contractor row by its field
                    * name, custom reads the values map by its key — and this is
@@ -830,8 +1131,8 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                   const cellKey = `${row.id}:${column.key}`;
                   const editable = !column.native && snap.canEditValues;
                   /*
-                   * THE NAME COLUMN GETS NO SPECIAL CASE HERE ANY MORE, and
-                   * the reason is the pinned lane above.
+                   * THE NAME COLUMN GETS NO SPECIAL CASE HERE, and the reason is
+                   * the identity branch above.
                    *
                    * It used to be the row's identity and its way in: matched on
                    * `nativeField === "name"` and drawn as a button that opened
@@ -839,13 +1140,12 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                    * to be on the table, and it stopped being right the moment
                    * an operator hid the column — which is exactly what happened
                    * on the live register, leaving rows with no name and no way
-                   * in. The identity moved to a lane nobody can hide; `name`
-                   * is now an ordinary text column, seeded hidden precisely
-                   * because the lane already prints it, and shown only by
-                   * somebody who wants a second, sortable copy.
+                   * in. `lane.identity` now decides that, on the column rather
+                   * than on its position, so the identity rendering follows the
+                   * column through a pin, an unpin and a reorder alike.
                    */
                   return (
-                    <td key={column.id} data-label={column.title}>
+                    <td key={lane.key} className={laneClass} data-label={column.title}>
                       {editingCell === cellKey ? (
                         <input
                           autoFocus
@@ -882,58 +1182,18 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                     </td>
                   );
                 })}
-                {extraColumns.map((column) => (
-                  <td key={column.key} data-label={column.title}>
-                    {column.render(row)}
-                  </td>
-                ))}
                 {/*
-                  THE PINNED ACTION LANE.
+                  AND NOTHING AFTER THE LAST LANE.
 
-                  Two buttons and not one, because they are two different
-                  places. The chevron OPENS the contractor — jobs, sites,
-                  documents, performance — and is the visible twin of the row
-                  press, kept at the right edge so the affordance is reachable
-                  without scrolling to the last column. The pencil opens the
-                  ordinary editor, which is the only way to write a native
-                  field; it is the row's only route to that editor, so it stays.
-
-                  Each stops the press from reaching the row. Redundant with
-                  `ROW_INTERACTIVE_SELECTOR`, which already exempts a
-                  `<button>` — and kept anyway, because it costs a line and
-                  states the intent at the place a reader will look for it.
+                  A frozen action lane used to close every row: a chevron that
+                  opened the contractor and a pencil that opened the editor,
+                  eighty-six pixels of a table the owner had already called too
+                  wide, held there on every row at every width. The chevron
+                  duplicated a press the whole row answers; the pencil moved to
+                  the profile the row opens. There is no permanent actions
+                  column on this table and no sticky lane at the right — which
+                  is the point, not an omission.
                 */}
-                <td
-                  data-label="Actions"
-                  className="contractor-register__lane contractor-register__lane--end"
-                >
-                  <span className="contractor-register__row-actions">
-                    {onOpen && (
-                      <button
-                        className="icon-button table-open"
-                        type="button"
-                        aria-label={`Open ${row.name}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpen(row.id);
-                        }}
-                      >
-                        <Icon name="chevron" size={16} />
-                      </button>
-                    )}
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label={`Edit ${row.name}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onManage(row.id);
-                      }}
-                    >
-                      <Icon name="edit" size={15} />
-                    </button>
-                  </span>
-                </td>
               </tr>
             ))}
             {!rows.length && (
@@ -941,13 +1201,13 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                 <td
                   className="analytics-empty"
                   /*
-                   * The register's own columns, the page's figures, and the two
-                   * lanes that are not columns — the identity lane at the front
-                   * and the action lane at the back. A colSpan that forgot them
-                   * would leave the empty message short of the table's width
-                   * and a stray bordered cell beside it.
+                   * Every lane the header drew, counted from the same list the
+                   * header drew it from. A colSpan derived a second time is a
+                   * colSpan that goes wrong the first time the two disagree —
+                   * short, and the empty message ends mid-table beside a stray
+                   * bordered cell.
                    */
-                  colSpan={shown.length + extraColumns.length + 2}
+                  colSpan={lanes.length}
                 >
                   No contractors are registered yet.
                 </td>

@@ -5631,6 +5631,15 @@ function ContractorsView({
           }}
           periodLabel={periodWindow.recognised ? periodWindow.label : "the selected period"}
           onNotify={onNotify}
+          /*
+           * THE PAGE'S OWN `onManage`, HANDED STRAIGHT ON — the same function
+           * object the register above is given. The drawer's Edit therefore
+           * opens the same `WorkspaceDataManager` on the same contractor tab
+           * with the same record selected; there is one editor in this product
+           * and one way in, which is what makes it safe for the table to have
+           * dropped its pinned pencil.
+           */
+          onManage={onManage}
           onClose={() => setOpenProfile(null)}
         />
       )}

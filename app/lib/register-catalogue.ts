@@ -142,6 +142,43 @@ export type NativeColumnSeed = {
    * quietly undo somebody's configuration on deploy.
    */
   hidden?: boolean;
+  /**
+   * The column that starts FROZEN at the left of the register.
+   *
+   * Stored in `register_columns.settings` as `{"pinned": true}` rather than in
+   * a column of its own — there is no migration behind this flag and none is
+   * wanted, because a pin is a per-organisation presentation choice living
+   * beside the label, the width and the order that are already there.
+   *
+   * TWO RULES TRAVEL WITH IT, and both are enforced by the engine and the route
+   * rather than by whoever writes this list:
+   *
+   *   AT MOST ONE PER REGISTER. Two frozen lanes is a table with no scrolling
+   *   half left on a phone, so pinning one column unpins the other in the same
+   *   write. A seed that named two would be a state the API can never produce.
+   *
+   *   PINNED IMPLIES SHOWN. A pinned column IS the frozen lane, so a column
+   *   both pinned and hidden is a lane that renders nothing. `hidden` and
+   *   `pinned` on one seed therefore contradict each other, and
+   *   `seedNativeColumns` resolves it in favour of the pin rather than seeding
+   *   a row the two write paths would immediately have to repair.
+   *
+   * Read once at seed, exactly like `hidden`. An organisation that has already
+   * seeded keeps whatever it has pinned since — including nothing.
+   */
+  pinned?: boolean;
+  /**
+   * Drawn by the page rather than read from the row.
+   *
+   * Marks a column whose value is computed — a count over the jobs on screen,
+   * not a field on the contractor. The grid pairs it with the `extraColumns`
+   * entry carrying the same key and lets that renderer draw the cell.
+   *
+   * It exists so the distinction is testable rather than implied by a comment:
+   * everything else about these columns is deliberately ordinary, because
+   * ordinary is what makes them configurable.
+   */
+  measurement?: boolean;
 };
 
 /**
@@ -257,23 +294,65 @@ export const SITE_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
  * column is on it. `availability` is the one field that changes which
  * contractor a coordinator rings NEXT, so it earns the eighth.
  *
- * AND `name` SEEDS HIDDEN, which reads like a mistake and is not. The grid's
- * pinned identity lane prints the contractor's name on every row and cannot be
- * hidden away — that lane exists precisely because a register whose name
- * column had been hidden showed rows with no identity on them at all. A
- * `name` column shown as well would print the same string twice on one row.
- * It stays in the catalogue (a register column somebody may want for its own
- * sake, and the entry that stops `name` being usable as a CUSTOM column key)
- * and it is one press away, but the default does not draw it twice.
+ * AND `name` SEEDS PINNED RATHER THAN HIDDEN, which is the same decision
+ * arrived at from the other end. The register has always drawn the
+ * contractor's identity in a frozen lane at the left — that lane exists
+ * because a register whose `name` column had been hidden showed rows with no
+ * identity on them at all — and while that lane was hard-coded structure, a
+ * `name` column shown as well would have printed the same string twice on one
+ * row, so `name` had to seed hidden to keep it off the table.
+ *
+ * The lane is now the pinned column itself: `settings.pinned` says which
+ * column freezes, the grid draws THAT column in the lane instead of in the
+ * scrolling run, and the string is printed once either way. So `name` seeds
+ * shown-and-pinned. A column that is pinned and hidden would be a frozen lane
+ * with nothing in it, which is why the two flags cannot both be set — see
+ * `NativeColumnSeed.pinned`.
  *
  * None of this touches an organisation that has already seeded. See
  * `NativeColumnSeed.hidden`.
  */
 export const CONTRACTOR_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
-  // Identity and contact. Drawn in the grid's pinned identity lane instead —
-  // the name, the archived badge and the actionable phone/WhatsApp/email are
-  // all there — so none of these seed onto the table as well.
-  { field: "name", title: "Contractor", type: "text", width: 220, hidden: true },
+  // Identity and contact. The archived badge and the actionable
+  // phone/WhatsApp/email are drawn in the grid's frozen identity lane, so the
+  // contact fields do not seed onto the table as well. `name` IS that lane:
+  // it seeds pinned, which is what puts a column in it.
+  { field: "name", title: "Contractor", type: "text", width: 220, pinned: true },
+
+  /*
+   * THE MEASUREMENTS, declared here so their ORDER belongs to the operator.
+   *
+   * These six are not stored fields — they are counts and sums over the jobs
+   * the Contractors page has already loaded, and `portal-app.tsx` renders each
+   * one through an `extraColumns` entry keyed by the same string as `field`
+   * below. The grid matches them by key and lets that renderer draw the cell,
+   * so a percentage still prints as "0%" and a total still prints as money.
+   *
+   * WHY THEY ARE IN THE CATALOGUE AT ALL. Until they were, the register's own
+   * columns could be reordered and hidden and these could not: they trailed the
+   * table in the page's declaration order, `reorderRegisterColumns` silently
+   * dropped any key with no row behind it, and the Columns panel could not list
+   * what it had no record of. A column the reader can see and cannot move is a
+   * worse answer than one that is simply absent.
+   *
+   * `nativeField` is set, like every other native column, so the panel treats
+   * them as built-in: renameable, resizable, hideable, and never deletable.
+   * Nothing writes them — the grid only edits CUSTOM cells inline, and
+   * `/api/registers/values` refuses a native key outright — so the read-only
+   * nature of a measurement is enforced by the same rule that protects
+   * `postcode`, rather than by a second concept.
+   *
+   * `type: "text"` throughout because the extra's renderer owns the formatting.
+   * The type here decides only the fallback in `formatRegisterCell`, which is
+   * reached only if the renderer is ever absent, and "—" is the right answer
+   * then rather than a raw pence integer.
+   */
+  { field: "assigned", title: "Assigned", type: "text", width: 120, measurement: true },
+  { field: "completed", title: "Completed", type: "text", width: 120, measurement: true },
+  { field: "completion", title: "Completion rate", type: "text", width: 150, measurement: true },
+  { field: "urgent", title: "Open urgent", type: "text", width: 135, measurement: true },
+  { field: "documents", title: "Documents", type: "text", width: 130, measurement: true },
+  { field: "spend", title: "Spend", type: "text", width: 120, measurement: true },
   { field: "contactName", title: "Contact", type: "text", hidden: true },
   { field: "email", title: "Email", type: "email", hidden: true },
   { field: "phone", title: "Phone", type: "phone", hidden: true },
