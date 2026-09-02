@@ -285,6 +285,48 @@ export function documentSiteLabel(
 export const UNLINKED_SITE_LABEL = "Not linked to a site";
 
 /**
+ * Which contractor it belongs to — W06-08 and the documents leg of W06-10.
+ *
+ * The same shape as `documentSiteLabel` and for the same reason: the id on the
+ * row is authoritative, the name is a lookup from it, and a document that names
+ * no contractor says so in words rather than rendering an empty cell. Most rows
+ * in this register are photographs of a job and will always read the fallback;
+ * that is the correct answer, not a gap.
+ */
+export function documentContractorLabel(
+  file: Pick<FileRecord, "contractor" | "contractorId">,
+): string {
+  const contractor = file.contractor?.trim();
+  if (contractor) return contractor;
+  return UNLINKED_CONTRACTOR_LABEL;
+}
+
+/** The literal `documentContractorLabel` returns when there is no contractor. */
+export const UNLINKED_CONTRACTOR_LABEL = "Not linked to a contractor";
+
+/**
+ * Name every document's contractor, from the id it is filed under.
+ *
+ * One source, not three: unlike a site there is no free-text predecessor to
+ * fall back to — `contractor_id` is the only place this has ever been recorded
+ * — so a row whose id names nothing this reader can see keeps the empty string
+ * and `documentContractorLabel` turns that into the fallback sentence.
+ *
+ * A pure function rather than a `useMemo` for the reason `withSiteNames` gives:
+ * the CSV export has to name the contractors of rows that are not on screen.
+ */
+export function withContractorNames<T extends FileRecord>(
+  files: T[],
+  contractors: ReadonlyArray<{ id: string; name: string }>,
+): T[] {
+  const nameOf = (contractorId: string | null | undefined) => {
+    if (!contractorId) return "";
+    return contractors.find((item) => item.id === contractorId)?.name?.trim() ?? "";
+  };
+  return files.map((file) => ({ ...file, contractor: nameOf(file.contractorId) }));
+}
+
+/**
  * Name every document's site, from the three sources in order of authority.
  *
  * This was a `useMemo` in portal-app.tsx and is now a pure function, for one
@@ -333,18 +375,25 @@ export function withSiteNames<T extends FileRecord>(
 /* ── Filters ──────────────────────────────────────────────────────────────── */
 
 /**
- * The five structured filters, plus the free-text search they compose with.
+ * The six structured filters, plus the free-text search they compose with.
  *
  * Every one of them is an empty string when inactive, which is the same
  * convention the Sites register uses (`<option value="">All statuses</option>`)
  * and means "all" without needing a sentinel value that could collide with a
  * real one.
+ *
+ * `contractor` is the sixth, added for W06-08 / W06-10. It holds the
+ * contractor's NAME rather than their id, exactly as `site` holds a site's
+ * name: these values are what the selects show and what the label functions
+ * return, and a filter holding an id would have to be translated in two
+ * directions on every render for no gain.
  */
 export type DocumentFilters = {
   documentType: string;
   status: string;
   expiry: string;
   site: string;
+  contractor: string;
   owner: string;
 };
 
@@ -353,6 +402,7 @@ export const emptyDocumentFilters: DocumentFilters = {
   status: "",
   expiry: "",
   site: "",
+  contractor: "",
   owner: "",
 };
 
@@ -417,6 +467,7 @@ export function documentFilterOptions(
   const types = new Set<string>();
   const statuses = new Map<DocumentState, string>();
   const sites = new Set<string>();
+  const contractorNames = new Set<string>();
   const owners = new Set<string>();
   const expiryBuckets = new Set<string>();
 
@@ -425,6 +476,7 @@ export function documentFilterOptions(
     const status = documentStatus(file, today);
     statuses.set(status.state, status.label);
     sites.add(documentSiteLabel(file));
+    contractorNames.add(documentContractorLabel(file));
     owners.add(documentOwner(file));
     for (const bucket of EXPIRY_FILTERS) {
       if (bucket.states.includes(status.state)) expiryBuckets.add(bucket.value);
@@ -436,6 +488,13 @@ export function documentFilterOptions(
     documentTypes: [...types].filter(Boolean).sort(alphabetical),
     statuses: [...statuses].map(([value, label]) => ({ value, label })),
     sites: [...sites].filter(Boolean).sort(alphabetical),
+    /*
+     * DERIVED, like every other option here. On a workspace where no document
+     * is filed against a contractor the only entry is the fallback sentence, so
+     * the select can never offer a name that returns an empty register — see
+     * the note above on why a hard-coded list is the wrong shape.
+     */
+    contractors: [...contractorNames].filter(Boolean).sort(alphabetical),
     owners: [...owners].filter(Boolean).sort(alphabetical),
     expiry: EXPIRY_FILTERS.filter((bucket) => expiryBuckets.has(bucket.value)),
   };
@@ -457,6 +516,9 @@ export function matchesDocumentFilters(
     return false;
   }
   if (filters.site && documentSiteLabel(file) !== filters.site) return false;
+  if (filters.contractor && documentContractorLabel(file) !== filters.contractor) {
+    return false;
+  }
   if (filters.owner && documentOwner(file) !== filters.owner) return false;
   if (filters.status || filters.expiry) {
     const status = documentStatus(file, today);
@@ -486,6 +548,13 @@ export function matchesDocumentSearch(file: FileRecord, query: string) {
     documentTypeLabel(file),
     file.description ?? "",
     documentSiteLabel(file),
+    /*
+     * The contractor's name, so "UK Safety" finds their insurance certificate.
+     * The fallback sentence goes in with it deliberately: typing "not linked"
+     * is how somebody finds the documents that belong to nobody, which is the
+     * question an audit actually asks.
+     */
+    documentContractorLabel(file),
     file.requestId ?? "",
     documentOwner(file),
   ]
@@ -687,6 +756,14 @@ export function documentServerQuery(input: {
   pageSize: number;
   /** A site's display name to the one site id it names, or "" when unknown. */
   siteIdFor: (label: string) => string;
+  /**
+   * A contractor's display name to their id, or "" when unknown.
+   *
+   * Optional so a caller that has no contractor list keeps compiling; an absent
+   * resolver makes the contractor filter residual, which is the honest answer
+   * rather than a narrowing that silently does nothing.
+   */
+  contractorIdFor?: (label: string) => string;
   today: Date;
 }): DocumentServerQuery {
   const { filters } = input;
@@ -729,6 +806,23 @@ export function documentServerQuery(input: {
     // Either "Not linked to a site" (`site_id IS NULL`) or a name that no
     // single store answers to — a label from a job's free-text location.
     else residual.push("site");
+  }
+
+  /*
+   * The contractor filter goes to the SERVER, because `/api/files` has taken a
+   * `contractorId` parameter since W07-11 and an exact id is precisely what
+   * this narrows by. The fallback label cannot: "Not linked to a contractor" is
+   * `contractor_id IS NULL`, which the endpoint has no parameter for, so it is
+   * named as residual rather than silently dropped.
+   */
+  const contractor = filters.contractor.trim();
+  if (contractor) {
+    const contractorId =
+      contractor === UNLINKED_CONTRACTOR_LABEL
+        ? ""
+        : (input.contractorIdFor?.(contractor) ?? "");
+    if (contractorId) params.set("contractorId", contractorId);
+    else residual.push("contractor");
   }
 
   if (filters.owner.trim()) residual.push("owner");

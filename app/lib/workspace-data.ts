@@ -143,17 +143,116 @@ export type WorkspaceContractor = {
    * has no storage behind them; absent reads as "not known", not as zero.
    */
   documentCount?: number;
+  /**
+   * W06-06 — the postcode, as its own column.
+   *
+   * `address` is one free-text line, so nothing could sort, search or map on
+   * where a contractor is. Optional and NOT format-checked against a UK
+   * pattern: the product admits non-UK contractors — `coverageAreas` is full of
+   * "Europe" and `sites.country` is a free column — so "75008" and "1012 AB"
+   * are as legitimate here as "SW1A 1AA".
+   */
+  postcode?: string | null;
   serviceCategories: string[];
   coverageAreas: string[];
   certifications: string[];
+  /**
+   * W06-08 — certifications as ENTRIES, each with its own expiry.
+   *
+   * `certifications` above is the legacy array of names and stays exactly where
+   * it is: it holds no dates, so "is their gas ticket still valid" had no
+   * answer, but it is what every existing row and every existing screen holds.
+   * This is additive — a contractor with no rows in `contractor_certifications`
+   * gets an empty list and behaves precisely as they did before.
+   *
+   * Optional in the type because `app/lib/mock-data.ts` builds these payloads
+   * too and has no storage behind them; absent reads as "not known", not as
+   * "none".
+   */
+  certificationEntries?: WorkspaceCertification[];
   insuranceExpiry: string | null;
+  /**
+   * The RAG bucket `insuranceExpiry` falls in, from `expiryStatus`.
+   *
+   * DERIVED on read and never stored, for the reason `compliance_documents
+   * .status` proves: a status written into a column stops being true the day
+   * after it was written, and "Compliant" then outlived the certificate by
+   * months. Sent from the server so the register, the manage drawer and any
+   * later digest cannot each classify the same date differently.
+   */
+  insuranceState?: "expired" | "due-soon" | "valid" | "not-recorded";
+  insuranceStatusLabel?: string;
+  /**
+   * W06-08 — who the cover is with, and under which policy.
+   *
+   * A bare expiry date can say WHEN something ends but never WHAT ended, which
+   * is the whole reason chasing a lapsed contractor's insurance used to start
+   * with a phone call asking who their broker was.
+   */
+  insurerName?: string | null;
+  policyNumber?: string | null;
+  insuranceNotes?: string | null;
   availability: string;
   rating: number | null;
   active: boolean;
+  /**
+   * W06-07 — the agreed rate card, all of it in integer pence.
+   *
+   * AGREED TERMS, not money spent. Nothing sums these and nothing may: spend is
+   * computed from job cost alone, and `app/lib/contractor-attribution.ts` is
+   * pinned by test never to so much as name one of these columns. Null is "not
+   * agreed", which is not the same as a rate of zero — the register prints a
+   * dash rather than "£0.00", because £0.00 reads as "they work for free".
+   *
+   * `otherCostLabel` is what makes `otherCostPence` legible. A figure with no
+   * name is not a cost, and overloading `notes` to carry the name would put it
+   * somewhere no column, filter or report can read.
+   */
+  hourlyRatePence?: number | null;
+  callOutCostPence?: number | null;
+  otherCostPence?: number | null;
+  otherCostLabel?: string | null;
+  /**
+   * W06-09 — payment TERMS and an EXTERNAL accounting reference.
+   *
+   * THE APPROVED MODEL, AND ITS BOUNDARY. `paymentTerms` is controlled from the
+   * `contractor_payment_terms` option set; `financeReference` points at the
+   * supplier record in Xero, Sage, QuickBooks or an internal ledger. There is
+   * deliberately NO bank account number, sort code, IBAN or card detail on this
+   * type, on the `contractors` table, or anywhere on the route that writes it,
+   * and none may be added: a maintenance portal holding payment credentials is
+   * a breach waiting for its first misconfigured backup, and the accounting
+   * system that already holds them is built for it.
+   */
+  paymentTerms?: string | null;
+  financeReference?: string | null;
   assignedJobs: number;
   completedJobs: number;
   urgentJobs: number;
   spend: number;
+};
+
+/**
+ * W06-08 — one certification a contractor holds.
+ *
+ * `status` is absent on purpose: it is DERIVED from `expiresOn` by
+ * `expiryStatus` at read time and travels as `expiryState` / `expiryLabel`, so
+ * there is no second copy of the verdict to go stale. Everything but `name` is
+ * optional, because not every ticket has a reference and not every ticket
+ * expires.
+ */
+export type WorkspaceCertification = {
+  id: string;
+  name: string;
+  reference: string | null;
+  issuedOn: string | null;
+  expiresOn: string | null;
+  notes: string | null;
+  position: number;
+  /** From `app/lib/expiry-status.ts` — the platform's one classifier. */
+  expiryState: "expired" | "due-soon" | "valid" | "not-recorded";
+  expiryLabel: string;
+  daysRemaining: number | null;
 };
 
 export type WorkspacePlannedItem = {

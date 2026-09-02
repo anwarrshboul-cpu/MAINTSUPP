@@ -14471,8 +14471,29 @@ body[data-theme="dark"] {
   outline-offset: 2px;
 }
 
-.site-detail__wide {
-  grid-column: 1 / -1;
+/*
+ * The Site profile's Overview tab: a grid of stat cards, then a panel of
+ * labelled rows.
+ *
+ * WHAT THIS REPLACES, AND WHY IT WAS A DEFECT RATHER THAN A PREFERENCE. The
+ * panel itself carried `site-stat-grid`, and `.site-stat-grid > div` restyles
+ * every direct child as a stat card — `grid-template-columns: 38px 1fr auto`,
+ * a 73px floor and a border. The block of labelled rows was one of those
+ * children, so its eight `.detail-row` divs flowed into a three-column grid
+ * whose first track is 38px wide, and each of them then laid its own
+ * `minmax(9rem, 14rem) 1fr` out inside that. The labels painted over each
+ * other at every width — "SERVICE CHARGOPENING HOURS", "PARKINGNOTES" — and
+ * `.site-detail__wide`, the `grid-column: 1 / -1` that used to be here, only
+ * ever hid it for the one child that carried the class.
+ *
+ * Two children, stacked on the same 11px rhythm the stat grid uses internally.
+ * The grid is now applied to the cards and to nothing else, so no rule needed
+ * loosening and nothing else that uses `.site-stat-grid` — the Documents
+ * register, the Compliance hero — is touched.
+ */
+.site-detail__overview {
+  display: grid;
+  gap: 11px;
 }
 
 /* ---- Board file cells: monday's photo strip, on desktop too ------------- */
@@ -15509,5 +15530,405 @@ body.is-dragging-board-column {
     width: 24px !important;
     height: 24px !important;
     flex: 0 0 24px !important;
+  }
+}
+
+/* ---- W05-09 / W06-10 / W06-11: contractor <-> site, and the register ---- */
+
+/*
+ * THE LINK CONTROLS ON BOTH PROFILES.
+ *
+ * One rule set for the site's Contractors tab and the contractor profile's
+ * Sites section, because they are the same control seen from either end: a
+ * search that narrows the SERVER's candidate list, a picker of what is not yet
+ * linked, and the button that commits it. Written once so the two cannot drift
+ * into two shapes of the same thing.
+ *
+ * `flex-wrap` rather than a media query: the three controls have natural widths
+ * (a search box, a select of contractor names, a button) and the row simply
+ * wraps when they no longer fit. A breakpoint would have to guess at the
+ * longest contractor name in somebody else's workspace.
+ */
+.site-contractors__link,
+.contractor-profile__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/*
+ * THE TWO CONTROLS LOOK LIKE FIELDS, because they are.
+ *
+ * `input`/`select` inherit only colour and font from the reset, so a bare box
+ * on a white panel renders as a line of text somebody has to guess is typable —
+ * measured on the contractor profile, where "Search sites…" read as a caption.
+ * These are the same border, radius and height `.form-field` gives every other
+ * box in the product; the rules are restated rather than the class reused,
+ * because `.form-field` also carries a 9px uppercase legend that these two
+ * controls do not have.
+ *
+ * 16px on the font, and that figure is not cosmetic: below it iOS zooms the
+ * page on focus and does not zoom back.
+ */
+.site-contractors__link input[type="search"],
+.contractor-profile__link input[type="search"],
+.site-contractors__link select,
+.contractor-profile__link select {
+  min-height: 41px;
+  padding: 0 11px;
+  border: 1px solid var(--line, #ccd8de);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--surface-card, white);
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.site-contractors__link input[type="search"],
+.contractor-profile__link input[type="search"] {
+  min-width: 180px;
+  flex: 1 1 180px;
+}
+
+.site-contractors__link select,
+.contractor-profile__link select {
+  min-width: 200px;
+  flex: 1 1 220px;
+}
+
+/*
+ * The "showing N of M" line takes the whole row rather than sitting between
+ * two controls, so the sentence is read as a caption for the picker above it
+ * and not as a third field.
+ */
+.site-contractors__more,
+.contractor-profile__link > p {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+/* ---- The contractor profile drawer ------------------------------------- */
+
+.detail-drawer--contractor .contractor-profile__section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line, rgba(15, 39, 56, 0.12));
+}
+
+.detail-drawer--contractor .contractor-profile__section:last-child {
+  border-bottom: 0;
+}
+
+.detail-drawer--contractor .contractor-profile__section h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.contractor-profile__upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+/*
+ * The file input is visually hidden and its LABEL is the button, which is the
+ * only arrangement that keeps a real `<input type="file">` — and with it the
+ * platform's own picker and its keyboard behaviour — while looking like the
+ * rest of the page. A `<button>` that calls `.click()` on a hidden input loses
+ * the label association a screen reader reads.
+ */
+.contractor-profile__upload label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+/*
+ * `.file-list li` is a column, so a control inside one takes the full width and
+ * reads as a second row of the card rather than as an action on it. The row
+ * becomes a grid: the link and its detail line stack on the left, the verb sits
+ * at the end, and neither has to be given a width.
+ */
+.contractor-profile__section .file-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.contractor-profile__section .file-list li > a {
+  grid-column: 1;
+}
+
+.contractor-profile__section .file-list li > .drawer-label {
+  grid-row: 2;
+  grid-column: 1;
+}
+
+.contractor-profile__section .file-list li > button {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+/* ---- The configurable register grid ------------------------------------ */
+
+/*
+ * EVERY CLASS BELOW IS NAMESPACED `contractor-register__`, and the prefix is
+ * load-bearing rather than tidy.
+ *
+ * The Sites register carries its own grid, styled in `brand-overrides.css`
+ * under bare names — `.register-column-menu`, `.register-cell-input`,
+ * `.register-columns-panel`. Both stylesheets are loaded on every page of the
+ * portal, so a shared name is not two components agreeing on a look: it is one
+ * component's `position: absolute; display: grid` landing on the other's
+ * `position: relative` wrapper. The two grids have different markup and neither
+ * is wrong; they simply must not answer to the same selector.
+ */
+.contractor-register__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.contractor-register__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.contractor-register__error {
+  margin: 0 14px 10px;
+}
+
+.contractor-register__error-action {
+  margin-left: 10px;
+}
+
+.contractor-register__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+
+.contractor-register__add label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.contractor-register__panel {
+  padding: 0 14px 12px;
+}
+
+.contractor-register__panel ul {
+  display: grid;
+  /*
+   * `auto-fill` at a fixed minimum rather than a column count, so the panel is
+   * one column on a phone and as many as fit on a desktop without a breakpoint
+   * deciding where the change happens.
+   */
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  margin: 8px 0 0;
+  padding: 0;
+  gap: 6px 14px;
+  list-style: none;
+}
+
+.contractor-register__panel li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.contractor-register__panel label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/*
+ * THE HEADER IS A ROW, and the resize handle is anchored to its right edge.
+ *
+ * `position: relative` on the cell content rather than on the `<th>`: the table
+ * is inside `.table-scroll`, and a handle positioned against a scrolling
+ * ancestor drifts away from its column as the table is scrolled sideways.
+ */
+.contractor-register__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.contractor-register__head-title {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contractor-register__menu-anchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.contractor-register__menu {
+  position: absolute;
+  /*
+   * A TIER TOKEN, never a raw number. `--z-popover` is what every other menu
+   * that opens over a table already sits on, and the tokens exist so a new
+   * surface cannot invent a depth that happens to work today and slides under
+   * the drawer tomorrow. The column menu is a popover; it says so.
+   */
+  z-index: var(--z-popover);
+  top: 100%;
+  right: 0;
+  display: grid;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--line, rgba(15, 39, 56, 0.12));
+  border-radius: 8px;
+  background: var(--surface-card, #fff);
+  box-shadow: 0 12px 30px rgba(7, 24, 38, 0.18);
+}
+
+.contractor-register__menu button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.contractor-register__menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.contractor-register__menu-danger {
+  color: #c02b3f;
+}
+
+/*
+ * 44px tall and 10px wide, which is the smallest a drag target may be here and
+ * still be hit on a phone. It is deliberately NOT shown to a touch-only device
+ * as the only way to resize: the column menu's Move controls and the columns
+ * panel do everything this does, and neither needs a precise drag.
+ */
+.contractor-register__resize {
+  flex: 0 0 auto;
+  width: 10px;
+  min-height: 44px;
+  margin-right: -6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.contractor-register__resize::after {
+  display: block;
+  width: 2px;
+  height: 60%;
+  margin: 20% auto;
+  background: var(--line, rgba(15, 39, 56, 0.16));
+  content: "";
+}
+
+.contractor-register__cell {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.contractor-register__cell--name {
+  text-decoration: underline;
+  text-decoration-color: transparent;
+}
+
+.contractor-register__cell--name:hover,
+.contractor-register__cell--name:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+.contractor-register__cell-input {
+  width: 100%;
+  min-height: 34px;
+  /*
+   * 16px, or iOS zooms the page on focus and does not zoom back. Every editable
+   * box in this product carries the same figure for the same reason.
+   */
+  font-size: 16px;
+}
+
+.contractor-register__hidden {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 14px;
+}
+
+.contractor-register__hidden-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/*
+ * THE PHONE. The register is a wide table and stays one — it scrolls inside
+ * `.table-scroll` exactly as the estate's other registers do — but the header
+ * controls have to be reachable with a thumb, so the menu button and the
+ * resize handle both take the 44px target the rest of the product uses. 640 is
+ * one of this codebase's agreed breakpoints; a width of its own would fail the
+ * stage tests that hold that line.
+ */
+@media (max-width: 640px) {
+  .contractor-register__toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .contractor-register__menu {
+    min-width: 170px;
+  }
+
+  .contractor-register__menu button {
+    min-height: 44px;
+  }
+
+  .contractor-register__add select,
+  .contractor-register__add input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  /*
+   * A drag handle is not a phone affordance. Hidden rather than enlarged: the
+   * column menu's Move controls and the columns panel already do everything it
+   * does, and a 10px target beside a menu button is a mis-tap waiting to
+   * happen on the horizontal scroll this table depends on.
+   */
+  .contractor-register__resize {
+    display: none;
   }
 }

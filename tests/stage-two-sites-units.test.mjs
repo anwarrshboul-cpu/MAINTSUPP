@@ -86,6 +86,103 @@ test("no configurable list has reappeared as a code constant", async () => {
   }
 });
 
+/**
+ * M12, SECOND HALF — the form the first half could not see.
+ *
+ * The guard above looks for a configurable list reintroduced as a NAMED
+ * constant. It has never caught the shape this codebase actually reaches for,
+ * which is the list written inline at the point of use:
+ *
+ *     { key: "type", label: "Type", type: "select",
+ *       options: ["Kiosk", "Inline", "Office", "Warehouse"].map(...) }
+ *
+ * That is the same defect with no identifier to match on. It was live on the
+ * Manage-data drawer's Sites tab for site TYPE and site LIFECYCLE while
+ * `POST /api/sites` validated the very same columns against
+ * `option_values` — so two screens editing one column disagreed about
+ * what its legal values are, and a type an admin added in Settings could be
+ * used on one of them and not the other.
+ *
+ * WHY AN ALLOWLIST RATHER THAN A BARE REFUSAL. Six of these remain and they
+ * belong to registers this pass does not own — the compliance state ladder, the
+ * unit and planned status lists, contractor availability, the role list. Making
+ * them fail today would leave the suite red for work nobody has started, and a
+ * red suite teaches people to ignore it. Naming them instead does three useful
+ * things at once: a NEW inline list fails immediately, a fixed one fails until
+ * it is struck off this list, and the debt is written down where somebody will
+ * read it rather than in a ticket. The site entries are absent because they are
+ * gone; they can never come back without failing here.
+ */
+const INLINE_OPTION_LIST = /options:\s*\[\s*["'][^\]]*\]\s*\.map\(/g;
+
+/**
+ * Every inline option list the codebase still has, by file and by first value.
+ * Anything not on this list is new and must come from the options registry.
+ */
+const KNOWN_INLINE_OPTION_LISTS = [
+  // The five compliance states. A closed vocabulary the whole product speaks —
+  // COMPLIANCE_STATES in app/lib/types.ts — but restated here rather than
+  // imported from it.
+  ["app/(app)/portal/workspace-data-manager.tsx", '"Compliant"'],
+  // Unit status. `unit_status` IS a seeded option_values key.
+  ["app/(app)/portal/workspace-data-manager.tsx", '"Active"'],
+  // Contractor availability, owned by the contractor register.
+  ["app/(app)/portal/workspace-data-manager.tsx", '"Available"'],
+  // Planned maintenance frequency and status.
+  ["app/(app)/portal/workspace-data-manager.tsx", '"One-off"'],
+  ["app/(app)/portal/workspace-data-manager.tsx", '"Scheduled"'],
+  // The three workspace roles, which are a permissions concept rather than an
+  // admin-editable list.
+  ["app/(app)/portal/workspace-data-manager.tsx", '"Super Admin"'],
+];
+
+test("no configurable list has reappeared as an inline literal option list", async () => {
+  const files = await collect("app/", [".ts", ".tsx"]);
+  const seen = [];
+  for (const path of files) {
+    const source = await read(path);
+    for (const match of source.matchAll(INLINE_OPTION_LIST)) {
+      const first = match[0].slice(match[0].indexOf("["));
+      seen.push([path, first.slice(first.indexOf('"') >= 0 ? first.indexOf('"') : 0).match(/["'][^"']*["']/)?.[0] ?? first]);
+    }
+  }
+
+  for (const [path, first] of seen) {
+    assert.ok(
+      KNOWN_INLINE_OPTION_LISTS.some(([file, value]) => file === path && value === first),
+      `${path}: options starting ${first} are written inline instead of read from option_values. Add the list to the options registry, or name it in KNOWN_INLINE_OPTION_LISTS with the reason.`,
+    );
+  }
+
+  /*
+   * And the other direction: a list that has been fixed must be struck off,
+   * so this cannot quietly become a permanent exemption.
+   */
+  for (const [file, value] of KNOWN_INLINE_OPTION_LISTS) {
+    assert.ok(
+      seen.some(([path, first]) => path === file && first === value),
+      `${file}: the inline list starting ${value} is gone — remove it from KNOWN_INLINE_OPTION_LISTS.`,
+    );
+  }
+
+  /*
+   * THE SITE FIELDS, NAMED. These three are the reason this test exists and
+   * they are the ones a regression would most plausibly restore, because the
+   * drawer's other tabs still have theirs.
+   */
+  const drawer = await read("app/(app)/portal/workspace-data-manager.tsx");
+  for (const gone of [
+    ['"Kiosk", "Inline", "Office", "Warehouse"', "site types are option_values rows"],
+    ['"UK", "Europe", "Other"', "region is free text; there is no site_region list to hardcode"],
+    ['"Current", "Closed"', "the lifecycle words have one home, app/lib/site-state.ts"],
+  ]) {
+    assert.ok(
+      !drawer.includes(`[${gone[0]}]`),
+      `the Sites tab must not restate [${gone[0]}] — ${gone[1]}`,
+    );
+  }
+});
+
 test("site attributes are runtime strings, not literal unions", async () => {
   const types = await read("app/lib/types.ts");
   const store = types.slice(types.indexOf("export interface StoreRecord"));

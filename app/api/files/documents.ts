@@ -196,7 +196,17 @@ export function documentFieldUpdates(
   return { ok: true, values };
 }
 
-/** The subset of a row a before/after audit table should show. */
+/**
+ * The subset of a row a before/after audit table should show.
+ *
+ * `contractorId` is here and the other three anchors are not, and the asymmetry
+ * is the point: W05-09 / W06-10 made the CONTRACTOR anchor editable after
+ * upload — see the PATCH in `app/api/files/[id]/route.ts` — so it is a field
+ * that moves and an audit table that could not show it moving would be missing
+ * the only structural change this route can make. `requestId`, `siteId` and
+ * `unitId` are still write-once at upload, so there is nothing for a before and
+ * an after to differ by.
+ */
 export function documentFieldSnapshot(row: AttachmentRow) {
   return {
     title: row.title,
@@ -204,6 +214,7 @@ export function documentFieldSnapshot(row: AttachmentRow) {
     description: row.description,
     expiryDate: row.expiryDate,
     archivedAt: row.archivedAt,
+    contractorId: row.contractorId,
   };
 }
 
@@ -360,11 +371,26 @@ export type AnchorSource = Pick<
  * version that is not the current head. A wrong `replaces` therefore costs the
  * caller an upload and then the truthful error, and buys them no information.
  *
- * WHY IT IS RACE-FREE. It reads only `request_id`, `site_id`, `unit_id` and
- * `contractor_id`, and no route writes those after insert — `PATCH
- * /api/files/[id]` updates the title, type, description, expiry and archive flag
- * and nothing else. So `start` and every part read the same four values however
- * long the upload takes, and deliberately WITHOUT `planVersion`'s liveness
+ * WHAT IT READS, AND THE ONE THING THAT CAN NOW MOVE UNDER IT. It reads
+ * `request_id`, `site_id`, `unit_id` and `contractor_id`. Three of those four
+ * are still write-once at upload. `contractor_id` is not, as of W05-09 /
+ * W06-10: `PATCH /api/files/[id]` can now file a document against a contractor
+ * or unfile it, alongside the title, type, description, expiry and archive
+ * flag it already wrote.
+ *
+ * That is a bounded, visible race rather than a silent one, and `anchorSegment`
+ * is why. The key names `request_id` first and only falls through to
+ * `contractor_id` when there is no job — so a multipart replacement of a
+ * job-anchored document is unaffected however its contractor is edited, and the
+ * exposed case is narrow: somebody re-files a JOBLESS document against a
+ * different contractor while a >900 KB new version of that same document is
+ * mid-upload. The parts then disagree with the prefix `start` minted and
+ * `validUploadKey` refuses them, which costs that upload and stores nothing
+ * wrong. The alternative — reading the anchor once and trusting it — would
+ * write bytes under a key the row does not name, which is the failure this
+ * function was added to end.
+ *
+ * Otherwise unchanged, and deliberately WITHOUT `planVersion`'s liveness
  * conditions: if the predecessor is archived or superseded mid-upload the parts
  * must keep agreeing with the key `start` minted, and `complete` is where that
  * is refused.

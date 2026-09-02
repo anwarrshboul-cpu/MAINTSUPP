@@ -47,6 +47,7 @@ import type {
 import { EXPIRY_DUE_SOON_DAYS } from "../../lib/expiry-status";
 import {
   activeFilterCount,
+  documentContractorLabel,
   documentFilterOptions,
   documentName,
   documentOwner,
@@ -63,6 +64,7 @@ import {
   hasActiveFilters,
   matchesDocumentFilters,
   matchesDocumentSearch,
+  withContractorNames,
   type DocumentFilters,
 } from "./views/document-register";
 /*
@@ -73,6 +75,28 @@ import {
  * them shows a broken image.
  */
 import { DocumentThumbnail } from "./views/document-thumbnail";
+/*
+ * W06-11 — the shared configurable register, mounted on Contractors. The grid
+ * is its own module because it owns a fetch, a column menu, a drag and a
+ * settings panel, and because every cell in it has to go through
+ * `registerCellValue` — one call site, in one file, is what keeps a native
+ * column from being read out of `register_values` and rendering blank.
+ */
+import { ContractorRegister } from "./contractor-register";
+/*
+ * The actionable contact cell — a contractor's phone, WhatsApp and email as
+ * things you can tap. It used to be defined in this file and rendered once; the
+ * profile drawer needs the same three links, and importing this module from
+ * there would be a cycle, so it moved.
+ */
+import { ContractorContact } from "./contractor-contact";
+/*
+ * W06-10 — the contractor profile: their jobs, their sites, their documents and
+ * their performance. Separate from this file for the plainest reason: it owns
+ * two fetches and five verbs of its own, and this component is already nine
+ * thousand lines.
+ */
+import { ContractorProfile } from "./contractor-profile";
 import { AccountMenu } from "./account-menu";
 import {
   formatDayMonth,
@@ -82,13 +106,16 @@ import {
   formatTimeOfDay,
 } from "../../lib/format-date";
 /*
- * The rules for turning a typed-in number into something a handset can act on.
- * They live in one module because the contractor register is not the only
- * place a number is printed, and because `wa.me` refuses a national number
- * rather than dialling it — see the file's own header for why guessing a
- * country code is the one thing neither helper is allowed to do.
+ * `telHref` and `whatsappHref` are no longer imported here.
+ *
+ * The rules for turning a typed-in number into something a handset can act on
+ * live in `app/lib/contact-links.ts`, and the only thing in this file that used
+ * them was `ContractorContact` — which moved to `./contractor-contact` so the
+ * profile drawer could render the same three links without importing this
+ * module and creating a cycle. The helpers are imported there instead. Said
+ * here rather than deleted silently, because "why does this page print a number
+ * it cannot dial" is a question somebody will ask again.
  */
-import { telHref, whatsappHref } from "../../lib/contact-links";
 import { chipInk } from "./chip-ink";
 /*
  * ── The calendar ─────────────────────────────────────────────────────────────
@@ -131,9 +158,11 @@ import { installSessionGuard } from "./session-guard";
 import { publishedBoardOptions } from "../../lib/board-option-registry";
 import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
 import { priorityOptions } from "./board-model";
+import { attributeContractorWork } from "../../lib/contractor-attribution";
 import {
   classifySpend,
   ComplianceExpiryTimeline,
+  ContractorCostPanel,
   ContractorScorecard,
   CostByCategory,
   OpenJobAgeing,
@@ -956,6 +985,14 @@ function downloadFileRegister(files: FileRecord[], now = new Date()) {
     "description",
     "site",
     "siteId",
+    /*
+     * W06-08. Both, for the reason `site` and `siteId` are both here: the name
+     * is what a person reads in the spreadsheet and the id is what anything
+     * downstream can join on. A name alone would be unjoinable the moment two
+     * contractors were renamed into each other's old names.
+     */
+    "contractor",
+    "contractorId",
     "requestId",
     "uploadedAt",
     "uploadedByEmail",
@@ -1314,6 +1351,8 @@ export default function PortalApp({
           createdAt: string;
           uploadedByEmail?: string | null;
           siteId?: string | null;
+          /* W06-08 — served by `attachmentPayload` all along, dropped here. */
+          contractorId?: string | null;
           title?: string | null;
           documentType?: string | null;
           description?: string | null;
@@ -1388,6 +1427,18 @@ export default function PortalApp({
         description: file.description ?? null,
         site: "",
         siteId: file.siteId ?? null,
+        /*
+         * W06-08 — the contractor anchor, carried through at last.
+         *
+         * `attachmentPayload` has served `contractorId` since W07-07 and this
+         * mapping threw it away, so `GET /api/files?contractorId=…` worked and
+         * nothing in the browser could tell which contractor a document
+         * belonged to. `contractor` — the NAME — is left empty here for the
+         * same reason `site` is: it is resolved at render time from the
+         * workspace's contractor list, which is a separate request that may not
+         * have arrived yet.
+         */
+        contractorId: file.contractorId ?? null,
         requestId: file.requestId,
         uploadedAt: file.createdAt,
         uploadedByEmail: file.uploadedByEmail ?? null,
@@ -1442,6 +1493,12 @@ export default function PortalApp({
    * The third source is nothing, and it says so: `documentSiteLabel` turns the
    * empty string into "Not linked to a site", which is a fact about the
    * document rather than a placeholder that reads like a place.
+   *
+   * W06-08 — THE CONTRACTOR IS NAMED IN THE SAME PASS, and for the same reason
+   * it could not be named at fetch time: the contractor list arrives on the
+   * workspace request, which races the document walk. One source rather than
+   * three, because `contractor_id` is the only place this has ever been
+   * recorded — there is no free-text predecessor to fall back to.
    */
   const documentsWithSites = useMemo(() => {
     const stores = workspace?.stores ?? [];
@@ -1449,7 +1506,7 @@ export default function PortalApp({
       if (!siteId) return "";
       return stores.find((item) => item.id === siteId)?.name?.trim() ?? "";
     };
-    return documents.map((file) => {
+    const named = documents.map((file) => {
       const direct = nameOf(file.siteId);
       if (direct) return { ...file, site: direct };
       const job = requests.find((item) => item.id === file.requestId);
@@ -1458,6 +1515,7 @@ export default function PortalApp({
       const viaJob = nameOf(job?.siteId);
       return { ...file, site: viaJob };
     });
+    return withContractorNames(named, workspace?.contractors ?? []);
   }, [documents, requests, workspace]);
 
   useEffect(() => {
@@ -2655,6 +2713,7 @@ export default function PortalApp({
               requests={requests}
               stores={currentStores}
               compliance={workspace?.compliance ?? []}
+              contractors={currentContractors}
               units={currentUnits}
               workspaceReady={workspace !== null}
               /* The workspace flag above covers units and compliance, which
@@ -2784,6 +2843,7 @@ export default function PortalApp({
               sectionKey={activeSection}
               contractors={currentContractors}
               requests={requests}
+              onNotify={setToast}
               onManage={(id) => openWorkspaceManager("contractor", id)}
             />
           )}
@@ -2829,6 +2889,7 @@ export default function PortalApp({
               key={activeSection}
               sectionKey={activeSection}
               files={documentsWithSites}
+              contractors={currentContractors}
               truncated={documentsTruncated}
               onNotify={setToast}
               onChanged={() => void loadDocuments()}
@@ -2849,6 +2910,7 @@ export default function PortalApp({
               sectionKey={activeSection}
               requests={requests}
               stores={currentStores}
+              contractors={currentContractors}
               /* `dataMode` IS the jobs signal — it is stamped "live" only
                  once /api/maintenance has answered, and the gate above lets
                  "loading" through on purpose so the page's chrome paints
@@ -3148,6 +3210,7 @@ function OverviewView({
   requests,
   stores: storeRows,
   compliance: complianceRecords,
+  contractors: registeredContractors,
   units,
   workspaceReady,
   jobsReady,
@@ -3165,6 +3228,16 @@ function OverviewView({
    * Compliance Tracker about the same documents. One source, one verdict.
    */
   compliance: WorkspaceSnapshot["compliance"];
+  /**
+   * The contractor register, so the Dashboard can put a cost against a
+   * contractor by REFERENCE rather than by the name typed on the job.
+   *
+   * W06-12 is worded "Reports and Dashboard", and the Dashboard half was unmet
+   * outright — the only contractor panel in the product was rendered once,
+   * inside the Reports widget list. `ContractorCostPanel` below is that half,
+   * and an id is meaningless without the register that names it.
+   */
+  contractors: WorkspaceContractor[];
   units: WorkspaceUnit[];
   /**
    * Whether `/api/workspace` has answered yet.
@@ -3496,6 +3569,33 @@ function OverviewView({
                 sites={storeRows}
                 period={period}
                 now={now}
+                loading={!workspaceReady || loading}
+              />
+            ),
+          },
+          {
+            /*
+             * THE DASHBOARD HALF OF W06-12.
+             *
+             * "Contractor costs on Reports and Dashboard" had one panel, on
+             * Reports, ranked by job volume. This is the money question on the
+             * screen people open first, over the same `scopedRequests` every
+             * other figure on this page uses — so it is scoped by
+             * `withinAnalyticsPeriod(request.requestedAt, …)` exactly like the
+             * spend tiles and the trend above it, and cannot print a different
+             * total for the same window on the same page.
+             *
+             * Both flags: the jobs supply the cost and the workspace supplies
+             * the register that says whose it is, and a panel that announced
+             * "no costed job names a contractor" while the register was still
+             * in flight would be stating a finding about data nobody had read.
+             */
+            key: "contractor-spend",
+            label: "Contractor spend",
+            render: () => (
+              <ContractorCostPanel
+                requests={scopedRequests}
+                contractors={registeredContractors}
                 loading={!workspaceReady || loading}
               />
             ),
@@ -4398,12 +4498,23 @@ function CalendarView({
 
 function DocumentsView({
   files,
+  contractors,
   truncated,
   sectionKey,
   onNotify,
   onChanged,
 }: {
   files: FileRecord[];
+  /**
+   * The contractor register, so a document can be FILED against one — W06-08.
+   *
+   * The register itself only needs the name, and `withContractorNames` has
+   * already put that on every row. This is here for the drawer's editor, which
+   * has to offer a list of real contractors to choose from: a free-text box
+   * would let somebody type a name that resolves to nobody, and the anchor is
+   * an id, not a label.
+   */
+  contractors: WorkspaceContractor[];
   /**
    * The register read its bound rather than the end of the estate.
    *
@@ -4446,14 +4557,15 @@ function DocumentsView({
    */
   const [page, setPage] = useState(1);
   /*
-   * The five structured filters — W07-11.
+   * The six structured filters — W07-11, and W06-08 for the sixth.
    *
    * Search alone was never enough for a register: "Aldgate" typed into the box
    * matches a site, a filename that mentions it and a description, and there
    * was no way at all to ask "which certificates expire soon", which is the
-   * question a compliance register exists to answer. Each one is a plain
-   * string, empty when inactive, exactly as the Sites register's two selects
-   * already work.
+   * question a compliance register exists to answer. Contractor is the sixth
+   * and closes the same kind of gap: the column was written and indexed and
+   * this page had no way to ask about it. Each one is a plain string, empty
+   * when inactive, exactly as the Sites register's two selects already work.
    */
   const [filters, setFilters] = useState<DocumentFilters>(emptyDocumentFilters);
   const setFilter = (key: keyof DocumentFilters, value: string) =>
@@ -4763,6 +4875,33 @@ function DocumentsView({
               </option>
             ))}
           </select>
+          {/*
+            W06-08 / W06-10 — FILTER BY CONTRACTOR.
+
+            "Show me everything UK Safety have given us" was unanswerable from
+            this page: `attachments.contractor_id` was written, indexed and
+            queryable through `GET /api/files?contractorId=…`, and the register
+            had no column for it and no control that mentioned it. The options
+            are derived from the rows in view like every other select here, so
+            a workspace with no contractor documents is offered only the
+            "not linked" entry rather than a list of names that all return
+            nothing.
+          */}
+          <label htmlFor="document-contractor-filter" className="visually-hidden">
+            Filter by contractor
+          </label>
+          <select
+            id="document-contractor-filter"
+            value={filters.contractor}
+            onChange={(event) => setFilter("contractor", event.target.value)}
+          >
+            <option value="">All contractors</option>
+            {options.contractors.map((contractor) => (
+              <option key={contractor} value={contractor}>
+                {contractor}
+              </option>
+            ))}
+          </select>
           <label htmlFor="document-owner-filter" className="visually-hidden">
             Filter by owner
           </label>
@@ -4830,7 +4969,8 @@ function DocumentsView({
           /*
            * A SCROLLING REGION A KEYBOARD CAN REACH.
            *
-           * The register now carries ten columns and scrolls sideways on
+           * The register now carries eleven columns — ten, plus the Contractor
+           * column W06-08 added — and scrolls sideways on
            * anything narrower than a laptop. axe reports
            * `scrollable-region-focusable` (serious) against this container
            * whenever the table holds nothing focusable — which is exactly the
@@ -4855,6 +4995,13 @@ function DocumentsView({
                   <th>File</th>
                   <th>Type</th>
                   <th>Site</th>
+                  {/*
+                    Beside Site and before Work order, because the three
+                    together are the answer to "what is this document about" —
+                    a place, a company and a job — and the reader scanning for
+                    one of them is scanning for the other two.
+                  */}
+                  <th>Contractor</th>
                   <th>Work order</th>
                   <th>Owner</th>
                   <th>Uploaded</th>
@@ -4893,6 +5040,13 @@ function DocumentsView({
                       </td>
                       <td>{documentTypeLabel(file)}</td>
                       <td>{documentSiteLabel(file)}</td>
+                      {/*
+                        `documentContractorLabel`, never `file.contractor`
+                        directly: a document filed against nobody has to read
+                        as a fact about the document rather than as an empty
+                        cell, which is the same rule the Site column follows.
+                      */}
+                      <td>{documentContractorLabel(file)}</td>
                       <td>{file.requestId ?? "—"}</td>
                       <td>{documentOwner(file)}</td>
                       <td>{formatDate(file.uploadedAt)}</td>
@@ -4937,7 +5091,8 @@ function DocumentsView({
                 */}
                 {!filtered.length && (
                   <tr>
-                    <td className="analytics-empty" colSpan={10}>
+                    {/* Eleven, since W06-08 added the Contractor column. */}
+                    <td className="analytics-empty" colSpan={11}>
                       {emptyReason}
                     </td>
                   </tr>
@@ -5059,6 +5214,7 @@ function DocumentsView({
         <FileDetailDrawer
           key={openFile.id}
           file={openFile}
+          contractors={contractors}
           today={today}
           onClose={() => setSelectedFile(null)}
           onNotify={onNotify}
@@ -5070,172 +5226,28 @@ function DocumentsView({
 }
 
 
-/**
- * The WhatsApp mark, filled rather than stroked.
+/*
+ * W06-11 — THE ACTIONABLE CONTACT CELL MOVED OUT OF THIS FILE.
  *
- * Every other glyph on this row is a 1.8px outline, and this one deliberately
- * is not: WhatsApp is a brand a user recognises by its silhouette, and an
- * outlined approximation of it at 14px reads as "some bubble" rather than as
- * "the green one on my phone". Recognition is the whole job here — the row
- * exists so a coordinator can tell at a glance which of two numbers opens
- * WhatsApp — so the real shape wins over set consistency.
- *
- * It takes `currentColor`, so it is the link colour in both themes rather than
- * a hard-coded #25d366 that would fail contrast on the light ground.
+ * `ContractorContact` and the WhatsApp glyph beside it now live in
+ * `./contractor-contact`, because the contractor profile drawer needs the same
+ * three links and importing this nine-thousand-line module from it would be a
+ * cycle. The component is unchanged; only its address is. It is still rendered
+ * on this page — as the register's `Reach them` column, below.
  */
-function WhatsAppGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      height={size}
-      width={size}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-    >
-      <path d="M12.04 2c-5.5 0-9.96 4.46-9.96 9.96 0 1.76.46 3.48 1.34 5L2 22l5.2-1.36a9.9 9.9 0 0 0 4.84 1.24h.01c5.49 0 9.95-4.46 9.95-9.96A9.9 9.9 0 0 0 19.08 4.9 9.9 9.9 0 0 0 12.04 2Zm0 1.85c2.16 0 4.19.84 5.72 2.37a8.05 8.05 0 0 1 2.37 5.74c0 4.47-3.63 8.1-8.1 8.1a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.1.81.83-3.02-.2-.31a8.05 8.05 0 0 1-1.25-4.3c0-4.47 3.64-8.1 8.11-8.06Zm-3.5 4.02c-.16 0-.43.06-.66.31-.22.25-.86.84-.86 2.05 0 1.2.88 2.37 1 2.53.13.17 1.72 2.63 4.17 3.69.58.25 1.04.4 1.4.51.58.19 1.11.16 1.53.1.47-.07 1.44-.59 1.64-1.16.2-.57.2-1.06.14-1.16-.06-.1-.22-.16-.47-.28-.24-.13-1.44-.72-1.66-.8-.23-.08-.39-.12-.55.12-.16.25-.63.8-.77.96-.14.17-.29.19-.53.06-.25-.12-1.04-.38-1.97-1.22a7.4 7.4 0 0 1-1.37-1.7c-.14-.25-.01-.38.11-.5.11-.11.25-.29.37-.44.12-.14.16-.24.24-.4.08-.17.04-.31-.02-.44-.06-.12-.55-1.33-.76-1.82-.2-.47-.4-.41-.55-.41h-.47Z" />
-    </svg>
-  );
-}
 
-/**
- * A contractor's phone, WhatsApp and email, as things you can act on.
- *
- * These columns have existed on `contractors` since Stage 0 and the workspace
- * payload has always carried them; nothing rendered either, so the register
- * told you who a contractor was and gave you no way to reach them. On a phone —
- * which is where this is used, standing in a shop — a number you cannot tap is
- * a number you have to memorise and retype.
- *
- * WHY THE HREFS COME FROM contact-links.ts RATHER THAN A TEMPLATE HERE.
- *
- * The old `tel:` was built inline and that was fine, because a dialler is
- * forgiving and the user is standing there watching it. `wa.me` is neither: it
- * addresses people by full international number and answers a national one —
- * `07812 224644`, the shape every number on a van is written in — with "the
- * phone number shared via url is invalid". So a WhatsApp row that always
- * linked would be a button that is broken for most of the register.
- *
- * `whatsappHref` returns null rather than inventing a country code, and null
- * here means PLAIN TEXT, not a hidden row: the number is still readable and
- * still dialable by hand, it simply is not dressed up as an action that would
- * dead-end. The same guard is on the telephone row, for the four-digit
- * extensions that are not numbers anybody can be reached on.
- *
- * The numbers print as stored rather than reformatted: an operator recognises
- * the spacing they typed, and guessing at a national format is how a leading
- * zero goes missing.
- *
- * A contractor with nothing at all is not an error — most rows have no phone
- * yet — so it says so quietly rather than rendering an empty cell that reads
- * as a bug. A contractor with no WhatsApp gets no WhatsApp row at all: a dash
- * there would only make every row in the table taller to say nothing.
- */
-function ContractorContact({
-  contractor,
-}: {
-  contractor: {
-    name: string;
-    contactName?: string | null;
-    email?: string | null;
-    phone?: string | null;
-    whatsappNumber?: string | null;
-  };
-}) {
-  const phone = (contractor.phone ?? "").trim();
-  const email = (contractor.email ?? "").trim();
-  const person = (contractor.contactName ?? "").trim();
-  const whatsapp = (contractor.whatsappNumber ?? "").trim();
-
-  const dial = telHref(phone);
-  const chat = whatsappHref(whatsapp);
-
-  if (!phone && !email && !person && !whatsapp) {
-    return <span className="contractor-contact__none">No contact details</span>;
-  }
-
-  return (
-    <span className="contractor-contact">
-      {/* The person leads, because a number nobody has a name for is the
-          thing that gets dialled last. */}
-      {person && <strong className="contractor-contact__person">{person}</strong>}
-      {phone &&
-        (dial ? (
-          <a
-            className="contractor-contact__link"
-            href={dial}
-            aria-label={`Call ${contractor.name} on ${phone}`}
-          >
-            <Icon name="phone" size={14} />
-            {phone}
-          </a>
-        ) : (
-          /* Too short to be a number anybody answers — an internal extension,
-             usually. Shown, because the coordinator may still know what to do
-             with it; not linked, because the handset would not. */
-          <span className="contractor-contact__plain">
-            <Icon name="phone" size={14} />
-            {phone}
-          </span>
-        ))}
-      {/* Directly under the telephone row, because the two are read as a pair:
-          "this is their number, and this is the one that opens WhatsApp". */}
-      {whatsapp &&
-        (chat ? (
-          <a
-            className="contractor-contact__link contractor-contact__link--whatsapp"
-            href={chat}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Message ${contractor.name} on WhatsApp at ${whatsapp}`}
-          >
-            <WhatsAppGlyph />
-            {whatsapp}
-          </a>
-        ) : (
-          <span
-            className="contractor-contact__plain contractor-contact__plain--whatsapp"
-            /* The tooltip is for the mouse. It is NOT the accessible answer —
-               `title` on a plain span is not reliably announced — which is why
-               the same sentence is also in the text below. */
-            title="Add the country code to make this a WhatsApp link"
-          >
-            <WhatsAppGlyph />
-            {whatsapp}
-            {/*
-              * Said out loud, because everything that distinguishes this row
-              * from the linked one is visual: no underline, a quieter colour,
-              * no pointer. A screen reader would otherwise hear a WhatsApp
-              * number and a glyph it cannot see, with nothing to say that
-              * activating it does nothing.
-              */}
-            <span className="visually-hidden">
-              {" "}
-              — not a WhatsApp link; the country code is missing
-            </span>
-          </span>
-        ))}
-      {email && (
-        <a
-          className="contractor-contact__link"
-          href={`mailto:${email}`}
-          aria-label={`Email ${contractor.name} at ${email}`}
-        >
-          <Icon name="inbox" size={14} />
-          {email}
-        </a>
-      )}
-    </span>
-  );
-}
 
 function ContractorsView({
   contractors: registeredContractors,
   requests,
   sectionKey,
   onManage,
+  onNotify,
 }: {
   contractors: WorkspaceContractor[];
   requests: MaintenanceRequest[];
+  /** Toast, for the profile drawer's uploads. */
+  onNotify: (message: string) => void;
   /**
    * WHICH PAGE THIS IS, for the range it remembers.
    *
@@ -5312,6 +5324,8 @@ function ContractorsView({
    * nothing this quarter" is the answer the reader came for.
    */
   const [period, setPeriod] = useStoredPeriod(sectionKey, "12m");
+  /** W06-10 — the contractor whose profile drawer is open, by id. */
+  const [openProfile, setOpenProfile] = useState<string | null>(null);
   // Once per render pass, and on the minute — not a fresh instant on every
   // render, which gave two paints two slightly different windows.
   const nowMs = useCurrentTime();
@@ -5362,67 +5376,69 @@ function ContractorsView({
   const scopedRequests = requests.filter(inWindow);
 
   /*
-   * How many rows in this roster answer to each name.
+   * THE ID FIRST, AND THE NAME ONLY WHERE THERE IS NO ID.
    *
-   * Two contractors can share one, because nothing stops them: no unique index
-   * on `contractors.name` and no duplicate check on the create. When that
-   * happens the name branch below matches BOTH, so one unlinked job was
-   * counted against each of them and the Tracked spend tile — which sums these
-   * per-row figures — reported a single GBP 999 job as GBP 1,998.
+   * This page attributed work by matching the job's contractor NAME against the
+   * register row's name, and a name is not an identity. Renaming a contractor
+   * therefore zeroed their whole history — assigned, completed, urgent AND
+   * spend — while `contractor_id` on every one of those jobs went on pointing
+   * straight at them. S3 replayed this function over the live
+   * `/api/maintenance` payload and measured the drop: `{assigned:1,
+   * completed:0, urgent:1, spend:250}` → `{0,0,0,0}` on rename, server and
+   * client identically. The server half was fixed with it; this is the half the
+   * reader actually sees, because the four numbers in the table are recomputed
+   * here rather than taken from the payload — that is what the page's own
+   * reporting period requires, and it is also why fixing the API alone left the
+   * table wrong.
+   *
+   * THE RULE NOW LIVES IN app/lib/contractor-attribution.ts, and this page
+   * calls it rather than spelling it out. W06-12 found the ORIGINAL name-only
+   * line still running in `ContractorScorecard` on the Reports page, months
+   * after it was removed from here: a fix applied to one copy of a rule nobody
+   * shared. `attributeContractorWork` carries the whole reasoning — the
+   * disjoint branches, the synthesised `contractor-${slug}` ids this page's
+   * `fallbackContractors` produces, and why a name TWO register rows share is
+   * attributed to neither of them.
+   *
+   * Index-aligned with `roster` on purpose: every registered contractor keeps a
+   * row whether or not they worked in this window, because "we use them and
+   * they did nothing this quarter" is an answer this page exists to give.
    */
-  const rosterPerName = new Map<string, number>();
-  for (const entry of roster) {
-    rosterPerName.set(entry.name, (rosterPerName.get(entry.name) ?? 0) + 1);
-  }
+  const attribution = attributeContractorWork(scopedRequests, roster);
 
-  const contractors = roster.map((contractor) => {
-    /*
-     * THE ID FIRST, AND THE NAME ONLY WHERE THERE IS NO ID.
-     *
-     * This line attributed work by matching the job's contractor NAME against
-     * the register row's name, and a name is not an identity. Renaming a
-     * contractor therefore zeroed their whole history — assigned, completed,
-     * urgent AND spend — while `contractor_id` on every one of those jobs went
-     * on pointing straight at them. S3 replayed this function over the live
-     * `/api/maintenance` payload and measured the drop: `{assigned:1,
-     * completed:0, urgent:1, spend:250}` → `{0,0,0,0}` on rename, server and
-     * client identically. The server half is fixed; this is the half the
-     * reader actually sees, because the four numbers in the table are
-     * recomputed here rather than taken from the payload — that is what the
-     * page's own reporting period requires, and it is also why fixing the API
-     * alone left the table wrong.
-     *
-     * The two branches are disjoint per job: a job with an id is matched by
-     * the id and by nothing else, a job without one falls back to the name. So
-     * no job can reach two contractors and none can be counted twice — the
-     * same partition property the server-side aggregate relies on.
-     *
-     * `fallbackContractors` above synthesises ids from the name
-     * (`contractor-${slug}`) and those are NOT register ids. The predicate is
-     * still right there: that roster only exists when the register is empty,
-     * and a workspace with no contractors has no job carrying a valid
-     * `contractor_id` either, so every synthesised row takes the name branch
-     * exactly as before. Matching those ids would be the bug, not the fix.
-     *
-     * And a name TWO of them share attributes to neither, matching both the
-     * server aggregate and `resolveContractorLink`: a register that cannot say
-     * which contractor a name means cannot say whose job it was. An ambiguous
-     * name under-counting is visible and fixable; double-counting silently
-     * inflates a figure somebody bills from.
-     */
-    const nameIsUnique = (rosterPerName.get(contractor.name) ?? 0) <= 1;
-    const theirs = scopedRequests.filter((request) =>
-      request.contractorId
-        ? request.contractorId === contractor.id
-        : nameIsUnique && request.contractor === contractor.name);
+  const contractors = roster.map((contractor, index) => {
+    const theirs = attribution.byRoster[index].jobs;
     return {
       ...contractor,
       assignedJobs: theirs.length,
       completedJobs: theirs.filter(isClosedRequest).length,
       urgentJobs: theirs.filter((request) => request.priority === "Urgent" && isOpenRequest(request)).length,
       spend: theirs.reduce((sum, request) => sum + (request.cost ?? 0), 0),
+      /*
+       * W06-10 — THEIR JOBS, not just how many.
+       *
+       * The rows themselves, so the profile can list them without re-running
+       * the attribution rule. Attribution is decided ONCE, here, by the shared
+       * `attributeContractorWork`; a panel that recomputed it would be a second
+       * answer to "whose job was that", and the audit found exactly that
+       * failure when the page matched by name while `contractor_id` said
+       * otherwise.
+       */
+      jobs: theirs,
     };
   });
+
+  /*
+   * W06-10 — WHICH CONTRACTOR'S PROFILE IS OPEN.
+   *
+   * Held by id and resolved against `contractors` on every render rather than
+   * stored as a row: the four work figures are recomputed whenever the period
+   * moves, and a stored copy would go on showing the window it was opened in
+   * while the picker above said something else.
+   */
+  const openContractor = openProfile
+    ? (contractors.find((entry) => entry.id === openProfile) ?? null)
+    : null;
 
   return (
     <div className="section-stack">
@@ -5452,46 +5468,167 @@ function ContractorsView({
         <div><span className="site-stat-icon"><Icon name="users" size={19} /></span><small>Contractors</small><strong>{contractors.filter((item) => item.name !== "Unassigned").length}</strong></div>
         <div><span className="site-stat-icon site-stat-icon--teal"><Icon name="check" size={19} /></span><small>Completed jobs</small><strong>{contractors.reduce((sum, item) => sum + item.completedJobs, 0)}</strong></div>
         <div><span className="site-stat-icon site-stat-icon--orange"><Icon name="alert" size={19} /></span><small>Urgent actions</small><strong>{contractors.reduce((sum, item) => sum + item.urgentJobs, 0)}</strong></div>
-        <div><span className="site-stat-icon site-stat-icon--green"><Icon name="chart" size={19} /></span><small>Tracked spend</small><strong>{formatMoney(contractors.reduce((sum, item) => sum + item.spend, 0))}</strong></div>
+        {/*
+          * "Tracked spend" says WHAT is tracked, on the tile and to a screen
+          * reader, because three things about this number are not obvious from
+          * four words and a currency symbol: it is recorded job cost and not an
+          * invoiced or paid amount; it is dated by when work was FINISHED,
+          * which is this page's basis and not Reports'; and the register's day
+          * rate, call-out charge and hourly rate are agreed TERMS that never
+          * enter it. The last of those became a live risk the moment those
+          * columns existed — summing a rate into a spend total does not
+          * summarise cost, it invents it.
+          */}
+        <div title="Recorded job cost on work completed in this period. Not invoiced or paid amounts, and never an agreed day, call-out or hourly rate."><span className="site-stat-icon site-stat-icon--green"><Icon name="chart" size={19} /></span><small>Tracked spend<span className="visually-hidden"> — recorded job cost on work completed in this period, not invoiced amounts and never an agreed rate</span></small><strong>{formatMoney(contractors.reduce((sum, item) => sum + item.spend, 0))}</strong></div>
       </section>
-      <section className="panel sites-panel"><div className="table-scroll"><table className="data-table sites-table">
-        <thead><tr><th>Contractor</th><th>Contact</th><th>Service categories</th><th>Coverage</th><th>Day rate</th><th>Assigned</th><th>Completed</th><th>Completion rate</th><th>Open urgent</th><th>Spend</th><th aria-label="Actions" /></tr></thead>
-        <tbody>{contractors.map((contractor) => (
-          /*
-            THE ONE STATE THIS TABLE COULD NOT SHOW.
+      {/*
+        W06-11 — THE REGISTER IS MOUNTED HERE, and the fixed table is gone.
 
-            Eleven columns, and neither of the register's two states was among
-            them. Proved on a fixture: archiving a contractor writes
-            `active:false, availability:"Inactive"` — confirmed against
-            /api/workspace — and its row here stayed byte-identical to a live
-            one. Nothing on the page distinguished a contractor you can call
-            today from one somebody took off the register last month.
+        WHAT WAS HERE. Eleven hard-coded columns, and a comment beside the
+        `<thead>` arguing against a twelfth: the table already scrolls sideways
+        inside `.table-scroll` from 1440 down, and a column blank on all but a
+        handful of rows buys that scroll for nothing. That reasoning was right
+        about a HARD-CODED column and it does not survive this change, so it has
+        been rewritten rather than left contradicting the code. The answer to
+        "the table is too wide" is that the READER decides which columns are on
+        it — which is exactly what W06-11 asks for, and what
+        `/api/registers?register=contractors` now provides: 25 native columns
+        of the contractor record, any of them renameable, reorderable, resizable
+        and hideable, plus columns somebody adds and fills in per contractor.
 
-            A twelfth column was the wrong answer: the table already scrolls
-            sideways inside `.table-scroll` from 1440 down, and a column that is
-            blank on all but a handful of rows buys that scroll for nothing. So
-            the flag rides with the name, where the reader already is.
+        The archived flag still rides with the name rather than taking a column,
+        for the half of the old argument that does survive: it is blank on all
+        but a handful of rows, and the reader is already at the name when they
+        need it. `badge` is how it gets there.
 
-            Labelled, and with the word `recordSubtitle` uses for the same flag,
-            because "Archived" and the availability value "Inactive" are two
-            different fields and this page has spent a stage learning not to
-            print one where the other is meant. The hidden half of the sentence
-            says which field it is out loud, for a reader who cannot see that it
-            is attached to the name rather than to the availability nobody
-            prints here.
-          */
-          <tr key={contractor.id}><td><span className="site-name-cell"><span><Icon name="users" size={17} /></span><strong>{contractor.name}</strong>{!contractor.active && <span className="contractor-archived-chip">Archived<span className="visually-hidden"> — off the register; this is not their availability</span></span>}</span></td><td data-label="Contact"><ContractorContact contractor={contractor} /></td><td>{contractor.serviceCategories.join(", ") || "Not specified"}</td><td>{contractor.coverageAreas.join(", ") || "Not specified"}</td><td>{contractor.dayRatePence === null || contractor.dayRatePence === undefined ? "—" : formatMoney(contractor.dayRatePence / 100)}</td><td>{contractor.assignedJobs}</td><td>{contractor.completedJobs}</td><td>{Math.round((contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100)}%</td><td>{contractor.urgentJobs}</td><td>{formatMoney(contractor.spend)}</td><td><button className="icon-button table-open" type="button" aria-label={`Edit ${contractor.name}`} onClick={() => onManage(contractor.id)}><Icon name="chevron" size={16} /></button></td></tr>
-        ))}
-        {!contractors.length && (
-          <tr>
-            <td className="analytics-empty" colSpan={11}>
-              {periodWindow.recognised
-                ? "No contractors are registered yet, and no job in this period names one."
-                : periodWindow.reason}
-            </td>
-          </tr>
-        )}</tbody>
-      </table></div></section>
+        THE FIVE WORK FIGURES ARE NOT REGISTER COLUMNS and are passed as
+        `extraColumns`. They are counts over the jobs inside this page's
+        reporting period — they move when the picker above moves — and a
+        register column is a view onto a stored value. Seeding them as native
+        columns would put a measurement in a catalogue of facts and invite
+        `PATCH /api/registers/values` to write one.
+      */}
+      {contractors.length > 0 && (
+        <ContractorRegister
+          rows={contractors}
+          onOpen={(id) => setOpenProfile(id)}
+          onManage={onManage}
+          badge={(contractor) =>
+            contractor.active ? null : (
+              <span className="contractor-archived-chip">
+                Archived
+                <span className="visually-hidden">
+                  {" "}
+                  — off the register; this is not their availability
+                </span>
+              </span>
+            )
+          }
+          extraColumns={[
+            {
+              /*
+               * THE ACTIONABLE FORM of three columns the register also holds as
+               * text — Email, Phone and WhatsApp. Not a duplication to be
+               * tidied away: `wa.me` refuses a national number, so the WhatsApp
+               * link exists only where `whatsappHref` can build one, and the
+               * raw columns stay readable (and hideable) for every row where it
+               * cannot. A reader who wants one and not the other hides the
+               * others, which is what this register is for.
+               */
+              key: "reach",
+              title: "Reach them",
+              render: (contractor) => <ContractorContact contractor={contractor} />,
+            },
+            {
+              key: "assigned",
+              title: "Assigned",
+              render: (contractor) => contractor.assignedJobs,
+            },
+            {
+              key: "completed",
+              title: "Completed",
+              render: (contractor) => contractor.completedJobs,
+            },
+            {
+              key: "completion",
+              title: "Completion rate",
+              render: (contractor) =>
+                `${Math.round(
+                  (contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100,
+                )}%`,
+            },
+            {
+              key: "urgent",
+              title: "Open urgent",
+              render: (contractor) => contractor.urgentJobs,
+            },
+            {
+              /*
+               * W06-08 — `documentCount`, RENDERED AT LAST.
+               *
+               * `/api/workspace` has computed it per contractor since W07-07,
+               * `WorkspaceContractor` names it and a unit test covers it, and
+               * no screen had ever read it — so "which of our contractors has
+               * no insurance on file" was a question the product could answer
+               * and never did. It is the one figure in this group that is NOT
+               * period-scoped: a certificate is held or it is not, whatever
+               * window the picker is on.
+               *
+               * An em dash where the count is ABSENT, and a zero where it is
+               * zero. The field is optional because `mock-data.ts` builds these
+               * records with no storage behind them, and absent means "not
+               * known" — printing 0 for it would be inventing an answer.
+               */
+              key: "documents",
+              title: "Documents",
+              render: (contractor) =>
+                contractor.documentCount === undefined ? "—" : contractor.documentCount,
+            },
+            {
+              key: "spend",
+              title: "Spend",
+              render: (contractor) => formatMoney(contractor.spend),
+            },
+          ]}
+        />
+      )}
+      {/*
+        The page says why it is empty, and names the two different reasons: no
+        contractors at all, or a window nobody could read. The register grid has
+        an empty row of its own, but it cannot know about this page's period —
+        so the page answers first and the grid is only drawn when there is
+        something to draw.
+      */}
+      {!contractors.length && (
+        <section className="panel sites-panel">
+          <p className="analytics-empty">
+            {periodWindow.recognised
+              ? "No contractors are registered yet, and no job in this period names one."
+              : periodWindow.reason}
+          </p>
+        </section>
+      )}
+      {/*
+        W06-10 — THE PROFILE. Which jobs are assigned, which sites are linked,
+        which documents belong to them, and how they are performing, in one
+        place reachable from the row.
+      */}
+      {openContractor && (
+        <ContractorProfile
+          key={openContractor.id}
+          contractor={openContractor}
+          jobs={openContractor.jobs}
+          performance={{
+            assignedJobs: openContractor.assignedJobs,
+            completedJobs: openContractor.completedJobs,
+            urgentJobs: openContractor.urgentJobs,
+            spend: openContractor.spend,
+          }}
+          periodLabel={periodWindow.recognised ? periodWindow.label : "the selected period"}
+          onNotify={onNotify}
+          onClose={() => setOpenProfile(null)}
+        />
+      )}
     </div>
   );
 }
@@ -5523,12 +5660,25 @@ function describeCadence(orders: number, spanDays: number | null) {
 function ReportsView({
   requests,
   stores: storeRows,
+  contractors: registeredContractors,
   jobsReady,
   sectionKey,
   onNavigate,
 }: {
   requests: MaintenanceRequest[];
   stores: StoreRecord[];
+  /**
+   * The contractor register, so this page can attribute work by REFERENCE.
+   *
+   * W06-12: `ContractorScorecard` counted by the contractor name typed on the
+   * job, which is not an identity — a rename split one firm's history in two, a
+   * shared name merged two firms into one row, and a job linked by
+   * `contractor_id` with its text cleared vanished from the panel altogether.
+   * The panel could not do better without this list: an id means nothing
+   * without the register that gives it a name. Passed to the Dashboard's
+   * contractor panel for the same reason.
+   */
+  contractors: WorkspaceContractor[];
   /**
    * Whether `/api/maintenance` has answered yet.
    *
@@ -5861,7 +6011,31 @@ function ReportsView({
           {
             key: "contractor-scorecard",
             label: "Contractor scorecard",
-            render: () => <ContractorScorecard requests={scopedRequests} loading={loading} />,
+            render: () => (
+              <ContractorScorecard
+                requests={scopedRequests}
+                contractors={registeredContractors}
+                loading={loading}
+              />
+            ),
+          },
+          {
+            /*
+             * W06-12 asks for contractor cost on Reports AND the Dashboard, and
+             * the Dashboard had nothing. It is here too because a reader who
+             * arrives on Reports for the scorecard should not have to change
+             * page to see the money it adds up to — same rows, same window,
+             * same attribution rule, ranked by spend instead of by volume.
+             */
+            key: "contractor-spend",
+            label: "Contractor spend",
+            render: () => (
+              <ContractorCostPanel
+                requests={scopedRequests}
+                contractors={registeredContractors}
+                loading={loading}
+              />
+            ),
           },
           {
             key: "reactive-planned",
@@ -8246,12 +8420,15 @@ type DocumentVersion = {
 
 function FileDetailDrawer({
   file,
+  contractors,
   today,
   onClose,
   onNotify,
   onChanged,
 }: {
   file: FileRecord;
+  /** Every contractor this workspace holds, for the anchor picker — W06-08. */
+  contractors: WorkspaceContractor[];
   /** The instant every verdict in this drawer is classified against. */
   today: Date;
   onClose: () => void;
@@ -8325,6 +8502,12 @@ function FileDetailDrawer({
     documentType: file.documentType ?? "",
     description: file.description ?? "",
     expiryDate: file.expiryDate ?? "",
+    /*
+     * W06-08 / W06-10 — the contractor anchor, in the same form as the fields
+     * beside it. An id and not a name: the column is a foreign key and the
+     * server refuses one that names nobody in this workspace.
+     */
+    contractorId: file.contractorId ?? "",
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -8344,8 +8527,16 @@ function FileDetailDrawer({
       documentType: file.documentType ?? "",
       description: file.description ?? "",
       expiryDate: file.expiryDate ?? "",
+      contractorId: file.contractorId ?? "",
     });
-  }, [file.id, file.title, file.documentType, file.description, file.expiryDate]);
+  }, [
+    file.id,
+    file.title,
+    file.documentType,
+    file.description,
+    file.expiryDate,
+    file.contractorId,
+  ]);
 
   useEffect(() => {
     if (editing) titleFieldRef.current?.focus();
@@ -8371,6 +8562,13 @@ function FileDetailDrawer({
           documentType: draft.documentType.trim() || null,
           description: draft.description.trim() || null,
           expiryDate: draft.expiryDate.trim() || null,
+          /*
+           * The fifth key, and it obeys the same rule as the other four: an
+           * explicit null UNFILES the document from its contractor. The server
+           * refuses that when it would leave the row filed against nothing at
+           * all, and the refusal is shown here verbatim — see `anchorRefusal`.
+           */
+          contractorId: draft.contractorId.trim() || null,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
@@ -8781,6 +8979,42 @@ function FileDetailDrawer({
                     turn amber {EXPIRY_DUE_SOON_DAYS} days before the date.
                   </small>
                 </label>
+                {/*
+                  W06-08 / W06-10 — FILE THIS DOCUMENT AGAINST A CONTRACTOR.
+
+                  A SELECT and never a text box. The column is a foreign key,
+                  so a typed name that matches nobody is an id the server has
+                  to refuse — and a name is not an identity here anyway: two
+                  contractors renamed into each other's old names would move
+                  every certificate between them. Choosing the blank entry
+                  UNFILES the document, which the server allows only while some
+                  other anchor remains; its refusal appears above this form.
+                */}
+                <label htmlFor="document-contractor">
+                  Contractor
+                  <select
+                    id="document-contractor"
+                    value={draft.contractorId}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        contractorId: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Not linked to a contractor</option>
+                    {contractors.map((contractor) => (
+                      <option key={contractor.id} value={contractor.id}>
+                        {contractor.name}
+                        {contractor.active ? "" : " (archived)"}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    A certificate, insurance or a method statement belongs to
+                    the contractor it names. Photographs of a job do not.
+                  </small>
+                </label>
                 <label htmlFor="document-description">
                   Description
                   <textarea
@@ -8815,6 +9049,7 @@ function FileDetailDrawer({
                         documentType: file.documentType ?? "",
                         description: file.description ?? "",
                         expiryDate: file.expiryDate ?? "",
+                        contractorId: file.contractorId ?? "",
                       });
                     }}
                   >
@@ -8829,6 +9064,17 @@ function FileDetailDrawer({
                     icon="store"
                     label="Site"
                     value={documentSiteLabel(file)}
+                  />
+                  {/*
+                    W06-08. The contractor this document belongs to, in words —
+                    "Not linked to a contractor" when it belongs to none, for
+                    the same reason the Site row says so rather than rendering
+                    a label over nothing.
+                  */}
+                  <DetailItem
+                    icon="users"
+                    label="Contractor"
+                    value={documentContractorLabel(file)}
                   />
                   <DetailItem
                     icon="wrench"

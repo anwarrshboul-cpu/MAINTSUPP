@@ -1,10 +1,27 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RaiseTicketButton } from "../raise-ticket";
 import { useLoader } from "./use-loader";
 import { SiteDetail } from "./site-detail";
 import { SiteForm } from "./site-form";
+/*
+ * W05-05 — one confirmation, shared with the Manage-data drawer. The words and
+ * the reasoning live in site-closure.ts; both closure paths call them so the
+ * promise can only be corrected in one place.
+ */
+import { confirmSiteClosure } from "./site-closure";
+/*
+ * W05-08 — the configurable register, mounted rather than reimplemented.
+ *
+ * The grid, the column menu, the columns panel and the four rules a register
+ * screen has to keep — native cells come off the entity row, controls are gated
+ * on the snapshot's capabilities, a refusal is shown in the server's own words,
+ * and a reorder sends the WHOLE order — all live in `register-grid.tsx` beside
+ * `register-client.ts`. A second copy of any of them here is how the Sites and
+ * Contractors registers would come to disagree about what a column is.
+ */
+import { RegisterGrid } from "../register/register-grid";
 import {
   api,
   labelFor,
@@ -33,6 +50,38 @@ type Mode =
   | { kind: "list" }
   | { kind: "detail"; siteId: string }
   | { kind: "form"; site: SiteRecord | null; groupIds: string[] };
+
+/**
+ * W05-10 — THE SITE PROFILE HAS AN ADDRESS.
+ *
+ * The three views here REPLACE each other out of `useState`, so opening a site
+ * changed nothing about the URL: reloading the page went back to the register,
+ * a link to "the Bullring's profile" could not be sent to anybody, and the
+ * browser's Back button left the screen the user was on entirely. For the one
+ * screen a manager opens when somebody asks about a specific shop, that is the
+ * difference between a page and a modal.
+ *
+ * A query parameter on `/dashboard/sites` rather than a path segment, because
+ * the portal is one client-routed page and the PATH is how it chooses its
+ * section — `portal-app.tsx` reads `location.pathname` on `popstate` and would
+ * read `/dashboard/sites/site-bluewater` as a section it does not have. The
+ * parameter rides alongside and is invisible to that handler, which is why this
+ * needs no change there.
+ *
+ * The EDITOR is deliberately not addressed. A half-typed form is not a place,
+ * and a URL that reopens one would restore the shell of an edit without any of
+ * the typing.
+ */
+const SITE_PARAM = "site";
+
+/** The current URL with the site parameter set, or cleared when null. */
+function siteHref(siteId: string | null) {
+  const params = new URLSearchParams(window.location.search);
+  if (siteId) params.set(SITE_PARAM, siteId);
+  else params.delete(SITE_PARAM);
+  const query = params.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}`;
+}
 
 /**
  * Every string the register will match a search term against, lower-cased once.
@@ -68,9 +117,79 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
+  /*
+   * W05-08 — WHICH OF THE TWO VIEWS OF ONE REGISTER IS OPEN.
+   *
+   * "Summary" is the seven-column table this screen has always had, and it is
+   * the default because it is the one with the Raise / Edit / Close controls on
+   * every row — the daily job. "All columns" is the configurable register: all
+   * forty native site fields plus whatever columns this workspace has added,
+   * arranged, renamed, resized and hidden the way somebody configured them.
+   *
+   * BOTH READ `visible`, so the search box and the two filters above apply to
+   * either one. A register that ignored the filters would be a second, subtly
+   * different answer to the same question.
+   *
+   * Deliberately NOT in the URL. `?site=` addresses the detail screen because a
+   * site profile is somewhere you send somebody; which of two renderings of the
+   * list you last looked at is not, and the column layout itself — the part
+   * that IS worth keeping — already persists server-side in `register_columns`.
+   */
+  const [view, setView] = useState<"summary" | "register">("summary");
   const [importing, setImporting] = useState<ImportResult | null>(null);
   const [pendingCsv, setPendingCsv] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+
+  /*
+   * The URL is read on mount and on every Back and Forward, and it is the only
+   * thing that decides whether the detail screen is open.
+   *
+   * Deferred through a zero timer for the reason `portal-app.tsx` defers its
+   * own `?manage=` read: state written synchronously in an effect body cascades
+   * a render and the lint rules here reject it. `popstate` needs no timer — it
+   * is already an event, not a render.
+   *
+   * The mount read and the history read are the same function on purpose. Two
+   * of them is how a deep link comes to work on a fresh load and not after a
+   * Back, which is the half nobody tests.
+   */
+  useEffect(() => {
+    const sync = () => {
+      const siteId = new URLSearchParams(window.location.search).get(SITE_PARAM);
+      setMode((current) => {
+        if (siteId) {
+          return current.kind === "detail" && current.siteId === siteId
+            ? current
+            : { kind: "detail", siteId };
+        }
+        // Only the detail screen is URL-addressed, so only the detail screen is
+        // closed by the parameter going away. An open editor is left alone.
+        return current.kind === "detail" ? { kind: "list" } : current;
+      });
+    };
+    const timer = window.setTimeout(sync, 0);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+
+  /*
+   * Every move between the three views goes through one of these two, so the
+   * URL and the rendered view cannot disagree. `pushState` rather than
+   * `replaceState`: opening a site is somewhere the reader went, and Back
+   * should return them to the register they came from.
+   */
+  const openSite = (siteId: string) => {
+    window.history.pushState(null, "", siteHref(siteId));
+    setMode({ kind: "detail", siteId });
+  };
+
+  const leaveSite = (next: Mode) => {
+    window.history.pushState(null, "", siteHref(null));
+    setMode(next);
+  };
 
   const { data, error, setError, reload } = useLoader<ListPayload & { accessMethods: OptionChoice[] }>(
     async () => {
@@ -121,7 +240,20 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
   );
 
   async function archive(site: SiteRecord) {
-    if (!window.confirm(`Close ${site.name}? Its jobs and certificates are kept.`)) return;
+    /*
+     * W05-05 — the shared confirmation, not a sentence local to this screen.
+     *
+     * The words this replaces were fine as far as they went and they did not go
+     * far enough: "Its jobs and certificates are kept" says nothing about what
+     * closing actually DOES, which is take the site off the active register so
+     * it stops being offered when raising or assigning work. The identical
+     * write is reachable from the Manage-data drawer's Lifecycle select, which
+     * asked nothing at all. One helper now owns the promise for both doors.
+     *
+     * CANCEL COSTS NOTHING: this returns before the fetch, so no request is
+     * made, no state moves and no toast appears.
+     */
+    if (!confirmSiteClosure(site.name)) return;
     try {
       await api("/api/sites", { method: "DELETE", body: { id: site.id } });
       onNotify(`${site.name} closed.`);
@@ -163,8 +295,8 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
          * the boxes drawn unticked. The list row below has always passed the
          * real ids; the two paths now agree.
          */
-        onEdit={(site, groupIds) => setMode({ kind: "form", site, groupIds })}
-        onClose={() => setMode({ kind: "list" })}
+        onEdit={(site, groupIds) => leaveSite({ kind: "form", site, groupIds })}
+        onClose={() => leaveSite({ kind: "list" })}
       />
     );
   }
@@ -315,6 +447,32 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
             </option>
           ))}
         </select>
+        {/*
+          W05-08 — the switch between the two views.
+
+          A radio group rather than two buttons, because that is what this is:
+          one setting with two values, exactly one of them chosen. `aria-label`
+          on the wrapper names the group; each control names its own value. A
+          pair of toggle buttons would announce as two unrelated controls and
+          leave a screen reader user with no way to tell which one is on.
+        */}
+        <div className="register-view-switch" role="radiogroup" aria-label="Register view">
+          {([
+            ["summary", "Summary"],
+            ["register", "All columns"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="radio"
+              aria-checked={view === key}
+              className={view === key ? "is-active" : ""}
+              onClick={() => setView(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error ? (
@@ -379,6 +537,25 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
             ? "No sites yet. Add your first one, or import a CSV."
             : "No sites match these filters."}
         </p>
+      ) : view === "register" ? (
+        /*
+          W05-08 — THE CONFIGURABLE REGISTER.
+
+          `visible` rather than `data.sites`, so the search box and the two
+          filters above mean the same thing in both views. The rows are the
+          site records themselves because that is where a NATIVE column's value
+          lives — `registerCellValue` inside the grid reads
+          `row[column.nativeField]` for those and `snapshot.values` for the
+          custom ones, and a grid that read one store for both would draw all
+          forty native columns blank.
+        */
+        <RegisterGrid
+          register="sites"
+          rows={visible as unknown as Array<Record<string, unknown> & { id: string }>}
+          caption="Site register, every configured column"
+          title="Site register columns"
+          emptyMessage="No sites match these filters."
+        />
       ) : (
         <div className="table-scroll">
           <table className="analytics-table analytics-table--mobile-cards sites-table">
@@ -401,7 +578,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
                     <button
                       type="button"
                       className="table-text-action"
-                      onClick={() => setMode({ kind: "detail", siteId: site.id })}
+                      onClick={() => openSite(site.id)}
                     >
                       {site.name}
                     </button>

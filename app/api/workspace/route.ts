@@ -4,6 +4,7 @@ import {
   activityLog,
   attachments,
   complianceDocuments,
+  contractorCertifications,
   contractors,
   maintenanceBoardColumns,
   maintenanceRequests,
@@ -45,11 +46,35 @@ import {
   maintenanceRequests as sampleRequests,
   stores as sampleStores,
 } from "../../lib/mock-data";
-import { dateOnlyValue, isRealCalendarDate } from "../../lib/expiry-status";
+import { dateOnlyValue, expiryStatus, isRealCalendarDate } from "../../lib/expiry-status";
+/*
+ * W06-06 and W06-09 — the two contractor vocabularies live in `option_values`,
+ * not in a literal here.
+ *
+ * `contractor_trade` exists so an applicant filling in the public form and a
+ * coordinator reading the register mean the same thing by "Glazing"; the eleven
+ * trades are seeded from the form's own list. `contractor_payment_terms` is the
+ * approved half of "payment details". Both are read the same way every other
+ * controlled column on this platform is read — `app/api/sites/route.ts` calls
+ * exactly this for `site_type` — so an admin can add a term in Settings without
+ * a deploy and without either screen disagreeing about what is legal.
+ */
+import { listOptionValues } from "../../lib/options-repository";
+/*
+ * W05-07 — the site state rules. Both write paths into `sites` reconcile the
+ * status/lifecycle/active trio through one function rather than each projecting
+ * two of the columns out of the third; the long note lives with the rule.
+ */
+import {
+  normaliseSiteLifecycle,
+  reconcileSiteState,
+  siteLifecycleRefusal,
+} from "../../lib/site-state";
 import type { ComplianceState, StoreRecord } from "../../lib/types";
 import {
   defaultWorkspaceSettings,
   type WorkspaceActivity,
+  type WorkspaceCertification,
   type WorkspaceComplianceRecord,
   type WorkspaceContractor,
   type WorkspaceEntity,
@@ -544,6 +569,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     register,
     documentationColumnRows,
     contractorDocumentRows,
+    certificationRows,
   ] = await Promise.all([
     db.select().from(sites).where(eq(sites.organisationId, orgId)).orderBy(sites.name),
     db.select().from(units).where(eq(units.organisationId, orgId)).orderBy(units.name),
@@ -738,6 +764,25 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         ),
       )
       .groupBy(attachments.contractorId),
+    /*
+     * ── W06-08 — certifications that have dates of their own ───────────────
+     *
+     * The legacy `contractors.certifications` JSON array holds NAMES and
+     * nothing else, so "is this contractor's gas ticket still valid" had no
+     * answer anywhere in the product: there was one `insurance_expiry` for the
+     * whole contractor and none per certificate.
+     *
+     * The rows themselves rather than a count, because unlike a document tally
+     * the point of each one IS its expiry date, and a number cannot carry a
+     * date. Small by construction — a handful per contractor — and the legacy
+     * array is still read beside them, so a contractor with no rows here
+     * behaves exactly as they did before this table existed.
+     */
+    db
+      .select()
+      .from(contractorCertifications)
+      .where(eq(contractorCertifications.organisationId, orgId))
+      .orderBy(contractorCertifications.position, contractorCertifications.name),
   ]);
 
   /*
@@ -902,6 +947,44 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       .map((row) => [row.contractorId, Number(row.total)]),
   );
 
+  /*
+   * W06-08 — every certification, grouped by the contractor it belongs to.
+   *
+   * One instant for the whole loop, exactly as the compliance digest classifies
+   * a whole board against one `now`: the alternative is `new Date()` inside the
+   * map, which drifts across a long payload and can put two certificates that
+   * expire on the same day into two different buckets.
+   */
+  const classifiedAt = new Date();
+  const certificationsByContractor = new Map<string, WorkspaceCertification[]>();
+  for (const row of certificationRows) {
+    const status = expiryStatus(row.expiresOn, classifiedAt);
+    const list = certificationsByContractor.get(row.contractorId) ?? [];
+    list.push({
+      id: row.id,
+      name: row.name,
+      reference: row.reference,
+      issuedOn: row.issuedOn,
+      expiresOn: row.expiresOn,
+      notes: row.notes,
+      position: row.position,
+      /*
+       * DERIVED, never stored. There is no `status` column on
+       * `contractor_certifications` and there must not be one: a status written
+       * down is a status that stops being true the day after it was written,
+       * which is exactly how `compliance_documents.status` came to say
+       * "Compliant" about a certificate that had expired months earlier. This
+       * is `expiryStatus` — the platform's one classifier, at the platform's
+       * one 60-day amber threshold — so a contractor's ticket and a store's
+       * certificate cannot mean different things by "due soon".
+       */
+      expiryState: status.state,
+      expiryLabel: status.label,
+      daysRemaining: status.daysRemaining,
+    });
+    certificationsByContractor.set(row.contractorId, list);
+  }
+
   const contractorsPayload: WorkspaceContractor[] = contractorRows.map((contractor) => {
     /*
      * Their linked jobs plus their unlinked-by-name jobs. Disjoint sets, so
@@ -910,6 +993,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
      */
     const byId = jobsByContractorId.get(contractor.id);
     const byName = jobsByContractorName.get(contractor.name);
+    const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt);
     return {
       id: contractor.id,
       name: contractor.name,
@@ -921,12 +1005,52 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       // note on the `contractors` table for why the row could not hold them.
       contactName: contractor.contactName,
       address: contractor.address,
+      // W06-06. `address` is one free-text line and nothing can search, sort or
+      // map on it; a postcode is the field an engineer is actually given.
+      postcode: contractor.postcode,
       notes: contractor.notes,
+      /*
+       * W06-07 — the whole agreed rate card, in pence, read under the same
+       * names the PATCH now accepts as write keys. `otherCostLabel` travels
+       * with its figure: the number is meaningless without it, so a payload
+       * that carried one and not the other would be shipping a mystery.
+       */
       dayRatePence: contractor.dayRatePence,
+      hourlyRatePence: contractor.hourlyRatePence,
+      callOutCostPence: contractor.callOutCostPence,
+      otherCostPence: contractor.otherCostPence,
+      otherCostLabel: contractor.otherCostLabel,
+      /*
+       * W06-09 — TERMS and an EXTERNAL reference. No bank detail exists on this
+       * record to return; see `contractorPaymentTermsRefusal` for why not.
+       */
+      paymentTerms: contractor.paymentTerms,
+      financeReference: contractor.financeReference,
       serviceCategories: parseStringArray(contractor.serviceCategories),
       coverageAreas: parseStringArray(contractor.coverageAreas),
       certifications: parseStringArray(contractor.certifications),
+      /*
+       * W06-08 — the structured entries, beside the legacy names array rather
+       * than instead of it. A contractor with no rows in the new table gets an
+       * empty list here and their old `certifications` array unchanged, which
+       * is what "additive" has to mean for a register already in use.
+       */
+      certificationEntries: certificationsByContractor.get(contractor.id) ?? [],
       insuranceExpiry: contractor.insuranceExpiry,
+      /*
+       * W06-08 — a date nobody classifies is a date nobody acts on.
+       *
+       * `insurance_expiry` was stored, shown in one edit box and read by
+       * nothing: no register column, no chip, no alert. Classified here rather
+       * than in each screen for the reason `expiry-status.ts` exists at all —
+       * two surfaces inventing their own answer is how the compliance count
+       * came to differ by one between two pages.
+       */
+      insuranceState: insurance.state,
+      insuranceStatusLabel: insurance.label,
+      insurerName: contractor.insurerName,
+      policyNumber: contractor.policyNumber,
+      insuranceNotes: contractor.insuranceNotes,
       availability: contractor.availability,
       rating: contractor.rating,
       active: contractor.active,
@@ -1109,7 +1233,33 @@ export async function POST(request: Request) {
       const name = text(data.name, 120);
       if (!name || !text(data.address, 300)) throw new Error("A site name and address are required.");
       id = newId("store", name);
-      await db.insert(sites).values({ id, organisationId: orgId, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", lifecycle: text(data.lifecycle, 40) || "Current", address: text(data.address, 300), manager: optionalText(data.manager, 120) });
+      /*
+       * W05-07 — A NEW SITE CANNOT BE BORN CONTRADICTING ITSELF.
+       *
+       * This insert named `lifecycle` and neither of the other two state
+       * columns, so the row took the schema defaults for them: `status`
+       * 'active' and `active` true. Creating a site here with Lifecycle set to
+       * Closed — two clicks, New then the select — therefore stored
+       * `{ status: 'active', lifecycle: 'Closed', active: true }`: a record the
+       * Sites register lists as open and offers in every location picker, filed
+       * under Closed by the reporting groups. The PATCH beside this has always
+       * written all three together; the create did not, and a route that
+       * refuses on edit what it accepts on create just moves the bad row's
+       * birthday.
+       *
+       * The same validation too: an unrecognised lifecycle is a 400 rather than
+       * forty characters of whatever arrived.
+       */
+      if ("lifecycle" in data && !normaliseSiteLifecycle(data.lifecycle)) {
+        return Response.json({ error: siteLifecycleRefusal() }, { status: 400 });
+      }
+      const siteState = reconcileSiteState(
+        { ...("lifecycle" in data ? { lifecycle: data.lifecycle } : {}) },
+        // The column defaults, stated rather than relied on: a new row's state
+        // before anybody has said anything about it.
+        { status: "active", lifecycle: "Current", active: true },
+      );
+      await db.insert(sites).values({ id, organisationId: orgId, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", ...siteState, address: text(data.address, 300), manager: optionalText(data.manager, 120) });
     } else if (entity === "compliance") {
       /*
        * The same validation the PATCH does, for the same reasons — see the long
@@ -1181,6 +1331,34 @@ export async function POST(request: Request) {
       const badRate = contractorRateRefusal(data);
       if (badRate) return badRate;
       /*
+       * W06-06/07/08 — the same four guards the edit runs, in the same order.
+       *
+       * A create that accepts what the edit refuses produces a row that cannot
+       * be saved a second time, which is the asymmetry `contractorEmailRefusal`
+       * was written to avoid; these are here for exactly that reason.
+       *
+       * `insuranceExpiry` is the one that was genuinely broken rather than
+       * merely missing: it went through `optionalText(data.insuranceExpiry, 40)`
+       * on BOTH paths, so `2027-13-45` was stored on create and on edit alike,
+       * while `compliance` twenty lines up on this very route already ran
+       * `isRealCalendarDate` and refused it. One route, two opinions about what
+       * a date is.
+       */
+      const badCost = contractorCostRefusal(data);
+      if (badCost) return badCost;
+      const badPostcode = contractorPostcodeRefusal(data);
+      if (badPostcode) return badPostcode;
+      const badExpiry = contractorExpiryRefusal(
+        data,
+        "insuranceExpiry",
+        "A contractor's insurance expiry",
+      );
+      if (badExpiry) return badExpiry;
+      // Before the insert, so a certificate with a nonsense date refuses the
+      // whole create rather than leaving a contractor half-made.
+      const badCertifications = contractorCertificationsRefusal(data);
+      if (badCertifications) return badCertifications;
+      /*
        * Same allow-list as the edit. An OMITTED availability still falls to
        * "Available" through the `||` below — that is the create's default and
        * it stays. What is refused is a SUPPLIED value that is not one of the
@@ -1189,6 +1367,10 @@ export async function POST(request: Request) {
        */
       const badAvailability = contractorAvailabilityRefusal(data);
       if (badAvailability) return badAvailability;
+      // W06-09. A DB read, so it sits with the other two below rather than up
+      // among the cheap checks.
+      const badTerms = await contractorPaymentTermsRefusal(db, orgId, data);
+      if (badTerms) return badTerms;
       /*
        * Last of the create guards, because it is the only one that has to ask
        * the database a question, and there is no point asking it about a
@@ -1199,7 +1381,19 @@ export async function POST(request: Request) {
       const badName = await contractorNameConflict(db, orgId, name, null);
       if (badName) return badName;
       id = newId("contractor", name);
-      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), notes: optionalText(data.notes, 2000), dayRatePence: ratePence(data.dayRate), serviceCategories: JSON.stringify(stringArray(data.serviceCategories)), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: optionalText(data.insuranceExpiry, 40), availability: text(data.availability, 60) || "Available", rating: optionalRating(data.rating), active: booleanValue(data.active) });
+      /*
+       * W06-06 — the trades, folded onto `contractor_trade` before they are
+       * stored, so "Electrical", "electrical" and " ElectRical" stop being
+       * three trades from the moment the row is created. An unlisted value is
+       * kept as typed; see `contractorTradeValues`.
+       */
+      const trades = await contractorTradeValues(db, orgId, data.serviceCategories);
+      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), postcode: contractorPostcode(data.postcode), notes: optionalText(data.notes, 2000), ...contractorCostSet(data), otherCostLabel: optionalText(data.otherCostLabel, 80), paymentTerms: optionalText(data.paymentTerms, 60), financeReference: optionalText(data.financeReference, 80), serviceCategories: JSON.stringify(trades), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: contractorDate(data.insuranceExpiry), insurerName: optionalText(data.insurerName, 160), policyNumber: optionalText(data.policyNumber, 80), insuranceNotes: optionalText(data.insuranceNotes, 1000), availability: text(data.availability, 60) || "Available", rating: optionalRating(data.rating), active: booleanValue(data.active) });
+      // W06-08 — structured certifications, if the create carried any. Absent
+      // key writes nothing at all; see `writeContractorCertifications`. Their
+      // VALIDATION already ran above, so nothing here can fail after the insert
+      // and leave a contractor whose certificates were refused.
+      await writeContractorCertifications(db, orgId, id, data);
     } else if (entity === "planned") {
       const title = text(data.title, 160);
       const siteId = text(data.siteId, 100);
@@ -1609,6 +1803,511 @@ function contractorRateRefusal(data: Record<string, unknown>): Response | null {
       );
 }
 
+/* ── W06-07 — the rest of the agreed rate card ────────────────────────────── */
+
+/**
+ * The four money columns on a contractor, and the two names each answers to.
+ *
+ * WHY TWO NAMES. `GET /api/workspace` returns `dayRatePence`, and
+ * `CONTRACTOR_NATIVE_COLUMNS` publishes that same camelCase field as the
+ * register column's `nativeField` — which is the key a register cell writes
+ * back through (`PATCH /api/workspace { data: { [column.nativeField]: next } }`,
+ * see the note in app/lib/register-catalogue.ts). The PATCH accepted only
+ * `dayRate`, in POUNDS, so the register could display the day rate and could
+ * never write it: the one field whose read name and write name disagreed.
+ * Sites met this first and answered it the same way — `PAYLOAD_SOURCES` there
+ * takes both `serviceCharge` and `serviceChargePence` — so this is that rule
+ * applied to a second register, not a second rule.
+ *
+ * THE TWO NAMES MEAN DIFFERENT UNITS and are read differently. Pounds is what
+ * a rate card says and what the form's box holds, so it is multiplied by 100;
+ * pence is already the stored integer and is only rounded. Scaling both was
+ * the exact bug that multiplied a site's service charge by a hundred on every
+ * ordinary read-edit-save. Pounds wins when a caller sends both, because the
+ * pounds key is the form's key and the form is the surface somebody is looking
+ * at.
+ *
+ * `otherCostPence` has `other_cost_label` beside it — a number with no name is
+ * not a cost, it is a mystery — and the label is a column of its own rather
+ * than a sentence appended to `notes`, because a figure nothing can read back
+ * out is a figure no report can ever use.
+ *
+ * NOTHING SUMS THESE. They are AGREED TERMS, not money spent: spend comes from
+ * job cost alone and `app/lib/contractor-attribution.ts` is pinned never to
+ * mention a rate column.
+ */
+const CONTRACTOR_COSTS = [
+  { column: "dayRatePence", pounds: "dayRate", pence: "dayRatePence", label: "day rate" },
+  { column: "hourlyRatePence", pounds: "hourlyRate", pence: "hourlyRatePence", label: "hourly rate" },
+  { column: "callOutCostPence", pounds: "callOutCost", pence: "callOutCostPence", label: "call-out cost" },
+  { column: "otherCostPence", pounds: "otherCost", pence: "otherCostPence", label: "other cost" },
+] as const;
+
+/**
+ * A figure that is ALREADY pence.
+ *
+ * `ratePence` scales; this only rounds. Same emptiness rule in both, and for
+ * the same reason: an empty box is not a cost of zero, it is nobody having
+ * recorded one, and the register prints a dash for it rather than "£0.00".
+ */
+function wholePence(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed);
+}
+
+/**
+ * What this request says one cost column should hold, or `undefined` for
+ * "the caller did not mention it" — which is what keeps a partial PATCH from
+ * erasing a rate nobody touched. Same contract as `supplied`, widened to two
+ * possible keys.
+ */
+function contractorCostValue(
+  data: Record<string, unknown>,
+  cost: (typeof CONTRACTOR_COSTS)[number],
+): number | null | undefined {
+  if (cost.pounds in data) return ratePence(data[cost.pounds]);
+  if (cost.pence in data) return wholePence(data[cost.pence]);
+  return undefined;
+}
+
+/** The `set` fragment for every cost column this request actually named. */
+function contractorCostSet(data: Record<string, unknown>): Record<string, number | null> {
+  const patch: Record<string, number | null> = {};
+  for (const cost of CONTRACTOR_COSTS) {
+    const value = contractorCostValue(data, cost);
+    if (value !== undefined) patch[cost.column] = value;
+  }
+  return patch;
+}
+
+/**
+ * A cost that is negative, or larger than the column can hold — refused.
+ *
+ * THE BOUND IS `MAX_DAY_RATE_PENCE`, deliberately reused rather than restated.
+ * All four columns are 4-byte integers on Postgres and SQLite hides that
+ * completely, so a second, differently-worded ceiling would only be a second
+ * thing to keep in step.
+ *
+ * THE NEGATIVE HALF IS NEW, AND ONLY ON THE NEW KEYS. `dayRate` in pounds is
+ * left exactly as it was — `ratePence` turns a negative, a word and an empty
+ * box all into null, and `contractorRateRefusal` above is pinned by
+ * `tests/workstream-six-contractor-crud.test.mjs` to keep that behaviour, so
+ * widening it here would break a contract this pass has no business changing.
+ * Every key that did not exist before this pass — the three new costs in both
+ * spellings, and `dayRatePence` — refuses a negative instead, because a
+ * call-out that costs minus forty pounds is not a term anybody agreed and
+ * silently storing null for it would lose the fact that somebody typed it.
+ */
+function contractorCostRefusal(data: Record<string, unknown>): Response | null {
+  for (const cost of CONTRACTOR_COSTS) {
+    // `dayRate` is `contractorRateRefusal`'s, and keeps its own behaviour.
+    for (const key of cost.pounds === "dayRate" ? [cost.pence] : [cost.pounds, cost.pence]) {
+      if (!(key in data)) continue;
+      const raw = data[key];
+      if (raw === null || raw === undefined || raw === "") continue;
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed < 0) {
+        return Response.json(
+          { error: `A contractor's ${cost.label} cannot be negative.` },
+          { status: 400 },
+        );
+      }
+      const pence = key === cost.pence ? wholePence(raw) : ratePence(raw);
+      if (pence === null) continue;
+      if (!Number.isSafeInteger(pence) || pence > MAX_DAY_RATE_PENCE) {
+        return Response.json(
+          { error: `A contractor's ${cost.label} is larger than this workspace can record.` },
+          { status: 400 },
+        );
+      }
+    }
+  }
+  return null;
+}
+
+/* ── W06-06 — where a contractor is ───────────────────────────────────────── */
+
+/**
+ * A postcode this register will store, or "" for "no postcode".
+ *
+ * DELIBERATELY NOT A UK FORMAT CHECK. `sites.country` defaults to United
+ * Kingdom but is a free column, `coverage_areas` is filled with things like
+ * "Europe", and the public application form asks for regions rather than
+ * counties — the product admits non-UK contractors and always has. A
+ * `^[A-Z]{1,2}\d…$` regex would refuse "75008", "1012 AB", "K1A 0B1" and
+ * "100-0001", every one of which is a real postal code somebody would be
+ * entitled to type, and the failure would look like a bug in the form rather
+ * than like a policy.
+ *
+ * So the rule is the one a postal code of ANY country satisfies and a piece of
+ * pasted junk does not: letters, digits, spaces and hyphens only, at least one
+ * alphanumeric, and short. That refuses "<script>", an email address and a
+ * whole street address pasted into the wrong box, which is the entire set of
+ * things this can usefully catch.
+ *
+ * NORMALISED, NOT REWRITTEN. Runs of whitespace collapse to one space and the
+ * ends are trimmed, so "SW1A  1AA " and "SW1A 1AA" stop being two postcodes.
+ * The CASE is left exactly as typed: `sites.postcode` stores what it was given
+ * and a second register quietly upper-casing its own copy would be two rules
+ * for one kind of value.
+ */
+const CONTRACTOR_POSTCODE_SHAPE = /^[A-Za-z0-9][A-Za-z0-9 -]{0,15}$/;
+
+function contractorPostcode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(INVISIBLE_CHARACTERS_GLOBAL, "").replace(/\s+/g, " ").trim();
+  return cleaned || null;
+}
+
+/**
+ * A postcode that is not one — refused.
+ *
+ * Three cases, the same three `contractorEmailRefusal` separates: an omitted
+ * key leaves the column alone, an explicit "" or null is "no postcode" and
+ * clears it, and a non-empty string that cannot be a postal code is refused
+ * rather than stored. A non-string goes to null, as every other optional text
+ * column on this route does.
+ */
+function contractorPostcodeRefusal(data: Record<string, unknown>): Response | null {
+  if (!("postcode" in data)) return null;
+  const raw = data.postcode;
+  if (typeof raw !== "string" || raw === "") return null;
+  const cleaned = contractorPostcode(raw);
+  return cleaned && CONTRACTOR_POSTCODE_SHAPE.test(cleaned)
+    ? null
+    : Response.json(
+        {
+          error:
+            "A contractor's postcode may only contain letters, numbers, spaces and hyphens, or be left blank.",
+        },
+        { status: 400 },
+      );
+}
+
+/* ── W06-06 — WHAT a contractor does, said once ───────────────────────────── */
+
+/**
+ * The trades on a contractor, folded onto the configured vocabulary.
+ *
+ * THE PROBLEM. `service_categories` was free text split on commas, so
+ * "Electrical", "electrical" and " ElectRical" were three different trades: the
+ * register counted three, a filter on one found none of the others, and the
+ * public application form — which offers exactly eleven fixed trades — could
+ * not be matched against the register at all. `contractor_trade` is seeded in
+ * `db/init.ts` with those same eleven, verbatim and in the form's order,
+ * precisely so an applicant and the register mean the same thing by "Glazing".
+ *
+ * WHAT THIS DOES, AND WHAT IT REFUSES TO DO. A value that folds onto a
+ * configured trade — case and spacing ignored — is rewritten to the set's own
+ * spelling, so the three Electricals become one. A value that folds onto
+ * NOTHING in the set is KEPT AS TYPED. It is not dropped and it is not a 400:
+ * this column already holds years of imported free text ("Plumbing", "HVAC",
+ * "Signage & graphics"), the manage form has always posted whatever was in the
+ * box, and a route that started refusing those would make every one of those
+ * contractors unsavable. The editor shows an unlisted value as a checked
+ * option marked "(not configured)", the same way the compliance Requirement
+ * select keeps a requirement recorded under a name the canonical list does not
+ * have — one pattern, three screens.
+ *
+ * DUPLICATES GO, whether or not the set knows the word. Two spellings of one
+ * trade are one trade, and this is the only place that can say so.
+ */
+async function contractorTradeValues(
+  db: WorkspaceDb,
+  orgId: string,
+  value: unknown,
+): Promise<string[]> {
+  const submitted = stringArray(value);
+  if (!submitted.length) return [];
+  let configured: string[] = [];
+  try {
+    configured = (await listOptionValues(db, orgId, "contractor_trade")).map((row) => row.value);
+  } catch {
+    // No option set yet, or the read failed. Keeping what was typed is the
+    // safe direction: this canonicalises, it is not the gate.
+    configured = [];
+  }
+  const fold = (entry: string) => entry.toLowerCase().replace(/\s+/g, " ").trim();
+  const canonical = new Map(configured.map((entry) => [fold(entry), entry]));
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const entry of submitted) {
+    const folded = fold(entry);
+    if (!folded || seen.has(folded)) continue;
+    seen.add(folded);
+    kept.push(canonical.get(folded) ?? entry);
+  }
+  return kept;
+}
+
+/* ── W06-09 — payment TERMS, and never payment credentials ────────────────── */
+
+/**
+ * Payment terms that are not one of the configured terms — refused.
+ *
+ * Controlled from `contractor_payment_terms` rather than typed, for the reason
+ * every other controlled column here is: "30 days", "30 Days" and "Net 30" are
+ * one agreement written three ways, and nothing downstream can group them. The
+ * list is seeded in `db/init.ts` and editable in Settings, so a workspace that
+ * needs a seventh term adds it there — this validates against whatever is
+ * configured rather than against a literal, exactly as `validateOption` does
+ * for a site's type.
+ *
+ * "" and null CLEAR it. The column is nullable because "no terms agreed yet" is
+ * a real state and the register prints a dash for it.
+ *
+ * WHAT IS NOT HERE, and never will be. There is no bank account number, no
+ * sort code, no IBAN and no card detail on this table or in this route. The
+ * approved model is terms plus an EXTERNAL reference — `finance_reference`
+ * points at the supplier record in Xero, Sage, QuickBooks or an internal
+ * ledger, and the credentials stay in the system that is built to hold them.
+ * A maintenance portal that stored payment credentials would be a breach
+ * waiting for its first misconfigured backup.
+ */
+async function contractorPaymentTermsRefusal(
+  db: WorkspaceDb,
+  orgId: string,
+  data: Record<string, unknown>,
+): Promise<Response | null> {
+  if (!("paymentTerms" in data)) return null;
+  const candidate = text(data.paymentTerms, 60);
+  if (!candidate) return null;
+  const configured = await listOptionValues(db, orgId, "contractor_payment_terms");
+  if (configured.some((row) => row.value === candidate)) return null;
+  return Response.json(
+    {
+      error: `"${candidate}" is not a configured payment term. Add it in Settings first.`,
+      terms: configured.map((row) => row.value),
+    },
+    { status: 400 },
+  );
+}
+
+/* ── W06-08 — an insurance expiry that is a date ──────────────────────────── */
+
+/**
+ * An insurance expiry that is not a calendar date — refused.
+ *
+ * `insurance_expiry` went through `optionalText(data.insuranceExpiry, 40)` on
+ * BOTH create and edit, so any forty characters at all were accepted into the
+ * column that decides whether a contractor's cover has lapsed. `2027-13-45`
+ * stored happily; the compliance branch on this very route already runs
+ * `isRealCalendarDate` and 400s on the same string, so one route held two
+ * opinions about what a date is.
+ *
+ * The reason a malformed date is WORSE than a missing one is the whole of
+ * `isRealCalendarDate`'s note: `Date.UTC(2027, 12, 45)` does not throw, it
+ * rolls forward into February 2028, so a certificate filed with a typo quietly
+ * acquires an expiry three months from the one anybody meant and every screen
+ * agrees about it. And a date nothing can parse alerts on nothing at all,
+ * while still rendering on screen as though it were fine.
+ *
+ * The stored value is normalised through `dateOnlyValue`, so what the register,
+ * the expiry chip and any future digest read is one shape. "" and null clear
+ * it, because "no cover recorded" is a real answer and an open finding.
+ */
+function contractorExpiryRefusal(
+  data: Record<string, unknown>,
+  key: string,
+  subject: string,
+): Response | null {
+  if (!(key in data)) return null;
+  const raw = visibleText(data[key], 40);
+  if (!raw) return null;
+  return isRealCalendarDate(raw)
+    ? null
+    : Response.json(
+        { error: `${subject} must be a calendar date, as YYYY-MM-DD.` },
+        { status: 400 },
+      );
+}
+
+/** The stored form of a date column on this record: normalised, or null. */
+function contractorDate(value: unknown): string | null {
+  const raw = visibleText(value, 40);
+  if (!raw) return null;
+  return dateOnlyValue(raw) || null;
+}
+
+/* ── W06-08 — certifications with dates of their own ──────────────────────── */
+
+/**
+ * How many certificates one contractor may hold.
+ *
+ * A ceiling rather than a policy: the write below deletes and reinserts the
+ * whole set in one request, and an unbounded list is an unbounded number of
+ * statements. Forty is far past any real gas, electrical, asbestos, IPAF and
+ * PASMA ticket collection and well inside what a single request should cost.
+ */
+const MAX_CONTRACTOR_CERTIFICATIONS = 40;
+
+type CertificationInput = {
+  id: string;
+  name: string;
+  reference: string | null;
+  issuedOn: string | null;
+  expiresOn: string | null;
+  notes: string | null;
+};
+
+/**
+ * The certifications this request describes, or null when it does not mention
+ * them at all.
+ *
+ * ABSENT IS NOT EMPTY, and the distinction is the whole of the partial-PATCH
+ * contract: a request that never says the word must leave every certificate
+ * where it is, while `certificationEntries: []` is somebody deliberately
+ * clearing the list. `supplied` makes exactly this distinction for the flat
+ * columns; this is the same rule for a collection.
+ */
+function certificationInputs(data: Record<string, unknown>): CertificationInput[] | null {
+  if (!("certificationEntries" in data)) return null;
+  const raw = data.certificationEntries;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .slice(0, MAX_CONTRACTOR_CERTIFICATIONS)
+    .map((entry) => ({
+      // Carried through when the browser is editing a row it already has, so an
+      // ordinary save is an UPDATE and the certificate keeps its identity —
+      // and with it anything that ever comes to reference the row.
+      id: text(entry.id, 120),
+      name: visibleText(entry.name, 140),
+      reference: optionalText(entry.reference, 120),
+      issuedOn: contractorDate(entry.issuedOn),
+      expiresOn: contractorDate(entry.expiresOn),
+      notes: optionalText(entry.notes, 1000),
+    }))
+    .filter((entry) => entry.name !== "");
+}
+
+/**
+ * A certification list this route will not store — refused.
+ *
+ * The dates go through `isRealCalendarDate` for the reason the insurance
+ * expiry now does: a certificate's expiry is the only thing that makes its
+ * status derivable, and `2027-13-45` does not fail loudly — `Date.UTC` rolls it
+ * forward into February 2028, so the ticket silently acquires an expiry three
+ * months from the one anybody meant.
+ *
+ * A nameless entry is dropped rather than refused, because the editor's own
+ * empty row is exactly that and adding a row before typing in it must not be a
+ * 400. A LIST that is not a list is refused, because that is a caller error
+ * rather than an empty form.
+ */
+function contractorCertificationsRefusal(data: Record<string, unknown>): Response | null {
+  if (!("certificationEntries" in data)) return null;
+  const raw = data.certificationEntries;
+  if (raw !== null && !Array.isArray(raw)) {
+    return Response.json(
+      { error: "A contractor's certifications must be a list." },
+      { status: 400 },
+    );
+  }
+  if (Array.isArray(raw) && raw.length > MAX_CONTRACTOR_CERTIFICATIONS) {
+    return Response.json(
+      { error: `A contractor may hold up to ${MAX_CONTRACTOR_CERTIFICATIONS} certifications.` },
+      { status: 400 },
+    );
+  }
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    for (const [key, subject] of [
+      ["issuedOn", "A certification's issue date"],
+      ["expiresOn", "A certification's expiry date"],
+    ] as const) {
+      const refusal = contractorExpiryRefusal(record, key, subject);
+      if (refusal) return refusal;
+    }
+  }
+  return null;
+}
+
+/**
+ * Write one contractor's certifications, when this request carried any.
+ *
+ * DELETE-THEN-WRITE ON THE ROWS THE PAYLOAD KEPT, not a wholesale wipe: an
+ * entry that arrives carrying an `id` this contractor already owns is UPDATED
+ * in place, so an ordinary save does not give every certificate a new identity
+ * and does not reset its `created_at`. Rows the payload no longer names are the
+ * ones deleted, which is what removing a line in the editor means.
+ *
+ * ORGANISATION-SCOPED ON EVERY STATEMENT. The caller supplies these ids, so a
+ * payload could name another tenant's certification row; both predicates are on
+ * the WHERE rather than trusted from the body.
+ *
+ * A certification is genuinely deleted rather than archived, unlike the
+ * contractor who holds it. It is a claim about a piece of paper, not a party to
+ * anything: no job references one, no audit line points at one, and a ticket
+ * recorded by mistake should leave no trace once it is removed.
+ */
+async function writeContractorCertifications(
+  db: WorkspaceDb,
+  orgId: string,
+  contractorId: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const inputs = certificationInputs(data);
+  if (inputs === null) return;
+  const existing = await db
+    .select({ id: contractorCertifications.id })
+    .from(contractorCertifications)
+    .where(
+      and(
+        eq(contractorCertifications.organisationId, orgId),
+        eq(contractorCertifications.contractorId, contractorId),
+      ),
+    );
+  const own = new Set(existing.map((row) => row.id));
+  const kept = new Set(inputs.map((entry) => entry.id).filter((id) => own.has(id)));
+  const now = new Date().toISOString();
+  for (const row of existing) {
+    if (kept.has(row.id)) continue;
+    await db
+      .delete(contractorCertifications)
+      .where(
+        and(
+          eq(contractorCertifications.id, row.id),
+          eq(contractorCertifications.organisationId, orgId),
+        ),
+      );
+  }
+  for (const [position, entry] of inputs.entries()) {
+    const values = {
+      name: entry.name,
+      reference: entry.reference,
+      issuedOn: entry.issuedOn,
+      expiresOn: entry.expiresOn,
+      notes: entry.notes,
+      // The order the editor shows them in, so a list somebody arranged stays
+      // arranged. Not a sort key the reader has to guess at.
+      position,
+      updatedAt: now,
+    };
+    if (own.has(entry.id)) {
+      await db
+        .update(contractorCertifications)
+        .set(values)
+        .where(
+          and(
+            eq(contractorCertifications.id, entry.id),
+            eq(contractorCertifications.organisationId, orgId),
+          ),
+        );
+    } else {
+      await db.insert(contractorCertifications).values({
+        id: newId("contractor-cert", entry.name),
+        organisationId: orgId,
+        contractorId,
+        ...values,
+      });
+    }
+  }
+}
+
 /**
  * The contractor this request names, as this organisation can see it — or a
  * refusal.
@@ -1878,35 +2577,69 @@ export async function PATCH(request: Request) {
       const badAddress = requiredTextRefusal(data, "address", 300, "A site address is required.");
       if (badAddress) return badAddress;
       /*
-       * `lifecycle` is the only closed/open control this form has, and archiving
-       * now writes all three state columns, so writing `lifecycle` alone would
-       * leave a site the Sites screen still calls closed and this tab could
-       * never reopen. `app/api/sites/route.ts` keeps the trio in step from the
-       * other direction — it derives `lifecycle` and `active` from `status` —
-       * and this is the same rule read backwards.
+       * W05-07 — `lifecycle` IS VALIDATED, AND THE TRIO IS RECONCILED, NOT
+       * PROJECTED.
        *
-       * Reopening only clears an actually-closed site. `status` also carries
-       * 'international' and 'other', which are open states this form cannot
-       * express, so forcing 'active' on every save would quietly flatten them.
+       * `lifecycle` is the only closed/open control this form has, and archiving
+       * writes all three state columns, so writing `lifecycle` alone would leave
+       * a site the Sites screen still calls closed and this tab could never
+       * reopen. That much was already true. Two things were not:
+       *
+       *  1. NOTHING CHECKED THE VALUE. The write below used to end in
+       *     `supplied(data, "lifecycle", (value) => text(value, 40))`, which
+       *     stores whatever forty characters arrive. A body carrying
+       *     `lifecycle: "closed"` — lower case, so it matched no branch above —
+       *     was written verbatim onto a row whose `status` stayed 'active' and
+       *     whose `active` stayed true. The register lists that site as open,
+       *     the lifecycle column says it is shut, and nothing in the product
+       *     ever disagreed out loud. `lifecycle: ""` did the same to a NOT NULL
+       *     column. It is now one of two words or a 400.
+       *
+       *  2. CLOSING FLATTENED THE CLASSIFICATION. Choosing Closed wrote
+       *     `status = 'closed'` unconditionally, so an unverified 'other' row
+       *     closed from this tab lost the one column that recorded the register
+       *     could not vouch for it, and moved reporting group on the way past.
+       *
+       * `reconcileSiteState` owns both directions now — see the long note in
+       * app/lib/site-state.ts. It is handed the STORED trio, not just the
+       * status, because the three columns are three separate facts and deriving
+       * two of them from the third is what produced the contradiction.
        */
       let lifecycleState = {};
-      if ("lifecycle" in data) {
-        if (text(data.lifecycle, 40) === "Closed") {
-          lifecycleState = { status: "closed", active: false };
-        } else {
-          const [current] = await db
-            .select({ status: sites.status })
-            .from(sites)
-            .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)))
-            .limit(1);
-          if (current?.status === "closed") lifecycleState = { status: "active", active: true };
+      if ("lifecycle" in data || "active" in data) {
+        if ("lifecycle" in data && !normaliseSiteLifecycle(data.lifecycle)) {
+          return Response.json({ error: siteLifecycleRefusal() }, { status: 400 });
+        }
+        const [current] = await db
+          .select({ status: sites.status, lifecycle: sites.lifecycle, active: sites.active })
+          .from(sites)
+          .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)))
+          .limit(1);
+        if (current) {
+          lifecycleState = reconcileSiteState(
+            {
+              ...("lifecycle" in data ? { lifecycle: data.lifecycle } : {}),
+              ...("active" in data ? { active: data.active } : {}),
+            },
+            {
+              status: current.status,
+              lifecycle: current.lifecycle,
+              active: Boolean(current.active),
+            },
+          );
         }
       }
       await db.update(sites).set({
         ...supplied(data, "name", (value) => text(value, 120)),
         ...supplied(data, "type", (value) => text(value, 40)),
         ...supplied(data, "region", (value) => text(value, 40)),
-        ...supplied(data, "lifecycle", (value) => text(value, 40)),
+        /*
+         * `lifecycleState` carries the reconciled `lifecycle` itself, so there
+         * is no `supplied(data, "lifecycle", …)` here any more. Spreading the
+         * raw text first and the reconciled trio second would have worked by
+         * ordering alone, and a rule that holds because of the order two object
+         * spreads happen to be written in is one refactor from being false.
+         */
         ...lifecycleState,
         ...supplied(data, "address", (value) => text(value, 300)),
         ...supplied(data, "manager", (value) => optionalText(value, 120)),
@@ -2051,6 +2784,28 @@ export async function PATCH(request: Request) {
       if (badEmail) return badEmail;
       const badRate = contractorRateRefusal(data);
       if (badRate) return badRate;
+      /*
+       * W06-06/07/08 — the four guards the create runs, run here too and in the
+       * same order, so neither path can end up stricter than the other.
+       *
+       * `contractorExpiryRefusal` is the one that closes a hole rather than
+       * adding a rule: `insurance_expiry` was `optionalText(…, 40)` here, so
+       * any forty characters were accepted into the column that says whether a
+       * contractor's cover has lapsed — and a date nothing can parse alerts on
+       * nothing while still rendering on screen as though it were fine.
+       */
+      const badCost = contractorCostRefusal(data);
+      if (badCost) return badCost;
+      const badPostcode = contractorPostcodeRefusal(data);
+      if (badPostcode) return badPostcode;
+      const badExpiry = contractorExpiryRefusal(
+        data,
+        "insuranceExpiry",
+        "A contractor's insurance expiry",
+      );
+      if (badExpiry) return badExpiry;
+      const badCertifications = contractorCertificationsRefusal(data);
+      if (badCertifications) return badCertifications;
       // The row as this organisation can see it, or a 404. Before the update,
       // so a cross-tenant id refuses instead of answering 200 and logging a
       // change that never happened. See `contractorTarget`.
@@ -2072,6 +2827,27 @@ export async function PATCH(request: Request) {
         const badRename = await contractorNameConflict(db, orgId, text(data.name, 140), id);
         if (badRename) return badRename;
       }
+      /*
+       * W06-09 — the payment term is checked against the CONFIGURED list, so it
+       * needs a read. After the 404 for the same reason the rename check is:
+       * answering a cross-tenant id with a list of this organisation's terms is
+       * a fact about somebody else's workspace leaking through the wrong door.
+       */
+      const badTerms = await contractorPaymentTermsRefusal(db, orgId, data);
+      if (badTerms) return badTerms;
+      /*
+       * The canonical trades, read before the statement rather than inside it:
+       * `supplied` is synchronous by design and this needs the option list. An
+       * absent `serviceCategories` yields an empty fragment, so a PATCH that
+       * never mentions trades still leaves them alone.
+       */
+      const tradePatch = "serviceCategories" in data
+        ? {
+            serviceCategories: JSON.stringify(
+              await contractorTradeValues(db, orgId, data.serviceCategories),
+            ),
+          }
+        : {};
       await db.update(contractors).set({
         // Only what was sent — see `supplied`. A partial PATCH used to blank
         // every column it did not mention.
@@ -2089,13 +2865,52 @@ export async function PATCH(request: Request) {
         ...supplied(data, "whatsappNumber", (value) => optionalText(value, 80)),
         ...supplied(data, "contactName", (value) => optionalText(value, 140)),
         ...supplied(data, "address", (value) => optionalText(value, 240)),
+        /*
+         * W06-06 — the postcode `address` could not hold. Behind `supplied`
+         * like everything else: an absent key preserves what is stored, and an
+         * explicit "" clears it, which is how a contractor who moves and has
+         * not said where yet is recorded honestly.
+         */
+        ...supplied(data, "postcode", contractorPostcode),
         ...supplied(data, "notes", (value) => optionalText(value, 2000)),
-        // The form's key is `dayRate` in pounds; the column is pence.
-        ...("dayRate" in data ? { dayRatePence: ratePence(data.dayRate) } : {}),
-        ...supplied(data, "serviceCategories", (value) => JSON.stringify(stringArray(value))),
+        /*
+         * W06-07 — all four agreed costs, each from whichever of its two
+         * spellings the caller sent. `dayRate` (pounds) is still accepted and
+         * still wins; `dayRatePence` now works too, which is what makes
+         * `nativeField` usable as a write key from the register.
+         *
+         * This replaces `...("dayRate" in data ? { dayRatePence: ratePence(…) } : {})`
+         * — one column's special case grown into the rule for all four. See
+         * `CONTRACTOR_COSTS`.
+         */
+        ...contractorCostSet(data),
+        // The name that makes the figure above legible. Never `notes`: a cost
+        // whose label is buried in prose is a cost no report can read back.
+        ...supplied(data, "otherCostLabel", (value) => optionalText(value, 80)),
+        /*
+         * W06-09 — terms, and a pointer at the ledger that holds the rest.
+         * `paymentTerms` has already been checked against the configured set;
+         * "" clears it, because "no terms agreed" is a real state.
+         */
+        ...supplied(data, "paymentTerms", (value) => optionalText(value, 60)),
+        ...supplied(data, "financeReference", (value) => optionalText(value, 80)),
+        // W06-06 — folded onto `contractor_trade` before storage. Awaited above
+        // the statement because `supplied` is synchronous and this is a read.
+        ...tradePatch,
         ...supplied(data, "coverageAreas", (value) => JSON.stringify(stringArray(value))),
         ...supplied(data, "certifications", (value) => JSON.stringify(stringArray(value))),
-        ...supplied(data, "insuranceExpiry", (value) => optionalText(value, 40)),
+        // Normalised through `dateOnlyValue` rather than stored as typed, so
+        // every reader of this column sees one shape. Validated above.
+        ...supplied(data, "insuranceExpiry", contractorDate),
+        /*
+         * W06-08 — who the cover is with, and under which policy. A date on its
+         * own can say when something ends and never what ended, which is why
+         * chasing a lapsed certificate used to begin with a phone call asking
+         * who the broker was.
+         */
+        ...supplied(data, "insurerName", (value) => optionalText(value, 160)),
+        ...supplied(data, "policyNumber", (value) => optionalText(value, 80)),
+        ...supplied(data, "insuranceNotes", (value) => optionalText(value, 1000)),
         ...supplied(data, "availability", (value) => text(value, 60)),
         ...supplied(data, "rating", optionalRating),
         // `booleanValue` still falls back to TRUE, and that fallback is now
@@ -2104,6 +2919,14 @@ export async function PATCH(request: Request) {
         ...supplied(data, "active", booleanValue),
         updatedAt: new Date().toISOString(),
       }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
+      /*
+       * W06-08 — the certifications, after the row and inside the same 404.
+       * `contractorTarget` above has already established that this contractor
+       * belongs to the caller's organisation, so this cannot write rows against
+       * somebody else's id; every statement carries the organisation anyway.
+       * An absent `certificationEntries` writes nothing at all.
+       */
+      await writeContractorCertifications(db, orgId, id, data);
     } else if (entity === "planned") {
       /*
        * Only what was sent — see `supplied`. Every column here except `unitId`,
@@ -2249,8 +3072,32 @@ export async function DELETE(request: Request) {
      * 'active'. 'closed' is the seeded site_status option, and this is the
      * literal `app/api/sites/route.ts` already writes.
      */
-    if (entity === "site") await db.update(sites).set({ status: "closed", lifecycle: "Closed", active: false, updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
-    else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+    /*
+     * W05-07 — the closure goes through the same reconciliation as every other
+     * one, so a row the register cannot vouch for keeps saying so.
+     *
+     * The literal `status: "closed"` this replaces was right for the case it
+     * was written for and wrong for 'other': archiving an unverified legacy row
+     * rewrote the only column recording that it WAS unverified, and moved it
+     * from the Other reporting group into Closed on the way. `reconcileSiteState`
+     * still writes `{ closed, Closed, false }` for an active or international
+     * site — that behaviour is unchanged and asserted — and writes
+     * `{ other, Closed, false }` for an 'other' one.
+     */
+    if (entity === "site") {
+      const [current] = await db
+        .select({ status: sites.status, lifecycle: sites.lifecycle, active: sites.active })
+        .from(sites)
+        .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)))
+        .limit(1);
+      const closed = reconcileSiteState(
+        { lifecycle: "Closed" },
+        current
+          ? { status: current.status, lifecycle: current.lifecycle, active: Boolean(current.active) }
+          : { status: "active", lifecycle: "Current", active: true },
+      );
+      await db.update(sites).set({ ...closed, updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+    } else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     else if (entity === "contractor") await db.update(contractors).set({ active: false, availability: "Inactive", updatedAt: new Date().toISOString() }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
     else if (entity === "planned") await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));

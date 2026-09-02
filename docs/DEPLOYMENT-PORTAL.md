@@ -104,7 +104,13 @@ Build environment: bash + Node 24 (`.nvmrc`), Linux/WSL/git-bash.
 ## Post-deploy smoke test
 
 1. Anonymous `GET /api/board` → **401/refusal** (proves `NODE_ENV=production`
-   took and the demo identity is off).
+   took and the demo identity is off). Check the Workstream 5/6 routes in the
+   same breath — `GET /api/registers?register=sites`,
+   `PATCH /api/registers/values` and `GET /api/contractor-sites?siteId=x` —
+   because `demoIdentityAllowed()` is a blanket development fallback, so these
+   answer 200 locally and MUST refuse here. A register is configuration and a
+   contractor↔site link is commercial data; neither belongs to an anonymous
+   caller.
 2. Owner sign-in works; the cookie is `Secure`; a wrong password is throttled.
 3. Board loads; photo cells draw thumbnails; hover cards fetch.
 4. Upload a photo → appears without reload → **survives a redeploy** (proves

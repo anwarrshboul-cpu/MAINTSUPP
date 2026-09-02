@@ -241,8 +241,25 @@ const archive = (orgId, entity, id) =>
 // FIX 1 — a partial PATCH no longer blanks the columns it did not mention
 // ---------------------------------------------------------------------------
 
+/**
+ * COMMENTS STRIPPED FIRST, and that is not tidiness.
+ *
+ * The pin below matched `supplied(data, "lifecycle"` anywhere in the site
+ * branch, and that branch now carries a comment EXPLAINING why the call was
+ * removed — so the assertion went on passing against prose describing the code
+ * it was meant to be checking. A pin that can be satisfied by a sentence is
+ * worse than one that fails, because nobody looks at it again.
+ */
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .join("\n");
+}
+
 test("a partial workspace PATCH writes only the keys it was sent", async () => {
-  const route = await read("app/api/workspace/route.ts");
+  const route = stripComments(await read("app/api/workspace/route.ts"));
   const update = route.slice(route.indexOf("export async function PATCH"));
 
   /*
@@ -252,8 +269,22 @@ test("a partial workspace PATCH writes only the keys it was sent", async () => {
    * the importer's index, Report-a-Job and the shared-form submit path all key
    * on.
    */
+  /*
+   * `lifecycle` LEFT THIS LIST, and the rule it was here for did not.
+   *
+   * The site branch no longer writes `supplied(data, "lifecycle", …)`,
+   * because writing the raw request text is exactly the defect W05-07 closed:
+   * the column took whatever forty characters arrived, so
+   * `lifecycle: "closed"` — lower case, matching no branch — was stored on
+   * a row whose `status` stayed 'active'. The lifecycle is now validated
+   * and then written by `reconcileSiteState`, which is guarded by the same
+   * "was it sent" test every other column uses. That guard is asserted
+   * immediately below, so the only-what-was-sent contract is still pinned for
+   * this column — at its new home rather than at the call that used to enforce
+   * it.
+   */
   for (const [entity, columns] of [
-    ["site", ["name", "type", "region", "lifecycle", "address", "manager"]],
+    ["site", ["name", "type", "region", "address", "manager"]],
     ["unit", ["siteId", "name", "category", "status", "notes"]],
     ["planned", ["siteId", "title", "category", "frequency", "nextDueAt", "status"]],
   ]) {
@@ -265,6 +296,18 @@ test("a partial workspace PATCH writes only the keys it was sent", async () => {
         branch,
         new RegExp(`supplied\\(data, "${column}"`),
         `PATCH ${entity} must write ${column} only when it was sent`,
+      );
+    }
+    if (entity === "site") {
+      assert.match(
+        branch,
+        /if \("lifecycle" in data \|\| "active" in data\) \{/,
+        "PATCH site must reconcile the state columns only when the edit mentioned one",
+      );
+      assert.doesNotMatch(
+        branch,
+        /supplied\(data, "lifecycle"/,
+        "and must never write the raw lifecycle text again",
       );
     }
     assert.doesNotMatch(
@@ -339,14 +382,62 @@ test("closing a site from the workspace tab can be undone there", async () => {
    * Archiving writes all three state columns. The only closed/open control this
    * form has is `lifecycle`, so writing that alone would strand a site the
    * Sites screen still calls closed and this tab could never reopen.
+   *
+   * RE-POINTED FOR W05-07, WITH THE CONTRACT KEPT AND WIDENED.
+   *
+   * This used to pin two object literals — `lifecycleState = { status:
+   * "closed", active: false }` and `{ status: "active", active: true }`
+   * — and a branch on `current?.status === "closed"`. Those were the
+   * projection's implementation, not its promise. The promise was three things:
+   * closing writes all three columns; reopening clears them; and neither
+   * flattens the open states this two-way toggle cannot express.
+   *
+   * The projection is gone because it could only ever answer two of the four
+   * statuses. `reconcileSiteState` (app/lib/site-state.ts) answers all of
+   * them from the STORED trio, and the promise is pinned here at its new home —
+   * plus the half that was never pinned at all, because it was never true: the
+   * lifecycle arriving in the request is now VALIDATED before anything is
+   * written. The behaviour itself is asserted end to end in
+   * tests/workstream-five-site-state-and-profile.test.mjs.
    */
   const route = await read("app/api/workspace/route.ts");
-  assert.match(route, /lifecycleState = \{ status: "closed", active: false \}/, "closing writes the trio");
-  assert.match(route, /lifecycleState = \{ status: "active", active: true \}/, "reopening clears it");
   assert.match(
     route,
-    /if \(current\?\.status === "closed"\)/,
-    "and only for a site that was actually closed — 'international' and 'other' are open states this form cannot express",
+    /import \{\s*normaliseSiteLifecycle,\s*reconcileSiteState,\s*siteLifecycleRefusal,\s*\} from "\.\.\/\.\.\/lib\/site-state"/,
+    "the workspace route must take the state rules from the one module that owns them",
+  );
+  assert.match(
+    route,
+    /if \("lifecycle" in data && !normaliseSiteLifecycle\(data\.lifecycle\)\) \{/,
+    "an unrecognised lifecycle is refused rather than stored",
+  );
+  assert.match(
+    route,
+    /lifecycleState = reconcileSiteState\(/,
+    "closing and reopening both go through the one reconciliation",
+  );
+  assert.match(
+    route,
+    /\.select\(\{ status: sites\.status, lifecycle: sites\.lifecycle, active: sites\.active \}\)/,
+    "and it is handed the whole stored trio, not just the status — three facts, not one",
+  );
+
+  /*
+   * The promise itself, at its home: 'closed' pins Closed, 'active' and
+   * 'international' pin Current, and 'other' — which is how the register
+   * records a row it cannot vouch for — pins nothing and survives both.
+   */
+  const state = await read("app/lib/site-state.ts");
+  assert.match(state, /if \(status === SITE_STATUS_CLOSED\) return SITE_LIFECYCLE_CLOSED;/);
+  assert.match(
+    state,
+    /status === SITE_STATUS_ACTIVE \|\| status === SITE_STATUS_INTERNATIONAL/,
+    "'international' stays an OPEN state",
+  );
+  assert.match(
+    state,
+    /status === SITE_STATUS_OTHER\s*\?\s*SITE_STATUS_OTHER/,
+    "and 'other' survives a close and a reopen rather than being flattened",
   );
 });
 
@@ -487,13 +578,52 @@ test("archiving a site closes it everywhere, not just in the lifecycle word", as
    * filters the public Location dropdown on `sites.active`, so an archived site
    * was still offered to the public.
    */
+  /*
+   * RE-POINTED FOR W05-07. Both archive verbs used to name the three columns as
+   * literals and this read them straight out of the source. They now call
+   * `reconcileSiteState({ lifecycle: "Closed" }, <stored trio>)`, which
+   * writes the same three columns and additionally keeps a classification the
+   * literal destroyed: archiving a `status='other'` row rewrote the only
+   * column recording that the register could not vouch for it.
+   *
+   * So the pin moves to the call, and the VALUES it produces are pinned in the
+   * module that produces them — plus, end to end, in
+   * tests/workstream-five-site-state-and-profile.test.mjs, which archives a real
+   * fixture and reads all three columns back. Reading three literals out of a
+   * file never proved they were written together anyway; that test does.
+   */
   for (const file of ["app/api/sites/route.ts", "app/api/workspace/route.ts"]) {
     const source = await read(file);
     const archiveVerb = source.slice(source.indexOf("export async function DELETE"));
-    assert.match(archiveVerb, /status: "closed"/, `${file}: status must close`);
-    assert.match(archiveVerb, /lifecycle: "Closed"/, `${file}: the Stage 0 column stays in step`);
-    assert.match(archiveVerb, /active: false/, `${file}: form-options.ts filters on sites.active`);
+    assert.match(
+      archiveVerb,
+      /reconcileSiteState\(\s*\{ lifecycle: "Closed" \}/,
+      `${file}: archiving must close the record through the shared rule`,
+    );
+    assert.match(
+      archiveVerb,
+      /status: (existing|current)\.status/,
+      `${file}: and must hand it the stored classification rather than assuming one`,
+    );
   }
+
+  /*
+   * The three columns the archive writes, at the one place that decides them.
+   * app/lib/form-options.ts filters the public Location dropdown on
+   * `sites.active`, which is why a "closed" that did not clear
+   * `active` was a site still offered to the public.
+   */
+  const state = await read("app/lib/site-state.ts");
+  assert.match(
+    state,
+    /lifecycle === SITE_LIFECYCLE_CLOSED \|\| settledStatus === SITE_STATUS_CLOSED\s*\n?\s*\? false/,
+    "a closed record is never operationally active",
+  );
+  assert.match(
+    state,
+    /lifecycle === SITE_LIFECYCLE_CLOSED\s*\n?\s*\? SITE_STATUS_CLOSED/,
+    "and a closed lifecycle closes the status with it",
+  );
 });
 
 // ---------------------------------------------------------------------------

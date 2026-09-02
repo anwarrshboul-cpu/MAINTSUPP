@@ -8591,3 +8591,410 @@ label.live-board-tool {
     min-height: 44px;
   }
 }
+
+/*
+ * W06-06 and W06-08 — the two controls the contractor editor grew.
+ *
+ * Both span the editor's full width for the reason a textarea already does
+ * (`.workspace-record-editor__fields .form-field:has(textarea)`): they are
+ * lists, not values, and half a column is not enough to read eleven trades or
+ * four columns of certificate across. Everything else — the border, the sunken
+ * ground, the label weight — is taken from `.workspace-checkbox` above rather
+ * than restated, so the editor reads as one form and not as a form with two
+ * bolted-on panels.
+ */
+.workspace-record-editor__fields .workspace-multiselect,
+.workspace-record-editor__fields .workspace-certifications {
+  grid-column: 1 / -1;
+}
+
+.workspace-multiselect,
+.workspace-certifications {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  min-width: 0;
+}
+
+.workspace-multiselect > legend,
+.workspace-certifications > legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/*
+ * WRAP, never scroll. Eleven trades at any width the manager opens at is two
+ * or three rows of pills; a horizontal scroller would hide the last of them
+ * behind a gesture nobody knows is there, on the one control whose whole job
+ * is to show what has and has not been ticked.
+ */
+.workspace-multiselect__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-multiselect__options > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /* 44px is the touch floor the rest of this dialog keeps; the padding gets
+     there without a min-height that would leave the text off-centre. */
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workspace-multiselect__options > label:has(input:checked) {
+  border-color: rgba(18, 180, 168, .55);
+  background: rgba(18, 180, 168, .12);
+}
+
+.workspace-multiselect__options input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: #12b4a8;
+}
+
+/*
+ * One certificate per row: name, reference, the two dates, the derived state
+ * and the control that removes it. `auto` on the last two so a long
+ * certificate name never squeezes the status word to nothing — that word is
+ * the only thing on the row a reader is scanning for.
+ */
+.workspace-certification {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.workspace-certification .form-field > span {
+  font-size: 10px;
+}
+
+.workspace-certification > .icon-button {
+  align-self: center;
+}
+
+/*
+ * THE WORD, ALWAYS — the colour is the second signal and never the only one.
+ * Same four states `app/lib/expiry-status.ts` classifies, so this chip and the
+ * board's expiry cell cannot come to mean different things by "due soon".
+ */
+.workspace-expiry-chip {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-expiry-chip.is-expired {
+  border-color: rgba(226, 68, 92, .45);
+  background: rgba(226, 68, 92, .13);
+  color: #e2445c;
+}
+
+.workspace-expiry-chip.is-due-soon {
+  border-color: rgba(253, 171, 61, .5);
+  background: rgba(253, 171, 61, .15);
+  color: #b57113;
+}
+
+.workspace-expiry-chip.is-valid {
+  border-color: rgba(18, 180, 168, .45);
+  background: rgba(18, 180, 168, .12);
+  color: #0f8f86;
+}
+
+body[data-theme="dark"] .workspace-expiry-chip.is-due-soon { color: #fdab3d; }
+body[data-theme="dark"] .workspace-expiry-chip.is-valid { color: #29d3c6; }
+
+/*
+ * 640 is one of the five widths this file is allowed to break at, and it is
+ * where the six-column certificate row stops fitting: the two date inputs
+ * alone need about 300px between them once the browser's own calendar button
+ * is counted. Stacked, every field keeps its label and its full width.
+ */
+@media (max-width: 640px) {
+  .workspace-certification {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .workspace-certification .form-field {
+    grid-column: 1 / -1;
+  }
+}
+
+/*
+ * W05-08 — the configurable register grid.
+ *
+ * The TABLE itself is `.analytics-table analytics-table--mobile-cards`, which
+ * every other register on this platform already uses and which is what gives
+ * this one its card layout on a phone for free. Nothing below restyles a cell;
+ * it styles the CONTROLS the configurable register adds — the header menus, the
+ * columns panel, the view switch — and leaves the table looking like a table.
+ */
+.register-grid {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.register-grid__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.register-grid__toolbar > div:first-child { display: grid; gap: 2px; }
+.register-grid__toolbar strong { color: var(--ink); font-size: 13px; }
+.register-grid__toolbar small { color: var(--muted-2); font-size: 11px; }
+
+.register-grid__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.register-add-column {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+}
+
+.register-add-column .form-field { flex: 1 1 220px; min-width: 0; }
+
+/*
+ * SHOWN AND HIDDEN, SIDE BY SIDE. The hidden list is the half that matters:
+ * "remove" on a built-in column means HIDE, so without somewhere to see what is
+ * hidden the removal would be unrecoverable, which is a delete wearing a
+ * different word.
+ */
+.register-columns-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+}
+
+.register-columns-panel h4 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.register-columns-panel ul {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.register-columns-panel li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.register-columns-panel li small { color: var(--muted-2); font-size: 10px; }
+.register-columns-panel li .secondary-button { padding: 3px 9px; font-size: 11px; }
+
+/* The header cell is the anchor for its own menu, so the menu can never open
+   under a neighbouring column. */
+.register-column { position: relative; }
+
+.register-column__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.register-column__name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.register-column-menu {
+  position: absolute;
+  /* Tier token, not a raw number: tests/ui-batch-overlays.test.mjs requires every
+     z-index of 10 or more to be a tier token, so the portal has one ordering
+     rather than a set of competing guesses. A column menu is a popover. */
+  z-index: var(--z-popover);
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  min-width: 168px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-card);
+  box-shadow: 0 12px 30px rgba(16, 24, 32, .18);
+}
+
+.register-column-menu > button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.register-column-menu > button:hover:not(:disabled) { background: var(--surface-hover); }
+.register-column-menu > button:disabled { color: var(--muted-2); cursor: not-allowed; }
+.register-column-menu > button.is-destructive { color: #e2445c; }
+
+/* A cell that is editable should look editable and still read as a cell. */
+.register-cell-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+}
+
+.register-cell-input:hover { border-color: var(--line); }
+.register-cell-input:focus { border-color: var(--line-strong); background: var(--surface-card); }
+
+/*
+ * ONE SETTING WITH TWO VALUES. A radio group, not two toggle buttons — see the
+ * markup's own note. The active pill is filled rather than merely outlined
+ * because the difference has to survive greyscale and a colour-blind reader.
+ */
+.register-view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+.register-view-switch > button {
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/*
+ * DECLARES ITS OWN FOREGROUND, exactly as `.primary-button` does.
+ *
+ * `color` alone is not enough. The dark theme carries a blanket
+ * `.portal-main button { color: var(--control-own-fg, var(--ink)) }`
+ * (app/globals.css), and `body[data-theme="dark"] .portal-main button`
+ * outranks this two-class selector — so in dark this pill's label was
+ * repainted #e7eef3 onto its #12b4a8 ground: 2.2:1, against the 4.5:1 AA
+ * floor, measured with axe-core at 1440, 1024 and 390. Light was unaffected,
+ * which is why it reads correctly on a desktop and fails on a phone.
+ *
+ * `--control-own-fg` is the opt-out that rule was given for precisely this
+ * case: the comment beside it records the same 2.21:1 failure across 779
+ * `.primary-button` nodes. Setting it here wins without a specificity fight
+ * and without `!important`, and the tokens keep the pair defined together.
+ */
+.register-view-switch > button.is-active {
+  --control-own-fg: var(--on-brand-bright);
+  background: var(--brand-bright);
+  color: var(--on-brand-bright);
+}
+
+/*
+ * 767 is one of the five widths this file is allowed to break at and is the
+ * phone band the rest of the register screens use. The columns panel stops
+ * being two columns because at that width each side is under 180px and the
+ * Show / Hide button wraps under a truncated column name.
+ */
+@media (max-width: 767px) {
+  .register-columns-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .register-view-switch {
+    width: 100%;
+  }
+
+  .register-view-switch > button {
+    flex: 1 1 0;
+    /* The 44px touch floor the rest of this file keeps. */
+    min-height: 44px;
+  }
+
+  /*
+    The menu is anchored to a header cell inside a horizontally scrolling
+    table, and the last column's menu would otherwise open past the right edge
+    where the scroll cannot reach it. Right-aligning it there keeps every menu
+    inside the viewport at any scroll position.
+  */
+  .register-table th:last-child .register-column-menu {
+    left: auto;
+    right: 0;
+  }
+}

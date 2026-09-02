@@ -929,6 +929,35 @@ async function ensureBoardEngineColumns(d1: D1DatabaseLike) {
      */
     ["contractors", "whatsapp_number", "TEXT"],
     /*
+     * WORKSTREAM 6 — the commercial, compliance and finance columns the
+     * official checklist names and the register could not hold.
+     *
+     * Every one is nullable, so an existing contractor reads NULL and every
+     * screen behaves exactly as it did before. Money is INTEGER pence, like
+     * `day_rate_pence` and every other money column here, so nothing rounds.
+     *
+     * `payment_terms` and `finance_reference` are the approved shape of
+     * "payment details": terms the coordinator agreed, and a reference to the
+     * supplier record in whichever accounting system already holds the bank
+     * details. There is deliberately NO account number, sort code or IBAN
+     * column — this repository is public, and an accounting reference is
+     * useless to anyone who steals it, which a bank detail is not.
+     *
+     * `insurer_name`/`policy_number`/`insurance_notes` give the existing bare
+     * `insurance_expiry` an identity: a date on its own cannot answer "expiring
+     * with whom, under which policy".
+     */
+    ["contractors", "postcode", "TEXT"],
+    ["contractors", "call_out_cost_pence", "INTEGER"],
+    ["contractors", "hourly_rate_pence", "INTEGER"],
+    ["contractors", "other_cost_pence", "INTEGER"],
+    ["contractors", "other_cost_label", "TEXT"],
+    ["contractors", "payment_terms", "TEXT"],
+    ["contractors", "finance_reference", "TEXT"],
+    ["contractors", "insurer_name", "TEXT"],
+    ["contractors", "policy_number", "TEXT"],
+    ["contractors", "insurance_notes", "TEXT"],
+    /*
      * WORKSTREAM 7 — a document's own identity. See the block comment on
      * `attachments` in db/schema.ts for what each column is for.
      *
@@ -1230,6 +1259,27 @@ async function ensureStageOneFoundation(d1: D1DatabaseLike) {
     ["unit_category", "Unit category", "Asset category for the unit register"],
     ["unit_status", "Unit status", "Operating state of an asset"],
     ["access_method", "Access method", "How access to a site is arranged"],
+    /*
+     * WORKSTREAM 6 — the two contractor vocabularies that were free text.
+     *
+     * `contractor_trade` exists because `contractors.service_categories` is a
+     * comma-split JSON array of whatever was typed, so "Electrical",
+     * "electrical" and "Electrics" were three different trades and the register
+     * could not be filtered or reported on by trade at all. The values below are
+     * EXACTLY the eleven the public application form already offers
+     * (`TRADES` in app/api/contractor-applications/route.ts), in its order —
+     * two vocabularies for one concept is the thing being fixed, so this must
+     * not become a third.
+     *
+     * `contractor_payment_terms` is half of the approved shape of "payment
+     * details". The other half is `contractors.finance_reference`, a pointer to
+     * the supplier record in the accounting system that already holds the bank
+     * details under its own controls. There is deliberately no account number,
+     * sort code or IBAN anywhere: this repository is public, and a stolen
+     * accounting reference buys an attacker nothing.
+     */
+    ["contractor_trade", "Contractor trade", "Trades a contractor covers"],
+    ["contractor_payment_terms", "Payment terms", "Agreed payment terms for a contractor"],
   ] as const;
   const setIds = new Map<string, string>();
   for (const [key, name, description] of setDefinitions) {
@@ -1327,6 +1377,37 @@ async function ensureStageOneFoundation(d1: D1DatabaseLike) {
       ["Inactive", "Inactive", "#5c82af", "#ffffff"],
       ["Out of service", "Out of service", "#e2445c", "#ffffff"],
       ["Retired", "Retired", "#808799", "#ffffff"],
+    ],
+    /*
+     * The eleven trades the public form offers, verbatim and in its order. If
+     * that list ever changes, change it there and here together — the whole
+     * point of this set is that an applicant and the register mean the same
+     * thing by "Glazing".
+     */
+    contractor_trade: [
+      ["Electrical & lighting", "Electrical & lighting", "#fdab3d", "#101820"],
+      ["Plumbing & leaks", "Plumbing & leaks", "#579bfc", "#ffffff"],
+      ["Doors, locks & shutters", "Doors, locks & shutters", "#5c82af", "#ffffff"],
+      ["HVAC & air conditioning", "HVAC & air conditioning", "#12B4A8", "#101820"],
+      ["Glazing", "Glazing", "#9cd326", "#101820"],
+      ["Signage", "Signage", "#a25ddc", "#ffffff"],
+      ["Drainage", "Drainage", "#037f4c", "#ffffff"],
+      ["General maintenance & handyman", "General maintenance & handyman", "#808799", "#ffffff"],
+      ["Fire & compliance", "Fire & compliance", "#e2445c", "#ffffff"],
+      ["CCTV & security", "CCTV & security", "#401694", "#ffffff"],
+      ["Other", "Other", "#808799", "#ffffff"],
+    ],
+    /*
+     * Terms, not credentials. "Other" is last so the list stays usable without
+     * becoming a free-text field by the back door.
+     */
+    contractor_payment_terms: [
+      ["On completion", "On completion", "#12B4A8", "#101820"],
+      ["7 days", "7 days", "#9cd326", "#101820"],
+      ["14 days", "14 days", "#fdab3d", "#101820"],
+      ["30 days", "30 days", "#579bfc", "#ffffff"],
+      ["60 days", "60 days", "#5c82af", "#ffffff"],
+      ["Other", "Other", "#808799", "#ffffff"],
     ],
   };
   for (const [key, values] of Object.entries(stageTwoSeeds)) {
@@ -1799,6 +1880,160 @@ async function ensureStageTwoFoundation(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS site_group_members_site_idx ON site_group_members (site_id)",
+    ),
+
+    /*
+     * WORKSTREAM 5/6 — the configurable register, as ONE architecture for both
+     * Sites and Contractors rather than two implementations.
+     *
+     * `register_key` is the discriminator ('sites' | 'contractors'), which is
+     * what lets a third register join later without a migration.
+     *
+     * These deliberately do NOT reuse `maintenance_board_cells`. That table's
+     * `request_id` is a work order, so a site's value has nowhere to sit in it;
+     * widening it would put three unrelated entity kinds behind one FK.
+     *
+     * `native_field` carries the whole native/custom distinction. NON-NULL means
+     * this column is a view onto a real typed column on `sites`/`contractors`:
+     * its values are read and written THERE and are never duplicated here, so
+     * the canonical row stays the single source of truth. NULL means a user
+     * created the column, and its values live in `register_values`. One
+     * nullable column says both things, which is why there is no `native`
+     * boolean — and a boolean of that name would also have had to be declared
+     * in BOOLEAN_COLUMNS in db/sqlite-to-postgres.ts to survive the rewriter.
+     *
+     * `hidden_at` rather than a `visible` flag, for a sharper version of the
+     * same reason: `visible` is ALREADY a BOOLEAN_COLUMN name (from
+     * maintenance_board_columns), and the rewriter's bare-name rule turns
+     * `WHERE visible = 1` into `WHERE visible = true` on the strength of the
+     * name alone. An INTEGER column called `visible` on a new table would make
+     * that rule silently wrong — the exact failure its own comment warns about.
+     * A nullable timestamp also records WHEN a column was hidden, which a flag
+     * does not. Same argument for `deleted_at`.
+     *
+     * A native column is never physically deleted: hiding is the only removal,
+     * because the underlying canonical field is real data. Only custom columns
+     * accept `deleted_at`.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS register_columns (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         register_key TEXT NOT NULL,
+         column_key TEXT NOT NULL,
+         title TEXT NOT NULL,
+         type TEXT NOT NULL DEFAULT 'text',
+         position INTEGER NOT NULL DEFAULT 0,
+         width INTEGER NOT NULL DEFAULT 160,
+         native_field TEXT,
+         settings TEXT NOT NULL DEFAULT '{}',
+         hidden_at TEXT,
+         deleted_at TEXT,
+         deleted_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS register_columns_key_idx ON register_columns (organisation_id, register_key, column_key)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS register_columns_order_idx ON register_columns (organisation_id, register_key, position)",
+    ),
+    /*
+     * One row per custom cell. Native cells are absent by construction — they
+     * live on the canonical row — so this table stays proportional to what
+     * users actually added rather than to the size of the register.
+     *
+     * The unique index is the write contract: a custom value is upserted by
+     * (organisation, register, entity, column), so a double submit updates one
+     * row instead of growing a second. `organisation_id` leads every index
+     * because every read is org-scoped and a cross-tenant row must never be
+     * reachable even by an id guess.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS register_values (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         register_key TEXT NOT NULL,
+         entity_id TEXT NOT NULL,
+         column_key TEXT NOT NULL,
+         value TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS register_values_cell_idx ON register_values (organisation_id, register_key, entity_id, column_key)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS register_values_entity_idx ON register_values (organisation_id, register_key, entity_id)",
+    ),
+
+    /*
+     * WORKSTREAM 5/6 — the Contractor <-> Site relation, canonical and explicit.
+     *
+     * Until now the only site-bearing path from a contractor was transitive
+     * through a job, and `coverage_areas` was free text every contractor filled
+     * with "UK" — which discriminates nothing. This is a real many-to-many with
+     * a real uniqueness rule, so "which sites does this contractor cover" has
+     * an answer that does not depend on fuzzy matching a string.
+     *
+     * `organisation_id` is part of the unique key rather than merely present,
+     * so the same contractor and site cannot be paired twice, and a pair can
+     * never span tenants. Both FKs are declared; the API additionally checks
+     * that contractor and site belong to the acting organisation BEFORE the
+     * insert, because an FK proves the row exists, not that the caller may see it.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_sites (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         contractor_id TEXT NOT NULL REFERENCES contractors(id),
+         site_id TEXT NOT NULL REFERENCES sites(id),
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         created_by TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS contractor_sites_pair_idx ON contractor_sites (organisation_id, contractor_id, site_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_sites_site_idx ON contractor_sites (site_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_sites_contractor_idx ON contractor_sites (contractor_id)",
+    ),
+
+    /*
+     * WORKSTREAM 6 — certifications as entries rather than as one comma string.
+     *
+     * The old `contractors.certifications` JSON array holds names and nothing
+     * else, so "is this contractor's gas certificate still valid" had no answer:
+     * there was one `insurance_expiry` for the whole contractor and none per
+     * certificate. Each row here carries its own expiry, which is what lets the
+     * register derive a status the same way the site compliance register does.
+     *
+     * The legacy column is left in place and still read. This table is additive:
+     * a contractor with no rows here behaves exactly as before.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_certifications (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         contractor_id TEXT NOT NULL REFERENCES contractors(id),
+         name TEXT NOT NULL,
+         reference TEXT,
+         issued_on TEXT,
+         expires_on TEXT,
+         notes TEXT,
+         position INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_certifications_owner_idx ON contractor_certifications (organisation_id, contractor_id, position)",
     ),
 
     // X12/X13 — nothing an import corrects is corrected silently.

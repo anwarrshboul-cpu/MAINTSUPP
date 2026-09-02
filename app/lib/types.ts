@@ -472,6 +472,28 @@ export interface FileRecord {
    * name is a lookup from it.
    */
   siteId: string | null;
+  /**
+   * W06-08 / W06-10 — THE CONTRACTOR THIS DOCUMENT BELONGS TO.
+   *
+   * `attachments.contractor_id` has been written and served since W07-07 and
+   * this type never named it, so the Documents register threw it away when it
+   * mapped the payload and there was no contractor column anywhere in the
+   * product. A contractor's public liability certificate is a fact about the
+   * CONTRACTOR, not about a work order, and it had nowhere to be shown.
+   *
+   * Null on the great majority of rows, which are photographs of a job.
+   */
+  contractorId: string | null;
+  /**
+   * The contractor's NAME, resolved at render time exactly as `site` is.
+   *
+   * Empty when this document names no contractor, or when the contractor list
+   * has not arrived yet — never a fallback string, because the two mean
+   * different things and `documentContractorLabel` is the one place allowed to
+   * turn the empty case into words. Baking a name in at fetch time is the race
+   * `withSiteNames` exists to avoid; see the note there.
+   */
+  contractor?: string;
   requestId: string | null;
   uploadedAt: string;
   /** Who uploaded it. Served all along; the register simply never read it. */

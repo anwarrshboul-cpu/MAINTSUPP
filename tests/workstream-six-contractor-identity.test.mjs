@@ -416,12 +416,36 @@ test("the read-side ambiguity rule survives on both surfaces", async () => {
     "the server attributes an unlinked job only where the name is unique",
   );
 
+  /*
+   * THE BROWSER'S HALF MOVED, AND THIS PIN MOVED WITH IT — it is not weaker.
+   *
+   * The rule was written out by hand in `ContractorsView`, and W06-12 then
+   * found the ORIGINAL name-only version still running in `ContractorScorecard`
+   * on the Reports page: one rule, two hand-written copies, one of them fixed.
+   * It now lives once, in `app/lib/contractor-attribution.ts`, and the register
+   * page, the Reports scorecard and the Dashboard's contractor cost panel all
+   * call it. Asserting it where it is DEFINED plus asserting the page is a
+   * caller covers strictly more surfaces than the single pin did.
+   */
+  const rule = await read("app/lib/contractor-attribution.ts");
+  assert.match(rule, /const nameIsUnique = \(rosterPerName\.get\(contractor\.name\) \?\? 0\) <= 1;/);
+  assert.match(
+    rule,
+    /nameIsUnique && request\.contractor === contractor\.name/,
+    "and the browser applies the same rule to the same question",
+  );
+
   const page = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(page, /const nameIsUnique = \(rosterPerName\.get\(contractor\.name\) \?\? 0\) <= 1;/);
   assert.match(
     page,
-    /nameIsUnique && request\.contractor === contractor\.name/,
-    "and the page applies the same rule to the same question",
+    /attributeContractorWork\(scopedRequests, roster\)/,
+    "the Contractors page reaches its figures through that one rule",
+  );
+  const insights = await read("app/(app)/portal/dashboard-insights.tsx");
+  assert.equal(
+    (insights.match(/attributeContractorWork\(requests, contractors\)/g) ?? []).length,
+    2,
+    "and so do both reporting panels, which is the copy that had been missed",
   );
 });
 
@@ -456,9 +480,20 @@ test("the assignment select offers the active, and keeps whoever is already assi
   // The current value stays selectable even when the rule no longer offers it.
   assert.match(block, /assignedElsewhere/, "an archived assignee is kept as an option");
   assert.match(block, /\(archived\)/, "and is labelled, so it does not read as an ordinary choice");
+  /*
+   * RE-POINTED, CONTRACT UNCHANGED. This matched the whole call on one line —
+   * `fieldsFor(tab, workspace, typeof form?.contractorId === "string" ? …)` —
+   * and W05-07 gave `fieldsFor` a FOURTH argument (the configured site types,
+   * so the Sites tab stops restating a list `option_values` owns). The call is
+   * now spread over several lines and carries one more parameter; the promise
+   * this pin exists for is unchanged and is asserted directly: the open
+   * record's own contractor id must still be what reaches the third argument,
+   * because that is what keeps an archived assignee selectable instead of
+   * blanking a select that is bound to them.
+   */
   assert.match(
     form,
-    /fieldsFor\(tab, workspace, typeof form\?\.contractorId === "string" \? form\.contractorId : null\)/,
+    /fieldsFor\(\s*tab,\s*workspace,\s*typeof form\?\.contractorId === "string" \? form\.contractorId : null,/,
     "the open record's own contractor is what makes that possible",
   );
 });

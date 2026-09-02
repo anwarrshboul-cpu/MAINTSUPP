@@ -41,6 +41,39 @@ function initialState(site: SiteRecord | null): FormState {
      * site opens on the answer that is right for nine in ten of them.
      */
     region: site?.region ?? "UK",
+    /*
+     * W05-01 — THE TWO COLUMNS NO SCREEN COULD REACH.
+     *
+     * `latitude` and `longitude` are real columns on `sites`, they are in
+     * `SiteRecord`, `PATCH /api/sites` has always written them — and until now
+     * the ONLY way to put a value in either was a CSV import, which runs under
+     * `data.import`, a different capability from the one that owns this form.
+     * So the person who owns the site register could not record where a site
+     * is; somebody with permission to bulk-load a spreadsheet could.
+     *
+     * Held as strings like every other field here, so an untouched empty box
+     * posts `""` and `optionalNumber` reads it as "no coordinate" rather than
+     * as zero — which is a real place off the coast of Ghana, and exactly the
+     * kind of default nobody notices.
+     */
+    latitude:
+      site?.latitude === null || site?.latitude === undefined ? "" : String(site.latitude),
+    longitude:
+      site?.longitude === null || site?.longitude === undefined ? "" : String(site.longitude),
+    /*
+     * W05-07 — OPERATIONAL ELIGIBILITY, AS ITS OWN ANSWER.
+     *
+     * `active` is what `listRetailSites` and the public Location dropdown
+     * filter on, and it had no control anywhere in the product: it could only
+     * ever be whatever `status` implied. That is why the register could not
+     * express a current site that is not a shop — a warehouse, the office, an
+     * internal location — without also closing it.
+     *
+     * A new site defaults to eligible, which is what somebody adding a site is
+     * almost always doing. Closing a site still overrides this: see
+     * `reconcileSiteState`.
+     */
+    active: site ? String(Boolean(site.active)) : "true",
     managerName: site?.managerName ?? "",
     managerPhone: site?.managerPhone ?? "",
     managerEmail: site?.managerEmail ?? "",
@@ -191,6 +224,31 @@ export function SiteForm({
           options={statuses}
           required
         />
+        {/*
+          W05-07 — the third state column, with a control at last.
+          NOT a duplicate of Status above. Status classifies the record for
+          reporting; this says whether the site may be assigned work and
+          offered as a location, which is what `sites.active` actually gates.
+          The two answer different questions and the register holds rows where
+          they differ — a warehouse is a current site nobody dispatches a shop
+          fitter to. Closing a site overrides this either way, so the hint says
+          so rather than leaving somebody to discover it.
+        */}
+        <fieldset className="form-field">
+          <legend>Availability</legend>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={form.active === "true"}
+              onChange={(event) => set("active")(String(event.target.checked))}
+            />
+            <span>Available for work</span>
+          </label>
+          <p className="form-hint">
+            Offered when raising and assigning jobs, and on the public request
+            form. Closing a site clears this whatever is ticked here.
+          </p>
+        </fieldset>
         <Field id="site-notes" label="Notes" value={form.notes} onChange={set("notes")} multiline />
         <fieldset className="form-field">
           <legend>Reporting groups</legend>
@@ -244,6 +302,37 @@ export function SiteForm({
           value={form.region}
           onChange={set("region")}
           hint="How the portfolio is split for reporting. Existing sites use UK or Europe."
+        />
+        {/*
+          W05-01 — the coordinates, beside the address they belong to.
+          `type="number"` with the real bounds rather than free text: the route
+          refuses anything outside them, and a field that only tells you its
+          rules after a failed save is a field that teaches its rules by
+          punishing you. `step="any"` because a degree is not an integer.
+        */}
+        <Field
+          id="latitude"
+          label="Latitude"
+          type="number"
+          min={-90}
+          max={90}
+          step="any"
+          value={form.latitude}
+          onChange={set("latitude")}
+          placeholder="51.5074"
+          hint="Decimal degrees, between -90 and 90. Leave blank if the position is not known."
+        />
+        <Field
+          id="longitude"
+          label="Longitude"
+          type="number"
+          min={-180}
+          max={180}
+          step="any"
+          value={form.longitude}
+          onChange={set("longitude")}
+          placeholder="-0.1278"
+          hint="Decimal degrees, between -180 and 180."
         />
       </SectionPanel>
 

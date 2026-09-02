@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { SectionPanel, SectionTabs } from "./section-tabs";
+/*
+ * W05-09 — the fifth connection. Its own component because it is the only part
+ * of this screen with its own fetch and its own writes; see site-contractors.tsx.
+ */
+import { SiteContractors } from "./site-contractors";
 import { useLoader } from "./use-loader";
 import {
   api,
@@ -65,13 +70,36 @@ type DetailPayload = {
   files: FileRow[];
   activity: ActivityRow[];
   groupIds: string[];
+  /*
+   * W05-10 — the same membership as `groupIds`, with the names on it.
+   *
+   * Both, not one: `groupIds` is what this screen hands the editor and the
+   * editor treats a sent list as authoritative, so it has to stay exactly the
+   * shape it is. `groups` is what a reader can be shown. A profile that could
+   * not name the portfolio a store rolls up into was missing the answer to the
+   * question the reporting groups exist to ask.
+   */
+  groups: Array<{ id: string; name: string; kind: string; colourHex: string }>;
+  /** Every earlier spelling of the name, as `site_aliases` recorded it. */
+  aliases: string[];
 };
 
+/*
+ * W05-09 — CONTRACTORS IS THE FIFTH TAB, and it sits beside Assets rather than
+ * at the end. The criterion names five things a site connects to — Jobs,
+ * Compliance, Documents, Assets, Contractors — and four of them were already
+ * here; putting the fifth after Activity would have filed the missing
+ * relationship behind the audit trail. "Contacts" above it is the site's OWN
+ * people (its manager, its landlord, its out-of-hours number); this is the
+ * external network appointed to it, which is a different list with a different
+ * owner, so they are two tabs and not one.
+ */
 const TABS = [
   "Overview",
   "Jobs",
   "Compliance",
   "Assets",
+  "Contractors",
   "Documents",
   "Contacts",
   "Activity",
@@ -203,8 +231,16 @@ export function SiteDetail({
             the screen had no heading of any level to announce what it showed.
           */}
           <h1>{site.name}</h1>
+          {/*
+            `addressLine2` was missing from this line and from the whole
+            screen. It holds the floor, the unit or the mall on a third of the
+            register — "Etage 2", "Upper Mall West" — so the profile printed a
+            street with the part that tells an engineer where to go removed.
+          */}
           <p className="drawer-label">
-            {[site.addressLine1, site.city, site.postcode].filter(Boolean).join(", ")}
+            {[site.addressLine1, site.addressLine2, site.city, site.postcode]
+              .filter(Boolean)
+              .join(", ")}
           </p>
         </div>
         <div className="section-header__actions">
@@ -238,38 +274,122 @@ export function SiteDetail({
         onChange={setTab}
       />
 
+      {/*
+        W05-10 — THE STAT CARDS AND THE DETAIL ROWS ARE TWO BLOCKS, NOT ONE.
+        This panel carried `className="site-stat-grid"` itself, so
+        `.site-stat-grid > div` (globals.css) restyled EVERY direct child as a
+        stat card — including the wide block of labelled rows at the bottom. A
+        stat card is `grid-template-columns: 38px 1fr auto`, so the eight
+        `.detail-row` children flowed into a three-column grid whose first
+        track is 38 pixels wide, and each row then applied its OWN
+        `minmax(9rem, 14rem) 1fr` inside it. Measured at every width: the
+        labels painted on top of each other — "SERVICE CHARGOPENING HOURS",
+        "PARKINGNOTES" — with the value track collapsed to 13px at 1440.
+        The grid now wraps only the things that are stat cards, and the rows
+        sit in an ordinary panel beside it. No CSS rule had to be weakened for
+        it; the markup was simply claiming to be something it was not.
+      */}
       <SectionPanel
         idPrefix={TAB_PREFIX}
         section="Overview"
-        className="site-stat-grid"
+        className="site-detail__overview"
         focusable
         active={tab === "Overview"}
       >
-        <div className="panel">
-          <span className="drawer-label">Open jobs</span>
-          <strong>{openJobs.length}</strong>
+        <div className="site-stat-grid">
+          <div className="panel">
+            <span className="drawer-label">Open jobs</span>
+            <strong>{openJobs.length}</strong>
+          </div>
+          <div className="panel">
+            <span className="drawer-label">Jobs recorded</span>
+            <strong>{data.jobs.length}</strong>
+          </div>
+          <div className="panel">
+            <span className="drawer-label">Assets</span>
+            <strong>{data.units.length}</strong>
+          </div>
+          {/*
+            W05-10 BUG — THIS COUNTED THE WRONG THING.
+
+            "Documents held" rendered `data.compliance.length`, which is the
+            number of rows in the COMPLIANCE REGISTER for this site —
+            requirements, including every one whose state is Missing or Not
+            required. Those are the documents the site does NOT hold. Measured
+            on a real site: the card read 265 while the Documents tab below
+            listed two files.
+
+            `data.files` is the actual document source and is already on this
+            payload: current, unarchived `attachments` rows for this site, the
+            same list the Documents tab renders. The compliance figure was
+            worth showing — it just was not this — so it keeps a card under a
+            label that says what it is.
+          */}
+          <div className="panel">
+            <span className="drawer-label">Documents held</span>
+            <strong>{data.files.length}</strong>
+          </div>
+          <div className="panel">
+            <span className="drawer-label">Compliance requirements</span>
+            <strong>{data.compliance.length}</strong>
+          </div>
+          <div className="panel">
+            <span className="drawer-label">Spend recorded</span>
+            <strong>{formatMoney(Math.round(spend * 100))}</strong>
+          </div>
+          {/*
+            The annual maintenance budget. It is editable on the Sites form,
+            exported in the CSV and read by the Dashboard's spend panel, and
+            the one screen about this single site did not show it — so a
+            manager could see what a store had spent with nothing to compare it
+            against. `formatMoney` prints an em dash for null, which is the
+            honest rendering of "no budget set" and is not the same as zero.
+          */}
+          <div className="panel">
+            <span className="drawer-label">Annual budget</span>
+            <strong>{formatMoney(site.annualBudgetPence)}</strong>
+          </div>
+          <div className="panel">
+            <span className="drawer-label">Site type</span>
+            <strong>{labelFor(siteTypes, site.siteTypeValue ?? site.type)}</strong>
+          </div>
         </div>
         <div className="panel">
-          <span className="drawer-label">Jobs recorded</span>
-          <strong>{data.jobs.length}</strong>
-        </div>
-        <div className="panel">
-          <span className="drawer-label">Assets</span>
-          <strong>{data.units.length}</strong>
-        </div>
-        <div className="panel">
-          <span className="drawer-label">Documents held</span>
-          <strong>{data.compliance.length}</strong>
-        </div>
-        <div className="panel">
-          <span className="drawer-label">Spend recorded</span>
-          <strong>{formatMoney(Math.round(spend * 100))}</strong>
-        </div>
-        <div className="panel">
-          <span className="drawer-label">Site type</span>
-          <strong>{labelFor(siteTypes, site.siteTypeValue ?? site.type)}</strong>
-        </div>
-        <div className="panel site-detail__wide">
+          {/*
+            W05-10 — the fields the profile did not have. `region` and
+            `country` are how the portfolio is split for every rolled-up
+            figure; the reporting groups are how it is split for reporting, and
+            they were fetched and rendered nowhere at all; the coordinates were
+            reachable from no screen in the product until W05-01 put them on
+            the form. A profile is "complete" when the answers a person came
+            for are on it.
+          */}
+          <Row
+            label="Reporting groups"
+            value={
+              data.groups.length
+                ? data.groups.map((group) => group.name).join(", ")
+                : null
+            }
+          />
+          <Row label="Region" value={site.region} />
+          <Row label="Country" value={site.country} />
+          <Row label="Address" value={site.addressLine2} />
+          <Row
+            label="Coordinates"
+            value={
+              site.latitude !== null && site.longitude !== null
+                ? `${site.latitude}, ${site.longitude}`
+                : null
+            }
+          />
+          {/*
+            Former names, so somebody holding a four-year-old invoice for
+            "Cardiff St Davids" can see they are on the right page. The array
+            is empty for a site that has never been renamed and the Row prints
+            an em dash, which is the truth about that site.
+          */}
+          <Row label="Also known as" value={data.aliases.join(", ")} />
           <Row label="Lease" value={`${formatDate(site.leaseStart)} to ${formatDate(site.leaseEnd)}`} />
           <Row label="Break clause" value={site.breakClause} />
           <Row label="Rent review" value={site.rentReview} />
@@ -416,6 +536,15 @@ export function SiteDetail({
             </table>
           </div>
         )}
+      </SectionPanel>
+
+      <SectionPanel
+        idPrefix={TAB_PREFIX}
+        section="Contractors"
+        focusable
+        active={tab === "Contractors"}
+      >
+        <SiteContractors siteId={site.id} siteName={site.name} />
       </SectionPanel>
 
       <SectionPanel

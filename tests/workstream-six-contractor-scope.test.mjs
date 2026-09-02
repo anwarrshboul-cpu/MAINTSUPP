@@ -416,11 +416,28 @@ test("the replay above is still the page's own rule", async () => {
   assert.ok(start > 0, "ContractorsView was found");
   const view = app.slice(start, start + 20_000);
 
-  // The id first, the name only where there is no id, and never an ambiguous name.
+  /*
+   * THE ID-FIRST CLAUSE MOVED, AND THIS PIN MOVED WITH IT — it is not weaker.
+   *
+   * W06-12 found the ORIGINAL name-only line still running in
+   * `ContractorScorecard` on the Reports page, months after it was removed from
+   * this view: one rule, two hand-written copies, and only one of them fixed.
+   * The rule now lives once, in `app/lib/contractor-attribution.ts`, and every
+   * surface that attributes a job to a contractor calls it. So the clause is
+   * asserted where it is now DEFINED, and the page is separately asserted to be
+   * a caller — which is a stronger contract than the single source pin was,
+   * because it also covers the two panels that used to disagree with it.
+   */
+  const attribution = await read("app/lib/contractor-attribution.ts");
+  assert.match(
+    attribution,
+    /request\.contractorId\s*\?\s*request\.contractorId === contractor\.id\s*:\s*nameIsUnique && request\.contractor === contractor\.name/,
+    "the shared rule attributes by id, falling back to a UNIQUE name",
+  );
   assert.match(
     view,
-    /request\.contractorId\s*\?\s*request\.contractorId === contractor\.id\s*:\s*nameIsUnique && request\.contractor === contractor\.name/,
-    "the page attributes by id, falling back to a UNIQUE name",
+    /attributeContractorWork\(scopedRequests, roster\)/,
+    "and the page reaches its four numbers through that one rule",
   );
   assert.match(view, /countsAsWorkOrder\(request\)/, "the page applies the work-order rule");
   assert.match(view, /theirs\.filter\(isClosedRequest\)/, "and the shared closed predicate");

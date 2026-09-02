@@ -23,6 +23,9 @@ export function FormField({
   multiline,
   options,
   placeholder,
+  min,
+  max,
+  step,
 }: {
   id: string;
   label: string;
@@ -34,6 +37,20 @@ export function FormField({
   multiline?: boolean;
   options?: Array<OptionChoice | FieldOption>;
   placeholder?: string;
+  /*
+   * W05-01 — the bounds of a numeric field, on the control itself.
+   *
+   * Added for the coordinates, which are the first fields here that have a real
+   * range: latitude is -90..90 and longitude -180..180, and the route refuses
+   * anything outside them. Putting the same figures on the input means the
+   * browser says so before the round trip, a phone offers a numeric keypad, and
+   * a screen reader announces the range with the field — rather than the user
+   * learning it from a 400. `step` exists for the same reason: the default is
+   * 1, which makes a decimal degree an invalid value.
+   */
+  min?: number;
+  max?: number;
+  step?: string;
 }) {
   const describedBy = hint ? `${id}-hint` : undefined;
 
@@ -84,6 +101,9 @@ export function FormField({
           value={value}
           required={required}
           placeholder={placeholder}
+          min={min}
+          max={max}
+          step={step}
           aria-describedby={describedBy}
           onChange={(event) => onChange(event.target.value)}
         />

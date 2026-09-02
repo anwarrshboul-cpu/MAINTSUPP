@@ -23,6 +23,23 @@ import {
   stageZeroState,
   uniqueSlug,
 } from "../../../lib/sites-repository";
+// W05-01 — the same bounds the Sites form and `PATCH /api/sites` use.
+import { coordinateRefusal } from "../../../lib/site-state";
+
+/**
+ * One cell read as a coordinate, or null.
+ *
+ * The expression this replaces was written twice, inline, and answered null for
+ * an empty cell and for "not-a-number" alike — correct, but the two readings
+ * then had to be repeated a third time to be range-checked. One function, three
+ * call sites, no chance of the check and the write disagreeing about what the
+ * cell said.
+ */
+function coordinate(value: string): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 /**
  * Column order is also the import template. Exporting, editing in Excel and
@@ -404,6 +421,31 @@ export async function POST(request: Request) {
         continue;
       }
 
+      /*
+       * W05-01 — the coordinates are bounded here too, and the row is skipped
+       * rather than half-imported.
+       *
+       * This importer was the ONLY write path either column ever had, and it
+       * checked nothing beyond `Number.isFinite` — so `latitude: 480` imported
+       * cleanly and produced a pin the map silently drops. Now that the Sites
+       * form can write them under `sites.edit` and refuses out of range, an
+       * importer that accepts what the form refuses is the same rule with a
+       * hole in it: the CSV is exactly where an impossible figure comes from,
+       * because it is the path where nobody reads the value.
+       *
+       * Skipped with a named reason, like an unconfigured type or a duplicate
+       * code, because that is how this importer already reports a row it will
+       * not take: the preview lists it, and the operator fixes the sheet.
+       */
+      const badCoordinate = coordinateRefusal(
+        coordinate(cell(record, "latitude")),
+        coordinate(cell(record, "longitude")),
+      );
+      if (badCoordinate) {
+        outcome.skipped.push({ row: rowNumber, name, reason: badCoordinate });
+        continue;
+      }
+
       const siteTypeValue = rawType || defaultType;
       const status = rawStatus || defaultStatus;
       const serviceChargePounds = cell(record, "service_charge_pounds");
@@ -421,10 +463,8 @@ export async function POST(request: Request) {
         city: optional(cell(record, "city")),
         postcode: optional(cell(record, "postcode")),
         country: cell(record, "country") || "United Kingdom",
-        latitude: Number.isFinite(Number(cell(record, "latitude")))
-          && cell(record, "latitude") ? Number(cell(record, "latitude")) : null,
-        longitude: Number.isFinite(Number(cell(record, "longitude")))
-          && cell(record, "longitude") ? Number(cell(record, "longitude")) : null,
+        latitude: coordinate(cell(record, "latitude")),
+        longitude: coordinate(cell(record, "longitude")),
         managerName: optional(cell(record, "manager_name")),
         managerPhone: optional(cell(record, "manager_phone")),
         managerEmail: optional(cell(record, "manager_email")),

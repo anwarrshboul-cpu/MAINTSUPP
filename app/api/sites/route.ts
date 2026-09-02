@@ -34,6 +34,12 @@ import {
   stageZeroState,
   uniqueSlug,
 } from "../../lib/sites-repository";
+/*
+ * W05-01 and W05-07 — the coordinate bounds and the state rules, from the one
+ * module that owns them. Imported straight rather than through the repository
+ * re-export so the dependency is visible where it is used.
+ */
+import { coordinateRefusal, reconcileSiteState } from "../../lib/site-state";
 
 /**
  * What a reader is told when Sites cannot load, and what a developer is told.
@@ -251,6 +257,27 @@ function optionalNumber(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * W05-07 — a checkbox's value, as it arrives from three different callers.
+ *
+ * The Sites form holds every field as a string, so its Active control posts
+ * `"true"` and `"false"`; a JSON caller posts a real boolean; the CSV importer
+ * posts `"1"` / `"0"` / `"yes"`. `Boolean("false")` is `true`, which is the
+ * classic way a tick-box ends up permanently ticked, so the string forms are
+ * read by name and anything unrecognised answers `null` — "nothing was said" —
+ * rather than guessing. A `null` here reaches `reconcileSiteState` as an
+ * unstated eligibility and the stored value is kept.
+ */
+function flag(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  if (["true", "1", "yes", "y", "on"].includes(trimmed)) return true;
+  if (["false", "0", "no", "n", "off"].includes(trimmed)) return false;
+  return null;
 }
 
 /** Money is stored as integer pence. A float here loses a penny per rounding. */
@@ -539,7 +566,8 @@ export async function GET(request: Request) {
     if (id) {
       const site = await getSite(db, orgId, id);
       if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
-      const [jobs, assets, documents, groups, files, activity] = await Promise.all([
+      const [jobs, assets, documents, groups, files, activity, allGroups, allAliases] =
+        await Promise.all([
         db
           .select()
           .from(maintenanceRequests)
@@ -636,7 +664,27 @@ export async function GET(request: Request) {
           )
           .orderBy(desc(activityLog.createdAt))
           .limit(100),
+        /*
+         * W05-10 — THE GROUPS BY NAME, AND THE FORMER NAMES.
+         *
+         * `groupIds` has always been in this payload and the profile rendered
+         * it NOWHERE, because a list of ids is not something to show anybody:
+         * the reporting groups a site belongs to are the answer to "how does
+         * this store roll up", and they were reachable only by opening the
+         * editor and reading which checkboxes happened to be ticked. Both
+         * queries are per-organisation rather than per-site — the register is
+         * small and `listAliases` is one statement either way — and the
+         * membership ids above still decide which of them apply.
+         *
+         * `groupIds` stays exactly as it was. `SiteDetail` hands it to the
+         * editor, which treats a sent list as authoritative, so anything that
+         * changed its shape would silently rewrite group membership on the next
+         * save. Names are added ALONGSIDE it, never instead of it.
+         */
+        listSiteGroups(db, orgId),
+        listAliases(db, orgId),
       ]);
+      const memberOf = new Set(groups.map((entry) => entry.siteGroupId));
       return Response.json({
         site,
         jobs,
@@ -646,6 +694,17 @@ export async function GET(request: Request) {
         files,
         activity,
         groupIds: groups.map((entry) => entry.siteGroupId),
+        groups: allGroups
+          .filter((group) => memberOf.has(group.id))
+          .map((group) => ({
+            id: group.id,
+            name: group.name,
+            kind: group.kind,
+            colourHex: group.colourHex,
+          })),
+        aliases: allAliases
+          .filter((alias) => alias.siteId === id)
+          .map((alias) => alias.alias),
       });
     }
 
@@ -713,6 +772,22 @@ export async function POST(request: Request) {
 
     const junk = junkReason(payload.name, address.value);
     if (junk) throw new Error(junk);
+
+    /*
+     * W05-01 — a coordinate is checked on the way in, on both verbs.
+     *
+     * `latitude` and `longitude` are now editable from the Sites form, and
+     * before that they were only ever written by the CSV importer, which
+     * checked nothing either. `optionalNumber` accepts any finite number, so
+     * `latitude: 480` stored happily and then vanished: a map drops a pin it
+     * cannot place, and nobody proof-reads a coordinate the way they proof-read
+     * a postcode. The bounds and the sentence live in app/lib/site-state.ts so
+     * the form's `min`/`max` and this refusal cannot drift apart.
+     */
+    const badCoordinate = coordinateRefusal(payload.latitude, payload.longitude);
+    if (badCoordinate) {
+      return Response.json({ error: badCoordinate }, { status: 400 });
+    }
 
     const badGroup = await unknownGroupRefusal(db, orgId, stringList(body.data?.groupIds));
     if (badGroup) return badGroup;
@@ -921,6 +996,20 @@ export async function PATCH(request: Request) {
     const address = cleanAddress(payload.addressLine1 ?? "");
     if (!address.value) throw new Error("A first line of address is required.");
 
+    /*
+     * W05-01 — the same bounds as the create, applied to the MERGED payload.
+     *
+     * Merged rather than raw, which matters: `preserveUnsent` hands back the
+     * stored coordinate for a key the caller left out, and re-checking that is
+     * free. Sending `latitude: ""` still clears it — `optionalNumber` answers
+     * null and a null coordinate is always allowed, because a site whose
+     * position nobody has recorded is an ordinary thing.
+     */
+    const badCoordinate = coordinateRefusal(payload.latitude, payload.longitude);
+    if (badCoordinate) {
+      return Response.json({ error: badCoordinate }, { status: 400 });
+    }
+
     // Same rule on edit: a code is an identity, and it may not be duplicated.
     if (payload.code && payload.code !== existing.code) {
       const clash = await codeConflict(db, orgId, payload.code, id);
@@ -970,39 +1059,46 @@ export async function PATCH(request: Request) {
         : await uniqueSlug(db, orgId, payload.name, id);
 
     /*
-     * THE STAGE 0 TWINS MOVE ONLY WHEN THE THING THEY TWIN MOVES.
+     * W05-07 — THE THREE STATE COLUMNS ARE THREE FACTS, RECONCILED TOGETHER.
      *
-     * `lifecycle` and `active` are derived from `status`, and the derivation
-     * only knows two answers: 'closed' is Closed/false, everything else is
-     * Current/true. `status` also carries 'other' and 'international', which
-     * are neither — and the register already holds rows that say so. The three
-     * legacy rows on the canonical register are `status='other'` with
-     * `lifecycle='Closed'` and `active=false`, recorded that way deliberately
-     * because they are unverified and must not be offered as current sites.
+     * WHAT WAS HERE. `lifecycle` and `active` were projected out of `status`
+     * whenever the status changed and left alone when it did not. The second
+     * half of that was a real fix and it is kept: a notes-only PATCH sends no
+     * status, `preserveUnsent` hands back the stored one, and re-deriving on
+     * every save used to write `active = true` and `lifecycle = 'Current'` onto
+     * an unverified legacy row — promoting it into the live register through an
+     * edit that never mentioned it.
      *
-     * Re-deriving on every save flattened them. A notes-only PATCH — which
-     * sends no status at all, so `preserveUnsent` hands back the stored one —
-     * still wrote `active = true` and `lifecycle = 'Current'`, promoting a
-     * legacy row into the live register and moving it out of the Closed
-     * reporting group, which `seedStoreDocumentationGroups` rebuilds from
-     * `lifecycle`. That is the same fault `preserveUnsent` exists to stop, one
-     * layer further down: these two columns are not payload fields, so
-     * preservation never reached them.
+     * WHAT WAS STILL WRONG. Projection is the wrong shape for the first half.
+     * The three columns answer three different questions — is the RECORD
+     * current, is the site OPERATIONALLY ELIGIBLE, how is it CLASSIFIED — and
+     * `active` had no control anywhere in the product, so it could only ever be
+     * whatever a status implied. `{ status: 'other', lifecycle: 'Current',
+     * active: false }` is a perfectly good internal or non-retail record and
+     * this route could neither produce it nor leave it alone.
      *
-     * So they are rewritten when the status actually changes and left alone
-     * when it does not. Closing and reopening still move all three together —
-     * see the DELETE verb below, which writes the trio outright. This is the
-     * rule `/api/workspace` already applies from the other direction: it too
-     * only clears a site that was ACTUALLY closed, because 'international' and
-     * 'other' are open states a two-way toggle cannot express.
+     * `reconcileSiteState` takes what the edit ASKED for and what is STORED and
+     * answers with a trio that cannot contradict itself; app/lib/site-state.ts
+     * carries the rules and the reasoning. Two properties it preserves that
+     * matter here: an edit carrying none of the three moves none of the three,
+     * and 'other' survives a close and a reopen because nothing else in the
+     * register records that a row cannot be vouched for.
      */
-    const lifecycleState =
-      status === existing.status
-        ? {}
-        : {
-            active: stageZeroState(status).active,
-            lifecycle: stageZeroState(status).lifecycle,
-          };
+    const siteState = reconcileSiteState(
+      {
+        status,
+        // Only what the caller actually sent. `"active" in sent` is the same
+        // absent-versus-cleared distinction `preserveUnsent` draws for every
+        // other column — an omitted key keeps the stored eligibility, an
+        // explicit `false` sets it.
+        ...("active" in sent ? { active: flag(sent.active) } : {}),
+      },
+      {
+        status: existing.status,
+        lifecycle: existing.lifecycle,
+        active: Boolean(existing.active),
+      },
+    );
 
     /*
      * THE STAGE 0 ADDRESS IS REBUILT ONLY WHEN REBUILDING IT LOSES NOTHING.
@@ -1037,10 +1133,12 @@ export async function PATCH(request: Request) {
         ...payload,
         addressLine1: address.value,
         siteTypeValue,
-        status,
+        // All three state columns, from the one reconciliation above. Writing
+        // `status` here and the other two further down is how they came to be
+        // able to disagree.
+        ...siteState,
         slug,
         type: siteTypeValue,
-        ...lifecycleState,
         address: mirror.value,
         manager: payload.managerName,
         updatedAt: new Date().toISOString(),
@@ -1126,14 +1224,28 @@ export async function DELETE(request: Request) {
         ),
       );
 
+    /*
+     * W05-07 — closing goes through the same reconciliation every other write
+     * does, so a row the register cannot vouch for keeps saying so.
+     *
+     * The literal trio this replaces was right for an active or international
+     * site and it still writes exactly that: `{ closed, Closed, false }`. It
+     * was wrong for 'other' — archiving an unverified legacy row rewrote the
+     * one column recording that it WAS unverified, and moved it out of the
+     * Other reporting group on the way past. `reconcileSiteState` leaves that
+     * classification alone and closes the record around it.
+     */
+    const closed = reconcileSiteState(
+      { lifecycle: "Closed" },
+      {
+        status: existing.status,
+        lifecycle: existing.lifecycle,
+        active: Boolean(existing.active),
+      },
+    );
     await db
       .update(sites)
-      .set({
-        status: "closed",
-        lifecycle: "Closed",
-        active: false,
-        updatedAt: new Date().toISOString(),
-      })
+      .set({ ...closed, updatedAt: new Date().toISOString() })
       .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
 
     await logChange(db, orgId, id, "archived", actor.email, {

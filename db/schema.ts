@@ -318,6 +318,44 @@ export const contractors = sqliteTable(
     notes: text("notes"),
     /** Pence, like every other money column here, so nothing has to round. */
     dayRatePence: integer("day_rate_pence"),
+    /*
+     * The rest of the agreed commercial terms. All pence, all nullable: a
+     * contractor you have only a day rate for reads NULL for the others and
+     * every screen draws exactly what it drew before.
+     *
+     * These are AGREED TERMS, not money spent. Nothing sums them into a
+     * dashboard: without days worked, hours worked or call-outs used, adding
+     * a day rate to an hourly rate would invent a number nobody owes. Actual
+     * contractor spend is summed from real job cost attributed through
+     * `maintenance_requests.contractor_id` — see the Reports surface.
+     */
+    callOutCostPence: integer("call_out_cost_pence"),
+    hourlyRatePence: integer("hourly_rate_pence"),
+    otherCostPence: integer("other_cost_pence"),
+    /** What the "other" cost is for; without it the number is unreadable. */
+    otherCostLabel: text("other_cost_label"),
+    /*
+     * "Payment details", in the only shape that is safe to hold here. Terms
+     * are an option-backed string ("30 days", "On completion"); the finance
+     * reference points at the supplier record in the accounting system that
+     * already holds the bank details under its own controls.
+     *
+     * There is deliberately no account number, sort code, IBAN or card column.
+     * This repository is public, and a stolen accounting reference buys an
+     * attacker nothing, which is not true of a sort code.
+     */
+    paymentTerms: text("payment_terms"),
+    financeReference: text("finance_reference"),
+    /*
+     * Who the insurance is with, and under which policy. `insuranceExpiry`
+     * alone could say a date but never which cover it was the end of.
+     */
+    insurerName: text("insurer_name"),
+    policyNumber: text("policy_number"),
+    insuranceNotes: text("insurance_notes"),
+    /** The contractor's own postcode. `address` is one free-text line and
+     * nothing ever parsed one out of it. */
+    postcode: text("postcode"),
     serviceCategories: text("service_categories").notNull().default("[]"),
     coverageAreas: text("coverage_areas").notNull().default("[]"),
     certifications: text("certifications").notNull().default("[]"),
@@ -1845,5 +1883,145 @@ export const automationRuns = sqliteTable(
   (table) => [
     index("automation_runs_board_idx").on(table.organisationId, table.boardId, table.createdAt),
     index("automation_runs_rule_idx").on(table.organisationId, table.automationId, table.dedupeKey),
+  ],
+);
+
+
+/*
+ * WORKSTREAM 5/6 — the configurable register, shared by Sites and Contractors.
+ *
+ * `registerKey` is the discriminator, so one pair of tables serves both
+ * registers and can serve a third without a migration. See the block comment
+ * in db/init.ts for why this does not reuse `maintenanceBoardCells` (its
+ * `requestId` is a work order) and why the flags are nullable timestamps
+ * rather than booleans (the bare-name rewrite rule in db/sqlite-to-postgres.ts).
+ */
+export const registerColumns = sqliteTable(
+  "register_columns",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** 'sites' | 'contractors'. */
+    registerKey: text("register_key").notNull(),
+    columnKey: text("column_key").notNull(),
+    /** The display label. Renaming a column changes THIS, never the field. */
+    title: text("title").notNull(),
+    type: text("type").notNull().default("text"),
+    position: integer("position").notNull().default(0),
+    width: integer("width").notNull().default(160),
+    /*
+     * NON-NULL: a view onto this canonical field on sites/contractors, whose
+     * values live on that row and are never copied here.
+     * NULL: a user-created column, whose values live in `registerValues`.
+     */
+    nativeField: text("native_field"),
+    settings: text("settings").notNull().default("{}"),
+    /** Hidden, not removed. A native column can only ever be hidden. */
+    hiddenAt: text("hidden_at"),
+    deletedAt: text("deleted_at"),
+    deletedBy: text("deleted_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("register_columns_key_idx").on(
+      table.organisationId,
+      table.registerKey,
+      table.columnKey,
+    ),
+    index("register_columns_order_idx").on(
+      table.organisationId,
+      table.registerKey,
+      table.position,
+    ),
+  ],
+);
+
+/** One row per CUSTOM cell. Native cells are absent by construction. */
+export const registerValues = sqliteTable(
+  "register_values",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    registerKey: text("register_key").notNull(),
+    entityId: text("entity_id").notNull(),
+    columnKey: text("column_key").notNull(),
+    value: text("value"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("register_values_cell_idx").on(
+      table.organisationId,
+      table.registerKey,
+      table.entityId,
+      table.columnKey,
+    ),
+    index("register_values_entity_idx").on(
+      table.organisationId,
+      table.registerKey,
+      table.entityId,
+    ),
+  ],
+);
+
+/*
+ * WORKSTREAM 5/6 — Contractor <-> Site, canonical and explicit.
+ *
+ * Before this the only site-bearing path from a contractor was transitive
+ * through a job, and `coverageAreas` was free text every contractor filled
+ * with "UK". The organisation is part of the unique key, so a pair can never
+ * span tenants and cannot be created twice.
+ */
+export const contractorSites = sqliteTable(
+  "contractor_sites",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    contractorId: text("contractor_id").notNull().references(() => contractors.id),
+    siteId: text("site_id").notNull().references(() => sites.id),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdBy: text("created_by"),
+  },
+  (table) => [
+    uniqueIndex("contractor_sites_pair_idx").on(
+      table.organisationId,
+      table.contractorId,
+      table.siteId,
+    ),
+    index("contractor_sites_site_idx").on(table.siteId),
+    index("contractor_sites_contractor_idx").on(table.contractorId),
+  ],
+);
+
+/*
+ * WORKSTREAM 6 — certifications as entries, each with its own expiry.
+ *
+ * The legacy `contractors.certifications` JSON array holds names and nothing
+ * else, so no certificate could have a date of its own. It is left in place and
+ * still read; a contractor with no rows here behaves exactly as before.
+ */
+export const contractorCertifications = sqliteTable(
+  "contractor_certifications",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    contractorId: text("contractor_id").notNull().references(() => contractors.id),
+    name: text("name").notNull(),
+    reference: text("reference"),
+    issuedOn: text("issued_on"),
+    /** What makes a status derivable at all. Nullable: not every ticket expires. */
+    expiresOn: text("expires_on"),
+    notes: text("notes"),
+    position: integer("position").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("contractor_certifications_owner_idx").on(
+      table.organisationId,
+      table.contractorId,
+      table.position,
+    ),
   ],
 );

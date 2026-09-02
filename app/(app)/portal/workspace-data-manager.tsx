@@ -4,19 +4,63 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components";
 import { storeDocumentationKinds } from "../../../db/monday-board-spec";
 import { MondayImportPanel } from "./monday-import-panel";
+/*
+ * W05-05 and W05-07 — the Sites tab edits the same three state columns the
+ * Sites register does, so it uses the same two rules: one confirmation before a
+ * site leaves the active roster, and one vocabulary for the lifecycle words.
+ * Neither may be restated here; that is how the two screens came to disagree.
+ */
+import { confirmSiteClosure } from "./sites/site-closure";
+/*
+ * W06-04 — the contractor equivalent, and for the same reason: the Archive
+ * button and the "Active contractor" tick box both take somebody off the
+ * assignment roster and only one of them used to ask. The words and the
+ * reasoning live in contractor-closure.ts so both doors say the same thing.
+ */
+import { confirmContractorRosterExit, leavesContractorRoster } from "./contractor-closure";
+import { SITE_LIFECYCLE_CLOSED, SITE_LIFECYCLES } from "../../lib/site-state";
+import { expiryStatus } from "../../lib/expiry-status";
 import type {
+  WorkspaceCertification,
   WorkspaceEntity,
   WorkspaceSnapshot,
 } from "../../lib/workspace-data";
 
 type ManagerTab = Exclude<WorkspaceEntity, "settings"> | "activity" | "import";
-type EditorValue = string | boolean;
+/**
+ * W06-08 — one certification row while it is being edited.
+ *
+ * Everything is a string because everything is bound to an input; the route
+ * turns "" back into null. `id` is carried through so an ordinary save is an
+ * UPDATE of the row that already exists rather than a delete and a re-create —
+ * a new line simply arrives with `id: ""`.
+ */
+type EditorCertification = {
+  id: string;
+  name: string;
+  reference: string;
+  issuedOn: string;
+  expiresOn: string;
+};
+/*
+ * The array arm is W06-08's. Every other field on every other tab is a string
+ * or a tick box, and widening the union rather than smuggling a JSON string
+ * through one is what keeps the certifications editor type-checked instead of
+ * parsed.
+ */
+type EditorValue = string | boolean | EditorCertification[];
 type EditorData = Record<string, EditorValue>;
 
 type FieldDefinition = {
   key: string;
   label: string;
-  type?: "text" | "email" | "tel" | "number" | "date" | "textarea" | "select" | "checkbox";
+  /**
+   * `multiselect` renders the option set as tick boxes over a comma-separated
+   * string — the shape `stringArray` on the route already reads, so nothing
+   * about the wire format changes. `certifications` renders the W06-08
+   * repeater, which is the one control here that edits a list of records.
+   */
+  type?: "text" | "email" | "tel" | "number" | "date" | "textarea" | "select" | "checkbox" | "multiselect" | "certifications";
   required?: boolean;
   options?: Array<{ value: string; label: string }>;
   placeholder?: string;
@@ -57,10 +101,23 @@ const tabs: Array<{ key: ManagerTab; label: string; icon: IconName }> = [
 ];
 
 const emptyDefaults: Record<Exclude<ManagerTab, "activity" | "import">, EditorData> = {
-  site: { name: "", type: "Kiosk", region: "UK", lifecycle: "Current", address: "", manager: "" },
+  // `type` starts EMPTY and is filled from the configured `site_type` list in
+  // `startNew`. It was the literal "Kiosk", which is a seeded option and not a
+  // guaranteed one — a workspace that renamed or removed it opened the New Site
+  // form on a type the route would refuse.
+  site: { name: "", type: "", region: "UK", lifecycle: "Current", address: "", manager: "" },
   compliance: { siteId: "", kind: "", state: "Missing", expiry: "" },
   unit: { siteId: "", name: "", category: "Asset", manufacturer: "", model: "", serialNumber: "", status: "Active", notes: "" },
-  contractor: { name: "", contactName: "", email: "", phone: "", whatsappNumber: "", address: "", serviceCategories: "", coverageAreas: "UK", certifications: "", insuranceExpiry: "", dayRate: "", availability: "Available", rating: "", active: true, notes: "" },
+  /*
+   * W06-06/07/08/09 — every commercial field starts EMPTY, and deliberately so.
+   *
+   * A blank money box is "no rate agreed", which is not a rate of £0 — the
+   * route stores null and the register prints a dash, because "£0.00" reads as
+   * "they work for free". The same argument retired the form's old pre-filled
+   * `rating: "4"`, which rated every contractor four fifths on behalf of
+   * somebody who had never assessed them.
+   */
+  contractor: { name: "", contactName: "", email: "", phone: "", whatsappNumber: "", address: "", postcode: "", serviceCategories: "", coverageAreas: "UK", certifications: "", certificationEntries: [], insuranceExpiry: "", insurerName: "", policyNumber: "", insuranceNotes: "", dayRate: "", hourlyRate: "", callOutCost: "", otherCost: "", otherCostLabel: "", paymentTerms: "", financeReference: "", availability: "Available", rating: "", active: true, notes: "" },
   planned: { siteId: "", unitId: "", contractorId: "", title: "", category: "Planned maintenance", frequency: "Annual", nextDueAt: "", lastCompletedAt: "", status: "Scheduled", reminderDays: "30" },
   member: { name: "", email: "", role: "Client", active: true },
 };
@@ -96,6 +153,38 @@ function fieldsFor(
   tab: Exclude<ManagerTab, "activity">,
   workspace: WorkspaceSnapshot,
   assignedContractorId?: string | null,
+  /**
+   * W05-07 — the CONFIGURED site types, from `option_values`.
+   *
+   * The Sites tab's Type select was the literal `["Kiosk", "Inline", "Office",
+   * "Warehouse"]`, and `POST /api/sites` validates the same field against the
+   * `site_type` option list (`validateOption`) — so the two screens that edit
+   * one column disagreed about what its legal values are, and an admin who
+   * added a fifth type in Settings could use it on one of them. That is the
+   * exact restriction the options registry exists to remove.
+   *
+   * Optional, and empty until the fetch lands. `recordToEditor` calls this for
+   * the KEYS only and passes nothing; the keys do not depend on the values.
+   */
+  siteTypes: Array<{ value: string; label: string }> = [],
+  /**
+   * W06-06 and W06-09 — the CONFIGURED contractor vocabularies, from
+   * `option_values`.
+   *
+   * `contractor_trade` replaces the free-text Service categories box and
+   * `contractor_payment_terms` is the controlled half of the approved payment
+   * model. Both are validated by `PATCH /api/workspace` against the same two
+   * sets, so this is one list read by the screen and the route rather than two
+   * lists that happen to agree — the exact restriction the options registry
+   * exists to remove, and the same arrangement `siteTypes` above got.
+   *
+   * Optional and empty until the fetch lands, for the reason `siteTypes` is:
+   * `recordToEditor` calls this for the KEYS only and passes nothing, and the
+   * keys do not depend on the values. An empty trade list still renders the
+   * values this contractor already holds — see the `multiselect` branch.
+   */
+  contractorTrades: Array<{ value: string; label: string }> = [],
+  contractorPaymentTerms: Array<{ value: string; label: string }> = [],
 ): FieldDefinition[] {
   const siteOptions = workspace.stores.map((site) => ({ value: site.id, label: site.name }));
   const unitOptions = [{ value: "", label: "No linked unit" }, ...workspace.units.map((unit) => ({ value: unit.id, label: unit.name }))];
@@ -143,9 +232,54 @@ function fieldsFor(
   ];
   if (tab === "site") return [
     { key: "name", label: "Site name", required: true },
-    { key: "type", label: "Type", type: "select", options: ["Kiosk", "Inline", "Office", "Warehouse"].map((value) => ({ value, label: value })) },
-    { key: "region", label: "Region", type: "select", options: ["UK", "Europe", "Other"].map((value) => ({ value, label: value })) },
-    { key: "lifecycle", label: "Lifecycle", type: "select", options: ["Current", "Closed"].map((value) => ({ value, label: value })) },
+    /*
+     * THE CONFIGURED LIST, PLUS WHATEVER THIS ROW ALREADY HOLDS.
+     *
+     * The second half is the same rule the Requirement select below already
+     * applies: a value the registry does not offer is still shown while it is
+     * the one saved, so opening a legacy row does not silently rewrite its type
+     * to whichever option happens to sort first. Without it a `<select>` whose
+     * value matches no option renders BLANK and one careless Save reassigns the
+     * record — measured on the contractor select two tabs down, which is why
+     * that one carries the same guard.
+     */
+    {
+      key: "type",
+      label: "Type",
+      type: "select",
+      options: siteTypes,
+    },
+    /*
+     * FREE TEXT, DELIBERATELY, and this is a narrowing rather than a widening.
+     *
+     * It was a three-item select — UK, Europe, Other — and `region` is not one
+     * of the option tables: there is no `site_region` list for an admin to
+     * edit, and `app/(app)/portal/sites/site-form.tsx` says in its own comment
+     * why it refuses to invent one here. Two screens edit this column and one
+     * of them offered a vocabulary the other does not enforce, so a region
+     * typed on the Sites form ("EMEA") could not be seen, kept or re-saved from
+     * this tab: opening the record showed an empty select and saving wrote
+     * whichever value the user picked instead. The hint names the values
+     * already in the data, which is the honest version of the same guidance.
+     */
+    {
+      key: "region",
+      label: "Region",
+      placeholder: "UK",
+      hint: "How the portfolio is split for reporting. Existing sites use UK or Europe.",
+    },
+    /*
+     * The two lifecycle words come from `SITE_LIFECYCLES`, which is also what
+     * `PATCH /api/workspace` validates against. They were a literal here and
+     * the route validated NOTHING, so the pair could not be checked against
+     * each other at all — see app/lib/site-state.ts for what got stored.
+     */
+    {
+      key: "lifecycle",
+      label: "Lifecycle",
+      type: "select",
+      options: SITE_LIFECYCLES.map((value) => ({ value, label: value })),
+    },
     { key: "address", label: "Address", type: "textarea", required: true },
     { key: "manager", label: "Site manager" },
   ];
@@ -202,13 +336,109 @@ function fieldsFor(
      */
     { key: "whatsappNumber", label: "WhatsApp number", type: "tel", placeholder: "+44 7700 900123 — international format" },
     { key: "address", label: "Address", placeholder: "Where they are based" },
-    { key: "serviceCategories", label: "Service categories", placeholder: "Electrical, HVAC, Plumbing" },
+    /*
+     * W06-06 — the postcode, as its own field.
+     *
+     * `address` is one free-text line, so nothing could sort, search or map on
+     * where a contractor is. OPTIONAL, and not format-checked against a UK
+     * pattern either here or on the route: the product admits non-UK
+     * contractors — `coverageAreas` is full of "Europe" — so "75008" and
+     * "1012 AB" are as legitimate as "SW1A 1AA", and a UK regex would refuse
+     * them in a way that reads as a broken form rather than as a policy.
+     */
+    { key: "postcode", label: "Postcode", placeholder: "SW1A 1AA", hint: "Optional. Non-UK postal codes are accepted as typed." },
+    /*
+     * W06-06 — TRADES, FROM THE OPTION SET, not a comma box.
+     *
+     * This was free text, so "Electrical", "electrical" and " ElectRical" were
+     * three trades: the register counted three, a filter on one found none of
+     * the others, and the public application form — which offers exactly eleven
+     * fixed trades — could not be matched against the register at all.
+     * `contractor_trade` is seeded with those same eleven, verbatim and in the
+     * form's order, so an applicant and a coordinator mean the same thing by
+     * "Glazing".
+     *
+     * A value already stored that the set does not offer is still shown, still
+     * ticked, and marked "(not configured)" — the same rule the Requirement
+     * select above applies to a compliance record filed under a name the
+     * canonical list has lost. Nothing is silently dropped; see
+     * `contractorTradeValues` in the workspace API for the other half.
+     */
+    {
+      key: "serviceCategories",
+      label: "Trades",
+      type: "multiselect",
+      options: contractorTrades,
+      hint: "The same eleven trades the public application form offers, so an applicant and the register mean the same thing.",
+    },
     { key: "coverageAreas", label: "Coverage areas", placeholder: "UK, London, Midlands" },
-    { key: "certifications", label: "Certifications", placeholder: "Comma-separated" },
+    /*
+     * The legacy names array. KEPT, and kept editable, because it is what every
+     * contractor imported before certificates had dates of their own still
+     * holds — removing the box would make that data unreachable rather than
+     * migrated. The dated list below is where anything with an expiry belongs.
+     */
+    { key: "certifications", label: "Other certifications", placeholder: "Comma-separated", hint: "Names only, with no dates. Anything that expires belongs in the list below, where it can be tracked." },
+    /*
+     * W06-08 — certifications as ENTRIES, each with its own expiry.
+     *
+     * One `insurance_expiry` for a whole contractor could never answer "is
+     * their gas ticket still valid". Each row here carries its own date and the
+     * STATUS IS DERIVED from it by `expiryStatus` — the platform's one
+     * classifier, at the platform's one 60-day amber threshold — so a
+     * contractor's ticket and a store's certificate cannot mean different
+     * things by "due soon".
+     */
+    { key: "certificationEntries", label: "Certifications with expiry dates", type: "certifications" },
+    /*
+     * W06-08 — the insurer and the policy, beside the date.
+     *
+     * The expiry alone can say WHEN cover ends and never WHAT ended, which is
+     * why chasing a lapsed contractor used to start with a phone call asking
+     * who their broker was. The date is now validated as a real calendar date
+     * on both create and edit; it used to accept any forty characters.
+     */
+    { key: "insurerName", label: "Insurer", placeholder: "Who the cover is with" },
+    { key: "policyNumber", label: "Policy number" },
     { key: "insuranceExpiry", label: "Insurance expiry", type: "date" },
+    { key: "insuranceNotes", label: "Insurance notes", type: "textarea", placeholder: "Level of cover, exclusions, anything a claim would turn on" },
     /* Pounds here, pence in the column — see `ratePence` in the workspace API.
        Left empty it stays null, because no recorded rate is not a rate of £0. */
     { key: "dayRate", label: "Day rate (£)", type: "number", placeholder: "e.g. 320" },
+    /*
+     * W06-07 — the rest of the agreed rate card, all of it in pounds here and
+     * integer pence in the column, all of it optional.
+     *
+     * AGREED TERMS, not money spent. Nothing sums these: spend is computed from
+     * job cost alone, and `app/lib/contractor-attribution.ts` is pinned by test
+     * never to name a rate column. `otherCostLabel` is what makes the figure
+     * beside it legible — a number with no name is not a cost — and it is a
+     * field of its own rather than a sentence in Notes, because a label buried
+     * in prose is a label no column, filter or report can read.
+     */
+    { key: "hourlyRate", label: "Hourly rate (£)", type: "number", placeholder: "e.g. 65" },
+    { key: "callOutCost", label: "Call-out cost (£)", type: "number", placeholder: "e.g. 85" },
+    { key: "otherCost", label: "Other cost (£)", type: "number", placeholder: "e.g. 40" },
+    { key: "otherCostLabel", label: "Other cost is for", placeholder: "Standby, congestion charge, parking…" },
+    /*
+     * W06-09 — TERMS, and a pointer at the ledger that holds the rest.
+     *
+     * THE APPROVED MODEL, AND ITS BOUNDARY. There is no bank account number,
+     * sort code, IBAN or card field here, on the `contractors` table, or on the
+     * route that writes it, and none may be added — a maintenance portal
+     * holding payment credentials is a breach waiting for its first
+     * misconfigured backup. `financeReference` points at the supplier record in
+     * Xero, Sage, QuickBooks or an internal ledger, which is the system built
+     * to hold them.
+     */
+    {
+      key: "paymentTerms",
+      label: "Payment terms",
+      type: "select",
+      options: contractorPaymentTerms,
+      hint: "From the configured terms. Add a new one in Settings if the agreement is not listed.",
+    },
+    { key: "financeReference", label: "Finance reference", placeholder: "Supplier code in Xero, Sage or QuickBooks", hint: "An external reference only. Never record bank, sort code, IBAN or card details here." },
     /*
      * `required`, for the same reason a member's Role is — see the note on it
      * below. Without it this select renders the blank "None" every optional
@@ -274,6 +504,53 @@ function recordTitle(tab: ManagerTab, record: Record<string, unknown>) {
   return String(record.action ?? "Activity").replaceAll("_", " ");
 }
 
+/**
+ * W06-08 — THE HALF OF AN EXPIRY DATE THAT WAS MISSING: SOMEBODY SEEING IT.
+ *
+ * `insurance_expiry` has been on this record since the beginning and appeared
+ * NOWHERE except the edit form. No register column, no chip, no digest, no
+ * alert — so a contractor's public liability could lapse and the only way to
+ * find out was to open their record and read a date box. A field that is stored
+ * and never surfaced is not a compliance control; it is a note.
+ *
+ * The state is preferred from the payload (`insuranceState`, classified once on
+ * the server against one instant) and only DERIVED here when it is absent —
+ * `app/lib/mock-data.ts` builds these records too and has no classifier behind
+ * them. Either way the verdict is `expiryStatus`, the platform's one
+ * classifier at its one 60-day amber threshold, so this line and the
+ * certificate chips in the editor cannot disagree.
+ *
+ * Worst-first, and at most one phrase: this sits at the end of a list subtitle
+ * that already carries three facts, and a row that says four things says none
+ * of them. Expired outranks due-soon, and insurance outranks a certificate
+ * because it is the one that stops a contractor being sent to site at all.
+ * Silence means nothing is expiring, which is the common case and should cost
+ * the reader nothing.
+ */
+function contractorExpiryWarning(record: Record<string, unknown>) {
+  const insurance =
+    typeof record.insuranceState === "string"
+      ? record.insuranceState
+      : expiryStatus(typeof record.insuranceExpiry === "string" ? record.insuranceExpiry : null)
+          .state;
+  const entries = Array.isArray(record.certificationEntries)
+    ? (record.certificationEntries as WorkspaceCertification[])
+    : [];
+  const counted = (state: string) =>
+    entries.filter(
+      (entry) => (entry.expiryState ?? expiryStatus(entry.expiresOn).state) === state,
+    ).length;
+  const certificates = (count: number, word: string) =>
+    ` · ${count} certificate${count === 1 ? "" : "s"} ${word}`;
+  if (insurance === "expired") return " · Insurance expired";
+  const expired = counted("expired");
+  if (expired) return certificates(expired, "expired");
+  if (insurance === "due-soon") return " · Insurance due soon";
+  const dueSoon = counted("due-soon");
+  if (dueSoon) return certificates(dueSoon, "due soon");
+  return "";
+}
+
 function recordSubtitle(tab: ManagerTab, record: Record<string, unknown>) {
   if (tab === "site") return `${record.type ?? "Site"} · ${record.lifecycle ?? "Current"}`;
   if (tab === "compliance") return `${record.siteName ?? "Unknown site"} · ${record.state ?? "Missing"}`;
@@ -316,7 +593,7 @@ function recordSubtitle(tab: ManagerTab, record: Record<string, unknown>) {
    * would have been worse than the blank: it would have reported an unset
    * column as the one value that means "send them work".
    */
-  if (tab === "contractor") return `${record.active ? "Active" : "Archived"} · Availability: ${record.availability || "Not set"} · ${record.assignedJobs ?? 0} jobs`;
+  if (tab === "contractor") return `${record.active ? "Active" : "Archived"} · Availability: ${record.availability || "Not set"} · ${record.assignedJobs ?? 0} jobs${contractorExpiryWarning(record)}`;
   if (tab === "planned") return `${record.siteName ?? "Unknown site"} · ${dateValue(record.nextDueAt) || "No date"}`;
   if (tab === "member") return `${record.role ?? "Client"} · ${record.active ? "Active" : "Paused"}`;
   return `${record.actorEmail ?? "Workspace"} · ${dateValue(record.createdAt)}`;
@@ -368,6 +645,11 @@ function searchText(tab: ManagerTab, record: Record<string, unknown>) {
     ...numbers.map((value) => value.replace(/\D/g, "")),
     flat(record.serviceCategories),
     flat(record.coverageAreas),
+    // W06-06. The postcode is the field somebody holds when they are asking
+    // "who do we already use near here", and it did not exist when the haystack
+    // above was widened. Omitting it would repeat the exact bug that note
+    // describes: a search that looks like it works.
+    flat(record.postcode),
   ]
     .join(" ")
     .toLowerCase();
@@ -393,7 +675,52 @@ function recordToEditor(tab: Exclude<ManagerTab, "activity">, record: Record<str
     const pence = record.dayRatePence;
     selected.dayRate = typeof pence === "number" ? String(pence / 100) : "";
   }
-  return editorData(selected, ["expiry", "insuranceExpiry", "nextDueAt", "lastCompletedAt"]);
+  /*
+   * W06-07 — the same round trip for the three costs that joined it.
+   *
+   * Every one of these is pounds in the box and pence in the column, so the
+   * plain key copy above finds none of them and the box would open empty on a
+   * contractor whose rate card is filled in — after which one Save would wipe
+   * all three. The day rate is stated on its own line above rather than folded
+   * into this loop because a test pins that line as the proof this round trip
+   * exists at all; the reasoning is identical.
+   */
+  if (tab === "contractor") {
+    for (const [box, column] of [
+      ["hourlyRate", "hourlyRatePence"],
+      ["callOutCost", "callOutCostPence"],
+      ["otherCost", "otherCostPence"],
+    ] as const) {
+      if (!(box in selected)) continue;
+      const pence = record[column];
+      selected[box] = typeof pence === "number" ? String(pence / 100) : "";
+    }
+  }
+  /*
+   * W06-08 — the certifications are RECORDS, not a string.
+   *
+   * Lifted out before `editorData`, whose `stringify` joins an array with
+   * commas and would render each entry as "[object Object]", and put back
+   * afterwards as the typed list the repeater binds to. `id` is carried so an
+   * ordinary save updates the row that already exists instead of deleting and
+   * re-creating it; a line added in the editor arrives with `id: ""`.
+   */
+  const certifications: EditorCertification[] =
+    tab === "contractor"
+      ? ((record.certificationEntries as WorkspaceCertification[] | undefined) ?? []).map(
+          (entry) => ({
+            id: entry.id,
+            name: entry.name,
+            reference: entry.reference ?? "",
+            issuedOn: dateValue(entry.issuedOn),
+            expiresOn: dateValue(entry.expiresOn),
+          }),
+        )
+      : [];
+  delete selected.certificationEntries;
+  const editor = editorData(selected, ["expiry", "insuranceExpiry", "nextDueAt", "lastCompletedAt"]);
+  if (tab === "contractor") editor.certificationEntries = certifications;
+  return editor;
 }
 
 export function WorkspaceDataManager({
@@ -440,6 +767,68 @@ export function WorkspaceDataManager({
     });
   }, [query, tab, workspace]);
   const readOnlyTab = tab === "activity" || tab === "import";
+
+  /*
+   * W05-07 — the configured site types, fetched once.
+   *
+   * `WorkspaceSnapshot` does not carry the option registry and there is no
+   * reason for it to: this is the only tab that needs one list, and the Sites
+   * screen fetches its own the same way (`/api/options?key=access_method` in
+   * sites-manager.tsx). A failure leaves the array empty rather than falling
+   * back to a hardcoded list — the empty select is visible and asks a question;
+   * a stale literal silently disagrees with the route that validates it.
+   */
+  const [siteTypes, setSiteTypes] = useState<Array<{ value: string; label: string }>>([]);
+  /*
+   * W06-06 and W06-09 — the two contractor vocabularies, fetched the same way
+   * and for the same reason. `contractor_trade` replaces the free-text Service
+   * categories box; `contractor_payment_terms` is the controlled half of the
+   * approved payment model. `PATCH /api/workspace` validates against these same
+   * two sets, so the screen and the route read one list rather than agreeing by
+   * coincidence.
+   */
+  const [contractorTrades, setContractorTrades] = useState<Array<{ value: string; label: string }>>([]);
+  const [paymentTerms, setPaymentTerms] = useState<Array<{ value: string; label: string }>>([]);
+  useEffect(() => {
+    let live = true;
+    /*
+     * One reader for all three lists.
+     *
+     * A failure leaves the array empty rather than falling back to a hardcoded
+     * list — the empty select is visible and asks a question; a stale literal
+     * silently disagrees with the route that validates it. The trades control
+     * degrades further and better than a select can: with no options it still
+     * renders whatever this contractor already holds, so a fetch that never
+     * lands cannot make an existing record look blank.
+     */
+    const load = async (
+      key: string,
+      apply: (values: Array<{ value: string; label: string }>) => void,
+    ) => {
+      try {
+        const response = await fetch(`/api/options?key=${key}`);
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          values?: Array<{ value: string; label: string; active?: boolean }>;
+        };
+        if (!live) return;
+        apply(
+          (payload.values ?? [])
+            .filter((option) => option.active !== false)
+            .map((option) => ({ value: option.value, label: option.label })),
+        );
+      } catch {
+        // Offline or refused. The select stays empty and says so.
+      }
+    };
+    void load("site_type", setSiteTypes);
+    void load("contractor_trade", setContractorTrades);
+    void load("contractor_payment_terms", setPaymentTerms);
+    return () => {
+      live = false;
+    };
+  }, []);
+
   /*
    * The open record's own contractor is handed to `fieldsFor` so the select can
    * keep showing somebody who has since been archived. `form` rather than the
@@ -447,13 +836,40 @@ export function WorkspaceDataManager({
    */
   const fields = readOnlyTab
     ? []
-    : fieldsFor(tab, workspace, typeof form?.contractorId === "string" ? form.contractorId : null);
+    : fieldsFor(
+        tab,
+        workspace,
+        typeof form?.contractorId === "string" ? form.contractorId : null,
+        /*
+         * The value this row already holds is kept as an option even when the
+         * registry no longer offers it — otherwise a `<select>` bound to an
+         * unlisted type renders blank and the next Save rewrites the column.
+         */
+        tab === "site" && typeof form?.type === "string" && form.type
+          && !siteTypes.some((option) => option.value === form.type)
+          ? [...siteTypes, { value: form.type, label: `${form.type} (not configured)` }]
+          : siteTypes,
+        contractorTrades,
+        /*
+         * Same guard as the site type above, one control down. A payment term
+         * this contractor already holds that the registry no longer offers
+         * stays selectable, so opening the record does not render a blank
+         * select and let the next Save rewrite an agreement nobody discussed.
+         */
+        typeof form?.paymentTerms === "string" && form.paymentTerms
+          && !paymentTerms.some((option) => option.value === form.paymentTerms)
+          ? [...paymentTerms, { value: form.paymentTerms, label: `${form.paymentTerms} (not configured)` }]
+          : paymentTerms,
+      );
   const activeTabLabel = tabs.find((item) => item.key === tab)?.label ?? "records";
 
   const startNew = () => {
     if (readOnlyTab) return;
     const defaults = { ...emptyDefaults[tab] };
     if ("siteId" in defaults && !defaults.siteId) defaults.siteId = workspace.stores[0]?.id ?? "";
+    // The workspace's own first site type, the same way the site above is the
+    // workspace's own first site. See `emptyDefaults`.
+    if (tab === "site" && !defaults.type) defaults.type = siteTypes[0]?.value ?? "";
     setEditorId(null);
     setForm(defaults);
   };
@@ -624,7 +1040,52 @@ export function WorkspaceDataManager({
           </div>
           )}
           {form && !readOnlyTab && (
-            <form className="workspace-record-editor" onSubmit={async (event) => { event.preventDefault(); try { await onSave(tab, editorId, form); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } }}>
+            /*
+              W05-05 — CLOSING A SITE FROM HERE ASKS FIRST.
+
+              The Lifecycle select on the Sites tab reaches
+              `PATCH /api/workspace`, which writes the identical
+              `{ status: 'closed', active: false, lifecycle: 'Closed' }` that
+              the Sites register's Close button writes — and this path asked
+              NOTHING. Choose Closed, press Save, and the site is off every
+              location picker in the product with no dialog and no undo. A
+              confirmation that guards one of two doors is not a confirmation.
+
+              Only a real closure is confirmed: an existing record whose stored
+              lifecycle is not already Closed. Re-saving a site that is closed
+              already, and creating one, both go straight through — asking
+              about something that is not happening is how people learn to
+              click Yes without reading.
+
+              CANCEL COSTS NOTHING. This returns before `onSave`, so no request
+              is made, the editor stays open with the user's edit intact, and
+              nothing on the dashboard moves.
+            */
+            /*
+              W06-04 — AND UNTICKING "ACTIVE CONTRACTOR" ASKS THE SAME WAY.
+
+              This was the door nobody was watching. The Archive button at
+              least asked something; the tick box asked NOTHING, and pressing
+              Save with it cleared writes the identical `active: false` through
+              `PATCH /api/workspace` that Archive writes. `assignableContractors`
+              above filters on `active` alone, so that one box removes a
+              contractor from every assignment select just as completely — with
+              no dialog, no undo, and sitting two rows under an Availability
+              select that already offers the word "Inactive".
+
+              Only the TRANSITION is confirmed: `leavesContractorRoster` asks
+              whether the STORED record was on the roster and this save takes
+              them off it. Re-saving somebody already archived goes straight
+              through, and creating a contractor with the box cleared goes
+              straight through — asking about something that is not happening
+              is how people learn to click Yes without reading. Ordinary
+              Availability changes are not this and never prompt.
+
+              CANCEL COSTS NOTHING. This returns before `onSave`, so no request
+              is made, the editor stays open with the tick box exactly as the
+              user left it, and nothing on the dashboard moves.
+            */
+            <form className="workspace-record-editor" onSubmit={async (event) => { event.preventDefault(); if (tab === "site" && editorId && String(form.lifecycle ?? "") === SITE_LIFECYCLE_CLOSED) { const stored = workspace.stores.find((site) => site.id === editorId); if (stored && stored.lifecycle !== SITE_LIFECYCLE_CLOSED && !confirmSiteClosure(String(form.name ?? stored.name))) return; } if (tab === "contractor" && editorId) { const stored = workspace.contractors.find((item) => item.id === editorId); if (leavesContractorRoster(stored, Boolean(form.active)) && !confirmContractorRosterExit(String(form.name ?? stored?.name ?? ""))) return; } try { await onSave(tab, editorId, form); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } }}>
               {/*
                 `role="presentation"` for the reason the manager's own header
                 is a `div`: a bare `<header>` is scoped out of the `banner`
@@ -641,6 +1102,183 @@ export function WorkspaceDataManager({
               <div className="workspace-record-editor__fields">
                 {fields.map((field) => {
                   const value = form[field.key] ?? (field.type === "checkbox" ? false : "");
+                  /*
+                    W06-06 — THE TRADE LIST, AND THE VALUES IT DOES NOT OFFER.
+
+                    Tick boxes over the same comma-separated string the field
+                    always held, so nothing about the wire format changes and
+                    `stringArray` on the route reads it exactly as before. What
+                    changes is that the vocabulary now comes from
+                    `contractor_trade` instead of from whatever somebody typed,
+                    which is what stops "Electrical", "electrical" and
+                    " ElectRical" being three trades.
+
+                    ANYTHING ALREADY STORED THAT THE SET DOES NOT OFFER IS
+                    STILL SHOWN, still ticked, and marked "(not configured)" —
+                    the same rule the compliance Requirement select applies to a
+                    certificate filed under a name the canonical list has lost,
+                    and the same one the Sites tab's Type select applies. A
+                    control that silently dropped those would turn one careless
+                    Save into data loss on every legacy contractor in the
+                    register.
+                  */
+                  if (field.type === "multiselect") {
+                    const chosen = String(value)
+                      .split(",")
+                      .map((entry) => entry.trim())
+                      .filter(Boolean);
+                    const configured = field.options ?? [];
+                    const offered = [
+                      ...configured,
+                      ...chosen
+                        .filter((entry) => !configured.some((option) => option.value === entry))
+                        .map((entry) => ({ value: entry, label: `${entry} (not configured)` })),
+                    ];
+                    return (
+                      <fieldset className="workspace-multiselect" key={field.key}>
+                        <legend>{field.label}</legend>
+                        <div className="workspace-multiselect__options">
+                          {offered.map((option) => (
+                            <label key={option.value}>
+                              <input
+                                type="checkbox"
+                                checked={chosen.includes(option.value)}
+                                onChange={(event) => {
+                                  // Order is preserved on the way in and out:
+                                  // ticking appends, unticking removes, and a
+                                  // list somebody arranged stays arranged.
+                                  const next = event.target.checked
+                                    ? [...chosen, option.value]
+                                    : chosen.filter((entry) => entry !== option.value);
+                                  setForm((current) =>
+                                    current ? { ...current, [field.key]: next.join(", ") } : current,
+                                  );
+                                }}
+                              />
+                              <span>{option.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {offered.length === 0 ? (
+                          <small className="form-hint">
+                            No trades are configured yet. Add them in Settings.
+                          </small>
+                        ) : null}
+                        {field.hint ? <small className="form-hint">{field.hint}</small> : null}
+                      </fieldset>
+                    );
+                  }
+                  /*
+                    W06-08 — CERTIFICATIONS, EACH WITH ITS OWN EXPIRY.
+
+                    The one control here that edits a list of records rather
+                    than a value. The STATUS beside each row is DERIVED from the
+                    date in the box next to it by `expiryStatus` — the
+                    platform's one classifier at its one 60-day amber threshold
+                    — and is never stored: a status written into a column stops
+                    being true the day after it is written, which is exactly how
+                    `compliance_documents.status` came to say "Compliant" about
+                    a certificate that had expired months earlier.
+
+                    It updates as the date is typed, so the consequence of the
+                    date is visible before Save rather than after a reload.
+                  */
+                  if (field.type === "certifications") {
+                    const entries = Array.isArray(value) ? value : [];
+                    const write = (next: EditorCertification[]) =>
+                      setForm((current) => (current ? { ...current, [field.key]: next } : current));
+                    const amend = (index: number, patch: Partial<EditorCertification>) =>
+                      write(entries.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)));
+                    return (
+                      <fieldset className="workspace-certifications" key={field.key}>
+                        <legend>{field.label}</legend>
+                        {entries.map((entry, index) => {
+                          const status = expiryStatus(entry.expiresOn || null);
+                          return (
+                            <div
+                              className="workspace-certification"
+                              key={entry.id || `unsaved-${index}`}
+                            >
+                              <label className="form-field">
+                                <span>Certificate</span>
+                                <input
+                                  type="text"
+                                  value={entry.name}
+                                  placeholder="Gas Safe, IPAF, Asbestos awareness…"
+                                  onChange={(event) => amend(index, { name: event.target.value })}
+                                />
+                              </label>
+                              <label className="form-field">
+                                <span>Reference</span>
+                                <input
+                                  type="text"
+                                  value={entry.reference}
+                                  onChange={(event) => amend(index, { reference: event.target.value })}
+                                />
+                              </label>
+                              <label className="form-field">
+                                <span>Issued</span>
+                                <input
+                                  type="date"
+                                  value={entry.issuedOn}
+                                  onChange={(event) => amend(index, { issuedOn: event.target.value })}
+                                />
+                              </label>
+                              <label className="form-field">
+                                <span>Expires</span>
+                                <input
+                                  type="date"
+                                  value={entry.expiresOn}
+                                  onChange={(event) => amend(index, { expiresOn: event.target.value })}
+                                />
+                              </label>
+                              {/*
+                                The word as well as the colour. A chip that says
+                                only "amber" says nothing to anybody who cannot
+                                see it, and `status.description` is written to
+                                read correctly after the certificate's name.
+                              */}
+                              <span
+                                className={`workspace-expiry-chip is-${status.state}`}
+                                title={status.description}
+                              >
+                                {status.label}
+                              </span>
+                              <button
+                                className="icon-button"
+                                type="button"
+                                aria-label={`Remove ${entry.name || "this certification"}`}
+                                onClick={() => write(entries.filter((_, at) => at !== index))}
+                              >
+                                <Icon name="close" size={16} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {!entries.length ? (
+                          <p className="form-hint">
+                            Nothing recorded. Anything that expires belongs here, so it can be
+                            chased before it lapses.
+                          </p>
+                        ) : null}
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() =>
+                            // `id: ""` is what tells the route this is a new
+                            // row rather than an edit of an existing one.
+                            write([
+                              ...entries,
+                              { id: "", name: "", reference: "", issuedOn: "", expiresOn: "" },
+                            ])
+                          }
+                        >
+                          <Icon name="plus" size={16} />
+                          Add a certification
+                        </button>
+                      </fieldset>
+                    );
+                  }
                   if (field.type === "checkbox") return (
                     /*
                       A NAME AND A DESCRIPTION, not one 180-character name.
@@ -669,12 +1307,43 @@ export function WorkspaceDataManager({
                       ) : (
                         <input required={field.required} type={field.type ?? "text"} value={String(value)} placeholder={field.placeholder} step={field.type === "number" ? "any" : undefined} onChange={(event) => setForm((current) => current ? { ...current, [field.key]: event.target.value } : current)} />
                       )}
+                      {/*
+                        `hint` was rendered for checkboxes only, so a
+                        `FieldDefinition` could declare guidance on any other
+                        control and it went nowhere. Nothing but the Sites
+                        tab's Region field uses it yet, so nothing else moves.
+                      */}
+                      {field.hint ? <small className="form-hint">{field.hint}</small> : null}
                     </label>
                   );
                 })}
               </div>
               <footer>
-                {editorId && <button className="secondary-button workspace-archive-button" type="button" disabled={busy} onClick={async () => { if (window.confirm("Archive this record? It will remain in the activity history.")) { try { await onArchive(tab, editorId); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } } }}>Archive</button>}
+                {/*
+                  W05-05 — the Archive button is the drawer's THIRD route to
+                  the same closure, and its generic sentence does not name the
+                  record, does not say the site leaves the active register and
+                  does not say what survives. For a site it now asks the same
+                  question the other two doors ask; every other register keeps
+                  the wording it had.
+                */}
+                {/*
+                  W06-04 — and a contractor gets the same treatment, from the
+                  same helper, for the same reason.
+
+                  The generic sentence — "Archive this record? It will remain in
+                  the activity history." — does not name the contractor, does
+                  not say they leave the assignment roster, and describes what
+                  survives as "the activity history" when what actually survives
+                  is every job, document and performance figure they have.
+                  `contractor-closure.ts` owns those words and the tick-box path
+                  above calls the same function, so the two doors onto one
+                  outcome cannot drift apart again.
+
+                  Sites and contractors now ask; every other register keeps the
+                  wording it had, because nothing else here has a second door.
+                */}
+                {editorId && <button className="secondary-button workspace-archive-button" type="button" disabled={busy} onClick={async () => { const named = (fallback: string) => String(form.name ?? fallback ?? ""); const agreed = tab === "site" ? confirmSiteClosure(named(workspace.stores.find((site) => site.id === editorId)?.name ?? "")) : tab === "contractor" ? confirmContractorRosterExit(named(workspace.contractors.find((item) => item.id === editorId)?.name ?? "")) : window.confirm("Archive this record? It will remain in the activity history."); if (agreed) { try { await onArchive(tab, editorId); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } } }}>Archive</button>}
                 <button className="secondary-button" type="button" onClick={() => setForm(null)}>Cancel</button>
                 <button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
               </footer>

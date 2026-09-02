@@ -16,10 +16,14 @@ import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { reconcileAttachmentCounts } from "../../../lib/attachment-counts";
 import { chunkIds } from "../../../lib/sql-batching";
 import {
+  FIELD_LIMITS,
+  anchorRefusal,
+  anchorReferencesRefusal,
   attachmentPayload,
   documentFieldSnapshot,
   documentFieldUpdates,
   releaseComplianceLinks,
+  type Anchors,
 } from "../documents";
 
 /**
@@ -790,10 +794,25 @@ export async function DELETE(
  * `object_key`, not `original_name`, not the organisation, not the uploader, not
  * the job, the site or the version lineage. Editing a document's description
  * must not be able to move it to another tenant's site or re-point it at another
- * job — those are anchor changes, and an anchor change is a different, auditable
- * operation. `original_name` in particular stays the byte-truth: the file a
- * person downloaded must keep matching the copy on their disk, which is why
- * `title` is a separate column rather than a rename.
+ * job. `original_name` in particular stays the byte-truth: the file a person
+ * downloaded must keep matching the copy on their disk, which is why `title` is
+ * a separate column rather than a rename.
+ *
+ * THE ONE EXCEPTION, AND WHY IT IS ONE — W05-09 / W06-10. `contractorId` may be
+ * set and cleared here, named explicitly and audited as its own action. Filing a
+ * public liability certificate against the contractor it belongs to was
+ * reachable only at the instant of upload: `POST /api/files` has accepted a
+ * `contractorId` anchor since W07-07 and no screen ever sent one, so every
+ * document already in the workspace was permanently unfilable and the
+ * contractor-documents leg of W06-10 was a column nobody could write.
+ *
+ * It is still an ANCHOR CHANGE and is held to every anchor rule: the id is
+ * checked against this organisation before the write, so another tenant's
+ * contractor is 404 rather than accepted; and clearing it is refused when it is
+ * the document's only anchor, because "a document must be filed against
+ * something" is not suspended by editing. The job, site and unit anchors stay
+ * write-once — a document's job is what every count, photo strip and compliance
+ * slot in this product is keyed by, and nothing here has business moving it.
  *
  * PATCH semantics throughout: an absent key is unchanged, an explicit value is
  * set, an explicit null clears. That is why `documentFieldUpdates` returns a
@@ -884,6 +903,59 @@ export async function PATCH(
     }
   }
 
+  /*
+   * W05-09 / W06-10 — THE CONTRACTOR ANCHOR, AFTER THE FACT.
+   *
+   * Same PATCH semantics as every field above: an absent key is unchanged, a
+   * string files the document against that contractor, and an explicit `null`
+   * unfiles it. A value equal to the one already stored is a no-op and writes
+   * nothing, so re-saving an unchanged form does not produce an audit line
+   * claiming the anchor moved.
+   *
+   * Two refusals, both BEFORE the update:
+   *
+   *   `anchorRefusal` — the rule that a document belongs to something. Clearing
+   *   the contractor on a certificate with no job, no site and no unit would
+   *   leave a row filed against nothing, which is the state W07-07's
+   *   mandatory-anchor rule exists to prevent. Unfiling is allowed; unfiling
+   *   into thin air is not.
+   *
+   *   `anchorReferencesRefusal` — the id names a contractor IN THIS TENANT.
+   *   `contractor_id` does carry a real composite foreign key, so a bad id would
+   *   otherwise be caught by the database and surfaced as a 503; going through
+   *   the shared checker answers 404 in the words the rest of the product uses,
+   *   and makes another organisation's id indistinguishable from one that never
+   *   existed.
+   */
+  let contractorChange: { from: string | null; to: string | null } | null = null;
+  if ("contractorId" in payload) {
+    if (payload.contractorId !== null && typeof payload.contractorId !== "string") {
+      return Response.json(
+        { error: "A contractor id must be text, or null to unfile the document." },
+        { status: 400 },
+      );
+    }
+    const next =
+      typeof payload.contractorId === "string"
+        ? payload.contractorId.trim().slice(0, FIELD_LIMITS.anchorId)
+        : "";
+    const current = record.contractorId ?? "";
+    if (next !== current) {
+      const anchors: Anchors = {
+        requestId: record.requestId ?? "",
+        siteId: record.siteId ?? "",
+        unitId: record.unitId ?? "",
+        contractorId: next,
+      };
+      const unanchored = anchorRefusal(anchors);
+      if (unanchored) return unanchored;
+      const badAnchor = await anchorReferencesRefusal(db, orgId, anchors);
+      if (badAnchor) return badAnchor;
+      values.contractorId = next || null;
+      contractorChange = { from: record.contractorId ?? null, to: next || null };
+    }
+  }
+
   if (!Object.keys(values).length) {
     // Nothing was asked for. A no-op is not an error, and answering 400 would
     // make a form that submits unchanged fields look broken.
@@ -908,12 +980,24 @@ export async function PATCH(
     db,
     organisationId: orgId,
     actor: auditActor(guard.scope),
+    /*
+     * The anchor move gets its own verb rather than hiding inside
+     * "metadata_updated". "Who filed this certificate against this contractor,
+     * and when" is a different question from "who corrected its expiry date",
+     * and a log that answers both with one word can be searched for neither.
+     * The archive verbs still win where both happened in one request:
+     * withdrawing a document from the register is the larger fact about it.
+     */
     action:
       archiveAction === "archived"
         ? "document.archived"
         : archiveAction === "restored"
           ? "document.restored"
-          : "document.metadata_updated",
+          : contractorChange
+            ? contractorChange.to
+              ? "document.contractor_linked"
+              : "document.contractor_unlinked"
+            : "document.metadata_updated",
     entityType: "document",
     entityId: id,
     summary:
@@ -921,7 +1005,11 @@ export async function PATCH(
         ? `Archived ${updated.title || updated.originalName}.`
         : archiveAction === "restored"
           ? `Restored ${updated.title || updated.originalName} from the archive.`
-          : `Updated the details of ${updated.title || updated.originalName}.`,
+          : contractorChange
+            ? contractorChange.to
+              ? `Filed ${updated.title || updated.originalName} against a contractor.`
+              : `Unfiled ${updated.title || updated.originalName} from its contractor.`
+            : `Updated the details of ${updated.title || updated.originalName}.`,
     detail: changeDetail(
       documentFieldSnapshot(record),
       documentFieldSnapshot(updated),

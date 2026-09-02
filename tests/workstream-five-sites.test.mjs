@@ -318,12 +318,32 @@ test("the Stage 0 twins move only when the status actually moves", async () => {
    * knows closed-from-not-closed. The register holds legacy rows recorded as
    * status='other' WITH lifecycle='Closed', so re-deriving on every save
    * promoted them to 'Current' — a legacy row quietly becoming a current one.
+   *
+   * RE-POINTED FOR W05-07. The pin was
+   * `const lifecycleState =\s*status === existing.status`, which read the
+   * ternary that implemented this rule inside `PATCH /api/sites`. The rule is
+   * unchanged and is now enforced one layer down, for every caller rather than
+   * for that one route: `reconcileSiteState` in app/lib/site-state.ts returns
+   * the stored trio untouched when an edit carries none of the three, and the
+   * route calls it. That is strictly wider than what this pinned before — the
+   * workspace route and the archive verb are covered by the same guard now —
+   * so the assertion moves rather than weakens.
+   *
+   * The behaviour itself is asserted against the running API in
+   * tests/workstream-five-site-state-and-profile.test.mjs, under "a save that
+   * mentions no state moves no state".
    */
   const route = await read("app/api/sites/route.ts");
   assert.match(
     route,
-    /const lifecycleState =\s*\n?\s*status === existing\.status/,
-    "PATCH must leave the twins alone when the status did not change",
+    /const siteState = reconcileSiteState\(/,
+    "PATCH must reconcile the trio through the shared rule",
+  );
+  const state = await read("app/lib/site-state.ts");
+  assert.match(
+    state,
+    /if \(!statusMoved && askedLifecycle === null && askedActive === null\) \{\s*\n\s*return \{ status: current\.status, lifecycle: current\.lifecycle, active: current\.active \};/,
+    "an edit that mentions none of the three must return the stored trio untouched",
   );
   const csv = await read("app/api/sites/csv/route.ts");
   assert.match(

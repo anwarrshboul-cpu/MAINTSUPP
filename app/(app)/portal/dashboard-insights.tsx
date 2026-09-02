@@ -41,6 +41,13 @@ import {
 } from "./period-model";
 import { isClosedRequest, isOpenRequest } from "./dashboard-meters";
 import { TrendChart } from "./dashboard-analytics";
+import {
+  CONTRACTOR_SPEND_BASIS,
+  attributeContractorWork,
+  contractorJobCost,
+  contractorSpendBasisNote,
+  type ContractorRosterEntry,
+} from "../../lib/contractor-attribution";
 
 /**
  * The period a panel covers when its caller does not name one.
@@ -498,12 +505,36 @@ export function OpenJobAgeing({
  * Contractor names are nominal — swapping their order changes nothing — so every
  * bar takes the same hue. Colouring each contractor differently would spend the
  * identity channel re-encoding what the bar length already shows.
+ *
+ * W06-12 — THIS PANEL COUNTED BY NAME TEXT, and a name is not an identity.
+ *
+ * It read `(request.contractor ?? "").trim()` and never looked at
+ * `contractorId` at all: the same line commit `9c53bd9` removed from the
+ * Contractors register, still here because nothing shared the rule between the
+ * two screens and no test covered this panel. Measured on the running product:
+ * the register showed a renamed contractor holding £250 while this table
+ * printed that £250 under a name no register row carries. Attribution now goes
+ * through `attributeContractorWork`, which is that one rule — see
+ * app/lib/contractor-attribution.ts for the three ways the name-only version
+ * was wrong and why an ambiguous name is attributed to nobody.
  */
 export function ContractorScorecard({
   requests,
+  contractors = [],
   loading = false,
 }: {
   requests: MaintenanceRequest[];
+  /**
+   * The contractor register, which is what makes an id mean something.
+   *
+   * Optional and defaulting to empty, because a name-only estate is a real
+   * state of this product — a workspace that has imported jobs but registered
+   * nobody — and the panel still has something true to say about it: every job
+   * then falls to the unregistered-name branch, exactly as it did before, and
+   * the table looks the same. What changes is that as soon as a register EXISTS
+   * it is believed ahead of the text.
+   */
+  contractors?: ContractorRosterEntry[];
   /**
    * Whether the rows have arrived yet. `InsightPanel` has rendered a
    * "Loading…" state since it was written; the panels simply were not told,
@@ -514,36 +545,55 @@ export function ContractorScorecard({
    */
   loading?: boolean;
 }) {
-  const rows = useMemo(() => {
-    const byContractor = new Map<
-      string,
-      { jobs: number; closed: number; days: number; spend: number }
-    >();
-    for (const request of requests) {
-      const name = (request.contractor ?? "").trim();
-      if (!name) continue;
-      const entry =
-        byContractor.get(name) ?? { jobs: 0, closed: 0, days: 0, spend: 0 };
-      entry.jobs += 1;
-      entry.spend += request.cost ?? 0;
-      const days = daysBetween(request.requestedAt, request.completedAt);
-      if (days !== null) {
-        entry.closed += 1;
-        entry.days += days;
-      }
-      byContractor.set(name, entry);
-    }
-    return [...byContractor.entries()]
-      .map(([name, entry]) => ({
-        name,
-        jobs: entry.jobs,
-        closed: entry.closed,
-        averageDays: entry.closed ? entry.days / entry.closed : null,
-        spend: entry.spend,
-      }))
-      .sort((left, right) => right.jobs - left.jobs)
-      .slice(0, 8);
-  }, [requests]);
+  const { rows, unplaced } = useMemo(() => {
+    const attribution = attributeContractorWork(requests, contractors);
+    /*
+     * Registered contractors and unlinked names in one ranking, and a
+     * registered contractor with no work in the window is left out of the
+     * TABLE rather than shown as a zero row. That is this panel's question —
+     * it ranks by volume and shows the top eight — and differs on purpose from
+     * the Contractors register, which lists everybody because "we use them and
+     * they did nothing this quarter" is what that page is for.
+     */
+    const ranked = [...attribution.byRoster, ...attribution.unregistered]
+      .filter((row) => row.jobs.length > 0)
+      .map((row) => {
+        let closed = 0;
+        let days = 0;
+        for (const request of row.jobs) {
+          const elapsed = daysBetween(request.requestedAt, request.completedAt);
+          if (elapsed !== null) {
+            closed += 1;
+            days += elapsed;
+          }
+        }
+        return {
+          key: row.id ?? `name:${row.name}`,
+          name: row.name,
+          registered: row.registered,
+          jobs: row.jobs.length,
+          averageDays: closed ? days / closed : null,
+          spend: contractorJobCost(row.jobs),
+        };
+      })
+      .sort((left, right) => right.jobs - left.jobs);
+    /*
+     * What this table cannot place, carried out rather than dropped.
+     *
+     * Jobs with no contractor at all, jobs whose name two register rows share,
+     * and jobs whose `contractor_id` points at nobody in this roster. The old
+     * code silently discarded all three; a spend column somebody reads as a
+     * total has to be able to say what is missing from it, and the ambiguous
+     * case in particular is the operator's cue to rename one of the pair.
+     */
+    const claimed = attribution.unattributed.filter(
+      (request) => Boolean(request.contractorId) || Boolean((request.contractor ?? "").trim()),
+    );
+    return {
+      rows: ranked.slice(0, 8),
+      unplaced: { jobs: claimed.length, spend: contractorJobCost(claimed) },
+    };
+  }, [contractors, requests]);
 
   if (!rows.length) {
     return (
@@ -584,12 +634,19 @@ export function ContractorScorecard({
               <th scope="col">Contractor</th>
               <th scope="col">Jobs</th>
               <th scope="col">Avg. close</th>
-              <th scope="col">Spend</th>
+              {/* "Actual spend", because the register now also holds AGREED
+                  terms — a day rate, a call-out charge, an hourly rate. This
+                  column is neither: it is recorded job cost and nothing is
+                  ever substituted for a cost nobody entered. */}
+              <th scope="col">Actual spend</th>
             </tr>
           </thead>
           <tbody>
+            {/* Keyed by the register id where there is one, so two contractors
+                who genuinely share a name stay two rows. The old key was the
+                NAME, which is the same mistake as counting by it. */}
             {rows.map((row) => (
-              <tr key={row.name}>
+              <tr key={row.key}>
                 <td>
                   <div className="insight-table__bar">
                     <i
@@ -599,7 +656,18 @@ export function ContractorScorecard({
                       }}
                     />
                   </div>
-                  <span>{row.name}</span>
+                  <span>
+                    {row.name}
+                    {/* Said out loud, because a name-only row is a different
+                        claim: nothing links these jobs to a register record,
+                        so a rename of that firm will not carry them. */}
+                    {!row.registered && (
+                      <small title="Named on the job, but not linked to a contractor record">
+                        {" "}
+                        · not in register
+                      </small>
+                    )}
+                  </span>
                 </td>
                 <td>{row.jobs}</td>
                 <td>
@@ -611,6 +679,164 @@ export function ContractorScorecard({
           </tbody>
         </table>
       </div>
+      <p className="insight-note">
+        {contractorSpendBasisNote(CONTRACTOR_SPEND_BASIS.requested)}
+      </p>
+      {unplaced.jobs > 0 && (
+        /*
+         * What the table left out, and never folded into somebody else's row.
+         *
+         * These are jobs that name a contractor the register cannot resolve to
+         * exactly one record — an ambiguous name, or an id pointing at a record
+         * that is gone. Attributing them to a guess is what this whole change
+         * exists to stop; hiding them would make the spend column read as a
+         * total it is not.
+         */
+        <p className="insight-note">
+          {plural(unplaced.jobs, "job")} could not be matched to one contractor
+          record{unplaced.spend ? ` (${money(unplaced.spend)})` : ""} and is
+          counted against nobody.
+        </p>
+      )}
+    </InsightPanel>
+  );
+}
+
+/* ── Contractor cost, for the Dashboard ──────────────────────────────────── */
+
+/**
+ * WHAT THIS PORTFOLIO IS SPENDING WITH ITS CONTRACTORS, on the Overview.
+ *
+ * W06-12 asks for contractor cost on Reports AND the Dashboard. The scorecard
+ * above has only ever been on Reports — `portal-app.tsx` renders it once, in
+ * the `surface="reports"` widget list — so the Dashboard half of that wording
+ * had nothing behind it at all. This is that half: the same attribution rule,
+ * the same date basis as every other Overview figure, ranked by MONEY rather
+ * than by volume, because "who is costing us the most" is the question a
+ * dashboard is asked and the scorecard answers a different one.
+ *
+ * Deliberately NOT a second copy of the scorecard. It shows the total, how much
+ * of it is linked to a register record, and the largest few — and it shares
+ * `attributeContractorWork` with the scorecard and with the Contractors
+ * register, so the three cannot drift the way the scorecard drifted from the
+ * register for a whole release.
+ */
+export function ContractorCostPanel({
+  requests,
+  contractors = [],
+  loading = false,
+}: {
+  requests: MaintenanceRequest[];
+  contractors?: ContractorRosterEntry[];
+  loading?: boolean;
+}) {
+  const summary = useMemo(() => {
+    const attribution = attributeContractorWork(requests, contractors);
+    const ranked = [...attribution.byRoster, ...attribution.unregistered]
+      .map((row) => ({
+        key: row.id ?? `name:${row.name}`,
+        name: row.name,
+        registered: row.registered,
+        jobs: row.jobs.length,
+        spend: contractorJobCost(row.jobs),
+      }))
+      .filter((row) => row.spend > 0)
+      .sort((left, right) => right.spend - left.spend);
+    /*
+     * Three totals that add up, and are shown as three so nobody has to assume
+     * they do. `attributed` is what this panel can put a name to; `unplaced` is
+     * costed work whose contractor the register cannot resolve; `total` is
+     * every costed job in the window including the ones nobody was named on.
+     * A reader who wants the estate's whole spend has it, and a reader who
+     * wants contractor spend is not silently handed the other number.
+     */
+    const attributed = ranked.reduce((sum, row) => sum + row.spend, 0);
+    const unplaced = contractorJobCost(
+      attribution.unattributed.filter(
+        (request) => Boolean(request.contractorId) || Boolean((request.contractor ?? "").trim()),
+      ),
+    );
+    return {
+      rows: ranked.slice(0, 5),
+      named: ranked.length,
+      attributed,
+      unplaced,
+      total: contractorJobCost(requests),
+      linked: attribution.byRoster.reduce((sum, row) => sum + contractorJobCost(row.jobs), 0),
+    };
+  }, [contractors, requests]);
+
+  if (!summary.rows.length) {
+    return (
+      <InsightPanel
+        loading={loading}
+        title="Contractor spend"
+        hint="Recorded job cost by contractor"
+        empty={{
+          message: "No costed job in this period names a contractor",
+          hint: "Assign a contractor on the board and record the cost of works, and this ranks them by spend.",
+        }}
+      >
+        <span />
+      </InsightPanel>
+    );
+  }
+
+  const maximum = Math.max(...summary.rows.map((row) => row.spend), 1);
+
+  return (
+    <InsightPanel
+      title="Contractor spend"
+      hint={`${money(summary.attributed)} attributed across ${plural(summary.named, "contractor")}`}
+    >
+      <dl className="insight-facts">
+        <div>
+          <dt>Attributed to a contractor</dt>
+          <dd>{money(summary.attributed)}</dd>
+        </div>
+        <div>
+          {/* The share the register actually stands behind. Name-only work is
+              real spend, but it is not linked to anything a rename, a rate or
+              a document can travel with. */}
+          <dt>Of which linked to a record</dt>
+          <dd>{money(summary.linked)}</dd>
+        </div>
+        <div>
+          <dt>All job cost in period</dt>
+          <dd>{money(summary.total)}</dd>
+        </div>
+      </dl>
+
+      <div className="insight-ageing">
+        {summary.rows.map((row) => (
+          <div
+            key={row.key}
+            className="insight-ageing__row"
+            title={`${money(row.spend)} across ${plural(row.jobs, "job")}`}
+          >
+            <span>{row.name}</span>
+            <div className="insight-bar">
+              <i
+                style={{
+                  width: `${Math.max((row.spend / maximum) * 100, 3)}%`,
+                  background: BRAND.teal,
+                }}
+              />
+            </div>
+            <strong>{money(row.spend)}</strong>
+          </div>
+        ))}
+      </div>
+
+      <p className="insight-note">
+        {contractorSpendBasisNote(CONTRACTOR_SPEND_BASIS.requested)}
+      </p>
+      {summary.unplaced > 0 && (
+        <p className="insight-note">
+          {money(summary.unplaced)} names a contractor the register cannot
+          resolve to one record, and is counted against nobody.
+        </p>
+      )}
     </InsightPanel>
   );
 }

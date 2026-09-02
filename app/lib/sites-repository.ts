@@ -1,5 +1,17 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { getDb } from "../../db";
+/*
+ * The state vocabulary and the reconciliation rule live in a module with no
+ * database imports, because the Sites form and the Manage-data drawer need them
+ * too and both are client components. Re-exported below so a server module that
+ * already imports this repository does not have to know that.
+ */
+import {
+  SITE_LIFECYCLE_CLOSED,
+  SITE_LIFECYCLE_CURRENT,
+  SITE_STATUS_CLOSED,
+  SITE_STATUS_OTHER,
+} from "./site-state";
 import {
   importAnomalies,
   siteAliases,
@@ -118,7 +130,7 @@ export async function getSite(db: Database, organisationId: string, id: string) 
 }
 
 /**
- * The two Stage-0 columns a status implies, in one place.
+ * The two Stage-0 columns a status implies AT CREATION, in one place.
  *
  * `lifecycle` and `active` are the lossy projections of `status`, and the
  * derivation used to know only two answers: 'closed' was Closed/false and
@@ -133,10 +145,35 @@ export async function getSite(db: Database, organisationId: string, id: string) 
  * "is active". `status` also carries the configured 'international', which IS
  * open for business, and keying on 'active' alone would have quietly closed
  * every international site to fix the legacy ones.
+ *
+ * THIS IS THE CREATE-TIME PROJECTION AND ONLY THAT. It answers from a status
+ * and nothing else because at insert there IS nothing else — no stored
+ * lifecycle to keep, no eligibility anybody has stated. Closed is the
+ * register's own convention for a row it cannot vouch for at the moment it
+ * arrives, and the CSV importer has always filed one that way.
+ *
+ * EVERY EDIT OF AN EXISTING ROW GOES THROUGH `reconcileSiteState` in
+ * app/lib/site-state.ts INSTEAD. Once a row exists the three columns are three
+ * separate facts — is the record current, is it operationally eligible, how is
+ * it classified — and projecting two of them out of the third is exactly how
+ * `{ status: 'other', lifecycle: 'Current', active: false }`, which is a valid
+ * internal or non-retail record, kept being flattened into a closed one. That
+ * module owns the rule; this owns the first row only.
  */
+export {
+  SITE_LIFECYCLES,
+  normaliseSiteLifecycle,
+  reconcileSiteState,
+  siteLifecycleRefusal,
+  siteStateContradiction,
+} from "./site-state";
+
 export function stageZeroState(status: string): { active: boolean; lifecycle: string } {
-  const open = status !== "closed" && status !== "other";
-  return { active: open, lifecycle: open ? "Current" : "Closed" };
+  const open = status !== SITE_STATUS_CLOSED && status !== SITE_STATUS_OTHER;
+  return {
+    active: open,
+    lifecycle: open ? SITE_LIFECYCLE_CURRENT : SITE_LIFECYCLE_CLOSED,
+  };
 }
 
 export async function listAliases(db: Database, organisationId: string) {
