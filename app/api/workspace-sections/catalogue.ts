@@ -241,6 +241,8 @@ export function builtInSectionBoard(sectionKey: string): string | null {
 
 /** One workspace-defined section, as the API returns it. */
 export type WorkspaceSection = {
+  /** W02-07 — the workspace's own words for what this section is for. */
+  description?: string | null;
   key: string;
   label: string;
   icon: string;
@@ -262,7 +264,14 @@ const MAX_SLUG = 48;
  * `layout.ts` — one behaviour for one kind of value, so a label that survives a
  * rename in the sidebar also survives being created here.
  */
-export function cleanSectionLabel(value: unknown): string | null {
+export function cleanSectionLabel(
+  value: unknown,
+  /* A description is prose and gets more room than a nav label, which has to
+     fit a 248px rail. Same cleaning either way — the rules about control
+     characters and collapsed whitespace are about what text IS, not how long
+     it is allowed to be. */
+  max: number = MAX_LABEL,
+): string | null {
   if (typeof value !== "string") return null;
   const trimmed = [...value]
     .filter((character) => {
@@ -273,7 +282,7 @@ export function cleanSectionLabel(value: unknown): string | null {
     .replace(/\s+/g, " ")
     .trim();
   if (!trimmed) return null;
-  return trimmed.slice(0, MAX_LABEL);
+  return trimmed.slice(0, max);
 }
 
 /** "CCTV" becomes `section:cctv`; "Fire & Safety" becomes `section:fire-safety`. */

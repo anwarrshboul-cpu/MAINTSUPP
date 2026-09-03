@@ -4777,6 +4777,41 @@ label.live-board-tool {
   padding: 18px 0 24px;
 }
 
+/*
+ * A workspace section that is still resolving. Sized like a page so the shell
+ * does not jump when the real surface replaces it.
+ */
+.section-pending {
+  display: grid;
+  place-items: center;
+  min-height: 40vh;
+  padding: 40px 24px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/*
+ * W02-07 — the board's empty state.
+ *
+ * `position: sticky` on the left edge because the canvas is `max-content` wide:
+ * without it the message is laid out across the full scroll width and sits
+ * wherever the columns end, which on a 25-column board is several screens to
+ * the right of where the reader is looking.
+ */
+.live-board-empty {
+  position: sticky;
+  left: 0;
+  width: min(520px, 100%);
+  margin: 8px 0 0 34px;
+  padding: 18px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-card-lo);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
 .sheet-group {
   width: max-content;
   min-width: 100%;

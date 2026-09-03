@@ -17,7 +17,7 @@ import { createPortal } from "react-dom";
 import BoardChrome, { type BoardView } from "./board-chrome";
 import { viewReplacesGrid, type BoardCalendarWiring } from "./board-view-pane";
 import BoardColumnSummary from "./board-column-summary";
-import { boardIdentity } from "./board-identity";
+import { sectionIdentity } from "./board-identity";
 import { DEFERRED_GROUP_CLASS, deferredGroupHeight } from "./board-visibility";
 import { ColumnSettingsDialog } from "./board-column-settings";
 import { chipStyle } from "./chip-ink";
@@ -206,6 +206,8 @@ function tierCellValue(tier: string, options: Option[]): string {
 export function LiveMaintenanceBoard({
   boardId = "maintenance",
   sectionKey,
+  sectionLabel,
+  sectionDescription,
   requests,
   onCreateDetailed,
   onOpenRequest,
@@ -228,6 +230,16 @@ export function LiveMaintenanceBoard({
    * wherever the first was left — which defeats the point of adding it.
    */
   sectionKey?: string;
+  /**
+   * What this workspace calls the section — W02-07's "title".
+   *
+   * Absent for a built-in section, which is named by the board it draws. When
+   * present it replaces the heading and the mobile bar's short name, which are
+   * otherwise keyed on the board and so identical for two sections reading it.
+   */
+  sectionLabel?: string | null;
+  /** W02-07's "description", when the workspace gave this section one. */
+  sectionDescription?: string | null;
   requests: MaintenanceRequest[];
   onCreateDetailed: () => void;
   onOpenRequest: (
@@ -3224,7 +3236,7 @@ export function LiveMaintenanceBoard({
     return () => onItemActionsChange(null);
   }, [boardId, onItemActionsChange]);
 
-  const identity = boardIdentity(boardId);
+  const identity = sectionIdentity(boardId, sectionLabel, sectionDescription);
   const newItemLabel = isStoreDocumentation ? "New store" : "New item";
   const addItemToGroupLabel = isStoreDocumentation ? "Add store to group" : "Add item to group";
 
@@ -3233,7 +3245,22 @@ export function LiveMaintenanceBoard({
     <div className="section-stack live-board-page" ref={pageRef} data-jobs-rail={railState}>
       {boardId === "maintenance" && (
       <section className="analytics-page-heading live-jobs-analytics-heading" ref={anchorRef}>
-        <div><span>Live maintenance workspace</span><h1>Live job list</h1></div>
+        {/*
+          W02-07. The analytics hero is the FIRST heading on the job board and
+          it was two literals, so a section called CCTV opened on a page headed
+          "Live job list" under "Live maintenance workspace" — the sidebar entry
+          and the page disagreeing about where you were.
+
+          The literals are kept as the fallback rather than replaced by
+          `identity.heading`, which is "Maintenance operations board": that is
+          the heading of the section BELOW this one, and collapsing the two
+          would rename an accepted screen for everybody to fix a case that only
+          arises for an added section.
+        */}
+        <div>
+          <span>{sectionDescription?.trim() || "Live maintenance workspace"}</span>
+          <h1>{sectionLabel?.trim() || "Live job list"}</h1>
+        </div>
         <AnalyticsToolbar
           portfolio={portfolio}
           portfolios={portfolioChoices}
@@ -4354,6 +4381,36 @@ export function LiveMaintenanceBoard({
                 </section>
               );
             })}
+
+            {/*
+              W02-07's empty state.
+
+              A board with no rows drew its group headers over nothing at all,
+              or — for a board with no groups either — an empty canvas. The
+              filter panel has said "No rows match these filters" for a long
+              time, but that is the FILTERED empty state and it is only rendered
+              while a rule is set; a board that is simply empty said nothing,
+              and a screen that says nothing is indistinguishable from one that
+              is still loading or has broken.
+
+              Gated on `placementsLoaded` for that reason: before the snapshot
+              arrives `scopedRequests` is deliberately empty, and announcing
+              "nothing here yet" over a board that is about to fill is worse
+              than the blank it replaces.
+
+              The wording stays neutral about WHAT the rows are. `itemNoun` is
+              "live items" on one board and "stores" on the other, and neither
+              reads as a sentence — "New stores will appear as they are raised"
+              is wrong about stores. The board's name is already above this; the
+              empty state only has to say that the absence is real.
+            */}
+            {placementsLoaded && visibleRows.length === 0 && (
+              <p className="live-board-empty" role="status">
+                {filterState.rules.length > 0
+                  ? "No rows match these filters. Clear them to see everything on this board."
+                  : "Nothing here yet. Anything added to this board will appear here."}
+              </p>
+            )}
           </div>
         </div>
 

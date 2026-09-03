@@ -375,16 +375,51 @@ test("every query names the organisation the scope resolved", async () => {
   }
 });
 
-test("removing a section archives it, and a purge is refused while anything refers to it", async () => {
+test("removing a section archives it, and a purge is the deliberate second act", async () => {
+  /*
+   * RE-POINTED, NOT WEAKENED — W2.
+   *
+   * This used to assert `references.arrangements > 0 || references.views > 0`
+   * and a 409, which pinned a rule that could not be satisfied. `sidebar-nav`
+   * builds its payload from the WHOLE resolved layout, so every saved sidebar
+   * names every catalogue key; the moment one colleague dragged one item, that
+   * condition was true forever and no section could ever be purged again. The
+   * 409 it produced also claimed the section "was archived rather than
+   * deleted" while writing nothing at all.
+   *
+   * The precondition it was reaching for — "nobody is using this any more" — is
+   * now expressed as the thing that actually means it: the row must ALREADY be
+   * archived. The three properties the old assertions were protecting are all
+   * still checked below, and two more that the old shape could not express.
+   */
   const route = await source("app/api/workspace-sections/route.ts");
   const del = route.slice(route.indexOf("export async function DELETE"));
+
+  // 1. Unchanged: the default verb archives rather than deletes.
   assert.match(del, /archivedAt: new Date\(\)\.toISOString\(\)/, "the default must archive");
-  assert.match(del, /references\.arrangements > 0 \|\| references\.views > 0/);
-  assert.match(del, /status: 409/, "a purge with references outstanding must be refused");
-  // And the hard delete must be reachable only behind the explicit flag.
+
+  // 2. Unchanged: the hard delete is reachable only behind the explicit flag.
   const purgeAt = del.indexOf("purge");
   const deleteAt = del.indexOf(".delete(workspaceSections)");
   assert.ok(purgeAt > 0 && deleteAt > purgeAt);
+
+  // 3. The refusal survives, on the precondition that can be met.
+  assert.match(del, /if \(!row\.archivedAt\)/, "a live section cannot be purged in one step");
+  assert.match(del, /status: 409/, "and refusing is how it says so");
+
+  // 4. New: the irreversible verb sits behind the platform's purge permission,
+  //    the same rule `/api/trash` and `/api/files/[id]` follow. `settings.edit`
+  //    is held by `admin`, which `data.delete` is deliberately withheld from.
+  assert.match(del, /mayPurge\(context\)/, "a purge is not an edit");
+  assert.match(route, /can\(subject, "data\.delete"\)/, "and data.delete is the capability");
+
+  // 5. New: what blocked the purge is now cleared BY it, so the confirmation
+  //    the browser shows — that the section's place in every sidebar goes with
+  //    it — is true rather than reassuring.
+  assert.match(del, /forgetSection\(context, row\.key\)/);
+  const forget = route.slice(route.indexOf("async function forgetSection"), route.indexOf("export async function DELETE"));
+  assert.match(forget, /\.delete\(sectionViewPreferences\)/, "its chosen and remembered views");
+  assert.match(forget, /\.update\(navigationLayouts\)/, "and its name in every stored arrangement");
 });
 
 test("the navigation route treats workspace sections as catalogue, not arrangement", async () => {
@@ -427,13 +462,24 @@ async function serverIsUp() {
 
 const KEY = "section:cctv-test";
 
+/*
+ * A purge now needs `data.delete`, which `admin` is deliberately not given, so
+ * the sweep has to run as the seeded super admin — `can()` waves that role
+ * through by design. Sweeping as ADMIN left the row archived rather than gone,
+ * and the next run's POST answered 409 "restore it instead of adding it
+ * again": a teardown that silently poisons the next test is worse than one
+ * that fails.
+ */
+const SUPER = "super-admin@test.maintsupp.com";
+
 async function removeFixture() {
   await call(`/api/workspace-sections/view?section=${KEY}&scope=workspace`, { method: "DELETE" });
   for (const identity of [ADMIN, CLIENT]) {
     await call(`/api/workspace-sections/view?section=${KEY}`, { method: "DELETE" }, identity);
   }
+  // Archive first: the purge refuses a live section, which is the point of it.
   await call(`/api/workspace-sections?key=${KEY}`, { method: "DELETE" });
-  await call(`/api/workspace-sections?key=${KEY}&purge=1`, { method: "DELETE" });
+  await call(`/api/workspace-sections?key=${KEY}&purge=1`, { method: "DELETE" }, SUPER);
 }
 
 test("the API adds, shows, renames, reorders and removes a section", async (t) => {

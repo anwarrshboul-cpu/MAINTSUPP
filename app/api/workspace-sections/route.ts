@@ -54,6 +54,7 @@ import {
   type WorkspaceSection,
 } from "./catalogue";
 import { BUILT_IN_GROUPS, FALLBACK_GROUP } from "../navigation/layout";
+import { can, resolvePermissions } from "../../lib/permissions";
 
 /** The headings a section may be filed under. `layout.ts` is the authority. */
 const GROUP_KEYS = BUILT_IN_GROUPS.map((group) => group.key);
@@ -71,6 +72,7 @@ function toSection(row: SectionRow): WorkspaceSection {
   return {
     key: row.key,
     label: row.label,
+    description: row.description ?? null,
     icon: isIconName(row.icon) ? row.icon : DEFAULT_ICON,
     surface,
     // The row's own board when it has one, otherwise whatever the surface is
@@ -268,6 +270,11 @@ export async function POST(request: Request) {
       key,
       label,
       icon: isIconName(body.icon) ? body.icon : DEFAULT_ICON,
+      /* Cleaned through `visibleText`'s rules like the label, so a description
+         of three zero-width spaces is stored as absent rather than as a blurb
+         that renders blank — the cleaner answers null for text that is not
+         really there. */
+      description: cleanSectionLabel(body.description, 240) || null,
       surface,
       surfaceRef: board.boardKey,
       groupKey: isGroupChoice(body.group, GROUP_KEYS) ? body.group : FALLBACK_GROUP,
@@ -281,6 +288,13 @@ export async function POST(request: Request) {
     await recordSectionChange(context, request, "workspace.section_created", key, `Added the "${label}" workspace section.`, { key, label, surface, board: board.boardKey });
     return Response.json({ section: created ? toSection(created) : null }, { status: 201 });
   } catch (error) {
+    /* A session that has ended is not a bad request. Without this an expired
+       session answered 400 here while the GET beside it answered 401
+       {signIn:true}, and `installSessionGuard` bounces to /login only on the
+       401 — so a save made just after a session lapsed failed silently and the
+       person was left looking at a form that would never work again. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     const message =
       error instanceof Error ? error.message : "The section could not be added.";
     return Response.json({ error: message }, { status: 400 });
@@ -380,6 +394,11 @@ export async function PATCH(request: Request) {
       }
       patch.label = label;
     }
+    if (body.description !== undefined) {
+      // Explicitly clearable: an empty string means "no description", which is
+      // NULL, not the literal "".
+      patch.description = cleanSectionLabel(body.description, 240) || null;
+    }
     if (body.icon !== undefined) {
       if (!isIconName(body.icon)) {
         return Response.json(
@@ -445,6 +464,13 @@ export async function PATCH(request: Request) {
     );
     return Response.json({ section: updated ? toSection(updated) : null });
   } catch (error) {
+    /* A session that has ended is not a bad request. Without this an expired
+       session answered 400 here while the GET beside it answered 401
+       {signIn:true}, and `installSessionGuard` bounces to /login only on the
+       401 — so a save made just after a session lapsed failed silently and the
+       person was left looking at a form that would never work again. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     const message =
       error instanceof Error ? error.message : "The section could not be changed.";
     return Response.json({ error: message }, { status: 400 });
@@ -525,6 +551,109 @@ async function referencesTo(context: ScopedDatabase, key: string) {
 }
 
 /**
+ * May this caller destroy a section outright, as opposed to archiving one?
+ *
+ * `data.delete`, not `settings.edit`. The two verbs on this endpoint are not
+ * the same kind of act and were behind the same capability, which meant an
+ * `admin` — who holds `settings.edit` by default and is deliberately NOT given
+ * `data.delete`, because "archiving is reversible and deletion is not"
+ * (`app/lib/permissions.ts`) — could permanently destroy a section while being
+ * refused the permanent deletion of a single row by `/api/trash`. This is the
+ * platform's own stated rule applied to the one destructive verb in this file;
+ * `/api/trash` and `/api/files/[id]` already read it exactly this way.
+ */
+async function mayPurge(context: ScopedDatabase) {
+  const subject = await resolvePermissions(
+    context.db,
+    context.orgId,
+    context.actor.role,
+  );
+  return can(subject, "data.delete");
+}
+
+/**
+ * Forget every trace of a section that is about to stop existing.
+ *
+ * Its remembered and default views, and its name in every stored arrangement —
+ * the workspace default and each person's own. `resolveNavigation` already
+ * drops a key the catalogue no longer holds, so leaving these behind would draw
+ * nothing; removing them is what stops a purge leaving rows nothing can ever
+ * reach again, and what makes the browser's confirmation true when it says the
+ * arrangement goes with the section.
+ *
+ * The arrangements are rewritten one row at a time because the key lives inside
+ * a JSON blob. There is one row per person per organisation, so this is a small
+ * loop over a small table, and it runs only on the deliberate destructive path.
+ */
+async function forgetSection(context: ScopedDatabase, key: string) {
+  await context.db
+    .delete(sectionViewPreferences)
+    .where(
+      and(
+        eq(sectionViewPreferences.organisationId, context.orgId),
+        eq(sectionViewPreferences.sectionKey, key),
+      ),
+    );
+
+  const layouts = await context.db
+    .select({
+      id: navigationLayouts.id,
+      items: navigationLayouts.items,
+      locked: navigationLayouts.locked,
+    })
+    .from(navigationLayouts)
+    .where(eq(navigationLayouts.organisationId, context.orgId));
+
+  for (const layout of layouts) {
+    let items: unknown;
+    let locked: unknown;
+    try {
+      items = JSON.parse(layout.items) as unknown;
+      locked = JSON.parse(layout.locked) as unknown;
+    } catch {
+      // A row that will not parse is already treated as "no opinion" by every
+      // reader. Rewriting it here would be the first thing to give it meaning.
+      continue;
+    }
+    if (!Array.isArray(items) && !Array.isArray(locked)) continue;
+    const keptItems = Array.isArray(items)
+      ? items.filter(
+          (entry) =>
+            !(
+              entry &&
+              typeof entry === "object" &&
+              (entry as Record<string, unknown>).key === key
+            ),
+        )
+      : [];
+    const keptLocked = Array.isArray(locked)
+      ? locked.filter((entry) => entry !== key)
+      : [];
+    const changed =
+      (Array.isArray(items) && keptItems.length !== items.length) ||
+      (Array.isArray(locked) && keptLocked.length !== locked.length);
+    if (!changed) continue;
+    await context.db
+      .update(navigationLayouts)
+      .set({
+        items: JSON.stringify(keptItems),
+        locked: JSON.stringify(keptLocked),
+        updatedAt: new Date().toISOString(),
+      })
+      /* Scoped by organisation as well as by id. Every other write in this file
+         names both, and an id-only WHERE would be safe here only because the
+         SELECT above was scoped — a property of the caller rather than of the
+         statement, which is the kind that stops being true after a refactor. */
+      .where(
+        and(
+          eq(navigationLayouts.organisationId, context.orgId),
+          eq(navigationLayouts.id, layout.id),
+        ),
+      );
+  }
+}
+
+/**
  * DELETE — remove a section. `?key=section:cctv`, optionally `&purge=1`.
  *
  * ARCHIVE IS THE DEFAULT, AND THAT IS THE POINT.
@@ -533,9 +662,25 @@ async function referencesTo(context: ScopedDatabase, key: string) {
  * out of the catalogue, so it stops being drawn in every sidebar immediately —
  * no arrangement is rewritten, no stored layout is migrated, and restoring it
  * puts it back exactly where it was, with the view everybody was landing on
- * still chosen. A hard delete throws all of that away, so it is a separate,
- * explicit request, and it is REFUSED while anything still refers to the
- * section. Silently dropping those rows is the one outcome not on offer.
+ * still chosen.
+ *
+ * A PURGE IS THE SECOND ACT, AND IT HAS TO BE REACHABLE.
+ *
+ * It used to be refused while ANY stored arrangement or chosen view named the
+ * key. That read as caution and behaved as a dead end: `sidebar-nav.tsx` builds
+ * its payload from the whole resolved layout, so every saved sidebar names
+ * every catalogue key — which meant that the moment one colleague dragged one
+ * item, no section could ever be purged again and the 409 was the permanent
+ * answer. Worse, that refusal said the section "was archived rather than
+ * deleted" while writing nothing at all, so a caller was told a live section
+ * had been taken out of use when it had not been touched.
+ *
+ * The precondition is now the thing that actually means "nobody is using this":
+ * the section must ALREADY BE ARCHIVED. Archiving is the reversible step and it
+ * is what takes the section out of every sidebar; purging is then the
+ * deliberate second request, gated on `data.delete`, and it CLEARS the
+ * references rather than being blocked by them. What was discarded is counted
+ * first and returned, so the caller learns what went with it.
  */
 export async function DELETE(request: Request) {
   try {
@@ -576,19 +721,36 @@ export async function DELETE(request: Request) {
       return Response.json({ ok: true, key: row.key, archived: true });
     }
 
-    const references = await referencesTo(context, row.key);
-    if (references.arrangements > 0 || references.views > 0) {
+    if (!(await mayPurge(context))) {
       return Response.json(
         {
           error:
-            "This section is still referred to by a saved sidebar or a chosen view, so it was archived rather than deleted. Nothing was lost.",
+            "Permanently deleting a section needs the data.delete permission. Removing it archives it instead, which takes it out of every sidebar and can be undone.",
           key: row.key,
-          archived: true,
-          references,
+        },
+        { status: 403 },
+      );
+    }
+
+    /* Archived first, always. This is the precondition that used to be a
+       reference count: it means the section is already out of every sidebar and
+       somebody chose to take it out, which is the state a permanent deletion
+       should follow rather than replace. */
+    if (!row.archivedAt) {
+      return Response.json(
+        {
+          error: `"${row.label}" is still in use. Remove it first, which archives it and takes it out of every sidebar, and then it can be deleted permanently.`,
+          key: row.key,
+          archived: false,
         },
         { status: 409 },
       );
     }
+
+    /* Counted BEFORE they are cleared, so the audit line and the response say
+       what the deletion actually discarded. */
+    const references = await referencesTo(context, row.key);
+    await forgetSection(context, row.key);
 
     await context.db
       .delete(workspaceSections)
@@ -604,10 +766,17 @@ export async function DELETE(request: Request) {
       "workspace.section_deleted",
       row.key,
       `Permanently deleted the "${row.label}" workspace section.`,
-      { key: row.key, label: row.label, recoverable: false },
+      { key: row.key, label: row.label, recoverable: false, discarded: references },
     );
-    return Response.json({ ok: true, key: row.key, deleted: true });
+    return Response.json({ ok: true, key: row.key, deleted: true, discarded: references });
   } catch (error) {
+    /* A session that has ended is not a bad request. Without this an expired
+       session answered 400 here while the GET beside it answered 401
+       {signIn:true}, and `installSessionGuard` bounces to /login only on the
+       401 — so a save made just after a session lapsed failed silently and the
+       person was left looking at a form that would never work again. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     const message =
       error instanceof Error ? error.message : "The section could not be removed.";
     return Response.json({ error: message }, { status: 400 });

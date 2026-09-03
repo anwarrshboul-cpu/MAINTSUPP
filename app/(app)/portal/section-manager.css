@@ -1,0 +1,293 @@
+/*
+ * W02 — the section manager's own styling.
+ *
+ * Deliberately small. The dialog shell, the buttons, the fields and the hints
+ * are `.ba-*` from `board-actions.css`, which `board-modal.tsx` already pulls
+ * in; only the things that file has no equivalent for live here — the section
+ * rows, the icon grid and the confirmation panel.
+ *
+ * The one media query is at 640px, which is inside the agreed set
+ * (640 / 767 / 768 / 1024 / 1280). Several stage tests fail on any other width,
+ * so a "just this once" breakpoint here would break them.
+ */
+
+.sec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sec-heading {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sec-empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: var(--surface-card-lo);
+}
+
+/* ── The list of sections ─────────────────────────────────────────────────── */
+
+.sec-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sec-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.sec-list--archived .sec-row {
+  background: var(--surface-card-lo);
+}
+
+.sec-row__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
+}
+
+.sec-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sec-row__text strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sec-row__text small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sec-row__tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/*
+ * One glyph, two directions. `Icon name="chevron"` points down, so "up" is the
+ * same drawing rotated rather than a second icon that could drift from it.
+ */
+.sec-up {
+  transform: rotate(180deg);
+}
+
+/*
+ * The description field. `.ba-input` gives it the border, the radius and the
+ * 16px font that stops iOS zooming on focus; only the things a single-line
+ * input has no opinion about are set here.
+ */
+.sec-textarea {
+  min-height: 56px;
+  padding: 8px 10px;
+  line-height: 1.45;
+  resize: vertical;
+  font: inherit;
+  font-size: 16px;
+}
+
+/* ── The icon picker ──────────────────────────────────────────────────────── */
+
+.sec-icons {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sec-icons legend {
+  padding: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sec-icons__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-card-lo);
+}
+
+.sec-icon {
+  display: grid;
+  place-items: center;
+  /* 38px, not 44: this is a dense grid of 36 choices inside a dialog, and a
+     44px cell pushes it to four rows of scroll on a phone. The whole grid is
+     reachable by arrow key from one tab stop, which is the path that matters. */
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sec-icon input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sec-icon:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.sec-icon.is-chosen {
+  background: var(--brand-solid);
+  border-color: var(--brand-solid);
+  color: var(--on-brand-solid);
+}
+
+/* The radio is invisible, so its focus ring has to be drawn by the label. */
+.sec-icon:focus-within {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+/* ── The add / edit form ──────────────────────────────────────────────────── */
+
+.sec-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sec-form__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ── The permanent-removal confirmation ───────────────────────────────────── */
+
+.sec-confirm {
+  padding: 14px 16px;
+  border: 1px solid var(--danger-solid);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sec-confirm:focus-visible {
+  outline: 2px solid var(--danger-solid);
+  outline-offset: 2px;
+}
+
+.sec-confirm strong {
+  font-size: 14.5px;
+  color: var(--ink);
+}
+
+.sec-confirm p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.sec-confirm__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sec-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * On a phone the tools wrap under the name rather than squeezing it to an
+ * ellipsis: the label is the thing you are looking for, and four controls plus
+ * a 32px icon leave it about six characters at 360px.
+ */
+@media (max-width: 640px) {
+  .sec-row {
+    flex-wrap: wrap;
+  }
+
+  .sec-row__text {
+    flex: 1 1 60%;
+  }
+
+  .sec-row__tools {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+
+  /*
+   * The shared button classes are 32px (`.ba-btn--small`) and 40px
+   * (`.ba-iconbtn`), and neither is covered by the 44px floor
+   * `brand-overrides.css` applies to the rest of the shell — its selector list
+   * does not name them. These are the W02-01/03/04 controls, so they are
+   * exactly the ones that must be tappable. Scoped to this dialog rather than
+   * raised globally: widening the floor to every `.ba-btn--small` in the
+   * product would re-space several dialogs this workstream has no business
+   * touching.
+   */
+  .sec-modal .sec-row__tools .ba-btn--small,
+  .sec-modal .sec-row__tools .ba-iconbtn {
+    min-height: 44px;
+  }
+
+  .sec-modal .sec-row__tools .ba-iconbtn {
+    width: 44px;
+    height: 44px;
+  }
+}

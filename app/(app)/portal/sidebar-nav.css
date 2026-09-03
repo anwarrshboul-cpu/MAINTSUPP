@@ -164,6 +164,56 @@
   color: var(--rail-fg);
 }
 
+/*
+ * W02-01 / W02-03 / W02-04 on a touch screen.
+ *
+ * The controls above reveal on `:hover` and `:focus-within` only, and reordering
+ * otherwise depends on HTML5 drag-and-drop — which does not fire for touch — or
+ * on Alt + arrow, which needs a keyboard. On a phone or a tablet there was
+ * therefore NO path to reordering, renaming or hiding anything: the whole
+ * sidebar editor was desktop-only without saying so. The buttons were also
+ * 21x21, less than half the 44px target the rest of the drawer is held to.
+ *
+ * `hover: none` is the query for "this pointer cannot hover", which is the
+ * actual condition — a narrow desktop window still hovers and keeps the tidy
+ * reveal, while a large tablet does not and gets the controls. Scoping it to
+ * `.nav-row--editing` keeps the resting sidebar a list of places: nothing
+ * appears until Customise sidebar is on.
+ *
+ * `!important` is repeated because the base rule uses it; without matching it
+ * the size would not change. It is not a new escalation.
+ */
+@media (hover: none) {
+  .nav-row--editing .nav-row-actions,
+  .nav-label--editing .nav-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .nav-row-actions button {
+    width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* Four 44px targets need the room. The strip stops floating over the label
+     and sits under it, which is also what stops it covering the name it is
+     about. */
+  .nav-row--editing .nav-row-actions {
+    position: static;
+    justify-content: flex-end;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+  }
+
+  .nav-row--editing {
+    flex-wrap: wrap;
+    height: auto;
+  }
+}
+
 .nav-row-actions button:disabled {
   opacity: 0.3;
   cursor: not-allowed;
@@ -226,6 +276,16 @@
 .nav-rename--item {
   min-height: 38px;
   margin-left: 37px;
+  /*
+   * `.nav-rename` is `width: 100%`, and 100% of the row PLUS a 37px left margin
+   * is 37px wider than the row — measured as exactly 37px of overflow at every
+   * width from 1440 down to 320. Because the rail scrolls vertically, its
+   * `overflow-x` computes to `auto`, so the sidebar grew a horizontal scrollbar
+   * and the right-hand end of the field — where the caret sits while you type a
+   * long name — was off the edge. This is the W02-03 control, so it is the one
+   * field in the product that most needs to be fully visible while in use.
+   */
+  width: calc(100% - 37px);
   font-size: 11px;
   font-weight: 560;
   letter-spacing: normal;

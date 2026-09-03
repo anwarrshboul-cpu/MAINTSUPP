@@ -85,6 +85,7 @@ export function SidebarNav({
   badges,
   badgeDescriptions,
   onNotify,
+  onManageSections,
 }: {
   /** What the app can actually navigate to, in built-in order. */
   catalogue: SidebarNavEntry[];
@@ -106,6 +107,17 @@ export function SidebarNav({
    */
   badgeDescriptions?: Record<string, string>;
   onNotify?: (message: string) => void;
+  /*
+   * W02-02 — open the section manager.
+   *
+   * A CALLBACK, not the dialog itself. This file edits an ARRANGEMENT; the
+   * dialog edits which sections EXIST, which is a different table and a
+   * different capability, and it has to tell `portal-app` to re-read its
+   * catalogue afterwards. Owning it here would put that refresh two components
+   * away from the state it has to refresh. Absent means the button is not
+   * drawn, so a caller that has no section catalogue is not offered one.
+   */
+  onManageSections?: () => void;
 }) {
   const [arrangement, setArrangement] = useState<Arrangement>(EMPTY);
   const [locked, setLocked] = useState<string[]>([]);
@@ -242,6 +254,9 @@ export function SidebarNav({
     const response = await fetch("/api/navigation", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
+      /* So a save started as the page goes away still leaves the browser. A
+         layout is a few hundred bytes, far inside the 64KB keepalive budget. */
+      keepalive: true,
       body: JSON.stringify({
         scope: job.scope,
         items: job.items,
@@ -268,12 +283,39 @@ export function SidebarNav({
     [flush],
   );
 
-  useEffect(
-    () => () => {
+  /*
+   * The debounce must not be able to swallow the last change — W02-09.
+   *
+   * Every reorder, rename and hide is written 400ms after it stops changing.
+   * The cleanup below used to clear that timer and nothing else, so navigating
+   * away, or closing the tab, within 400ms of the last drag dropped the save
+   * silently: the sidebar looked rearranged until the next reload put it back.
+   * That is exactly the complaint W02-09 exists to prevent, and it is the
+   * hardest kind to report, because the person who sees it did nothing wrong.
+   *
+   * A ref because the cleanup runs once, on unmount, and must call the CURRENT
+   * flush rather than the one that existed at mount. `pagehide` covers the case
+   * React never sees at all — a closed tab, a followed link, a phone switching
+   * apps — and fires on the bfcache path where `unload` does not.
+   */
+  const flushRef = useRef(flush);
+  useEffect(() => {
+    flushRef.current = flush;
+  }, [flush]);
+
+  useEffect(() => {
+    const onPageHide = () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    },
-    [],
-  );
+      saveTimer.current = null;
+      void flushRef.current();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      void flushRef.current();
+    };
+  }, []);
 
   const commit = useCallback(
     (next: NavArrangementItem[], message: string, lockedKeys = locked) => {
@@ -684,7 +726,20 @@ export function SidebarNav({
                         onBlur={() => applyRename(item.key, renameDraft)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") applyRename(item.key, renameDraft);
-                          if (event.key === "Escape") setRenaming(null);
+                          if (event.key === "Escape") {
+                            /* Back to the row you were renaming. Without this
+                               the input unmounts and focus falls to <body>,
+                               which loses your place in a seventeen-item list
+                               — the one thing a keyboard user cannot recover
+                               from by looking. */
+                            setRenaming(null);
+                            const key = item.key;
+                            window.requestAnimationFrame(() => {
+                              document
+                                .querySelector<HTMLElement>(`[data-nav-key="${key}"]`)
+                                ?.focus();
+                            });
+                          }
                           event.stopPropagation();
                         }}
                       />
@@ -694,6 +749,17 @@ export function SidebarNav({
                           transient ? " is-transient" : ""
                         }${item.hidden && editing ? " is-hidden" : ""}`}
                         type="button"
+                        /*
+                         * Which section you are on, said out loud.
+                         *
+                         * `is-active` is a class, and a class is a colour. A
+                         * screen reader read seventeen identical buttons with
+                         * nothing to distinguish the one whose page was on
+                         * screen. `aria-current="page"` is the attribute for
+                         * exactly this, and it is `undefined` rather than
+                         * "false" on the others so only one element carries it.
+                         */
+                        aria-current={activeSection === item.key ? "page" : undefined}
                         data-nav-key={item.key}
                         data-nav-hidden={item.hidden ? "true" : "false"}
                         data-nav-locked={item.locked ? "true" : "false"}
@@ -805,7 +871,11 @@ export function SidebarNav({
           );
         })}
 
-        {editing && (
+        {/* `editable`, not `editing`: in the workspace scope without
+            `settings.edit`, or with no `users` row to save a personal layout
+            against, every control in this tray is one the server will refuse.
+            The per-row controls follow the same flag. */}
+        {editable && (
           <div className="nav-editor">
             {/*
               "Add" is a restore, never a creation. Everything offered here came
@@ -833,6 +903,23 @@ export function SidebarNav({
             )}
 
             <div className="nav-editor__tools">
+              {/*
+                W02-02. First, because adding a SECTION is the thing an owner
+                comes here to do; a heading is the container they reach for
+                second. Both sit under "Customise sidebar" so the resting
+                sidebar stays a list of places rather than a workbench.
+              */}
+              {onManageSections && (
+                <button
+                  type="button"
+                  className="nav-editor__tool"
+                  data-nav-sections
+                  onClick={onManageSections}
+                >
+                  <Icon name="plus" size={13} />
+                  <span>New section</span>
+                </button>
+              )}
               <button type="button" className="nav-editor__tool" onClick={addGroup}>
                 <Icon name="plus" size={13} />
                 <span>New heading</span>

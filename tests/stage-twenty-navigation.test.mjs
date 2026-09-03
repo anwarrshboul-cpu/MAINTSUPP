@@ -698,12 +698,34 @@ test("live: a section the stored layout never heard of comes back visible", { sk
    * The property worth pinning survives: a custom section may join the list,
    * but a built-in the layout already carries may never be called new.
    */
+  /*
+   * "audit" is NOT expected to be new, and used to be — W2.
+   *
+   * This list was written when `audit` was absent from `BUILT_IN_ORDER`. It has
+   * been in it since Stage 20's administration block, and the layout saved four
+   * lines above is built from `BUILT_IN_ORDER` itself — so the arrangement
+   * already names `audit`, and reporting it as new would be the bug rather than
+   * the behaviour. The assertion could only ever have passed against a build
+   * where the two disagreed.
+   *
+   * It went unnoticed because this file's live tests skip unless a dev server
+   * answers, and the suite's default base URL is :3000 while the server runs on
+   * :5173. Run with `MAINTSUPP_BASE_URL=http://localhost:5173` it fails at
+   * HEAD too. The three keys left are the ones genuinely outside
+   * `BUILT_IN_ORDER`, which is what the test is actually about: a catalogue
+   * entry the stored layout has never seen must still be drawn.
+   */
   const appeared = payload.layout.appeared;
-  for (const key of ["account", "admin", "audit", "teams"]) {
+  const NEW_TO_THIS_LAYOUT = ["account", "admin", "teams"];
+  for (const key of NEW_TO_THIS_LAYOUT) {
     assert.ok(appeared.includes(key), `${key} must be reported as new to this layout`);
   }
+  assert.ok(
+    !appeared.includes("audit"),
+    "audit is in BUILT_IN_ORDER and therefore in the saved layout; it cannot be new",
+  );
   const unexpected = appeared.filter(
-    (key) => !["account", "admin", "audit", "teams"].includes(key) && !key.startsWith("section:"),
+    (key) => !NEW_TO_THIS_LAYOUT.includes(key) && !key.startsWith("section:"),
   );
   assert.deepEqual(unexpected, [], "a section the layout already carried was reported as new");
   await clear();

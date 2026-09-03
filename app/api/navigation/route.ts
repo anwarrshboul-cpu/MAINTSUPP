@@ -436,6 +436,13 @@ export async function PUT(request: Request) {
     }
     return Response.json({ ok: true, scope, locked });
   } catch (error) {
+    /* A session that has ended is not a bad request. Without this an expired
+       session answered 400 here while the GET beside it answered 401
+       {signIn:true}, and `installSessionGuard` bounces to /login only on the
+       401 — so a save made just after a session lapsed failed silently and the
+       person was left looking at a form that would never work again. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     const message =
       error instanceof Error ? error.message : "The navigation layout could not be saved.";
     return Response.json({ error: message }, { status: 400 });
@@ -460,6 +467,13 @@ export async function DELETE(request: Request) {
     }
     return Response.json({ ok: true, reset: true });
   } catch (error) {
+    /* A session that has ended is not a bad request. Without this an expired
+       session answered 400 here while the GET beside it answered 401
+       {signIn:true}, and `installSessionGuard` bounces to /login only on the
+       401 — so a save made just after a session lapsed failed silently and the
+       person was left looking at a form that would never work again. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     const message =
       error instanceof Error ? error.message : "The sidebar could not be reset.";
     return Response.json({ error: message }, { status: 400 });

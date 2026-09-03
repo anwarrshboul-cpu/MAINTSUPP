@@ -1666,6 +1666,11 @@ export const workspaceSections = sqliteTable(
     /** Namespaced `section:<slug>` so it can never collide with a built-in key. */
     key: text("key").notNull(),
     label: text("label").notNull(),
+    /**
+     * W02-07's "description" — what this section is for, in the workspace's own
+     * words. NULL means "no opinion", and the screen's own blurb stands.
+     */
+    description: text("description"),
     /** One of `IconName` in app/components.tsx. Validated on write. */
     icon: text("icon").notNull().default("grid"),
     /** Which built-in surface draws it — see SECTION_SURFACES. */

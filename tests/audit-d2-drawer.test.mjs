@@ -85,7 +85,25 @@ test("opening the drawer moves focus into it, and closing gives it back", () => 
 });
 
 test("Escape closes the drawer, but yields to whatever is on top of it", () => {
-  const at = SOURCE.indexOf('if (event.key !== "Escape" || event.defaultPrevented) return;');
+  /*
+   * RE-POINTED — W2. `indexOf` took the FIRST Escape guard in the file, and
+   * this file now has more than one: the navigation drawer gained the same
+   * `event.defaultPrevented` guard, higher up, so the search landed on a
+   * handler that has no evidence manager and no mobile editor to yield to and
+   * every assertion below failed against the wrong function.
+   *
+   * The handler is now identified by what makes it THIS drawer's — the two
+   * inner surfaces it defers to — rather than by being the first of its shape.
+   * Nothing about the contract has changed.
+   */
+  const GUARD = 'if (event.key !== "Escape" || event.defaultPrevented) return;';
+  let at = -1;
+  for (let from = SOURCE.indexOf(GUARD); from !== -1; from = SOURCE.indexOf(GUARD, from + 1)) {
+    if (SOURCE.slice(from, from + 1800).includes("evidenceOpen || mobileEditor")) {
+      at = from;
+      break;
+    }
+  }
   assert.notEqual(at, -1, "the drawer's Escape handler went missing");
   const handler = SOURCE.slice(at, at + 1800);
 

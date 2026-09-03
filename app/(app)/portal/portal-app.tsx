@@ -141,6 +141,7 @@ import { EvidenceManager } from "./evidence-manager";
 import { BeforeAfter } from "./before-after";
 // Stage 20 — the sidebar is arranged per person. See sidebar-nav.tsx.
 import { SidebarNav, type SidebarNavEntry } from "./sidebar-nav";
+import { SectionManager } from "./section-manager";
 import { uploadEvidenceFile } from "../../lib/client-upload";
 import {
   LiveMaintenanceBoard,
@@ -528,6 +529,33 @@ const navSecondary: Section[] = [
   "recycle-bin",
 ];
 
+/**
+ * Sections that exist, route and render — and are deliberately NOT offered in
+ * the sidebar.
+ *
+ * This list exists because leaving a key out of `navPrimary`/`navSecondary` did
+ * not do it. The catalogue below sweeps up every `sectionMeta` key nobody
+ * placed, on purpose, so that a section added by another team cannot end up
+ * with no nav item at all — and that safety net silently caught "units" and put
+ * it straight back, under "Workspace", one row below All clients. Both this
+ * file and `app/api/navigation/layout.ts` carried a comment saying Units was
+ * gone from the sidebar; it was on screen the whole time, and the two
+ * catalogues disagreed about it — the browser drew "Units" under Workspace
+ * while `GET /api/navigation` answered "units", lower case, under Operations,
+ * because the key reached `requestCatalogue` as one it had never heard of.
+ *
+ * So the two intentions are separated rather than left to collide: an omission
+ * still means "no position, keep the nav item", and THIS list means "no nav
+ * item". `tests/stage-two-menu-platform-sections.test.mjs` holds it level with
+ * `BUILT_IN_ORDER`, which is the assertion whose absence let the drift happen.
+ *
+ * The section is kept, not deleted — `/dashboard/units` still resolves, the
+ * screen still renders, a bookmark still works and no row in the asset register
+ * is touched. What changes is only that the sidebar stops offering a second
+ * door to what Sites already lists, which is what the owner asked for.
+ */
+const navExcluded: ReadonlySet<string> = new Set<string>(["units"]);
+
 const sectionRoutes: Record<Section, string> = {
   overview: "",
   maintenance: "jobs",
@@ -578,6 +606,9 @@ const routeSections: Record<string, Section> = Object.fromEntries(
  * Forgetting to also list it in `navPrimary` costs it a position — it lands at
  * the end of "Workspace" — and never costs it a nav item.
  *
+ * `navExcluded` is how a section opts OUT of that, which an omission cannot do
+ * and was wrongly believed to. See the note on it above.
+ *
  * The two checks below are the 404 guard: no label without a destination. A
  * key with a `sectionMeta` entry but no route would render a nav item that goes
  * nowhere, which is precisely what "Add must not invent a destination" forbids.
@@ -594,7 +625,10 @@ const builtInNavCatalogue: SidebarNavEntry[] = (() => {
   ];
   return ordered
     .filter(
-      (key) => key in sectionMeta && sectionRoutes[key as Section] !== undefined,
+      (key) =>
+        key in sectionMeta &&
+        sectionRoutes[key as Section] !== undefined &&
+        !navExcluded.has(key),
     )
     .map((key) => ({
       key,
@@ -618,6 +652,8 @@ const builtInNavCatalogue: SidebarNavEntry[] = (() => {
 type WorkspaceSectionEntry = {
   key: string;
   label: string;
+  /** W02-07 — what the workspace says this section is for, or null. */
+  description?: string | null;
   icon: IconName;
   surface: Section;
   group: string;
@@ -1057,6 +1093,28 @@ export default function PortalApp({
     useState<RequestDrawerTab>("updates");
   const [showCreateRequest, setShowCreateRequest] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  /*
+   * Escape closes the navigation drawer.
+   *
+   * The drawer is a scroll-locking overlay with a scrim over the page — every
+   * other overlay in this product closes on Escape, and this one did not, so
+   * the one dismissal a keyboard user reaches for first did nothing. The X and
+   * the scrim always worked; that is not the same thing.
+   *
+   * `defaultPrevented` is respected so a popover or a rename input inside the
+   * drawer keeps its own Escape and closes itself first, rather than having the
+   * whole drawer shut underneath it.
+   */
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      setMobileNavOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen]);
   /*
    * The nav drawer and the create-request modal are the two overlays the shell
    * owns; the job drawer takes its own lock where it mounts. All three go
@@ -1518,10 +1576,36 @@ export default function PortalApp({
     return withContractorNames(named, workspace?.contractors ?? []);
   }, [documents, requests, workspace]);
 
+  /*
+   * Back and Forward, resolved the SAME WAY the server resolves a typed URL.
+   *
+   * This read `pathname.split("/")[1]` — one segment — while `sectionRoutes`
+   * holds two values that contain a slash and one namespace that does. So the
+   * handler and `app/(app)/dashboard/[[...section]]/page.tsx` disagreed about
+   * the same address, and a reload and a Back button on that address landed in
+   * different places:
+   *
+   *   /dashboard/admin/roles  →  "admin"  →  admin-users.  Pressing Back onto
+   *                              Roles or All clients rendered USERS.
+   *   /dashboard/s/cctv       →  "s"      →  undefined → overview.  Back onto
+   *                              any workspace section dropped you on Overview,
+   *                              though a hard reload of it worked.
+   *
+   * The three lines below are the server's own resolution order, in the same
+   * order, for the same reason it is written that way there: join first so a
+   * nested route matches whole, fall back to the first segment so `admin`
+   * still resolves, and take `s/<slug>` as a workspace section before either.
+   * `tests/stage-two-menu-platform-sections.test.mjs` holds the two files level.
+   */
   useEffect(() => {
     const syncSectionFromHistory = () => {
-      const slug = window.location.pathname.split("/").filter(Boolean)[1] ?? "";
-      setActiveSection(routeSections[slug] ?? "overview");
+      const segments = window.location.pathname.split("/").filter(Boolean).slice(1);
+      const workspaceSection =
+        segments[0] === "s" && segments[1] ? `section:${segments[1]}` : null;
+      const slug = segments.join("/");
+      setActiveSection(
+        workspaceSection ?? routeSections[slug] ?? routeSections[segments[0] ?? ""] ?? "overview",
+      );
       setMobileNavOpen(false);
     };
     window.addEventListener("popstate", syncSectionFromHistory);
@@ -1745,31 +1829,55 @@ export default function PortalApp({
    * zero-delay timer like every other loader here, and a failed load leaves the
    * built-in sidebar standing — it is already on screen.
    */
+  /*
+   * Lifted out of the effect so the section manager can call it again.
+   *
+   * Adding a section has to change the sidebar without a reload, and the only
+   * thing that knows the catalogue is this state. `useCallback` with no
+   * dependencies because it reads nothing from the render — the filter is
+   * against two module constants.
+   */
+  const reloadWorkspaceSections = useCallback(async () => {
+    try {
+      const response = await fetch("/api/navigation", {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        sections?: WorkspaceSectionEntry[];
+      };
+      setWorkspaceSections(
+        (payload.sections ?? []).filter(
+          (entry) =>
+            entry.surface in sectionMeta &&
+            sectionRoutes[entry.surface] !== undefined,
+        ),
+      );
+    } catch {
+      // Built-in catalogue only. Nothing disappears; nothing 404s.
+    } finally {
+      /*
+       * Answered, either way — which is a different fact from "there are no
+       * sections", and the difference is what stops a deep link rendering the
+       * wrong page. In the `finally` so a failed load also settles: the
+       * catalogue is then known to be the built-in one, and a section URL
+       * resolves to Overview deliberately rather than while still loading.
+       */
+      setWorkspaceSectionsLoaded(true);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const response = await fetch("/api/navigation", {
-            headers: { Accept: "application/json" },
-          });
-          if (!response.ok) return;
-          const payload = (await response.json()) as {
-            sections?: WorkspaceSectionEntry[];
-          };
-          setWorkspaceSections(
-            (payload.sections ?? []).filter(
-              (entry) =>
-                entry.surface in sectionMeta &&
-                sectionRoutes[entry.surface] !== undefined,
-            ),
-          );
-        } catch {
-          // Built-in catalogue only. Nothing disappears; nothing 404s.
-        }
-      })();
+      void reloadWorkspaceSections();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [reloadWorkspaceSections]);
+
+  /** W02-02 — whether the section manager is open. */
+  const [sectionManagerOpen, setSectionManagerOpen] = useState(false);
+  /** Whether the workspace's own sections have been fetched — see below. */
+  const [workspaceSectionsLoaded, setWorkspaceSectionsLoaded] = useState(false);
 
   /*
    * What may appear in the sidebar: what the product ships, then what this
@@ -1831,9 +1939,64 @@ export default function PortalApp({
   const activeCustom =
     workspaceSections.find((entry) => entry.key === activeSection) ?? null;
   const rawSurface = activeCustom ? activeCustom.surface : activeSection;
+  /*
+   * A workspace section whose catalogue has not arrived yet is PENDING, not
+   * Overview.
+   *
+   * The server resolves `/dashboard/s/cctv` to `section:cctv` with no database
+   * call, and the browser learns what that section draws from `/api/navigation`
+   * — about two seconds later. Until then `rawSurface` is a key `sectionMeta`
+   * has never heard of, and the fallback below sent it to Overview: a deep
+   * link, a refresh or a Forward onto any added section rendered the WRONG
+   * PAGE, complete with its heading and its figures, and then silently
+   * replaced it. Showing the right page late is fine; showing a different
+   * page confidently is not.
+   *
+   * Only for `section:` keys. Anything else unknown is a stale bookmark to a
+   * built-in section that no longer exists, and Overview is the right answer
+   * for that immediately.
+   */
+  const sectionPending =
+    !activeCustom &&
+    !workspaceSectionsLoaded &&
+    typeof activeSection === "string" &&
+    activeSection.startsWith("section:");
   const activeSurface: Section = (
-    rawSurface in sectionMeta ? rawSurface : "overview"
+    rawSurface in sectionMeta
+      ? rawSurface
+      : sectionPending
+        ? "__pending"
+        : "overview"
   ) as Section;
+
+  /*
+   * A `section:` URL that resolved to nothing, once we know it resolved to
+   * nothing.
+   *
+   * `/dashboard/s/anything` answers 200 and renders Overview — deliberately,
+   * so a stale bookmark lands somewhere real rather than on a blank screen.
+   * What was not deliberate is that the address bar went on saying
+   * `/dashboard/s/anything` over Overview's content, with no sidebar item
+   * active: a link that looks like it worked, reproduces on reload, and can be
+   * shared onward in that state. Once the catalogue has arrived and the key is
+   * genuinely absent, the URL is corrected to the page actually on screen.
+   *
+   * `replaceState`, not `pushState`: the bad address should not become a Back
+   * destination, and this must not add a history entry the user did not make.
+   */
+  useEffect(() => {
+    if (!workspaceSectionsLoaded) return undefined;
+    if (!activeSection.startsWith("section:")) return undefined;
+    if (workspaceSections.some((entry) => entry.key === activeSection)) return undefined;
+    /* Deferred past the commit, like every other state write reached from an
+       effect in this file — the correction is a follow-up to a render, not
+       part of one. */
+    const timer = window.setTimeout(() => {
+      setActiveSection("overview");
+      window.history.replaceState({}, "", "/dashboard");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [workspaceSectionsLoaded, workspaceSections, activeSection]);
 
   const setSection = (section: string) => {
     setActiveSection(section);
@@ -2214,9 +2377,22 @@ export default function PortalApp({
    * The screen's framing, under the workspace's own name for it. A section
    * called "CCTV" that draws the job board is titled CCTV, not "Live job list".
    */
-  const surfaceMeta = sectionMeta[activeSurface];
+  /* `?? sectionMeta.overview` because `activeSurface` carries the "__pending"
+     sentinel while a workspace section is resolving, and the topbar reads this
+     on every render. The strip is hidden behind `sectionPending` below; this
+     only stops the lookup being undefined on the way there. */
+  const surfaceMeta = sectionMeta[activeSurface] ?? sectionMeta.overview;
   const meta = activeCustom
-    ? { ...surfaceMeta, label: activeCustom.label, title: activeCustom.label }
+    ? {
+        ...surfaceMeta,
+        label: activeCustom.label,
+        title: activeCustom.label,
+        /* And the eyebrow, when the workspace described the section. Without
+           this a section called CCTV was titled CCTV under an eyebrow that
+           still read "Live maintenance workspace" — the strip contradicting
+           itself in two adjacent lines. */
+        eyebrow: activeCustom.description?.trim() || surfaceMeta.eyebrow,
+      }
     : surfaceMeta;
   const urgentCount = requests.filter(
     (request) =>
@@ -2359,6 +2535,7 @@ export default function PortalApp({
           badges={{ maintenance: urgentCount }}
           badgeDescriptions={{ maintenance: "urgent jobs open" }}
           onNotify={setToast}
+          onManageSections={() => setSectionManagerOpen(true)}
         />
 
         <div className="sidebar-help">
@@ -2456,7 +2633,7 @@ export default function PortalApp({
             measure this row wondering why an element that is not on screen is
             in the markup.
           */}
-          {!narrowTopbar && (
+          {!narrowTopbar && !sectionPending && (
             <div className="page-identity">
               <span>{meta.eyebrow}</span>
               <strong>
@@ -2681,6 +2858,22 @@ export default function PortalApp({
             managers each read their own source and show their own empty state,
             so they are never reporting a figure they did not measure.
           */}
+          {/*
+            A workspace section, still resolving.
+
+            `activeSurface` carries the "__pending" sentinel here, so none of
+            the surface branches below match and the main area would otherwise
+            be blank. A blank screen is honest but indistinguishable from a
+            broken one, so it says what it is waiting for. It lasts about as
+            long as one `/api/navigation` round trip and never appears for a
+            built-in section, which the server resolves without it.
+          */}
+          {sectionPending && (
+            <div className="section-pending" role="status">
+              <p>Opening this section…</p>
+            </div>
+          )}
+
           {activeSurface === "overview" && dataMode === "unavailable" && (
             <WorkspaceUnavailable
               onRetry={() => {
@@ -2733,6 +2926,11 @@ export default function PortalApp({
               /* The section, not the board: two sections can read one board,
                  and each keeps its own open tab. */
               sectionKey={activeSection}
+              /* And its name, so the page is headed the way the sidebar entry
+                 that opened it is. Null for a built-in section, which keeps the
+                 board's own heading. */
+              sectionLabel={activeCustom?.label ?? null}
+              sectionDescription={activeCustom?.description ?? null}
               requests={requests}
               onCreateDetailed={() => setShowCreateRequest(true)}
               onOpenRequest={openRequest}
@@ -3045,6 +3243,23 @@ export default function PortalApp({
           }}
         />
       )}
+
+      {/*
+        W02 — the platform-structure editor.
+
+        Mounted here rather than inside `SidebarNav` because it changes which
+        sections EXIST, and this component is the one holding that catalogue:
+        `onChanged` re-reads it so a section added in the dialog is in the
+        sidebar behind it before the dialog closes. Rendered unconditionally and
+        gated on its own `open` prop, like every other dialog on this screen.
+      */}
+      <SectionManager
+        open={sectionManagerOpen}
+        onClose={() => setSectionManagerOpen(false)}
+        onChanged={() => {
+          void reloadWorkspaceSections();
+        }}
+      />
 
       {toast && (
         <div className="toast" role="status">

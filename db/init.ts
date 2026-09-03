@@ -3252,6 +3252,11 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
          organisation_id TEXT NOT NULL REFERENCES organisations(id),
          key TEXT NOT NULL,
          label TEXT NOT NULL,
+         /* W02-07 asks a new section's page for a description as well as a
+            title. Nullable: every section that existed before this reads NULL,
+            and a NULL description renders the screen's own blurb exactly as it
+            did. */
+         description TEXT,
          icon TEXT NOT NULL DEFAULT 'grid',
          surface TEXT NOT NULL DEFAULT 'board',
          surface_ref TEXT,
@@ -3296,6 +3301,21 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
       "CREATE UNIQUE INDEX IF NOT EXISTS section_view_preferences_scope_idx ON section_view_preferences(organisation_id, section_key, user_id)",
     ),
   ]);
+
+  /*
+   * The same column for a database provisioned before it existed.
+   *
+   * The CREATE above carries it for a fresh database; this carries it for every
+   * other one. `addColumn` reads `PRAGMA table_info` first and returns early
+   * when the table is absent or the column already there, so this is idempotent
+   * and costs one guarded read per boot — SQLite has no
+   * `ADD COLUMN IF NOT EXISTS`, and an unguarded ALTER would throw "duplicate
+   * column name" on the second boot and take every API route down with it.
+   *
+   * After the batch, never inside it: the table has to exist before it can be
+   * altered, and a batch gives no ordering guarantee this could rely on.
+   */
+  await addColumn(d1, "workspace_sections", "description", "TEXT");
 }
 
 async function ensureImportIdentity(d1: D1DatabaseLike) {

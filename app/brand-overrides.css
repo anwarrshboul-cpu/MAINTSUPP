@@ -6318,6 +6318,35 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
   }
 
   /*
+   * …which it could not do, because the crushable child was a scroller itself.
+   *
+   * `overflow-y: auto` above was the right instinct and it never engaged: a
+   * flex child that scrolls has a min-content height of 0, so `.portal-nav`
+   * absorbed the whole deficit and the SIDEBAR never overflowed — measured at
+   * 320x568 as a 178px window onto a 950px list, roughly three and a half rows
+   * of seventeen. The column was scrollable in principle and squashed in fact.
+   *
+   * Two rules fix it together, and neither works alone: nothing above or below
+   * the nav may shrink, and the nav stops being its own scroll container so its
+   * real height reaches the sidebar. The sidebar then overflows, as it was
+   * always meant to, and one scroll gesture moves the whole rail.
+   */
+  .portal-sidebar > * {
+    flex-shrink: 0;
+  }
+
+  .portal-nav {
+    overflow-y: visible;
+  }
+
+  /* The drawer keeps its scroll to itself rather than handing it to the page
+     underneath — the containment that lived on `.portal-nav` while that was the
+     scroller, moved to the element that scrolls now. */
+  .portal-sidebar {
+    overscroll-behavior: contain;
+  }
+
+  /*
    * Panel header actions ("View all", "Show summary") and the wordmark.
    *
    * These are text buttons that inherit their height from the line box — 18px

@@ -44,3 +44,42 @@ const IDENTITIES: Record<string, BoardIdentity> = {
 export function boardIdentity(boardId: string): BoardIdentity {
   return IDENTITIES[boardId] ?? IDENTITIES.maintenance;
 }
+
+/**
+ * The same identity, under the name the workspace gave this section — W02-07.
+ *
+ * A section called "CCTV" that draws the job board is titled CCTV. The topbar
+ * already did that (`portal-app.tsx` overrides `meta.title`), but the topbar is
+ * the one place the name was applied, and it is not rendered at all below
+ * 768px: the page's own `<h1>` came from this map, keyed on the BOARD, so the
+ * heading read "Maintenance operations board" and the mobile bar — the only
+ * name on a phone — read "Maintenance". A section was never called by its own
+ * name on the page it opened, and on a phone was never called by it anywhere.
+ *
+ * Only the two NAMES are replaced. The eyebrow, the blurb and the item noun
+ * still describe the screen, because they describe what the grid is and that
+ * has not changed — a CCTV section drawing the job board still holds jobs, and
+ * saying otherwise would be the invention this file's header rules out.
+ *
+ * `label` empty or absent gives the board's own identity back unchanged, so a
+ * built-in section is untouched by this.
+ */
+export function sectionIdentity(
+  boardId: string,
+  label?: string | null,
+  description?: string | null,
+): BoardIdentity {
+  const identity = boardIdentity(boardId);
+  const name = label?.trim();
+  const blurb = description?.trim();
+  if (!name && !blurb) return identity;
+  return {
+    ...identity,
+    ...(name ? { heading: name, shortName: name } : {}),
+    /* The workspace's own words when it gave any, otherwise the screen's. A
+       section with a name but no description still describes the grid
+       correctly, which is why these two are independent rather than one
+       override. */
+    ...(blurb ? { blurb } : {}),
+  };
+}
