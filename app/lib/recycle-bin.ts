@@ -632,7 +632,29 @@ async function restoreJob(
   }
 
   const placement = parsePlacement(entry.placement);
-  const boardId = placement?.boardId ?? entry.boardId ?? "maintenance";
+  /*
+   * A RESTORE THAT DOES NOT KNOW THE BOARD MUST REFUSE, NOT GUESS.
+   *
+   * This ended `?? "maintenance"`. `recycle_bin.board_id` is nullable and a
+   * snapshot can be written without one, so an entry that named no board was
+   * restored onto the CANONICAL JOB BOARD — somebody else's board gaining a row,
+   * a group or a view out of nowhere, with no error and no way to tell where it
+   * had come from. Now that a register can be created at runtime the guess is
+   * not even likely to be right.
+   *
+   * Refusing is recoverable: the entry stays in the bin, retention keeps
+   * running, and the reader is told what is missing. Restoring to the wrong
+   * board is not.
+   */
+  const boardId = placement?.boardId ?? entry.boardId;
+  if (!boardId) {
+    return {
+      ok: false,
+      error:
+        "This item's bin entry does not record which board it came from, so it cannot be put back.",
+      status: 409,
+    };
+  }
 
   /*
    * The group has to still exist, and still be live.
@@ -811,7 +833,29 @@ async function restoreGroup(
   }
 
   const snapshot = parsePlacement(entry.placement);
-  const boardId = snapshot?.boardId ?? entry.boardId ?? "maintenance";
+  /*
+   * A RESTORE THAT DOES NOT KNOW THE BOARD MUST REFUSE, NOT GUESS.
+   *
+   * This ended `?? "maintenance"`. `recycle_bin.board_id` is nullable and a
+   * snapshot can be written without one, so an entry that named no board was
+   * restored onto the CANONICAL JOB BOARD — somebody else's board gaining a row,
+   * a group or a view out of nowhere, with no error and no way to tell where it
+   * had come from. Now that a register can be created at runtime the guess is
+   * not even likely to be right.
+   *
+   * Refusing is recoverable: the entry stays in the bin, retention keeps
+   * running, and the reader is told what is missing. Restoring to the wrong
+   * board is not.
+   */
+  const boardId = snapshot?.boardId ?? entry.boardId;
+  if (!boardId) {
+    return {
+      ok: false,
+      error:
+        "This group's bin entry does not record which board it came from, so it cannot be put back.",
+      status: 409,
+    };
+  }
 
   /*
    * The old slot may have been taken while the group sat in the bin, and the
@@ -1016,7 +1060,30 @@ async function restoreBoardView(
     };
   }
 
-  const boardId = String(snapshot.boardId ?? entry.boardId ?? "maintenance");
+  /*
+   * A RESTORE THAT DOES NOT KNOW THE BOARD MUST REFUSE, NOT GUESS.
+   *
+   * This ended `?? "maintenance"`. `recycle_bin.board_id` is nullable and a
+   * snapshot can be written without one, so an entry that named no board was
+   * restored onto the CANONICAL JOB BOARD — somebody else's board gaining a row,
+   * a group or a view out of nowhere, with no error and no way to tell where it
+   * had come from. Now that a register can be created at runtime the guess is
+   * not even likely to be right.
+   *
+   * Refusing is recoverable: the entry stays in the bin, retention keeps
+   * running, and the reader is told what is missing. Restoring to the wrong
+   * board is not.
+   */
+  const restoredBoardId = snapshot.boardId ?? entry.boardId;
+  if (!restoredBoardId) {
+    return {
+      ok: false,
+      error:
+        "This view's bin entry does not record which board it came from, so it cannot be put back.",
+      status: 409,
+    };
+  }
+  const boardId = String(restoredBoardId);
   const existing = await db
     .select({ key: boardViews.key })
     .from(boardViews)

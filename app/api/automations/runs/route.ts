@@ -11,7 +11,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { automationRuns, boardAutomations } from "../../../../db/schema";
-import { normaliseBoardId } from "../../../lib/automations/store";
+import { resolveBoardId } from "../../../lib/automations/store";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,11 @@ export async function GET(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
     const url = new URL(request.url);
-    const boardId = normaliseBoardId(url.searchParams.get("boardId") ?? url.searchParams.get("board"));
+    const boardId = await resolveBoardId(
+      guard.scope.db,
+      guard.scope.orgId,
+      url.searchParams.get("boardId") ?? url.searchParams.get("board"),
+    );
     const automationId = (url.searchParams.get("automationId") ?? "").trim().slice(0, 80);
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 500);
 

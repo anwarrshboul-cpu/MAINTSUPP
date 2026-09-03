@@ -115,8 +115,29 @@ export function AddViewMenu({
   return (
     <AnchoredPopover open={open} anchorRef={anchorRef} onClose={onClose} placement="bottom-end" label="Add a view">
       <div className="ba-menu ba-menu--views">
+        {/*
+          AN ENTRY THAT CANNOT MAKE A WORKING VIEW IS DISABLED, NOT CLICKABLE.
+
+          Every type was offered as a live choice with a "soon" tag beside the
+          unbuilt ones, so picking Timeline wrote a real `board_views` row, drew
+          a real tab and opened a panel reading "Timeline is not built yet" —
+          a clickable no-op that left a dead tab on the board somebody then had
+          to find and delete. The tag stays, because hiding the type would say
+          the product has no plans for it; what goes is the click.
+          `POST /api/board/views` refuses the same types with a 409, so this is
+          the courtesy and the route is the rule.
+        */}
         {types.map((type) => (
-          <button key={type.key} type="button" role="menuitem" className="ba-menu__item" onClick={() => onAdd(type)}>
+          <button
+            key={type.key}
+            type="button"
+            role="menuitem"
+            className="ba-menu__item"
+            disabled={!type.built}
+            aria-disabled={type.built ? undefined : true}
+            title={type.built ? undefined : `${type.label} is not built yet`}
+            onClick={() => onAdd(type)}
+          >
             <Icon name={iconFor(type.icon)} size={15} />
             <span>{type.label}</span>
             {!type.built && <em className="board-views__soon">soon</em>}

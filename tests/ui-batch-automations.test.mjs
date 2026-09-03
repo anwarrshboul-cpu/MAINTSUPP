@@ -255,7 +255,14 @@ test("every rule read and write is scoped to the caller's organisation", async (
     assert.match(await read(file), /eq\(automationRuns\.organisationId, orgId\)/, `${file} must filter runs by organisation`);
   }
   const route = await read("app/api/automations/route.ts");
-  assert.match(route, /normaliseBoardId\(/, "the board id is allow-listed, never trusted");
+  /* RE-POINTED, AND STRICTLY STRONGER. `normaliseBoardId` was an allow-list of
+     two that returned "maintenance" for everything else — so a rule created on
+     a workspace section's own register was stored against the JOB BOARD, with a
+     200 and the caller's key echoed back. `resolveBoardId` asks the database
+     which boards this organisation has and throws for one it does not. The
+     property pinned here — the id is never trusted straight through — holds
+     more tightly than before. */
+  assert.match(route, /resolveBoardId\(/, "the board id is resolved against this organisation's boards, never trusted");
   assert.doesNotMatch(route, /"sunnamusk-uk"/);
   assert.doesNotMatch(route, /\bCLIENT_ID\b/);
 });

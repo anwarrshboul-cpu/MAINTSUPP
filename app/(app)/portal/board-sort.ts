@@ -32,7 +32,7 @@
  *     engine's sort.
  */
 
-import type { MaintenanceRequest } from "../../lib/types";
+import type { MaintenanceBoardColumn, MaintenanceRequest } from "../../lib/types";
 import type { BoardDisplayColumn, ColumnKey } from "./board-model";
 import {
   boardItemName,
@@ -281,4 +281,77 @@ export function sortSettingsFor(
   };
   if (index < 0) return rest;
   return { ...rest, sort: rules[index].direction, sortPriority: index };
+}
+
+/* ── The toolbar's one-click sort ─────────────────────────────────────────── */
+
+/**
+ * Which column the quick sort writes a rule on, and what the button should say.
+ *
+ * OWNER REPRO 3, and the reason this is here rather than in the component.
+ *
+ * It was `isStoreDocumentation ? itemNameColumn : <the "requested" column>` —
+ * two boards and an assumption. A section's generated register has neither: its
+ * six columns are Item, Status, Owner, Date, Notes and Files. So the column
+ * resolved to null, the toggle returned on its first line, and the button went
+ * on being drawn reading "Newest". A control that takes a click and does
+ * nothing.
+ *
+ * The ladder looks for a column ON THIS BOARD, in the order a reader would: the
+ * arrival date where there is one, otherwise the board's own first date or
+ * timeline column, otherwise the row's name. A board with none of the three
+ * returns null and the toolbar draws no button at all — nothing to sort by is a
+ * reason to show no button, never a reason to show a dead one.
+ *
+ * The label follows the COLUMN rather than the board, and names it: on a
+ * register whose date column is called "Renewal due", the old button promised
+ * "the date each job was requested".
+ *
+ * Pure, so it can be fed columns and asserted on. Inside a 5,700-line component
+ * it could only be eyeballed — the same argument the header above makes for the
+ * comparator.
+ */
+export type QuickSort = {
+  column: MaintenanceBoardColumn;
+  by: "date" | "name";
+  direction: SortDirection | null;
+  label: { text: string; aria: string };
+};
+
+export function resolveQuickSort(input: {
+  isStoreDocumentation: boolean;
+  itemNameColumn: MaintenanceBoardColumn | null;
+  systemColumns: MaintenanceBoardColumn[];
+  boardColumns: Array<{ column: MaintenanceBoardColumn }>;
+  sortRules: BoardSortRule[];
+}): QuickSort | null {
+  const { isStoreDocumentation, itemNameColumn, systemColumns, boardColumns, sortRules } = input;
+
+  const chosen: { column: MaintenanceBoardColumn; by: "date" | "name" } | null =
+    isStoreDocumentation && itemNameColumn
+      ? { column: itemNameColumn, by: "name" }
+      : (() => {
+          const requested = systemColumns.find((column) => column.key === "requested");
+          if (requested) return { column: requested, by: "date" as const };
+          const date = boardColumns.find(
+            (entry) => entry.column.type === "date" || entry.column.type === "timeline",
+          );
+          if (date) return { column: date.column, by: "date" as const };
+          if (itemNameColumn) return { column: itemNameColumn, by: "name" as const };
+          return null;
+        })();
+
+  if (!chosen) return null;
+  const direction = sortDirectionFor(sortRules, chosen.column.id);
+  const label =
+    chosen.by === "name"
+      ? {
+          text: direction === "desc" ? "Z\u2013A" : "A\u2013Z",
+          aria: `Sort by ${chosen.column.title}, A to Z`,
+        }
+      : {
+          text: direction === "asc" ? "Oldest" : "Newest",
+          aria: `Sort by ${chosen.column.title}, newest first`,
+        };
+  return { ...chosen, direction, label };
 }

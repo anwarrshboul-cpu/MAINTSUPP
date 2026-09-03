@@ -165,13 +165,37 @@ test("W02-06 a generated register is not given the maintenance spec", async () =
 });
 
 test("W02-06 the browser draws the board the section names", async () => {
+  /*
+   * RE-POINTED, AND THE CONTRACT GOT STRONGER.
+   *
+   * This pinned `boardId={activeCustom?.boardKey ?? "maintenance"}`, which was
+   * right about the thing it was written for — `surface_ref` was stored and
+   * returned for a year and never read — and wrong about the fallback. A
+   * section detached from its register has a NULL `boardKey`, and `?? "maintenance"`
+   * made it render the canonical job board: 74 rows of somebody else's work
+   * under the section's own name. That is the substitution this workstream
+   * exists to remove, and it was still in the mount.
+   *
+   * The section still draws the board it names. A section that names none now
+   * says so instead of borrowing one.
+   */
   const portal = await source("app/(app)/portal/portal-app.tsx");
   assert.match(
     portal,
-    /boardId=\{activeCustom\?\.boardKey \?\? "maintenance"\}/,
-    "`surface_ref` was validated, stored and returned for a year and never read",
+    /boardId=\{activeCustom \? activeCustom\.boardKey \?\? "" : "maintenance"\}/,
+    "an instance draws its own register; a built-in section draws the default board",
   );
   assert.match(portal, /boardKey\?: string \| null;/, "and the entry type has to carry it");
+  assert.match(
+    portal,
+    /const sectionDetached =/,
+    "a section with no register must be recognised, not defaulted",
+  );
+  assert.match(
+    portal,
+    /\{activeSurface === "maintenance" && !sectionDetached && \(/,
+    "and it must keep the board out of the tree rather than draw the canonical one",
+  );
 });
 
 test("W02-06 an unknown board does not describe itself as the job board", () => {

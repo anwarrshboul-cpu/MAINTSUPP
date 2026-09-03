@@ -60,7 +60,24 @@ import "./form-builder.css";
  * the control out of the accessibility tree so a desktop screen reader does
  * not announce a button nobody can see.
  */
-export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void }) {
+export default function FormBuilder({
+  boardId,
+  onSubmitted,
+}: {
+  /*
+   * WHICH BOARD'S FORM. Required, and that is the fix.
+   *
+   * Both fetches below asked `/api/board/form` with no board at all, so the
+   * server fell back to the default and the Form tab on a workspace section's
+   * register rendered THE JOB BOARD'S PUBLIC FORM — its title, its questions,
+   * and a Location list naming all 39 real stores — with a working Submit. A
+   * PATCH from that screen then rewrote the maintenance form. Making it a
+   * required prop means a caller that forgets is a compile error rather than a
+   * silent leak.
+   */
+  boardId: string;
+  onSubmitted?: () => void;
+}) {
   const [form, setForm] = useState<BuilderForm | null>(null);
   const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
   const [mode, setMode] = useState<BuilderMode>("view");
@@ -71,7 +88,9 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
 
   useEffect(() => {
     let active = true;
-    fetch("/api/board/form", { headers: { Accept: "application/json" } })
+    fetch(`/api/board/form?board=${encodeURIComponent(boardId)}`, {
+      headers: { Accept: "application/json" },
+    })
       .then(async (response) => {
         const payload = (await response.json()) as {
           form?: BuilderForm;
@@ -130,7 +149,7 @@ export default function FormBuilder({ onSubmitted }: { onSubmitted?: () => void 
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/board/form", {
+      const response = await fetch(`/api/board/form?board=${encodeURIComponent(boardId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

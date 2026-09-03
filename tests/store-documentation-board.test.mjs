@@ -295,8 +295,30 @@ test("the Store Type filter and choices come off the column, not a hardcoded lis
     "the store types must not be restated in the toolbar",
   );
 
-  // Person and Group by stay off this board: there is no people column, and the
-  // four groups are fixed.
+  /*
+   * Person and Group by stay off this board: there is no people column, and the
+   * four groups are fixed.
+   *
+   * The People filter's guard MOVED in W02-06 and the pin moved with it. It was
+   * `!isStoreDocumentation`, which reads "every board except that one is the job
+   * board" — and a section's generated register is neither, so it inherited a
+   * People filter listing every engineer in the organisation. The guard is now
+   * the question that actually decides it: does THIS board carry the `assignee`
+   * column the filter reads? Store Documentation does not, so the contract this
+   * line was protecting is unchanged; it is now held for the right reason and
+   * holds for boards that did not exist when it was written.
+   */
+  assert.match(
+    board,
+    /\{hasSystemColumn\("assignee"\) && \(\s*<label className="live-board-tool">/,
+    "the People filter follows the board's own column, not a not-that-one test",
+  );
+  assert.match(
+    board,
+    /const hasSystemColumn = useCallback\(/,
+    "and that question is asked of the columns this board loaded",
+  );
+  // Group by is still off Store Documentation, whose four groups are fixed.
   assert.match(board, /\{!isStoreDocumentation && \(\s*<label className="live-board-tool">/);
 });
 

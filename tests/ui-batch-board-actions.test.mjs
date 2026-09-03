@@ -196,10 +196,21 @@ test("viewFromSearch reads the view and refuses junk", () => {
 });
 
 test("the chrome honours ?view= on load, only for a tab the board has", async () => {
+  /*
+   * The three rules moved from `board-chrome.tsx` into `board-view-memory.ts`
+   * as `useLandingView`, and this pin moved with them. The chrome is still
+   * where the hook is CALLED, and the module's own docstring always said the
+   * rules belonged there; what forced the move is that the remembered landing
+   * view never applied while the rule lived beside the fetch that set the
+   * board's default. Behaviour asserted here is unchanged — a shared link's
+   * `?view=` wins, an unknown key is ignored, and it is consumed once.
+   */
   const chrome = await read("app/(app)/portal/board-chrome.tsx");
-  assert.match(chrome, /viewFromSearch\(window\.location\.search\)/);
-  assert.match(chrome, /views\.some\(\(view\) => view\.key === wanted\)/, "an unknown key is ignored");
-  assert.match(chrome, /linkedView\.current = null/, "consumed once, so it cannot drag the strip back later");
+  assert.match(chrome, /useLandingView\(section, views, setActiveKey\)/);
+  const memory = await read("app/(app)/portal/board-view-memory.ts");
+  assert.match(memory, /viewFromSearch\(window\.location\.search\)/);
+  assert.match(memory, /views\.some\(\(view\) => view\.key === wanted\)/, "an unknown key is ignored");
+  assert.match(memory, /linkedView\.current = null/, "consumed once, so it cannot drag the strip back later");
   const host = await read(`${ACTIONS}/board-actions-host.tsx`);
   assert.match(host, /boardLink\(window\.location\.origin, window\.location\.pathname, activeKey/);
   assert.match(host, /copyBoardText\(link\)/);

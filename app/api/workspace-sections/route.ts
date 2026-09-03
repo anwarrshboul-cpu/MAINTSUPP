@@ -29,9 +29,10 @@
  * to any member, because the sidebar has to be drawable by everybody.
  */
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
+  auditEvents,
   boards,
   navigationLayouts,
   sectionViewPreferences,
@@ -42,23 +43,30 @@ import { auditActor, recordAudit } from "../../lib/audit";
 import {
   DEFAULT_ICON,
   DEFAULT_SURFACE,
+  DEFAULT_TEMPLATE,
   SECTION_SURFACES,
+  SECTION_TEMPLATES,
   cleanSectionLabel,
+  isChoosableTemplate,
   isGroupChoice,
   isIconName,
   isSurfaceKey,
+  isTemplateKey,
   isWorkspaceSectionKey,
   sectionKeyFrom,
   surfaceDefinition,
+  templateDefinition,
   type SurfaceKey,
   type WorkspaceSection,
 } from "./catalogue";
 import { BUILT_IN_GROUPS, FALLBACK_GROUP } from "../navigation/layout";
 import { can, resolvePermissions } from "../../lib/permissions";
 import {
+  boardBinCount,
   boardItemCount,
   createBoard,
   deleteBoardStructure,
+  renameBoard,
 } from "../../lib/board-registry";
 
 /** The headings a section may be filed under. `layout.ts` is the authority. */
@@ -104,6 +112,11 @@ function toSection(row: SectionRow): WorkspaceSection {
        section by `createBoard`. The same test the purge uses, answered once and
        returned, so the dialog and the destructive path cannot disagree. */
     ownsBoard: row.surfaceRef !== null && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef),
+    /* W2 — returned as stored, INCLUDING a template this build no longer
+       offers. A row is a record of what was chosen; re-labelling it as
+       something else because the catalogue moved on would make the audit trail
+       lie. NULL stays NULL, and means the section predates templates. */
+    template: row.template ?? null,
     group: isGroupChoice(row.groupKey, GROUP_KEYS) ? row.groupKey : FALLBACK_GROUP,
     position: row.position,
     archived: row.archivedAt !== null,
@@ -195,6 +208,12 @@ export async function GET(request: Request) {
       /* What a section is allowed to be, so the editor does not need a second
          copy of the list and cannot offer a surface the server would refuse. */
       surfaces: SECTION_SURFACES,
+      /* W2 — and what a NEW one may be created from. Sent whole, unavailable
+         entries included, because the dialog has to be able to say WHY a
+         template it is not offering is not on offer. `available` is the
+         server's answer and the browser does not get to second-guess it: POST
+         refuses an unchoosable template whatever the dialog drew. */
+      templates: SECTION_TEMPLATES,
       /* Stated rather than inferred from the role, because a role whose
          `settings.edit` was revoked in Roles is still called "Admin". */
       canEdit: !guard.denied,
@@ -244,7 +263,77 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const surface = isSurfaceKey(body.surface) ? body.surface : DEFAULT_SURFACE;
+
+    /*
+     * W2 — A TEMPLATE AND A SURFACE ARE DIFFERENT REQUESTS, AND ASKING FOR BOTH
+     * IS A CONTRADICTION RATHER THAN A PREFERENCE.
+     *
+     * `template` says "give this section a register of its own, shaped like
+     * that one". `surface` says "put a second door onto a screen the product
+     * already has". Honouring one and dropping the other is exactly the silent
+     * substitution the surface check above refuses, so both together is a 400.
+     */
+    if (
+      body.template !== undefined &&
+      (body.surface !== undefined || body.board !== undefined || body.surfaceRef !== undefined)
+    ) {
+      return Response.json(
+        {
+          error:
+            "A section is either created from a template, with a register of its own, or pointed at one of the product's existing screens. Choose one.",
+        },
+        { status: 400 },
+      );
+    }
+    if (body.template !== undefined) {
+      if (!isTemplateKey(body.template)) {
+        return Response.json(
+          {
+            error: "That is not a template this product offers.",
+            templates: SECTION_TEMPLATES.filter((entry) => entry.available).map(
+              (entry) => entry.key,
+            ),
+          },
+          { status: 400 },
+        );
+      }
+      /* §8 — a template that cannot yet give an INDEPENDENT instance is refused
+         with the reason, not quietly downgraded to something that works. The
+         dialog does not offer these; a script or a stale tab can still ask. */
+      if (!isChoosableTemplate(body.template)) {
+        return Response.json(
+          {
+            error:
+              templateDefinition(body.template as string)?.unavailable ??
+              "That template is not available yet.",
+            template: body.template,
+            available: false,
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    /*
+     * Which of the three shapes this request is, decided once.
+     *
+     *   template named      -> an INSTANCE of that template
+     *   surface named       -> a SECOND DOOR onto an existing screen (legacy,
+     *                          and still supported: see the note further down)
+     *   neither             -> an instance of the default template, which is
+     *                          what every section created since W02-06 already
+     *                          is. Recorded by name now rather than implied.
+     */
+    const template = body.template !== undefined
+      ? (body.template as string)
+      : body.surface === undefined
+        ? DEFAULT_TEMPLATE
+        : null;
+    const surface: SurfaceKey = template
+      ? (templateDefinition(template)?.surface ?? DEFAULT_SURFACE)
+      : isSurfaceKey(body.surface)
+        ? body.surface
+        : DEFAULT_SURFACE;
     const board = await resolveSurfaceRef(context, surface, body.board ?? body.surfaceRef);
     if ("error" in board) {
       return Response.json({ error: board.error }, { status: 400 });
@@ -311,7 +400,7 @@ export async function POST(request: Request) {
      * calendar" is a coherent thing to want in a way that "a second Jobs board"
      * was not. Absent, which is what the dialog now sends, means a new register.
      */
-    const wantsExistingScreen = body.surface !== undefined;
+    const wantsExistingScreen = template === null;
     let ownedBoardKey: string | null = null;
 
     if (!wantsExistingScreen) {
@@ -359,6 +448,9 @@ export async function POST(request: Request) {
         description: cleanSectionLabel(body.description, 240) || null,
         surface,
         surfaceRef: ownedBoardKey ?? board.boardKey,
+        /* NULL for a second door, which is the honest record of what it is —
+           see the column's own note in `db/schema.ts`. */
+        template,
         groupKey: isGroupChoice(body.group, GROUP_KEYS) ? body.group : FALLBACK_GROUP,
         position: await nextPosition(context),
         createdBy: context.identityEmail,
@@ -386,7 +478,14 @@ export async function POST(request: Request) {
       "workspace.section_created",
       key,
       `Added the "${label}" workspace section${ownedBoardKey ? " and its register" : ""}.`,
-      { key, label, surface, board: ownedBoardKey ?? board.boardKey, ownsBoard: ownedBoardKey !== null },
+      {
+        key,
+        label,
+        surface,
+        template,
+        board: ownedBoardKey ?? board.boardKey,
+        ownsBoard: ownedBoardKey !== null,
+      },
     );
     return Response.json({ section: created ? toSection(created) : null }, { status: 201 });
   } catch (error) {
@@ -516,6 +615,76 @@ export async function PATCH(request: Request) {
       }
       patch.groupKey = body.group;
     }
+    /*
+     * W2 — A TEMPLATE IS NOT AN EDITABLE FIELD.
+     *
+     * It records the structure the instance was born with. "Changing" it would
+     * mean rebuilding a live register's columns, groups and views under rows
+     * already filed on it, which is a migration and not a rename. Refused by
+     * name rather than ignored, so a caller that tries learns it did nothing.
+     */
+    if (body.template !== undefined) {
+      return Response.json(
+        {
+          error:
+            "A section's template cannot be changed after it is created. Add a section from the template you want and move the work across.",
+        },
+        { status: 400 },
+      );
+    }
+
+    /*
+     * W2 — CHANGING THE SURFACE MUST NEVER STRAND A REGISTER. This is the
+     * second half of the owner's first reproduction, and the half that made
+     * the first half invisible.
+     *
+     * `resolveSurfaceRef` answers `{ boardKey: null }` for a surface with no
+     * board of its own, so PATCHing `section:test` from the job board to, say,
+     * Reports NULLED the `surface_ref` that said which register it owned. Every
+     * later read of that row — the dialog's "Own register" badge, and crucially
+     * the purge's ownership test — then saw a plain second door and left the
+     * board behind. Nothing warned; nothing failed; the board simply stopped
+     * belonging to anybody, and under the old name-derived keys it took its
+     * name with it.
+     *
+     * SO A SECTION THAT IS THE LAST ONE POINTING AT ITS REGISTER CANNOT BE
+     * RE-HOMED AT ALL. Not to a board-less surface (which was the silent
+     * orphan), and not to another board-backed surface either — the surface
+     * decides which component draws the page, and the Document board's is still
+     * wired to the one shared board, so "re-home the instance" would have meant
+     * "show and edit the canonical compliance data" (W2 R5).
+     *
+     * WHAT IS STILL ALLOWED, deliberately: re-homing a LEGACY second-door
+     * section, which owns nothing and is the only reason the control exists;
+     * and re-homing one of SEVERAL sections that share a register, because the
+     * register survives in the hands of the others. Only the last owner is
+     * pinned, and the way to be rid of it is the audited one — remove the
+     * section, which archives it, then delete it permanently, which takes the
+     * empty register with it.
+     */
+    const ownedBoard =
+      row.surfaceRef && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef) ? row.surfaceRef : null;
+    const rehoming =
+      (body.surface !== undefined && body.surface !== row.surface) ||
+      (body.board !== undefined && body.board !== row.surfaceRef) ||
+      (body.surfaceRef !== undefined && body.surfaceRef !== row.surfaceRef);
+    if (ownedBoard && rehoming) {
+      const sharing = (await loadWorkspaceSections(context.db, context.orgId)).filter(
+        (section) => section.key !== row.key && section.boardKey === ownedBoard,
+      );
+      if (sharing.length === 0) {
+        return Response.json(
+          {
+            error: `"${row.label}" has a register of its own, and it is the only section that opens it. Pointing it somewhere else would leave that register with no way in. Remove the section instead — that archives it, and deleting it permanently takes the empty register with it.`,
+            key: row.key,
+            board: ownedBoard,
+            ownsBoard: true,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     if (body.surface !== undefined) {
       if (!isSurfaceKey(body.surface)) {
         return Response.json(
@@ -554,6 +723,21 @@ export async function PATCH(request: Request) {
           eq(workspaceSections.key, row.key),
         ),
       );
+
+    /*
+     * W2 R1 — the label follows onto `boards.name`, and the key does not move.
+     *
+     * This is the visible half of separating identity from display: the board's
+     * own heading, its entry in a board list and the name any later export
+     * carries are all `boards.name`, and leaving them on the name the section
+     * had when it was created would make a rename look like it half-worked. The
+     * ADDRESS — `boards.key`, `sec-<12hex>` — is untouched, so no link, no
+     * stored view and no placement is invalidated by renaming, and the old name
+     * becomes free the moment nothing is called it.
+     */
+    if (patch.label && ownedBoard) {
+      await renameBoard(context.db, context.orgId, ownedBoard, patch.label);
+    }
 
     const updated = await findByKey(context, row.key);
     await recordSectionChange(
@@ -756,6 +940,75 @@ async function forgetSection(context: ScopedDatabase, key: string) {
 }
 
 /**
+ * The register a section created, when the row no longer says which.
+ *
+ * WHY THIS IS NEEDED AT ALL. `surface_ref` is the ownership record, and until
+ * the PATCH guard above there was a way to null it while the board it named
+ * still existed: change the section's screen to one with no board of its own.
+ * The purge then read a NULL, concluded the section owned nothing, and deleted
+ * only the row — leaving a live register nothing routes to. That is the owner's
+ * reproduction, and the audit trail on Staging shows it exactly: `section:test`
+ * created with `{"board":"test","ownsBoard":true}` at 17:20, updated at 17:22
+ * to `{"boardKey":null,"ownsBoard":false}`, deleted at 17:26 with
+ * `{"board":null}`.
+ *
+ * THE GUARD STOPS NEW ONES. This recovers the rows already in that shape, and
+ * it does it from a record the product already keeps rather than a guess: the
+ * section's own `workspace.section_created` audit line names the board it was
+ * given. A label match or a name heuristic could pick the wrong board; this
+ * cannot, because it is the write itself, read back.
+ *
+ * IT PROVES OWNERSHIP RATHER THAN ASSUMING IT. The board must still exist, must
+ * not be one of the product's own, and — checked by the caller on exactly the
+ * same footing as a normally-owned board — must be unshared, empty, and empty
+ * of binned rows. So the worst case of a wrong answer here is a refusal, never
+ * a deletion.
+ *
+ * Only on the purge path: one indexed read on a deliberate, rare, destructive
+ * act. It has no business on a page load, and none at all on a boot path.
+ */
+async function abandonedBoardFor(
+  context: ScopedDatabase,
+  sectionKey: string,
+): Promise<string | null> {
+  /* Newest first, and more than one, because a key can be created, purged and
+     created again — the Staging trail has `section:test` twice. The newest
+     creation that names a board is the one this row came from. */
+  const events = await context.db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.organisationId, context.orgId),
+        eq(auditEvents.action, "workspace.section_created"),
+        eq(auditEvents.entityId, sectionKey),
+      ),
+    )
+    .orderBy(desc(auditEvents.createdAt))
+    .limit(5);
+
+  for (const event of events) {
+    if (!event.detail) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(event.detail) as unknown;
+    } catch {
+      continue;
+    }
+    const board = (parsed as Record<string, unknown> | null)?.board;
+    if (typeof board !== "string" || !board || BUILT_IN_BOARD_KEYS.has(board)) continue;
+
+    const [exists] = await context.db
+      .select({ key: boards.key })
+      .from(boards)
+      .where(and(eq(boards.organisationId, context.orgId), eq(boards.key, board)))
+      .limit(1);
+    if (exists) return exists.key;
+  }
+  return null;
+}
+
+/**
  * DELETE — remove a section. `?key=section:cctv`, optionally `&purge=1`.
  *
  * ARCHIVE IS THE DEFAULT, AND THAT IS THE POINT.
@@ -872,7 +1125,13 @@ export async function DELETE(request: Request) {
      * occupied register refuses, and says how many rows are in the way.
      */
     const ownedBoard =
-      row.surfaceRef && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef) ? row.surfaceRef : null;
+      (row.surfaceRef && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef) ? row.surfaceRef : null) ??
+      /* And the register this section created but no longer names, for the rows
+         that were detached before the PATCH guard existed. See
+         `abandonedBoardFor` — it reads the section's own creation audit line,
+         and everything below then treats what it finds exactly as it treats a
+         board the row still points at. */
+      (await abandonedBoardFor(context, row.key));
 
     if (ownedBoard) {
       const sharing = (await loadWorkspaceSections(context.db, context.orgId)).filter(
@@ -887,6 +1146,29 @@ export async function DELETE(request: Request) {
               key: row.key,
               board: ownedBoard,
               items,
+            },
+            { status: 409 },
+          );
+        }
+        /*
+         * AND THE BIN, which the count above cannot see.
+         *
+         * Binning an item LIFTS its placement out of `maintenance_group_items`,
+         * so a register whose every row was deleted yesterday answers "0 items"
+         * here while the bin still offers all of them back. Destroying the
+         * board at that point leaves them restorable onto a board that is gone
+         * — the refusal above, defeated by taking one extra step first. The
+         * message names the bin, because that is where the work now is and the
+         * product already has a deliberate, audited way to empty it.
+         */
+        const binned = await boardBinCount(context.db, context.orgId, ownedBoard);
+        if (binned > 0) {
+          return Response.json(
+            {
+              error: `"${row.label}" still has ${binned} ${binned === 1 ? "item" : "items"} in the recycle bin, which can still be restored onto it. Empty the bin first, and then it can be removed permanently.`,
+              key: row.key,
+              board: ownedBoard,
+              binned,
             },
             { status: 409 },
           );

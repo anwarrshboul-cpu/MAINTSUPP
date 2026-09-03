@@ -21,6 +21,9 @@
  * network is exactly the kind of thing that belongs outside the component.
  */
 
+import { useEffect, useRef } from "react";
+import { viewFromSearch } from "./board-actions/board-link";
+
 /** Where a landing view came from, so the two can be told apart. */
 export type ViewMemorySource = "user" | "workspace" | "board" | "first";
 
@@ -70,4 +73,66 @@ export function rememberLandingView(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(scope ? { section, view, scope } : { section, view }),
   }).catch(() => undefined);
+}
+
+/**
+ * WHICH TAB THE STRIP OPENS ON — the rule this module's header promises, now
+ * actually applied.
+ *
+ * Moved out of `board-chrome.tsx` because it did not work there, and it did not
+ * work for a reason that is invisible while it is written inside the component.
+ * The chrome's views fetch sets `activeKey` to the board's own default the
+ * moment the tab list lands; this ran afterwards — it depends on `views` — and
+ * its test was "only override an UNSET tab". By then the tab was set, to the
+ * default, every time. So the remembered view was fetched on every board load,
+ * compared, and discarded, and "Set as the view everyone lands on" in the tab
+ * menu was a menu item with no observable effect. Verified on the running
+ * server: with a stored personal preference of `chart` on `section:s2qa-alpha`
+ * (`GET /api/workspace-sections/view` answering `view: "chart", source: "user"`),
+ * two consecutive loads both opened Main table.
+ *
+ * The rule is now the one the server's resolution order implies: the landing
+ * view wins over the BOARD'S DEFAULT, and loses to the reader. So it is applied
+ * ONCE per section, on the first tab list that section produces, and never
+ * again — `landedFor` — which is what keeps a later refresh of the views (every
+ * write bumps them) from dragging somebody back off the tab they moved to. A
+ * key naming a tab this board does not have is ignored, as the server's own
+ * layers are.
+ *
+ * `?view=` from a shared link still wins over both and is consumed once: that
+ * is what following a link to a view means.
+ */
+export function useLandingView(
+  section: string,
+  views: readonly { key: string }[],
+  setActiveKey: (update: (current: string) => string) => void,
+) {
+  const linkedView = useRef<string | null>(
+    typeof window === "undefined" ? null : viewFromSearch(window.location.search),
+  );
+  const landedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!views.length) return;
+    const wanted = linkedView.current;
+    if (wanted) {
+      linkedView.current = null;
+      if (views.some((view) => view.key === wanted)) {
+        landedFor.current = section;
+        setActiveKey(() => wanted);
+        return;
+      }
+    }
+    if (landedFor.current === section) return;
+    let cancelled = false;
+    void fetchLandingView(section).then((landing) => {
+      if (cancelled || landedFor.current === section) return;
+      landedFor.current = section;
+      if (!landing || !views.some((view) => view.key === landing.view)) return;
+      setActiveKey(() => landing.view);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [views, section, setActiveKey]);
 }

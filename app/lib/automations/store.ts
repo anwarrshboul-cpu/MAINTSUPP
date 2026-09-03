@@ -26,12 +26,44 @@ import {
 } from "./catalog";
 import { composeSentence, type SentenceResolver } from "./sentence";
 import { configString, parseConfig, type AutomationRule, type Database } from "./types";
+import { resolveBoard } from "../board-registry";
 
 export const BOARD_IDS = ["maintenance", "store-documentation"] as const;
 export type BoardId = (typeof BOARD_IDS)[number];
 
-export function normaliseBoardId(raw: unknown): BoardId {
-  return BOARD_IDS.includes(raw as BoardId) ? (raw as BoardId) : "maintenance";
+/**
+ * Which board an automation or a discussion is about.
+ *
+ * THIS USED TO COERCE EVERY UNKNOWN KEY TO "maintenance", AND THAT WAS A WRITE.
+ *
+ * `normaliseBoardId` was a pure `includes ? raw : "maintenance"`, so a rule or a
+ * comment created on a workspace section's own register was stored against the
+ * canonical JOB BOARD — silently, with a 200 and the caller's own key echoed
+ * back. It is the same silent substitution `boardIdFrom` in `/api/board` was
+ * built on, found in the same audit and fixed the same way: ask the database
+ * which boards this organisation actually has.
+ *
+ * Kept synchronous and total for the two built-ins, because every caller passes
+ * one of them on the overwhelming majority of requests and a round trip for
+ * "maintenance" would be paid on every board load. Anything else is resolved,
+ * and `resolveBoard` throws `BoardNotFoundError` for a key this workspace does
+ * not have — which the routes turn into a 404 rather than a write somewhere
+ * else.
+ */
+export function isBuiltInBoardId(raw: unknown): raw is BoardId {
+  return BOARD_IDS.includes(raw as BoardId);
+}
+
+export async function resolveBoardId(
+  db: Database,
+  organisationId: string,
+  raw: unknown,
+): Promise<string> {
+  const key = typeof raw === "string" ? raw.trim() : "";
+  if (!key) return "maintenance";
+  if (isBuiltInBoardId(key)) return key;
+  const board = await resolveBoard(db, organisationId, key);
+  return board.key;
 }
 
 export function catalogEnvironment(): CatalogEnvironment {

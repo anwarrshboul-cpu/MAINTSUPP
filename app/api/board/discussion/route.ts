@@ -19,7 +19,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { itemUpdateLikes, itemUpdates } from "../../../../db/schema";
-import { normaliseBoardId } from "../../../lib/automations/store";
+import { resolveBoardId } from "../../../lib/automations/store";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { discussionRequestId } from "./discussion-store";
 
@@ -61,7 +61,11 @@ export async function GET(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
     const { db, orgId, actor } = guard.scope;
-    const boardId = normaliseBoardId(new URL(request.url).searchParams.get("board"));
+    const boardId = await resolveBoardId(
+      db,
+      orgId,
+      new URL(request.url).searchParams.get("board"),
+    );
     const requestId = discussionRequestId(boardId);
 
     const rows = await db
@@ -140,7 +144,7 @@ export async function POST(request: Request) {
     } catch {
       return Response.json({ error: "Write an update." }, { status: 400 });
     }
-    const boardId = normaliseBoardId(payload.board ?? payload.boardId);
+    const boardId = await resolveBoardId(db, orgId, payload.board ?? payload.boardId);
     const requestId = discussionRequestId(boardId);
     const body = typeof payload.body === "string" ? payload.body.trim().slice(0, 8000) : "";
     const parentId =
@@ -201,7 +205,7 @@ export async function DELETE(request: Request) {
     const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const id = (url.searchParams.get("id") ?? "").trim();
-    const boardId = normaliseBoardId(url.searchParams.get("board"));
+    const boardId = await resolveBoardId(db, orgId, url.searchParams.get("board"));
     const requestId = discussionRequestId(boardId);
     if (!id) return Response.json({ error: "Name an update." }, { status: 400 });
     const [row] = await db

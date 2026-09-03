@@ -1003,10 +1003,20 @@ export function FileHoverPreview({
           mondayMediaStyle ? " is-monday-media" : ""
         }`}
         type="button"
+        /*
+         * NEVER `undefined`. The visible label below is the only other name this
+         * button has, and `.sheet-file-cell__label` is hidden by CSS at 430px
+         * and under — so without a column title the control was an unnamed
+         * button on every phone, one per row, which axe reports as a CRITICAL
+         * `button-name` violation. Naming the column is better when we have it;
+         * naming the action is the floor.
+         */
         aria-label={
           columnTitle
             ? `${count ? `${count} file${count === 1 ? "" : "s"} in` : "Add a file to"} ${columnTitle}`
-            : undefined
+            : count
+              ? `${count} file${count === 1 ? "" : "s"}`
+              : "Add a file"
         }
         onClick={() => {
           // A tap that opens the panel must not leave the desktop hover

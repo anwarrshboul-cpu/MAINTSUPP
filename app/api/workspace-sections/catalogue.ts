@@ -143,6 +143,154 @@ export function isSurfaceKey(value: unknown): value is SurfaceKey {
   return typeof value === "string" && surfaceDefinition(value) !== null;
 }
 
+/* ── W2 — TEMPLATES ───────────────────────────────────────────────────────── */
+
+/**
+ * A TEMPLATE is not a SURFACE, and conflating the two is what produced the
+ * dialog the owner rejected.
+ *
+ * A `surface` answers "which screen draws this section" — and because every
+ * surface key is a built-in section key, choosing one is choosing to open
+ * somebody else's page. That is the SECOND DOOR the product shipped first, and
+ * it is why the Edit dialog's control is labelled "Screen".
+ *
+ * A `template` answers "what STRUCTURE and CAPABILITY does this instance get"
+ * — W2 R3: choosing "Jobs" copies the shape of the job board and none of its
+ * rows, attachments, comments, responses or history. An instance created from a
+ * template has a register of its own from the first request.
+ *
+ * Every template names the surface an instance of it renders, so a template is
+ * a strictly stronger statement than a surface: it implies one, and adds the
+ * scope. Nothing here duplicates `SECTION_SURFACES` — `surface` below is a key
+ * out of it, and `templatesAreRenderable` in the section tests holds that true.
+ *
+ * `available` IS THE HONEST HALF, and it is data rather than a code branch on
+ * purpose. The owner's §8 rule is "do NOT present clickable fake options": a
+ * template may only be offered once the product can actually give it an
+ * INDEPENDENT instance. Turning one on is then one boolean here, not a hunt
+ * through the dialog — and `unavailable` says, in the words the owner will
+ * read, exactly what is missing.
+ */
+export type SectionTemplate = {
+  key: string;
+  label: string;
+  description: string;
+  /** The screen an instance of this template renders — a `SECTION_SURFACES` key. */
+  surface: SurfaceKey;
+  /** Does choosing this today actually produce an instance of its own? */
+  available: boolean;
+  /** Why not. Present exactly when `available` is false. */
+  unavailable?: string;
+};
+
+export const SECTION_TEMPLATES: readonly SectionTemplate[] = [
+  {
+    key: "jobs",
+    label: "Jobs",
+    description:
+      "A board of its own, shaped like the job board — groups, columns, view tabs, filters and sorting. It starts empty; nothing is copied from another section.",
+    surface: "maintenance",
+    /* Proven, not asserted: `tests/stage-two-section-registers.test.mjs`
+       creates two of these against a running server and shows that a column
+       added to one appears on neither the other nor the job board. */
+    available: true,
+  },
+  {
+    key: "store-documentation",
+    label: "Documents",
+    description:
+      "A compliance register of its own — a row per site, a column per certificate, with expiry tracked.",
+    surface: "store-documentation",
+    /*
+     * HELD BACK ON PURPOSE, and not because the plumbing is missing. The board
+     * is parameterised, uploads are already fenced to their board and document
+     * versioning stays inside the instance — this one is close.
+     *
+     * It is off because `/api/notifications/compliance` reads the CANONICAL
+     * board and nothing else. An instance would therefore look exactly like a
+     * compliance register, be filled with real certificates, and never warn
+     * about a single expiry. That failure is silent and it errs towards false
+     * assurance, which is the one direction a compliance surface must never
+     * fail in: no register at all tells the truth about itself, and one that
+     * quietly stops warning does not. It ships when the expiry digest takes its
+     * board from the section.
+     */
+    available: false,
+    unavailable:
+      "Expiry alerts still only watch the workspace's own Store Documentation board, so a second one would collect certificates and never warn that any of them had expired. Available once the compliance digest reads the section's own board.",
+  },
+  {
+    key: "contractors",
+    label: "Contractors",
+    description:
+      "A supplier register of its own — a row per contractor, with the columns and scoring you choose.",
+    surface: "contractors",
+    /*
+     * OFF, and the blocker is not the missing scope column — it is what the
+     * NAME-MATCHING would do the moment a second row existed.
+     *
+     * `resolveContractorLink` (`app/lib/contractor-reference.ts`) matches a
+     * job's free-text contractor to a row BY NAME, ORG-WIDE, and answers
+     * `ambiguous` on two matches. So one contractor added to an instance under
+     * a name the canonical roster already uses would silently stop every
+     * canonical job naming it from linking at all — accepted W5/W6 behaviour,
+     * regressed by a row rather than by a code change. `portal-app.tsx` also
+     * synthesises contractor rows out of the job feed, so an "empty" instance
+     * would come up already showing canonical names.
+     */
+    available: false,
+    unavailable:
+      "Jobs are still matched to contractors by name across the whole workspace, so a second register would break the links on the jobs you already have. Available once a contractor is matched within its own register.",
+  },
+  {
+    key: "sites",
+    label: "Sites",
+    description:
+      "A property register of its own — a row per site, with the columns and grouping you choose.",
+    surface: "stores",
+    /*
+     * OFF for the same class of reason, one degree worse. `resolveSiteByName`
+     * (`app/lib/sites-repository.ts`) has NO ambiguity guard, and there is no
+     * unique index on (organisation, name) to give it one — so a site added to
+     * an instance under an existing name does not fail, it silently takes over
+     * the routing of inbound jobs addressed to the canonical site.
+     */
+    available: false,
+    unavailable:
+      "Inbound jobs are still routed to sites by name across the whole workspace, so a second register could quietly take over another site's jobs. Available once a site is matched within its own register.",
+  },
+];
+
+/**
+ * What a section is when the owner did not name a template.
+ *
+ * Jobs, because it is the only one the product can serve today and because it
+ * is what `POST` has created for every section since W02-06 — so the default
+ * NAMES the existing behaviour rather than changing it.
+ */
+export const DEFAULT_TEMPLATE = "jobs";
+
+export function templateDefinition(key: string): SectionTemplate | null {
+  return SECTION_TEMPLATES.find((template) => template.key === key) ?? null;
+}
+
+/** A template this build has heard of — available or not. */
+export function isTemplateKey(value: unknown): value is string {
+  return typeof value === "string" && templateDefinition(value) !== null;
+}
+
+/**
+ * A template that can be CHOSEN, as opposed to one that can be named.
+ *
+ * The distinction is the whole of §8. A stored row may name an unavailable
+ * template — a rollback, or a template turned off after somebody used it — and
+ * that row keeps working; what must never happen is a dialog offering one as
+ * though it worked.
+ */
+export function isChoosableTemplate(value: unknown): value is string {
+  return isTemplateKey(value) && templateDefinition(value)?.available === true;
+}
+
 /**
  * The icons a section may wear.
  *
@@ -252,6 +400,15 @@ export type WorkspaceSection = {
    * reads the same fact.
    */
   ownsBoard?: boolean;
+  /**
+   * W2 — which template this instance was created from, or NULL.
+   *
+   * NULL is not "unknown", it is a FACT about the row: a section created before
+   * templates existed is a second door onto one of the product's own screens,
+   * and it must keep working exactly as it does. Read it that way everywhere —
+   * `template === null` means legacy, never "assume Jobs".
+   */
+  template?: string | null;
   key: string;
   label: string;
   icon: string;

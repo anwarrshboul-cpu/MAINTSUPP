@@ -1,10 +1,16 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { boardViews } from "../../../../db/schema";
+import { boardViews, formConfigurations } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { RETENTION_DAYS, sendBoardViewToBin } from "../../../lib/recycle-bin";
-import { DEFAULT_BOARD_KEY, resolveBoard } from "../../../lib/board-registry";
+import {
+  BoardNotFoundError,
+  DEFAULT_BOARD_KEY,
+  isBoardNotFound,
+  resolveBoard,
+  type BoardRecord,
+} from "../../../lib/board-registry";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +104,96 @@ function unavailable(error?: unknown) {
   // what a person fixes by signing in. See `anonymousRefusal`.
   const refusal = anonymousRefusal(error);
   if (refusal) return refusal;
+  /*
+   * A board key this organisation does not have is a bad REQUEST, not an
+   * outage, and must never be quietly answered with somebody else's board —
+   * see `boardFrom` below. `resolveBoard` throws `BoardNotFoundError` for it;
+   * without this arm that landed here and came back as 503 "temporarily
+   * unavailable", telling the browser to retry something no retry can fix.
+   */
+  if (isBoardNotFound(error)) {
+    const named = (error as Error).message;
+    /* `boardFrom` throws this with an empty key for `?board=` with nothing
+       after it, and 'Board "" does not exist.' explains nothing. */
+    return Response.json(
+      { error: named.includes('""') ? "No board was named." : named },
+      { status: 404 },
+    );
+  }
   return Response.json({ error: "Board views are temporarily unavailable." }, { status: 503 });
+}
+
+/**
+ * WHICH BOARD A REQUEST IS ABOUT — ONE ANSWER FOR ALL FOUR VERBS.
+ *
+ * THE FAULT THIS FIXES. `GET` read `?board=` from the query string and `POST`
+ * read `body.board` from the JSON body. `board-chrome.tsx`'s `send()` puts the
+ * key in the QUERY STRING for every verb, so `body.board` was always absent,
+ * `resolveBoard`'s default parameter took over, and every view added from a
+ * custom section's register was written to the canonical job board. Proven on
+ * the running server: `POST /api/board/views?board=sec-f47167fe0157` with a
+ * Calendar produced view `s2qa-calendar` on `maintenance` — the job board's tab
+ * strip went from eleven tabs to twelve — while the section's own strip still
+ * showed only `main`. Nothing errored, which is what made it survive.
+ *
+ * So the question is asked ONCE, here, and the query string is the authority
+ * because that is where the client has always put it. The body is still read as
+ * a fallback so a caller written against the old POST contract keeps working.
+ *
+ * NO SILENT FALLBACK. An unknown key throws `BoardNotFoundError` and comes back
+ * as a 404 through `unavailable` above; it is never answered with the default
+ * board. An ABSENT key still means the default, because that is how the
+ * canonical job board addresses itself — `boardUrl()` in `live-board.tsx` omits
+ * the parameter for `maintenance` — so an absent parameter is a positive
+ * statement about which board is meant rather than a missing scope.
+ */
+async function boardFrom(
+  request: Request,
+  db: Database,
+  orgId: string,
+  body?: unknown,
+): Promise<BoardRecord> {
+  const raw = new URL(request.url).searchParams.get("board");
+  const fromQuery = text(raw, 48);
+  /*
+   * `?board=` WITH NOTHING AFTER IT IS NOT "NO OPINION".
+   *
+   * Absent means the default board, as above. Present and empty means a caller
+   * that meant to name a board and had none to name — which is exactly what a
+   * section with no register of its own produces: `portal-app.tsx` passes
+   * `activeCustom.boardKey ?? ""`. Treating that as absent would hand a
+   * detached section the JOB BOARD's tab strip and let it write views onto it,
+   * which is the whole failure this route was just fixed for.
+   */
+  if (raw !== null && !fromQuery) throw new BoardNotFoundError("");
+  const fromBody =
+    body && typeof body === "object"
+      ? text((body as Record<string, unknown>).board, 48)
+      : "";
+  return resolveBoard(db, orgId, fromQuery || fromBody || undefined);
+}
+
+/**
+ * The refusal a write gets when the view it names lives on a different board
+ * than the request does.
+ *
+ * A view id is unique, so the update would "work" — which is the problem. The
+ * tab strip on a section's register would be able to rename, reorder, re-default
+ * or bin a tab on the canonical job board, and the operator would see nothing
+ * happen on their own screen. Only checked when the caller named a board, so a
+ * caller that addresses a view purely by id is unaffected.
+ */
+function wrongBoard(viewBoardId: string, board: BoardRecord, named: boolean) {
+  if (!named || viewBoardId === board.key) return null;
+  return bad("That view is not on this board.", 404);
+}
+
+/** Did this request actually name a board, or is it taking the default? */
+function namesBoard(request: Request, body?: unknown) {
+  if (text(new URL(request.url).searchParams.get("board"), 48)) return true;
+  return Boolean(
+    body && typeof body === "object" && text((body as Record<string, unknown>).board, 48),
+  );
 }
 
 function newId() {
@@ -119,6 +214,56 @@ type Database = Awaited<ReturnType<typeof scopedDb>>["db"];
 
 function seedId(orgId: string, boardKey: string, viewKey: string) {
   return `seed-${orgId}-${boardKey}-${viewKey}`;
+}
+
+/**
+ * The three view types that are a FORM's surfaces rather than the board's.
+ *
+ * `form` is the form itself, and `form-results` and `form-responses` count and
+ * list what people sent through it. All three name the form in their own copy.
+ */
+const FORM_BACKED: ReadonlySet<string> = new Set([
+  "form",
+  "form-results",
+  "form-responses",
+]);
+
+/**
+ * WHICH TYPES THIS BOARD CAN ACTUALLY PRODUCE A WORKING VIEW OF — owner §8/§26.
+ *
+ * `VIEW_TYPES` says whether the product has BUILT a renderer. That is not the
+ * same question as whether this board can use it, and the difference is a leak
+ * rather than a cosmetic one: a section's generated register has no form, and
+ * `FormBuilder` asks `/api/board/form` with no board at all, so a Form view
+ * added to a register drew the CANONICAL JOB BOARD's public form — its title,
+ * its questions, and the Location dropdown listing all 39 real store names —
+ * with a working Submit that filed the job onto the job board. Verified on the
+ * running server: the Form tab on `sec-f47167fe0157` rendered "Maintenance
+ * Request … Please fill up 1 form for each repair requested" and the estate.
+ *
+ * So a board with no form of its own reports the three form-backed types as
+ * unbuilt: the "+" menu draws them disabled, `POST` refuses them, and an
+ * existing row of that type renders the placeholder instead of somebody else's
+ * form. The job board has a form and is unaffected. The other half of this —
+ * teaching `FormBuilder` to ask for its own board — belongs to the form lane;
+ * until it lands, this is what stops the form being served where it does not
+ * belong.
+ */
+async function typesFor(db: Database, orgId: string, boardKey: string) {
+  const [form] = await db
+    .select({ id: formConfigurations.id })
+    .from(formConfigurations)
+    .where(
+      and(
+        eq(formConfigurations.organisationId, orgId),
+        eq(formConfigurations.boardId, boardKey),
+      ),
+    )
+    .limit(1);
+  if (form) return VIEW_TYPES.map((type) => ({ ...type }));
+  return VIEW_TYPES.map((type) =>
+    FORM_BACKED.has(type.key) ? { ...type, built: false } : { ...type },
+  );
 }
 
 /** A view's stored settings, never throwing on a row an admin has hand-edited. */
@@ -259,8 +404,7 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const { db, orgId } = await scopedDb(request);
-    const url = new URL(request.url);
-    const board = await resolveBoard(db, orgId, url.searchParams.get("board") ?? undefined);
+    const board = await boardFrom(request, db, orgId);
 
     await seedViews(db, orgId, board.key);
 
@@ -270,9 +414,10 @@ export async function GET(request: Request) {
       .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, board.key)))
       .orderBy(asc(boardViews.position));
 
-    const built = new Map<string, boolean>(
-      VIEW_TYPES.map((type) => [type.key as string, type.built as boolean]),
-    );
+    /* Per BOARD, not per product — see `typesFor`. One answer feeds both the
+       tab strip's `built` flags and the "+" menu, so they cannot disagree. */
+    const types = await typesFor(db, orgId, board.key);
+    const built = new Map<string, boolean>(types.map((type) => [type.key, type.built]));
 
     return Response.json({
       board,
@@ -290,7 +435,7 @@ export async function GET(request: Request) {
         settings: readSettings(row.settings),
         built: built.get(row.type) ?? false,
       })),
-      types: VIEW_TYPES,
+      types,
     });
   } catch (error) {
     return unavailable(error);
@@ -305,13 +450,36 @@ export async function POST(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId, actor } = guard.scope;
     const body = await request.json().catch(() => ({}));
-    const board = await resolveBoard(db, orgId, text(body.board, 48) || undefined);
+    /* The query string first — that is where the chrome puts it. See `boardFrom`. */
+    const board = await boardFrom(request, db, orgId, body);
 
     const name = text(body.name, 60);
     const type = text(body.type, 24);
     if (!name) return bad("A view name is required.");
-    if (!VIEW_TYPES.some((entry) => entry.key === type)) {
+    /* The same list the "+" menu was drawn from, asked of the same board. */
+    const definition = (await typesFor(db, orgId, board.key)).find(
+      (entry) => entry.key === type,
+    );
+    if (!definition) {
       return bad(`"${type}" is not a view type.`);
+    }
+    /*
+     * A TYPE NOTHING CAN RENDER IS NOT A VIEW — owner §8/§26.
+     *
+     * The "+" menu listed every entry in `VIEW_TYPES` as a live choice, unbuilt
+     * ones included, so picking Timeline wrote a real row, drew a real tab and
+     * opened a panel reading "Timeline is not built yet". A clickable no-op that
+     * leaves a dead tab behind on the board. The menu now draws those entries
+     * disabled (`AddViewMenu`), and this is the same rule on the server so the
+     * row cannot be created by any other caller either.
+     */
+    if (!definition.built) {
+      return bad(
+        FORM_BACKED.has(type)
+          ? `This board has no form of its own, so ${definition.label} would have nothing to show.`
+          : `${definition.label} is not built yet, so it cannot be added.`,
+        409,
+      );
     }
 
     let key = slug(name);
@@ -374,12 +542,24 @@ export async function PATCH(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
     const body = await request.json().catch(() => ({}));
+    /* The same question the other three verbs ask, asked the same way. */
+    const board = await boardFrom(request, db, orgId, body);
+    const named = namesBoard(request, body);
 
     if (Array.isArray(body.order)) {
+      /*
+       * Scoped to THIS board's views, not to every view in the organisation.
+       *
+       * The lookup read the whole organisation and the UPDATE keyed on the id
+       * alone, so a reorder posted from a section's strip could renumber tabs on
+       * the job board — the same cross-board write `POST` was making, in the one
+       * verb where the ids come from the client. The board filter turns an id
+       * from another board into a row this loop simply does not know about.
+       */
       const before = await db
         .select({ id: boardViews.id, name: boardViews.name, position: boardViews.position, boardId: boardViews.boardId })
         .from(boardViews)
-        .where(eq(boardViews.organisationId, orgId));
+        .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, board.key)));
       const byId = new Map(before.map((row) => [row.id, row]));
       const moved: Array<{ id: string; name: string; from: number; to: number }> = [];
 
@@ -388,13 +568,20 @@ export async function PATCH(request: Request) {
         const position = Number(entry?.position);
         if (!id || !Number.isFinite(position)) continue;
         const existing = byId.get(id);
-        if (existing && existing.position !== position) {
+        if (!existing) continue;
+        if (existing.position !== position) {
           moved.push({ id, name: existing.name, from: existing.position, to: position });
         }
         await db
           .update(boardViews)
           .set({ position, updatedAt: sql`CURRENT_TIMESTAMP` })
-          .where(and(eq(boardViews.id, id), eq(boardViews.organisationId, orgId)));
+          .where(
+            and(
+              eq(boardViews.id, id),
+              eq(boardViews.organisationId, orgId),
+              eq(boardViews.boardId, board.key),
+            ),
+          );
       }
 
       if (moved.length) {
@@ -425,6 +612,8 @@ export async function PATCH(request: Request) {
       .from(boardViews)
       .where(and(eq(boardViews.id, id), eq(boardViews.organisationId, orgId)));
     if (!existing) return bad("View not found.", 404);
+    const misplaced = wrongBoard(existing.boardId, board, named);
+    if (misplaced) return misplaced;
 
     const patch: Record<string, unknown> = { updatedAt: sql`CURRENT_TIMESTAMP` };
     if (typeof body.name === "string") {
@@ -509,12 +698,16 @@ export async function DELETE(request: Request) {
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 64);
     if (!id) return bad("A view id is required.");
+    /* Same question, same answer — and a 404 rather than the default board. */
+    const board = await boardFrom(request, db, orgId);
 
     const [existing] = await db
       .select()
       .from(boardViews)
       .where(and(eq(boardViews.id, id), eq(boardViews.organisationId, orgId)));
     if (!existing) return bad("View not found.", 404);
+    const misplaced = wrongBoard(existing.boardId, board, namesBoard(request));
+    if (misplaced) return misplaced;
     if (existing.system) {
       return bad("The main table cannot be removed — it is how the board is edited.", 409);
     }

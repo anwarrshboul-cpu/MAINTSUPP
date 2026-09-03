@@ -75,6 +75,8 @@ import {
   fallbackSystemColumns,
   groupColors,
   subitemStatusOptions,
+  assigneeFilterOptions,
+  storeTypeFilterColumn,
 } from "./board-model";
 import {
   boardItemName,
@@ -131,6 +133,7 @@ import {
   sortDirectionFor,
   sortRuleIndex,
   sortSettingsFor,
+  resolveQuickSort,
 } from "./board-sort";
 import {
   EMPTY_FILTER,
@@ -701,18 +704,6 @@ export function LiveMaintenanceBoard({
     // showing the previous board's rows under the new board's columns.
   }, [boardId]);
 
-  const assignees = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          requests
-            .map((request) => request.assignee)
-            .filter((value): value is string => Boolean(value)),
-        ),
-      ).sort(),
-    [requests],
-  );
-
   const portfolioChoices = useMemo(() => {
     const siteNames = new Map<string, string>();
     for (const request of requests) {
@@ -794,40 +785,22 @@ export function LiveMaintenanceBoard({
     ],
   );
 
-  const assigneeOptions = useMemo<Option[]>(
-    () => [
-      { value: "", label: "Unassigned", color: "#eef2f4", text: "#61717c" },
-      ...assignees.map((person, index) => ({
-        value: person,
-        color: groupColors[index % groupColors.length],
-      })),
-    ],
-    [assignees],
-  );
+  /* The rows THIS board draws, not the organisation's — see
+     `assigneeFilterOptions` for the filter that used to empty a register by
+     offering it the job board's engineers. */
+  const { assignees, options: assigneeOptions } = useMemo(
+    () => assigneeFilterOptions(scopedRequests, groupColors),
+    [scopedRequests],
+  ) as { assignees: string[]; options: Option[] };
 
   const itemNameColumn = useMemo(
     () => systemColumns.find((column) => column.key === "name") ?? null,
     [systemColumns],
   );
 
-  /*
-   * Store Documentation filters by Store Type, not by priority — the board has
-   * no priority column, so the maintenance filter offered four values that
-   * matched nothing and hid every row when used. The choices come off the
-   * column itself rather than a hardcoded list, so an admin who adds a fifth
-   * store type sees it here without a deploy.
-   */
-  const storeTypeColumn = useMemo(
-    () =>
-      customColumns.find(
-        (column) => column.key === "storeType" && column.type === "dropdown",
-      ) ?? null,
-    [customColumns],
-  );
-  const storeTypeChoices = useMemo(
-    () => (storeTypeColumn ? choiceList(storeTypeColumn) : []),
-    [storeTypeColumn],
-  );
+  /* Per board, off the column itself — see `storeTypeFilterColumn`. */
+  const storeTypeColumn = useMemo(() => storeTypeFilterColumn(customColumns), [customColumns]);
+  const storeTypeChoices = useMemo(() => (storeTypeColumn ? choiceList(storeTypeColumn) : []), [storeTypeColumn]);
 
   /*
    * Which board this grid is, in the two forms the rest of the component asks
@@ -837,6 +810,38 @@ export function LiveMaintenanceBoard({
    */
   const isStoreDocumentation = boardId === "store-documentation";
   const canEditGroups = !isStoreDocumentation;
+
+  /*
+   * WHICH TOOLBAR CONTROLS THIS BOARD CAN HONESTLY DRAW — W02-06.
+   *
+   * The toolbar was written for the job board and then given one
+   * `!isStoreDocumentation` escape hatch per control, which says in effect
+   * "every board except that one is the job board". A section's generated
+   * register is neither, and it inherited the whole toolbar: a People filter,
+   * a Priority filter built from the MAINTENANCE option registry, and a
+   * "Newest" button wired to a Date Requested column the register does not
+   * have. Two of those silently hid rows and the third did nothing at all —
+   * the button was drawn, it took the click, and `quickSortToggle` returned on
+   * its first line because the column was null.
+   *
+   * A control is now drawn when the COLUMN BEHIND IT IS ON THIS BOARD, which
+   * is a question with an answer for every board including ones that do not
+   * exist yet. Store Documentation is unchanged by it — it carries neither
+   * `assignee` nor `priority` — so the two controls it never showed still do
+   * not appear, and the job board carries both and keeps them.
+   */
+  const hasSystemColumn = useCallback(
+    (key: ColumnKey) => systemColumns.some((column) => column.key === key),
+    [systemColumns],
+  );
+
+  /*
+   * A register a workspace section generated for itself, rather than one of the
+   * two the product ships. The mirror of `isGeneratedRegister` in
+   * `app/api/board/route.ts`, and used for the same thing: a verb that only the
+   * product's own boards have a destination for is not offered here.
+   */
+  const isGeneratedRegister = !isMaintenanceBoard && !isStoreDocumentation;
 
   const allBoardColumns = useMemo<BoardDisplayColumn[]>(
     () =>
@@ -2336,28 +2341,30 @@ export function LiveMaintenanceBoard({
    *
    * On maintenance it is Date Requested; on Store Documentation the Store name,
    * because a store is not a ticket and has no meaningful "requested" date.
-   * Either way it now writes a RULE on a real column, which is the fix: the old
-   * Newest/Oldest set a private flag that reordered the CSV and nothing on
-   * screen, because every group is re-sorted by the board's own comparator.
+   * Either way it writes a RULE on a real column, which was the earlier fix:
+   * the old Newest/Oldest set a private flag that reordered the CSV and nothing
+   * on screen, because every group is re-sorted by the board's own comparator.
    *
    * With no rule set the board is in its base order — newest first — so that is
    * what the label says, and the first click moves it to oldest.
    */
-  const quickSortColumn = isStoreDocumentation
-    ? itemNameColumn
-    : systemColumns.find((column) => column.key === "requested") ?? null;
-  const quickSortDirection = quickSortColumn
-    ? sortDirectionFor(sortRules, quickSortColumn.id)
-    : null;
-  const quickSortLabel = isStoreDocumentation
-    ? {
-        text: quickSortDirection === "desc" ? "Z–A" : "A–Z",
-        aria: "Sort stores by name",
-      }
-    : {
-        text: quickSortDirection === "asc" ? "Oldest" : "Newest",
-        aria: "Sort by the date each job was requested",
-      };
+  /* The ladder, the direction and the wording all live in `board-sort.ts` —
+     see `resolveQuickSort` for owner repro 3 and why a board with nothing to
+     sort by draws no button rather than a dead one. */
+  const quickSort = useMemo(
+    () =>
+      resolveQuickSort({
+        isStoreDocumentation,
+        itemNameColumn,
+        systemColumns,
+        boardColumns: allBoardColumns,
+        sortRules,
+      }),
+    [allBoardColumns, isStoreDocumentation, itemNameColumn, sortRules, systemColumns],
+  );
+  const quickSortColumn = quickSort?.column ?? null;
+  const quickSortDirection = quickSort?.direction ?? null;
+  const quickSortLabel = quickSort?.label ?? null;
   const quickSortToggle = () => {
     if (!quickSortColumn) return;
     commitSortRules(
@@ -3447,20 +3454,44 @@ export function LiveMaintenanceBoard({
             </button>
             {actionsOpen && (
               <div className="live-board-menu action-menu">
-                <button type="button" onClick={onCreateDetailed}>
-                  <Icon name="document" size={16} />
-                  New item via form
-                </button>
+                {/*
+                  "New item via form" IS THE JOB FORM, and it writes to the job
+                  board. The host opens `CreateRequestModal`, which POSTs to
+                  `/api/maintenance` — a route with no `?board=` and no
+                  placement insert at all. On the job board the unplaced row
+                  falls through to `groups[0]` and everything is as intended; on
+                  any other board the row was created, filed nowhere, and turned
+                  up on the CANONICAL job board while the register the operator
+                  clicked it from stayed empty. Drawn only on the two boards
+                  whose host wires this verb to something that belongs to them —
+                  the job form here, "import the monday export" on Store
+                  Documentation. The register's own "New item" beside it goes
+                  through `/api/board` with the board id and is correct
+                  everywhere.
+
+                  The same reasoning covers the import note below it: the import
+                  accepts `maintenance` and `store-documentation` only
+                  (`BOARD_KEYS` in app/api/import/route.ts), so on a generated
+                  register it was a promise nothing could keep.
+                */}
+                {!isGeneratedRegister && (
+                  <button type="button" onClick={onCreateDetailed}>
+                    <Icon name="document" size={16} />
+                    New item via form
+                  </button>
+                )}
                 {canEditGroups && (
                   <button type="button" onClick={openGroupCreator}>
                     <Icon name="grid" size={16} />
                     New group of items
                   </button>
                 )}
-                <span>
-                  <Icon name="upload" size={16} />
-                  Excel import mapping ready
-                </span>
+                {!isGeneratedRegister && (
+                  <span>
+                    <Icon name="upload" size={16} />
+                    Excel import mapping ready
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -3480,7 +3511,10 @@ export function LiveMaintenanceBoard({
             />
           </label>
 
-          {!isStoreDocumentation && (
+          {/* The board's own People column, not "any board but that one" —
+              see `hasSystemColumn`. Store Documentation and a generated
+              register both lack it, and neither draws this. */}
+          {hasSystemColumn("assignee") && (
             <label className="live-board-tool">
               <Icon name="user" size={16} />
               <select
@@ -3497,6 +3531,19 @@ export function LiveMaintenanceBoard({
             </label>
           )}
 
+          {/*
+            The dropdown filter, drawn only where a column stands behind it.
+
+            The `else` arm below is the MAINTENANCE priority filter, and it used
+            to be the fallback for every board that had no Store Type column —
+            so a section's generated register drew a Priority select built from
+            `optionsFor("priority")`, which falls back to the maintenance seed
+            when the board has no options of its own. It offered Urgent / Medium
+            / Low on a register with no priority column and filtered on
+            `request.priority`, which on those rows is whatever the job form
+            defaulted to. Every value emptied the board.
+          */}
+          {(storeTypeColumn || hasSystemColumn("priority")) && (
           <label className="live-board-tool">
             <Icon name="filter" size={16} />
             {storeTypeColumn ? (
@@ -3539,6 +3586,7 @@ export function LiveMaintenanceBoard({
               </select>
             )}
           </label>
+          )}
 
           {/*
             SORT — the composite control, beside the quick sort in every header.
@@ -3546,17 +3594,21 @@ export function LiveMaintenanceBoard({
             The button is the fast path this toolbar always had: on maintenance
             it flips the board between newest and oldest first, on Store
             Documentation between A–Z and Z–A, because a store is not a ticket
-            and has no meaningful "requested" date. What changed is that both
-            now write a RULE on a real column — Date Requested, or the Store
-            column — instead of a private flag the grid ignored. The old
-            Newest/Oldest reordered the CSV and nothing on screen, because
-            `groupedRows` re-sorted every group by stored position underneath
-            it.
+            and has no meaningful "requested" date. On a section's own register
+            it takes that board's first date column, or its name column, or —
+            where the board has neither — it is not drawn at all. `quickSort`
+            above is the ladder and the reason for each rung. Every one of them
+            writes a RULE on a real column instead of a private flag the grid
+            ignored: the old Newest/Oldest reordered the CSV and nothing on
+            screen, because `groupedRows` re-sorted every group by stored
+            position underneath it.
 
             The chevron beside it opens the full ordered sort, where a
             tie-breaker can be added, reordered or dropped.
           */}
           <div className="live-board-menu-wrap live-board-rules-wrap" data-board-popover>
+            {/* No column to sort by is a reason to draw no button — see `quickSort`. */}
+            {quickSortLabel && (
             <button
               className="live-board-tool"
               type="button"
@@ -3566,6 +3618,7 @@ export function LiveMaintenanceBoard({
               <Icon name="activity" size={16} />
               {quickSortLabel.text}
             </button>
+            )}
             <button
               className="live-board-tool live-board-tool--adjacent"
               type="button"

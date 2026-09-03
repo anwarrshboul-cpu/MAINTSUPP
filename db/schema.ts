@@ -1677,6 +1677,20 @@ export const workspaceSections = sqliteTable(
     surface: text("surface").notNull().default("board"),
     /** The surface's parameter: a board key for board surfaces, else NULL. */
     surfaceRef: text("surface_ref"),
+    /**
+     * W2 — the TEMPLATE this instance was created from. See SECTION_TEMPLATES.
+     *
+     * Plain nullable TEXT rather than a constrained set, and that is what lets
+     * `contractors` and `sites` arrive without a second migration: a new
+     * template is an entry in the catalogue module, validated by the API on
+     * write, and this column simply holds its key.
+     *
+     * NULL MEANS LEGACY, NOT UNKNOWN. Every section created before W2 is a
+     * second door onto one of the product's own screens — a real, supported
+     * shape that must keep working — so a NULL here is a statement about the
+     * row rather than a gap to be backfilled.
+     */
+    template: text("template"),
     /** The heading it lands under before anybody rearranges anything. */
     groupKey: text("group_key").notNull().default("group:operations"),
     position: integer("position").notNull().default(0),

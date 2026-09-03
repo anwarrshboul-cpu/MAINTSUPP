@@ -100,6 +100,12 @@ test("no board file exceeds a reviewable size", async () => {
     "app/(app)/portal/board-cells.tsx": 1300,
     "app/(app)/portal/board-subitems.tsx": 300,
     "app/(app)/portal/board-chrome.tsx": 500,
+    // Split out of board-chrome when the view-write path needed its own
+    // explanation — the four verbs have to agree about which board they are
+    // writing to, and they did not. Capped for the same reason board-compact
+    // is: a file created to relieve a ceiling is the easiest place for the next
+    // thing to be dropped without anyone noticing.
+    "app/(app)/portal/board-view-writes.ts": 150,
   };
   for (const [file, limit] of Object.entries(limits)) {
     const source = await read(file);

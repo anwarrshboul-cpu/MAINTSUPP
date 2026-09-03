@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardActionsHost } from "./board-actions/board-actions-host";
-import { viewFromSearch } from "./board-actions/board-link";
 import { AddViewMenu, ViewOverflowMenu, ViewTabMenu } from "./board-actions/view-menus";
-import { fetchLandingView, rememberLandingView } from "./board-view-memory";
+import { rememberLandingView, useLandingView } from "./board-view-memory";
+import { writeBoardView } from "./board-view-writes";
 import { TabGlyph } from "./board-tab-glyph";
 import { Icon } from "../../components";
 import BoardViewPane, {
@@ -41,14 +41,14 @@ type BoardSummary = {
 
 type Props = {
   /**
-   * Which board this chrome belongs to.
-   *
-   * `/api/board/views` serves the maintenance board's saved views — Form, Fix
-   * Tracker, Chart and File gallery are all built around work orders. On any
-   * other board those tabs are neither meaningful nor reachable, so the strip is
-   * suppressed rather than shown broken, and that board supplies its own views.
+   * Which board this chrome belongs to. REQUIRED, and deliberately so: it used
+   * to default to `"maintenance"`, so a caller that forgot to pass a board got
+   * the CANONICAL JOB BOARD's tab strip, and every view it created, renamed,
+   * reordered or binned landed there. That is the fallback W02-06 forbids — a
+   * missing scope is a refusal or an empty state, never somebody else's
+   * register. With no default the same mistake is a compile error.
    */
-  boardId?: string;
+  boardId: string;
   /**
    * Which SECTION this board is being drawn in — Stage 23.
    *
@@ -92,7 +92,7 @@ type Props = {
  * All three are sticky so the grid scrolls beneath them (AA2).
  */
 export default function BoardChrome({
-  boardId = "maintenance",
+  boardId,
   sectionKey,
   boardName,
   children,
@@ -148,8 +148,10 @@ export default function BoardChrome({
 
   useEffect(() => {
     /* Any board but Store Documentation, which draws its own tracker. This read
-       `!== "maintenance"`, leaving a section's register with no tabs — W02-06. */
-    if (boardId === "store-documentation") return;
+       `!== "maintenance"`, leaving a section's register with no tabs — W02-06.
+       An EMPTY board id is a section with no register of its own; asking the
+       views endpoint about it would come back as the job board's strip. */
+    if (!boardId || boardId === "store-documentation") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -183,44 +185,14 @@ export default function BoardChrome({
   }, [boardId, refreshToken]);
 
   /*
-   * Which tab to open on — see `board-view-memory.ts` for the rules. Runs after
-   * the views load and only overrides an unset tab, so it can never yank the
-   * strip out from under somebody mid-click.
+   * Which tab to open on — `?view=` from a shared link, then the remembered
+   * landing view, then the board's own default. All three rules, and the
+   * ordering fault that made the middle one dead code, live in
+   * `board-view-memory.ts`, which is where this module's docstring has always
+   * said they belong.
    */
   const section = sectionKey ?? boardId;
-  /*
-   * A shared link names its view: `?view=<key>`, written by "Copy link".
-   * Read once, on this load only, and it wins over the remembered landing
-   * view — that is what following a link to a view means — but only when
-   * the key is a tab this board actually has. Consumed after use so a later
-   * re-fetch of the views cannot drag the strip back to it.
-   */
-  const linkedView = useRef<string | null>(
-    typeof window === "undefined" ? null : viewFromSearch(window.location.search),
-  );
-  useEffect(() => {
-    if (!views.length) return;
-    const wanted = linkedView.current;
-    if (wanted) {
-      linkedView.current = null;
-      if (views.some((view) => view.key === wanted)) {
-        setActiveKey(wanted);
-        return;
-      }
-    }
-    let cancelled = false;
-    void fetchLandingView(section).then((landing) => {
-      if (!landing || cancelled) return;
-      setActiveKey((current) =>
-        current && views.some((view) => view.key === current)
-          ? current
-          : landing.view,
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [views, section]);
+  useLandingView(section, views, setActiveKey);
 
   const rememberView = useCallback(
     (key: string) => rememberLandingView(section, key),
@@ -242,28 +214,26 @@ export default function BoardChrome({
      `viewReplacesGrid`. */
   const gridOnScreen = !viewReplacesGrid(activeView);
 
+  /* The board travels with every write, or a view added on a section's
+     register lands on the job board — see `board-view-writes.ts`. */
   async function send(method: "POST" | "PATCH" | "DELETE", body?: unknown, query = "") {
-    /* The board travels with writes too, or a view added on a section's
-       register lands on the job board. */
-    const scoped = `${query ? `${query}&` : "?"}board=${encodeURIComponent(boardId)}`;
-    const response = await fetch(`/api/board/views${scoped}`, {
-      method,
-      headers: body ? { "content-type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setError(String(payload.error ?? "That did not work."));
+    const result = await writeBoardView(boardId, method, body, query);
+    if (!result.ok) {
+      setError(result.error);
       return null;
     }
     setRefreshToken((token) => token + 1);
-    return payload;
+    return result.payload;
   }
 
   async function addView(type: ViewType) {
     setAddOpen(false);
     const created = await send("POST", { name: type.label, type: type.key, icon: type.icon });
-    if (created?.key) setActiveKey(created.key);
+    // Remembered as well as opened: creating a view IS navigating to it, and
+    // without this a reload put the reader back on Main table — the tab they
+    // had just made was still there, just not the one that opened.
+    const key = typeof created?.key === "string" ? created.key : "";
+    if (key) { setActiveKey(key); rememberView(key); }
   }
 
   async function renameView(view: BoardView, name: string) {
@@ -310,7 +280,7 @@ export default function BoardChrome({
 
       {/* ── Row 2 — view tabs (AA3–AA6) ──────────────────────────────── */}
       {/* Drawn wherever views were loaded — see the fetch above. */}
-      {boardId !== "store-documentation" && (
+      {Boolean(boardId) && boardId !== "store-documentation" && (
       <nav className="board-views" aria-label="Board views">
         {/*
           The strip and its two arrows live in one positioned wrapper so the
@@ -485,6 +455,7 @@ export default function BoardChrome({
           bottom with it, and no scroll position can reach the end. */}
       {activeView && activeView.type !== "table" && (
         <BoardViewPane
+          boardId={boardId}
           activeView={activeView}
           items={items}
           palette={palette}

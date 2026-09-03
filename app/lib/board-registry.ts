@@ -1,11 +1,16 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
+  automationRuns,
+  boardAutomations,
   boardViews,
   boards,
+  formConfigurations,
   maintenanceBoardColumns,
+  maintenanceBoardOptions,
   maintenanceGroupItems,
   maintenanceGroups,
+  recycleBin,
 } from "../../db/schema";
 import {
   GENERIC_BOARD_COLUMNS,
@@ -62,6 +67,40 @@ export function slugifyKey(input: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+/** The namespace every board created FOR a workspace section carries. */
+export const SECTION_BOARD_PREFIX = "sec-";
+
+/**
+ * W2 R1 — A BOARD'S IDENTITY IS NEVER ITS DISPLAY NAME.
+ *
+ * `createBoard` used to key a board `slugifyKey(name)`, which made the label an
+ * identifier and produced the owner's reproduction: create a section called
+ * "test", remove it permanently, create "test" again — refused, because a board
+ * keyed `test` was still there. Two independent defects met in that one key.
+ * The board survived (a `surface` change had silently nulled the `surface_ref`
+ * that made it owned, so the purge's ownership test found nothing to delete),
+ * and because the key WAS the name, the surviving board held the name hostage.
+ *
+ * The key is now generated from the instance, so the two are decoupled for
+ * good: renaming a section changes `boards.name` and nothing else, and a board
+ * that somehow outlives its section is invisible litter rather than a name
+ * nobody can use again. 48 bits is far past collision for the handful of boards
+ * one organisation has, and `createBoard` still checks for a clash.
+ *
+ * The prefix is load-bearing as well as readable: it is what tells a
+ * section-generated board apart from a board keyed by the pre-W2 code, which is
+ * how `db/init.ts` can sweep the legacy orphans without ever being able to race
+ * a board being created right now.
+ */
+export function newSectionBoardKey() {
+  return `${SECTION_BOARD_PREFIX}${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+/** True for a key this build's `createBoard` generated, exactly. */
+export function isSectionBoardKey(key: string) {
+  return new RegExp(`^${SECTION_BOARD_PREFIX}[0-9a-f]{12}$`).test(key);
 }
 
 /**
@@ -162,7 +201,23 @@ export async function resolveBoard(
   organisationId: string,
   key: string = DEFAULT_BOARD_KEY,
 ): Promise<BoardRecord> {
-  const wanted = slugifyKey(key) || DEFAULT_BOARD_KEY;
+  /*
+   * A KEY THAT WAS GIVEN AND MEANS NOTHING IS NOT THE JOB BOARD.
+   *
+   * This was `slugifyKey(key) || DEFAULT_BOARD_KEY`, so a key of "!!!" — or any
+   * string of punctuation, which `slugifyKey` reduces to "" — resolved to
+   * maintenance. Callers that had already validated their input never noticed;
+   * callers that pass a key straight through were handing an attacker-shaped
+   * value a silent redirect onto the canonical board. It is the last member of
+   * the fallback family this workstream has been closing.
+   *
+   * Omitting the argument still means the default board, because sixteen
+   * callers rely on that and "no board named" genuinely does mean maintenance
+   * here. Naming something that is not a board is now a `BoardNotFoundError`,
+   * which the routes already turn into a 404.
+   */
+  const wanted = slugifyKey(key);
+  if (!wanted) throw new BoardNotFoundError(key);
 
   const [existing] = await db
     .select()
@@ -326,17 +381,34 @@ async function provisionDefaultStructure(
 export async function createBoard(
   db: Database,
   organisationId: string,
-  input: { name: string; description?: string; itemNoun?: string; kind?: string },
+  input: {
+    name: string;
+    description?: string;
+    itemNoun?: string;
+    kind?: string;
+    /**
+     * An explicit key, for a caller that needs a well-known one. Absent — which
+     * is every caller today — the key is GENERATED, never derived from the name.
+     * See `newSectionBoardKey` for why that is the default rather than the
+     * option: a name-derived key makes the display name an identifier, and the
+     * name then cannot be reused after the board is gone.
+     */
+    key?: string;
+  },
 ): Promise<BoardRecord> {
   const name = input.name.trim().slice(0, 80);
   if (!name) throw new Error("A board name is required.");
 
-  const key = slugifyKey(name);
+  const key = input.key ? slugifyKey(input.key) : newSectionBoardKey();
+  if (!key) throw new Error("A board key is required.");
   const [clash] = await db
     .select({ id: boards.id })
     .from(boards)
     .where(and(eq(boards.organisationId, organisationId), eq(boards.key, key)));
-  if (clash) throw new Error(`A board called "${name}" already exists.`);
+  /* Named by KEY, not by name. Two boards may share a display name — that is
+     the whole point of separating the two — so a clash here is an address
+     collision and the message has to say so rather than blaming the name. */
+  if (clash) throw new Error(`The board address "${key}" is already taken.`);
 
   const [tail] = await db
     .select({ maxPosition: sql<number>`COALESCE(MAX(${boards.position}), -1)` })
@@ -361,6 +433,33 @@ export async function createBoard(
 }
 
 /**
+ * A board's DISPLAY NAME, changed. Its key is not touched and cannot be.
+ *
+ * W2 R1 in one function. Renaming a section renames its register, so the
+ * board's own heading follows the sidebar entry that opens it; the address the
+ * rest of the product joins on stays exactly where it was, which is what makes
+ * a rename free rather than a migration — and what frees the old name for the
+ * next section that wants it.
+ *
+ * `referencePrefix` deliberately does NOT follow. It is baked into every
+ * reference already issued (MS-2026-0001), so re-deriving it from a new name
+ * would leave one register issuing two incompatible series.
+ */
+export async function renameBoard(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+  name: string,
+) {
+  const trimmed = name.trim().slice(0, 80);
+  if (!trimmed) return;
+  await db
+    .update(boards)
+    .set({ name: trimmed, updatedAt: sql`CURRENT_TIMESTAMP` })
+    .where(and(eq(boards.organisationId, organisationId), eq(boards.key, boardKey)));
+}
+
+/**
  * Everything a board owns, removed — used when a section that owns a board is
  * permanently deleted.
  *
@@ -370,6 +469,28 @@ export async function createBoard(
  * independently of this board. That distinction is the whole of the rule: a
  * register's columns, groups and views are its own, and the work filed on it is
  * not, so removing the register must never be a way to lose the work.
+ *
+ * IT HAS TO BE COMPLETE, AND IT WAS NOT.
+ *
+ * The first version removed four of the eight board-scoped tables, and the four
+ * it missed were not cosmetic:
+ *
+ *  - `form_configurations` carries the PUBLIC share token. A form left behind
+ *    still resolves at `/f/:token` and still accepts submissions, which would
+ *    file rows onto a board that no longer exists — a live intake pointed at
+ *    nothing, surviving the deliberate destruction of the thing it belonged to.
+ *    Its unique index is (organisation, board, view), so it also silently
+ *    refused any future form on a board that reused the key.
+ *  - `board_automations` are rules that run on someone's behalf; a rule nobody
+ *    can see or edit any more is worse than no rule.
+ *  - `automation_runs` and `maintenance_board_options` are unreachable rows
+ *    keyed on a board that is gone, and `maintenance_board_options` is unique
+ *    on (organisation, board, column, value), so it too could refuse a later
+ *    write under a reused key.
+ *
+ * The bar is the owner's own §29: after a permanent removal, NOTHING may block
+ * reuse. Anything keyed by `board_id` that this function does not name is a hole
+ * in that promise.
  */
 export async function deleteBoardStructure(
   db: Database,
@@ -385,6 +506,14 @@ export async function deleteBoardStructure(
       ),
     );
   await db
+    .delete(maintenanceBoardOptions)
+    .where(
+      and(
+        eq(maintenanceBoardOptions.organisationId, organisationId),
+        eq(maintenanceBoardOptions.boardId, boardKey),
+      ),
+    );
+  await db
     .delete(maintenanceGroups)
     .where(
       and(
@@ -396,6 +525,33 @@ export async function deleteBoardStructure(
     .delete(boardViews)
     .where(
       and(eq(boardViews.organisationId, organisationId), eq(boardViews.boardId, boardKey)),
+    );
+  /* The form and its share token, then the rules and their history. Ordered
+     token-first so the publicly reachable thing stops resolving before anything
+     slower is attempted. */
+  await db
+    .delete(formConfigurations)
+    .where(
+      and(
+        eq(formConfigurations.organisationId, organisationId),
+        eq(formConfigurations.boardId, boardKey),
+      ),
+    );
+  await db
+    .delete(boardAutomations)
+    .where(
+      and(
+        eq(boardAutomations.organisationId, organisationId),
+        eq(boardAutomations.boardId, boardKey),
+      ),
+    );
+  await db
+    .delete(automationRuns)
+    .where(
+      and(
+        eq(automationRuns.organisationId, organisationId),
+        eq(automationRuns.boardId, boardKey),
+      ),
     );
   await db
     .delete(boards)
@@ -416,6 +572,31 @@ export async function boardItemCount(
         eq(maintenanceGroupItems.organisationId, organisationId),
         eq(maintenanceGroupItems.boardId, boardKey),
       ),
+    );
+  return Number(row?.value ?? 0);
+}
+
+/**
+ * How many of a board's items are sitting in the recycle bin.
+ *
+ * Binning an item LIFTS its placement out of `maintenance_group_items` and
+ * snapshots it into `recycle_bin.placement`, so `boardItemCount` answers zero
+ * for a register whose every row is one click from coming back. Destroying the
+ * board at that point would leave those rows restorable onto a board that no
+ * longer exists — the bin's whole promise, broken by a menu entry being
+ * removed. Counted separately from the live items so the refusal can say which
+ * of the two is in the way and where to go and clear it.
+ */
+export async function boardBinCount(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ value: sql<number>`COUNT(*)` })
+    .from(recycleBin)
+    .where(
+      and(eq(recycleBin.organisationId, organisationId), eq(recycleBin.boardId, boardKey)),
     );
   return Number(row?.value ?? 0);
 }

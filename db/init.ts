@@ -80,6 +80,15 @@ async function initialize() {
   await ensureStageTwentyThreeRecycleBin(d1);
   await ensureBoardAutomations(d1);
   await ensureCanonicalSiteLink(d1);
+
+  /*
+   * Last, because it deletes from tables the stages above create — the forms of
+   * `ensureFormBuilder` and the rules of `ensureBoardAutomations` among them.
+   * A repair that ran before its tables existed would be a silent no-op on a
+   * fresh database and a working one everywhere else, which is the shape of bug
+   * that is found a year later.
+   */
+  await repairOrphanedSectionBoards(d1);
 }
 
 /**
@@ -3260,6 +3269,12 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
          icon TEXT NOT NULL DEFAULT 'grid',
          surface TEXT NOT NULL DEFAULT 'board',
          surface_ref TEXT,
+         /* W2 — which template this instance was created from. Nullable, and
+            NULL is a fact rather than a gap: it means a section created before
+            templates existed, which is a second door onto a built-in screen and
+            keeps working as one. Unconstrained TEXT so a template added to
+            SECTION_TEMPLATES later needs no migration at all. */
+         template TEXT,
          group_key TEXT NOT NULL DEFAULT 'group:operations',
          position INTEGER NOT NULL DEFAULT 0,
          archived_at TEXT,
@@ -3316,7 +3331,13 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
    * altered, and a batch gives no ordering guarantee this could rely on.
    */
   await addColumn(d1, "workspace_sections", "description", "TEXT");
+  /* W2 — the template an instance was created from. Same guard, same reason;
+     nullable because NULL is the real answer for every section that predates
+     templates. A template added to `SECTION_TEMPLATES` later slots into this
+     column with no further migration, which is why it carries no CHECK. */
+  await addColumn(d1, "workspace_sections", "template", "TEXT");
 }
+
 
 async function ensureImportIdentity(d1: D1DatabaseLike) {
   await addColumn(d1, "maintenance_requests", "external_id", "TEXT");
@@ -3326,6 +3347,193 @@ async function ensureImportIdentity(d1: D1DatabaseLike) {
          ON maintenance_requests(organisation_id, external_id)`,
     )
     .run();
+}
+
+/*
+ * MOVED OUT OF THE STAGE 20 BLOCK, DELIBERATELY.
+ *
+ * `tests/stage-twenty-schema.test.mjs` slices `db/init.ts` from
+ * `ensureStageTwentyAccounts` to `ensureImportIdentity` and refuses any
+ * `DELETE FROM` inside it — Stage 20's accounts migration must be purely
+ * additive, and it still is. This repair is not part of that migration and
+ * only sat between the two markers by accident of where it was written; the
+ * slice caught it and was right to. It lives below them now, and the
+ * additive rule is unweakened.
+ */
+/**
+ * W2 — the boards left behind by the pre-W2 create/purge pair, removed.
+ *
+ * WHAT WENT WRONG. Until R1 a section's board was keyed `slugifyKey(label)`, so
+ * the display name WAS the address. Meanwhile `PATCH { surface }` would quietly
+ * null a `surface_ref` when the new surface had no board of its own, and the
+ * purge's ownership test reads exactly that column — so a section whose surface
+ * had been changed took nothing with it when it was deleted. The board stayed,
+ * holding its name, and creating a section by that name again was refused by
+ * `createBoard`'s clash check with no way for the owner to see why. That is the
+ * owner's first reproduction, and both halves of it are fixed above: the key is
+ * generated (`newSectionBoardKey`) and the surface change is refused while the
+ * section owns a board (`app/api/workspace-sections/route.ts`).
+ *
+ * WHY A SWEEP AT ALL, THEN. Because the residue is already out there — one such
+ * board on Staging, and any local or Railway database that ran the old code —
+ * and a board with no section is unreachable by every route in the product, so
+ * nothing else will ever find it.
+ *
+ * WHY THIS ONE CANNOT RACE THE CREATE PATH. `POST /api/workspace-sections`
+ * creates the BOARD first and the section second, so there is a window in which
+ * a perfectly healthy board has no section pointing at it. A sweep that deleted
+ * on "nobody names it" alone would take one out from under an in-flight request
+ * — and this file runs on the boot path of every isolate, so on a serverless
+ * host that window is entered often. Two different proofs close it, one per
+ * kind of key, and they are set out at the candidate test below: a legacy key
+ * can only have come from code that no longer runs, and a generated key must
+ * additionally have an audit line whose section is gone.
+ *
+ * WHY IT IS CHEAP. Two small reads in the steady state — `boards` is a handful
+ * of rows per organisation — and no further statement at all unless a board is
+ * unclaimed. It never scans an item table except to ask whether one specific
+ * board is empty.
+ *
+ * WHAT IT REFUSES TO TOUCH. A built-in board; a board any section still names,
+ * ARCHIVED SECTIONS INCLUDED (an archived section still owns its register and
+ * is restored with it); a board holding items; and a board with anything in the
+ * recycle bin. Board `testtt` on Staging is the owner's and is protected by the
+ * second of those — see W2 R6.
+ */
+async function repairOrphanedSectionBoards(d1: D1DatabaseLike) {
+  const boardRows = await d1
+    .prepare(
+      `SELECT organisation_id, key FROM boards
+        WHERE key NOT IN ('maintenance', 'store-documentation')`,
+    )
+    .all()
+    .catch(() => ({ results: [] as unknown[] }));
+  const candidates = ((boardRows.results ?? []) as Array<{
+    organisation_id?: string;
+    key?: string;
+  }>).filter((row) => row.organisation_id && row.key);
+  if (candidates.length === 0) return;
+
+  /* One read gives both facts: which boards a section still names, and which
+     section keys exist at all. The second is what makes a generated board safe
+     to judge — see the audit check below. */
+  const sectionRows = await d1
+    .prepare("SELECT organisation_id, key, surface_ref FROM workspace_sections")
+    .all()
+    .catch(() => ({ results: [] as unknown[] }));
+  const sections = (sectionRows.results ?? []) as Array<{
+    organisation_id?: string;
+    key?: string;
+    surface_ref?: string | null;
+  }>;
+  const claimed = new Set(
+    sections
+      .filter((row) => row.surface_ref)
+      .map((row) => `${row.organisation_id}\u0000${row.surface_ref}`),
+  );
+  const liveSectionKeys = new Set(
+    sections.map((row) => `${row.organisation_id}\u0000${row.key}`),
+  );
+
+  for (const board of candidates) {
+    const organisationId = board.organisation_id as string;
+    const key = board.key as string;
+    if (claimed.has(`${organisationId}\u0000${key}`)) continue;
+
+    /*
+     * A GENERATED KEY NEEDS A SECOND PROOF, and this is where the race is
+     * closed for it.
+     *
+     * A legacy-keyed board can only have come from code that no longer runs, so
+     * "no section names it" is proof enough. A `sec-` board cannot be judged
+     * that way: `POST /api/workspace-sections` creates the BOARD first and the
+     * SECTION second, so for the width of one insert a perfectly healthy new
+     * register has nobody pointing at it — and this file runs at every cold
+     * start.
+     *
+     * The audit line settles it. `workspace.section_created` is written AFTER
+     * the section row, so a board still inside that window has no such line at
+     * all and is left alone. A board that HAS one, whose section key no longer
+     * exists, was created for a section that has since been permanently
+     * deleted — which is an orphan by definition, and the exact residue the
+     * pre-guard purge used to leave behind.
+     *
+     * Read only when there is an unclaimed generated board to ask about, which
+     * in the steady state is never. `audit_events` is indexed on `action`, and
+     * the LIKE is a filter on that index's rows rather than a scan.
+     */
+    if (key.startsWith("sec-")) {
+      const audit = await d1
+        .prepare(
+          `SELECT entity_id FROM audit_events
+            WHERE organisation_id = ?
+              AND action = 'workspace.section_created'
+              AND detail LIKE ?`,
+        )
+        .bind(organisationId, `%"board":"${key}"%`)
+        .all()
+        .catch(() => ({ results: [] as unknown[] }));
+      const creators = ((audit.results ?? []) as Array<{ entity_id?: string }>)
+        .map((row) => row.entity_id)
+        .filter((value): value is string => Boolean(value));
+      if (creators.length === 0) continue;
+      if (creators.some((section) => liveSectionKeys.has(`${organisationId}\u0000${section}`))) {
+        continue;
+      }
+    }
+
+    /* The emptiness test, and it is the same pair the purge endpoint applies:
+       live placements, and anything sitting in the recycle bin waiting to be
+       restored onto this board. Either one and the board is left exactly where
+       it is — an orphan that holds work is a bug to be reported, never a row to
+       be tidied away on a boot path. */
+    const occupied = await Promise.all(
+      [
+        "SELECT COUNT(*) AS n FROM maintenance_group_items WHERE organisation_id = ? AND board_id = ?",
+        "SELECT COUNT(*) AS n FROM recycle_bin WHERE organisation_id = ? AND board_id = ?",
+      ].map(async (statement) => {
+        const result = await d1
+          .prepare(statement)
+          .bind(organisationId, key)
+          .all()
+          .catch(() => ({ results: [{ n: 1 }] }));
+        const [row] = (result.results ?? []) as Array<{ n?: number | string }>;
+        return Number(row?.n ?? 1);
+      }),
+    );
+    if (occupied.some((count) => count > 0)) continue;
+
+    /*
+     * The same tables `deleteBoardStructure` names in
+     * `app/lib/board-registry.ts`, in the same order.
+     *
+     * Two lists, because that file speaks drizzle and this one is dialect-shared
+     * raw SQL that runs before any of it is loaded. They are held equal by
+     * `tests/stage-two-section-registers.test.mjs`, so a table added to the
+     * purge and forgotten here fails the suite rather than leaving a second,
+     * quieter definition of "everything a board owns".
+     */
+    for (const table of [
+      "maintenance_board_columns",
+      "maintenance_board_options",
+      "maintenance_groups",
+      "board_views",
+      "form_configurations",
+      "board_automations",
+      "automation_runs",
+    ]) {
+      await d1
+        .prepare(`DELETE FROM ${table} WHERE organisation_id = ? AND board_id = ?`)
+        .bind(organisationId, key)
+        .run()
+        .catch(() => undefined);
+    }
+    await d1
+      .prepare("DELETE FROM boards WHERE organisation_id = ? AND key = ?")
+      .bind(organisationId, key)
+      .run()
+      .catch(() => undefined);
+  }
 }
 
 /**

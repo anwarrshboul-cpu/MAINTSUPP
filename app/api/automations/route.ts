@@ -25,7 +25,7 @@ import {
   exposeVocabulary,
   findRule,
   listRules,
-  normaliseBoardId,
+  resolveBoardId,
   normaliseImportance,
   templatesFor,
   validateRule,
@@ -59,7 +59,11 @@ export async function GET(request: Request) {
     if (guard.denied) return guard.denied;
     const scope = guard.scope;
     const url = new URL(request.url);
-    const boardId = normaliseBoardId(url.searchParams.get("boardId") ?? url.searchParams.get("board"));
+    const boardId = await resolveBoardId(
+      scope.db,
+      scope.orgId,
+      url.searchParams.get("boardId") ?? url.searchParams.get("board"),
+    );
 
     /*
      * Opening the board is when time-based rules get their chance. The sweep
@@ -99,7 +103,7 @@ export async function POST(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
     const body = record(await request.json().catch(() => ({})));
-    const boardId = normaliseBoardId(body.boardId);
+    const boardId = await resolveBoardId(db, orgId, body.boardId);
     const { columns, groups } = await boardVocabulary(db, orgId, boardId);
     const outcome = validateRule(currentCatalog(), columns, groups, {
       triggerType: text(body.triggerType, 60),

@@ -49,6 +49,8 @@ export type WorkspaceSectionRow = {
   description?: string | null;
   /** W02-06 — whether the register it draws belongs to this section alone. */
   ownsBoard?: boolean;
+  /** W2 — the template it was created from. NULL means a legacy second door. */
+  template?: string | null;
   icon: IconName;
   surface: string;
   boardKey: string | null;
@@ -65,9 +67,28 @@ type Surface = {
   boardKey: string | null;
 };
 
+/**
+ * A template a NEW section may be built from, as the server describes it.
+ *
+ * `available` is the server's word and this file does not argue with it. An
+ * unavailable template is drawn — so the owner can see it exists and read why
+ * it is not yet on offer — and is not selectable, because the owner's §8 rule
+ * is that a fake option must not be clickable. `POST` refuses one too, so the
+ * two cannot drift into disagreeing.
+ */
+type Template = {
+  key: string;
+  label: string;
+  description: string;
+  surface: string;
+  available: boolean;
+  unavailable?: string;
+};
+
 type Catalogue = {
   sections: WorkspaceSectionRow[];
   surfaces: Surface[];
+  templates: Template[];
   canEdit: boolean;
 };
 
@@ -116,22 +137,28 @@ async function send(url: string, init: RequestInit) {
 function SectionForm({
   initial,
   surfaces,
+  templates,
   busy,
   onCancel,
   onSubmit,
 }: {
   initial: WorkspaceSectionRow | null;
   surfaces: Surface[];
+  templates: Template[];
   busy: boolean;
   onCancel: () => void;
   onSubmit: (values: {
     label: string;
     description: string;
     icon: IconName;
-    /* Absent when adding: the server then creates the section's own register.
-       Carried on an edit so a section made before W02-06, which points at a
-       shared screen, keeps pointing at it. */
+    /* Sent only when EDITING a legacy second-door section, which is the only
+       row whose screen may still be changed. An instance with a register of its
+       own is refused by the server if it is sent one, because re-homing it
+       would leave the register with nothing that opens it. */
     surface?: string;
+    /* Sent only when ADDING. A template decides the structure the new register
+       is born with; it is not an editable field afterwards. */
+    template?: string;
     group: string;
   }) => void;
 }) {
@@ -152,10 +179,32 @@ function SectionForm({
   }, []);
   const [icon, setIcon] = useState<IconName>(initial?.icon ?? "grid");
   const [surface, setSurface] = useState(initial?.surface ?? surfaces[0]?.key ?? "maintenance");
+  /* The first template that can actually be chosen — never merely the first in
+     the list, which may be one the server has marked unavailable. */
+  const [template, setTemplate] = useState(
+    () => templates.find((entry) => entry.available)?.key ?? "",
+  );
   const [group, setGroup] = useState(initial?.group ?? BUILT_IN_GROUPS[0].key);
 
   const chosen = surfaces.find((entry) => entry.key === surface) ?? null;
   const trimmed = label.trim();
+  /*
+   * WHICH CONTROL THIS FORM SHOWS, and it is three cases rather than two.
+   *
+   *   adding                 -> the TEMPLATE chooser. The new section gets a
+   *                             register of its own, and this decides its shape.
+   *   editing an INSTANCE    -> no chooser at all, and a line saying what it was
+   *                             built from. Its template is not editable (that
+   *                             would be a migration) and its screen is not
+   *                             either — see the 409 in the PATCH handler.
+   *   editing a LEGACY row   -> the screen picker, unchanged. A second door onto
+   *                             an existing screen is exactly what those rows
+   *                             are, and this is the only way to re-home one.
+   */
+  const ownsRegister = initial?.ownsBoard === true;
+  const builtFrom = initial?.template
+    ? templates.find((entry) => entry.key === initial.template) ?? null
+    : null;
 
   return (
     <form
@@ -167,10 +216,18 @@ function SectionForm({
           label: trimmed,
           description: description.trim(),
           icon,
-          /* W02-06. Adding a section creates a register of its own, so there is
-             no screen to choose and sending one would ask for the old
-             second-door behaviour. Editing keeps whatever the row already has. */
-          ...(initial ? { surface } : {}),
+          /* W02-06 / W2. Adding sends a TEMPLATE and never a surface: the
+             section gets a register of its own and the template says what shape
+             it starts in. Editing sends a surface only for a legacy second door,
+             which is the only row that has one to change. An instance sends
+             neither — its screen and its template are both fixed. */
+          ...(initial
+            ? ownsRegister
+              ? {}
+              : { surface }
+            : template
+              ? { template }
+              : {}),
           group,
         });
       }}
@@ -229,16 +286,83 @@ function SectionForm({
         </div>
       </fieldset>
 
-      {initial ? (
+      {!initial ? (
         /*
-         * Only when editing, and only because sections created before W02-06
-         * are doors onto a shared screen. Removing the control would leave
-         * those rows with no way to be re-homed; offering it when ADDING would
-         * offer the behaviour the owner ruled out.
+         * W2 §3 — THE TEMPLATE CHOOSER, back where the owner asked for it.
+         *
+         * It went missing when W02-06 made every new section a register of its
+         * own: the screen picker was removed from Add (correctly — it offered
+         * the second-door behaviour the owner had just ruled out) and nothing
+         * took its place, so "what is this section made of" stopped being a
+         * question anybody could answer.
+         *
+         * Native radios, like the icon grid above and for the same reasons: the
+         * arrow keys, the group semantics and the "one of these is chosen"
+         * announcement all come free, and `disabled` on a radio is a state
+         * assistive technology already knows how to say.
+         */
+        <fieldset className="sec-templates">
+          <legend>Template</legend>
+          <p className="ba-hint sec-templates__intro">
+            What the section is built from. Its STRUCTURE is copied — columns,
+            groups and view tabs. Its DATA is not: the register starts empty, and
+            nothing you do in it touches the section it was modelled on.
+          </p>
+          <div className="sec-templates__list">
+            {templates.map((entry) => (
+              <label
+                key={entry.key}
+                className={`sec-template${template === entry.key ? " is-chosen" : ""}${
+                  entry.available ? "" : " is-unavailable"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="section-template"
+                  value={entry.key}
+                  checked={template === entry.key}
+                  /* §8 — "do NOT present clickable fake options". A template the
+                     server cannot yet give an independent instance is shown and
+                     explained, and cannot be picked. */
+                  disabled={!entry.available}
+                  onChange={() => setTemplate(entry.key)}
+                />
+                <span className="sec-template__text">
+                  <strong>
+                    {entry.label}
+                    {!entry.available && (
+                      <span className="sec-template__tag">Not available yet</span>
+                    )}
+                  </strong>
+                  <small>{entry.available ? entry.description : entry.unavailable}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : ownsRegister ? (
+        /* An instance. Its template is a fact about it, not a control: changing
+           it would mean rebuilding the columns and groups under rows already
+           filed on them, and its screen is fixed for the same reason. Stated
+           rather than hidden, so the answer to "what is this?" is on the page. */
+        <p className="ba-hint sec-owns">
+          {builtFrom
+            ? `Built from the ${builtFrom.label} template, with a register of its own.`
+            : "This section has a register of its own."}{" "}
+          Its columns, groups, views and items are its alone. A template cannot be
+          changed after a section is created.
+        </p>
+      ) : (
+        /*
+         * Only for a LEGACY row, and only because sections created before
+         * W02-06 are doors onto a shared screen. Removing the control would
+         * leave those rows with no way to be re-homed; offering it for an
+         * instance is what silently orphaned board `test` — see the PATCH
+         * handler's note in `app/api/workspace-sections/route.ts`.
          */
         <>
           <label className="ba-field">
-            <span>Screen</span>
+            <span>Screen it opens</span>
             <select
               className="ba-select"
               value={surface}
@@ -252,12 +376,12 @@ function SectionForm({
             </select>
           </label>
           {chosen && <p className="ba-hint">{chosen.description}</p>}
+          <p className="ba-hint">
+            This section is a second door onto a screen the product already has,
+            so it shows that screen&rsquo;s own data. Sections added now get a
+            register of their own instead.
+          </p>
         </>
-      ) : (
-        <p className="ba-hint sec-owns">
-          This section gets a register of its own — its own columns, filters,
-          sorting, views and items. Nothing is copied from another section.
-        </p>
       )}
 
       <label className="ba-field">
@@ -353,6 +477,7 @@ function SectionManagerBody({
       setCatalogue({
         sections: payload.sections ?? [],
         surfaces: payload.surfaces ?? [],
+        templates: payload.templates ?? [],
         canEdit: payload.canEdit === true,
       });
       setError(null);
@@ -451,6 +576,7 @@ function SectionManagerBody({
           <SectionForm
             initial={editing}
             surfaces={catalogue?.surfaces ?? []}
+            templates={catalogue?.templates ?? []}
             busy={busy}
             onCancel={() => setMode(null)}
             onSubmit={(values) => {
@@ -496,7 +622,10 @@ function SectionManagerBody({
                             An owner deciding whether a section is safe to
                             remove needs to know which. */}
                         {entry.ownsBoard
-                          ? "Own register"
+                          ? `${
+                              catalogue.templates.find((t) => t.key === entry.template)
+                                ?.label ?? "Own"
+                            } register`
                           : catalogue.surfaces.find((s) => s.key === entry.surface)?.label ??
                             entry.surface}
                         {" · "}

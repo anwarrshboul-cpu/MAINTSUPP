@@ -492,3 +492,64 @@ export type BoardResponse = {
   cells?: MaintenanceBoardCell[];
   fileCounts?: MaintenanceBoardFileCount[];
 };
+
+/* ── The toolbar's People filter ──────────────────────────────────────────── */
+
+/**
+ * The people THIS BOARD has work assigned to, and the options that name them.
+ *
+ * The list was built from every work order the organisation holds and then
+ * handed to whichever board was on screen. So the People filter on a workspace
+ * section's own register — a register with no rows in it yet — offered every
+ * engineer on the job board, and picking one emptied a board that never had
+ * their work on it. It takes the rows the board actually draws.
+ *
+ * Pure, and here rather than in the component, because it is a list derivation
+ * with a right answer: a test can hand it rows and assert the names, which is
+ * the property that was missing when it was three lines inside a 5,600-line
+ * file. "Unassigned" leads because it is the one option that is always
+ * meaningful, and the colours cycle the board's own group palette so a person
+ * keeps the same chip everywhere.
+ */
+export function assigneeFilterOptions(
+  rows: Array<{ assignee?: string | null }>,
+  palette: readonly string[],
+): { assignees: string[]; options: Array<{ value: string; label?: string; color: string; text?: string }> } {
+  const assignees = Array.from(
+    new Set(
+      rows
+        .map((row) => row.assignee)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).sort();
+  return {
+    assignees,
+    options: [
+      { value: "", label: "Unassigned", color: "#eef2f4", text: "#61717c" },
+      ...assignees.map((person, index) => ({
+        value: person,
+        color: palette[index % palette.length],
+      })),
+    ],
+  };
+}
+
+/**
+ * The Store Documentation board's Store Type column, if this board has one.
+ *
+ * That board filters by store type where the job board filters by priority; it
+ * has no priority column, so the maintenance filter offered four values that
+ * matched nothing and hid every row when used. Read off the column rather than
+ * a hardcoded list, so an admin who adds a fifth store type sees it without a
+ * deploy — and answered per board, so a register that has neither column draws
+ * neither control.
+ */
+export function storeTypeFilterColumn<T extends { key: string; type: string }>(
+  customColumns: T[],
+): T | null {
+  return (
+    customColumns.find(
+      (column) => column.key === "storeType" && column.type === "dropdown",
+    ) ?? null
+  );
+}

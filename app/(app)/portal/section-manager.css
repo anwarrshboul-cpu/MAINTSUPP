@@ -202,6 +202,119 @@
   outline-offset: 1px;
 }
 
+/* ── The template chooser ─────────────────────────────────────────────────── */
+
+/*
+ * A LIST OF CARDS, NOT A SELECT, and the reason is honesty rather than taste.
+ *
+ * Each template has to carry its own sentence — what it gives you, or, for one
+ * that is not ready, why it is not on offer — and a <select> has nowhere to put
+ * that. It also has to be able to show an option AND refuse the click, which is
+ * the owner's §8 rule; a greyed line in a dropdown says that far less clearly
+ * than a card that states its reason where it stands.
+ */
+.sec-templates {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sec-templates legend {
+  padding: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sec-templates__intro {
+  margin: 0 0 8px;
+}
+
+.sec-templates__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sec-template {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.sec-template input {
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--brand-solid);
+}
+
+.sec-template:hover {
+  background: var(--surface-hover);
+}
+
+.sec-template.is-chosen {
+  border-color: var(--brand-solid);
+  box-shadow: inset 0 0 0 1px var(--brand-solid);
+}
+
+/*
+ * The unavailable state has to READ as unavailable without becoming unreadable.
+ * The reason is the whole point of drawing the row at all, so the text keeps
+ * full contrast and it is the surface and the cursor that say "not this one".
+ */
+.sec-template.is-unavailable {
+  cursor: not-allowed;
+  background: var(--surface-card-lo);
+  border-style: dashed;
+}
+
+.sec-template.is-unavailable:hover {
+  background: var(--surface-card-lo);
+}
+
+.sec-template__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sec-template__text strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.sec-template__text small {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.sec-template__tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--chip-neutral-fg);
+  background: var(--chip-neutral-bg);
+}
+
+.sec-template:focus-within {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
 /* ── The add / edit form ──────────────────────────────────────────────────── */
 
 .sec-form {

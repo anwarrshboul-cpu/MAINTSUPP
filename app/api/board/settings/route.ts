@@ -17,7 +17,6 @@ import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { boards } from "../../../../db/schema";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
-import { normaliseBoardId } from "../../../lib/automations/store";
 import { resolveBoard } from "../../../lib/board-registry";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 
@@ -40,8 +39,12 @@ export async function GET(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
-    const key = normaliseBoardId(new URL(request.url).searchParams.get("board"));
-    const board = await resolveBoard(db, orgId, key);
+    /* Straight to `resolveBoard`, which knows which boards this organisation
+       has and throws for one it does not. `normaliseBoardId` used to sit here
+       and quietly rewrite every unknown key to "maintenance", so a section
+       register's settings were read from — and renamed on — the job board. */
+    const key = (new URL(request.url).searchParams.get("board") ?? "").trim();
+    const board = await resolveBoard(db, orgId, key || undefined);
     const canEdit = (await scopedDbWithCapability(request, "settings.edit")).denied === undefined;
     return Response.json({
       board: { id: board.id, key: board.key, name: board.name, itemNoun: board.itemNoun },
@@ -59,7 +62,8 @@ export async function PATCH(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
     const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    const key = normaliseBoardId(payload.board ?? payload.boardId);
+    const raw = payload.board ?? payload.boardId;
+    const key = typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
     const board = await resolveBoard(db, orgId, key);
 
     const changes: Partial<typeof boards.$inferInsert> = {};

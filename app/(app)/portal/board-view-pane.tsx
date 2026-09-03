@@ -92,6 +92,12 @@ export type BoardCalendarWiring = {
 };
 
 type Props = {
+  /**
+   * The board this pane belongs to, carried so the panes that fetch can ask for
+   * their own data rather than the server's default. The Form tab could not,
+   * and served the job board's public form on every register.
+   */
+  boardId: string;
   /** The selected view. The caller has already excluded `type === "table"`. */
   activeView: BoardView;
   /** Items already filtered by the table's own controls. */
@@ -119,6 +125,18 @@ type Props = {
 const NO_DATE_WRITER = async (): Promise<never> => {
   throw new Error("This board cannot save calendar dates.");
 };
+
+/**
+ * The view types that are a FORM's surfaces rather than the board's own — the
+ * same three `/api/board/views` reports as unbuilt on a board with no form.
+ * Written here as well because the pane has to say WHY it is refusing, and
+ * "not built yet" is not true of a renderer this product has shipped.
+ */
+const FORM_BACKED: ReadonlySet<string> = new Set([
+  "form",
+  "form-results",
+  "form-responses",
+]);
 
 /**
  * `BoardItem` → `MaintenanceRequest`, for a host that has only the pane's own
@@ -329,6 +347,7 @@ export function viewReplacesGrid(view: BoardView | null) {
 }
 
 export default function BoardViewPane({
+  boardId,
   activeView,
   items,
   palette,
@@ -345,6 +364,38 @@ export default function BoardViewPane({
     () => calendar?.requests ?? boardItemsAsRequests(items),
     [calendar?.requests, items],
   );
+
+  /*
+   * A VIEW THIS BOARD CANNOT SERVE MOUNTS NOTHING AT ALL.
+   *
+   * `built` is answered per board by `/api/board/views` — a board with no form
+   * of its own reports `form`, `form-results` and `form-responses` as unbuilt,
+   * because `FormBuilder` asks `/api/board/form` with no board and would draw
+   * the CANONICAL JOB BOARD's public form: its title, its questions and a
+   * Location list of 39 real store names, with a working Submit. The
+   * placeholder alone was not enough — it used to render BESIDE the renderer,
+   * so on a section's register the note appeared under a form that was still
+   * mounted and still fetching. Returning here is what makes the refusal real.
+   *
+   * The grid stays behind it, which is what `viewReplacesGrid` promises for an
+   * unbuilt view and why the note says so.
+   */
+  if (!activeView.built) {
+    return (
+      <div className="board-chrome__pane">
+        <p className="board-chrome__placeholder">
+          <Icon name="alert" size={16} />
+          <span>
+            <strong>{activeView.name}</strong>{" "}
+            {FORM_BACKED.has(activeView.type)
+              ? "reads a form, and this board has none of its own."
+              : "is not built yet."}{" "}
+            The table below is still the live board.
+          </span>
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="board-chrome__pane">
@@ -415,7 +466,9 @@ export default function BoardViewPane({
         questions are unchanged — what is added is the toolbar above them, and
         that toolbar is hidden below 768px so a phone gets the form alone.
       */}
-      {activeView.type === "form" && <FormBuilder onSubmitted={onFormSubmitted} />}
+      {activeView.type === "form" && (
+        <FormBuilder boardId={boardId} onSubmitted={onFormSubmitted} />
+      )}
       {/*
         monday's four other tabs. `flat-table` is monday's second table view
         (9116879) and is deliberately group-free — that is the whole
@@ -430,15 +483,6 @@ export default function BoardViewPane({
         <FlatTableView items={items} onOpen={onOpenItem} />
       )}
       {activeView.type === "vibe" && <BuildVibeView items={items} />}
-      {!activeView.built && (
-        <p className="board-chrome__placeholder">
-          <Icon name="alert" size={16} />
-          <span>
-            <strong>{activeView.name}</strong> is not built yet. The table below is
-            still the live board.
-          </span>
-        </p>
-      )}
     </div>
   );
 }

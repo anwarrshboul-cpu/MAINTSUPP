@@ -1965,6 +1965,25 @@ export default function PortalApp({
    * built-in section that no longer exists, and Overview is the right answer
    * for that immediately.
    */
+  /*
+   * A section that names no register at all — R2.
+   *
+   * `activeCustom.boardKey` is the board the section draws. It is the register's
+   * key for an instance, and "maintenance" for a legacy pre-W02-06 second door.
+   * NULL means neither: a row detached from its own register by the re-home bug
+   * this release fixes. The mount below read `?? "maintenance"`, so those rows
+   * silently rendered THE CANONICAL JOB BOARD — its columns, its groups and all
+   * 74 of its rows — under the section's own name. That is the exact
+   * substitution this workstream has been removing everywhere else, and it was
+   * still here.
+   *
+   * Detached rows are repaired at boot and refused at the source now, so this
+   * should be unreachable; it says so plainly rather than showing somebody
+   * else's work.
+   */
+  const sectionDetached =
+    !!activeCustom && !activeCustom.boardKey;
+
   const sectionPending =
     !activeCustom &&
     !workspaceSectionsLoaded &&
@@ -2930,7 +2949,22 @@ export default function PortalApp({
               onNavigate={setSection}
             />
           )}
-          {activeSurface === "maintenance" && (
+          {/*
+            A section detached from its register. Rendering the job board here
+            was the R2 violation; saying so is the whole fix. It is reachable
+            only for rows created before the re-home refusal landed, and
+            `repairOrphanedSectionBoards` clears the boards they abandoned.
+          */}
+          {sectionDetached && (
+            <div className="section-pending" role="status">
+              <p>
+                This section has no register of its own. Remove it and add it
+                again to give it one.
+              </p>
+            </div>
+          )}
+
+          {activeSurface === "maintenance" && !sectionDetached && (
             <LiveMaintenanceBoard
               /*
                * W02-06 — the section's OWN register.
@@ -2944,11 +2978,11 @@ export default function PortalApp({
                * nothing else — the one symptom that made the omission look like
                * a preference rather than a bug.
                *
-               * Falls back to the default board for a built-in section and for
-               * any section created before this, which have no register of
-               * their own.
+               * A built-in section has no `activeCustom` and takes the default
+               * board. A section that names no board at all never reaches here
+               * — see `sectionDetached` above and the branch that renders it.
                */
-              boardId={activeCustom?.boardKey ?? "maintenance"}
+              boardId={activeCustom ? activeCustom.boardKey ?? "" : "maintenance"}
               /* The section, not the board: two sections can read one board,
                  and each keeps its own open tab. */
               sectionKey={activeSection}
@@ -3014,7 +3048,22 @@ export default function PortalApp({
                * a date change out loud rather than pretending to save it.
                */
               calendar={{
-                complianceRecords: workspace?.compliance ?? [],
+                /*
+                 * The workspace's compliance estate belongs to the JOB BOARD's
+                 * calendar, not to every board's.
+                 *
+                 * `workspace.compliance` is the organisation's 460 certificate
+                 * records, derived from the Store Documentation board and the
+                 * compliance register. Handed to a workspace section's register
+                 * unconditionally, its Calendar tab drew the whole estate's
+                 * renewals beside the two rows somebody had actually put there —
+                 * the canonical data leaking into an instance that is supposed
+                 * to be independent.
+                 *
+                 * A generated register has no compliance estate of its own, so
+                 * the honest answer is none. The built-in boards are unchanged.
+                 */
+                complianceRecords: activeCustom ? [] : workspace?.compliance ?? [],
                 onOpenCompliance: (id) => openWorkspaceManager("compliance", id),
                 onJobDateChange: changeJobDate,
                 onComplianceDateChange: changeComplianceDate,

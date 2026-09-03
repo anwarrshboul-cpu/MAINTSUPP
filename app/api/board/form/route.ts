@@ -19,7 +19,7 @@ import { formOptionOverrides } from "../../../lib/form-options";
  * the same two strings is a third place to forget a board.
  */
 import { BOARD_IDS, type BoardId } from "../../../lib/automations/store";
-import { DEFAULT_BOARD_KEY } from "../../../lib/board-registry";
+import { DEFAULT_BOARD_KEY, isBoardNotFound, resolveBoard } from "../../../lib/board-registry";
 import {
   anonymousRefusal,
   scopedDb,
@@ -55,6 +55,11 @@ function failure(message: string, status = 400) {
 }
 
 function unavailable(error: unknown) {
+  /* A board this organisation does not have is a bad REQUEST. Without this
+     the handler answered 503 "temporarily unavailable" for a key that will
+     never exist, telling the browser to retry something no retry can fix —
+     the same mapping `/api/board` and `/api/board/views` already make. */
+  if (isBoardNotFound(error)) return failure(error.message, 404);
   const refusal = anonymousRefusal(error);
   if (refusal) return refusal;
   return Response.json({ error: "The form is temporarily unavailable." }, { status: 503 });
@@ -121,21 +126,42 @@ function serialiseForm(
  * appeared to have no form of its own however many times they configured it, and
  * the form real submitters were filling in changed under them.
  *
- * Validated against `BOARD_IDS` rather than passed through, so an unknown value
- * falls back to the default instead of resolving to no board at all. That is the
- * rule `/api/board`'s own `boardIdFrom` applies, and the two must agree — the
- * builder is opened from the board this reads the key from.
+ * AND THE ALLOW-LIST OF TWO WAS ITSELF A LEAK.
+ *
+ * `BOARD_IDS.includes(raw) ? raw : DEFAULT_BOARD_KEY` meant every key outside the
+ * two built-ins — including every register generated for a workspace section —
+ * resolved to the MAINTENANCE form. So `GET /api/board/form?board=<a section>`
+ * served the job board's public form: its title, its questions, and its group
+ * list, which on this estate is 39 groups NAMED AFTER REAL STORES. That form is
+ * client-facing and shared by link, so the fallback published the estate to
+ * anyone holding a section's form URL. A PATCH from that screen then rewrote the
+ * maintenance form, which is the same "saved somebody else's board" failure the
+ * note above describes, one layer out.
+ *
+ * The comment above said this rule "must agree" with `/api/board`'s own
+ * `boardIdFrom`. It does again: that one now resolves the key against the boards
+ * this organisation actually has and 404s an unknown one, and so does this. A
+ * board with no form of its own answers the 404 the handlers already return
+ * rather than borrowing one.
  */
-function boardIdFrom(request: Request): string {
+async function boardIdFrom(
+  request: Request,
+  db: Parameters<typeof loadForm>[0],
+  orgId: string,
+): Promise<string> {
   const raw = new URL(request.url).searchParams.get("board")?.trim() ?? "";
-  return BOARD_IDS.includes(raw as BoardId) ? raw : DEFAULT_BOARD_KEY;
+  if (!raw || BOARD_IDS.includes(raw as BoardId)) {
+    return BOARD_IDS.includes(raw as BoardId) ? raw : DEFAULT_BOARD_KEY;
+  }
+  const board = await resolveBoard(db, orgId, raw);
+  return board.key;
 }
 
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const { db, orgId } = await scopedDb(request);
-    const boardId = boardIdFrom(request);
+    const boardId = await boardIdFrom(request, db, orgId);
     const record = await loadForm(db, orgId, boardId);
     if (!record) return failure("This board has no form.", 404);
 
@@ -202,7 +228,7 @@ export async function PATCH(request: Request) {
 
     // The SAME board the GET above read. Without this a save from the Store
     // Documentation builder rewrote the maintenance board's public form.
-    const boardId = boardIdFrom(request);
+    const boardId = await boardIdFrom(request, db, orgId);
     const record = await loadForm(db, orgId, boardId);
     if (!record) return failure("This board has no form.", 404);
 

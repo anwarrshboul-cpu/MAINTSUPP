@@ -241,7 +241,12 @@ test("the Form tab renders the monday form, not an empty pane", async () => {
    * a builder that renders nothing pass the test that was written to catch
    * exactly that.
    */
-  assert.match(pane, /activeView\.type === "form" && <FormBuilder/);
+    /* RE-POINTED — the mount gained the board it must ask for. Without it
+       `FormBuilder` fetched `/api/board/form` with no board and the Form tab
+       on a workspace section rendered THE JOB BOARD's public form, including
+       a Location list naming every real store. The contract this line holds —
+       that the form tab mounts the builder — is unchanged. */
+  assert.match(pane, /activeView\.type === "form" && \(\s*<FormBuilder boardId=\{boardId\}/);
   const builder = await read("app/(app)/portal/form-builder.tsx");
   assert.match(builder, /<FormView onSubmitted=\{onSubmitted\} \/>/);
   assert.ok(
