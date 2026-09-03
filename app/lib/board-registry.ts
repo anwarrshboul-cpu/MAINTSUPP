@@ -1,6 +1,17 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { boards, maintenanceGroupItems } from "../../db/schema";
+import {
+  boardViews,
+  boards,
+  maintenanceBoardColumns,
+  maintenanceGroupItems,
+  maintenanceGroups,
+} from "../../db/schema";
+import {
+  GENERIC_BOARD_COLUMNS,
+  GENERIC_BOARD_GROUPS,
+  GENERIC_COLUMN_SETTINGS,
+} from "./generic-board-template";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -204,6 +215,114 @@ export async function resolveBoard(
   };
 }
 
+/**
+ * Give a board the default register structure — W02-06.
+ *
+ * Columns and groups, so the board is usable on its first load rather than an
+ * empty canvas an owner has to furnish before it does anything. Called from
+ * `createBoard` below rather than exported for callers to remember: a board
+ * created by the canonical primitive is always complete, which is the property
+ * that stops a second, half-finished creation path appearing later.
+ *
+ * The ids carry the BOARD KEY, and that is not cosmetic. The board route's own
+ * self-healing seeder uses `tenantSeedId("column-system-<key>", orgId)`, which
+ * does not — so on a second board in the same organisation every one of its
+ * inserts collides with the first board's row and is discarded by
+ * `onConflictDoNothing`, and the board comes up with no columns at all and no
+ * error. Any per-board seeding here must key on the board or repeat that.
+ *
+ * Idempotent throughout: `maintenance_board_columns` is unique on
+ * (organisation_id, board_id, column_key), so re-provisioning an existing board
+ * changes nothing and cannot restore a column an admin deleted.
+ */
+async function provisionDefaultStructure(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+) {
+  for (const [position, column] of GENERIC_BOARD_COLUMNS.entries()) {
+    await db
+      .insert(maintenanceBoardColumns)
+      .values({
+        id: `seed-${organisationId}-${boardKey}-${column.key}`,
+        organisationId,
+        boardId: boardKey,
+        key: column.key,
+        title: column.title,
+        type: column.type,
+        position: position * 1000,
+        width: column.width,
+        /* A custom column's choices live in its own `settings`, which is what
+           the grid, the column menu and the mobile editor all read for a column
+           that is not one of the five request-backed maintenance ones. */
+        settings: column.settings
+          ? JSON.stringify(column.settings)
+          : GENERIC_COLUMN_SETTINGS,
+        required: column.required === true,
+        /* Only the row's own title is request-backed. Everything else is a cell,
+           which is what makes it configurable and deletable like any column an
+           admin adds by hand. */
+        system: column.system === true,
+        visible: true,
+        pinned: false,
+      })
+      .onConflictDoNothing();
+  }
+
+  /*
+   * One view tab, keyed `main`, because W02-07 asks a new section's page for
+   * "views" and a board with no `board_views` row draws no tab strip at all.
+   *
+   * The key and the id follow `app/api/board/views/route.ts` exactly —
+   * `seed-<org>-<board>-main`, `system: true`, `isDefault: true` — so the tab a
+   * generated register starts with is the same Main table every other board
+   * has, and `upgradeToMondayViews` can add the rest later if this board is
+   * ever given monday's full strip. Deliberately ONE: the other ten are
+   * maintenance-shaped (Fix Tracker, Form Response Viewer) and a register for
+   * CCTV should not open holding tabs for a workflow it does not have.
+   */
+  await db
+    .insert(boardViews)
+    .values({
+      id: `seed-${organisationId}-${boardKey}-main`,
+      organisationId,
+      boardId: boardKey,
+      key: "main",
+      name: "Main table",
+      type: "table",
+      icon: "grid",
+      position: 0,
+      isDefault: true,
+      system: true,
+    })
+    .onConflictDoNothing();
+
+  for (const [position, group] of GENERIC_BOARD_GROUPS.entries()) {
+    await db
+      .insert(maintenanceGroups)
+      .values({
+        id: `group-${organisationId}-${boardKey}-${group.key}`,
+        organisationId,
+        boardId: boardKey,
+        name: group.name,
+        color: group.colour,
+        stageKey: null,
+        position,
+      })
+      .onConflictDoNothing();
+  }
+}
+
+/**
+ * Create a board, with the structure that makes it a register rather than a row
+ * in a table — W02-06.
+ *
+ * This had no callers at all until the section editor needed one: adding a
+ * section bound it to an EXISTING screen, so two sections showed the same data
+ * and "generate the same default page structure" was unmet by design. It is now
+ * the one board-creation primitive, and it provisions structure as part of
+ * creating a board so there is no way to call it and get an unusable board.
+ */
 export async function createBoard(
   db: Database,
   organisationId: string,
@@ -237,7 +356,68 @@ export async function createBoard(
   };
 
   await db.insert(boards).values({ ...record, organisationId });
+  await provisionDefaultStructure(db, organisationId, record.key);
   return record;
+}
+
+/**
+ * Everything a board owns, removed — used when a section that owns a board is
+ * permanently deleted.
+ *
+ * CONFIGURATION AND PLACEMENT ONLY. The caller is responsible for having
+ * established that the board holds no items; nothing here deletes a
+ * `maintenance_requests` row, an attachment or any other record that exists
+ * independently of this board. That distinction is the whole of the rule: a
+ * register's columns, groups and views are its own, and the work filed on it is
+ * not, so removing the register must never be a way to lose the work.
+ */
+export async function deleteBoardStructure(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+) {
+  await db
+    .delete(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.organisationId, organisationId),
+        eq(maintenanceBoardColumns.boardId, boardKey),
+      ),
+    );
+  await db
+    .delete(maintenanceGroups)
+    .where(
+      and(
+        eq(maintenanceGroups.organisationId, organisationId),
+        eq(maintenanceGroups.boardId, boardKey),
+      ),
+    );
+  await db
+    .delete(boardViews)
+    .where(
+      and(eq(boardViews.organisationId, organisationId), eq(boardViews.boardId, boardKey)),
+    );
+  await db
+    .delete(boards)
+    .where(and(eq(boards.organisationId, organisationId), eq(boards.key, boardKey)));
+}
+
+/** How many items are filed on a board. Zero is what makes it safe to destroy. */
+export async function boardItemCount(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ value: sql<number>`COUNT(*)` })
+    .from(maintenanceGroupItems)
+    .where(
+      and(
+        eq(maintenanceGroupItems.organisationId, organisationId),
+        eq(maintenanceGroupItems.boardId, boardKey),
+      ),
+    );
+  return Number(row?.value ?? 0);
 }
 
 /**

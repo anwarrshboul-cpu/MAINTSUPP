@@ -355,10 +355,18 @@ test("`update_cell` is on /api/board's PATCH handler and nowhere else", async ()
     1,
     "one handler owns the cell write",
   );
-  // And the board is read from the query string, not from the body.
+  /*
+   * And the board is read from the query string, not from the body.
+   *
+   * RE-POINTED — W02-06. `boardIdFrom` became async and takes the scoped
+   * database, because a board that can be created at runtime cannot be
+   * validated against a literal list. The fact this line exists to hold is
+   * where the board comes FROM, and that has not changed: the query string,
+   * never the body.
+   */
   assert.match(
     route,
-    /function boardIdFrom\(request: Request\): BoardId \{\s*const raw = new URL\(request\.url\)\.searchParams\.get\("board"\)/,
+    /async function boardIdFrom\(\s*request: Request,[\s\S]{0,200}searchParams\.get\("board"\)/,
   );
 });
 

@@ -56,7 +56,13 @@ export const GROUP_COLORS = new Set([
 ]);
 
 export function newItemTitle(boardId: string) {
-  return boardId === "store-documentation" ? "New store" : "New maintenance item";
+  if (boardId === "store-documentation") return "New store";
+  /* A register generated for a workspace section is not a maintenance board and
+     its rows are not maintenance items — "New maintenance item" on a CCTV
+     register names the wrong thing. `createBoard` gives such a board the item
+     noun "Item"; this is the same word where a row has no title yet. */
+  if (boardId === "maintenance") return "New maintenance item";
+  return "New item";
 }
 
 /** Seed ids are bare on the primary organisation and suffixed elsewhere. */
@@ -292,16 +298,44 @@ export async function createBoardItem(
     throw new Error("Could not allocate a job id; too many simultaneous creates.");
   }
 
-  const [item] = await db
-    .insert(maintenanceGroupItems)
-    .values({
-      requestId: id,
-      organisationId: orgId,
-      boardId,
-      groupId: group.id,
-      position,
-    })
-    .returning();
+  /*
+   * THE PLACEMENT IS WHAT PUTS THE ROW ON A BOARD, so a row without one is not
+   * a half-created item — it is an invisible row on somebody else's board.
+   *
+   * `maintenance_requests` carries no board id: a row's board comes from its
+   * placement, and the board route deliberately files an UNPLACED row into the
+   * default board's first group so nothing is ever stranded. Which means that
+   * if this insert throws after the request row is already committed, the new
+   * row does not vanish — it appears on the JOB BOARD, belonging to nobody,
+   * under whatever title it was given. Six of them were produced that way while
+   * W02-06 was being built, on a board carrying real work.
+   *
+   * There is no transaction to lean on here — D1 and the Postgres shim do not
+   * give this code one — so the compensation is explicit: undo the row we just
+   * made, then let the failure surface. Best-effort, because a failed cleanup
+   * must not replace the real error with its own.
+   */
+  let item;
+  try {
+    [item] = await db
+      .insert(maintenanceGroupItems)
+      .values({
+        requestId: id,
+        organisationId: orgId,
+        boardId,
+        groupId: group.id,
+        position,
+      })
+      .returning();
+  } catch (error) {
+    await db
+      .delete(maintenanceRequests)
+      .where(
+        and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
+      )
+      .catch(() => undefined);
+    throw error;
+  }
 
   await db.insert(activityLog).values({
     id: crypto.randomUUID(),

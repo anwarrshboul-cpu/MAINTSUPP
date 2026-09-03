@@ -425,14 +425,24 @@ test("W02-10 an expired session is told to sign in, not told it made a bad reque
     "app/api/navigation/route.ts",
     "app/api/workspace-sections/view/route.ts",
   ]) {
+    /*
+     * Counted per HANDLER, not per file. W02-06 gave the POST handler an inner
+     * `try/catch` around board creation — a compensation, not a request
+     * boundary — and a whole-file count then read one catch too many and failed
+     * on a rule that was still being kept.
+     */
     const text = codeOnly(await source(path));
-    const catches = text.split("} catch (error) {").length - 1;
-    const refusals = text.split("anonymousRefusal(error)").length - 1;
-    assert.equal(
-      refusals,
-      catches,
-      `${path}: ${catches} catch blocks but ${refusals} call anonymousRefusal`,
-    );
+    for (const verb of ["POST", "PATCH", "PUT", "DELETE"]) {
+      const from = text.indexOf(`export async function ${verb}(`);
+      if (from === -1) continue;
+      const next = text.indexOf("export async function", from + 1);
+      const handler = next === -1 ? text.slice(from) : text.slice(from, next);
+      /* The LAST catch in a handler is the one that answers the request. */
+      assert.ok(
+        handler.lastIndexOf("} catch (error) {") < handler.lastIndexOf("anonymousRefusal(error)"),
+        `${path} ${verb}: the handler's own catch must call anonymousRefusal`,
+      );
+    }
   }
 });
 

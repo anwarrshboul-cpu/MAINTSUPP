@@ -23,15 +23,34 @@ test("the board route is not pinned to a single board", async () => {
     /const BOARD_ID = "maintenance"/,
     "the hardcoded board id is what stopped a second board being served",
   );
-  assert.match(route, /function boardIdFrom\(request: Request\)/);
+  assert.match(route, /async function boardIdFrom\(/);
 
-  // `board_id` reaches a WHERE clause, so the query string must not be trusted
-  // straight through. This is the check that stops a caller addressing rows the
-  // route was never meant to serve.
+  /*
+   * RE-POINTED, NOT WEAKENED — W02-06.
+   *
+   * This asserted `BOARD_IDS.includes(raw as BoardId)` as the whole validation,
+   * and that allow-list of two was itself the defect the owner's W02-06
+   * decision exposed: every other key was answered with the JOB BOARD, under
+   * whatever key was asked for, so a register created for a workspace section
+   * drew maintenance and a row created "on" it was filed into a maintenance
+   * group. Nothing errored.
+   *
+   * The property this test protects — "`board_id` reaches a WHERE clause, so
+   * the query string must not be trusted straight through" — is unchanged and
+   * now held more strongly: the key is resolved against the `boards` table for
+   * THIS organisation, so a caller cannot address a board the workspace does
+   * not have, nor one belonging to another tenant. What used to be a silent
+   * substitution is now a 404.
+   */
   assert.match(
     route,
-    /BOARD_IDS\.includes\(raw as BoardId\)/,
-    "the board id must be validated against an allow-list, not passed through",
+    /resolveBoard\(db, orgId, raw\)/,
+    "the board id must be resolved against this organisation's boards, not passed through",
+  );
+  assert.doesNotMatch(
+    route,
+    /\?\s*\(raw as BoardId\)\s*:\s*DEFAULT_BOARD_ID/,
+    "and it must never silently answer with the job board instead",
   );
   assert.match(
     route,
@@ -341,8 +360,16 @@ test("the board serves the rows it places", async () => {
 
 test("a new row is named for the board that made it", async () => {
   const route = await read("app/api/board/route.ts");
-  assert.match(route, /function newItemTitle\(boardId: BoardId\)/);
+  /* `BoardId` narrowed to the two boards the product ships. Since W02-06 a
+     board can be created at runtime, so the parameter is a plain string — the
+     naming rule below is what this test is actually about and is unchanged. */
+  assert.match(route, /function newItemTitle\(boardId: string\)/);
   assert.match(route, /"store-documentation" \? "New store"/);
   // Maintenance keeps its exact wording.
   assert.match(route, /"New maintenance item"/);
+
+  /* And a register generated for a workspace section is neither, so its rows
+     are not called maintenance items — see `newItemTitle` in board-mutations. */
+  const mutations = await read("app/lib/board-mutations.ts");
+  assert.match(mutations, /return "New item";/, "a generated register names its own rows");
 });

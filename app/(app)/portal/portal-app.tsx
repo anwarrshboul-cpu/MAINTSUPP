@@ -656,6 +656,15 @@ type WorkspaceSectionEntry = {
   description?: string | null;
   icon: IconName;
   surface: Section;
+  /**
+   * W02-06 — the register this section owns, when it has one.
+   *
+   * `surface` says which SCREEN draws it; this says which BOARD that screen
+   * reads. A section created since W02-06 carries a board of its own here, so
+   * two sections on the job-board surface show two different registers. Null
+   * for a screen that has no board, and for a section created before this.
+   */
+  boardKey?: string | null;
   group: string;
 };
 
@@ -2923,6 +2932,23 @@ export default function PortalApp({
           )}
           {activeSurface === "maintenance" && (
             <LiveMaintenanceBoard
+              /*
+               * W02-06 — the section's OWN register.
+               *
+               * `workspace_sections.surface_ref` has been validated on write,
+               * returned by the API and carried on the row since Stage 23, and
+               * the browser never read it: the board was mounted with no
+               * `boardId`, so it defaulted to "maintenance" and every section
+               * drew the job board whatever it was bound to. Re-pointing a
+               * section at another board changed which VIEWS it offered and
+               * nothing else — the one symptom that made the omission look like
+               * a preference rather than a bug.
+               *
+               * Falls back to the default board for a built-in section and for
+               * any section created before this, which have no register of
+               * their own.
+               */
+              boardId={activeCustom?.boardKey ?? "maintenance"}
               /* The section, not the board: two sections can read one board,
                  and each keeps its own open tab. */
               sectionKey={activeSection}

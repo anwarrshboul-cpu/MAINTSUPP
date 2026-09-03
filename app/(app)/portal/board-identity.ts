@@ -41,8 +41,29 @@ const IDENTITIES: Record<string, BoardIdentity> = {
   },
 };
 
+/**
+ * What a board this file has never heard of calls itself — W02-06.
+ *
+ * Registers generated for workspace sections are created at runtime, so they
+ * can never be in the map above. Falling through to `IDENTITIES.maintenance`
+ * gave a CCTV register the eyebrow "Live maintenance workspace" and the noun
+ * "live items" — the screen describing itself as the job board while showing
+ * six generic columns and none of its rows.
+ *
+ * Neutral rather than invented: it says the section is a workspace section and
+ * counts plain items, and `sectionIdentity` replaces the heading and the blurb
+ * with the workspace's own words a moment later.
+ */
+const GENERIC_IDENTITY: BoardIdentity = {
+  eyebrow: "Workspace section",
+  heading: "Register",
+  blurb: "A register this workspace added, with its own columns, filters and views.",
+  shortName: "Register",
+  itemNoun: "items",
+};
+
 export function boardIdentity(boardId: string): BoardIdentity {
-  return IDENTITIES[boardId] ?? IDENTITIES.maintenance;
+  return IDENTITIES[boardId] ?? GENERIC_IDENTITY;
 }
 
 /**

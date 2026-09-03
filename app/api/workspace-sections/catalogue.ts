@@ -243,6 +243,15 @@ export function builtInSectionBoard(sectionKey: string): string | null {
 export type WorkspaceSection = {
   /** W02-07 — the workspace's own words for what this section is for. */
   description?: string | null;
+  /**
+   * W02-06 — whether the register this section draws belongs to it alone.
+   *
+   * False for a section that is a door onto one of the product's own screens,
+   * which is every section created before W02-06. Decided on the server from
+   * the board key, so the browser cannot disagree with the purge rule that
+   * reads the same fact.
+   */
+  ownsBoard?: boolean;
   key: string;
   label: string;
   icon: string;

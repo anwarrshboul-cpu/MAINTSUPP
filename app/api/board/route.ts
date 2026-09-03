@@ -30,6 +30,7 @@ import {
 } from "../../lib/compliance-register";
 import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/init";
+import { isBoardNotFound, resolveBoard } from "../../lib/board-registry";
 import { seedStoreDocumentationBoard } from "../../../db/seed-store-documentation";
 import {
   activityLog,
@@ -202,9 +203,44 @@ async function mirrorRegistryOption(
   invalidateOptionCache(orgId, setKey);
 }
 
-function boardIdFrom(request: Request): BoardId {
-  const raw = new URL(request.url).searchParams.get("board");
-  return BOARD_IDS.includes(raw as BoardId) ? (raw as BoardId) : DEFAULT_BOARD_ID;
+/**
+ * Which board this request is about — W02-06.
+ *
+ * THIS USED TO BE AN ALLOW-LIST OF TWO, AND FAILED SILENTLY.
+ *
+ * `BOARD_IDS.includes(raw) ? raw : DEFAULT_BOARD_ID` meant every key but
+ * "maintenance" and "store-documentation" was answered with the JOB BOARD —
+ * its columns, its groups and all of its rows — under whatever key the caller
+ * asked for. A section with a register of its own therefore drew the job board,
+ * and a row created "on" it was filed into a maintenance group. Nothing
+ * errored; the response simply described a different board than the one that
+ * was asked for, which is the substitution this codebase refuses elsewhere by
+ * name ("a silent substitution is worse than a refusal").
+ *
+ * The question is now asked of the database, which is the only thing that knows
+ * what boards this organisation has. `resolveBoard` throws `BoardNotFoundError`
+ * for a key that is not one of them, and the callers turn that into a 404 —
+ * the behaviour `isBoardNotFound` was added for and had no caller using.
+ *
+ * The two built-ins short-circuit: `maintenance` is materialised on demand by
+ * `resolveBoard` itself, and both are asked for on nearly every request.
+ */
+async function boardIdFrom(
+  request: Request,
+  db: BoardDb,
+  orgId: string,
+): Promise<string> {
+  const raw = (new URL(request.url).searchParams.get("board") ?? "").trim();
+  if (!raw || BOARD_IDS.includes(raw as BoardId)) {
+    return BOARD_IDS.includes(raw as BoardId) ? raw : DEFAULT_BOARD_ID;
+  }
+  const board = await resolveBoard(db, orgId, raw);
+  return board.key;
+}
+
+/** A board this organisation has, but not one the product ships. */
+function isGeneratedRegister(boardId: string) {
+  return !BOARD_IDS.includes(boardId as BoardId);
 }
 type BoardDb = Awaited<ReturnType<typeof scopedDb>>["db"];
 
@@ -527,7 +563,7 @@ function parseSettings(value: string, type: BoardColumnType) {
  * thing on screen. Maintenance keeps its exact wording; the board parity tests
  * read that string.
  */
-function newItemTitle(boardId: BoardId) {
+function newItemTitle(boardId: string) {
   return boardId === "store-documentation" ? "New store" : "New maintenance item";
 }
 
@@ -787,7 +823,9 @@ type BoardStateCache = {
 async function ensureBoardState(
   db: BoardDb,
   orgId: string,
-  boardId: BoardId,
+  /* Any board this organisation has — see `boardIdFrom`, which no longer
+     narrows to the two the product ships. */
+  boardId: string,
 ): Promise<BoardStateCache> {
   await ensureDatabase();
 
@@ -801,6 +839,25 @@ async function ensureBoardState(
     await seedStoreDocumentationBoard(await getD1(), orgId);
     return null;
   }
+
+  /*
+   * A register generated for a workspace section brings its own structure and
+   * must be left alone — W02-06.
+   *
+   * Everything below this line is the MAINTENANCE board's: 26 domain columns
+   * from `monday-board-spec`, its option sets, and `seedRequestsIfEmpty`, which
+   * invents sample jobs into an empty board. Running any of it against a
+   * section's register would furnish "CCTV" with Tier Level and Engineer
+   * Required and then fill it with maintenance samples — a data model nobody
+   * asked for, on a board that already has the one it was created with.
+   *
+   * It would also not even work: the column seeder's ids come from
+   * `tenantSeedId("column-system-<key>", orgId)`, which does not name the
+   * board, so on a second board every insert collides with the first board's
+   * row and is discarded. The result would be an empty board and no error.
+   * `createBoard` provisions a generated register once, keyed on the board.
+   */
+  if (isGeneratedRegister(boardId)) return null;
 
   await seedRequestsIfEmpty(db, orgId);
 
@@ -1016,7 +1073,7 @@ async function ensureBoardState(
 async function boardPayload(
   db: BoardDb,
   orgId: string,
-  boardId: BoardId,
+  boardId: string,
   // Named `include` rather than `options`, which in this function already means
   // the board's status and dropdown choices.
   include: { requests: boolean } = { requests: true },
@@ -1641,11 +1698,18 @@ export async function GET(request: Request) {
      * anything hitting the URL by hand — gets exactly what it got before.
      */
     const compact = new URL(request.url).searchParams.get("compact") === "1";
-    const payload = await boardPayload(db, orgId, boardIdFrom(request), {
+    const payload = await boardPayload(db, orgId, await boardIdFrom(request, db, orgId), {
       requests: !compact,
     });
     return Response.json(compact ? compactBoard(payload) : payload);
   } catch (error) {
+    /* A board this organisation does not have is a bad REQUEST, not an outage.
+       Without this the generic handler below answers 503 "temporarily
+       unavailable", telling the browser to retry a request no retry can fix —
+       which is the case `isBoardNotFound` was written for. */
+    if (isBoardNotFound(error)) {
+      return Response.json({ error: error.message }, { status: 404 });
+    }
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
@@ -1680,7 +1744,7 @@ export async function POST(request: Request) {
       );
     }
     const action = trimString(payload.action, 40);
-    const boardId = boardIdFrom(request);
+    const boardId = await boardIdFrom(request, db, orgId);
     await ensureBoardState(db, orgId, boardId);
 
     if (action === "create_group") {
@@ -2231,6 +2295,13 @@ export async function POST(request: Request) {
 
     return Response.json({ error: "Unknown board action." }, { status: 400 });
   } catch (error) {
+    /* A board this organisation does not have is a bad REQUEST, not an outage.
+       Without this the generic handler below answers 503 "temporarily
+       unavailable", telling the browser to retry a request no retry can fix —
+       which is the case `isBoardNotFound` was written for. */
+    if (isBoardNotFound(error)) {
+      return Response.json({ error: error.message }, { status: 404 });
+    }
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
@@ -2262,7 +2333,7 @@ export async function PATCH(request: Request) {
       );
     }
     const action = trimString(payload.action, 40);
-    const boardId = boardIdFrom(request);
+    const boardId = await boardIdFrom(request, db, orgId);
     await ensureBoardState(db, orgId, boardId);
 
     if (action === "rename_group") {
@@ -3139,6 +3210,13 @@ export async function PATCH(request: Request) {
 
     return Response.json({ error: "Unknown board action." }, { status: 400 });
   } catch (error) {
+    /* A board this organisation does not have is a bad REQUEST, not an outage.
+       Without this the generic handler below answers 503 "temporarily
+       unavailable", telling the browser to retry a request no retry can fix —
+       which is the case `isBoardNotFound` was written for. */
+    if (isBoardNotFound(error)) {
+      return Response.json({ error: error.message }, { status: 404 });
+    }
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;

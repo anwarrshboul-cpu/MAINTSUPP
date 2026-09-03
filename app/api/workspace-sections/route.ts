@@ -55,9 +55,30 @@ import {
 } from "./catalogue";
 import { BUILT_IN_GROUPS, FALLBACK_GROUP } from "../navigation/layout";
 import { can, resolvePermissions } from "../../lib/permissions";
+import {
+  boardItemCount,
+  createBoard,
+  deleteBoardStructure,
+} from "../../lib/board-registry";
 
 /** The headings a section may be filed under. `layout.ts` is the authority. */
 const GROUP_KEYS = BUILT_IN_GROUPS.map((group) => group.key);
+
+/**
+ * The boards the PRODUCT owns, as opposed to one a section made for itself.
+ *
+ * Derived from `SECTION_SURFACES` rather than written out, so a surface added
+ * later cannot be mistaken for a section-owned board and destroyed with it.
+ * Anything not in here was created by `createBoard` for the section that names
+ * it, and is the only kind of board a purge may remove.
+ */
+const BUILT_IN_BOARD_KEYS: ReadonlySet<string> = new Set<string>(
+  /* `SECTION_SURFACES` is `as const`, so `boardKey` is a literal union and a
+     `Set` inferred from it would only accept those two strings — the membership
+     test below is asked about an arbitrary stored key. Widened to `string` here
+     rather than cast at each call site. */
+  SECTION_SURFACES.flatMap((surface) => (surface.boardKey ? [surface.boardKey as string] : [])),
+);
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +100,10 @@ function toSection(row: SectionRow): WorkspaceSection {
     // bound to. Stored separately so pointing a section at a different board is
     // a row change rather than a release.
     boardKey: row.surfaceRef ?? definition?.boardKey ?? null,
+    /* A board key that is not one of the product's own was created for this
+       section by `createBoard`. The same test the purge uses, answered once and
+       returned, so the dialog and the destructive path cannot disagree. */
+    ownsBoard: row.surfaceRef !== null && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef),
     group: isGroupChoice(row.groupKey, GROUP_KEYS) ? row.groupKey : FALLBACK_GROUP,
     position: row.position,
     archived: row.archivedAt !== null,
@@ -263,29 +288,106 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * W02-06 — the section gets its OWN register.
+     *
+     * The owner's decision, and it reverses this endpoint's original one. A
+     * section used to be bound to an EXISTING screen, so "CCTV" and "Jobs" drew
+     * the same board and showed the same rows; the checklist asks a new section
+     * to "automatically generate the same default page structure used by the
+     * existing sections", and pointing at somebody else's page is not
+     * generating one.
+     *
+     * `createBoard` is the canonical primitive and provisions the default
+     * columns and groups itself, so there is no second creation path and no way
+     * to end up with a board that renders nothing. The register is generic by
+     * construction — see `generic-board-template.ts` for why it is not a copy of
+     * Maintenance and not a copy of a live board.
+     *
+     * A CALLER MAY STILL ASK FOR AN EXISTING SCREEN, and the editor no longer
+     * offers it. `body.surface` is honoured when it names a non-board screen —
+     * Reports, the calendar, the site register — because those sections predate
+     * this decision and must keep working, and because "a second door onto the
+     * calendar" is a coherent thing to want in a way that "a second Jobs board"
+     * was not. Absent, which is what the dialog now sends, means a new register.
+     */
+    const wantsExistingScreen = body.surface !== undefined;
+    let ownedBoardKey: string | null = null;
+
+    if (!wantsExistingScreen) {
+      /*
+       * BOARD FIRST, SECTION SECOND, and the order is the failure plan.
+       *
+       * If the board cannot be created there is no section, so nothing
+       * navigable exists — the outcome the checklist asks for by name. If the
+       * section then fails, the board is removed below; an unbound board is
+       * invisible either way, because nothing routes to a board except through
+       * a section.
+       */
+      try {
+        const provisioned = await createBoard(context.db, context.orgId, {
+          name: label,
+          description: cleanSectionLabel(body.description, 240) ?? undefined,
+          itemNoun: "Item",
+        });
+        ownedBoardKey = provisioned.key;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "The section's register could not be created.";
+        return Response.json(
+          {
+            error: `The section was not created: ${message}`,
+            key,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const now = new Date().toISOString();
-    await context.db.insert(workspaceSections).values({
-      id: `wsec_${crypto.randomUUID().replace(/-/g, "")}`,
-      organisationId: context.orgId,
-      key,
-      label,
-      icon: isIconName(body.icon) ? body.icon : DEFAULT_ICON,
-      /* Cleaned through `visibleText`'s rules like the label, so a description
-         of three zero-width spaces is stored as absent rather than as a blurb
-         that renders blank — the cleaner answers null for text that is not
-         really there. */
-      description: cleanSectionLabel(body.description, 240) || null,
-      surface,
-      surfaceRef: board.boardKey,
-      groupKey: isGroupChoice(body.group, GROUP_KEYS) ? body.group : FALLBACK_GROUP,
-      position: await nextPosition(context),
-      createdBy: context.identityEmail,
-      createdAt: now,
-      updatedAt: now,
-    });
+    try {
+      await context.db.insert(workspaceSections).values({
+        id: `wsec_${crypto.randomUUID().replace(/-/g, "")}`,
+        organisationId: context.orgId,
+        key,
+        label,
+        icon: isIconName(body.icon) ? body.icon : DEFAULT_ICON,
+        /* Cleaned through `visibleText`'s rules like the label, so a description
+           of three zero-width spaces is stored as absent rather than as a blurb
+           that renders blank — the cleaner answers null for text that is not
+           really there. */
+        description: cleanSectionLabel(body.description, 240) || null,
+        surface,
+        surfaceRef: ownedBoardKey ?? board.boardKey,
+        groupKey: isGroupChoice(body.group, GROUP_KEYS) ? body.group : FALLBACK_GROUP,
+        position: await nextPosition(context),
+        createdBy: context.identityEmail,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      /* The section is what makes a board reachable, so a board with no section
+         is not a half-created feature — it is litter. Removed rather than left,
+         and the caller is told the whole operation failed. */
+      if (ownedBoardKey) {
+        await deleteBoardStructure(context.db, context.orgId, ownedBoardKey).catch(
+          () => undefined,
+        );
+      }
+      const message =
+        error instanceof Error ? error.message : "The section could not be added.";
+      return Response.json({ error: message }, { status: 400 });
+    }
 
     const created = await findByKey(context, key);
-    await recordSectionChange(context, request, "workspace.section_created", key, `Added the "${label}" workspace section.`, { key, label, surface, board: board.boardKey });
+    await recordSectionChange(
+      context,
+      request,
+      "workspace.section_created",
+      key,
+      `Added the "${label}" workspace section${ownedBoardKey ? " and its register" : ""}.`,
+      { key, label, surface, board: ownedBoardKey ?? board.boardKey, ownsBoard: ownedBoardKey !== null },
+    );
     return Response.json({ section: created ? toSection(created) : null }, { status: 201 });
   } catch (error) {
     /* A session that has ended is not a bad request. Without this an expired
@@ -747,10 +849,72 @@ export async function DELETE(request: Request) {
       );
     }
 
+    /*
+     * W02-06 — a section that owns a register takes it with it, and only if the
+     * register is empty.
+     *
+     * THE OWNERSHIP TEST. A board key that is not one of the product's own was
+     * created by `createBoard` for this section. A section pointed at
+     * `maintenance` or `store-documentation` is a door onto a shared screen and
+     * must never take it away.
+     *
+     * THE SHARING TEST. `PATCH { board }` can re-point one section at another's
+     * register, so a board with another section still on it is shared in fact
+     * whoever created it. The section goes; the board stays.
+     *
+     * THE EMPTINESS TEST, and it is a refusal rather than a cascade. Rows on a
+     * register are `maintenance_requests` — the same table the job board uses,
+     * carrying attachments in object storage, comments and activity, and
+     * referenced by sites and by the recycle bin. Destroying them because
+     * somebody removed a MENU ENTRY is exactly the surprise this endpoint spent
+     * its first version avoiding, and the product already has a deliberate,
+     * audited path for destroying items: bin them, then purge the bin. So an
+     * occupied register refuses, and says how many rows are in the way.
+     */
+    const ownedBoard =
+      row.surfaceRef && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef) ? row.surfaceRef : null;
+
+    if (ownedBoard) {
+      const sharing = (await loadWorkspaceSections(context.db, context.orgId)).filter(
+        (section) => section.key !== row.key && section.boardKey === ownedBoard,
+      );
+      if (sharing.length === 0) {
+        const items = await boardItemCount(context.db, context.orgId, ownedBoard);
+        if (items > 0) {
+          return Response.json(
+            {
+              error: `"${row.label}" still holds ${items} ${items === 1 ? "item" : "items"}. Delete them from the section first — they go to the recycle bin, where they can be restored — and then it can be removed permanently.`,
+              key: row.key,
+              board: ownedBoard,
+              items,
+            },
+            { status: 409 },
+          );
+        }
+      }
+    }
+
     /* Counted BEFORE they are cleared, so the audit line and the response say
        what the deletion actually discarded. */
     const references = await referencesTo(context, row.key);
     await forgetSection(context, row.key);
+
+    /*
+     * The register's own structure — its columns and its groups — and the board
+     * row itself. Configuration only: `deleteBoardStructure` deletes no item, no
+     * attachment and nothing that exists independently of this board, and it is
+     * reached only after the emptiness test above.
+     */
+    let removedBoard: string | null = null;
+    if (ownedBoard) {
+      const stillShared = (await loadWorkspaceSections(context.db, context.orgId)).some(
+        (section) => section.key !== row.key && section.boardKey === ownedBoard,
+      );
+      if (!stillShared) {
+        await deleteBoardStructure(context.db, context.orgId, ownedBoard);
+        removedBoard = ownedBoard;
+      }
+    }
 
     await context.db
       .delete(workspaceSections)
@@ -766,9 +930,18 @@ export async function DELETE(request: Request) {
       "workspace.section_deleted",
       row.key,
       `Permanently deleted the "${row.label}" workspace section.`,
-      { key: row.key, label: row.label, recoverable: false, discarded: references },
+      { key: row.key, label: row.label, recoverable: false, discarded: references, board: removedBoard },
     );
-    return Response.json({ ok: true, key: row.key, deleted: true, discarded: references });
+    return Response.json({
+      ok: true,
+      key: row.key,
+      deleted: true,
+      discarded: references,
+      /* Null when the section was a door onto a shared screen, or when another
+         section still uses the register. Named so the caller can tell the two
+         outcomes apart rather than inferring them. */
+      board: removedBoard,
+    });
   } catch (error) {
     /* A session that has ended is not a bad request. Without this an expired
        session answered 400 here while the GET beside it answered 401

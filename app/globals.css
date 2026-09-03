@@ -11344,6 +11344,20 @@ th.sheet-column--name {
     display: none;
   }
 
+  /*
+   * …except a workspace section's own description — W02-07.
+   *
+   * The rule above hides the board's standing blurb, which is copy about what
+   * the screen is and is worth the vertical space on a phone. A section's
+   * description is the thing the owner typed when they created it, and the
+   * checklist asks for it on the page; below 761px this was the only place it
+   * could still have appeared, because the topbar identity strip is not
+   * rendered under 768 either. It was nowhere on a phone.
+   */
+  .live-board-heading p[data-section-description] {
+    display: block;
+  }
+
   .live-board-heading__meta {
     width: 100%;
     min-width: 0;
@@ -12474,6 +12488,33 @@ th.sheet-column--name {
   }
 
   .live-board-page .live-board-heading {
+    display: none;
+  }
+
+  /*
+   * …but a workspace section's heading is the page, not chrome — W02-07.
+   *
+   * The rule above hides the standing copy above a built-in board, which on a
+   * phone is a screenful of text between the reader and the grid. A section's
+   * heading carries its NAME and the description the owner typed, and the
+   * checklist asks for both on the page. With this hidden and the topbar
+   * identity strip not rendered under 768 either, a section was unnamed and
+   * undescribed on every phone.
+   *
+   * Trimmed rather than simply revealed: the meters and the eyebrow stay gone,
+   * so what comes back is two lines, not the desktop block.
+   */
+  .live-board-page .live-board-heading[data-section] {
+    display: block;
+    padding: 12px 16px 4px;
+  }
+
+  .live-board-page .live-board-heading[data-section] h1 {
+    margin: 0;
+    font-size: 19px;
+  }
+
+  .live-board-page .live-board-heading[data-section] .live-board-heading__meta {
     display: none;
   }
 

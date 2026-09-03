@@ -47,6 +47,8 @@ export type WorkspaceSectionRow = {
   key: string;
   label: string;
   description?: string | null;
+  /** W02-06 — whether the register it draws belongs to this section alone. */
+  ownsBoard?: boolean;
   icon: IconName;
   surface: string;
   boardKey: string | null;
@@ -126,7 +128,10 @@ function SectionForm({
     label: string;
     description: string;
     icon: IconName;
-    surface: string;
+    /* Absent when adding: the server then creates the section's own register.
+       Carried on an edit so a section made before W02-06, which points at a
+       shared screen, keeps pointing at it. */
+    surface?: string;
     group: string;
   }) => void;
 }) {
@@ -158,7 +163,16 @@ function SectionForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (!trimmed || busy) return;
-        onSubmit({ label: trimmed, description: description.trim(), icon, surface, group });
+        onSubmit({
+          label: trimmed,
+          description: description.trim(),
+          icon,
+          /* W02-06. Adding a section creates a register of its own, so there is
+             no screen to choose and sending one would ask for the old
+             second-door behaviour. Editing keeps whatever the row already has. */
+          ...(initial ? { surface } : {}),
+          group,
+        });
       }}
     >
       <label className="ba-field">
@@ -215,21 +229,36 @@ function SectionForm({
         </div>
       </fieldset>
 
-      <label className="ba-field">
-        <span>Screen</span>
-        <select
-          className="ba-select"
-          value={surface}
-          onChange={(event) => setSurface(event.target.value)}
-        >
-          {surfaces.map((entry) => (
-            <option key={entry.key} value={entry.key}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {chosen && <p className="ba-hint">{chosen.description}</p>}
+      {initial ? (
+        /*
+         * Only when editing, and only because sections created before W02-06
+         * are doors onto a shared screen. Removing the control would leave
+         * those rows with no way to be re-homed; offering it when ADDING would
+         * offer the behaviour the owner ruled out.
+         */
+        <>
+          <label className="ba-field">
+            <span>Screen</span>
+            <select
+              className="ba-select"
+              value={surface}
+              onChange={(event) => setSurface(event.target.value)}
+            >
+              {surfaces.map((entry) => (
+                <option key={entry.key} value={entry.key}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {chosen && <p className="ba-hint">{chosen.description}</p>}
+        </>
+      ) : (
+        <p className="ba-hint sec-owns">
+          This section gets a register of its own — its own columns, filters,
+          sorting, views and items. Nothing is copied from another section.
+        </p>
+      )}
 
       <label className="ba-field">
         <span>Heading</span>
@@ -448,10 +477,10 @@ function SectionManagerBody({
                  be true and useless — this is the only screen that explains the
                  feature, because it is the only screen it appears on. */
               <p className="sec-empty">
-                This workspace has not added any sections of its own. A section is
-                another door into one of the screens the product already
-                draws — a CCTV list on the job board, say — with its own name,
-                icon and place in the sidebar.
+                This workspace has not added any sections of its own. Adding one
+                creates a register of its own — a CCTV list, say — with its own
+                name, icon, columns, filters, views and items, and its own place
+                in the sidebar.
               </p>
             ) : (
               <ul className="sec-list">
@@ -463,8 +492,13 @@ function SectionManagerBody({
                     <span className="sec-row__text">
                       <strong>{entry.label}</strong>
                       <small>
-                        {catalogue.surfaces.find((s) => s.key === entry.surface)?.label ??
-                          entry.surface}
+                        {/* Its own register, or the shared screen it opens.
+                            An owner deciding whether a section is safe to
+                            remove needs to know which. */}
+                        {entry.ownsBoard
+                          ? "Own register"
+                          : catalogue.surfaces.find((s) => s.key === entry.surface)?.label ??
+                            entry.surface}
                         {" · "}
                         {BUILT_IN_GROUPS.find((g) => g.key === entry.group)?.label ??
                           entry.group}

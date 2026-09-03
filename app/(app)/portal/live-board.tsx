@@ -3310,14 +3310,26 @@ export function LiveMaintenanceBoard({
       </section>
       )}
 
-      <section className="section-header live-board-heading">
+      {/* `data-section` marks a heading that IS the section's identity rather
+          than standing copy about a built-in screen — a phone hides the second
+          and must not hide the first. See `.live-board-page .live-board-heading`
+          at 760px. */}
+      <section
+        className="section-header live-board-heading"
+        data-section={sectionLabel?.trim() ? "" : undefined}
+      >
         <div>
           <span className="eyebrow-chip">
             <Icon name="grid" size={15} />
             {identity.eyebrow}
           </span>
           <h1>{identity.heading}</h1>
-          <p>{identity.blurb}</p>
+          {/* Marked when it is the SECTION's own description rather than the
+              board's standing blurb — the two are hidden differently on a
+              phone. See `.live-board-heading p` at 760px. */}
+          <p data-section-description={sectionDescription?.trim() ? "" : undefined}>
+            {identity.blurb}
+          </p>
         </div>
         <div className="live-board-heading__meta">
           <span>

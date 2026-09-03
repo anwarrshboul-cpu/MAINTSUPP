@@ -124,6 +124,19 @@
   font-size: 16px;
 }
 
+/*
+ * The line that stands in for the Screen picker when adding. It is a promise
+ * about what the button will do, so it reads as a statement rather than a hint.
+ */
+.sec-owns {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--brand-solid);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  color: var(--ink);
+}
+
 /* ── The icon picker ──────────────────────────────────────────────────────── */
 
 .sec-icons {

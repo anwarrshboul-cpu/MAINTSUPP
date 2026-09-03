@@ -147,11 +147,13 @@ export default function BoardChrome({
   useActiveTabInView(tabsRef, activeKey);
 
   useEffect(() => {
-    if (boardId !== "maintenance") return;
+    /* Any board but Store Documentation, which draws its own tracker. This read
+       `!== "maintenance"`, leaving a section's register with no tabs — W02-06. */
+    if (boardId === "store-documentation") return;
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch("/api/board/views");
+        const response = await fetch(`/api/board/views?board=${encodeURIComponent(boardId)}`);
         if (!response.ok) throw new Error("Views could not be loaded.");
         const payload = (await response.json()) as {
           board: BoardSummary;
@@ -241,7 +243,10 @@ export default function BoardChrome({
   const gridOnScreen = !viewReplacesGrid(activeView);
 
   async function send(method: "POST" | "PATCH" | "DELETE", body?: unknown, query = "") {
-    const response = await fetch(`/api/board/views${query}`, {
+    /* The board travels with writes too, or a view added on a section's
+       register lands on the job board. */
+    const scoped = `${query ? `${query}&` : "?"}board=${encodeURIComponent(boardId)}`;
+    const response = await fetch(`/api/board/views${scoped}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -304,7 +309,8 @@ export default function BoardChrome({
       )}
 
       {/* ── Row 2 — view tabs (AA3–AA6) ──────────────────────────────── */}
-      {boardId === "maintenance" && (
+      {/* Drawn wherever views were loaded — see the fetch above. */}
+      {boardId !== "store-documentation" && (
       <nav className="board-views" aria-label="Board views">
         {/*
           The strip and its two arrows live in one positioned wrapper so the
