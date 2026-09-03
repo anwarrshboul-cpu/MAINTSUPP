@@ -84,6 +84,26 @@ export const sites = sqliteTable(
      */
     annualBudgetPence: integer("annual_budget_pence"),
 
+    /**
+     * W2 -- WHICH REGISTER THIS SITE BELONGS TO.
+     *
+     * The board key of the section instance that owns the row, or NULL for the
+     * canonical register -- the workspace's own Sites screen, which genuinely
+     * has no board behind it (`SECTION_SURFACES` records `boardKey: null` for
+     * the `stores` surface, and `builtInSectionBoard("stores")` returns null).
+     *
+     * The same column, holding the same kind of value, as the twelve
+     * board-scoped tables below. `app/lib/register-scope.ts` owns the meaning,
+     * the predicate and the request-to-scope resolution; nothing may compare
+     * this column by hand, because `= NULL` is never true and a hand-rolled
+     * filter therefore reads an instance as empty and the canonical register as
+     * everything.
+     *
+     * Nullable with no default so the migration is a no-op: every existing row
+     * reads NULL, which is canonical, so nothing moves.
+     */
+    boardId: text("board_id"),
+
     // X11 — monday name reconciliation. Both boards describe the same sites
     // under different names; the importer matches on either.
     mondayMaintenanceName: text("monday_maintenance_name"),
@@ -98,6 +118,11 @@ export const sites = sqliteTable(
     index("sites_lifecycle_idx").on(table.lifecycle),
     index("sites_organisation_status_idx").on(table.organisationId, table.status),
     index("sites_organisation_position_idx").on(table.organisationId, table.position),
+    /* W2 -- the scope filter is on every read of this table, so it is indexed
+       with the organisation it always accompanies. Not unique: two registers
+       may legitimately hold a site of the same name, which is the whole point
+       of an independent instance. */
+    index("sites_organisation_board_idx").on(table.organisationId, table.boardId),
     uniqueIndex("sites_organisation_slug_idx").on(table.organisationId, table.slug),
     // A code identifies a site to job intake — `resolveSiteByName` matches on it
     // and returns the first row that does — so two sites may not share one. The
@@ -141,6 +166,13 @@ export const siteGroups = sqliteTable(
     slug: text("slug").notNull(),
     kind: text("kind").notNull().default("region"),
     colourHex: text("colour_hex").notNull().default("#12B4A8"),
+    /**
+     * W2 -- reporting groups belong to ONE register. Without this an instance's
+     * Sites screen would list the canonical register's groups, which is the
+     * leak of canonical data into an instance the owner ruled out by name.
+     * See `sites.boardId`.
+     */
+    boardId: text("board_id"),
     position: integer("position").notNull().default(0),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -149,6 +181,8 @@ export const siteGroups = sqliteTable(
   (table) => [
     uniqueIndex("site_groups_organisation_slug_idx").on(table.organisationId, table.slug),
     index("site_groups_organisation_position_idx").on(table.organisationId, table.position),
+    /* W2 -- see `sites_organisation_board_idx`. */
+    index("site_groups_organisation_board_idx").on(table.organisationId, table.boardId),
   ],
 );
 
@@ -356,6 +390,16 @@ export const contractors = sqliteTable(
     /** The contractor's own postcode. `address` is one free-text line and
      * nothing ever parsed one out of it. */
     postcode: text("postcode"),
+    /**
+     * W2 -- WHICH REGISTER THIS CONTRACTOR BELONGS TO. See `sites.boardId`;
+     * one model, one meaning, and `app/lib/register-scope.ts` owns both.
+     *
+     * NULL is the canonical roster, which is what every existing row reads and
+     * what `resolveContractorLink` searches when nobody names an instance. That
+     * default is what keeps a contractor added to an instance from breaking the
+     * name-matching on the jobs the workspace already has.
+     */
+    boardId: text("board_id"),
     serviceCategories: text("service_categories").notNull().default("[]"),
     coverageAreas: text("coverage_areas").notNull().default("[]"),
     certifications: text("certifications").notNull().default("[]"),
@@ -366,7 +410,11 @@ export const contractors = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("contractors_organisation_idx").on(table.organisationId)],
+  (table) => [
+    index("contractors_organisation_idx").on(table.organisationId),
+    /* W2 -- see `sites_organisation_board_idx`. */
+    index("contractors_organisation_board_idx").on(table.organisationId, table.boardId),
+  ],
 );
 
 export const maintenanceRequests = sqliteTable(
@@ -1086,6 +1134,24 @@ export const boards = sqliteTable(
     name: text("name").notNull(),
     description: text("description"),
     kind: text("kind").notNull().default("maintenance"),
+    /**
+     * W2 - THE TEMPLATE THIS REGISTER WAS BUILT FROM, and the instance model's
+     * one identifying fact.
+     *
+     * `workspace_sections.template` records what the OWNER chose; this records
+     * what the REGISTER actually is, and the two are not the same question. A
+     * section can be re-homed, archived and restored, or detached from its
+     * register entirely, and through all of it the board still has to be able
+     * to say whether it is a Jobs board - which is what decides whether the
+     * spec's newest column belongs on it.
+     *
+     * NULL means a board that predates templates: the two built-in ones, and
+     * every register created for a section before W2. Read that way everywhere.
+     * NULL is never "assume Jobs" - a legacy section's generic six-column
+     * register must keep working exactly as it does, and silently converting
+     * one into a job board is the change the owner ruled out by name.
+     */
+    template: text("template"),
     itemNoun: text("item_noun").notNull().default("Job"),
     referencePrefix: text("reference_prefix").notNull().default("MS"),
     referenceCounter: integer("reference_counter").notNull().default(0),

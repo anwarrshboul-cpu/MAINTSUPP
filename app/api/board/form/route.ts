@@ -1,7 +1,12 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { formConfigurations, maintenanceGroups } from "../../../../db/schema";
 import {
+  formConfigurations,
+  maintenanceBoardColumns,
+  maintenanceGroups,
+} from "../../../../db/schema";
+import {
+  createFormForBoard,
   formPasswordProblem,
   generateShareToken,
   generateShortToken,
@@ -12,6 +17,7 @@ import {
   type FormRecord,
   type StoredFormConfig,
 } from "../../../lib/form-config";
+import type { FormSourceColumn } from "../../../lib/form-derive";
 import { formOptionOverrides } from "../../../lib/form-options";
 /*
  * The board key list, from the shared copy in the automation store rather than
@@ -95,6 +101,24 @@ function serialiseForm(
 ) {
   return {
     id: record.id,
+    /*
+     * WHICH BOARD THIS FORM IS. Sent because the builder has to be able to tell
+     * the reader whose form they are editing, and because `filesIntoThisBoard`
+     * below is only checkable against it.
+     */
+    boardKey: record.boardId,
+    /*
+     * Whether the builder's "view" mode may mount `FormView`.
+     *
+     * `FormView` posts to `/api/maintenance`, which files onto the DEFAULT
+     * board and takes no board argument. Mounting it on a section's register
+     * therefore drew the JOB BOARD's questions with a working Submit that filed
+     * the job somewhere else entirely — the same leak `?board=` was, in the one
+     * place the builder still had a hard-coded form. The comparison is made
+     * HERE, where `DEFAULT_BOARD_KEY` is defined, rather than by the browser
+     * comparing board keys it should not have to know.
+     */
+    filesIntoThisBoard: record.boardId === DEFAULT_BOARD_KEY,
     title: record.title,
     description: record.description,
     active: record.active,
@@ -163,7 +187,27 @@ export async function GET(request: Request) {
     const { db, orgId } = await scopedDb(request);
     const boardId = await boardIdFrom(request, db, orgId);
     const record = await loadForm(db, orgId, boardId);
-    if (!record) return failure("This board has no form.", 404);
+    /*
+     * NO FORM YET IS NOT "NO FORM EVER", and the difference is the whole of
+     * requirement B.
+     *
+     * `ensureFormBuilder` in db/init.ts seeds exactly one row per organisation,
+     * for `board_id = 'maintenance'`, so every other register answered 404 here
+     * and the product's answer to "give this section a form" was to hide the
+     * tab. The 404 stays — there genuinely is no form to send — but it now
+     * carries `canCreate`, so the builder can offer to make the board ONE OF
+     * ITS OWN rather than falling back to somebody else's.
+     *
+     * `canCreate` is not a permission claim. It says a form could exist for
+     * this board; POST below is what checks whether this caller may create it,
+     * because a capability decided in a GET body is a capability decided twice.
+     */
+    if (!record) {
+      return Response.json(
+        { error: "This board has no form.", canCreate: true },
+        { status: 404 },
+      );
+    }
 
     /*
      * The board's real groups, so "Group for answers" can offer what exists
@@ -190,6 +234,120 @@ export async function GET(request: Request) {
       ),
       groups,
     });
+  } catch (error) {
+    return unavailable(error);
+  }
+}
+
+/**
+ * THIS BOARD'S OWN FORM, CREATED — W2 requirement B.
+ *
+ * The owner's words were "its own form ID, fields derived from the instance's
+ * own columns, its own persisted settings, its own public/shared URL, and
+ * submissions scoped to that instance", and explicitly not solved "by 404, by
+ * hiding the action, or by pointing at canonical Jobs". This is the verb that
+ * makes the first four true; `/api/forms/[token]/submit` makes the fifth.
+ *
+ * `board.edit`, the same capability that edits the form afterwards. Creating
+ * one MINTS AN UNAUTHENTICATED WRITE PATH into this organisation's database, so
+ * it cannot be a read: a `client`, whose capabilities are `board.view` and
+ * `data.export`, must not be able to publish an intake by opening a tab.
+ *
+ * Idempotent, and deliberately so rather than 409: two people opening the Form
+ * tab on the same register at the same moment should both see the same form,
+ * not one error. `createFormForBoard` relies on the unique index for that, so
+ * the outcome does not depend on the two requests being ordered.
+ */
+export async function POST(request: Request) {
+  try {
+    await ensureDatabase();
+    const guard = await scopedDbWithCapability(request, "board.edit");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
+
+    const boardId = await boardIdFrom(request, db, orgId);
+    const existing = await loadForm(db, orgId, boardId);
+    if (existing) {
+      return Response.json({
+        ok: true,
+        created: false,
+        form: serialiseForm(
+          request,
+          existing,
+          await formOptionOverrides(db, orgId, existing.config),
+        ),
+      });
+    }
+
+    /*
+     * Resolved rather than assumed, for two reasons that are not the same: the
+     * form is titled after the register, and an ARCHIVED board must not gain a
+     * public intake. `resolveBoard` throws `BoardNotFoundError` for a key this
+     * organisation does not have, which `unavailable` turns into a 404 — so a
+     * key from another tenant cannot create anything here.
+     */
+    const board = await resolveBoard(db, orgId, boardId);
+    if (board.archived) {
+      return failure("This register is archived, so it cannot take a new form.", 409);
+    }
+
+    /*
+     * THE INSTANCE'S OWN COLUMNS, and only its own. Scoped to (organisation,
+     * board) and to the live ones — a column in the recoverable-columns bin is
+     * not a field this register has. This query is the entire input to the
+     * derivation: nothing downstream reads a board key, a kind or a template.
+     */
+    const columns = await db
+      .select({
+        id: maintenanceBoardColumns.id,
+        key: maintenanceBoardColumns.key,
+        title: maintenanceBoardColumns.title,
+        type: maintenanceBoardColumns.type,
+        required: maintenanceBoardColumns.required,
+        system: maintenanceBoardColumns.system,
+      })
+      .from(maintenanceBoardColumns)
+      .where(
+        and(
+          eq(maintenanceBoardColumns.organisationId, orgId),
+          eq(maintenanceBoardColumns.boardId, board.key),
+          isNull(maintenanceBoardColumns.deletedAt),
+        ),
+      )
+      .orderBy(maintenanceBoardColumns.position);
+
+    const created = await createFormForBoard(
+      db,
+      orgId,
+      { key: board.key, name: board.name },
+      columns as FormSourceColumn[],
+    );
+    if (!created) return failure("The form could not be created.", 503);
+
+    const groups = await db
+      .select({ id: maintenanceGroups.id, name: maintenanceGroups.name })
+      .from(maintenanceGroups)
+      .where(
+        and(
+          eq(maintenanceGroups.organisationId, orgId),
+          eq(maintenanceGroups.boardId, created.boardId),
+        ),
+      )
+      .orderBy(maintenanceGroups.position);
+
+    return Response.json(
+      {
+        ok: true,
+        created: true,
+        form: serialiseForm(
+          request,
+          created,
+          await formOptionOverrides(db, orgId, created.config),
+        ),
+        groups,
+      },
+      { status: 201 },
+    );
   } catch (error) {
     return unavailable(error);
   }

@@ -1,5 +1,16 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
+/*
+ * W2 -- which register a row belongs to. `registerScopeFilter` is the ONLY
+ * thing allowed to turn a scope into a predicate, because `= NULL` is never
+ * true and a hand-rolled filter therefore reads an instance as empty and the
+ * canonical register as everything. See that module's header for the model.
+ */
+import {
+  CANONICAL_REGISTER,
+  registerScopeFilter,
+  type RegisterScope,
+} from "./register-scope";
 /*
  * The state vocabulary and the reconciliation rule live in a module with no
  * database imports, because the Sites form and the Manage-data drawer need them
@@ -93,11 +104,20 @@ const RETAIL_SITE_TYPES = ["Inline", "Kiosk"];
  * by type, and anything the register cannot vouch for carries status 'other'
  * and is excluded with them — a legacy row must never become a suggestion.
  */
-export async function listRetailSites(db: Database, organisationId: string) {
+export async function listRetailSites(
+  db: Database,
+  organisationId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+) {
   const rows = await db
     .select()
     .from(sites)
-    .where(eq(sites.organisationId, organisationId))
+    .where(
+      and(
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    )
     .orderBy(asc(sites.position), asc(sites.name));
   return rows.filter(
     (row) =>
@@ -107,24 +127,68 @@ export async function listRetailSites(db: Database, organisationId: string) {
   );
 }
 
+/**
+ * Every site in ONE register.
+ *
+ * W2 -- DEFAULT-DENY BY OMISSION. `scope` is optional in syntax only: leaving
+ * it out selects the canonical register (`board_id IS NULL`) and never
+ * "every scope". Every caller that predates instances therefore reads exactly
+ * the rows it read before -- every existing row carries NULL -- and a caller
+ * that forgets the argument on a new path gets the canonical register rather
+ * than another register's estate. There is no call anywhere that reads across
+ * scopes, and none can be written by forgetting an argument.
+ *
+ * The scope is in the SQL, not in the `filter` below: `includeInactive` is a
+ * presentation choice over rows this register owns, while the scope decides
+ * which register we are looking at at all, and that must never be a decision
+ * made after the rows have already been fetched.
+ */
 export async function listSites(
   db: Database,
   organisationId: string,
   options: { includeInactive?: boolean } = {},
+  scope: RegisterScope = CANONICAL_REGISTER,
 ) {
   const rows = await db
     .select()
     .from(sites)
-    .where(eq(sites.organisationId, organisationId))
+    .where(
+      and(
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    )
     .orderBy(asc(sites.position), asc(sites.name));
   return options.includeInactive ? rows : rows.filter((row) => row.active);
 }
 
-export async function getSite(db: Database, organisationId: string, id: string) {
+/**
+ * One site, BY ID AND BY REGISTER.
+ *
+ * The scope is in the predicate even though an id is already unique, because
+ * this function is what the Sites route uses to decide whether a caller may
+ * read or edit a row. Without it, an id belonging to an instance register
+ * would be readable -- and PATCHable -- through the canonical screen by
+ * anyone who had seen the id once. That is the object-reference hole the
+ * organisation predicate beside it closes for tenants; this closes the same
+ * hole for registers.
+ */
+export async function getSite(
+  db: Database,
+  organisationId: string,
+  id: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+) {
   const [row] = await db
     .select()
     .from(sites)
-    .where(and(eq(sites.id, id), eq(sites.organisationId, organisationId)))
+    .where(
+      and(
+        eq(sites.id, id),
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -176,48 +240,177 @@ export function stageZeroState(status: string): { active: boolean; lifecycle: st
   };
 }
 
-export async function listAliases(db: Database, organisationId: string) {
-  return db
-    .select()
+/**
+ * Every alias in one register.
+ *
+ * `site_aliases` deliberately carries NO scope column of its own. An alias
+ * belongs to a site and a site belongs to a register, so the scope is joined
+ * through rather than duplicated -- one fact, one place, and a site that
+ * moved register could never leave its aliases behind in the old one.
+ *
+ * KNOWN LIMITATION, stated rather than hidden: the unique index
+ * `site_aliases_organisation_normalised_idx` is on (organisation_id,
+ * normalised) and so spans every register in the workspace. Two registers
+ * therefore cannot both hold the alias "woodgreen", and the second is
+ * REFUSED by `setSiteAliases`/`addSiteAlias` with the conflict reported. That
+ * is a refusal, not a mis-route -- resolution below is scoped, so an alias
+ * held by another register resolves to nothing rather than to that
+ * register's site. Widening the index means dropping it, and `db/init.ts` is
+ * additive-only on a path every request awaits, so it is not done here.
+ */
+export async function listAliases(
+  db: Database,
+  organisationId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+) {
+  const rows = await db
+    .select({ alias: siteAliases })
     .from(siteAliases)
-    .where(eq(siteAliases.organisationId, organisationId));
+    .innerJoin(sites, eq(sites.id, siteAliases.siteId))
+    .where(
+      and(
+        eq(siteAliases.organisationId, organisationId),
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    );
+  return rows.map((row) => row.alias);
 }
 
 /**
- * X11 — resolve any historic name to one canonical site. Checks the canonical
- * name, both monday board columns and every recorded alias. Returns null rather
- * than guessing, so U9 can route an unmatched name to manual review.
+ * Why a location string resolved to the site it resolved to — or to nothing.
+ *
+ * The same vocabulary `ContractorLinkReason` uses in
+ * `app/lib/contractor-reference.ts`, and deliberately the same: an unknown name
+ * and a register that cannot decide are different facts about the workspace,
+ * and a caller filing a job is entitled to be told which one it hit rather than
+ * being handed a silent null for both.
+ */
+export type SiteMatchReason =
+  /** Exactly one site in this register answers to that name. */
+  | "matched"
+  /** The text was blank — there is nothing to resolve. */
+  | "cleared"
+  /** Nothing in this register answers to it. */
+  | "unknown"
+  /** Two or more do. Picking either would be a guess, so neither is picked. */
+  | "ambiguous";
+
+export type SiteMatch = {
+  site: SiteRow | null;
+  reason: SiteMatchReason;
+  /** How many rows in this register answer to the name. */
+  matches: number;
+};
+
+/**
+ * X11 — resolve any historic name to one site IN ONE REGISTER.
+ *
+ * ── THE DEFECT THIS CLOSES ────────────────────────────────────────────────
+ *
+ * This was `rows.find(...)`: the FIRST row whose name, monday name or code
+ * matched won, and nothing anywhere counted the others. `codeConflict`'s own
+ * header already names the consequence for codes — "job intake naming that code
+ * attaches the work to whichever shop the query happened to return" — and there
+ * was no equivalent guard for NAMES at all, because `findDuplicateCandidates`
+ * only warns and there is no unique index on (organisation_id, name) to fall
+ * back on. Two sites called "Wood Green" therefore routed inbound work to
+ * whichever the position/name ordering returned first, silently and for ever.
+ *
+ * Now every match is collected and TWO IS A REFUSAL. A register that cannot
+ * decide resolves nothing, exactly as `resolveContractorLink` refuses to put a
+ * company's name against an invoice on a guess, and exactly as the contractor
+ * backfill in `db/init.ts` guards itself with `count(*) = 1`.
+ *
+ * ── WHY A NAME COLLISION ACROSS REGISTERS IS NOT AMBIGUOUS ────────────────
+ *
+ * Because the two rows are never in the same result set. `listSites` puts the
+ * scope in the SQL, so resolving inside an instance sees only that instance's
+ * rows and resolving in the canonical register sees only canonical ones. Two
+ * registers may each hold a "Wood Green" and both resolve cleanly — which is
+ * the entire point of an independent instance, and is what makes this safe
+ * where a workspace-wide unique index would merely have made it impossible.
+ *
+ * Aliases are scoped by JOINING to the site that owns them rather than by a
+ * column of their own; see `listAliases` for why, and for the one limitation
+ * that leaves.
+ */
+export async function resolveSiteMatch(
+  db: Database,
+  organisationId: string,
+  candidate: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+): Promise<SiteMatch> {
+  const trimmed = typeof candidate === "string" ? candidate.trim() : "";
+  const key = normaliseSiteName(trimmed);
+  if (!key) return { site: null, reason: "cleared", matches: 0 };
+
+  /*
+   * Scoped in SQL. The name comparison that follows cannot be: `normaliseSiteName`
+   * strips punctuation, spacing and diacritics through NFKD, and neither SQLite
+   * nor Postgres can express that portably. So the DATABASE decides which
+   * register's rows are on the table and JavaScript decides which of those rows
+   * the text names — the boundary that matters is the one the database holds.
+   */
+  const rows = await listSites(db, organisationId, { includeInactive: true }, scope);
+
+  const codeKey = trimmed.toLowerCase();
+  const direct = rows.filter(
+    (row) =>
+      normaliseSiteName(row.name) === key ||
+      (row.mondayMaintenanceName && normaliseSiteName(row.mondayMaintenanceName) === key) ||
+      (row.mondayComplianceName && normaliseSiteName(row.mondayComplianceName) === key) ||
+      (row.code && row.code.trim().toLowerCase() === codeKey),
+  );
+  if (direct.length === 1) return { site: direct[0], reason: "matched", matches: 1 };
+  if (direct.length > 1) {
+    return { site: null, reason: "ambiguous", matches: direct.length };
+  }
+
+  /*
+   * `limit(2)` rather than `limit(1)`, for the reason `resolveContractorLink`
+   * gives: one round trip answers both "is there a match" and "is it unique".
+   * The unique index makes two rows impossible today; the guard is what keeps
+   * that a fact about the data rather than an assumption in the code.
+   */
+  const aliasRows = await db
+    .select({ siteId: siteAliases.siteId })
+    .from(siteAliases)
+    .innerJoin(sites, eq(sites.id, siteAliases.siteId))
+    .where(
+      and(
+        eq(siteAliases.organisationId, organisationId),
+        eq(siteAliases.normalised, key),
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    )
+    .limit(2);
+
+  if (aliasRows.length === 0) return { site: null, reason: "unknown", matches: 0 };
+  if (aliasRows.length > 1) {
+    return { site: null, reason: "ambiguous", matches: aliasRows.length };
+  }
+  const site = rows.find((row) => row.id === aliasRows[0].siteId) ?? null;
+  return site
+    ? { site, reason: "matched", matches: 1 }
+    : { site: null, reason: "unknown", matches: 0 };
+}
+
+/**
+ * The site a name resolves to, or null — the shape the existing callers take.
+ *
+ * Ambiguity comes back as null here, which is the same answer an unknown name
+ * gets and is the SAFE one: nothing is routed on a guess. A caller that wants
+ * to tell a person WHY nothing resolved calls `resolveSiteMatch` above.
  */
 export async function resolveSiteByName(
   db: Database,
   organisationId: string,
   candidate: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<SiteRow | null> {
-  const key = normaliseSiteName(candidate);
-  if (!key) return null;
-
-  const rows = await listSites(db, organisationId, { includeInactive: true });
-  const direct = rows.find(
-    (row) =>
-      normaliseSiteName(row.name) === key ||
-      (row.mondayMaintenanceName && normaliseSiteName(row.mondayMaintenanceName) === key) ||
-      (row.mondayComplianceName && normaliseSiteName(row.mondayComplianceName) === key) ||
-      (row.code && row.code.toLowerCase() === candidate.trim().toLowerCase()),
-  );
-  if (direct) return direct;
-
-  const [alias] = await db
-    .select()
-    .from(siteAliases)
-    .where(
-      and(
-        eq(siteAliases.organisationId, organisationId),
-        eq(siteAliases.normalised, key),
-      ),
-    )
-    .limit(1);
-  if (!alias) return null;
-  return rows.find((row) => row.id === alias.siteId) ?? null;
+  return (await resolveSiteMatch(db, organisationId, candidate, scope)).site;
 }
 
 /**
@@ -230,10 +423,15 @@ export async function findDuplicateCandidates(
   organisationId: string,
   name: string,
   excludeId?: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
 ) {
   const key = normaliseSiteName(name);
   if (!key) return [];
-  const rows = await listSites(db, organisationId, { includeInactive: true });
+  /* Within one register only. A site of the same name in a DIFFERENT register
+     is not a duplicate — two independent registers holding "Wood Green" is the
+     feature, not the fault — and warning about it would train an admin to click
+     past the warning that matters. */
+  const rows = await listSites(db, organisationId, { includeInactive: true }, scope);
   return rows
     .filter((row) => row.id !== excludeId)
     .filter((row) => {
@@ -282,23 +480,54 @@ export function generateSiteCode(name: string, taken: Iterable<string>) {
   return `${stem}${suffix}`;
 }
 
-export async function existingSiteCodes(db: Database, organisationId: string) {
+export async function existingSiteCodes(
+  db: Database,
+  organisationId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+) {
   const rows = await db
     .select({ code: sites.code })
     .from(sites)
-    .where(eq(sites.organisationId, organisationId));
+    .where(
+      and(
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    );
   return rows.map((row) => row.code).filter((code): code is string => Boolean(code));
 }
 
-export async function nextSitePosition(db: Database, organisationId: string) {
+/* Positions are per register: a new site on an instance starts at 0 rather
+   than after the canonical register's 31 rows, which would leave a fresh
+   instance's first row sorting as though thirty invisible ones preceded it. */
+export async function nextSitePosition(
+  db: Database,
+  organisationId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+) {
   const rows = await db
     .select({ position: sites.position })
     .from(sites)
-    .where(eq(sites.organisationId, organisationId));
+    .where(
+      and(
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    );
   return rows.reduce((highest, row) => Math.max(highest, row.position), -1) + 1;
 }
 
-/** Slugs are unique per organisation, so a repeated name gets a numeric suffix. */
+/**
+ * Slugs are unique per organisation, so a repeated name gets a numeric suffix.
+ *
+ * THE UNIQUE INDEX IS STILL ORGANISATION-WIDE — `sites_organisation_slug_idx`
+ * is on (organisation_id, slug) and cannot be narrowed without dropping it,
+ * which `db/init.ts` may not do. So the candidates are read organisation-wide
+ * on purpose: reading only this register's slugs would hand back a slug the
+ * index then rejects, turning a silent suffix into a failed save. The scope
+ * argument is accepted and ignored for exactly that reason, and saying so
+ * here is cheaper than the next reader assuming it was forgotten.
+ */
 export async function uniqueSlug(
   db: Database,
   organisationId: string,
@@ -343,6 +572,7 @@ export async function addSiteAlias(
   siteId: string,
   alias: string,
   source = "rename",
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<AliasWrite> {
   const trimmed = alias.trim();
   const normalised = normaliseSiteName(trimmed);
@@ -358,7 +588,19 @@ export async function addSiteAlias(
   const named = await db
     .select({ id: sites.id, name: sites.name })
     .from(sites)
-    .where(eq(sites.organisationId, organisationId));
+    .where(
+      and(
+        eq(sites.organisationId, organisationId),
+        /* W2 — WITHIN THIS REGISTER. The reason given above is that an alias
+           equal to a live site name can never be reached, because
+           `resolveSiteMatch` matches site names before aliases. That is a fact
+           about ONE register's resolution, so a site of the same name in a
+           DIFFERENT register shadows nothing and must not refuse the alias.
+           (The `site_aliases` unique key below is still organisation-wide and
+           is left that way — see `listAliases` for why it cannot be narrowed.) */
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    );
   const collides = named.find((row) => normaliseSiteName(row.name) === normalised);
   if (collides) {
     return collides.id === siteId
@@ -429,12 +671,22 @@ export async function nameConflict(
   organisationId: string,
   name: string,
   excludeId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<{ siteId: string; kind: "site" | "alias" } | null> {
   const key = normaliseSiteName(name);
   if (!key) return null;
-  const rows = await listSites(db, organisationId, { includeInactive: true });
+  const rows = await listSites(db, organisationId, { includeInactive: true }, scope);
   const site = rows.find((row) => row.id !== excludeId && normaliseSiteName(row.name) === key);
   if (site) return { siteId: site.id, kind: "site" };
+  /*
+   * The alias half stays ORGANISATION-WIDE, and that is not an oversight.
+   * `site_aliases_organisation_normalised_idx` spans the whole workspace, so an
+   * alias key held by ANOTHER register would be rejected by the database at
+   * insert time. Reporting the conflict up front is the whole reason this
+   * function exists — narrowing it to the register would let the rename be
+   * accepted here and then half-applied, which is the failure `addSiteAlias`
+   * refuses by name in its own header.
+   */
   const [alias] = await db
     .select({ siteId: siteAliases.siteId })
     .from(siteAliases)
@@ -469,10 +721,21 @@ export async function codeConflict(
   organisationId: string,
   code: string,
   excludeId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<string | null> {
   const key = code.trim().toLowerCase();
   if (!key) return null;
-  const rows = await listSites(db, organisationId, { includeInactive: true });
+  /*
+   * Per register, because `resolveSiteMatch` now reads a code within a register
+   * too, so that is exactly the keyspace a duplicate would make ambiguous.
+   *
+   * NOTE the database index is still organisation-wide
+   * (`sites_organisation_code_idx`), so two registers cannot in fact both use
+   * "WDGR" and the second write is refused by the index rather than by this
+   * check. Refusal is safe; the alternative — narrowing the index — means
+   * dropping it, which `db/init.ts` may not do on a boot path.
+   */
+  const rows = await listSites(db, organisationId, { includeInactive: true }, scope);
   const clash = rows.find(
     (row) => row.id !== excludeId && (row.code ?? "").trim().toLowerCase() === key,
   );
@@ -558,12 +821,32 @@ export async function setSiteAliases(
   return { refused };
 }
 
-export async function listSiteGroups(db: Database, organisationId: string) {
+/**
+ * The reporting groups of ONE register, with their membership.
+ *
+ * `site_groups` carries the scope column itself rather than joining through a
+ * site, because a group can legitimately be empty and an empty group joined
+ * through its members would belong to no register at all.
+ *
+ * Membership needs no scope of its own: both ends are already scoped, and
+ * `setSiteGroupMembership` below refuses to link across registers, so a
+ * member row can only ever join two rows of the same register.
+ */
+export async function listSiteGroups(
+  db: Database,
+  organisationId: string,
+  scope: RegisterScope = CANONICAL_REGISTER,
+) {
   const [groups, members] = await Promise.all([
     db
       .select()
       .from(siteGroups)
-      .where(eq(siteGroups.organisationId, organisationId))
+      .where(
+        and(
+          eq(siteGroups.organisationId, organisationId),
+          registerScopeFilter(siteGroups.boardId, scope),
+        ),
+      )
       .orderBy(asc(siteGroups.position), asc(siteGroups.name)),
     db
       .select()
@@ -576,11 +859,45 @@ export async function listSiteGroups(db: Database, organisationId: string) {
   }));
 }
 
+/**
+ * Every group slug already claimed in this workspace, ACROSS EVERY REGISTER.
+ *
+ * The one read in this module that deliberately spans registers, and it spans
+ * them because the DATABASE does: `site_groups_organisation_slug_idx` is unique
+ * on (organisation_id, slug) and cannot be narrowed without dropping it, which
+ * `db/init.ts` may not do on a path every request awaits.
+ *
+ * So a slug is chosen against the whole workspace. Choosing it against one
+ * register instead would hand back a slug the index then rejects, turning a
+ * silent numeric suffix — which is what a repeated group name is supposed to
+ * get — into a failed save with a database error behind it. Reading wide to
+ * write narrow is the correct shape here; it is stated rather than left to be
+ * mistaken for a missing filter.
+ */
+export async function claimedGroupSlugs(db: Database, organisationId: string) {
+  const rows = await db
+    .select({ slug: siteGroups.slug })
+    .from(siteGroups)
+    .where(eq(siteGroups.organisationId, organisationId));
+  return new Set(rows.map((row) => row.slug));
+}
+
+/**
+ * A site's group membership, replaced.
+ *
+ * The `owned` read below was already the guard that stops a caller attaching
+ * a site to another TENANT's group. The scope predicate makes it the same
+ * guard across registers: a group id from the canonical register cannot be
+ * attached to an instance's site, because the select that validates the ids
+ * never returns it. Ids that do not survive that read are dropped silently,
+ * which is the behaviour this function already had for a foreign tenant.
+ */
 export async function setSiteGroupMembership(
   db: Database,
   organisationId: string,
   siteId: string,
   groupIds: string[],
+  scope: RegisterScope = CANONICAL_REGISTER,
 ) {
   await db
     .delete(siteGroupMembers)
@@ -597,6 +914,7 @@ export async function setSiteGroupMembership(
     .where(
       and(
         eq(siteGroups.organisationId, organisationId),
+        registerScopeFilter(siteGroups.boardId, scope),
         inArray(siteGroups.id, groupIds),
       ),
     );

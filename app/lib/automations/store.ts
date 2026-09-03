@@ -337,10 +337,30 @@ export function normaliseImportance(raw: unknown): (typeof IMPORTANCE)[number] |
   return IMPORTANCE.includes(raw as never) ? (raw as (typeof IMPORTANCE)[number]) : null;
 }
 
-/** A handful of ready-made rules, built from the catalogue. Real, and few. */
-export function templatesFor(boardId: string) {
-  if (boardId !== "maintenance") return [];
+/**
+ * A handful of ready-made rules, built from the catalogue. Real, and few.
+ *
+ * OFFERED ON THE STRENGTH OF THE BOARD'S OWN COLUMNS, not its key.
+ *
+ * This read `if (boardId !== "maintenance") return []`, which was a fair
+ * approximation while the workspace had one board these rules could run on. A
+ * section created from the Jobs template carries the SAME 27 columns - Status,
+ * Date Completed, Assigned To, Next Update, Due Date, Priority - so every rule
+ * below applies to it exactly as it applies to the job board, and a key
+ * comparison offered the operator an empty panel on a board that supports all
+ * four. That is the "disabled rather than implemented" shape the owner ruled
+ * out, arrived at by a string.
+ *
+ * A rule is now offered when the board actually HAS the columns it names.
+ * Nothing is offered that could not run, which is the property the key check
+ * was reaching for, and a generic register - which has none of these columns -
+ * still correctly gets none of them.
+ */
+export function templatesFor(columnKeys: Iterable<string>) {
+  const present = new Set(columnKeys);
+  const needs = (...keys: string[]) => keys.every((key) => present.has(key));
   return [
+
     {
       key: "completed-to-done",
       title: "Close the loop on completed jobs",
@@ -349,6 +369,7 @@ export function templatesFor(boardId: string) {
       actionType: "set_date",
       actionConfig: { column: "completed", days: 0 },
       blurb: "When Status becomes Job Completed, set Date Completed to today.",
+      requires: ["status", "completed"],
     },
     {
       key: "new-item-note",
@@ -358,6 +379,9 @@ export function templatesFor(boardId: string) {
       actionType: "create_update",
       actionConfig: { body: "{name} was added to the board." },
       blurb: "When an item is created, post an update on it.",
+      /* Every register has a name and can carry an update, so this one asks
+         for nothing and is offered everywhere. */
+      requires: [],
     },
     {
       key: "assigned-set-next-update",
@@ -367,6 +391,7 @@ export function templatesFor(boardId: string) {
       actionType: "set_date",
       actionConfig: { column: "nextUpdate", days: 3 },
       blurb: "When someone is assigned, set Next Update to three days from today.",
+      requires: ["assignee", "nextUpdate"],
     },
     {
       key: "due-today-priority",
@@ -376,8 +401,9 @@ export function templatesFor(boardId: string) {
       actionType: "change_status",
       actionConfig: { column: "priority", value: "High" },
       blurb: "When Due Date arrives, set Priority to High.",
+      requires: ["dueDate", "priority"],
     },
-  ];
+  ].filter((template) => needs(...template.requires));
 }
 
 /** Columns and groups in the shape the builder's pickers want. */

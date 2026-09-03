@@ -40,7 +40,7 @@ import {
 import { DateCell, InlineTextCell, TimelineCell } from "../board-cells";
 
 export function CustomColumnCell({
-  boardId,
+  storeDocumentation,
   column,
   value,
   fileCount,
@@ -50,7 +50,18 @@ export function CustomColumnCell({
   onUpdateSettings,
   onOpenFiles,
 }: {
-  boardId: string;
+  /**
+   * Whether this cell is on a COMPLIANCE REGISTER — the canonical Store
+   * Documentation board, or a Documents-template section's own.
+   *
+   * It was `boardId: string`, compared against the literal
+   * "store-documentation" twice below. An instance's key is `sec-…`, so on a
+   * section's own compliance register every date column rendered as a bare
+   * date instead of an expiry with its RAG state, and every document column
+   * fell back to the maintenance hover preview instead of per-file chips —
+   * the two things that make the board a compliance register at all.
+   */
+  storeDocumentation: boolean;
   column: MaintenanceBoardColumn;
   value: string;
   fileCount: number;
@@ -84,7 +95,7 @@ export function CustomColumnCell({
      * date sitting in a cell tells you nothing; "expired 147 days ago" is the
      * whole reason the column exists. Maintenance keeps the plain date cell.
      */
-    if (boardId === "store-documentation") {
+    if (storeDocumentation) {
       return (
         <ExpiryCell
           title={column.title}
@@ -141,7 +152,7 @@ export function CustomColumnCell({
      * it has always had — changing it was not asked for and board parity tests
      * pin its behaviour.
      */
-    if (boardId === "store-documentation") {
+    if (storeDocumentation) {
       return (
         <FileCell
           title={column.title}

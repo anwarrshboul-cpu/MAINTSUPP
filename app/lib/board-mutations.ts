@@ -20,6 +20,7 @@ import { maintenanceGroups as maintenanceGroupSeeds } from "../../db/monday-boar
 import type { getDb } from "../../db";
 import {
   activityLog,
+  boards,
   maintenanceBoardCells,
   maintenanceGroupItems,
   maintenanceGroups,
@@ -55,14 +56,38 @@ export const GROUP_COLORS = new Set([
   "#037f4c",
 ]);
 
-export function newItemTitle(boardId: string) {
+export function newItemTitle(boardId: string, itemNoun?: string | null) {
+  /*
+   * THE BOARD'S OWN NOUN FIRST, AND THE KEY ONLY AS A FALLBACK.
+   *
+   * This compared `boardId` against two literal keys, which is precisely the
+   * isolation-by-route-string the section work exists to remove. It also got
+   * the answer wrong the moment templates landed: a section created from the
+   * Jobs template is a job board in every other respect - the same 27 columns,
+   * the same lanes, the same stage routing - and its untitled rows came back
+   * "New item" because its KEY is `sec-...` rather than `maintenance`.
+   *
+   * `boards.item_noun` is the fact being asked for, and `createBoard` sets it
+   * from the template, so an instance answers the same as its source by
+   * construction. The two literals survive underneath because the canonical
+   * boards' stored nouns are "Job" and "Store" while their long-standing UI
+   * strings are "New maintenance item" and "New store" - the board parity tests
+   * read those exact strings, and a register created at runtime has no such
+   * history to preserve.
+   */
   if (boardId === "store-documentation") return "New store";
-  /* A register generated for a workspace section is not a maintenance board and
-     its rows are not maintenance items — "New maintenance item" on a CCTV
-     register names the wrong thing. `createBoard` gives such a board the item
-     noun "Item"; this is the same word where a row has no title yet. */
   if (boardId === "maintenance") return "New maintenance item";
-  return "New item";
+  const noun = (itemNoun ?? "").trim();
+  return noun ? `New ${noun.toLowerCase()}` : "New item";
+}
+
+/** The item noun a board carries, or null when the board has since gone. */
+async function boardItemNoun(db: BoardDatabase, orgId: string, boardId: string) {
+  const [row] = await db
+    .select({ itemNoun: boards.itemNoun })
+    .from(boards)
+    .where(and(eq(boards.organisationId, orgId), eq(boards.key, boardId)));
+  return row?.itemNoun ?? null;
 }
 
 /** Seed ids are bare on the primary organisation and suffixed elsewhere. */
@@ -215,7 +240,9 @@ export async function createBoardItem(
   const position = await nextPosition(db, orgId, group.id);
   const requestedAt = new Date().toISOString();
   const stage = (group.stageKey as RequestStage | null) ?? ("Incoming" as const);
-  const title = (options.title ?? "").trim().slice(0, 180) || newItemTitle(boardId);
+  const title =
+    (options.title ?? "").trim().slice(0, 180) ||
+    newItemTitle(boardId, await boardItemNoun(db, orgId, boardId));
 
   // Everything about the new row except its id, which is picked per attempt.
   const values = {

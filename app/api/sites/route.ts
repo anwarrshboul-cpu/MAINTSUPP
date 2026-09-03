@@ -40,6 +40,23 @@ import {
  * re-export so the dependency is visible where it is used.
  */
 import { coordinateRefusal, reconcileSiteState } from "../../lib/site-state";
+/*
+ * W2 — WHICH REGISTER THIS REQUEST IS ABOUT.
+ *
+ * `?section=<key>` names an instance; absent means the canonical register,
+ * which is what every existing caller sends and what every existing caller
+ * keeps getting. The scope is resolved from the SESSION and the database —
+ * see `resolveRegisterScope` — never from the URL path, the section's label
+ * or the board key in the query string, and an unresolvable section is a
+ * REFUSAL rather than a quiet fall back onto the workspace's real estate.
+ */
+import {
+  registerScopeFilter,
+  resolveRegisterScope,
+  scopeRefusal,
+  type RegisterScope,
+  CANONICAL_REGISTER,
+} from "../../lib/register-scope";
 
 /**
  * What a reader is told when Sites cannot load, and what a developer is told.
@@ -512,9 +529,15 @@ async function unknownGroupRefusal(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
   requested: string[],
+  /* W2 — a group id from ANOTHER register is as unknown as one from another
+     tenant, and is answered identically for the same reason: a 404 that told
+     the two apart would confirm the id is real somewhere. */
+  scope: RegisterScope = CANONICAL_REGISTER,
 ) {
   if (!requested.length) return null;
-  const owned = new Set((await listSiteGroups(db, orgId)).map((group) => group.id));
+  const owned = new Set(
+    (await listSiteGroups(db, orgId, scope)).map((group) => group.id),
+  );
   const missing = requested.filter((groupId) => !owned.has(groupId));
   if (!missing.length) return null;
   return Response.json({ error: "Group not found." }, { status: 404 });
@@ -561,10 +584,16 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const { db, orgId } = await scopedDb(request);
     const url = new URL(request.url);
+    const resolved = await resolveRegisterScope(db, orgId, url, "sites");
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const id = url.searchParams.get("id");
 
     if (id) {
-      const site = await getSite(db, orgId, id);
+      /* Scoped, so an id belonging to an instance is 404 through the canonical
+         screen and vice versa. The id is not a capability. */
+      const site = await getSite(db, orgId, id, scope);
       if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
       const [jobs, assets, documents, groups, files, activity, allGroups, allAliases] =
         await Promise.all([
@@ -681,8 +710,8 @@ export async function GET(request: Request) {
          * changed its shape would silently rewrite group membership on the next
          * save. Names are added ALONGSIDE it, never instead of it.
          */
-        listSiteGroups(db, orgId),
-        listAliases(db, orgId),
+        listSiteGroups(db, orgId, scope),
+        listAliases(db, orgId, scope),
       ]);
       const memberOf = new Set(groups.map((entry) => entry.siteGroupId));
       return Response.json({
@@ -709,11 +738,15 @@ export async function GET(request: Request) {
     }
 
     const [rows, groups, siteTypes, statuses, aliases] = await Promise.all([
-      listSites(db, orgId, { includeInactive: true }),
-      listSiteGroups(db, orgId),
+      listSites(db, orgId, { includeInactive: true }, scope),
+      listSiteGroups(db, orgId, scope),
+      /* Option vocabularies are WORKSPACE settings, not register rows: the
+         configured site types and statuses are how this business classifies a
+         property, and an instance that could not use them would force an
+         owner to re-type the same list. Left organisation-wide on purpose. */
       listOptionValues(db, orgId, "site_type"),
       listOptionValues(db, orgId, "site_status"),
-      listAliases(db, orgId),
+      listAliases(db, orgId, scope),
     ]);
 
     /*
@@ -760,6 +793,15 @@ export async function POST(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as {
       data?: Record<string, unknown>;
       confirmDuplicate?: boolean;
@@ -789,11 +831,24 @@ export async function POST(request: Request) {
       return Response.json({ error: badCoordinate }, { status: 400 });
     }
 
-    const badGroup = await unknownGroupRefusal(db, orgId, stringList(body.data?.groupIds));
+    const badGroup = await unknownGroupRefusal(
+      db,
+      orgId,
+      stringList(body.data?.groupIds),
+      scope,
+    );
     if (badGroup) return badGroup;
 
-    // X6 — warn, do not block. Two centres can legitimately share a name.
-    const duplicates = await findDuplicateCandidates(db, orgId, payload.name);
+    /* X6 — warn, do not block. Two centres can legitimately share a name.
+       Within ONE register: a site of the same name in a different register is
+       not a duplicate, it is the independence the instance was created for. */
+    const duplicates = await findDuplicateCandidates(
+      db,
+      orgId,
+      payload.name,
+      undefined,
+      scope,
+    );
     if (duplicates.length && !body.confirmDuplicate) {
       return Response.json(
         {
@@ -819,7 +874,7 @@ export async function POST(request: Request) {
      * `resolveSiteByName` non-deterministic — see `codeConflict`.
      */
     if (payload.code) {
-      const clash = await codeConflict(db, orgId, payload.code, id);
+      const clash = await codeConflict(db, orgId, payload.code, id, scope);
       if (clash) {
         return Response.json(
           { error: `Another site already uses the code "${payload.code}".`, conflictSiteId: clash },
@@ -827,13 +882,24 @@ export async function POST(request: Request) {
         );
       }
     }
-    const code = payload.code ?? generateSiteCode(payload.name, await existingSiteCodes(db, orgId));
-    const position = await nextSitePosition(db, orgId);
+    const code =
+      payload.code ??
+      generateSiteCode(payload.name, await existingSiteCodes(db, orgId, scope));
+    const position = await nextSitePosition(db, orgId, scope);
 
     await db.insert(sites).values({
       id,
       organisationId: orgId,
       ...payload,
+      /*
+       * W2 — the register this row is being created in, written at INSERT and
+       * never derived afterwards. NULL is the canonical register, so a create
+       * with no `?section=` behaves exactly as it did before this existed.
+       *
+       * After the spread deliberately: `sitePayload` is built from caller data
+       * and must never be able to choose its own register.
+       */
+      boardId: scope,
       code,
       addressLine1: address.value,
       siteTypeValue,
@@ -876,7 +942,7 @@ export async function POST(request: Request) {
       ...(payload.mondayMaintenanceName ? [payload.mondayMaintenanceName] : []),
       ...(payload.mondayComplianceName ? [payload.mondayComplianceName] : []),
     ]);
-    await setSiteGroupMembership(db, orgId, id, stringList(body.data?.groupIds));
+    await setSiteGroupMembership(db, orgId, id, stringList(body.data?.groupIds), scope);
     await logChange(db, orgId, id, "created", actor.email, { name: payload.name });
 
     // A name another site already answers to is not recorded. Saying so is the
@@ -899,6 +965,15 @@ export async function PATCH(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as {
       id?: string;
       data?: Record<string, unknown>;
@@ -908,11 +983,18 @@ export async function PATCH(request: Request) {
     const id = text(body.id, 120);
     if (!id) throw new Error("A site ID is required.");
 
-    const existing = await getSite(db, orgId, id);
+    /* The scope gate for the whole verb: an id outside this register is Not
+       Found, so no branch below can read, rename or archive it. */
+    const existing = await getSite(db, orgId, id, scope);
     if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
 
     if (body.data?.groupIds !== undefined) {
-      const badGroup = await unknownGroupRefusal(db, orgId, stringList(body.data.groupIds));
+      const badGroup = await unknownGroupRefusal(
+        db,
+        orgId,
+        stringList(body.data.groupIds),
+        scope,
+      );
       if (badGroup) return badGroup;
     }
 
@@ -938,7 +1020,7 @@ export async function PATCH(request: Request) {
          * and the alias insert below would be rejected — leaving the rename
          * applied and its history lost.
          */
-        const conflict = await nameConflict(db, orgId, nextName, id);
+        const conflict = await nameConflict(db, orgId, nextName, id, scope);
         if (conflict?.kind === "alias") {
           return Response.json(
             {
@@ -949,7 +1031,7 @@ export async function PATCH(request: Request) {
             { status: 409 },
           );
         }
-        const duplicates = await findDuplicateCandidates(db, orgId, nextName, id);
+        const duplicates = await findDuplicateCandidates(db, orgId, nextName, id, scope);
         if (duplicates.length && !body.confirmDuplicate) {
           return Response.json(
             { error: "A similar site already exists.", requiresConfirmation: true, duplicates },
@@ -963,7 +1045,18 @@ export async function PATCH(request: Request) {
             slug: await uniqueSlug(db, orgId, nextName, id),
             updatedAt: new Date().toISOString(),
           })
-          .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+          /* The scope is in the WRITE as well as in the read that gated it.
+             `getSite` above already refused an out-of-register id, so this is
+             belt and braces — and it is the belt: a future edit that moved or
+             dropped that read would otherwise turn a 404 into a cross-register
+             write with nothing in the statement to stop it. */
+          .where(
+            and(
+              eq(sites.id, id),
+              eq(sites.organisationId, orgId),
+              registerScopeFilter(sites.boardId, scope),
+            ),
+          );
 
         /*
          * The previous name survives as an organisation-scoped alias, so every
@@ -975,7 +1068,7 @@ export async function PATCH(request: Request) {
          * spelling of it.
          */
         await releaseSiteAlias(db, orgId, id, nextName);
-        const recorded = await addSiteAlias(db, orgId, id, existing.name, "rename");
+        const recorded = await addSiteAlias(db, orgId, id, existing.name, "rename", scope);
 
         await logChange(db, orgId, id, "renamed", actor.email, {
           from: existing.name,
@@ -1012,7 +1105,7 @@ export async function PATCH(request: Request) {
 
     // Same rule on edit: a code is an identity, and it may not be duplicated.
     if (payload.code && payload.code !== existing.code) {
-      const clash = await codeConflict(db, orgId, payload.code, id);
+      const clash = await codeConflict(db, orgId, payload.code, id, scope);
       if (clash) {
         return Response.json(
           { error: `Another site already uses the code "${payload.code}".`, conflictSiteId: clash },
@@ -1025,7 +1118,7 @@ export async function PATCH(request: Request) {
       // A name another site already answers to by alias is a hard conflict, not
       // a warning — the alias insert below would be rejected by the unique
       // index and the rename would be left half-applied.
-      const conflict = await nameConflict(db, orgId, payload.name, id);
+      const conflict = await nameConflict(db, orgId, payload.name, id, scope);
       if (conflict?.kind === "alias") {
         return Response.json(
           {
@@ -1036,7 +1129,7 @@ export async function PATCH(request: Request) {
           { status: 409 },
         );
       }
-      const duplicates = await findDuplicateCandidates(db, orgId, payload.name, id);
+      const duplicates = await findDuplicateCandidates(db, orgId, payload.name, id, scope);
       if (duplicates.length && !body.confirmDuplicate) {
         return Response.json(
           { error: "A similar site already exists.", requiresConfirmation: true, duplicates },
@@ -1143,7 +1236,13 @@ export async function PATCH(request: Request) {
         manager: payload.managerName,
         updatedAt: new Date().toISOString(),
       })
-      .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+      .where(
+        and(
+          eq(sites.id, id),
+          eq(sites.organisationId, orgId),
+          registerScopeFilter(sites.boardId, scope),
+        ),
+      );
 
     /*
      * The same rule on the full-payload path. It recorded nothing at all unless
@@ -1156,7 +1255,7 @@ export async function PATCH(request: Request) {
      */
     if (payload.name !== existing.name) {
       await releaseSiteAlias(db, orgId, id, payload.name);
-      await addSiteAlias(db, orgId, id, existing.name, "rename");
+      await addSiteAlias(db, orgId, id, existing.name, "rename", scope);
     }
 
     let aliasConflicts: Array<{ alias: string; conflictSiteId: string }> = [];
@@ -1169,7 +1268,7 @@ export async function PATCH(request: Request) {
       aliasConflicts = aliasWrite.refused;
     }
     if (body.data?.groupIds !== undefined) {
-      await setSiteGroupMembership(db, orgId, id, stringList(body.data.groupIds));
+      await setSiteGroupMembership(db, orgId, id, stringList(body.data.groupIds), scope);
     }
     // Holding the mirror is recorded rather than silent: the audit line names
     // the words the canonical columns are missing, which is the whole of what an
@@ -1204,11 +1303,20 @@ export async function DELETE(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as { id?: string };
     const id = text(body.id, 120);
     if (!id) throw new Error("A site ID is required.");
 
-    const existing = await getSite(db, orgId, id);
+    const existing = await getSite(db, orgId, id, scope);
     if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
 
     const [openJobs] = await db
@@ -1246,7 +1354,13 @@ export async function DELETE(request: Request) {
     await db
       .update(sites)
       .set({ ...closed, updatedAt: new Date().toISOString() })
-      .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+      .where(
+        and(
+          eq(sites.id, id),
+          eq(sites.organisationId, orgId),
+          registerScopeFilter(sites.boardId, scope),
+        ),
+      );
 
     await logChange(db, orgId, id, "archived", actor.email, {
       name: existing.name,

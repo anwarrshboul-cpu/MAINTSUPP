@@ -130,3 +130,105 @@ export const GENERIC_BOARD_GROUPS: GenericGroup[] = [
 
 /** What a column with no settings of its own stores. */
 export const GENERIC_COLUMN_SETTINGS = JSON.stringify({ wrap: false });
+
+
+/* ── The Jobs template ────────────────────────────────────────────────────── */
+
+/**
+ * WHICH OF THE JOB BOARD'S GROUPS BELONG TO THE TEMPLATE — and which are this
+ * estate's own filing.
+ *
+ * `maintenanceGroups` in `monday-board-spec.ts` holds 38. Twenty-eight of them
+ * are `done-<store>` — Wood Green, Aldgate, Bluewater, Trafford Centre — and
+ * three more are dated month archives (`completed-2026-06/07/08`). Those are
+ * not the Jobs product; they are where THIS workspace has filed THIS estate's
+ * finished work, and a section created for CCTV arriving with a "Bluewater
+ * completed" lane would be the "clone the live board" mistake the owner ruled
+ * out in the same breath as asking for parity.
+ *
+ * What is left is the operational shape a job actually moves through, and that
+ * is the template: incoming, booked, blocked, on hold, access, international.
+ * `STAGE_BY_GROUP_KEY` in `db/init.ts` maps three of these onto request stages,
+ * so a job filed by the workflow lands in the right lane on an instance exactly
+ * as it does on the canonical board.
+ *
+ * Ordered as the spec orders them, so the lanes read the same way round.
+ */
+export const JOBS_TEMPLATE_GROUP_KEYS: readonly string[] = [
+  "topics",
+  "jobs-booked",
+  "needs-attention",
+  "on-hold",
+  "access-requests",
+  "international",
+];
+
+/**
+ * What a section's register is BUILT FROM.
+ *
+ * One registry rather than a branch per template, because the owner's
+ * requirement is explicitly that an instance and its source run the same code:
+ * a template names the spec arrays the canonical board is itself seeded from,
+ * and the provisioner reads them. Adding a template is a row here, not a fifth
+ * implementation.
+ *
+ * `columns: "maintenance"` means "seed this board with the same columns
+ * `seedBoardStructure` gives the job board" — the 26 request-backed ones, whose
+ * values live on `maintenance_requests` and therefore work on any board a row
+ * is placed on. That is what makes a Jobs instance a Jobs board rather than a
+ * lookalike.
+ */
+export type TemplateStructure = {
+  /**
+   * Which column spec to seed. `generic` is the six below.
+   *
+   * `none` means THIS TEMPLATE'S SURFACE IS NOT A BOARD. Sites and Contractors
+   * draw their own screens off their own tables, so seeding six columns onto
+   * their board would be litter nothing ever renders. The board row is still
+   * created, and that is the point of the model: the board KEY is the
+   * instance's identity, and the scope column on `sites` / `contractors` points
+   * at it. One instance model for all four templates, whether or not the
+   * instance happens to be drawn as a grid.
+   */
+  columns: "maintenance" | "store-documentation" | "generic" | "none";
+  /** Group keys from the same spec, the generic three, or none at all. */
+  groups: readonly string[] | "generic" | "none";
+  /** The board `kind`, which several surfaces switch on. */
+  kind: string;
+  /** The noun a row is called, used by `newItemTitle` and the row counts. */
+  itemNoun: string;
+};
+
+export const TEMPLATE_STRUCTURES: Record<string, TemplateStructure> = {
+  jobs: {
+    columns: "maintenance",
+    groups: JOBS_TEMPLATE_GROUP_KEYS,
+    kind: "maintenance",
+    itemNoun: "Job",
+  },
+  "store-documentation": {
+    columns: "store-documentation",
+    groups: "generic",
+    kind: "store-documentation",
+    itemNoun: "Store",
+  },
+  /*
+   * The two register templates, whose surfaces are screens rather than grids.
+   *
+   * They still get a board row, because that row is what the instance IS: the
+   * key it carries is what `sites.scope_board_id` / the contractor register's
+   * scope points at, what the purge tests for ownership, and what
+   * `workspace_sections.surface_ref` already stores. Modelling them any other
+   * way would be the fourth disconnected implementation the owner ruled out.
+   */
+  contractors: { columns: "none", groups: "none", kind: "contractors", itemNoun: "Contractor" },
+  sites: { columns: "none", groups: "none", kind: "sites", itemNoun: "Site" },
+  /* The fallback, and what every section created before templates existed has.
+     Kept so an unknown or absent template still produces a usable register
+     rather than an empty canvas. */
+  generic: { columns: "generic", groups: "generic", kind: "maintenance", itemNoun: "Item" },
+};
+
+export function templateStructure(template: string | null | undefined): TemplateStructure {
+  return TEMPLATE_STRUCTURES[template ?? ""] ?? TEMPLATE_STRUCTURES.generic;
+}

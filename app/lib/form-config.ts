@@ -1,7 +1,8 @@
 import { and, eq, or } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { formConfigurations } from "../../db/schema";
+import { boards, formConfigurations } from "../../db/schema";
 import { maintenanceFormConfiguration, type FormQuestion } from "../../db/monday-board-spec";
+import { deriveFormConfig, type FormSourceColumn } from "./form-derive";
 import { hashPassword, passwordProblem, verifyPassword } from "./password";
 import { projectPublicForm, type PublicQuestion } from "./form-projection";
 import { publicUrl } from "./public-origin";
@@ -170,7 +171,97 @@ export async function loadFormByToken(
       ),
     )
     .limit(1);
-  return row ? toRecord(row) : null;
+  if (!row) return null;
+
+  /*
+   * A TOKEN FOR AN ARCHIVED BOARD STOPS RESOLVING.
+   *
+   * A purged board already takes its form with it — `deleteBoardStructure` in
+   * app/lib/board-registry.ts deletes the `form_configurations` row, token
+   * first, precisely so the publicly reachable thing stops answering before
+   * anything slower is attempted. Archiving does not, and archiving is the
+   * reversible half of the same gesture: a register an operator has taken out
+   * of the workspace would have kept a live, unauthenticated intake pointed at
+   * it, filing rows onto a board nobody can open.
+   *
+   * The check is deliberately "a board row exists AND says archived", not "a
+   * board row exists". Forms predate `boards`, and `resolveBoard` materialises
+   * the default board only on demand, so a legitimate form can be older than
+   * the row describing its board — failing closed on a missing row would take
+   * live client forms off the air to close a hole that archiving alone opens.
+   */
+  const [board] = await db
+    .select({ archived: boards.archived })
+    .from(boards)
+    .where(and(eq(boards.organisationId, row.organisationId), eq(boards.key, row.boardId)))
+    .limit(1);
+  if (board?.archived) return null;
+
+  return toRecord(row);
+}
+
+/**
+ * A board's OWN form, created from its OWN columns — W2 requirement B.
+ *
+ * WHAT THIS REPLACES. `ensureFormBuilder` in db/init.ts seeds one row per
+ * organisation, hard-coded to `board_id = 'maintenance'`, and nothing else in
+ * the product ever wrote this table. So every other register — Store
+ * Documentation, and every instance a workspace section generates — had no
+ * form of its own, which left two bad answers and no good one: serve the job
+ * board's form under another board's name (the leak this workstream closed:
+ * its title, its questions, and a Location list naming 39 real stores, with a
+ * working Submit), or refuse the feature by 404. This is the third answer.
+ *
+ * IDEMPOTENT BY THE UNIQUE INDEX, NOT BY A READ-THEN-WRITE.
+ * `form_configurations_view_idx` is unique on (organisation, board, view), so
+ * two operators pressing the button at the same moment cannot mint two share
+ * tokens for one board — the second insert is discarded and both read back the
+ * same row. A check-then-insert would have a window between the two.
+ *
+ * Returns the board's form either way: the one just created, or the one that
+ * was already there.
+ */
+export async function createFormForBoard(
+  db: Database,
+  organisationId: string,
+  board: { key: string; name: string },
+  columns: readonly FormSourceColumn[],
+  viewKey = "form",
+): Promise<FormRecord | null> {
+  /*
+   * The id is readable rather than random because `unlockCookieName` derives a
+   * cookie name from it, and a cookie a person may have to clear by hand should
+   * say which form it belongs to. That function strips everything outside
+   * [A-Za-z0-9_], so the board key is normalised the same way HERE — otherwise
+   * two boards whose keys differ only in punctuation would share one unlock
+   * cookie, and passing one form's password gate would open the other's.
+   */
+  const id = `form_${organisationId.slice(-12)}_${board.key.replace(/[^A-Za-z0-9]+/g, "_")}`;
+
+  await db
+    .insert(formConfigurations)
+    .values({
+      id,
+      organisationId,
+      boardId: board.key,
+      viewKey,
+      /*
+       * The register's own name. Not "Maintenance Request", which is the job
+       * board's title and would put another board's heading on this form's
+       * public page and browser tab.
+       */
+      title: board.name.trim().slice(0, 200) || "Request form",
+      description: null,
+      /* Its own locators, from the same generator the seed uses. Two boards
+         can no more share a token than two organisations can — the column is
+         uniquely indexed and these are 32 random bytes. */
+      shareToken: generateShareToken(),
+      shortToken: generateShortToken(),
+      config: JSON.stringify(deriveFormConfig(columns)),
+    })
+    .onConflictDoNothing();
+
+  return loadForm(db, organisationId, board.key, viewKey);
 }
 
 /* ── Whether the form is taking answers ──────────────────────────────────── */

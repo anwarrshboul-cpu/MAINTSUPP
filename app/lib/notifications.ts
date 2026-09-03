@@ -316,14 +316,76 @@ export function jobAlertTemplate(job: {
   };
 }
 
+/**
+ * WHICH REGISTER A LAPSED CERTIFICATE IS ON.
+ *
+ * There can be more than one. A workspace section built from the Store
+ * Documentation template gets its own board — its own stores, its own twelve
+ * certificate slots — so "Cabot Circus, Fire Alarm, expired 12 days ago" is no
+ * longer an address. Two registers may each hold a store of that name, and the
+ * reader has to know which sidebar entry to open.
+ *
+ * THE COLUMN APPEARS ONLY WHEN IT SAYS SOMETHING. An organisation with the one
+ * canonical register gets the digest it has always had, to the byte: a board
+ * column reading "Store Documentation UK" on every row of every email is noise
+ * that trains people to skim, and skimming is the failure mode this digest
+ * exists to avoid. It appears the moment there are two.
+ *
+ * `boardName` is ESCAPED and the two fields beside it are not. That asymmetry
+ * is deliberate rather than an oversight: `site` and `kind` come from the board
+ * capture and the fixed slot vocabulary, while a board name is free text an
+ * operator typed into the section dialog. It reaches an HTML email either way,
+ * so the new field does not become this template's first injection point. The
+ * older two are a separate, pre-existing question and widening the surface
+ * without saying so is how that question stops being asked.
+ */
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function complianceDigestTemplate(summary: {
-  expired: Array<{ site: string; kind: string; expiry: string; daysAgo: number }>;
-  expiring: Array<{ site: string; kind: string; expiry: string; daysAway: number }>;
+  expired: Array<{
+    site: string;
+    kind: string;
+    expiry: string;
+    daysAgo: number;
+    boardName?: string | null;
+  }>;
+  expiring: Array<{
+    site: string;
+    kind: string;
+    expiry: string;
+    daysAway: number;
+    boardName?: string | null;
+  }>;
 }) {
+  /*
+   * More than one NAMED register in this digest. Counted over both lists at
+   * once, because an org whose canonical board is clean and whose instance is
+   * not would otherwise see a single-register expiring table and have no idea
+   * which board it was being told about.
+   */
+  const registers = new Set(
+    [...summary.expired, ...summary.expiring]
+      .map((item) => (item.boardName ?? "").trim())
+      .filter(Boolean),
+  );
+  const showBoard = registers.size > 1;
+  const boardCell = (item: { boardName?: string | null }) =>
+    showBoard
+      ? `<td style="padding:4px 12px 4px 0;font-size:13px;color:#6b7a83">${escapeHtml(
+          (item.boardName ?? "").trim() || "—",
+        )}</td>`
+      : "";
+
   const expiredRows = summary.expired
     .map(
       (item) =>
-        `<tr><td style="padding:4px 12px 4px 0;font-size:13px">${item.site}</td>
+        `<tr>${boardCell(item)}<td style="padding:4px 12px 4px 0;font-size:13px">${item.site}</td>
          <td style="padding:4px 12px 4px 0;font-size:13px">${item.kind}</td>
          <td style="padding:4px 0;font-size:13px;color:#e2445c">
            expired ${item.daysAgo} day${item.daysAgo === 1 ? "" : "s"} ago
@@ -334,7 +396,7 @@ export function complianceDigestTemplate(summary: {
   const expiringRows = summary.expiring
     .map(
       (item) =>
-        `<tr><td style="padding:4px 12px 4px 0;font-size:13px">${item.site}</td>
+        `<tr>${boardCell(item)}<td style="padding:4px 12px 4px 0;font-size:13px">${item.site}</td>
          <td style="padding:4px 12px 4px 0;font-size:13px">${item.kind}</td>
          <td style="padding:4px 0;font-size:13px">in ${item.daysAway} days (${item.expiry})</td></tr>`,
     )

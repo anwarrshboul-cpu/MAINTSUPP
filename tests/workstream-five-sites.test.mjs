@@ -359,8 +359,17 @@ test("the Stage 0 twins move only when the status actually moves", async () => {
 
 test("a site name resolves exactly or not at all", async () => {
   const repository = await read("app/lib/sites-repository.ts");
+  /*
+   * RE-POINTED, W2. The contract this test protects did not change; its home
+   * did. `resolveSiteByName` is now a one-line wrapper — the matching lives in
+   * `resolveSiteMatch`, which was extracted so a caller can be told WHY nothing
+   * resolved (an unknown name and a register that cannot decide between two
+   * rows are different facts, and the CSV importer now reports the difference).
+   * The slice follows the rule to its new home rather than being relaxed to the
+   * whole file, which would let a fuzzy operator elsewhere satisfy it.
+   */
   const resolve = repository.slice(
-    repository.indexOf("export async function resolveSiteByName"),
+    repository.indexOf("export async function resolveSiteMatch"),
     repository.indexOf("export async function findDuplicateCandidates"),
   );
 
@@ -368,7 +377,24 @@ test("a site name resolves exactly or not at all", async () => {
   // the alias table. Nothing else.
   assert.match(resolve, /normaliseSiteName\(row\.name\) === key/, "the canonical name must match exactly");
   assert.match(resolve, /eq\(siteAliases\.normalised, key\)/, "an alias must match exactly");
-  assert.match(resolve, /if \(!alias\) return null/, "an unmatched name resolves to nothing");
+  /*
+   * RE-POINTED, W2. `if (!alias) return null` became `if (aliasRows.length ===
+   * 0) return { site: null, reason: "unknown", matches: 0 }` when the resolver
+   * started carrying a reason. Same rule, stated harder: an unmatched name
+   * resolves to nothing AND says so, and two matches now resolve to nothing
+   * too — see the ambiguity guard pinned in tests/w2-scope-model.test.mjs,
+   * which is the half this file never had.
+   */
+  assert.match(
+    resolve,
+    /if \(aliasRows\.length === 0\) return \{ site: null, reason: "unknown", matches: 0 \};/,
+    "an unmatched name resolves to nothing",
+  );
+  assert.match(
+    resolve,
+    /reason: "ambiguous"/,
+    "and a name two rows answer to resolves to nothing rather than to the first of them",
+  );
 
   // The fuzzy operators that `findDuplicateCandidates` uses to WARN must never
   // appear in the resolver, which DECIDES.
@@ -471,12 +497,27 @@ test("a site is looked up by id AND organisation, so another tenant's row is not
   const repository = await read("app/lib/sites-repository.ts");
   const getSite = repository.slice(
     repository.indexOf("export async function getSite"),
-    repository.indexOf("export async function listAliases"),
+    repository.indexOf("export function stageZeroState"),
+  );
+  /*
+   * RE-POINTED, W2, and STRENGTHENED rather than relaxed. The rule is "one
+   * query carries every predicate, so they cannot drift apart"; there are now
+   * three of them, because a row also belongs to a REGISTER and an id from an
+   * instance must be as Not Found through the canonical screen as one from
+   * another tenant. Matching each predicate inside one `.where(and(...))` keeps
+   * the original guarantee: split them across two statements and this fails.
+   */
+  const predicate = getSite.slice(getSite.indexOf(".where("), getSite.indexOf(".limit(1)"));
+  assert.match(predicate, /eq\(sites\.id, id\)/, "the id must be in the query");
+  assert.match(
+    predicate,
+    /eq\(sites\.organisationId, organisationId\)/,
+    "and the organisation, in the SAME query, so they cannot drift apart",
   );
   assert.match(
-    getSite,
-    /and\(eq\(sites\.id, id\), eq\(sites\.organisationId, organisationId\)\)/,
-    "one query must carry both predicates so they cannot drift apart",
+    predicate,
+    /registerScopeFilter\(sites\.boardId, scope\)/,
+    "and the register, for the same reason — an id is an address, not a credential",
   );
 
   const route = await read("app/api/sites/route.ts");
@@ -486,18 +527,41 @@ test("a site is looked up by id AND organisation, so another tenant's row is not
   assert.ok(refusals.length >= 2, `expected the same 404 on every branch, found ${refusals.length}`);
   assert.doesNotMatch(route, /status: 403 \}\);\s*\n\s*\}\s*\n\s*const existing/, "never 403 for a site id");
 
-  // Every UPDATE names the organisation as well as the id.
-  const updates = route.match(/\.where\(and\(eq\(sites\.id, id\), eq\(sites\.organisationId, orgId\)\)\)/g) ?? [];
+  /*
+   * RE-POINTED, W2. Every UPDATE still names the organisation as well as the
+   * id — it now names the register too, so the single-line `.where(and(a, b))`
+   * the old pattern matched is a multi-line `and(a, b, c)`. Each update is
+   * sliced out and all three predicates are required, which is the same
+   * guarantee against a filter being dropped and a stricter one than before.
+   */
+  const updates = [...route.matchAll(/\.update\(sites\)[\s\S]*?\.where\(([\s\S]*?)\n\s*\);/g)];
   assert.ok(updates.length >= 3, `every site UPDATE must be tenant-filtered, found ${updates.length}`);
+  for (const update of updates) {
+    assert.match(update[1], /eq\(sites\.id, id\)/, "a site UPDATE must name the id");
+    assert.match(update[1], /eq\(sites\.organisationId, orgId\)/, "and the organisation");
+    assert.match(
+      update[1],
+      /registerScopeFilter\(sites\.boardId, scope\)/,
+      "and the register it is allowed to write in",
+    );
+  }
 });
 
 test("a reporting group from another tenant cannot be assigned to a site", async () => {
   const route = await read("app/api/sites/route.ts");
   assert.match(route, /async function unknownGroupRefusal/, "group ids must be validated before they are written");
+  /*
+   * RE-POINTED, W2. `listSiteGroups` gained a register argument, so the call is
+   * now wrapped across lines. The rule is unchanged and now covers one more
+   * axis: a group id is validated against the caller's own organisation AND
+   * against the register the write is landing in, because a group from another
+   * register is as unknown as one from another tenant and is answered
+   * identically — a distinguishable 404 would confirm the id is real somewhere.
+   */
   assert.match(
     route,
-    /const owned = new Set\(\(await listSiteGroups\(db, orgId\)\)\.map\(\(group\) => group\.id\)\)/,
-    "validation must be against the caller's own organisation",
+    /const owned = new Set\(\s*\(await listSiteGroups\(db, orgId, scope\)\)\.map\(\(group\) => group\.id\),?\s*\)/,
+    "validation must be against the caller's own organisation and their own register",
   );
   const repository = await read("app/lib/sites-repository.ts");
   const membership = repository.slice(repository.indexOf("export async function setSiteGroupMembership"));

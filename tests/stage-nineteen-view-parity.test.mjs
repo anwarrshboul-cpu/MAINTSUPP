@@ -217,24 +217,84 @@ test("the Vibe tab says what it is instead of faking an app builder", async () =
 
 test("the parity upgrade runs once and never resurrects a deleted tab", async () => {
   const source = await read(ROUTE);
-  const upgrade = source.slice(source.indexOf("async function upgradeToMondayViews"));
+  /*
+   * `upgradeToTemplateStrip`, not `upgradeToMondayViews` — W2 requirement C.
+   *
+   * The function did one job and now does it for two callers: the canonical
+   * job board, seeded before Stage 19 and missing four tabs, and a register
+   * generated for a workspace section, given one tab by `provisionMainView`
+   * and missing the rest of the strip its Jobs template implies. Both are "a
+   * board holding a subset of the strip it should have", so the name says the
+   * shape rather than the source. What it does is unchanged.
+   *
+   * THE STAMP CHECK MOVED OUT, and that is the other half of this re-point.
+   * Deciding whether a board has already been dealt with is now `seedViews`'s
+   * job, because a board that takes NO seeded strip has to be stamped too — or
+   * it re-asks the question on every page load for ever. So the assertion
+   * follows the guard to its caller instead of being dropped.
+   */
+  const upgrade = source.slice(source.indexOf("async function upgradeToTemplateStrip"));
+  const seed = source.slice(source.indexOf("async function seedViews"));
 
   // The marker lives on `main`, the one view DELETE refuses to remove, so it
   // cannot be lost by an admin tidying their tab strip.
-  assert.match(upgrade.slice(0, 900), /readSettings\(main\.settings\)\.seed === PARITY_STAMP/);
+  assert.match(seed, /readSettings\(main\.settings\)\.seed === PARITY_STAMP/);
+  assert.match(
+    source.slice(source.indexOf("async function stampStripApplied")),
+    /eq\(boardViews\.id, main\.id\)/,
+    "the stamp must be written on the main row and nowhere else",
+  );
   assert.match(upgrade, /onConflictDoNothing/);
 
   // An admin's own rename survives; only Stage 5's exact name is corrected.
   assert.match(upgrade, /existing\.name === "Reports"/);
 });
 
-test("the tab set belongs to the maintenance board alone", async () => {
+test("the tab set belongs to a JOBS REGISTER, not to a board key", async () => {
   const source = await read(ROUTE);
   const seed = source.slice(source.indexOf("async function seedViews"));
-  assert.match(
-    seed.slice(0, 400),
+
+  /*
+   * RE-POINTED, AND THE CONTRACT IS THE SAME ONE — W2 requirement C.
+   *
+   * This asserted `if (boardKey !== DEFAULT_BOARD_KEY) return;` with the reason
+   * "Fix Tracker and the Maintenance Request form cannot render on another
+   * board". That is still true and still enforced; what changed is what "another
+   * board" means. A register generated from the Jobs template is not another
+   * board — it is the same board, empty, and the key test denied it the strip
+   * its own columns entitle it to. That was the owner's parity gap.
+   *
+   * The question is now asked of the BOARD (`isJobsRegister` — does it carry
+   * the Jobs register's own columns?), so the two properties the key test held
+   * are both held here: a Jobs instance IS seeded, and Store Documentation and
+   * the pre-template generic register are NOT, because neither has those
+   * columns. Removing the key comparison is the point, so its absence is
+   * asserted too.
+   */
+  assert.doesNotMatch(
+    source,
     /if \(boardKey !== DEFAULT_BOARD_KEY\) return;/,
-    "Fix Tracker and the Maintenance Request form cannot render on another board",
+    "which board may have a tab strip must not be decided by its key",
+  );
+  assert.match(
+    seed,
+    /await isJobsRegister\(db, orgId, boardKey\)/,
+    "the seed decision must come from the board's own structure",
+  );
+  const capability = source.slice(
+    source.indexOf("const JOBS_REGISTER_COLUMNS"),
+    source.indexOf("function seedStripFor"),
+  );
+  for (const column of ["status", "priority", "requested", "issuePictures"]) {
+    assert.ok(
+      capability.includes(`"${column}"`),
+      `${column} is part of what makes a board a Jobs register`,
+    );
+  }
+  assert.match(
+    capability,
+    /every\(\(key\) => keys\.has\(key\)\)/,
+    "one column is a coincidence — the whole set is the shape",
   );
 
   // Store Documentation keeps its own three tabs, declared in its own component.

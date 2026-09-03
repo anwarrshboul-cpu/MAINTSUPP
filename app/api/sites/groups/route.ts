@@ -4,8 +4,15 @@ import { ensureDatabase, seedStoreDocumentationGroups } from "../../../../db/ini
 import { siteGroupMembers, siteGroups } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { listOptionValues } from "../../../lib/options-repository";
-import { listSiteGroups, toSlug } from "../../../lib/sites-repository";
+import { claimedGroupSlugs, listSiteGroups, toSlug } from "../../../lib/sites-repository";
 import { siteWriteFailure } from "../route";
+/* W2 — reporting groups belong to one register. See `register-scope.ts`. */
+import {
+  registerScopeFilter,
+  resolveRegisterScope,
+  scopeRefusal,
+  CANONICAL_REGISTER,
+} from "../../../lib/register-scope";
 
 function text(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -20,12 +27,33 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const { db, orgId } = await scopedDb(request);
-    // Rebuilt on read rather than seeded once: membership is derived from each
-    // site's lifecycle and region, so a store that closes or moves to Europe
-    // has to change group without anyone maintaining a second list.
-    await seedStoreDocumentationGroups(await getD1(), orgId);
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
+    /*
+     * Rebuilt on read rather than seeded once: membership is derived from each
+     * site's lifecycle and region, so a store that closes or moves to Europe
+     * has to change group without anyone maintaining a second list.
+     *
+     * W2 — the seeder runs for the CANONICAL register only, and deliberately.
+     * It derives the four store-documentation groups from the workspace's own
+     * estate; running it against an instance would furnish a register the
+     * owner asked to be EMPTY with four groups and the canonical sites'
+     * membership, which is the copy-the-live-board mistake W02-06 rules out.
+     */
+    if (scope === CANONICAL_REGISTER) {
+      await seedStoreDocumentationGroups(await getD1(), orgId);
+    }
     const [groups, kinds] = await Promise.all([
-      listSiteGroups(db, orgId),
+      listSiteGroups(db, orgId, scope),
+      /* Group KINDS are a workspace vocabulary, not register rows — see the
+         same decision for site types in `app/api/sites/route.ts`. */
       listOptionValues(db, orgId, "site_group_kind"),
     ]);
     return Response.json({ groups, kinds });
@@ -44,16 +72,33 @@ export async function POST(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as { data?: Record<string, unknown> };
     const data = body.data ?? {};
     const name = text(data.name, 120);
     if (!name) throw new Error("A group name is required.");
 
-    const existing = await listSiteGroups(db, orgId);
+    /*
+     * The slug is de-duplicated against the WHOLE ORGANISATION, not against
+     * this register, because `site_groups_organisation_slug_idx` is still on
+     * (organisation_id, slug) and the insert would be rejected by the database
+     * otherwise. `existing` is therefore read twice with different scopes: the
+     * wide one decides the slug, the narrow one decides the position.
+     */
+    const claimed = await claimedGroupSlugs(db, orgId);
+    const existing = await listSiteGroups(db, orgId, scope);
     const base = toSlug(name) || "group";
     let slug = base;
     let suffix = 2;
-    while (existing.some((group) => group.slug === slug)) {
+    while (claimed.has(slug)) {
       slug = `${base}-${suffix}`;
       suffix += 1;
     }
@@ -66,6 +111,10 @@ export async function POST(request: Request) {
       slug,
       kind: text(data.kind, 40) || "region",
       colourHex: colour(data.colourHex, "#12B4A8"),
+      /* W2 — the register this group belongs to, written at INSERT. NULL is
+         the canonical register, so a create with no `?section=` is exactly
+         what it was before this column existed. */
+      boardId: scope,
       position: existing.length,
     });
     return Response.json({ ok: true, id });
@@ -81,6 +130,15 @@ export async function PATCH(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as { id?: string; data?: Record<string, unknown> };
     const id = text(body.id, 120);
     if (!id) throw new Error("A group ID is required.");
@@ -89,7 +147,13 @@ export async function PATCH(request: Request) {
     const [existing] = await db
       .select()
       .from(siteGroups)
-      .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)))
+      .where(
+        and(
+          eq(siteGroups.id, id),
+          eq(siteGroups.organisationId, orgId),
+          registerScopeFilter(siteGroups.boardId, scope),
+        ),
+      )
       .limit(1);
     if (!existing) return Response.json({ error: "Group not found." }, { status: 404 });
 
@@ -102,7 +166,13 @@ export async function PATCH(request: Request) {
         active: typeof data.active === "boolean" ? data.active : existing.active,
         updatedAt: new Date().toISOString(),
       })
-      .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)));
+      .where(
+        and(
+          eq(siteGroups.id, id),
+          eq(siteGroups.organisationId, orgId),
+          registerScopeFilter(siteGroups.boardId, scope),
+        ),
+      );
     return Response.json({ ok: true, id });
   } catch (error) {
     const failure = siteWriteFailure(error, "The group could not be updated.");
@@ -117,6 +187,15 @@ export async function DELETE(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as { id?: string };
     const id = text(body.id, 120);
     if (!id) throw new Error("A group ID is required.");
@@ -134,7 +213,13 @@ export async function DELETE(request: Request) {
     const [existing] = await db
       .select({ id: siteGroups.id })
       .from(siteGroups)
-      .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)))
+      .where(
+        and(
+          eq(siteGroups.id, id),
+          eq(siteGroups.organisationId, orgId),
+          registerScopeFilter(siteGroups.boardId, scope),
+        ),
+      )
       .limit(1);
     if (!existing) {
       return Response.json({ error: "Group not found." }, { status: 404 });
@@ -150,7 +235,13 @@ export async function DELETE(request: Request) {
       );
     await db
       .delete(siteGroups)
-      .where(and(eq(siteGroups.id, id), eq(siteGroups.organisationId, orgId)));
+      .where(
+        and(
+          eq(siteGroups.id, id),
+          eq(siteGroups.organisationId, orgId),
+          registerScopeFilter(siteGroups.boardId, scope),
+        ),
+      );
     return Response.json({ ok: true, id });
   } catch (error) {
     const failure = siteWriteFailure(error, "The group could not be removed.");

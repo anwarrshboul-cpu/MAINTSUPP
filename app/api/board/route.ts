@@ -7,6 +7,7 @@ import {
   isNotNull,
   isNull,
   max,
+  sql,
 } from "drizzle-orm";
 import { defaultBoardOptions } from "../../../db/seed-options";
 import {
@@ -30,12 +31,18 @@ import {
 } from "../../lib/compliance-register";
 import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/init";
-import { isBoardNotFound, resolveBoard } from "../../lib/board-registry";
+import {
+  isBoardNotFound,
+  provisionDefaultStructure,
+  resolveBoard,
+  templateColumnCount,
+} from "../../lib/board-registry";
 import { seedStoreDocumentationBoard } from "../../../db/seed-store-documentation";
 import {
   activityLog,
   attachments,
   maintenanceBoardCells,
+  boards,
   maintenanceBoardColumns,
   maintenanceBoardOptions,
   maintenanceGroupItems,
@@ -554,19 +561,6 @@ function parseSettings(value: string, type: BoardColumnType) {
   }
 }
 
-/**
- * What a freshly created row is called.
- *
- * The grid's button already reads "New store" on Store Documentation, so a row
- * landing as "New maintenance item" contradicts the control that created it —
- * and the Store column shows the row's title, so the wrong noun is the first
- * thing on screen. Maintenance keeps its exact wording; the board parity tests
- * read that string.
- */
-function newItemTitle(boardId: string) {
-  return boardId === "store-documentation" ? "New store" : "New maintenance item";
-}
-
 type ColumnRow = typeof maintenanceBoardColumns.$inferSelect;
 
 /**
@@ -820,6 +814,58 @@ type BoardStateCache = {
   columns: Array<typeof maintenanceBoardColumns.$inferSelect>;
 } | null;
 
+/**
+ * A TEMPLATE INSTANCE, KEPT IN STEP WITH THE TEMPLATE IT WAS BUILT FROM.
+ *
+ * The owner's requirement for W02-06 is parity with the original, not a
+ * snapshot of it: "the SAME Jobs board engine and canonical DEFAULT structure".
+ * A snapshot satisfies that on the day the section is created and quietly stops
+ * satisfying it the first time a column is added to the product - the canonical
+ * board picks the new column up from `seedBoardStructure` on its next boot, and
+ * an instance seeded once would not.
+ *
+ * So an instance is re-provisioned when it is SHORT, through the same
+ * `provisionDefaultStructure` that created it. Every statement in there is an
+ * `INSERT OR IGNORE` / `onConflictDoNothing`, so a board that is already
+ * complete is untouched, and a board missing the spec's newest column gains it
+ * and nothing else.
+ *
+ * COUNT-GUARDED, and that is the whole cost on a normal load: one indexed
+ * count, not 27 no-op inserts. The same self-healing shape the option seeding
+ * below already uses, and for the same reason - a memo cannot see a row
+ * somebody else deleted.
+ *
+ * `boards.template` is what decides, and NULL decides nothing. A register
+ * created for a section before templates existed carries the generic six
+ * columns and must keep them; converting one into a job board because its
+ * `kind` happens to read "maintenance" is exactly the silent conversion the
+ * owner ruled out.
+ */
+async function ensureTemplateStructure(db: BoardDb, orgId: string, boardId: string) {
+  const [board] = await db
+    .select({ template: boards.template })
+    .from(boards)
+    .where(and(eq(boards.organisationId, orgId), eq(boards.key, boardId)));
+  const template = board?.template ?? null;
+  if (!template) return;
+
+  const expected = templateColumnCount(template);
+  if (expected === 0) return;
+
+  const [counted] = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.organisationId, orgId),
+        eq(maintenanceBoardColumns.boardId, boardId),
+      ),
+    );
+  if (Number(counted?.total ?? 0) >= expected) return;
+
+  await provisionDefaultStructure(db, orgId, boardId, template);
+}
+
 async function ensureBoardState(
   db: BoardDb,
   orgId: string,
@@ -857,7 +903,10 @@ async function ensureBoardState(
    * row and is discarded. The result would be an empty board and no error.
    * `createBoard` provisions a generated register once, keyed on the board.
    */
-  if (isGeneratedRegister(boardId)) return null;
+  if (isGeneratedRegister(boardId)) {
+    await ensureTemplateStructure(db, orgId, boardId);
+    return null;
+  }
 
   await seedRequestsIfEmpty(db, orgId);
 

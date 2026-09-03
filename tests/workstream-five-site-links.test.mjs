@@ -86,8 +86,14 @@ const count = (db, sql, ...args) => db.prepare(sql).get(...args).n;
 
 test("resolution is scoped to one organisation at every step", async () => {
   const repository = await read("app/lib/sites-repository.ts");
+  /*
+   * RE-POINTED, W2. The matching moved out of `resolveSiteByName` — now a
+   * one-line wrapper — into `resolveSiteMatch`, which was extracted so a caller
+   * can be told WHY nothing resolved. The rule this test protects is unchanged
+   * and the slice follows it to its new home rather than widening to the file.
+   */
   const resolve = repository.slice(
-    repository.indexOf("export async function resolveSiteByName"),
+    repository.indexOf("export async function resolveSiteMatch"),
     repository.indexOf("export async function findDuplicateCandidates"),
   );
   /*
@@ -103,7 +109,24 @@ test("resolution is scoped to one organisation at every step", async () => {
     /eq\(siteAliases\.organisationId, organisationId\)/,
     "the alias lookup must be tenant-filtered too",
   );
-  assert.match(resolve, /rows\.find\(\(row\) => row\.id === alias\.siteId\) \?\? null/,
+  /*
+   * RE-POINTED, W2, and the rule is now stated on BOTH axes it has to hold on.
+   *
+   * The alias tier used to be a bare `siteAliases` select filtered on the
+   * organisation, and this line proved that whatever it found was reduced back
+   * to a site already in the tenant's candidate set. The select now joins
+   * `sites` itself, which is what makes the tier REGISTER-scoped too — an alias
+   * belonging to another register resolves to nothing rather than to that
+   * register's site — so the join predicate is pinned as well as the reduction.
+   */
+  assert.match(
+    resolve,
+    /\.innerJoin\(sites, eq\(sites\.id, siteAliases\.siteId\)\)/,
+    "the alias tier must reach its site, so tenant and register both apply to it",
+  );
+  assert.match(resolve, /eq\(sites\.organisationId, organisationId\)/,
+    "and the joined site must be this tenant's");
+  assert.match(resolve, /rows\.find\(\(row\) => row\.id === aliasRows\[0\]\.siteId\) \?\? null/,
     "an alias may only resolve to a site already in this tenant's candidate set");
 });
 
@@ -147,7 +170,12 @@ test("a rename keeps the name the site used to have", async () => {
    */
   const route = await read("app/api/sites/route.ts");
   const patch = route.slice(route.indexOf("export async function PATCH"));
-  const additions = patch.match(/addSiteAlias\(db, orgId, id, existing\.name, "rename"\)/g) ?? [];
+  /* RE-POINTED, W2: `addSiteAlias` gained a trailing register argument, so the
+     call now ends `"rename", scope)`. The count — BOTH paths, never one — is
+     the rule and is unchanged; the pattern follows the new signature rather
+     than being loosened to `addSiteAlias(`, which a single path called twice
+     would also satisfy. */
+  const additions = patch.match(/addSiteAlias\(db, orgId, id, existing\.name, "rename", scope\)/g) ?? [];
   assert.equal(additions.length, 2, "both rename paths must record the former name");
   const releases = patch.match(/releaseSiteAlias\(db, orgId, id,/g) ?? [];
   assert.equal(

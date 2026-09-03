@@ -2,6 +2,7 @@ import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
+  maintenanceBoardColumns,
   maintenanceBoardOptions,
   maintenanceRequests,
   optionSets,
@@ -176,53 +177,106 @@ async function mirrorBoardOption(
 ) {
   const columnKey = SET_TO_BOARD_COLUMN[key];
   if (!columnKey) return;
-  const where = and(
-    eq(maintenanceBoardOptions.organisationId, orgId),
-    eq(maintenanceBoardOptions.columnKey, columnKey),
-    eq(maintenanceBoardOptions.value, value),
-  );
-  const [existing] = await db.select().from(maintenanceBoardOptions).where(where).limit(1);
 
-  if (action.kind === "remove") {
-    if (!existing) return;
-    /* Retire rather than delete when the seed would only recreate it. */
-    if (existing.system) {
+  /*
+   * EVERY BOARD THAT HAS THE COLUMN, not the first row that matched and not
+   * the literal "maintenance".
+   *
+   * This selected one option row org-wide with `LIMIT 1` and, when there was
+   * none, inserted with `board_id: "maintenance"` hardcoded. That was right
+   * while the workspace had one board carrying these columns. W2 templates make
+   * it wrong three ways at once, and all three fail silently:
+   *
+   *   - a RENAME updated whichever single row came back first. With a Jobs
+   *     instance in the workspace that can be the INSTANCE's chip, leaving the
+   *     job board itself showing the old word — the exact drift this mirror was
+   *     written to stop, now pointed at the wrong board.
+   *   - a REMOVE retired or deleted that same one row, so the label vanished
+   *     from one board and stayed on the others.
+   *   - a NEW option landed on the canonical board alone. An instance created
+   *     from the Jobs template offers the same six option columns, and would
+   *     never be offered a label added afterwards.
+   *
+   * `option_values` is the organisation's registry and
+   * `maintenance_board_options` is a PER-BOARD PROJECTION of it, so the mirror
+   * has to reach every projection. The boards are read from
+   * `maintenance_board_columns`: a board is in scope exactly when it actually
+   * carries the column, which is true of the job board and of every Jobs
+   * instance, and false for a register that has no such column — so nothing is
+   * written to a board that would not draw it.
+   */
+  const boardRows = await db
+    .selectDistinct({ boardId: maintenanceBoardColumns.boardId })
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.organisationId, orgId),
+        eq(maintenanceBoardColumns.key, columnKey),
+      ),
+    );
+  const boardIds = boardRows.map((row) => row.boardId);
+  /* A workspace whose boards predate the column still has to be able to add a
+     label to the canonical board, which is what this mirror has always done. */
+  if (!boardIds.length) boardIds.push("maintenance");
+
+  for (const boardId of boardIds) {
+    const [existing] = await db
+      .select()
+      .from(maintenanceBoardOptions)
+      .where(
+        and(
+          eq(maintenanceBoardOptions.organisationId, orgId),
+          eq(maintenanceBoardOptions.boardId, boardId),
+          eq(maintenanceBoardOptions.columnKey, columnKey),
+          eq(maintenanceBoardOptions.value, value),
+        ),
+      )
+      .limit(1);
+
+    if (action.kind === "remove") {
+      if (!existing) continue;
+      /* Retire rather than delete when the seed would only recreate it. */
+      if (existing.system) {
+        await db
+          .update(maintenanceBoardOptions)
+          .set({ active: false, updatedAt: new Date().toISOString() })
+          .where(eq(maintenanceBoardOptions.id, existing.id));
+      } else {
+        await db.delete(maintenanceBoardOptions).where(eq(maintenanceBoardOptions.id, existing.id));
+      }
+      continue;
+    }
+
+    if (existing) {
       await db
         .update(maintenanceBoardOptions)
-        .set({ active: false, updatedAt: new Date().toISOString() })
+        .set({
+          label: action.label,
+          color: action.colourHex,
+          textColor: action.textColour,
+          active: action.active,
+          ...(action.position !== undefined ? { position: action.position } : {}),
+          updatedAt: new Date().toISOString(),
+        })
         .where(eq(maintenanceBoardOptions.id, existing.id));
     } else {
-      await db.delete(maintenanceBoardOptions).where(eq(maintenanceBoardOptions.id, existing.id));
-    }
-    return;
-  }
-
-  if (existing) {
-    await db
-      .update(maintenanceBoardOptions)
-      .set({
+      await db.insert(maintenanceBoardOptions).values({
+        /* The board is in the id now. It was not, so two boards gaining the
+           same label inside one millisecond collided on the primary key and the
+           second insert was lost. */
+        id: `board-${boardId}-${key}-${Date.now().toString(36)}`,
+        organisationId: orgId,
+        boardId,
+        columnKey,
+        value,
         label: action.label,
         color: action.colourHex,
         textColor: action.textColour,
         active: action.active,
-        ...(action.position !== undefined ? { position: action.position } : {}),
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(maintenanceBoardOptions.id, existing.id));
-  } else {
-    await db.insert(maintenanceBoardOptions).values({
-      id: `board-${key}-${Date.now().toString(36)}`,
-      organisationId: orgId,
-      boardId: "maintenance",
-      columnKey,
-      value,
-      label: action.label,
-      color: action.colourHex,
-      textColor: action.textColour,
-      active: action.active,
-      system: false,
-      position: action.position ?? 999,
-    });
+        system: false,
+        position: action.position ?? 999,
+      });
+    }
   }
 }
 

@@ -381,17 +381,43 @@ test("the board serves the rows it places", async () => {
 });
 
 test("a new row is named for the board that made it", async () => {
-  const route = await read("app/api/board/route.ts");
-  /* `BoardId` narrowed to the two boards the product ships. Since W02-06 a
-     board can be created at runtime, so the parameter is a plain string — the
-     naming rule below is what this test is actually about and is unchanged. */
-  assert.match(route, /function newItemTitle\(boardId: string\)/);
-  assert.match(route, /"store-documentation" \? "New store"/);
-  // Maintenance keeps its exact wording.
-  assert.match(route, /"New maintenance item"/);
-
-  /* And a register generated for a workspace section is neither, so its rows
-     are not called maintenance items — see `newItemTitle` in board-mutations. */
+  /*
+   * RE-POINTED TWICE OVER, AND BOTH MOVES MADE THE CONTRACT STRONGER.
+   *
+   * `BoardId` first narrowed to the two boards the product ships; since W02-06
+   * a board can be created at runtime, so the parameter became a plain string.
+   * Then W2 templates arrived and the rule itself moved: the noun is now taken
+   * from `boards.item_noun`, which `createBoard` sets from the template, rather
+   * than from a comparison against two literal board KEYS. That mattered — a
+   * section created from the Jobs template is a job board in every other
+   * respect and its untitled rows came back "New item" purely because its key
+   * begins `sec-`.
+   *
+   * There were also TWO copies of this function, and only the one in
+   * `board-mutations.ts` was ever called, so the rule could have drifted
+   * between them unnoticed. The route's now delegates to it.
+   *
+   * What this test is for is unchanged: the two canonical boards keep their
+   * exact long-standing wording, and a register created at runtime is not
+   * called a maintenance item.
+   */
   const mutations = await read("app/lib/board-mutations.ts");
-  assert.match(mutations, /return "New item";/, "a generated register names its own rows");
+  assert.match(mutations, /export function newItemTitle\(boardId: string, itemNoun\?: string \| null\)/);
+  assert.match(mutations, /if \(boardId === "store-documentation"\) return "New store";/);
+  // Maintenance keeps its exact wording.
+  assert.match(mutations, /if \(boardId === "maintenance"\) return "New maintenance item";/);
+  /* The board's own noun is what decides everything else, so an instance
+     answers as its source does without anything comparing keys. */
+  assert.match(mutations, /noun \? `New \$\{noun\.toLowerCase\(\)\}` : "New item"/);
+  assert.match(
+    mutations,
+    /newItemTitle\(boardId, await boardItemNoun\(db, orgId, boardId\)\)/,
+    "and the caller must actually read it",
+  );
+
+  /* And the board route keeps NO copy of its own. It had one, it was never
+     called, and a rule stated twice in a codebase that pins source text is a
+     rule that can drift in the half nothing exercises. */
+  const route = await read("app/api/board/route.ts");
+  assert.doesNotMatch(route, /function newItemTitle\(/);
 });

@@ -80,12 +80,29 @@ export default function FormBuilder({
 }) {
   const [form, setForm] = useState<BuilderForm | null>(null);
   const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
+  /*
+   * This register has no form YET, and one can be made for it — the server's
+   * `canCreate` on the 404. Kept apart from `form === null`, which also covers
+   * "the request failed": offering to mint a public link because a fetch timed
+   * out would be the wrong thing to do quietly.
+   */
+  const [creatable, setCreatable] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<BuilderMode>("view");
   const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  /*
+   * `[boardId]`, not `[]`.
+   *
+   * The dependency array was empty while the body reads `boardId`, so the
+   * builder kept whichever board it first mounted with: moving between two
+   * registers without remounting left the Form tab editing — and sharing —
+   * the previous one's form. The same correction is made on `patch` below,
+   * where the consequence was a SAVE against the wrong board.
+   */
   useEffect(() => {
     let active = true;
     fetch(`/api/board/form?board=${encodeURIComponent(boardId)}`, {
@@ -96,24 +113,39 @@ export default function FormBuilder({
           form?: BuilderForm;
           groups?: Array<{ id: string; name: string }>;
           error?: string;
+          canCreate?: boolean;
         };
-        if (!response.ok || !payload.form) throw new Error(payload.error || "Unavailable");
-        if (active) {
-          setForm(payload.form);
-          setGroups(payload.groups ?? []);
+        if (!active) return;
+        if (!response.ok || !payload.form) {
+          /*
+           * A REGISTER WITH NO FORM IS OFFERED ONE OF ITS OWN.
+           *
+           * This used to fall through to `FormView`, which is the job board's
+           * live form: the Form tab on a section's register drew "Maintenance
+           * Request", its questions and a Location list naming 39 real stores,
+           * with a Submit that filed the job onto the job board. The answer is
+           * not to hide the tab — it is for the register to have a form of its
+           * own, which is what the button below creates.
+           */
+          setCreatable(Boolean(payload.canCreate));
+          setForm(null);
+          return;
         }
+        setForm(payload.form);
+        setGroups(payload.groups ?? []);
       })
       .catch(() => {
         /*
-         * A builder that cannot load is not an error the reader needs to see —
-         * the form itself still works. The toolbar simply does not appear.
+         * A builder that cannot load is not an error the reader needs to see.
+         * It is also not evidence that the board has no form, so nothing is
+         * offered here.
          */
         if (active) setForm(null);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [boardId]);
 
   /*
    * Leaving a builder panel open and then narrowing the window would hide the
@@ -162,7 +194,41 @@ export default function FormBuilder({
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [boardId]);
+
+  /**
+   * Give this register a form of its own — W2 requirement B.
+   *
+   * A plain POST to the same endpoint. Everything about the new form comes from
+   * the server: its questions are derived from THIS board's columns, its share
+   * token is minted fresh, and its settings are its own. Nothing here names a
+   * board other than the one the tab is open on.
+   */
+  const createForm = useCallback(async () => {
+    setCreating(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/board/form?board=${encodeURIComponent(boardId)}`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const payload = (await response.json()) as {
+        form?: BuilderForm;
+        groups?: Array<{ id: string; name: string }>;
+        error?: string;
+      };
+      if (!response.ok || !payload.form) {
+        throw new Error(payload.error || "The form could not be created.");
+      }
+      setForm(payload.form);
+      setGroups(payload.groups ?? []);
+      setCreatable(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The form could not be created.");
+    } finally {
+      setCreating(false);
+    }
+  }, [boardId]);
 
   async function copyLink() {
     if (!form) return;
@@ -220,8 +286,62 @@ export default function FormBuilder({
     }
   }
 
-  /* No form configured for this board: the live form, exactly as before. */
-  if (!form) return <FormView onSubmitted={onSubmitted} />;
+  /*
+   * WHOSE FORM IS IN STATE.
+   *
+   * `boardId` can change without this component unmounting, and until the
+   * fetch for the new register answers, what is held is the PREVIOUS one's
+   * form — its questions, its response count and, worst, its Share link, drawn
+   * under the new register's name. Clearing the state at the top of the effect
+   * is the obvious fix and is exactly what `react-hooks/set-state-in-effect`
+   * refuses, because it is a cascading render. Asking the form which board it
+   * belongs to costs nothing and cannot get out of step with the prop.
+   */
+  const pending = Boolean(form && form.boardKey && form.boardKey !== boardId);
+
+  /*
+   * NO FORM ON THIS BOARD.
+   *
+   * `FormView` is deliberately NOT the fallback any more. It fetches
+   * `/api/context` and posts to `/api/maintenance`, neither of which takes a
+   * board, so on anything but the job board it rendered another register's
+   * questions over another register's estate with a working Submit. A register
+   * without a form is offered one; a load that merely failed says so.
+   */
+  if (!form || pending) {
+    const offer = creatable && !pending;
+    return (
+      <div className="form-builder">
+        <p className="form-builder__banner">
+          <Icon name="document" size={15} />
+          {pending
+            ? "Loading this register’s form…"
+            : offer
+              ? "This register does not have a form yet. Creating one gives it its own questions, taken from this board’s own columns, and its own shareable link."
+              : "This register’s form could not be loaded."}
+        </p>
+        {error && !pending && (
+          <p className="form-builder__banner form-builder__banner--error" role="alert">
+            <Icon name="alert" size={15} />
+            {error}
+          </p>
+        )}
+        {offer && (
+          <div className="form-builder__stage">
+            <button
+              type="button"
+              className="form-builder__sharebtn"
+              onClick={createForm}
+              disabled={creating}
+            >
+              <Icon name="document" size={15} />
+              {creating ? "Creating the form…" : "Create a form for this register"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const editing = mode === "edit" || mode === "design" || mode === "settings";
 
@@ -333,7 +453,24 @@ export default function FormBuilder({
         {mode === "settings" && (
           <FormSettingsPanel form={form} patch={patch} busy={busy} groups={groups} />
         )}
-        {mode === "view" && <FormView onSubmitted={onSubmitted} />}
+        {/*
+          THE LIVE FILLABLE FORM, ONLY WHERE IT WOULD FILE HERE.
+
+          `FormView` posts to `/api/maintenance`, which takes no board and files
+          onto the default one. On any other register that is a form that
+          submits somewhere else — the same class of leak as the builder asking
+          `/api/board/form` with no board. The server answers the question
+          (`filesIntoThisBoard`), because it is the side that knows which board
+          is the default one; elsewhere this register's own form is rendered
+          through the shared public renderer instead, which is exactly what the
+          link serves.
+        */}
+        {mode === "view" &&
+          (form.filesIntoThisBoard === false ? (
+            <FormPreview form={form} />
+          ) : (
+            <FormView onSubmitted={onSubmitted} />
+          ))}
         {mode === "preview" && (
           /*
            * PREVIEW IS THE PUBLIC FORM'S OWN RENDERER, mounted here.

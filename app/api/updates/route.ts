@@ -12,6 +12,7 @@ import {
   dispatchAutomationEvents,
   updateCreatedEvent,
 } from "../../lib/automations";
+import { boardKeyForRequest } from "../../lib/board-registry";
 import { isBoardDiscussionId } from "../board/discussion/discussion-store";
 
 export const dynamic = "force-dynamic";
@@ -396,10 +397,25 @@ export async function POST(request: Request) {
   }
 
   const id = `upd_${crypto.randomUUID().replace(/-/g, "")}`;
+  /*
+   * THE BOARD THE JOB IS ACTUALLY ON, resolved from its placement.
+   *
+   * This wrote the literal "maintenance". `maintenance_requests` carries no
+   * board id - membership is `maintenance_group_items.board_id` - so the
+   * literal was right only while every commentable row was on the job board.
+   * Since W02-06 a section has a register of its own, and a comment left on one
+   * of its rows was filed under `board_id = 'maintenance'`: invisible in the
+   * instance's own updates feed, and present in the job board's. A leak in both
+   * directions, from one word.
+   *
+   * `boardKeyForRequest` is the same resolution `attachment-counts.ts` and the
+   * job-link route already use, so all three agree about where a row lives.
+   */
+  const boardId = await boardKeyForRequest(db, orgId, requestId);
   await db.insert(itemUpdates).values({
     id,
     organisationId: orgId,
-    boardId: "maintenance",
+    boardId,
     requestId,
     parentId,
     authorName: actor.displayName || actor.email,
@@ -461,7 +477,7 @@ export async function POST(request: Request) {
 
   // The comment is written and counted; now the board's rules may react to it.
   await dispatchAutomationEvents(automationContext(guard.scope, request), [
-    updateCreatedEvent("maintenance", requestId, null),
+    updateCreatedEvent(boardId, requestId, null),
   ]);
 
   // `attached` is reported rather than assumed: if a file was claimed by an

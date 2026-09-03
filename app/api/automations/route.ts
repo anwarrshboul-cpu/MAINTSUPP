@@ -88,7 +88,7 @@ export async function GET(request: Request) {
       },
       canManage,
       vocabulary: exposeVocabulary(columns, groups),
-      templates: templatesFor(boardId),
+      templates: templatesFor(columns.map((column) => column.key)),
       sweep,
     });
   } catch (error) {

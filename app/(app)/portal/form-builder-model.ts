@@ -11,6 +11,18 @@ import type { StoredFormConfig } from "../../lib/form-config";
  */
 export type BuilderForm = {
   id: string;
+  /** The register this form belongs to. Sent so the shell never has to guess. */
+  boardKey?: string;
+  /**
+   * Whether `FormView` — which posts to `/api/maintenance` and takes no board
+   * — would file its answer onto THIS register.
+   *
+   * Answered by the server, where `DEFAULT_BOARD_KEY` is defined. The shell
+   * mounts the live fillable form only when it is true; on any other register
+   * that component would draw the job board's questions with a Submit that
+   * filed the job somewhere else.
+   */
+  filesIntoThisBoard?: boolean;
   title: string;
   description: string | null;
   active: boolean;

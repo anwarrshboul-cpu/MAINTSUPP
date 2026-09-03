@@ -18,13 +18,22 @@ import {
   nextSitePosition,
   normaliseSiteName,
   recordAnomaly,
-  resolveSiteByName,
+  resolveSiteMatch,
   setSiteAliases,
   stageZeroState,
   uniqueSlug,
 } from "../../../lib/sites-repository";
 // W05-01 — the same bounds the Sites form and `PATCH /api/sites` use.
 import { coordinateRefusal } from "../../../lib/site-state";
+/* W2 — which register this import or export is about. See `register-scope.ts`;
+   absent `?section=` is the canonical register, which is what the Sites screen
+   sends today and what every existing import kept doing. */
+import {
+  registerScopeFilter,
+  resolveRegisterScope,
+  scopeRefusal,
+  CANONICAL_REGISTER,
+} from "../../../lib/register-scope";
 
 /**
  * One cell read as a coordinate, or null.
@@ -261,7 +270,20 @@ export async function GET(request: Request) {
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
-    const rows = await listSites(db, orgId, { includeInactive: true });
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
+    /* W2 — a register exports ITSELF. Without the scope an instance's export
+       would hand the caller the workspace's whole estate under the instance's
+       name, which is the leak of canonical data an instance exists to
+       prevent — and it leaves in a file, which cannot be recalled. */
+    const rows = await listSites(db, orgId, { includeInactive: true }, scope);
     const body = toCsv(
       COLUMNS,
       rows.map((site) => ({
@@ -328,6 +350,15 @@ export async function POST(request: Request) {
     const guard = await scopedDbWithCapability(request, "data.import");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(
+      db,
+      orgId,
+      new URL(request.url),
+      "sites",
+    );
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
     const body = (await request.json()) as { csv?: string; dryRun?: boolean };
     const csv = typeof body.csv === "string" ? body.csv : "";
     if (!csv.trim()) throw new Error("No CSV content was supplied.");
@@ -511,14 +542,37 @@ export async function POST(request: Request) {
 
       // X11 — match on canonical name, either monday name, or a stored alias,
       // so a re-import updates the existing site rather than duplicating it.
-      const existing =
-        (await resolveSiteByName(db, orgId, name)) ??
-        (values.mondayMaintenanceName
-          ? await resolveSiteByName(db, orgId, values.mondayMaintenanceName)
-          : null) ??
-        (values.mondayComplianceName
-          ? await resolveSiteByName(db, orgId, values.mondayComplianceName)
-          : null);
+      /*
+       * W2 — matched WITHIN THE REGISTER BEING IMPORTED INTO. A sheet imported
+       * into an instance must never update a canonical site because the two
+       * share a name: that is the silent take-over `resolveSiteMatch`'s header
+       * describes, arriving through a file rather than through a form.
+       *
+       * `resolveSiteMatch` rather than `resolveSiteByName` so an AMBIGUOUS
+       * register is reported instead of being treated as "not found" and
+       * quietly creating a third row of the same name — which is what a bare
+       * null would do here, on every re-import, for ever.
+       */
+      const nameMatch = await resolveSiteMatch(db, orgId, name, scope);
+      const mondayMatch =
+        nameMatch.site || nameMatch.reason === "ambiguous"
+          ? null
+          : ((values.mondayMaintenanceName
+              ? await resolveSiteMatch(db, orgId, values.mondayMaintenanceName, scope)
+              : null) ??
+            (values.mondayComplianceName
+              ? await resolveSiteMatch(db, orgId, values.mondayComplianceName, scope)
+              : null));
+      const match = nameMatch.site ? nameMatch : (mondayMatch ?? nameMatch);
+      if (match.reason === "ambiguous") {
+        outcome.skipped.push({
+          row: rowNumber,
+          name,
+          reason: `${match.matches} sites in this register already answer to "${name}". Resolve the duplicate before importing.`,
+        });
+        continue;
+      }
+      const existing = match.site;
 
       /*
        * A code is an identity, and this importer used to be the way around that.
@@ -550,7 +604,7 @@ export async function POST(request: Request) {
           });
           continue;
         }
-        const holder = await codeConflict(db, orgId, codeCell, existing?.id ?? "");
+        const holder = await codeConflict(db, orgId, codeCell, existing?.id ?? "", scope);
         if (holder) {
           outcome.skipped.push({
             row: rowNumber,
@@ -568,7 +622,13 @@ export async function POST(request: Request) {
           await db
             .update(sites)
             .set(sheetUpdate(values, headers, existing))
-            .where(and(eq(sites.id, existing.id), eq(sites.organisationId, orgId)));
+            .where(
+              and(
+                eq(sites.id, existing.id),
+                eq(sites.organisationId, orgId),
+                registerScopeFilter(sites.boardId, scope),
+              ),
+            );
           if (address.changed) {
             await recordAnomaly(db, orgId, {
               batchId,
@@ -603,11 +663,16 @@ export async function POST(request: Request) {
           id,
           organisationId: orgId,
           slug: await uniqueSlug(db, orgId, name),
-          position: await nextSitePosition(db, orgId),
+          position: await nextSitePosition(db, orgId, scope),
           ...values,
+          /* W2 — the register the sheet was imported into. After the spread,
+             so a crafted CSV column can never choose its own register. */
+          boardId: scope,
           // A blank code column in the sheet gets a generated one rather than
           // leaving the site without an operational reference.
-          code: values.code ?? generateSiteCode(name, await existingSiteCodes(db, orgId)),
+          code:
+            values.code ??
+            generateSiteCode(name, await existingSiteCodes(db, orgId, scope)),
         });
         if (address.changed) {
           await recordAnomaly(db, orgId, {

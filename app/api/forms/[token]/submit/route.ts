@@ -1,10 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
 import { getDb } from "../../../../../db";
 import {
   activityLog,
   formConfigurations,
   maintenanceBoardCells,
+  maintenanceGroupItems,
   maintenanceGroups,
   maintenanceBoardColumns,
   maintenanceRequests,
@@ -59,6 +60,21 @@ export const dynamic = "force-dynamic";
 function failure(message: string, status = 400) {
   return Response.json({ error: message }, { status });
 }
+
+/**
+ * A ceiling on the JSON body, because this endpoint is UNAUTHENTICATED.
+ *
+ * There is no per-IP rate limit in front of it and this does not pretend to be
+ * one — see the note on the POST handler for what is and is not defended here.
+ * What this does buy is that a single request cannot make the worker parse an
+ * arbitrarily large document before any of the four availability gates have
+ * run: every answer is a bounded string and the form has at most a few dozen
+ * questions, so a body past this is not a submission, it is a payload.
+ */
+const MAX_SUBMISSION_BYTES = 64 * 1024;
+
+/** More attachments than any real report, and the count is only a claim. */
+const MAX_DECLARED_FILES = 40;
 
 function trimString(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -123,9 +139,17 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * Keying by question id means the set of questions is DATA, so un-hiding a
      * question makes its answer arrive without anybody editing this route.
      */
-    const body = (await request.json()) as { answers?: Record<string, unknown> };
+    const rawBody = await request.text();
+    if (rawBody.length > MAX_SUBMISSION_BYTES) {
+      return failure("That submission is too large.", 413);
+    }
+    let body: { answers?: Record<string, unknown> };
+    try {
+      body = JSON.parse(rawBody) as { answers?: Record<string, unknown> };
+    } catch {
+      return failure("That submission could not be read.");
+    }
     const answers = (body.answers ?? {}) as Record<string, unknown>;
-    const answerFor = (id: string, max = 400) => trimString(answers[id], max);
 
     /*
      * Which questions were actually ASKED. A hidden question is not asked, and
@@ -133,11 +157,39 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * either would refuse a submission over a field the submitter never saw.
      * This mirrors the filter the public renderer applies.
      */
-    const asked = record.config.questions.filter((question) => {
-      if (!question.visible || question.type === "PAGE_BLOCK") return false;
-      if (!question.showIf) return true;
-      return question.showIf.equals.includes(answerFor(question.showIf.questionId));
-    });
+    const visible = record.config.questions.filter(
+      (question) => question.visible && question.type !== "PAGE_BLOCK",
+    );
+    const visibleIds = new Set(visible.map((question) => question.id));
+    /*
+     * A conditional question's TRIGGER is read from the visible set only, which
+     * is what `askedQuestions` in form-projection.ts does with the projected
+     * questions. Reading it from the raw body would let a caller reveal a
+     * conditional question by answering a trigger the form never showed.
+     */
+    const triggerAnswer = (id: string) =>
+      visibleIds.has(id) ? trimString(answers[id], 400) : "";
+    const asked = visible.filter(
+      (question) =>
+        !question.showIf || question.showIf.equals.includes(triggerAnswer(question.showIf.questionId)),
+    );
+    const askedIds = new Set(asked.map((question) => question.id));
+
+    /*
+     * AN ANSWER TO A QUESTION THE FORM DID NOT ASK IS NOT AN ANSWER — mass
+     * assignment, closed at the one place every value is read.
+     *
+     * This was `trimString(answers[id], max)`, unfiltered, and the seven reads
+     * below take their ids from constants rather than from `asked`. So a caller
+     * posting straight to this endpoint could set the job's Priority — and
+     * therefore its SLA tier and its due date, which `priorityRule` computes
+     * from it — on a form whose Priority question the operator had HIDDEN.
+     * The same held for the requested date, the engineer, and the description
+     * that becomes the job's title. The form is the contract; anything outside
+     * it is discarded here rather than validated later.
+     */
+    const answerFor = (id: string, max = 400) =>
+      askedIds.has(id) ? trimString(answers[id], max) : "";
 
     /*
      * Required, enforced HERE and not only by the `required` attribute in the
@@ -162,7 +214,9 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * token issued below, not the count.
      */
     const declaredFiles = Number((body as { fileCount?: unknown }).fileCount ?? 0);
-    const fileCount = Number.isFinite(declaredFiles) ? Math.max(0, declaredFiles) : 0;
+    const fileCount = Number.isFinite(declaredFiles)
+      ? Math.min(MAX_DECLARED_FILES, Math.max(0, declaredFiles))
+      : 0;
 
     const missing = asked.find((question) => {
       if (!question.required) return false;
@@ -216,10 +270,27 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * nobody can act on is worse than no job. Only applied when the question is
      * actually being asked.
      */
-    if (asked.some((question) => question.id === "short_text") && description.length < 10) {
+    if (askedIds.has("short_text") && description.length < 10) {
       return failure("Please describe the work needed in a little more detail.");
     }
-    if (!location || !requester || !contact) {
+    /*
+     * REQUIRED WHEN ASKED, WHICH IS NOT THE SAME AS ALWAYS REQUIRED.
+     *
+     * These three were demanded unconditionally, which is right for the job
+     * board's form — it asks all three — and impossible for any other. A
+     * register generated from the generic template has no Location column, so
+     * its form has no Location question, so `location` was necessarily blank
+     * and every submission was refused with "Location, manager and contact
+     * details are required", naming fields the form had never shown. The gate
+     * on the job board's form is bit for bit what it was; a form that does not
+     * ask is no longer answered for.
+     */
+    const missingCore = [
+      askedIds.has(LOCATION_QUESTION_ID) && !location,
+      askedIds.has("short_text64") && !requester,
+      askedIds.has("numbertb4g1z46") && !contact,
+    ].some(Boolean);
+    if (missingCore) {
       return failure("Location, manager and contact details are required.");
     }
 
@@ -228,13 +299,21 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * could name any site string and have it matched against another tenant's
      * estate — the token authorises writing to one workspace, not to whichever
      * one happens to have a site by that name.
+     *
+     * Only looked up when a location was actually asked for. `site_id` is
+     * nullable precisely because a job whose site is not yet known has no site,
+     * and a register that does not ask where the work is has none to record.
      */
-    const [matchedSite] = await db
-      .select({ id: sites.id })
-      .from(sites)
-      .where(and(eq(sites.name, location), eq(sites.organisationId, record.organisationId)))
-      .limit(1);
-    if (!matchedSite) return failure("Choose a location from the list.");
+    let matchedSiteId: string | null = null;
+    if (location) {
+      const [matchedSite] = await db
+        .select({ id: sites.id })
+        .from(sites)
+        .where(and(eq(sites.name, location), eq(sites.organisationId, record.organisationId)))
+        .limit(1);
+      if (!matchedSite) return failure("Choose a location from the list.");
+      matchedSiteId = matchedSite.id;
+    }
 
     const [latest] = await db
       .select({
@@ -294,21 +373,49 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * "Incoming", which is the board's top group and the safe default: a job in
      * the wrong group is recoverable, a job that failed to save is not.
      */
-    let targetStage = "Incoming";
-    const configuredGroupId = record.config.features.board?.itemGroupId;
-    if (configuredGroupId) {
-      const [group] = await db
-        .select({ stageKey: maintenanceGroups.stageKey })
+    /*
+     * WHICH BOARD, AND WHICH OF ITS GROUPS. Both read from the form's own row.
+     *
+     * Nothing in the request decides either. There is no `?board=`, no header
+     * and no host to read: `record.boardId` and `record.organisationId` come
+     * from the `form_configurations` row the token resolved to, and that row is
+     * the only authority this endpoint has. A token is authorisation to write
+     * to ONE register in ONE workspace.
+     */
+    const boardKey = record.boardId;
+    const boardGroups = (
+      await db
+        .select({
+          id: maintenanceGroups.id,
+          stageKey: maintenanceGroups.stageKey,
+          archived: maintenanceGroups.archived,
+        })
         .from(maintenanceGroups)
         .where(
           and(
-            eq(maintenanceGroups.id, String(configuredGroupId)),
             eq(maintenanceGroups.organisationId, record.organisationId),
+            eq(maintenanceGroups.boardId, boardKey),
+            isNull(maintenanceGroups.deletedAt),
           ),
         )
-        .limit(1);
-      if (group?.stageKey) targetStage = group.stageKey;
-    }
+        .orderBy(asc(maintenanceGroups.position))
+    ).filter((group) => !group.archived);
+
+    /*
+     * The configured group had to belong to this ORGANISATION and to nothing
+     * else — so a group id stored while the setting pointed at another board
+     * resolved, and its `stage_key` decided where a submission on THIS board
+     * landed. Scoped to the board as well, a stale id resolves to nothing and
+     * the fallback below applies, which is the whole point of having one.
+     */
+    const configuredGroupId = record.config.features.board?.itemGroupId;
+    const configured = configuredGroupId
+      ? boardGroups.find((group) => group.id === String(configuredGroupId))
+      : undefined;
+    /* The board's own first lane, not the literal "Incoming": a generic
+       register has no group by that name and would have had nowhere to file. */
+    const targetGroup = configured ?? boardGroups[0] ?? null;
+    const targetStage = targetGroup?.stageKey ?? "Incoming";
 
     const wantsFiles = asked.some((question) => question.type === "File");
     const uploadToken = wantsFiles ? crypto.randomUUID().replace(/-/g, "") : null;
@@ -322,7 +429,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       .values({
         id,
         organisationId: record.organisationId,
-        siteId: matchedSite.id,
+        siteId: matchedSiteId,
         /*
          * Named so the board can tell a link submission from one raised inside
          * the product. Both are form answers; only one came from outside.
@@ -357,6 +464,47 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         createdByEmail: null,
       })
       .returning();
+
+    /*
+     * THE PLACEMENT — what actually puts the answer on this register.
+     *
+     * `maintenance_requests` carries no `board_id`; a row's board is decided by
+     * its `maintenance_group_items` placement (see `boardKeyForRequest` in
+     * app/lib/board-registry.ts). This route wrote no placement at all, and the
+     * consequence was not that the row went nowhere: `ensureBoardState` in
+     * /api/board files every UNPLACED work order in the organisation onto
+     * whichever board is being loaded, into `groups[0]`. So a submission
+     * through a section's form landed on whichever register somebody opened
+     * first — usually the job board, where 39 groups are named after real
+     * stores. Placing it here is what makes "submissions scoped to that
+     * instance" true, and it is also what makes it deterministic.
+     *
+     * `onConflictDoNothing` because `request_id` is the primary key of that
+     * table: one work order holds one placement across the whole workspace, and
+     * a retry must not move a row that is already filed.
+     */
+    if (targetGroup) {
+      const [tail] = await db
+        .select({ maxPosition: sql<number>`COALESCE(MAX(${maintenanceGroupItems.position}), -1)` })
+        .from(maintenanceGroupItems)
+        .where(
+          and(
+            eq(maintenanceGroupItems.organisationId, record.organisationId),
+            eq(maintenanceGroupItems.boardId, boardKey),
+            eq(maintenanceGroupItems.groupId, targetGroup.id),
+          ),
+        );
+      await db
+        .insert(maintenanceGroupItems)
+        .values({
+          requestId: id,
+          organisationId: record.organisationId,
+          boardId: boardKey,
+          groupId: targetGroup.id,
+          position: Number(tail?.maxPosition ?? -1) + 1,
+        })
+        .onConflictDoNothing();
+    }
 
     await db.insert(activityLog).values({
       id: crypto.randomUUID(),
@@ -395,19 +543,55 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       (question) => !handled.has(question.id) && answerFor(question.id),
     );
     if (extras.length) {
+      /*
+       * THE FORM'S OWN BOARD'S COLUMNS, and only those.
+       *
+       * This query was scoped to the ORGANISATION alone, so a question id that
+       * matched a column on any other register was accepted — and the cell was
+       * then written with `board_id: "maintenance"` as a literal, filing an
+       * answer given on one board into a cell on another. Both halves are the
+       * same mistake: a cell belongs to (board, request, column) and every one
+       * of the three has to come from the form.
+       *
+       * Matched on `column_key` as well as on the row id. A canonical question
+       * carries monday's id, a derived one carries its column's row id, and
+       * `deriveFormQuestions` uses the row id precisely so this lookup needs no
+       * second mapping — the key is accepted too so a form written against an
+       * imported board still files.
+       *
+       * SYSTEM COLUMNS ARE EXCLUDED. Their value is a field on
+       * `maintenance_requests`, so a cell for one is a row nothing ever reads:
+       * the seven fields above are what write them, by hand.
+       */
       const columns = await db
-        .select({ id: maintenanceBoardColumns.id })
+        .select({
+          id: maintenanceBoardColumns.id,
+          key: maintenanceBoardColumns.key,
+          system: maintenanceBoardColumns.system,
+        })
         .from(maintenanceBoardColumns)
-        .where(eq(maintenanceBoardColumns.organisationId, record.organisationId));
-      const known = new Set(columns.map((column) => column.id));
+        .where(
+          and(
+            eq(maintenanceBoardColumns.organisationId, record.organisationId),
+            eq(maintenanceBoardColumns.boardId, boardKey),
+            isNull(maintenanceBoardColumns.deletedAt),
+          ),
+        );
+      const columnFor = new Map<string, string>();
+      for (const column of columns) {
+        if (column.system) continue;
+        columnFor.set(column.id, column.id);
+        if (!columnFor.has(column.key)) columnFor.set(column.key, column.id);
+      }
       for (const question of extras) {
-        if (!known.has(question.id)) continue;
+        const columnId = columnFor.get(question.id);
+        if (!columnId) continue;
         await db.insert(maintenanceBoardCells).values({
           id: crypto.randomUUID(),
           organisationId: record.organisationId,
-          boardId: "maintenance",
+          boardId: boardKey,
           requestId: id,
-          columnId: question.id,
+          columnId,
           value: answerFor(question.id, 800),
         });
       }

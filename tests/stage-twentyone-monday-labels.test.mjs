@@ -74,9 +74,23 @@ test("an existing board is backfilled, but an admin's rename is not touched", as
    * exactly `{}` — never configured — is written, so a renamed or recoloured
    * label survives the next boot.
    */
-  assert.match(seeder.slice(0, 4000), /UPDATE maintenance_board_columns\s+SET settings = \?/);
+  /*
+   * RE-POINTED: the window, not the rule.
+   *
+   * This read `seeder.slice(0, 4000)`, a byte count chosen when the function
+   * was shorter. W2 gave `seedBoardStructure` a `groupKeys` parameter — so a
+   * section created from the Jobs template can be seeded by THIS function
+   * rather than by a second copy of the job board's structure — and the note
+   * explaining why a subset may only ever narrow pushed the backfill past 4000.
+   * The assertion below was protecting a real contract and would have started
+   * passing vacuously on any future comment, so it is bounded by the function
+   * instead: everything up to its last statement.
+   */
+  const columnPass = seeder.slice(0, seeder.indexOf("await reconcileDuplicateColumns"));
+  assert.ok(columnPass.length > 0, "the seeder must still end in a reconcile pass");
+  assert.match(columnPass, /UPDATE maintenance_board_columns\s+SET settings = \?/);
   assert.match(
-    seeder.slice(0, 4000),
+    columnPass,
     /TRIM\(COALESCE\(settings, ''\)\) IN \('', '\{\}'\)/,
     "the backfill must only touch an unconfigured column",
   );

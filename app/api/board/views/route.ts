@@ -1,12 +1,20 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { boardViews, formConfigurations } from "../../../../db/schema";
+import {
+  boardViews,
+  formConfigurations,
+  maintenanceBoardColumns,
+} from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { RETENTION_DAYS, sendBoardViewToBin } from "../../../lib/recycle-bin";
+/* `DEFAULT_BOARD_KEY` is deliberately NOT imported any more. `seedViews` was
+   the last thing in this file that compared a board key to it, and importing a
+   constant whose only use would be such a comparison is how the next one gets
+   written. Which board a request is about comes from `resolveBoard`; what a
+   board may DO comes from the board's own record and columns. */
 import {
   BoardNotFoundError,
-  DEFAULT_BOARD_KEY,
   isBoardNotFound,
   resolveBoard,
   type BoardRecord,
@@ -15,9 +23,30 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * View types the chrome can render. `table` and `form` exist today; the rest
- * render a placeholder until their group lands, so the tab strip is honest
- * about what is built rather than hiding future work.
+ * EVERY VIEW TYPE THE PRODUCT SHIPS A RENDERER FOR — AND NOTHING ELSE.
+ *
+ * ONE LIST, ONE ANSWER, FOR THE CANONICAL JOB BOARD AND FOR EVERY INSTANCE.
+ * This is the "+ Add view" menu and the tab strip's build state at the same
+ * time, and `typesFor` below is the only thing that narrows it. A section's
+ * generated register therefore offers what its source offers BY CONSTRUCTION —
+ * there is no second list, and nothing anywhere compares a board key to decide
+ * what a board may draw.
+ *
+ * A TYPE WITH NO RENDERER IS NOT LISTED AT ALL — owner §8/§26.
+ *
+ * `timeline` sat in this list with `built: false`, so the "+" menu drew a
+ * greyed "Timeline · soon" entry on every board and the route refused it with a
+ * 409. The owner's rule is that a type the original does not support "must not
+ * be offered at all — not greyed, not a no-op", and a disabled entry for
+ * something nobody has started is still an offer. monday's capture of board
+ * 1139774521 has no timeline tab either (see SEED_VIEWS below), so there is no
+ * original to be at parity with and nothing was ever going to render. It is
+ * gone from the offer entirely rather than disabled inside it.
+ *
+ * `built` here means "this product has a renderer". Whether THIS BOARD can
+ * produce a working view of it is a different question, asked per board by
+ * `typesFor`, which is where a form-backed type on a form-less register is
+ * turned into an offer that carries its own configuration instruction.
  *
  * The last four are Stage 19's monday-parity renderers. Their labels describe
  * what the type does rather than repeating the seeded tab name, because this
@@ -29,7 +58,6 @@ export const VIEW_TYPES = [
   { key: "form", label: "Form", icon: "document", built: true },
   { key: "kanban", label: "Kanban", icon: "list", built: true },
   { key: "calendar", label: "Calendar", icon: "calendar", built: true },
-  { key: "timeline", label: "Timeline", icon: "chart", built: false },
   { key: "chart", label: "Chart", icon: "chart", built: true },
   { key: "gallery", label: "File gallery", icon: "image", built: true },
   { key: "reports", label: "Reports", icon: "chart", built: true },
@@ -38,6 +66,28 @@ export const VIEW_TYPES = [
   { key: "flat-table", label: "Flat table", icon: "grid", built: true },
   { key: "vibe", label: "Vibe app", icon: "spark", built: true },
 ] as const;
+
+/**
+ * What a board is offered, once its own capabilities have been read.
+ *
+ * `built` is the product's answer narrowed to this board; `unavailable` is the
+ * sentence that goes with a `false`. The pair exists because "not offered" and
+ * "offered, and here is what to configure first" are different things to a
+ * person, and the menu could previously only say "soon" — which is not true of
+ * a renderer this product shipped a year ago.
+ *
+ * The shape mirrors `SECTION_TEMPLATES` in `app/api/workspace-sections/
+ * catalogue.ts`, which answers the same §8 question for the Add-section dialog:
+ * an entry that cannot be chosen is drawn WITH ITS REASON, because an
+ * unavailable entry with no reason is a dead control.
+ */
+export type ViewTypeOffer = {
+  key: string;
+  label: string;
+  icon: string;
+  built: boolean;
+  unavailable?: string;
+};
 
 type SeedView = {
   key: string;
@@ -84,9 +134,16 @@ const SEED_VIEWS: SeedView[] = [
 const SEED_KEYS = new Set(SEED_VIEWS.map((view) => view.key));
 
 /**
- * Marks a board as carrying monday's eleven tabs. Stamped on the `main` row,
+ * Marks a board whose seeded strip has been decided. Stamped on the `main` row,
  * which is the one view DELETE refuses to remove, so the marker cannot be lost
  * by an admin tidying up their tab strip.
+ *
+ * THE VALUE IS HISTORY AND MUST NOT BE "CORRECTED". It read "monday's eleven"
+ * when only the canonical job board was ever seeded; a generated Jobs register
+ * with no form of its own takes eight of the same tabs, so the name is now
+ * narrower than the thing it marks. Changing the string would make every board
+ * already carrying it look unstamped and re-run the upgrade over strips their
+ * admins have since edited — the one thing `seedViews` promises never to do.
  */
 const PARITY_STAMP = "monday-11";
 
@@ -217,13 +274,27 @@ function seedId(orgId: string, boardKey: string, viewKey: string) {
 }
 
 /**
- * The three view types that are a FORM's surfaces rather than the board's.
+ * The two view types that read a FORM'S ANSWERS rather than the board's rows.
  *
- * `form` is the form itself, and `form-results` and `form-responses` count and
- * list what people sent through it. All three name the form in their own copy.
+ * `form-results` counts how the answers to each question divide and
+ * `form-responses` lists the submissions; both name the form in their own copy,
+ * and `FormResultsView` walks `maintenanceFormSpec.questions` to decide what to
+ * count. On a register with no form of its own that panel would head itself
+ * with the CANONICAL form's title — "No responses to Maintenance Request yet"
+ * on a register for CCTV — and list the job board's questions with zero answers
+ * beside each. Not a leak of data, but a confident answer about a form that
+ * does not exist.
+ *
+ * `form` IS NOT ONE OF THEM, and that changed with W2 requirement B. The Form
+ * view is the form's own surface rather than a reader of it, and `FormBuilder`
+ * now offers "Create a form for this register" when the board has none —
+ * deriving its questions from that board's own columns — instead of falling
+ * through to `FormView`, which posts to `/api/maintenance` and would have filed
+ * onto the job board. Keeping `form` gated here would have left that create
+ * button unreachable on the only boards that need it: an instance would be
+ * refused the tab that offers to make the thing the tab is waiting for.
  */
-const FORM_BACKED: ReadonlySet<string> = new Set([
-  "form",
+const READS_FORM_ANSWERS: ReadonlySet<string> = new Set([
   "form-results",
   "form-responses",
 ]);
@@ -232,24 +303,39 @@ const FORM_BACKED: ReadonlySet<string> = new Set([
  * WHICH TYPES THIS BOARD CAN ACTUALLY PRODUCE A WORKING VIEW OF — owner §8/§26.
  *
  * `VIEW_TYPES` says whether the product has BUILT a renderer. That is not the
- * same question as whether this board can use it, and the difference is a leak
- * rather than a cosmetic one: a section's generated register has no form, and
- * `FormBuilder` asks `/api/board/form` with no board at all, so a Form view
- * added to a register drew the CANONICAL JOB BOARD's public form — its title,
- * its questions, and the Location dropdown listing all 39 real store names —
- * with a working Submit that filed the job onto the job board. Verified on the
- * running server: the Form tab on `sec-f47167fe0157` rendered "Maintenance
- * Request … Please fill up 1 form for each repair requested" and the estate.
+ * same question as whether this board can use it, and this is the only place
+ * the two answers are allowed to differ.
  *
- * So a board with no form of its own reports the three form-backed types as
- * unbuilt: the "+" menu draws them disabled, `POST` refuses them, and an
- * existing row of that type renders the placeholder instead of somebody else's
- * form. The job board has a form and is unaffected. The other half of this —
- * teaching `FormBuilder` to ask for its own board — belongs to the form lane;
- * until it lands, this is what stops the form being served where it does not
- * belong.
+ * IT IS AN OFFER WITH A CONDITION, NOT A REFUSAL. A type that lands here is
+ * neither "supported" nor "not supported by the original" — it is the owner's
+ * third category, REQUIRES CONFIGURATION: the original supports it, this board
+ * will too once it has been configured, and until then the entry carries the
+ * sentence saying exactly what is missing. Dropping it from the list would tell
+ * an operator the product cannot do something it does every day on the board
+ * next door; drawing it with a "soon" pill would say nobody has written it yet,
+ * which is untrue of a renderer that shipped in Stage 19.
+ *
+ * THE SAME FUNCTION ANSWERS FOR EVERY BOARD. `maintenance` and `sec-<12hex>`
+ * go through this identical query against their own `form_configurations` row.
+ * That is the whole of requirement C's "absent for the same reason it is absent
+ * on the original, expressed in shared code, not by comparing board keys": the
+ * job board has a form, so it is offered everything; a register that has not
+ * been given one yet is short exactly the two views that read a form's answers,
+ * and it stops being short them the moment somebody creates one.
  */
-async function typesFor(db: Database, orgId: string, boardKey: string) {
+function needsOwnForm(label: string) {
+  return (
+    `${label} counts the answers to this register's own form, and this ` +
+    `register has none yet. Open the Form view and create one — its questions ` +
+    `come from this board's own columns — and this view then reads it.`
+  );
+}
+
+async function typesFor(
+  db: Database,
+  orgId: string,
+  boardKey: string,
+): Promise<ViewTypeOffer[]> {
   const [form] = await db
     .select({ id: formConfigurations.id })
     .from(formConfigurations)
@@ -262,8 +348,65 @@ async function typesFor(db: Database, orgId: string, boardKey: string) {
     .limit(1);
   if (form) return VIEW_TYPES.map((type) => ({ ...type }));
   return VIEW_TYPES.map((type) =>
-    FORM_BACKED.has(type.key) ? { ...type, built: false } : { ...type },
+    READS_FORM_ANSWERS.has(type.key)
+      ? { ...type, built: false, unavailable: needsOwnForm(type.label) }
+      : { ...type },
   );
+}
+
+/**
+ * THE COLUMNS THAT MAKE A BOARD A JOBS REGISTER — the capability that replaced
+ * a board-key comparison.
+ *
+ * `seedViews` below used to open with `if (boardKey !== DEFAULT_BOARD_KEY)
+ * return;`, which is exactly the isolation-by-route-string the owner ruled out.
+ * Its effect was the parity gap he is buying against: the canonical job board
+ * came up with monday's eleven tabs and a register generated from the SAME Jobs
+ * template came up with one, so "the original section, with all its
+ * functionality and configuration, but empty" arrived without its Fix Tracker,
+ * its Calendar, its Chart, its File gallery or its Board Reports.
+ *
+ * A board is a Jobs register when it carries the Jobs register's own columns,
+ * and only `seedBoardStructure` in `db/init.ts` produces them — the canonical
+ * board through `ensureDatabase`, an instance through
+ * `provisionDefaultStructure`. So the test is true for both and false for
+ * everything else: Store Documentation's twelve are `rams`/`patExpiry`/…, and
+ * the pre-template generic register's six are `name`/`state`/`owner`/… . None
+ * of them is `issuePictures`.
+ *
+ * Four keys rather than one, because a single column is a coincidence and these
+ * four span the spec — a status, a priority, a date and a file column. All four
+ * are `system` (request-backed) columns, which is what makes them the board's
+ * shape rather than an admin's arrangement.
+ */
+const JOBS_REGISTER_COLUMNS = ["status", "priority", "requested", "issuePictures"];
+
+async function isJobsRegister(db: Database, orgId: string, boardKey: string) {
+  const rows = await db
+    .select({ key: maintenanceBoardColumns.key })
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.organisationId, orgId),
+        eq(maintenanceBoardColumns.boardId, boardKey),
+      ),
+    );
+  const keys = new Set(rows.map((row) => row.key));
+  return JOBS_REGISTER_COLUMNS.every((key) => keys.has(key));
+}
+
+/**
+ * The seeded strip this board can actually serve.
+ *
+ * SEED_VIEWS is monday's eleven; a register with no form of its own cannot
+ * serve three of them, and seeding a tab that opens onto its own refusal is the
+ * dead tab this whole workstream is about. Filtered through the SAME
+ * `typesFor` answer the "+" menu is drawn from, so the strip and the menu
+ * cannot disagree about what this board can do.
+ */
+function seedStripFor(types: ViewTypeOffer[]) {
+  const built = new Map(types.map((type) => [type.key, type.built]));
+  return SEED_VIEWS.filter((view) => built.get(view.type) === true);
 }
 
 /** A view's stored settings, never throwing on a row an admin has hand-edited. */
@@ -284,27 +427,33 @@ function seedSettings(view: SeedView) {
 }
 
 /**
- * Brings a board seeded before Stage 19 up to monday's eleven tabs — the four
- * that were folded away are inserted, "Reports" takes monday's own name, and
- * every seeded tab moves to monday's position.
+ * Brings a board that has a `main` tab and nothing else up to the strip its
+ * template gives it — the missing tabs are inserted, "Reports" takes monday's
+ * own name, and every seeded tab moves to its position in `strip`.
+ *
+ * TWO BOARDS ARRIVE HERE AND THEY ARE THE SAME CASE. The canonical job board
+ * was seeded before Stage 19 and is missing the four tabs that were folded
+ * away. A register generated for a workspace section was given exactly one tab
+ * by `provisionMainView` in `app/lib/board-registry.ts` and is missing the rest
+ * of the strip its Jobs template implies. Both are "a board holding a subset of
+ * the strip it should have", and running one function over both is what stops
+ * the instance drifting from its source the next time a tab is added.
  *
  * Runs once. The marker lives on `main.settings` rather than being inferred
  * from which tabs are present, so Stage 5's promise survives: an admin who
  * deletes Results does not get it back on the next page load.
  */
-async function upgradeToMondayViews(db: Database, orgId: string, boardKey: string) {
-  const rows = await db
-    .select()
-    .from(boardViews)
-    .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, boardKey)));
-
-  const main = rows.find((row) => row.key === "main");
-  // No `main` row means these views are not ours to reorder — leave them be.
-  if (!main || readSettings(main.settings).seed === PARITY_STAMP) return;
-
+async function upgradeToTemplateStrip(
+  db: Database,
+  orgId: string,
+  boardKey: string,
+  rows: Array<typeof boardViews.$inferSelect>,
+  main: typeof boardViews.$inferSelect,
+  strip: SeedView[],
+) {
   const byKey = new Map(rows.map((row) => [row.key, row]));
 
-  for (const [position, view] of SEED_VIEWS.entries()) {
+  for (const [position, view] of strip.entries()) {
     const existing = byKey.get(view.key);
     if (!existing) {
       await db
@@ -339,15 +488,33 @@ async function upgradeToMondayViews(db: Database, orgId: string, boardKey: strin
       .where(and(eq(boardViews.id, existing.id), eq(boardViews.organisationId, orgId)));
   }
 
-  // Views an admin added keep their relative order, behind monday's eleven.
+  // Views an admin added keep their relative order, behind the seeded strip.
   for (const row of rows) {
     if (SEED_KEYS.has(row.key)) continue;
     await db
       .update(boardViews)
-      .set({ position: SEED_VIEWS.length + row.position, updatedAt: sql`CURRENT_TIMESTAMP` })
+      .set({ position: strip.length + row.position, updatedAt: sql`CURRENT_TIMESTAMP` })
       .where(and(eq(boardViews.id, row.id), eq(boardViews.organisationId, orgId)));
   }
 
+  await stampStripApplied(db, orgId, main);
+}
+
+/**
+ * Records that the seeded-strip decision has been made for this board.
+ *
+ * Written on the `main` row — the one view DELETE refuses to remove — so the
+ * marker cannot be lost by an admin tidying up their tab strip. It is stamped
+ * on a board that takes NO strip as well as on one that has just been given
+ * its own, because "decided" is the thing being recorded: without that, a
+ * register the product does not seed would re-ask the question on every single
+ * page load for ever.
+ */
+async function stampStripApplied(
+  db: Database,
+  orgId: string,
+  main: typeof boardViews.$inferSelect,
+) {
   await db
     .update(boardViews)
     .set({
@@ -358,28 +525,56 @@ async function upgradeToMondayViews(db: Database, orgId: string, boardKey: strin
 }
 
 /**
- * Seeds the default tab set on first read. Idempotent — an admin who deletes a
- * seeded view does not get it back on the next page load.
+ * Seeds the tab strip a board's own structure entitles it to, on first read.
+ * Idempotent — an admin who deletes a seeded view does not get it back on the
+ * next page load.
  *
- * The set is the maintenance board's, so it is only seeded there. Every other
- * board declares its own tabs in its own component — Store Documentation's
- * three (Main table, Compliance Tracker, Calendar) live in
- * `views/store-documentation-board.tsx` — and seeding Fix Tracker or the
- * Maintenance Request form onto them would offer tabs that cannot render.
+ * NOT "ONLY THE MAINTENANCE BOARD". This opened `if (boardKey !==
+ * DEFAULT_BOARD_KEY) return;`, and that single line was the parity gap the
+ * owner reported: a register generated from the Jobs template came up with the
+ * one tab `provisionMainView` gave it while the board it was copied from came
+ * up with eleven, so "the original section, with all its functionality and
+ * configuration" arrived with no Fix Tracker, no Calendar, no Chart, no File
+ * gallery and no Board Reports. The question is now asked of the BOARD — see
+ * `isJobsRegister` — so an instance is seeded because it IS a Jobs register,
+ * not because of what it is called.
+ *
+ * A board that is not one keeps whatever its own creator gave it. Store
+ * Documentation declares its three tabs in `views/store-documentation-board.tsx`
+ * and holds no `board_views` rows at all; the pre-template generic register
+ * holds the single Main table `board-registry.ts` seeds it. Neither is offered
+ * Fix Tracker or the Maintenance Request form, which is what the board-key test
+ * was protecting and what the column test protects properly.
  */
-async function seedViews(db: Database, orgId: string, boardKey: string) {
-  if (boardKey !== DEFAULT_BOARD_KEY) return;
-
+async function seedViews(
+  db: Database,
+  orgId: string,
+  boardKey: string,
+  types: ViewTypeOffer[],
+) {
   const [existing] = await db
     .select({ total: sql<number>`COUNT(*)` })
     .from(boardViews)
     .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, boardKey)));
+
   if (Number(existing?.total ?? 0) > 0) {
-    await upgradeToMondayViews(db, orgId, boardKey);
+    const rows = await db
+      .select()
+      .from(boardViews)
+      .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, boardKey)));
+    const main = rows.find((row) => row.key === "main");
+    // No `main` row means these views are not ours to reorder — leave them be.
+    if (!main || readSettings(main.settings).seed === PARITY_STAMP) return;
+    if (!(await isJobsRegister(db, orgId, boardKey))) {
+      await stampStripApplied(db, orgId, main);
+      return;
+    }
+    await upgradeToTemplateStrip(db, orgId, boardKey, rows, main, seedStripFor(types));
     return;
   }
 
-  for (const [position, view] of SEED_VIEWS.entries()) {
+  if (!(await isJobsRegister(db, orgId, boardKey))) return;
+  for (const [position, view] of seedStripFor(types).entries()) {
     await db
       .insert(boardViews)
       .values({
@@ -406,7 +601,15 @@ export async function GET(request: Request) {
     const { db, orgId } = await scopedDb(request);
     const board = await boardFrom(request, db, orgId);
 
-    await seedViews(db, orgId, board.key);
+    /*
+     * Per BOARD, not per product — see `typesFor`. ONE answer feeds the seeded
+     * strip, the tab strip's `built` flags and the "+" menu, so none of the
+     * three can disagree about what this board can draw. Asked BEFORE seeding
+     * because it is what decides which tabs the strip is entitled to; nothing
+     * seeding does can change the answer.
+     */
+    const types = await typesFor(db, orgId, board.key);
+    await seedViews(db, orgId, board.key, types);
 
     const rows = await db
       .select()
@@ -414,10 +617,7 @@ export async function GET(request: Request) {
       .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, board.key)))
       .orderBy(asc(boardViews.position));
 
-    /* Per BOARD, not per product — see `typesFor`. One answer feeds both the
-       tab strip's `built` flags and the "+" menu, so they cannot disagree. */
-    const types = await typesFor(db, orgId, board.key);
-    const built = new Map<string, boolean>(types.map((type) => [type.key, type.built]));
+    const offers = new Map(types.map((type) => [type.key, type]));
 
     return Response.json({
       board,
@@ -433,7 +633,19 @@ export async function GET(request: Request) {
         filters: JSON.parse(row.filters || "[]"),
         sort: JSON.parse(row.sort || "[]"),
         settings: readSettings(row.settings),
-        built: built.get(row.type) ?? false,
+        built: offers.get(row.type)?.built ?? false,
+        /*
+         * WHY THE ROW CARRIES THE REASON AND NOT JUST THE FLAG.
+         *
+         * `board-view-pane.tsx` used to hold its own copy of `FORM_BACKED` so
+         * it could say why a tab was refusing to draw — a second statement of
+         * the classification, in a file that has no idea whether this board has
+         * a form. Sending the sentence with the row leaves one author of it.
+         * A row naming a type this build no longer offers (`timeline`) is not
+         * in `offers` at all and gets no reason, which is what the pane's
+         * "is not built yet" fallback is for.
+         */
+        unavailable: offers.get(row.type)?.unavailable,
       })),
       types,
     });
@@ -464,20 +676,21 @@ export async function POST(request: Request) {
       return bad(`"${type}" is not a view type.`);
     }
     /*
-     * A TYPE NOTHING CAN RENDER IS NOT A VIEW — owner §8/§26.
+     * A TYPE THIS BOARD CANNOT SERVE IS NOT A VIEW — owner §8/§26.
      *
      * The "+" menu listed every entry in `VIEW_TYPES` as a live choice, unbuilt
      * ones included, so picking Timeline wrote a real row, drew a real tab and
      * opened a panel reading "Timeline is not built yet". A clickable no-op that
-     * leaves a dead tab behind on the board. The menu now draws those entries
-     * disabled (`AddViewMenu`), and this is the same rule on the server so the
-     * row cannot be created by any other caller either.
+     * leaves a dead tab behind on the board. Timeline is no longer offered at
+     * all; what is left here is the board-specific case — a form-backed type on
+     * a register with no form — and the refusal carries `typesFor`'s own
+     * sentence rather than a second copy of it, so the server's answer and the
+     * menu's label are the same words.
      */
     if (!definition.built) {
       return bad(
-        FORM_BACKED.has(type)
-          ? `This board has no form of its own, so ${definition.label} would have nothing to show.`
-          : `${definition.label} is not built yet, so it cannot be added.`,
+        definition.unavailable ??
+          `${definition.label} cannot be added to this board.`,
         409,
       );
     }
@@ -562,6 +775,30 @@ export async function PATCH(request: Request) {
         .where(and(eq(boardViews.organisationId, orgId), eq(boardViews.boardId, board.key)));
       const byId = new Map(before.map((row) => [row.id, row]));
       const moved: Array<{ id: string; name: string; from: number; to: number }> = [];
+
+      /*
+       * A REORDER NAMING A VIEW ON ANOTHER BOARD IS REFUSED, NOT IGNORED.
+       *
+       * Scoping the lookup to this board (above) already stopped the write —
+       * a foreign id is simply not in `byId`, so the UPDATE never ran. But the
+       * loop then `continue`d past it and the request came back `{ ok: true }`.
+       * Measured on the running server: `PATCH ?board=<a section>` carrying the
+       * canonical job board's `form` view answered 200 with the job board
+       * untouched, so the caller was told a reorder had happened that could
+       * not have happened. Every other verb on this route answers 404 for the
+       * same mistake — `wrongBoard` — and an order list is no different: the
+       * ids come from the client, and a client working from a stale strip needs
+       * to be told its strip is stale rather than shown a success.
+       *
+       * Only when the request NAMED a board, exactly as `wrongBoard` is. A
+       * caller addressing views purely by id keeps the old, lenient behaviour.
+       */
+      if (named) {
+        for (const entry of body.order) {
+          const id = text(entry?.id, 64);
+          if (id && !byId.has(id)) return bad("That view is not on this board.", 404);
+        }
+      }
 
       for (const entry of body.order) {
         const id = text(entry?.id, 64);

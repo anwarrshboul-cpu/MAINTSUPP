@@ -53,6 +53,9 @@ async function initialize() {
   await ensureTenantIdentities(d1);
 
   await ensureStageTwoFoundation(d1);
+  /* W2 — the register scope column. After Stage 2 because `site_groups`
+     is created there and `addColumn` skips a table that does not exist. */
+  await ensureRegisterScope(d1);
   await ensureStageThreeBoardEngine(d1);
   await ensureStageFourItems(d1);
   await ensureImportIdentity(d1);
@@ -1716,6 +1719,71 @@ async function ensureTenantIdentities(d1: D1DatabaseLike) {
  * migrations run at deploy time; until then an existing database that never
  * saw the migration must not fail on first request.
  */
+/**
+ * W2 — WHICH REGISTER A SITE, A CONTRACTOR OR A REPORTING GROUP BELONGS TO.
+ *
+ * One nullable TEXT column on three tables, and three indexes. Nothing else:
+ * no UPDATE, no backfill, no constraint. Every row that exists when this first
+ * runs reads NULL, and `app/lib/register-scope.ts` defines NULL as the
+ * canonical register — the workspace's own Sites and Contractors screens. So
+ * this is a no-op for existing data by construction, not by care.
+ *
+ * `board_id` is the name the schema already uses twelve times for exactly this
+ * fact: a key out of `boards` naming the register a row belongs to. Sites and
+ * Contractors are simply the two registers whose rows are not board-placed, so
+ * they never had one. Adding a differently-named column for the same fact is
+ * how a codebase ends up with two answers to one question.
+ *
+ * Nullable rather than `NOT NULL DEFAULT 'maintenance'` — which is how the
+ * other twelve are declared — because the canonical Sites and Contractors
+ * screens have no board behind them at all. `SECTION_SURFACES` records
+ * `boardKey: null` for both and `builtInSectionBoard()` returns null for both;
+ * this column persists that answer rather than inventing a sentinel that would
+ * need the client's live estate rewritten to carry it.
+ *
+ * PLACED AFTER STAGE 2, and that matters: `site_groups` is created by
+ * `ensureStageTwoFoundation`, and `addColumn` treats a table that does not yet
+ * exist as "nothing to extend" and returns. Called any earlier, the group
+ * column would silently never be added and an instance's Sites screen would
+ * list the canonical register's reporting groups.
+ *
+ * NO UNIQUE INDEX IS CREATED HERE, deliberately. A unique index cannot be
+ * created over data that already violates it, and this file runs on the boot
+ * path of every request — so a workspace holding two sites of the same name
+ * (which `findDuplicateCandidates` explicitly permits, because two centres in
+ * one city genuinely share one) would throw on every request and take the
+ * application down. The ambiguity it would have guarded is closed in the
+ * resolvers instead: `resolveSiteByName` and `resolveContractorLink` count
+ * matches within one scope and refuse on two, which is the rule this file
+ * already states for contractors at the backfill above.
+ */
+async function ensureRegisterScope(d1: D1DatabaseLike) {
+  const scopeColumns: Array<[string, string]> = [
+    ["sites", "board_id"],
+    ["contractors", "board_id"],
+    ["site_groups", "board_id"],
+  ];
+  for (const [table, column] of scopeColumns) {
+    await addColumn(d1, table, column, "TEXT");
+  }
+
+  /* Non-unique, and paired with `organisation_id` because the scope predicate
+     never appears without it — every scoped query in `app/lib/register-scope.ts`
+     is `and(organisation, scope)`. `CREATE INDEX IF NOT EXISTS` is untouched by
+     `db/sqlite-to-postgres.ts` and valid verbatim in both dialects. */
+  await d1.batch([
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS sites_organisation_board_idx ON sites (organisation_id, board_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractors_organisation_board_idx ON contractors (organisation_id, board_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS site_groups_organisation_board_idx ON site_groups (organisation_id, board_id)",
+    ),
+  ]);
+}
+
 async function ensureStageTwoFoundation(d1: D1DatabaseLike) {
   const siteColumns: Array<[string, string]> = [
     ["slug", "text"],
@@ -2132,6 +2200,7 @@ async function ensureStageThreeBoardEngine(d1: D1DatabaseLike) {
          name TEXT NOT NULL,
          description TEXT,
          kind TEXT NOT NULL DEFAULT 'maintenance',
+         template TEXT,
          item_noun TEXT NOT NULL DEFAULT 'Job',
          reference_prefix TEXT NOT NULL DEFAULT 'MS',
          reference_counter INTEGER NOT NULL DEFAULT 0,
@@ -2435,8 +2504,28 @@ export async function seedBoardStructure(
   d1: D1DatabaseLike,
   organisationId: string,
   boardKey = "maintenance",
+  /*
+   * WHICH GROUPS TO SEED - all 38 unless a caller names a subset.
+   *
+   * The canonical job board passes nothing and is seeded exactly as before.
+   * A section created from the Jobs template passes
+   * `JOBS_TEMPLATE_GROUP_KEYS`, because 31 of the 38 are THIS estate's filing
+   * (28 `done-<store>` lanes and three dated month archives) rather than the
+   * Jobs product's shape - a new section for CCTV opening with a "Bluewater
+   * completed" lane would be cloning the live board, which is the opposite of
+   * the empty independent instance a template is for.
+   *
+   * A subset only ever narrows. It cannot introduce a group the spec does not
+   * define, so an instance and its source can never disagree about what a lane
+   * called `jobs-booked` is, and `STAGE_BY_GROUP_KEY` still routes a filed job
+   * into it on both.
+   */
+  groupKeys?: readonly string[],
 ) {
   const columnsToSeed = [...seedColumns, ...seedUiColumns];
+  const groupsToSeed = groupKeys
+    ? seedGroups.filter((group) => groupKeys.includes(group.key))
+    : seedGroups;
 
   for (const [position, column] of columnsToSeed.entries()) {
     const settings = maintenanceColumnSettings(column.type, column.optionSetKey);
@@ -2543,7 +2632,7 @@ export async function seedBoardStructure(
       .run();
   }
 
-  for (const [position, group] of seedGroups.entries()) {
+  for (const [position, group] of groupsToSeed.entries()) {
     await d1
       .prepare(
         `INSERT OR IGNORE INTO maintenance_groups
@@ -3336,6 +3425,16 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
      templates. A template added to `SECTION_TEMPLATES` later slots into this
      column with no further migration, which is why it carries no CHECK. */
   await addColumn(d1, "workspace_sections", "template", "TEXT");
+  /*
+   * W2 - the same fact on the REGISTER rather than on the menu entry, because
+   * the two answer different questions and the register is the one that has to
+   * survive its section being re-homed, archived or detached. Nullable for the
+   * same reason and with the same reading: NULL is "predates templates", never
+   * "assume Jobs". `ensureBoardState` uses it to decide whether the maintenance
+   * spec's newest column belongs on a board, so a legacy section's generic
+   * register is left exactly as it is.
+   */
+  await addColumn(d1, "boards", "template", "TEXT");
 }
 
 

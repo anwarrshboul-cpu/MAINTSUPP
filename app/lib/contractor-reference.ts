@@ -58,6 +58,15 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { contractors } from "../../db/schema";
+/*
+ * W2 — which REGISTER the roster being searched is. See `register-scope.ts`
+ * for the model; the two paragraphs below are why this module needed it.
+ */
+import {
+  CANONICAL_REGISTER,
+  registerScopeFilter,
+  type RegisterScope,
+} from "./register-scope";
 
 type ContractorDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -103,6 +112,24 @@ export async function resolveContractorLink(
   db: ContractorDatabase,
   orgId: string,
   contractor: unknown,
+  /**
+   * WHICH ROSTER IS BEING SEARCHED — W2, and the reason this argument exists.
+   *
+   * Before it, the predicate was organisation-wide. So the moment a section
+   * created from the Contractors template held a row under a name the canonical
+   * roster already used, `rows.length` became 2 for every canonical job naming
+   * that contractor, the answer flipped to `ambiguous`, and every one of those
+   * jobs silently stopped linking — accepted W5/W6 behaviour regressed by
+   * somebody adding a ROW, with no code change and no error anywhere. That is
+   * the blocker `SECTION_TEMPLATES` names in the Contractors entry.
+   *
+   * The default is `CANONICAL_REGISTER`, and that is the whole fix: a job
+   * resolves against the workspace's own roster unless a caller explicitly says
+   * otherwise, so an instance's rows are invisible to it and the canonical
+   * links are exactly what they were. An instance's contractors are reachable
+   * only by naming that instance — see `resolveRegisterScope`.
+   */
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<ContractorLink> {
   const text = typeof contractor === "string" ? contractor.trim() : "";
   if (!text) return { contractorId: null, reason: "cleared", matches: 0 };
@@ -113,6 +140,7 @@ export async function resolveContractorLink(
     .where(
       and(
         eq(contractors.organisationId, orgId),
+        registerScopeFilter(contractors.boardId, scope),
         sql`lower(trim(${contractors.name})) = lower(trim(${text}))`,
       ),
     )
@@ -141,8 +169,12 @@ export async function contractorLinkValues(
   db: ContractorDatabase,
   orgId: string,
   values: { contractor?: string | null },
+  /* The roster the job's own register draws from. Omitted means the canonical
+     one, which is what every existing caller means and what a job on the job
+     board must keep meaning. */
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<{ contractorId?: string | null; link?: ContractorLink }> {
   if (!("contractor" in values)) return {};
-  const link = await resolveContractorLink(db, orgId, values.contractor);
+  const link = await resolveContractorLink(db, orgId, values.contractor, scope);
   return { contractorId: link.contractorId, link };
 }

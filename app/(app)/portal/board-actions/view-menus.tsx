@@ -21,7 +21,14 @@ import { iconFor } from "../board-tab-glyph";
 import { AnchoredPopover } from "../overlay/anchored";
 
 type MenuView = { id: string; key: string; name: string; system: boolean };
-type MenuType = { key: string; label: string; icon: string; built: boolean };
+type MenuType = {
+  key: string;
+  label: string;
+  icon: string;
+  built: boolean;
+  /** See `ViewType.unavailable` in `../board-view-types.ts`. */
+  unavailable?: string;
+};
 
 export function ViewTabMenu({
   view,
@@ -116,31 +123,52 @@ export function AddViewMenu({
     <AnchoredPopover open={open} anchorRef={anchorRef} onClose={onClose} placement="bottom-end" label="Add a view">
       <div className="ba-menu ba-menu--views">
         {/*
-          AN ENTRY THAT CANNOT MAKE A WORKING VIEW IS DISABLED, NOT CLICKABLE.
+          THREE STATES, AND THE MIDDLE ONE IS THE POINT — owner §8/§26.
 
-          Every type was offered as a live choice with a "soon" tag beside the
-          unbuilt ones, so picking Timeline wrote a real `board_views` row, drew
-          a real tab and opened a panel reading "Timeline is not built yet" —
-          a clickable no-op that left a dead tab on the board somebody then had
-          to find and delete. The tag stays, because hiding the type would say
-          the product has no plans for it; what goes is the click.
-          `POST /api/board/views` refuses the same types with a 409, so this is
-          the courtesy and the route is the rule.
+          Every type was once offered as a live choice with a "soon" tag beside
+          the unbuilt ones, so picking Timeline wrote a real `board_views` row,
+          drew a real tab and opened a panel reading "Timeline is not built
+          yet" — a clickable no-op that left a dead tab on the board somebody
+          then had to find and delete.
+
+          The owner's rule sorts a type into one of three places, and this menu
+          now shows all three:
+
+            · SUPPORTED — clickable, and it makes a working view.
+            · NOT SUPPORTED BY THE ORIGINAL — not in `types` at all. Timeline is
+              gone from `VIEW_TYPES`, so there is no entry to grey out. "Must
+              not be offered at all — not greyed, not a no-op."
+            · REQUIRES CONFIGURATION — drawn WITH THE REASON, and not clickable
+              until the reason is gone. A Form tab on a register with no form of
+              its own is this: the product built the renderer, the board has not
+              been set up for it, and once it is the same entry works. Hiding it
+              would tell an operator the product cannot do something it does
+              every day on the board next door; a bare greyed row with a "soon"
+              pill would say it has not been written yet, which is untrue.
+
+          The sentence is the SERVER's — `typesFor` in `app/api/board/views/
+          route.ts` is its only author, and `POST` refuses the same type with
+          the same words. This menu does not compose a reason of its own, so it
+          cannot drift from the one the operator gets if they reach the endpoint
+          another way.
         */}
         {types.map((type) => (
           <button
             key={type.key}
             type="button"
             role="menuitem"
-            className="ba-menu__item"
+            className={`ba-menu__item${type.unavailable ? " is-unconfigured" : ""}`}
             disabled={!type.built}
             aria-disabled={type.built ? undefined : true}
-            title={type.built ? undefined : `${type.label} is not built yet`}
+            title={type.built ? undefined : type.unavailable ?? `${type.label} is not built yet`}
             onClick={() => onAdd(type)}
           >
             <Icon name={iconFor(type.icon)} size={15} />
             <span>{type.label}</span>
-            {!type.built && <em className="board-views__soon">soon</em>}
+            {!type.built && !type.unavailable && (
+              <em className="board-views__soon">soon</em>
+            )}
+            {type.unavailable && <small>{type.unavailable}</small>}
           </button>
         ))}
       </div>

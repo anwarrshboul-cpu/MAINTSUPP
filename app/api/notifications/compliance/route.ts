@@ -4,6 +4,7 @@ import { complianceDocuments } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import {
   readComplianceRegister,
+  storeDocumentationBoards,
   withinOperationalEstate,
   type RegisterEntry,
 } from "../../../lib/compliance-register";
@@ -54,6 +55,10 @@ type Scanned = {
   daysAway: number;
   stage: string;
   alreadyAlerted: boolean;
+  /** The register this certificate is on — its board key. */
+  board: string | null;
+  /** That register's display name, which is what a reader can act on. */
+  boardName: string | null;
   /** Where the bookkeeping goes. See `recordStage`. */
   entry: RegisterEntry;
 };
@@ -75,13 +80,38 @@ type Scanned = {
  *
  * It now reads the same register the compliance screens read
  * (app/lib/compliance-register.ts), so an alert and a screen cannot disagree.
+ *
+ * EVERY STORE DOCUMENTATION REGISTER, NOT THE CANONICAL BOARD ALONE.
+ *
+ * WHAT WAS WRONG THE SECOND TIME. A workspace section created from the Store
+ * Documentation template provisions its OWN board, with a generated key
+ * (`sec-<12hex>`) and the same 24 columns, four groups and twelve certificate
+ * slots the canonical board has — seeded by the same `seedStoreDocumentationBoard`.
+ * This scan asked `readComplianceRegister` for its default, which is the
+ * canonical board and nothing else. So an instance would collect real
+ * certificates, show them on its own Compliance Tracker with a real RAG state,
+ * and never produce a single alert for any of them, for ever, silently. That is
+ * the same shape of failure as the one described above — a digest that is loud
+ * about one estate and silent about another — arriving through a board key
+ * rather than through the wrong table, and it is WORSE than the original,
+ * because the screen says the certificate is being watched.
+ *
+ * `storeDocumentationBoards` answers from `boards.kind`, never from a key
+ * comparison, so a section instance is covered the moment it is created and
+ * nothing here has to learn about it. What canonical users receive is unchanged:
+ * the canonical board is always in the set and always scanned first.
  */
 async function scan(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
 ): Promise<Scanned[]> {
   const today = new Date();
-  const { entries } = await readComplianceRegister(db, orgId, { today });
+  const registers = await storeDocumentationBoards(db, orgId);
+  const boardNameByKey = new Map(registers.map((board) => [board.key, board.name]));
+  const { entries } = await readComplianceRegister(db, orgId, {
+    today,
+    boardIds: registers.map((board) => board.key),
+  });
   const scanned: Scanned[] = [];
 
   // `row` rather than `entry`, because a register entry is a row of the
@@ -126,11 +156,35 @@ async function scan(
       daysAway,
       stage,
       alreadyAlerted: row.lastAlertStage === stage,
+      board: row.boardId,
+      /*
+       * The board's NAME, not its key. `sec-9f2c1a4b7e60` is an address; the
+       * person reading the digest at 07:00 knows the register as "Concession
+       * documents", which is the word in the sidebar they have to click. A
+       * register-only row has no board and gets null rather than a guess.
+       */
+      boardName: row.boardId ? (boardNameByKey.get(row.boardId) ?? row.boardId) : null,
       entry: row,
     });
   }
 
-  scanned.sort((left, right) => left.expiry.localeCompare(right.expiry));
+  /*
+   * Soonest-lapsed first, ACROSS registers rather than register by register.
+   *
+   * A digest grouped by board would bury a certificate that expired eight
+   * months ago under a second register's near-misses. Urgency is the only
+   * ordering an operations team reads down; the board NAME on each row is what
+   * says where to go, and it does not have to be the sort key to do that. The
+   * board key breaks ties so the order is deterministic when two certificates
+   * share an expiry date — an unstable digest reads as new news every morning.
+   */
+  scanned.sort(
+    (left, right) =>
+      left.expiry.localeCompare(right.expiry) ||
+      (left.board ?? "").localeCompare(right.board ?? "") ||
+      left.site.localeCompare(right.site, "en-GB") ||
+      left.kind.localeCompare(right.kind, "en-GB"),
+  );
   return scanned;
 }
 
@@ -253,6 +307,15 @@ function forDigest(item: Scanned) {
     daysAway: item.daysAway,
     stage: item.stage,
     alreadyAlerted: item.alreadyAlerted,
+    /*
+     * WHICH register. Both spellings, and both are load-bearing: `board` is the
+     * key a caller can put straight into `/api/board?board=` to go and look at
+     * the row, `boardName` is what a person recognises. Publishing only the
+     * name would make the GET useless to a script; publishing only the key
+     * would make the email useless to a person.
+     */
+    board: item.board,
+    boardName: item.boardName,
   };
 }
 

@@ -106,6 +106,19 @@ test("no board file exceeds a reviewable size", async () => {
     // is: a file created to relieve a ceiling is the easiest place for the next
     // thing to be dropped without anyone noticing.
     "app/(app)/portal/board-view-writes.ts": 150,
+    /*
+     * Split out of live-board when the ordered sort needed a comparator that
+     * could be tested against rows rather than eyeballed, and grown again when
+     * the option-order table followed it out — that extraction is what bought
+     * the room to fix the Store Documentation instance, which had one line of
+     * headroom under the 5,600 guard in
+     * `tests/workstream-seven-official-document-ui.test.mjs`.
+     *
+     * Capped now for the reason the two notes above give: a file created to
+     * relieve a ceiling is the easiest place for the next thing to be dropped
+     * without anyone noticing.
+     */
+    "app/(app)/portal/board-sort.ts": 450,
   };
   for (const [file, limit] of Object.entries(limits)) {
     const source = await read(file);

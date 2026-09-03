@@ -1400,3 +1400,34 @@
 .ba-menu--views .board-views__soon {
   margin-left: auto;
 }
+
+/*
+ * An "+ Add view" entry this BOARD has not been configured for — the Form,
+ * Results and Form-responses types on a register with no form of its own.
+ *
+ * It is offered rather than hidden (the product built the renderer; this board
+ * has not been set up for it) and carries the server's own sentence saying what
+ * to configure, so the entry has to be two lines. `.ba-menu__item` is a
+ * single-line flex row, which would put a whole sentence on the same line as
+ * the label and either clip it or drag the popover across the screen.
+ *
+ * No media query: this is a menu on a shared overlay layer and reads the same
+ * at every width, so it does not touch the agreed 640/767/768/1024/1280 set.
+ */
+.ba-menu--views .ba-menu__item.is-unconfigured {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.ba-menu--views .ba-menu__item.is-unconfigured > small {
+  flex: 1 1 100%;
+  /* Under the label rather than under the icon — 15px glyph plus the row's
+     10px gap is where the label starts. */
+  padding-left: 25px;
+  /* Bounded so the sentence wraps instead of setting the popover's width. */
+  max-width: 240px;
+  line-height: 1.35;
+  white-space: normal;
+}

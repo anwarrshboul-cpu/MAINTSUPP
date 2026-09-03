@@ -31,7 +31,16 @@ import {
 import { StoreExpiryCalendar, type StoreExpiryColumn } from "./store-expiry-calendar";
 import type { BoardItem } from "./view-model";
 
-const BOARD_ID = "store-documentation";
+/**
+ * The canonical board, and the DEFAULT rather than the answer.
+ *
+ * A section created from the Documents template renders this same screen over
+ * a board of its own, so the key has to arrive as a prop. It was a module
+ * constant, which is board-key isolation of exactly the kind W2 removes: the
+ * screen would have drawn the workspace's own compliance register under the
+ * new section's name, showing every store the workspace has.
+ */
+const CANONICAL_BOARD_ID = "store-documentation";
 
 const TABS = [
   { key: "table", label: "Main table" },
@@ -42,11 +51,14 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 export function StoreDocumentationBoard({
+  boardId = CANONICAL_BOARD_ID,
   onNotify,
   onOpenApps,
   onOpenRequest,
   onItemActionsChange,
 }: {
+  /** The board this screen draws. Absent means the workspace's own register. */
+  boardId?: string;
   onNotify: (message: string) => void;
   onOpenApps: () => void;
   /**
@@ -113,7 +125,7 @@ export function StoreDocumentationBoard({
    */
   const load = useCallback(async () => {
     try {
-      const response = await fetch(`/api/board?board=${BOARD_ID}`, {
+      const response = await fetch(`/api/board?board=${encodeURIComponent(boardId)}`, {
         headers: { accept: "application/json" },
       });
       if (!response.ok) return;
@@ -125,7 +137,12 @@ export function StoreDocumentationBoard({
       // A failed load leaves the previous rows on screen rather than blanking
       // the board. The tabs' own empty states cover a genuinely empty board.
     }
-  }, []);
+    /* `boardId`, and it is load-bearing rather than tidy: this screen is
+       mounted once and re-pointed when the reader moves between the workspace's
+       own compliance register and a section's instance of it. An empty
+       dependency list would have kept showing the first board's stores under
+       the second board's name. */
+  }, [boardId]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- `load` is async, so its
      setState lands after an await, not synchronously in the effect body; the
@@ -228,7 +245,13 @@ export function StoreDocumentationBoard({
            * monday export lands.
            */
           <LiveMaintenanceBoard
-            boardId={BOARD_ID}
+            boardId={boardId}
+            /* This screen IS the compliance register, on the canonical board
+               and on a Documents-template section's own. Said once here so the
+               grid does not have to infer it from a board key that differs
+               between the two. */
+            storeDocumentation
+
             requests={stores}
             onCreateDetailed={() => onNotify("Add stores by importing the monday export.")}
             onOpenRequest={onOpenRequest}

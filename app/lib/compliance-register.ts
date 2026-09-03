@@ -38,10 +38,11 @@
  * Nothing here writes, and nothing here drops a row.
  */
 
-import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   attachments,
+  boards,
   complianceDocuments,
   maintenanceBoardCells,
   maintenanceBoardColumns,
@@ -68,6 +69,82 @@ import type { ComplianceItem, ComplianceState } from "./types";
 export const STORE_DOCUMENTATION_BOARD_ID = "store-documentation";
 
 /**
+ * The board `kind` every Store Documentation register carries — the canonical
+ * one and every section instance created from the same template.
+ *
+ * WHY A KIND AND NOT A KEY. A workspace section now provisions its own board
+ * with a GENERATED key (`sec-<12hex>`; see `newSectionBoardKey`), seeded by
+ * `seedStoreDocumentationBoard` — the same seeder, the same 24 columns, the
+ * same four groups, the same twelve certificate slots. Its key is deliberately
+ * NOT derived from its name, so there is no string a reader could match on and
+ * no string anybody should try to. `boards.kind` is the only durable statement
+ * that a board is a Store Documentation register, which is why every question
+ * of the form "does this board track certificates?" must be asked of the kind.
+ *
+ * The defect this prevents is not hypothetical: the compliance digest read
+ * `board_id = 'store-documentation'` as a literal, so a section instance could
+ * hold a lapsed fire alarm certificate for as long as anyone cared to leave it
+ * there and the nightly digest would never say a word — the same silence this
+ * whole module was rebuilt to end, re-entering through a board key instead of
+ * through a stale status column.
+ */
+export const STORE_DOCUMENTATION_BOARD_KIND = "store-documentation";
+
+/** A Store Documentation register: the key rows are filed under, and its name. */
+export type StoreDocumentationBoard = { key: string; name: string };
+
+/**
+ * Every Store Documentation register in this organisation, canonical first.
+ *
+ * THE CANONICAL KEY IS A FLOOR, NOT A QUERY RESULT. `boards` is materialised on
+ * demand — `resolveBoard` in board-registry.ts creates the built-in rows the
+ * first time somebody asks for one — while placements have carried
+ * `board_id = 'store-documentation'` as a literal string since long before the
+ * table existed. So an organisation can hold 31 stores, 42 expiry dates and no
+ * `boards` row at all, and a digest that trusted this query alone would scan
+ * nothing and report "nothing has crossed a new threshold". The canonical key
+ * is therefore always included, whether or not a row for it has been created
+ * yet, and the query only ever ADDS to that.
+ *
+ * Archived boards are excluded. An archived section is out of the operational
+ * estate for the same reason a closed store is (see `withinOperationalEstate`):
+ * nobody is going to book a contractor against a register that has been put
+ * away, and an alert nobody can action is what teaches people to filter the
+ * digest to junk. It stays fully readable — archiving is not deletion — it
+ * simply stops generating a CURRENT alert.
+ */
+export async function storeDocumentationBoards(
+  db: Database,
+  orgId: string,
+): Promise<StoreDocumentationBoard[]> {
+  const rows = await db
+    .select({ key: boards.key, name: boards.name })
+    .from(boards)
+    .where(
+      and(
+        eq(boards.organisationId, orgId),
+        eq(boards.kind, STORE_DOCUMENTATION_BOARD_KIND),
+        /*
+         * `false`, not `0`. `boards.archived` is a boolean-mode column and the
+         * deployed database is Postgres, where `archived = 0` is a type error
+         * rather than a falsy comparison — see `BOOLEAN_COLUMNS` in
+         * db/sqlite-to-postgres.ts. Written through drizzle so the shim coerces
+         * it for both databases and this cannot pass locally and fail deployed.
+         */
+        eq(boards.archived, false),
+      ),
+    )
+    .orderBy(boards.position, boards.name);
+
+  const found = rows as Array<{ key: string; name: string }>;
+  const canonical = found.find((row) => row.key === STORE_DOCUMENTATION_BOARD_ID);
+  return [
+    { key: STORE_DOCUMENTATION_BOARD_ID, name: canonical?.name ?? "Store Documentation UK" },
+    ...found.filter((row) => row.key !== STORE_DOCUMENTATION_BOARD_ID),
+  ];
+}
+
+/**
  * The drizzle handle, exactly as `sites-repository.ts` types it. Both callers
  * get theirs from `scopedDb`, which has already narrowed it to one organisation
  * — every query below still filters on `organisationId` as well, because a
@@ -80,6 +157,19 @@ type Database = Awaited<ReturnType<typeof getDb>>;
 export type RegisterEntry = {
   /** The board item this came from, or null for a register-only row. */
   itemId: string | null;
+  /**
+   * WHICH Store Documentation register this row came from, or null for a
+   * register-only row that no board speaks for.
+   *
+   * There can now be more than one. A workspace section created from the Store
+   * Documentation template gets its own board, its own 24 columns and its own
+   * twelve slots, so "the fire alarm certificate for Cabot Circus" is no longer
+   * a unique phrase across the organisation — two registers may each hold a
+   * store of that name. Carrying the key on the entry is what lets the digest
+   * say WHICH register a lapsed certificate is on; without it an operator reads
+   * an alert and has nowhere to go and fix it.
+   */
+  boardId: string | null;
   /** The board slot key, or null for a requirement the board does not track. */
   slotKey: string | null;
   /** The `compliance_documents` row backing it, when there is one. */
@@ -202,16 +292,49 @@ function siteIsClosed(site: { lifecycle?: string | null; status?: string | null 
   return CLOSED_SITE_WORDS.has(lifecycle) || CLOSED_SITE_WORDS.has(status);
 }
 
+/** Board rows, plus which register each one came out of. */
+type StoreDocumentationRows = {
+  rows: BoardStoreRow[];
+  /** Board key per board item id. See `RegisterEntry.boardId`. */
+  boardIdByItemId: Map<string, string>;
+};
+
 /**
- * Every Store Documentation row with its cells and file counts.
+ * Every Store Documentation row with its cells and file counts, across the
+ * given registers.
  *
  * Filtered by organisation *and* board, with soft-deleted rows excluded, so a
  * binned store leaves the register the way it leaves the board.
+ *
+ * WHY ONE PASS OVER SEVERAL BOARDS RATHER THAN ONE CALL PER BOARD. Two reasons,
+ * and the second is the one that matters.
+ *
+ *  - Cost. `sites`, `site_aliases`, `compliance_documents` and this
+ *    organisation's ~3,000-row attachments table would otherwise be re-read
+ *    once per register, on the boot path of a scheduled job.
+ *  - Correctness of the register-only rows. `compliance_documents` holds
+ *    requirements NO board speaks for, and "no board" is a property of the
+ *    organisation, not of one register. Reading per board and concatenating
+ *    would emit every one of those rows once per board — so an organisation
+ *    with three Store Documentation sections would send three alerts about the
+ *    same certificate. Read once, they are emitted once.
+ *
+ * MIXING BOARDS IN ONE `boardRowsFrom` CALL IS SAFE, and it is worth writing
+ * down why rather than leaving it to be rediscovered. Cells and file counts are
+ * keyed by COLUMN ID, column ids are unique per board
+ * (`seed-<org>-<boardKey>-<columnKey>`), and `maintenance_group_items.request_id`
+ * is the PRIMARY KEY — a row is placed on exactly one board. So a row's cells
+ * can only ever reference its own board's columns, and the shared id→key map
+ * cannot cross-contaminate two registers that both have a `patExpiry`.
  */
 async function readStoreDocumentationRows(
   db: Database,
   orgId: string,
-): Promise<BoardStoreRow[]> {
+  boardIds: readonly string[],
+): Promise<StoreDocumentationRows> {
+  const empty: StoreDocumentationRows = { rows: [], boardIdByItemId: new Map() };
+  if (boardIds.length === 0) return empty;
+  const scope = [...boardIds];
   /*
    * `groupId` comes back with the placement now.
    *
@@ -224,18 +347,25 @@ async function readStoreDocumentationRows(
     .select({
       requestId: maintenanceGroupItems.requestId,
       groupId: maintenanceGroupItems.groupId,
+      /* Which register this row is on, carried onto every entry it produces. */
+      boardId: maintenanceGroupItems.boardId,
     })
     .from(maintenanceGroupItems)
     .where(
       and(
         eq(maintenanceGroupItems.organisationId, orgId),
-        eq(maintenanceGroupItems.boardId, STORE_DOCUMENTATION_BOARD_ID),
+        inArray(maintenanceGroupItems.boardId, scope),
       ),
     );
-  if (placements.length === 0) return [];
-  const placedRows = placements as Array<{ requestId: string; groupId: string }>;
+  if (placements.length === 0) return empty;
+  const placedRows = placements as Array<{
+    requestId: string;
+    groupId: string;
+    boardId: string;
+  }>;
   const placed = new Set(placedRows.map((row) => row.requestId));
   const groupIdByRequest = new Map(placedRows.map((row) => [row.requestId, row.groupId]));
+  const boardIdByItemId = new Map(placedRows.map((row) => [row.requestId, row.boardId]));
 
   const groupRows = await db
     .select({ id: maintenanceGroups.id, name: maintenanceGroups.name })
@@ -243,7 +373,7 @@ async function readStoreDocumentationRows(
     .where(
       and(
         eq(maintenanceGroups.organisationId, orgId),
-        eq(maintenanceGroups.boardId, STORE_DOCUMENTATION_BOARD_ID),
+        inArray(maintenanceGroups.boardId, scope),
       ),
     );
   const groupNameById = new Map(
@@ -266,7 +396,7 @@ async function readStoreDocumentationRows(
       .where(
         and(
           eq(maintenanceBoardColumns.organisationId, orgId),
-          eq(maintenanceBoardColumns.boardId, STORE_DOCUMENTATION_BOARD_ID),
+          inArray(maintenanceBoardColumns.boardId, scope),
         ),
       ),
     db
@@ -279,7 +409,7 @@ async function readStoreDocumentationRows(
       .where(
         and(
           eq(maintenanceBoardCells.organisationId, orgId),
-          eq(maintenanceBoardCells.boardId, STORE_DOCUMENTATION_BOARD_ID),
+          inArray(maintenanceBoardCells.boardId, scope),
         ),
       ),
     /*
@@ -332,25 +462,28 @@ async function readStoreDocumentationRows(
 
   const columnIds = new Set(columnRows.map((column: { id: string }) => column.id));
 
-  return boardRowsFrom({
-    requests: (requestRows as Array<{ id: string; title: string | null }>)
-      .filter((row) => placed.has(row.id))
-      .map((row) => ({
-        ...row,
-        group: groupNameById.get(groupIdByRequest.get(row.id) ?? "") ?? null,
-      })),
-    columns: columnRows,
-    cells: cellRows,
-    fileCounts: fileRows.filter(
-      (
-        row: { requestId: string | null; columnId: string | null; count: number },
-      ): row is { requestId: string; columnId: string; count: number } =>
-        Boolean(row.requestId) &&
-        Boolean(row.columnId) &&
-        columnIds.has(row.columnId ?? "") &&
-        placed.has(row.requestId ?? ""),
-    ),
-  });
+  return {
+    rows: boardRowsFrom({
+      requests: (requestRows as Array<{ id: string; title: string | null }>)
+        .filter((row) => placed.has(row.id))
+        .map((row) => ({
+          ...row,
+          group: groupNameById.get(groupIdByRequest.get(row.id) ?? "") ?? null,
+        })),
+      columns: columnRows,
+      cells: cellRows,
+      fileCounts: fileRows.filter(
+        (
+          row: { requestId: string | null; columnId: string | null; count: number },
+        ): row is { requestId: string; columnId: string; count: number } =>
+          Boolean(row.requestId) &&
+          Boolean(row.columnId) &&
+          columnIds.has(row.columnId ?? "") &&
+          placed.has(row.requestId ?? ""),
+      ),
+    }),
+    boardIdByItemId,
+  };
 }
 
 /**
@@ -474,7 +607,21 @@ function linkBoardRowsToSites(
 export async function readNotRequiredSlots(
   db: Database,
   orgId: string,
+  /*
+   * WHICH registers to read placements from. Defaults to the canonical board,
+   * so no existing caller changes behaviour by upgrading.
+   *
+   * A caller serving one board should pass THAT board's key alone. Passing the
+   * whole set would hand a section instance the canonical estate's overrides:
+   * `compliance_documents` has no board column, so a "Not required" recorded
+   * against a store on the canonical register would silently switch the same
+   * requirement off for a same-named store on an instance — a compliance flag
+   * crossing a boundary the operator drew on purpose.
+   */
+  boardIds: readonly string[] = [STORE_DOCUMENTATION_BOARD_ID],
 ): Promise<NotRequiredSlot[]> {
+  if (boardIds.length === 0) return [];
+  const scope = [...boardIds];
   const [siteRows, aliasRows, registerRows, placements] = await Promise.all([
     db
       .select({
@@ -504,7 +651,7 @@ export async function readNotRequiredSlots(
       .where(
         and(
           eq(maintenanceGroupItems.organisationId, orgId),
-          eq(maintenanceGroupItems.boardId, STORE_DOCUMENTATION_BOARD_ID),
+          inArray(maintenanceGroupItems.boardId, scope),
         ),
       ),
   ]);
@@ -545,15 +692,23 @@ export async function readNotRequiredSlots(
  *
  * `today` is injectable so a caller can classify a whole estate against one
  * instant, and so a test can pin the date.
+ *
+ * `boardIds` names WHICH Store Documentation registers to derive from, and it
+ * DEFAULTS TO THE CANONICAL BOARD ALONE. That default is the compatibility
+ * contract: `/api/workspace` and `readSiteComplianceRecords` call this with no
+ * board argument and must keep seeing exactly the estate they see today. A
+ * caller that wants section instances too — the compliance digest — asks for
+ * them by name, via `storeDocumentationBoards`.
  */
 export async function readComplianceRegister(
   db: Database,
   orgId: string,
-  options: { today?: Date } = {},
+  options: { today?: Date; boardIds?: readonly string[] } = {},
 ): Promise<ComplianceRegister> {
   const today = options.today ?? new Date();
+  const boardIds = options.boardIds ?? [STORE_DOCUMENTATION_BOARD_ID];
 
-  const [siteRows, aliasRows, registerRows, boardRows] = await Promise.all([
+  const [siteRows, aliasRows, registerRows, boardRowsResult] = await Promise.all([
     db
       .select({
         id: sites.id,
@@ -580,8 +735,9 @@ export async function readComplianceRegister(
       .from(complianceDocuments)
       .where(eq(complianceDocuments.organisationId, orgId))
       .orderBy(complianceDocuments.siteId, complianceDocuments.kind),
-    readStoreDocumentationRows(db, orgId),
+    readStoreDocumentationRows(db, orgId, boardIds),
   ]);
+  const { rows: boardRows, boardIdByItemId } = boardRowsResult;
 
   type RegisterRow = {
     id: string;
@@ -650,6 +806,10 @@ export async function readComplianceRegister(
       if (registerRow) covered.add(registerRow.id);
       entries.push({
         itemId: store.id,
+        /* From the PLACEMENT, which is the same column `/api/board` filters on
+           and the same one `boardKeyForRequest` answers from — so a row cannot
+           be alerted under one register and edited on another. */
+        boardId: boardIdByItemId.get(store.id) ?? null,
         slotKey: document.slotKey,
         registerId: registerRow?.id ?? null,
         id: registerRow?.id ?? registerDocumentId(store.id, document.slotKey),
@@ -725,6 +885,9 @@ export async function readComplianceRegister(
         });
     entries.push({
       itemId: null,
+      /* No board row, so no register. Emitted ONCE however many Store
+         Documentation boards were scanned — see `readStoreDocumentationRows`. */
+      boardId: null,
       slotKey: null,
       registerId: row.id,
       id: row.id,

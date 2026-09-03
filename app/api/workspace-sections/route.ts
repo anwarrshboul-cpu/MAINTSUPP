@@ -417,7 +417,18 @@ export async function POST(request: Request) {
         const provisioned = await createBoard(context.db, context.orgId, {
           name: label,
           description: cleanSectionLabel(body.description, 240) ?? undefined,
-          itemNoun: "Item",
+          /*
+           * THE TEMPLATE, PASSED THROUGH - this is the line that makes a Jobs
+           * section a Jobs board.
+           *
+           * It used to pin `itemNoun: "Item"` and name no template, so every
+           * section got the generic six-column register whatever the owner
+           * chose, and a "Jobs" section arrived without one of the job board's
+           * 26 columns. `createBoard` now reads `TEMPLATE_STRUCTURES` for the
+           * kind, the noun and the structure, and seeds through the canonical
+           * seeder for that template rather than describing it a second time.
+           */
+          template,
         });
         ownedBoardKey = provisioned.key;
       } catch (error) {

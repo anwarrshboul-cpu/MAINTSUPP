@@ -40,6 +40,8 @@ import {
   systemColumnSortValue,
 } from "./board-ordering";
 import { customCellKey, customCellSortValue } from "./board-format";
+import { editableFallbackOptions } from "./board-model";
+import type { BoardOptionColumn } from "../../lib/types";
 
 export type SortDirection = "asc" | "desc";
 
@@ -354,4 +356,72 @@ export function resolveQuickSort(input: {
           aria: `Sort by ${chosen.column.title}, newest first`,
         };
   return { ...chosen, direction, label };
+}
+
+
+/* ── The order an option-backed column's values are DEFINED in ───────────── */
+
+/** The bare number inside a tier value — "Tier 3" becomes "3". */
+export const tierDigits = (value: string) => value.replace(/\D+/g, "");
+
+/** One board option, in the only two fields the ordering needs. */
+export type SortableBoardOption = {
+  columnKey: string;
+  value: string;
+  label: string;
+  position: number;
+};
+
+/**
+ * WHERE EACH CHOICE SITS, per option-backed column.
+ *
+ * The first rule at the top of this file is that an option column sorts by the
+ * order its options are DEFINED in rather than alphabetically — Priority on
+ * this board reads Medium, Low, Urgent, and alphabetical would put Low above
+ * Medium and present that as ascending. This builds the lookup that rule needs:
+ * value (and label) to index, for the six registry-backed columns.
+ *
+ * Extracted from `live-board.tsx`, unchanged. It is pure — a list of options
+ * in, a map out — and it belongs beside the comparator that consumes it rather
+ * than inside a component that had one line of headroom left under its size
+ * ceiling. The extraction is what paid for the Store Documentation instance
+ * fix; see the note on `storeDocumentation` in `LiveMaintenanceBoard`.
+ *
+ * Falls back to `editableFallbackOptions` for a column whose board has no
+ * saved chips yet, so a board sorts sensibly before its first option edit.
+ */
+export function systemOptionOrders(boardOptions: SortableBoardOption[]) {
+  const orders = new Map<string, Map<string, number>>();
+  for (const key of [
+    "tier",
+    "engineer",
+    "priority",
+    "label",
+    "status",
+    "storeLocation",
+  ] as BoardOptionColumn[]) {
+    const saved = boardOptions
+      .filter((option) => option.columnKey === key)
+      .sort((left, right) => left.position - right.position);
+    const choices = saved.length
+      ? saved.map((option) => ({ value: option.value, label: option.label }))
+      : (editableFallbackOptions[key] ?? []).map((option) => ({
+          value: option.value,
+          label: option.label,
+        }));
+    if (!choices.length) continue;
+    const lookup = new Map<string, number>();
+    choices.forEach((choice, index) => {
+      if (choice.value) lookup.set(choice.value, index);
+      if (choice.label) lookup.set(choice.label, index);
+      // The tier FIELD is the bare number; alias "3" onto "Tier 3" so a
+      // tier sort ranks rows instead of scoring them all "not in the list".
+      if (key === "tier") {
+        const digits = tierDigits(choice.value ?? "");
+        if (digits) lookup.set(digits, index);
+      }
+    });
+    orders.set(key, lookup);
+  }
+  return orders;
 }

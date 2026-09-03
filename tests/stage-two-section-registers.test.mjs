@@ -342,13 +342,39 @@ test("live: two sections get two registers that cannot see each other", async (t
       "two sections must not share one register",
     );
 
-    /* The default structure arrived, and it is the generic one. */
+    /*
+     * RE-POINTED, AND THE CONTRACT MOVED WITH THE PRODUCT.
+     *
+     * This asserted the generic six-column register, which was right for what
+     * `POST` did when it was written: every section got `GENERIC_BOARD_COLUMNS`
+     * whatever the owner had chosen. The owner rejected exactly that — a
+     * section created from "Jobs" is supposed to be "the original section, with
+     * all its functionality and configuration, but empty and independent", and
+     * a six-column board named Item / Status / Owner / Date / Notes / Files is
+     * not the Jobs register.
+     *
+     * A section created without naming a template is a `DEFAULT_TEMPLATE`
+     * instance, and that is Jobs, so the structure to expect here is the job
+     * board's own. What this test is FOR is unchanged and is still checked
+     * below: the register is the section's own, and nothing leaks between it
+     * and the board it was shaped from.
+     *
+     * The generic template has not gone anywhere — it is what a stored row
+     * naming an unknown template still yields, which the pure tests above pin
+     * through `GENERIC_BOARD_COLUMNS` and `GENERIC_BOARD_GROUPS` directly.
+     * `tests/w2-template-parity.test.mjs` holds the parity half.
+     */
     const boardA = await (await call(`/api/board?board=${alpha.section.boardKey}`)).json();
+    const canonicalNow = await (await call("/api/board?board=maintenance")).json();
     assert.deepEqual(
-      boardA.columns.map((column) => column.key),
-      GENERIC_BOARD_COLUMNS.map((column) => column.key),
+      boardA.columns.map((column) => column.key).sort(),
+      canonicalNow.columns.map((column) => column.key).sort(),
+      "a section created without a template is a Jobs instance, and carries its columns",
     );
-    assert.equal(boardA.groups.length, GENERIC_BOARD_GROUPS.length);
+    assert.ok(
+      boardA.groups.length > 0 && boardA.groups.length < canonicalNow.groups.length,
+      "with the template's operational lanes rather than the estate's whole filing",
+    );
     assert.equal((boardA.requests ?? []).length, 0, "and it starts empty");
 
     /* CONFIGURATION ISOLATION — the property the whole decision rests on. */

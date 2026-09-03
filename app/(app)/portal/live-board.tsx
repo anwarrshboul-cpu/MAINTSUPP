@@ -134,6 +134,8 @@ import {
   sortRuleIndex,
   sortSettingsFor,
   resolveQuickSort,
+  systemOptionOrders as buildOptionOrders,
+  tierDigits,
 } from "./board-sort";
 import {
   EMPTY_FILTER,
@@ -196,7 +198,6 @@ const DETACHED_ANCHOR = createRef<HTMLButtonElement>();
  * sort's option order and the filter's choices, so the number and the label
  * can never disagree again.
  */
-const tierDigits = (value: string) => value.replace(/\D+/g, "");
 
 /** The option value the tier cell should light up — "3" resolved to "Tier 3". */
 function tierCellValue(tier: string, options: Option[]): string {
@@ -208,6 +209,7 @@ function tierCellValue(tier: string, options: Option[]): string {
 
 export function LiveMaintenanceBoard({
   boardId = "maintenance",
+  storeDocumentation,
   sectionKey,
   sectionLabel,
   sectionDescription,
@@ -224,6 +226,21 @@ export function LiveMaintenanceBoard({
   calendar,
 }: {
   boardId?: string;
+  /**
+   * WHETHER THIS GRID IS A COMPLIANCE REGISTER — declared, not inferred.
+   *
+   * The screen that draws it knows: `StoreDocumentationBoard` renders the
+   * canonical board and a Documents-template section's own register through the
+   * same component, so it says so once and both behave alike. It was inferred
+   * from `boardId === "store-documentation"`, which made the answer depend on a
+   * board KEY, and an instance's key is `sec-…` — so the instance came up
+   * offering group editing, subitems and a job board's toolbar over a register
+   * of certificates.
+   *
+   * Optional because every other mount predates it and the key still answers
+   * correctly for the two boards the product ships.
+   */
+  storeDocumentation?: boolean;
   /**
    * The section this board is drawn in — Stage 23.
    *
@@ -808,7 +825,13 @@ export function LiveMaintenanceBoard({
    * filter helpers above the render read them, and a const referenced before
    * its declaration is a temporal dead zone error rather than an undefined.
    */
-  const isStoreDocumentation = boardId === "store-documentation";
+  /* Declared by the screen that draws it. A section created from the Documents
+     template renders the SAME compliance screen over a register of its own, and
+     a key comparison called that register a job board: group editing came back,
+     subitems were offered, and the toolbar drew controls for columns it does
+     not have. The key stays only as the answer for a caller that predates the
+     prop, which is every built-in mount. */
+  const isStoreDocumentation = storeDocumentation ?? boardId === "store-documentation";
   const canEditGroups = !isStoreDocumentation;
 
   /*
@@ -866,41 +889,7 @@ export function LiveMaintenanceBoard({
     [allBoardColumns],
   );
 
-  const systemOptionOrders = useMemo(() => {
-    const orders = new Map<string, Map<string, number>>();
-    for (const key of [
-      "tier",
-      "engineer",
-      "priority",
-      "label",
-      "status",
-      "storeLocation",
-    ] as BoardOptionColumn[]) {
-      const saved = boardOptions
-        .filter((option) => option.columnKey === key)
-        .sort((left, right) => left.position - right.position);
-      const choices = saved.length
-        ? saved.map((option) => ({ value: option.value, label: option.label }))
-        : (editableFallbackOptions[key] ?? []).map((option) => ({
-            value: option.value,
-            label: option.label,
-          }));
-      if (!choices.length) continue;
-      const lookup = new Map<string, number>();
-      choices.forEach((choice, index) => {
-        if (choice.value) lookup.set(choice.value, index);
-        if (choice.label) lookup.set(choice.label, index);
-        // The tier FIELD is the bare number; alias "3" onto "Tier 3" so a
-        // tier sort ranks rows instead of scoring them all "not in the list".
-        if (key === "tier") {
-          const digits = tierDigits(choice.value ?? "");
-          if (digits) lookup.set(digits, index);
-        }
-      });
-      orders.set(key, lookup);
-    }
-    return orders;
-  }, [boardOptions]);
+  const systemOptionOrders = useMemo(() => buildOptionOrders(boardOptions), [boardOptions]);
 
   const filtered = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();
@@ -4218,6 +4207,7 @@ export function LiveMaintenanceBoard({
                           <Fragment key={request.id}>
                           <BoardRow
                             boardId={boardId}
+                            storeDocumentation={isStoreDocumentation}
                             request={request}
                             groups={groups}
                             currentGroupId={group.id}
@@ -4685,6 +4675,7 @@ export function LiveMaintenanceBoard({
 
 function BoardRow({
   boardId,
+  storeDocumentation,
   request,
   groups,
   currentGroupId,
@@ -4730,6 +4721,11 @@ function BoardRow({
   canConvertToSubitem,
 }: {
   boardId: string;
+  /* Whether this row belongs to a compliance register — the canonical one or a
+     Documents-template section's own. Passed down rather than re-derived from
+     the key, which differs between the two and made an instance's date columns
+     render as bare dates and its document columns as a hover preview. */
+  storeDocumentation: boolean;
   request: MaintenanceRequest;
   groups: MaintenanceGroup[];
   currentGroupId: string;
@@ -5501,7 +5497,7 @@ function BoardRow({
               Create new item below
             </button>
             {/* Subitems are a Jobs-board concept; a store has none. */}
-            {boardId !== "store-documentation" && (
+            {!storeDocumentation && (
             <>
             <button type="button" onClick={onAddSubitem}>
               <Icon name="list" size={15} />
@@ -5560,7 +5556,7 @@ function BoardRow({
             style={columnStyle(column)}
           >
             <CustomColumnCell
-              boardId={boardId}
+              storeDocumentation={storeDocumentation}
               column={column}
               value={
                 customCells[customCellKey(request.id, column.id)] ?? ""

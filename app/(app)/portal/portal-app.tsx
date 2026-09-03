@@ -665,6 +665,15 @@ type WorkspaceSectionEntry = {
    * for a screen that has no board, and for a section created before this.
    */
   boardKey?: string | null;
+  /**
+   * W02-06 — whether that register belongs to this section alone.
+   *
+   * Computed on the server from the board key, so the browser cannot disagree
+   * with the purge rule that reads the same fact. False for a section that is a
+   * second door onto one of the product's own screens, which is every section
+   * created before W02-06 — and those must keep behaving exactly as they do.
+   */
+  ownsBoard?: boolean;
   group: string;
 };
 
@@ -3071,8 +3080,17 @@ export default function PortalApp({
             />
           )}
           {activeSurface === "stores" && <SitesManager onNotify={setToast} />}
-          {activeSurface === "store-documentation" && (
+          {activeSurface === "store-documentation" && !sectionDetached && (
             <StoreDocumentationBoard
+              /* THE SECTION'S OWN REGISTER, on exactly the terms the job board
+                 is mounted above. A section created from the Documents template
+                 draws this screen over a board of its own; without this it drew
+                 the workspace's canonical compliance register under the new
+                 section's name, which is the substitution W02-06 exists to
+                 remove. A built-in section still names the canonical board, and
+                 a section detached from its register draws nothing rather than
+                 borrowing one. */
+              boardId={activeCustom ? activeCustom.boardKey ?? "" : "store-documentation"}
               onNotify={setToast}
               onOpenApps={() => setSection("settings")}
               /* `openRequest` only sets the drawer's record and tab — it does
@@ -3114,6 +3132,7 @@ export default function PortalApp({
             <ContractorsView
               key={activeSection}
               sectionKey={activeSection}
+              scopedToInstance={activeCustom?.ownsBoard === true}
               contractors={currentContractors}
               requests={requests}
               onNotify={setToast}
@@ -5531,6 +5550,7 @@ function ContractorsView({
   contractors: registeredContractors,
   requests,
   sectionKey,
+  scopedToInstance,
   onManage,
   onNotify,
 }: {
@@ -5548,6 +5568,24 @@ function ContractorsView({
    * moment somebody renamed a menu item.
    */
   sectionKey: string;
+  /**
+   * WHETHER THIS IS AN INSTANCE OF THE CONTRACTOR REGISTER RATHER THAN THE
+   * WORKSPACE'S OWN.
+   *
+   * It decides one thing, and it is a real one: whether `fallbackContractors`
+   * below may run. That fallback SYNTHESISES a roster out of the names on the
+   * job feed whenever the register is empty, which is right for the canonical
+   * screen — a workspace that has never filled in the register still gets a
+   * useful list — and is a leak on an instance. A Contractors section is
+   * created EMPTY on purpose, so the fallback would fire on its first load and
+   * show the workspace's real contractors under the new section's name: the
+   * exact substitution W02-06 exists to remove, arrived at by a derivation
+   * rather than by a query.
+   *
+   * Comes from `ownsBoard`, which the server computes from the section's board
+   * key. Not from the route, not from the label.
+   */
+  scopedToInstance: boolean;
   onManage: (id?: string | null) => void;
 }) {
   const fallbackContractors = useMemo<WorkspaceContractor[]>(
@@ -5599,7 +5637,12 @@ function ContractorsView({
       })),
     [requests],
   );
-  const roster = registeredContractors.length ? registeredContractors : fallbackContractors;
+  /* An instance shows what it holds, and nothing else. Empty is a true answer
+     for a register created five seconds ago; a derived roster is not. */
+  const roster =
+    registeredContractors.length || scopedToInstance
+      ? registeredContractors
+      : fallbackContractors;
 
   /*
    * THE PAGE'S OWN REPORTING RANGE.

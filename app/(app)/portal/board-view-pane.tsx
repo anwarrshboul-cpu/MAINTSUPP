@@ -22,7 +22,11 @@
  */
 
 import { useEffect, useMemo } from "react";
-import type { BoardView } from "./board-chrome";
+/* From `board-view-types.ts`, not from `board-chrome.tsx`. The shapes moved out
+   of the chrome when it hit its 500-line limit again, and taking the type from
+   its own module also breaks the import cycle this file was half of — the
+   chrome imports the pane's component, the pane imported the chrome's type. */
+import type { BoardView } from "./board-view-types";
 import { Icon } from "../../components";
 import { OperationsCalendarPanel } from "./calendar-surface";
 import type { CalendarWriteTarget } from "./calendar-model";
@@ -125,18 +129,6 @@ type Props = {
 const NO_DATE_WRITER = async (): Promise<never> => {
   throw new Error("This board cannot save calendar dates.");
 };
-
-/**
- * The view types that are a FORM's surfaces rather than the board's own — the
- * same three `/api/board/views` reports as unbuilt on a board with no form.
- * Written here as well because the pane has to say WHY it is refusing, and
- * "not built yet" is not true of a renderer this product has shipped.
- */
-const FORM_BACKED: ReadonlySet<string> = new Set([
-  "form",
-  "form-results",
-  "form-responses",
-]);
 
 /**
  * `BoardItem` → `MaintenanceRequest`, for a host that has only the pane's own
@@ -377,6 +369,16 @@ export default function BoardViewPane({
    * so on a section's register the note appeared under a form that was still
    * mounted and still fetching. Returning here is what makes the refusal real.
    *
+   * THE REASON COMES FROM THE SERVER, NOT FROM A SECOND COPY OF THE RULE.
+   *
+   * This file used to keep its own `FORM_BACKED` set so it could say WHY it was
+   * refusing — a second statement of the classification, in a file that has no
+   * idea whether this board has a form. `unavailable` is the sentence
+   * `typesFor` wrote, the same one the "+" menu prints and the same one `POST`
+   * refuses with, so the three cannot drift. It is absent only for a stored row
+   * naming a type this build no longer offers at all, and "not built yet" is
+   * exactly true of that.
+   *
    * The grid stays behind it, which is what `viewReplacesGrid` promises for an
    * unbuilt view and why the note says so.
    */
@@ -386,10 +388,11 @@ export default function BoardViewPane({
         <p className="board-chrome__placeholder">
           <Icon name="alert" size={16} />
           <span>
+            {/* The tab's own name as well as the type's, because an admin may
+                have renamed it and "Form reads…" would then not obviously be
+                about the tab they are looking at. */}
             <strong>{activeView.name}</strong>{" "}
-            {FORM_BACKED.has(activeView.type)
-              ? "reads a form, and this board has none of its own."
-              : "is not built yet."}{" "}
+            {activeView.unavailable ? `— ${activeView.unavailable}` : "is not built yet."}{" "}
             The table below is still the live board.
           </span>
         </p>

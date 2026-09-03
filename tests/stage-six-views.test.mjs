@@ -180,8 +180,41 @@ test("view types report their real build state", async () => {
       `${type} is implemented and must report built: true`,
     );
   }
-  // Timeline is genuinely not built and must still say so.
-  assert.match(built, /key: "timeline"[^}]*built: false/);
+  /*
+   * TIMELINE — RE-POINTED, NOT DELETED. W2 requirement C.
+   *
+   * This read `key: "timeline"[^}]*built: false` and the comment beside it said
+   * "Timeline is genuinely not built and must still say so". The contract it
+   * was protecting is that the product never claims a renderer it does not
+   * have, and that has not weakened — it has been made stronger, and moved.
+   *
+   * The owner's rule for a type the original does not support is that it "must
+   * not be offered at all — not greyed, not a no-op". `built: false` in
+   * `VIEW_TYPES` still drew Timeline in the "+ Add view" menu on every board,
+   * greyed with a "soon" pill, and the route refused it with a 409: an offer
+   * for something nobody had started, on a board whose monday source has no
+   * timeline tab either. So the entry is gone from the offer entirely.
+   *
+   * The assertion follows it: the honest statement is now Timeline's ABSENCE
+   * from the list the menu is drawn from, and `built: false` surviving in the
+   * route as the per-BOARD answer (`typesFor`) rather than the per-product one.
+   */
+  assert.doesNotMatch(
+    built,
+    /key: "timeline"/,
+    "a type with no renderer must not be offered at all — not listed, not greyed",
+  );
+  const offered = built.slice(0, built.indexOf("] as const;"));
+  assert.doesNotMatch(
+    offered,
+    /built: false/,
+    "every type the product still offers has a renderer; unbuilt is now a per-board answer",
+  );
+  assert.match(
+    api,
+    /built: false, unavailable:/,
+    "and a board that cannot serve a built type must say which one it is and why",
+  );
 });
 
 test("the board passes its filtered items into the views", async () => {

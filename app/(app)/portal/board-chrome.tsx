@@ -15,29 +15,13 @@ import BoardViewPane, {
 import { useScrollOverflow } from "./views/scroll-affordance";
 import { BoardViewsScroll, useDismissOnOutside } from "./board-views-controls";
 import type { BoardItem } from "./views/view-model";
+import type { BoardSummary, BoardView, ViewType } from "./board-view-types";
 
-export type BoardView = {
-  id: string;
-  key: string;
-  name: string;
-  type: string;
-  icon: string | null;
-  position: number;
-  isDefault: boolean;
-  system: boolean;
-  built: boolean;
-  /** Saved view settings. `glyph` carries monday's tab decoration. */
-  settings?: { glyph?: "pin" | "app" };
-};
-
-type ViewType = { key: string; label: string; icon: string; built: boolean };
-
-type BoardSummary = {
-  id: string;
-  key: string;
-  name: string;
-  itemNoun: string;
-};
+/* Re-exported from where it has always been imported. `live-board.tsx` and
+   `board-tab-glyph.tsx` take `BoardView` off this module; the shapes moved to
+   relieve this file's 500-line limit, and a move must not be a rename for
+   every caller. See `board-view-types.ts`. */
+export type { BoardView } from "./board-view-types";
 
 type Props = {
   /**
@@ -147,11 +131,29 @@ export default function BoardChrome({
   useActiveTabInView(tabsRef, activeKey);
 
   useEffect(() => {
-    /* Any board but Store Documentation, which draws its own tracker. This read
-       `!== "maintenance"`, leaving a section's register with no tabs — W02-06.
-       An EMPTY board id is a section with no register of its own; asking the
-       views endpoint about it would come back as the job board's strip. */
-    if (!boardId || boardId === "store-documentation") return;
+    /*
+     * ASK THE ENDPOINT ABOUT ANY BOARD THAT HAS ONE.
+     *
+     * This read `boardId !== "maintenance"` and then `boardId !==
+     * "store-documentation"`, and both spellings were the same mistake: which
+     * boards have a tab strip decided by NAME. The first left a section's own
+     * register with no tabs at all (W02-06); the second is the pattern
+     * requirement C exists to remove, and it would have hidden the strip on a
+     * Store-Documentation-template INSTANCE too, which does have views of its
+     * own.
+     *
+     * The board answers for itself now: the built-in Store Documentation board
+     * holds no `board_views` rows — it declares its three tabs in
+     * `views/store-documentation-board.tsx` and would show two strips if this
+     * drew a second — so the fetch returns `views: []` and the nav below simply
+     * has nothing to render. Same outcome on that board, by a property of the
+     * board rather than by its key.
+     *
+     * An EMPTY board id is still refused here rather than sent: it is a section
+     * with no register of its own, and `?board=` with nothing after it is what
+     * the route 404s. Nothing is gained by making the round trip.
+     */
+    if (!boardId) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -279,8 +281,10 @@ export default function BoardChrome({
       )}
 
       {/* ── Row 2 — view tabs (AA3–AA6) ──────────────────────────────── */}
-      {/* Drawn wherever views were loaded — see the fetch above. */}
-      {Boolean(boardId) && boardId !== "store-documentation" && (
+      {/* Drawn for a board that HAS views, not for a board with the right
+          name — see the fetch above. A strip with no tabs would still draw the
+          "All" and "+" controls over a board that keeps its tabs elsewhere. */}
+      {views.length > 0 && (
       <nav className="board-views" aria-label="Board views">
         {/*
           The strip and its two arrows live in one positioned wrapper so the
@@ -310,7 +314,15 @@ export default function BoardChrome({
                     rememberView(view.key);
                   }}
                   aria-current={isActive ? "page" : undefined}
-                  title={view.built ? undefined : `${view.name} is not built yet`}
+                  /* The server's own sentence where there is one — a Form tab
+                     on a register with no form is not "not built yet", and
+                     saying so sends the operator looking for a release that
+                     was shipped a year ago. See `BoardView.unavailable`. */
+                  title={
+                    view.built
+                      ? undefined
+                      : view.unavailable ?? `${view.name} is not built yet`
+                  }
                 >
                   <TabGlyph view={view} />
                   {isActive && renaming ? (

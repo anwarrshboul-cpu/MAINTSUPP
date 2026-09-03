@@ -1,5 +1,13 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import type { getDb } from "../../db";
+import { getD1, type getDb } from "../../db";
+import { seedBoardStructure } from "../../db/init";
+import {
+  maintenanceColumns,
+  maintenanceUiColumns,
+  storeDocumentationColumns,
+} from "../../db/monday-board-spec";
+import { defaultBoardOptions } from "../../db/seed-options";
+import { seedStoreDocumentationBoard } from "../../db/seed-store-documentation";
 import {
   automationRuns,
   boardAutomations,
@@ -16,6 +24,7 @@ import {
   GENERIC_BOARD_COLUMNS,
   GENERIC_BOARD_GROUPS,
   GENERIC_COLUMN_SETTINGS,
+  templateStructure,
 } from "./generic-board-template";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -26,6 +35,8 @@ export type BoardRecord = {
   name: string;
   description: string | null;
   kind: string;
+  /** The template this register was built from - NULL for one that predates them. */
+  template: string | null;
   itemNoun: string;
   referencePrefix: string;
   position: number;
@@ -132,6 +143,7 @@ export async function listBoards(
     name: row.name,
     description: row.description,
     kind: row.kind,
+    template: row.template ?? null,
     itemNoun: row.itemNoun,
     referencePrefix: row.referencePrefix,
     position: row.position,
@@ -231,6 +243,7 @@ export async function resolveBoard(
       name: existing.name,
       description: existing.description,
       kind: existing.kind,
+      template: existing.template ?? null,
       itemNoun: existing.itemNoun,
       referencePrefix: existing.referencePrefix,
       position: existing.position,
@@ -263,6 +276,9 @@ export async function resolveBoard(
     name: "Maintenance",
     description: null,
     kind: "maintenance",
+    /* The job board predates templates and is not an instance of one. NULL is
+       the true answer, and `ensureBoardState` reads it that way. */
+    template: null,
     itemNoun: "Job",
     referencePrefix: "MS",
     position: 0,
@@ -290,11 +306,144 @@ export async function resolveBoard(
  * (organisation_id, board_id, column_key), so re-provisioning an existing board
  * changes nothing and cannot restore a column an admin deleted.
  */
-async function provisionDefaultStructure(
+/**
+ * HOW MANY COLUMNS A TEMPLATE'S REGISTER SHOULD HAVE.
+ *
+ * Read off the spec arrays rather than written down, so it cannot fall behind
+ * the thing it counts. `ensureBoardState` compares an instance against this and
+ * re-provisions when it is short, which is what keeps "a column added to the
+ * product reaches instances too" true rather than aspirational.
+ */
+export function templateColumnCount(template: string | null | undefined) {
+  const structure = templateStructure(template);
+  if (structure.columns === "maintenance") {
+    return maintenanceColumns.length + maintenanceUiColumns.length;
+  }
+  if (structure.columns === "store-documentation") return storeDocumentationColumns.length;
+  if (structure.columns === "none") return 0;
+  return GENERIC_BOARD_COLUMNS.length;
+}
+
+/**
+ * The one view tab every register starts with.
+ *
+ * The key and the id follow `app/api/board/views/route.ts` exactly -
+ * `seed-<org>-<board>-main`, `system: true`, `isDefault: true` - so the tab a
+ * generated register opens on is the same Main table every other board has.
+ */
+async function provisionMainView(db: Database, organisationId: string, boardKey: string) {
+  await db
+    .insert(boardViews)
+    .values({
+      id: `seed-${organisationId}-${boardKey}-main`,
+      organisationId,
+      boardId: boardKey,
+      key: "main",
+      name: "Main table",
+      type: "table",
+      icon: "grid",
+      position: 0,
+      isDefault: true,
+      system: true,
+    })
+    .onConflictDoNothing();
+}
+
+/**
+ * The board's own chip store, for a template whose columns are the maintenance
+ * ones.
+ *
+ * `ensureBoardState` in the board route seeds these for the BUILT-IN boards and
+ * is deliberately skipped for a generated register - it also seeds request rows
+ * and would fill a new section with the estate's jobs. The chips are the part a
+ * Jobs instance genuinely needs, so they are seeded here instead, from
+ * `defaultBoardOptions`: the same array, so the instance's Status and Priority
+ * offer monday's own labels and colours rather than the API's "Option 1"
+ * placeholder.
+ */
+async function provisionMaintenanceChips(
   db: Database,
   organisationId: string,
   boardKey: string,
 ) {
+  for (const item of defaultBoardOptions) {
+    await db
+      .insert(maintenanceBoardOptions)
+      .values({
+        id: `seed-${organisationId}-${boardKey}-${item.columnKey}-${item.position}`,
+        organisationId,
+        boardId: boardKey,
+        columnKey: item.columnKey,
+        value: item.value,
+        label: item.label,
+        color: item.color,
+        textColor: item.textColor,
+        position: item.position,
+        active: true,
+        system: true,
+      })
+      .onConflictDoNothing();
+  }
+}
+
+/**
+ * A NEW SECTION'S REGISTER, BUILT FROM ITS TEMPLATE.
+ *
+ * The owner's requirement, stated exactly: "the original section, with all its
+ * functionality and configuration, but empty and independent." So this does not
+ * describe a Jobs board - it CALLS THE JOB BOARD'S OWN SEEDER,
+ * `seedBoardStructure`, which is board-keyed already, with the section's key.
+ * Same 26 columns, same `system` flags, same option-set settings, same
+ * `stage_key` routing; a column added to the product later reaches instances
+ * without anyone remembering this file exists. Store Documentation likewise
+ * goes through `seedStoreDocumentationBoard`.
+ *
+ * What is NOT copied is equally deliberate: no rows, no group memberships, no
+ * saved filters, no per-user view state. An instance starts empty.
+ */
+export async function provisionDefaultStructure(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+  template?: string | null,
+) {
+  const structure = templateStructure(template);
+
+  /*
+   * A register whose surface is its own screen gets NO board structure, and
+   * that is not an omission. Sites and Contractors read `sites` / the
+   * contractor roster, scoped to this board's key; columns and groups here
+   * would be rows no code path ever selects, and a `main` view tab would draw a
+   * strip over a screen that has none.
+   */
+  if (structure.columns === "none") return;
+
+  if (structure.columns === "maintenance") {
+    await seedBoardStructure(
+      await getD1(),
+      organisationId,
+      boardKey,
+      /* `Array.isArray`, not a comparison against "generic": `groups` is a
+         union of a key list and two sentinels, and only the list narrows to
+         something the seeder can filter by. Anything else means "seed them
+         all", which is what the canonical board passes. */
+      Array.isArray(structure.groups) ? structure.groups : undefined,
+    );
+    await provisionMaintenanceChips(db, organisationId, boardKey);
+    await provisionMainView(db, organisationId, boardKey);
+    return;
+  }
+
+  if (structure.columns === "store-documentation") {
+    /* Seeds columns, groups and chips for the key it is given. Its own
+       `INSERT OR IGNORE` on `boards` is a no-op here - `createBoard` has
+       already written that row, under the section's name, and
+       `boards_org_key_idx` makes the second insert collide and be discarded. */
+    await seedStoreDocumentationBoard(await getD1(), organisationId, boardKey);
+    await provisionMainView(db, organisationId, boardKey);
+    return;
+  }
+
   for (const [position, column] of GENERIC_BOARD_COLUMNS.entries()) {
     await db
       .insert(maintenanceBoardColumns)
@@ -324,33 +473,11 @@ async function provisionDefaultStructure(
       .onConflictDoNothing();
   }
 
-  /*
-   * One view tab, keyed `main`, because W02-07 asks a new section's page for
-   * "views" and a board with no `board_views` row draws no tab strip at all.
-   *
-   * The key and the id follow `app/api/board/views/route.ts` exactly —
-   * `seed-<org>-<board>-main`, `system: true`, `isDefault: true` — so the tab a
-   * generated register starts with is the same Main table every other board
-   * has, and `upgradeToMondayViews` can add the rest later if this board is
-   * ever given monday's full strip. Deliberately ONE: the other ten are
-   * maintenance-shaped (Fix Tracker, Form Response Viewer) and a register for
-   * CCTV should not open holding tabs for a workflow it does not have.
-   */
-  await db
-    .insert(boardViews)
-    .values({
-      id: `seed-${organisationId}-${boardKey}-main`,
-      organisationId,
-      boardId: boardKey,
-      key: "main",
-      name: "Main table",
-      type: "table",
-      icon: "grid",
-      position: 0,
-      isDefault: true,
-      system: true,
-    })
-    .onConflictDoNothing();
+  /* One view tab, because W02-07 asks a new section's page for "views" and a
+     board with no `board_views` row draws no tab strip at all. Deliberately
+     ONE on the generic template: the rest of monday's strip is shaped around a
+     workflow a register for CCTV does not have. */
+  await provisionMainView(db, organisationId, boardKey);
 
   for (const [position, group] of GENERIC_BOARD_GROUPS.entries()) {
     await db
@@ -394,10 +521,17 @@ export async function createBoard(
      * name then cannot be reused after the board is gone.
      */
     key?: string;
+    /**
+     * The template this register is built from - see `TEMPLATE_STRUCTURES`.
+     * Absent or unknown means the generic six-column register, which is what
+     * every section created before templates existed has.
+     */
+    template?: string | null;
   },
 ): Promise<BoardRecord> {
   const name = input.name.trim().slice(0, 80);
   if (!name) throw new Error("A board name is required.");
+  const structure = templateStructure(input.template);
 
   const key = input.key ? slugifyKey(input.key) : newSectionBoardKey();
   if (!key) throw new Error("A board key is required.");
@@ -420,15 +554,24 @@ export async function createBoard(
     key,
     name,
     description: input.description?.trim().slice(0, 240) || null,
-    kind: input.kind?.trim() || "maintenance",
-    itemNoun: input.itemNoun?.trim().slice(0, 24) || "Item",
+    /* The template decides both, and an explicit argument still wins - the
+       built-in boards name their own. `kind` is what the surfaces switch on,
+       so a Jobs instance being `maintenance` is what makes it behave like one
+       without anything comparing board keys or route strings. */
+    kind: input.kind?.trim() || structure.kind,
+    /* Stored as GIVEN, not as resolved. An unknown template is provisioned
+       generically but must still record what was asked for, or a rollback that
+       restores the template turns a register into something else on its next
+       boot. */
+    template: input.template?.trim() || null,
+    itemNoun: input.itemNoun?.trim().slice(0, 24) || structure.itemNoun,
     referencePrefix: derivePrefix(name),
     position: Number(tail?.maxPosition ?? -1) + 1,
     archived: false,
   };
 
   await db.insert(boards).values({ ...record, organisationId });
-  await provisionDefaultStructure(db, organisationId, record.key);
+  await provisionDefaultStructure(db, organisationId, record.key, input.template);
   return record;
 }
 

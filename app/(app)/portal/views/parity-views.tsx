@@ -34,7 +34,15 @@ import { type BoardItem, formatDate, formatMoney } from "./view-model";
  * kanban, calendar and chart also depend on.
  */
 type FormItem = BoardItem & {
-  source?: MaintenanceRequest["source"];
+  /*
+   * Widened past `MaintenanceRequest["source"]`, which declares only
+   * `"Portal form" | "Manual"`. The database holds a third value:
+   * `/api/forms/[token]/submit` writes `"Shared form"` on every submission that
+   * arrives through a public link, deliberately, so the board can tell a link
+   * submission from one raised inside the product. The shared type has never
+   * said so — see the note on `formResponses` below for what that cost.
+   */
+  source?: MaintenanceRequest["source"] | "Shared form";
   contact?: string;
   formUrl?: string | null;
 };
@@ -53,6 +61,14 @@ const FORM_ANSWER = /incoming form answer/i;
  * Two provenances have to be recognised, because the board carries both:
  *
  *  - a row raised in MAINTSUPP carries `source: "Portal form"`;
+ *  - a row that arrived through a SHARED LINK carries `source: "Shared form"`,
+ *    written by `/api/forms/[token]/submit`. It was missing from this filter,
+ *    and it is the one provenance that is unambiguously a form response: those
+ *    rows exist BECAUSE somebody filled the public form in. Every submission
+ *    through a shared link was therefore absent from both Results and the
+ *    response viewer, on the job board and on every register with a form of its
+ *    own — the panels reported zero responses to a form that was collecting
+ *    them. W2 requirement B.
  *  - a row imported from monday carries the importer's source instead, so the
  *    only surviving record of how it arrived is monday's Name.
  *
@@ -63,7 +79,10 @@ const FORM_ANSWER = /incoming form answer/i;
  */
 function formResponses(items: FormItem[]) {
   return items.filter(
-    (item) => item.source === "Portal form" || FORM_ANSWER.test(item.title ?? ""),
+    (item) =>
+      item.source === "Portal form" ||
+      item.source === "Shared form" ||
+      FORM_ANSWER.test(item.title ?? ""),
   );
 }
 
@@ -436,7 +455,13 @@ const COUNT_COLUMNS = new Set<ColumnKey>(["issuePictures", "completedPictures", 
  */
 function flatCell(item: FormItem, key: ColumnKey, children: number) {
   if (key === "name") {
-    const title = item.title?.trim() || displaySource(item.source ?? "Portal form");
+    /* `displaySource` only separates "Manual" from everything else, and a
+       shared-link submission is one of the everything else — narrowed here
+       rather than widening that function's argument, which several other
+       callers pass a strictly-typed record to. */
+    const title =
+      item.title?.trim() ||
+      displaySource(item.source === "Manual" ? "Manual" : "Portal form");
     return { sort: title as string | number, text: title };
   }
   if (key === "subitems") {

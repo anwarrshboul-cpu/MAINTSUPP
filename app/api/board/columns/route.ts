@@ -252,7 +252,25 @@ export async function PATCH(request: Request) {
       }
 
       if (moved.length) {
-        const board = byId.get(moved[0].id)?.boardId ?? "maintenance";
+        /*
+         * THE BOARDS ACTUALLY TOUCHED, not the first row's board and not the
+         * literal "maintenance".
+         *
+         * This read `byId.get(moved[0].id)?.boardId ?? "maintenance"`. The
+         * lookup cannot miss - `moved` is only appended to when the row was
+         * found - so the fallback was unreachable, but it was still a board key
+         * written down in a file that has no business naming one. The real
+         * defect is next to it: this handler reorders any column id the caller
+         * names, across every board in the organisation, so a single request
+         * can move columns on two boards and the audit line named one of them.
+         * With one board that could not happen; with a register per section it
+         * can, and an audit trail that quietly names the wrong board is worse
+         * than one that says nothing.
+         */
+        const touched = [
+          ...new Set(moved.map((entry) => byId.get(entry.id)?.boardId).filter(Boolean)),
+        ] as string[];
+        const board = touched.length === 1 ? touched[0] : touched.join(", ");
         await recordAudit({
           db,
           organisationId: orgId,
@@ -264,7 +282,7 @@ export async function PATCH(request: Request) {
             moved.length === 1
               ? `Moved the "${moved[0].title}" column on ${board}.`
               : `Reordered ${moved.length} columns on ${board}.`,
-          detail: { board, moved },
+          detail: { board, boards: touched, moved },
           request,
         });
       }
