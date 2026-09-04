@@ -231,6 +231,13 @@ import {
   sortBySpend,
   stampWithinPeriod,
 } from "./period-model";
+import {
+  ReportTabNav,
+  ReportTabPanel,
+  useReportTab,
+} from "./reports/reports-tabs";
+import { InvoiceReportGenerator } from "./reports/invoice-generator";
+import { GeneratedDocuments } from "./reports/generated-documents";
 
 export type Section =
   | "overview"
@@ -6304,6 +6311,21 @@ function ReportsView({
    * two siblings.
    */
   const [layoutSlot, setLayoutSlot] = useState<HTMLElement | null>(null);
+  /*
+   * Which of the three internal tabs is showing.
+   *
+   * Remembered per section and carried in the hash — see the header of
+   * ./reports/reports-tabs.tsx. It is held HERE rather than inside the tab
+   * component because the page heading's toolbar belongs to Spend Overview
+   * alone: "Edit layout" and "Export spend" are that tab's controls, and the
+   * owner asked for Edit layout on Spend Overview only.
+   */
+  const [reportTab, setReportTab] = useReportTab(sectionKey);
+  /*
+   * A document the Generated Documents tab asked the generator to open. Null
+   * for a fresh draft. Held here because it crosses two tabs.
+   */
+  const [openDocumentId, setOpenDocumentId] = useState<string | null>(null);
   const periodWindow = resolvePeriod(period, now);
   const scopedRequests = useMemo(
     () => requests.filter((request) =>
@@ -6412,18 +6434,39 @@ function ReportsView({
             not tell anyone which three months they are reading, and every
             figure below depends on the answer.
           */}
-          <PeriodCaption period={period} now={now} matched={scopedRequests.length} loading={loading} />
+          {/*
+            The caption describes the SPEND OVERVIEW's window. The generator
+            has its own period control and its own default, so printing this
+            one over the generator would label its figures with a range that
+            does not apply to them.
+          */}
+          {reportTab === "overview" && (
+            <PeriodCaption period={period} now={now} matched={scopedRequests.length} loading={loading} />
+          )}
         </div>
-        <AnalyticsToolbar
-          portfolio={portfolio}
-          portfolios={portfolioOptions(storeRows)}
-          onPortfolioChange={setPortfolio}
-          periodControl={<PeriodPicker value={period} onChange={setPeriod} now={now} />}
-          onExport={() => downloadCsv(scopedRequests)}
-          exportLabel="Export spend"
-          slotRef={setLayoutSlot}
-        />
+        {/*
+          Portfolio, period, Export spend and the slot "Edit layout" portals
+          into — all four are Spend Overview's controls. Drawn only on that
+          tab, which is the owner's "Edit layout for Spend Overview only", and
+          which also keeps Export spend where it has always been rather than
+          replacing it with the generator's button.
+        */}
+        {reportTab === "overview" && (
+          <AnalyticsToolbar
+            portfolio={portfolio}
+            portfolios={portfolioOptions(storeRows)}
+            onPortfolioChange={setPortfolio}
+            periodControl={<PeriodPicker value={period} onChange={setPeriod} now={now} />}
+            onExport={() => downloadCsv(scopedRequests)}
+            exportLabel="Export spend"
+            slotRef={setLayoutSlot}
+          />
+        )}
       </section>
+
+      <ReportTabNav value={reportTab} onChange={setReportTab} />
+
+      <ReportTabPanel tab="overview" active={reportTab === "overview"}>
 
       {/* Focusable because it scrolls sideways at phone widths: without a tab
           stop a keyboard user cannot reach the cards past the fold. */}
@@ -6653,6 +6696,20 @@ function ReportsView({
           {showAllRepeat ? "Show summary" : "View all repeat activity"} <Icon name="chevron" size={15} />
         </button>
       </section>
+      </ReportTabPanel>
+
+      <ReportTabPanel tab="generator" active={reportTab === "generator"}>
+        <InvoiceReportGenerator now={now} openDocumentId={openDocumentId} />
+      </ReportTabPanel>
+
+      <ReportTabPanel tab="documents" active={reportTab === "documents"}>
+        <GeneratedDocuments
+          onOpenGenerator={(invoiceId) => {
+            setOpenDocumentId(invoiceId);
+            setReportTab("generator");
+          }}
+        />
+      </ReportTabPanel>
     </div>
   );
 }
