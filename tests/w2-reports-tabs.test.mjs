@@ -421,17 +421,118 @@ test("every wide table is inside the scroll container and labelled for a keyboar
 
 test("the styling reuses the analytics surfaces rather than forking them", async () => {
   const source = await read(CSS);
-  // The literals the analytics panels themselves use, so the two cannot drift.
-  assert.ok(source.includes("#263d48"), "the analytics hairline");
-  assert.ok(
-    source.includes("linear-gradient(145deg, #14242d, #101b23)"),
-    "the analytics card gradient",
+  /*
+   * RE-POINTED, NOT WEAKENED. This test used to pin the two LITERALS the
+   * analytics panels use — `#263d48` and
+   * `linear-gradient(145deg, #14242d, #101b23)` — on the premise that those
+   * panels are dark in both themes. They are not: `body[data-theme="light"]
+   * :is(.metric-card, .analytics-panel, …)` in brand-overrides.css repaints
+   * them, and `.reports-card` was never added to that list. Pinning the
+   * literals therefore pinned this screen to a fork it could not follow the
+   * theme out of — a dark bar and a dark card on a light page, with the
+   * section heading at 1.4:1 on top of it.
+   *
+   * The contract was always "this screen does not fork the analytics surface".
+   * Its new home is the TOKENS that surface is built from, so the assertion
+   * moves there and gets stricter, not looser: the same gradient, expressed as
+   * `--surface-card-hi` -> `--surface-card-lo` (which IS #14242d -> #101b23 in
+   * dark, so dark is unchanged), the product's hairline token, and — the part
+   * that actually stops a fork — no colour literal anywhere in a DECLARATION.
+   */
+  assert.match(
+    source,
+    /background: linear-gradient\(145deg, var\(--surface-card-hi\), var\(--surface-card-lo\)\);/,
+    "the analytics card gradient, from the tokens the analytics card is built from",
+  );
+  assert.match(source, /border: 1px solid var\(--line\);/, "the product's hairline");
+  // Comments carry measurements and named colours on purpose; declarations may
+  // not. Strip the comments, then look for a literal on the left of a `:`.
+  const declarations = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  const literals = declarations.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+  assert.deepEqual(
+    literals,
+    [],
+    `a colour literal in a declaration cannot follow the theme: ${literals.join(", ")}`,
+  );
+  /*
+   * `rgba()` is allowed exactly twice, and only on the local token declared at
+   * the head of the sheet. See the comment there: a low-alpha wash of the
+   * OPPOSITE ink is a relationship rather than a colour, so it has no token in
+   * globals.css and is declared once per theme instead of eight times inline.
+   */
+  const alphas = declarations.match(/rgba\(/g) ?? [];
+  assert.equal(alphas.length, 2, "only --reports-inset may declare an rgba(), once per theme");
+  assert.match(
+    declarations,
+    /:root:not\(\[data-theme="light"\]\),\s*\nbody\[data-theme="dark"\] \{\s*\n\s*--reports-inset:/,
+    "the local token names BOTH selectors globals.css names — data-theme is stamped on html AND body",
   );
   const generator = await read(GENERATOR);
   assert.match(
     generator,
     /import \{ AnalyticsMetricCard \} from "\.\.\/dashboard-analytics"/,
     "the KPI tile is the product's tile",
+  );
+});
+
+/*
+ * A form field's COLOUR belongs to the product; its EDGE belongs to this sheet.
+ *
+ * Tailwind's preflight sets `border-width: 0` on every element, and both rules
+ * that paint fields in this product (`.portal-shell input:not()…:not()` and the
+ * light skin's equivalent) set only `border-color`. So a `.reports-field` block
+ * that drops the width leaves every field at 0px — invisible in light, where a
+ * white field sits on a white card with nothing drawing its edge. Measured
+ * that way once already, on "Internal reference".
+ */
+test("a form field keeps its edge even though it does not keep its colour", async () => {
+  const source = await read(CSS);
+  const block = source.match(
+    /\.reports-field :is\(input, select, textarea\) \{[\s\S]*?\}/,
+  );
+  assert.ok(block, "the field geometry block must exist");
+  assert.match(block[0], /border-width: 1px;/, "preflight zeroes this; it has to be restated");
+  assert.match(block[0], /border-style: solid;/);
+  assert.ok(
+    !/\n\s*(background|color):/.test(block[0]),
+    "the ground and the ink are the product's, not this screen's — a second copy only drifts",
+  );
+});
+
+/*
+ * The defect the owner reported, pinned so it cannot come back.
+ *
+ * `body[data-theme="dark"] { .portal-main button { color: var(--control-own-fg,
+ * var(--ink)) } }` in globals.css outranks every selector in reports.css, so a
+ * button here that paints its own foreground and does NOT declare
+ * `--control-own-fg` is repainted `--ink` in dark. Measured before the fix: the
+ * selected tab and the two unselected tabs all came out rgb(231, 238, 243) —
+ * the active tab was not distinguishable by colour at all.
+ */
+test("every control that paints its own foreground declares the opt-out", async () => {
+  const source = await read(CSS);
+  const rules = source.split("}");
+  const offenders = [];
+  for (const rule of rules) {
+    const selector = rule.split("{")[0]?.trim().split("\n").pop()?.trim() ?? "";
+    /*
+     * Selectors that land ON a <button>. `.reports-alert--ok` and friends are
+     * deliberately NOT in this list: they are <p> elements that set the tone
+     * the dismiss control then inherits, and `.reports-alert button` carries
+     * `--control-own-fg: inherit` so that inheritance survives the dark skin.
+     */
+    const isButton =
+      /\.reports-(tabs__tab|button|linkish)\b/.test(selector) ||
+      /\bbutton\b/.test(selector);
+    if (!isButton) continue;
+    // Only rules that set a foreground have anything to opt out of.
+    if (!/\n\s*color:/.test(rule)) continue;
+    if (!rule.includes("--control-own-fg:")) offenders.push(selector);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these paint a button label the dark skin will overwrite: ${offenders.join(" | ")}`,
   );
 });
 
