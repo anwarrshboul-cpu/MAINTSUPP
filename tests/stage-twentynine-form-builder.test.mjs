@@ -314,10 +314,28 @@ test("the submit route resolves the site inside the form's own organisation", as
    * Without the organisation predicate a submitter could name any site string
    * and have it matched against another tenant's estate. The token authorises
    * one workspace, not whichever happens to have a site by that name.
+   *
+   * RE-POINTED, AND THE RULE GREW A SECOND HALF. This matched the two
+   * predicates written on one line. W2 added a third — the REGISTER — because
+   * the organisation is no longer the whole boundary: a site can belong to a
+   * custom Sites section, and this endpoint is PUBLIC, so a submitted name
+   * matching a site inside somebody's own register attached the job to it.
+   * Reproduced before the fix.
+   *
+   * Asserted clause by clause rather than as one string, which is both stricter
+   * and immune to the next reformat: the name, the organisation and the
+   * canonical register must each be in the predicate.
    */
+  assert.match(submit, /eq\(sites\.name, location\)/, "matched by the submitted name");
   assert.match(
     submit,
-    /eq\(sites\.name, location\), eq\(sites\.organisationId, record\.organisationId\)/,
+    /eq\(sites\.organisationId, record\.organisationId\)/,
+    "inside the form's own organisation",
+  );
+  assert.match(
+    submit,
+    /registerScopeFilter\(sites\.boardId, CANONICAL_REGISTER\)/,
+    "and only the canonical register — a public submitter cannot name an instance",
   );
 });
 
