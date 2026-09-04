@@ -316,13 +316,61 @@ async function serverIsUp() {
   }
 }
 
-/* Exact keys, swept by exact key. A substring sweep has repeatedly eaten other
-   fixtures on the shared Miniflare database. */
-const ALPHA = "section:w2tpl-jobs-alpha";
-const BETA = "section:w2tpl-jobs-beta";
+/*
+ * A KEY PER TEST, and a sweep that finishes.
+ *
+ * These three tests shared one pair of keys, and that turned a partial cleanup
+ * into a poisoned suite. The purge REFUSES an occupied register on purpose, so
+ * the test that files a row could leave its section archived rather than gone —
+ * and the next run's create then answered 409 "was removed and is archived,
+ * restore it instead" for every test in the file. Two of the three had nothing
+ * to do with rows and failed anyway.
+ *
+ * Exact keys throughout, and swept by exact key. A filename- or
+ * label-substring sweep has repeatedly eaten other fixtures on the shared
+ * Miniflare database, and the owner's own sections live there.
+ */
+const KEYS = {
+  parity: ["section:w2tpl-parity-a"],
+  isolation: ["section:w2tpl-isolation-a", "section:w2tpl-isolation-b"],
+  rows: ["section:w2tpl-rows-a"],
+};
 
-async function sweep() {
-  for (const key of [ALPHA, BETA]) {
+/**
+ * Remove a fixture section completely, including anything filed on its
+ * register.
+ *
+ * The order is the whole point. A section's register cannot be purged while it
+ * holds items — that refusal is a product rule this suite also tests — so the
+ * rows go first, by their own ids, then the section is archived, then purged.
+ * Anything left behind is reported rather than swallowed, because a silent
+ * half-sweep is what produced the 409 above.
+ */
+async function sweep(keys) {
+  for (const key of keys) {
+    const listed = await call("/api/workspace-sections").then(
+      (response) => (response.ok ? response.json() : { sections: [] }),
+      () => ({ sections: [] }),
+    );
+    const section = (listed.sections ?? []).find((entry) => entry.key === key);
+    if (section?.boardKey) {
+      const board = await call(`/api/board?board=${encodeURIComponent(section.boardKey)}`)
+        .then((response) => (response.ok ? response.json() : {}), () => ({}));
+      const ids = (board.requests ?? []).map((row) => row.id);
+      if (ids.length) {
+        await call(`/api/board?board=${encodeURIComponent(section.boardKey)}`, {
+          method: "POST",
+          body: JSON.stringify({ action: "bin_items", ids }),
+        });
+        /* The bin still counts against the purge, so empty it by the exact bin
+           ids this sweep just created — never by a name or a sweep-all. */
+        const bin = await call(`/api/trash?board=${encodeURIComponent(section.boardKey)}`)
+          .then((response) => (response.ok ? response.json() : {}), () => ({}));
+        for (const entry of bin.items ?? []) {
+          await call(`/api/trash?id=${encodeURIComponent(entry.id)}`, { method: "DELETE" }, SUPER);
+        }
+      }
+    }
     await call(`/api/workspace-sections?key=${key}`, { method: "DELETE" });
     await call(`/api/workspace-sections?key=${key}&purge=1`, { method: "DELETE" }, SUPER);
   }
@@ -343,9 +391,10 @@ test("live: a Jobs section is the job board, empty", async (t) => {
     t.skip(`no server at ${BASE_URL}`);
     return;
   }
-  await sweep();
+  const [ALPHA] = KEYS.parity;
+  await sweep(KEYS.parity);
   try {
-    const alpha = await createSection(ALPHA, "W2TPL Alpha", "jobs");
+    const alpha = await createSection(ALPHA, "W2TPL Parity A", "jobs");
     const [instance, canonical] = await Promise.all([
       (await call(`/api/board?board=${alpha.boardKey}`)).json(),
       (await call("/api/board?board=maintenance")).json(),
@@ -394,7 +443,7 @@ test("live: a Jobs section is the job board, empty", async (t) => {
     };
     assert.deepEqual(chips(instance), chips(canonical), "and the same status vocabulary");
   } finally {
-    await sweep();
+    await sweep(KEYS.parity);
   }
 });
 
@@ -403,10 +452,11 @@ test("live: two Jobs instances are independent of each other and of the job boar
     t.skip(`no server at ${BASE_URL}`);
     return;
   }
-  await sweep();
+  const [ALPHA, BETA] = KEYS.isolation;
+  await sweep(KEYS.isolation);
   try {
-    const alpha = await createSection(ALPHA, "W2TPL Alpha", "jobs");
-    const beta = await createSection(BETA, "W2TPL Beta", "jobs");
+    const alpha = await createSection(ALPHA, "W2TPL Isolation A", "jobs");
+    const beta = await createSection(BETA, "W2TPL Isolation B", "jobs");
     assert.notEqual(alpha.boardKey, beta.boardKey, "two sections, two registers");
 
     const added = await call("/api/board/columns", {
@@ -429,7 +479,7 @@ test("live: two Jobs instances are independent of each other and of the job boar
       `the job board should still carry its own columns, found ${titles(canonical).length}`,
     );
   } finally {
-    await sweep();
+    await sweep(KEYS.isolation);
   }
 });
 
@@ -438,14 +488,21 @@ test("live: a row created on an instance stays on it", async (t) => {
     t.skip(`no server at ${BASE_URL}`);
     return;
   }
-  await sweep();
+  const [ALPHA] = KEYS.rows;
+  await sweep(KEYS.rows);
   try {
-    const alpha = await createSection(ALPHA, "W2TPL Alpha", "jobs");
+    const alpha = await createSection(ALPHA, "W2TPL Rows A", "jobs");
     const board = await (await call(`/api/board?board=${alpha.boardKey}`)).json();
     const groupId = board.groups[0]?.id;
     assert.ok(groupId, "an instance must have a lane to file into");
 
-    const created = await call("/api/board", {
+    /* The board goes in the QUERY STRING here, not the body: `boardIdFrom` in
+       the board route reads `searchParams`, so a `board` field in the body is
+       ignored and the write lands on the default board. The columns route below
+       reads its own body instead — the two conventions differ, and getting it
+       wrong is a 404 rather than a wrong-board write, which is the safe
+       direction and how this was caught. */
+    const created = await call(`/api/board?board=${encodeURIComponent(alpha.boardKey)}`, {
       method: "POST",
       body: JSON.stringify({
         action: "create_item",
@@ -466,19 +523,8 @@ test("live: a row created on an instance stays on it", async (t) => {
       "and never on the job board — the stranded-row defect this replaced",
     );
   } finally {
-    /* The purge refuses an occupied register on purpose, so the row goes
-       first — by its own id, never by a title sweep. */
-    const sections = await (await call("/api/workspace-sections")).json();
-    const alpha = (sections.sections ?? []).find((entry) => entry.key === ALPHA);
-    if (alpha?.boardKey) {
-      const board = await (await call(`/api/board?board=${alpha.boardKey}`)).json().catch(() => ({}));
-      for (const row of board.requests ?? []) {
-        await call(`/api/board?board=${alpha.boardKey}`, {
-          method: "POST",
-          body: JSON.stringify({ action: "bin_items", board: alpha.boardKey, ids: [row.id] }),
-        });
-      }
-    }
-    await sweep();
+    /* `sweep` empties the register before purging it — see the note on it for
+       why that order is what keeps this file re-runnable. */
+    await sweep(KEYS.rows);
   }
 });

@@ -889,7 +889,10 @@ export function LiveMaintenanceBoard({
     [allBoardColumns],
   );
 
-  const systemOptionOrders = useMemo(() => buildOptionOrders(boardOptions), [boardOptions]);
+  const systemOptionOrders = useMemo(
+    () => buildOptionOrders(boardOptions, editableFallbackOptions),
+    [boardOptions],
+  );
 
   const filtered = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();

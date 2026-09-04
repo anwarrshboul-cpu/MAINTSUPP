@@ -33,14 +33,13 @@
  */
 
 import type { MaintenanceBoardColumn, MaintenanceRequest } from "../../lib/types";
-import type { BoardDisplayColumn, ColumnKey } from "./board-model";
+import type { BoardDisplayColumn, ColumnKey, Option } from "./board-model";
 import {
   boardItemName,
   compareBoardValues,
   systemColumnSortValue,
 } from "./board-ordering";
 import { customCellKey, customCellSortValue } from "./board-format";
-import { editableFallbackOptions } from "./board-model";
 import type { BoardOptionColumn } from "../../lib/types";
 
 export type SortDirection = "asc" | "desc";
@@ -387,10 +386,21 @@ export type SortableBoardOption = {
  * ceiling. The extraction is what paid for the Store Documentation instance
  * fix; see the note on `storeDocumentation` in `LiveMaintenanceBoard`.
  *
- * Falls back to `editableFallbackOptions` for a column whose board has no
- * saved chips yet, so a board sorts sensibly before its first option edit.
+ * `fallbackOptions` is passed in rather than imported, and that is not style.
+ * This module is loaded in two tests by transpiling it to a `data:` URL, where
+ * a relative specifier cannot be resolved at all — so every value import here
+ * has to be rewritten by hand in those loaders, and one that is forgotten fails
+ * the WHOLE FILE rather than a test. Keeping the module free of new value
+ * imports is what stops the next extraction breaking two suites at a distance.
+ * The caller has the table anyway.
+ *
+ * The fallback covers a column whose board has no saved chips yet, so a board
+ * sorts sensibly before its first option edit.
  */
-export function systemOptionOrders(boardOptions: SortableBoardOption[]) {
+export function systemOptionOrders(
+  boardOptions: SortableBoardOption[],
+  fallbackOptions: Partial<Record<BoardOptionColumn, Option[]>>,
+) {
   const orders = new Map<string, Map<string, number>>();
   for (const key of [
     "tier",
@@ -405,7 +415,7 @@ export function systemOptionOrders(boardOptions: SortableBoardOption[]) {
       .sort((left, right) => left.position - right.position);
     const choices = saved.length
       ? saved.map((option) => ({ value: option.value, label: option.label }))
-      : (editableFallbackOptions[key] ?? []).map((option) => ({
+      : (fallbackOptions[key] ?? []).map((option) => ({
           value: option.value,
           label: option.label,
         }));

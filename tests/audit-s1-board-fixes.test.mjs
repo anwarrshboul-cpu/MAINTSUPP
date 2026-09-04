@@ -289,8 +289,28 @@ test("the tier cell bridges number<->'Tier N' in all four places", async () => {
   // …saving refuses NaN and stores the bare number…
   assert.match(board, /const tier = Number\(tierDigits\(value\) \|\| value\);/);
   assert.match(board, /if \(Number\.isFinite\(tier\) && value\.trim\(\)\) onSave\(\{ tier \}\);/);
-  // …the sort's option-order lookup aliases the digits…
-  assert.match(board, /if \(key === "tier"\) \{\s*const digits = tierDigits\(choice\.value \?\? ""\);/);
+  /*
+   * …the sort's option-order lookup aliases the digits…
+   *
+   * RE-POINTED, SAME CONTRACT, NEW HOME. `systemOptionOrders` moved out of
+   * live-board into `board-sort.ts`, where the comparator that consumes it
+   * already lives — the extraction that bought the room to fix the Store
+   * Documentation instance, live-board having had one line left under the
+   * 5,600 guard. `tierDigits` moved with it and is imported back, so this is
+   * still the ONE bridge all four places share.
+   */
+  const sort = await read("app/(app)/portal/board-sort.ts");
+  assert.match(sort, /export const tierDigits = \(value: string\) =>/);
+  assert.ok(
+    sort.includes(String.raw`value.replace(/\D+/g, "")`),
+    "the bridge must still strip everything but the digits",
+  );
+  assert.match(sort, /if \(key === "tier"\) \{\s*const digits = tierDigits\(choice\.value \?\? ""\);/);
+  assert.match(
+    board,
+    /tierDigits,\s*\} from "\.\/board-sort";/,
+    "and live-board must import it, not restate it",
+  );
   // …and the filter rule stores what the FIELD holds.
   assert.match(board, /entry\.key === "tier"\s*\?\s*tierDigits\(option\.value\) \|\| option\.value/);
 });
