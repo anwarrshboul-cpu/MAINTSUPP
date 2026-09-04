@@ -11,6 +11,10 @@ import {
 } from "../../lib/attachment-counts";
 import { ensureDatabase } from "../../../db/init";
 import {
+  CANONICAL_REGISTER,
+  registerScopeFilter,
+} from "../../lib/register-scope";
+import {
   jobAlertTemplate,
   notificationTargets,
   sendNotification,
@@ -433,7 +437,14 @@ export async function POST(request: Request) {
       .select({ id: sites.id })
       .from(sites)
       .where(
-        and(eq(sites.name, location), eq(sites.organisationId, orgId)),
+        and(
+          eq(sites.name, location),
+          eq(sites.organisationId, orgId),
+          /* CANONICAL ONLY, for the reason the public form gives: an inbound
+             caller names a location as text and cannot name a register, so the
+             only one they can mean is the workspace's own. */
+          registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+        ),
       )
       .limit(1);
     if (!matchedSite) {

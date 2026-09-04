@@ -78,6 +78,7 @@ import {
   assigneeFilterOptions,
   storeTypeFilterColumn,
 } from "./board-model";
+import { boardColumnOptions, boardDisplayColumns } from "./board-columns";
 import {
   boardItemName,
   moveBoardItemPlacement,
@@ -118,7 +119,7 @@ import { BoardMobileSection } from "./board-mobile-list";
 import { copyBoardText, downloadBoardCsv } from "./board-export";
 import { BoardColumnHeader } from "./board-column-header";
 import { ColumnPicker } from "./board-column-picker";
-import { BoardFilterPanel, BoardSortPanel, type FilterChoice } from "./board-controls";
+import { BoardFilterPanel, BoardSortPanel, type FilterChoice, BOARD_CONTENT_REGION} from "./board-controls";
 import {
   type BoardSortRule,
   type SortDirection,
@@ -154,6 +155,7 @@ import {
   stickyColumnOffsets,
   pinnedColumnClass,
   pinnedColumnStyle,
+  stickyCellStyle as stickyCellStyleFor,
   stickyZIndex,
   type StickyColumn,
 } from "./board-pinning";
@@ -467,6 +469,9 @@ export function LiveMaintenanceBoard({
   const [hideOpen, setHideOpen] = useState(false);
   // The columns panel is anchored to this button through the layer portal.
   const hideButtonRef = useRef<HTMLButtonElement | null>(null);
+  /* The chevron the New item menu hangs off. `AnchoredPopover` anchors to
+     the TRIGGER, which is also what makes focus return land on it. */
+  const actionsButtonRef = useRef<HTMLButtonElement | null>(null);
   const [columnPickerGroupId, setColumnPickerGroupId] = useState<string | null>(
     null,
   );
@@ -868,20 +873,9 @@ export function LiveMaintenanceBoard({
    */
   const isGeneratedRegister = !isMaintenanceBoard && !isStoreDocumentation;
 
+  /* One ordered list of both kinds — see board-model.ts. */
   const allBoardColumns = useMemo<BoardDisplayColumn[]>(
-    () =>
-      [
-        ...systemColumns.map(
-          (column): BoardDisplayColumn => ({
-            kind: "system",
-            key: column.key as ColumnKey,
-            column,
-          }),
-        ),
-        ...customColumns.map(
-          (column): BoardDisplayColumn => ({ kind: "custom", column }),
-        ),
-      ].sort((left, right) => left.column.position - right.column.position),
+    () => boardDisplayColumns(systemColumns, customColumns),
     [customColumns, systemColumns],
   );
 
@@ -1696,21 +1690,9 @@ export function LiveMaintenanceBoard({
     return saveCustomCell(request, column, decoration);
   };
 
-  const optionsFor = (columnKey: BoardOptionColumn): Option[] => {
-    const saved = boardOptions
-      .filter((option) => option.columnKey === columnKey)
-      .sort((a, b) => a.position - b.position)
-      .map((option) => ({
-        id: option.id,
-        value: option.value,
-        label: option.label,
-        color: option.color,
-        text: option.textColor,
-        active: option.active,
-        system: option.system,
-      }));
-    return saved.length ? saved : editableFallbackOptions[columnKey];
-  };
+  /* Saved chips first, the shared fallback otherwise — see board-model.ts. */
+  const optionsFor = (columnKey: BoardOptionColumn): Option[] =>
+    boardColumnOptions(boardOptions, columnKey);
 
   const createOption = async (
     columnKey: BoardOptionColumn,
@@ -2073,28 +2055,10 @@ export function LiveMaintenanceBoard({
     [visibleBoardColumns, isMobile],
   );
 
-  /*
-   * THE ADD-ITEM ROW WAS THE ONE ROW NOBODY GAVE THE FROZEN OFFSETS TO.
-   *
-   * The header, the body cells and the summary cells are all handed
-   * `stickyOffsets.get(column.id)`. The "+ Add item" cell at the foot of every
-   * group never was, and got away with it because `.sheet-column--name` hard-
-   * codes `left: 72px` — which is exactly what `stickyColumnOffsets` computes
-   * for Items when Items is the first frozen column, so the two agreed by
-   * coincidence. Pin a column, or drag a pinned column ahead of Items, and the
-   * coincidence ends: the rest of the frozen edge moves to its new offset and
-   * the last row of every group stays behind at 72, so the bottom of each
-   * group visibly detaches from the column above it partway through a scroll.
-   */
-  const stickyCellStyle = (columnId: string): CSSProperties => {
-    const sticky = stickyOffsets.get(columnId);
-    if (!sticky) return {};
-    return {
-      position: "sticky",
-      left: sticky.left,
-      zIndex: stickyZIndex(sticky.order, false),
-    };
-  };
+  /* The frozen-cell style, and the add-item-row defect it prevents, live in
+     board-pinning.ts beside the offsets they read. */
+  const stickyCellStyle = (columnId: string) =>
+    stickyCellStyleFor(columnId, stickyOffsets);
 
   /**
    * Freeze a column against the left edge, or release it.
@@ -3434,6 +3398,7 @@ export function LiveMaintenanceBoard({
             </button>
             <button
               type="button"
+              ref={actionsButtonRef}
               aria-label="More new item options"
               onClick={() => {
                 setActionsOpen((open) => !open);
@@ -3446,7 +3411,33 @@ export function LiveMaintenanceBoard({
             >
               <Icon name="chevron" size={15} />
             </button>
-            {actionsOpen && (
+            {/*
+              ON THE OVERLAY LAYER, for the reason the Sort panel is.
+              `.live-board-menu` is `position: absolute; z-index: 1000` inside
+              `.live-board-toolbar`, which is `position: relative; z-index: 80`
+              — a STACKING CONTEXT. A z-index inside one is ranked only against
+              that context's siblings, so 1000 there lost to the rail's 410
+              exactly as the Sort panel's did, and no number would have fixed
+              it. Measured at 1024: `elementFromPoint(15, 885)` returned
+              `aside.portal-sidebar` — the rail painted over the menu.
+
+              Two symptoms, one cause. Below 1024 `brand-overrides.css` turns
+              this menu into a fixed bottom sheet at `left: 10px`, which is
+              210px left of `.portal-main` while the rail is still docked (it
+              only undocks at 900) — so the live band was ~901-1024. At 1280 the
+              sheet rule does not apply and the ordinary dropdown simply ran off
+              the bottom of the window. Portalling with `bounds` answers both:
+              the layer escapes the stacking context, and the clamp keeps it
+              inside the content region.
+            */}
+            <AnchoredPopover
+              open={actionsOpen}
+              anchorRef={actionsButtonRef}
+              onClose={() => setActionsOpen(false)}
+              bounds={BOARD_CONTENT_REGION}
+              role="menu"
+              label="More new item options"
+            >
               <div className="live-board-menu action-menu">
                 {/*
                   "New item via form" IS THE JOB FORM, and it writes to the job
@@ -3487,7 +3478,7 @@ export function LiveMaintenanceBoard({
                   </span>
                 )}
               </div>
-            )}
+            </AnchoredPopover>
           </div>
 
           <label className="live-board-search">
@@ -3717,6 +3708,10 @@ export function LiveMaintenanceBoard({
               open={hideOpen}
               anchorRef={hideButtonRef}
               onClose={() => setHideOpen(false)}
+              /* Measured clear of the rail at every width, so this is latent
+                 rather than live — but it clamped to the WINDOW, and the
+                 content region is the guarantee its neighbours now carry. */
+              bounds={BOARD_CONTENT_REGION}
               role="dialog"
               label="Visible columns"
             >

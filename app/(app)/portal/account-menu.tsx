@@ -570,7 +570,17 @@ export function AccountMenu({
     const shared = {
       className: "account-menu__item",
       "data-menu-item": true,
-      title: `monday: ${item.monday}`,
+      /*
+       * NO TOOLTIP NAMING THE BRAND.
+       *
+       * This rendered `monday: <equivalent>` on every item in the avatar menu —
+       * a menu reachable from every board — so the brand was one hover away
+       * from anywhere in the product. `item.monday` stays: it is the mapping
+       * this menu was built against and it documents which monday surface each
+       * entry answers to. It is simply not a thing to show a reader, who has
+       * the label in front of them and no use for the other product's name for
+       * it.
+       */
     } as const;
 
     if (item.href) {
@@ -658,7 +668,7 @@ export function AccountMenu({
             <Link
               className="account-menu__plan"
               href="/dashboard/account/billing"
-              title="monday: credits pill"
+              title="Workspace credits"
             >
               {snapshot ? planLabel(snapshot.workspace.planTier) : "Plan"}
             </Link>

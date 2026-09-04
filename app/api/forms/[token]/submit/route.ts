@@ -1,5 +1,9 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
+import {
+  CANONICAL_REGISTER,
+  registerScopeFilter,
+} from "../../../../lib/register-scope";
 import { getDb } from "../../../../../db";
 import {
   activityLog,
@@ -309,7 +313,19 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       const [matchedSite] = await db
         .select({ id: sites.id })
         .from(sites)
-        .where(and(eq(sites.name, location), eq(sites.organisationId, record.organisationId)))
+        .where(
+          and(
+            eq(sites.name, location),
+            eq(sites.organisationId, record.organisationId),
+            /* CANONICAL ONLY. This endpoint is PUBLIC — a share link, no
+               session, no instance context — and the form offers the
+               workspace's own locations. Unscoped, a submitted name matching a
+               site inside somebody's custom Sites register attached the job to
+               it. An unmatched name is already refused below, which is the
+               state a person can see and correct. */
+            registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+          ),
+        )
         .limit(1);
       if (!matchedSite) return failure("Choose a location from the list.");
       matchedSiteId = matchedSite.id;

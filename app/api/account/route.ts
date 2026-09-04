@@ -18,6 +18,7 @@
 import { and, count, eq, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
+import { CANONICAL_REGISTER, registerScopeFilter } from "../../lib/register-scope";
 import {
   maintenanceRequests,
   memberships,
@@ -150,7 +151,17 @@ async function usage(db: Database, orgId: string) {
           isNull(maintenanceRequests.deletedAt),
         ),
       ),
-    db.select({ value: count() }).from(sites).where(eq(sites.organisationId, orgId)),
+    /* The workspace's own site register. A site inside a custom Sites
+       section is counted on that section, not on the workspace's usage tile. */
+    db
+      .select({ value: count() })
+      .from(sites)
+      .where(
+        and(
+          eq(sites.organisationId, orgId),
+          registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+        ),
+      ),
     db.select({ value: count() }).from(units).where(eq(units.organisationId, orgId)),
     db
       .select({ value: count() })

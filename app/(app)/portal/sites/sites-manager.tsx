@@ -429,8 +429,8 @@ export function SitesManager({
             type="search"
             placeholder={
               searchesAliases
-                ? "Search name, former name, code, town, postcode or monday name"
-                : "Search name, code, town, postcode or monday name"
+                ? "Search name, former name, code, town, postcode or board name"
+                : "Search name, code, town, postcode or board name"
             }
             value={search}
             onChange={(event) => setSearch(event.target.value)}

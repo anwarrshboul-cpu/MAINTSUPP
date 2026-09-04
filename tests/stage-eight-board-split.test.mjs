@@ -130,6 +130,16 @@ test("no board file exceeds a reviewable size", async () => {
      * overflow is the easiest place for the next thing to be dropped quietly.
      */
     "app/(app)/portal/board-pinning.ts": 250,
+    /*
+     * Split out of board-model when it reached 600 — the two column
+     * derivations that turn a board's stored lists into what the grid draws.
+     * That split is what bought the room to put the "New item" menu on the
+     * overlay layer, live-board having been over the 5,600 guard in
+     * `tests/workstream-seven-official-document-ui.test.mjs`.
+     *
+     * Capped from the start, for the reason the notes above give.
+     */
+    "app/(app)/portal/board-columns.ts": 200,
   };
   for (const [file, limit] of Object.entries(limits)) {
     const source = await read(file);

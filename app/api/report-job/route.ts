@@ -1,5 +1,9 @@
 import { and, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
+import {
+  CANONICAL_REGISTER,
+  registerScopeFilter,
+} from "../../lib/register-scope";
 import { activityLog, maintenanceRequests, siteAliases, sites } from "../../../db/schema";
 import { exposeRequest } from "../../lib/request-payload";
 import {
@@ -96,6 +100,29 @@ type PublicDatabase = Awaited<ReturnType<typeof scopedDb>>["db"];
  * Matching is exact, then case-insensitive, then this organisation's own
  * aliases — which is what a renamed site leaves behind, so a reporter typing
  * the name the shop carried last year still lands on the right row.
+ *
+ * ── AND ONLY EVER THE CANONICAL REGISTER ──────────────────────────────────
+ *
+ * Every one of the four reads below is scoped to `CANONICAL_REGISTER`, and on
+ * this route that is a security boundary rather than a tidiness rule.
+ *
+ * THIS ENDPOINT IS PUBLIC. There is no session, no actor and no instance
+ * context — a stranger with the link submits a job and names a location as free
+ * text. Unscoped, those reads matched every site in the organisation, so naming
+ * a site that lives inside a custom Sites SECTION attached the submission to
+ * it: a private register, populated by one team for their own work, taking rows
+ * from an anonymous form it was never connected to. Reproduced before the fix.
+ *
+ * Canonical is the right answer rather than a safe-looking default. An
+ * anonymous reporter cannot name a register — they have not seen one and the
+ * form does not offer one — so the only register they can mean is the
+ * workspace's own. A name that matches nothing there falls through to
+ * `unassignedSiteId()` exactly as an unknown name always has, which is a state
+ * the product already handles and a person can see and correct. Silently
+ * routing it into somebody's instance is not.
+ *
+ * The same reasoning `app/lib/register-scope.ts` sets out for every inbound
+ * path with no session.
  */
 async function resolveSite(
   db: PublicDatabase,
@@ -105,7 +132,13 @@ async function resolveSite(
   const [exact] = await db
     .select({ id: sites.id, name: sites.name })
     .from(sites)
-    .where(and(eq(sites.name, location), eq(sites.organisationId, orgId)))
+    .where(
+      and(
+        eq(sites.name, location),
+        eq(sites.organisationId, orgId),
+        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+      ),
+    )
     .limit(1);
   if (exact) return exact;
 
@@ -113,7 +146,11 @@ async function resolveSite(
     .select({ id: sites.id, name: sites.name })
     .from(sites)
     .where(
-      and(eq(sites.organisationId, orgId), sql`lower(${sites.name}) = lower(${location})`),
+      and(
+        eq(sites.organisationId, orgId),
+        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+        sql`lower(${sites.name}) = lower(${location})`,
+      ),
     )
     .limit(1);
   if (loose) return loose;
@@ -136,6 +173,10 @@ async function resolveSite(
         eq(siteAliases.organisationId, orgId),
         eq(siteAliases.normalised, normalised),
         eq(sites.organisationId, orgId),
+        /* The alias is only a way of spelling a site. Following one into an
+           instance would reach exactly the row the two predicates above are
+           there to keep an anonymous caller away from. */
+        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
       ),
     )
     .limit(1);

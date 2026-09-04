@@ -179,3 +179,36 @@ export function pinnedColumnStyle(
 export function pinnedColumnClass(column: MaintenanceBoardColumn) {
   return column.pinned === true ? " is-pinned-column" : "";
 }
+
+
+/**
+ * THE STYLE FOR A CELL IN A FROZEN COLUMN, wherever that cell sits.
+ *
+ * Extracted from `live-board.tsx`, unchanged, and it belongs beside
+ * `pinnedColumnStyle` because it reads the same map for the same reason.
+ *
+ * The defect it exists to prevent, kept with it: the header, the body cells and
+ * the summary cells were all handed `stickyOffsets.get(column.id)` and the
+ * "+ Add item" cell at the foot of every group never was. It got away with it
+ * because `.sheet-column--name` hard-codes `left: 72px`, which is exactly what
+ * `stickyColumnOffsets` computes for Items when Items is the first frozen
+ * column — so the two agreed by coincidence. Pin a column, or drag a pinned one
+ * ahead of Items, and the coincidence ends: the rest of the frozen edge moves
+ * and the last row of every group stays behind at 72, so the bottom of each
+ * group visibly detaches from the column above it partway through a scroll.
+ *
+ * An unfrozen column gets an empty object rather than `position: static`, so
+ * the stylesheet keeps whatever it was going to do.
+ */
+export function stickyCellStyle(
+  columnId: string,
+  stickyOffsets: Map<string, StickyColumn>,
+): CSSProperties {
+  const sticky = stickyOffsets.get(columnId);
+  if (!sticky) return {};
+  return {
+    position: "sticky",
+    left: sticky.left,
+    zIndex: stickyZIndex(sticky.order, false),
+  };
+}

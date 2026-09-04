@@ -77,7 +77,15 @@ import type { FilterOperator } from "./views/view-model";
 export type FilterChoice = { value: string; label: string };
 
 /** The layout region a toolbar panel may not leave — see `resolveBounds`. */
-const BOARD_CONTENT_REGION = ".portal-main";
+/**
+ * The region a board overlay may occupy — exported so there is ONE literal.
+ *
+ * `.portal-main` carries the margin that tracks the sidebar, so clamping to it
+ * is what puts a panel beside the rail instead of under it. The "New item" menu
+ * in `live-board.tsx` needs the same guarantee and must not restate the
+ * selector: two spellings of one region is how they drift.
+ */
+export const BOARD_CONTENT_REGION = ".portal-main";
 
 /* ── The anchor ──────────────────────────────────────────────────────────── */
 

@@ -2,6 +2,7 @@ import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { getD1 } from "../../../db";
 import { ensureDatabase, seedBoardStructure } from "../../../db/init";
 import { seedStoreDocumentationBoard } from "../../../db/seed-store-documentation";
+import { CANONICAL_REGISTER, registerScopeFilter } from "../../lib/register-scope";
 import {
   maintenanceRequests,
   memberships,
@@ -71,7 +72,15 @@ async function tenantSummary(context: ScopedDatabase) {
     context.db
       .select({ organisationId: sites.organisationId, value: count() })
       .from(sites)
-      .where(inArray(sites.organisationId, ids))
+      /* The workspace's own register, for the same reason the job count
+         excludes binned jobs: this tile says how big a TENANT is, and a site
+         filed inside one section is not part of the workspace's own estate. */
+      .where(
+        and(
+          inArray(sites.organisationId, ids),
+          registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+        ),
+      )
       .groupBy(sites.organisationId),
   ]);
 
@@ -104,7 +113,22 @@ async function contextPayload(request: Request) {
     context.db
       .select({ id: sites.id, name: sites.name })
       .from(sites)
-      .where(eq(sites.organisationId, context.orgId))
+      /*
+       * THE CANONICAL REGISTER ONLY. This list is the location select on
+       * Raise a ticket, the board's job form and the public /request page —
+       * an ASSIGNMENT surface, and `workspace-data-manager.tsx` states the
+       * rule for exactly this case: "a picker is an assignment surface rather
+       * than an inventory - offering another register's site there would
+       * attach a job to a site the canonical board does not hold."
+       * `registerScopeFilter` rather than a hand-rolled `isNull`, because
+       * `x = NULL` is never true and this module owns that.
+       */
+      .where(
+        and(
+          eq(sites.organisationId, context.orgId),
+          registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+        ),
+      )
       .orderBy(asc(sites.name)),
     listOptionValues(context.db, context.orgId, "priority"),
     listOptionValues(context.db, context.orgId, "engineer_required"),
