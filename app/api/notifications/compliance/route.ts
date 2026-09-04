@@ -3,8 +3,8 @@ import { ensureDatabase } from "../../../../db/init";
 import { complianceDocuments } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import {
+  headlineComplianceRegisters,
   readComplianceRegister,
-  storeDocumentationBoards,
   withinOperationalEstate,
   type RegisterEntry,
 } from "../../../lib/compliance-register";
@@ -81,32 +81,42 @@ type Scanned = {
  * It now reads the same register the compliance screens read
  * (app/lib/compliance-register.ts), so an alert and a screen cannot disagree.
  *
- * EVERY STORE DOCUMENTATION REGISTER, NOT THE CANONICAL BOARD ALONE.
+ * THE SAME SCOPE THE SCREENS SHOW — `headlineComplianceRegisters`.
  *
- * WHAT WAS WRONG THE SECOND TIME. A workspace section created from the Store
- * Documentation template provisions its OWN board, with a generated key
- * (`sec-<12hex>`) and the same 24 columns, four groups and twelve certificate
- * slots the canonical board has — seeded by the same `seedStoreDocumentationBoard`.
- * This scan asked `readComplianceRegister` for its default, which is the
- * canonical board and nothing else. So an instance would collect real
- * certificates, show them on its own Compliance Tracker with a real RAG state,
- * and never produce a single alert for any of them, for ever, silently. That is
- * the same shape of failure as the one described above — a digest that is loud
- * about one estate and silent about another — arriving through a board key
- * rather than through the wrong table, and it is WORSE than the original,
- * because the screen says the certificate is being watched.
+ * WHAT WAS WRONG THE SECOND TIME, and it is the mirror of the first. A
+ * workspace section created from the Store Documentation template provisions
+ * its OWN board, with a generated key (`sec-<12hex>`) and the same columns,
+ * four groups and twelve certificate slots the canonical board has — seeded by
+ * the same `seedStoreDocumentationBoard`. This scan was widened to cover every
+ * one of them, by `boards.kind`, while `/api/workspace` — which feeds
+ * /dashboard/compliance, the Overview tile, the calendar and the site drawer —
+ * kept `readComplianceRegister`'s canonical default. So the product held TWO
+ * definitions of "compliance": a certificate on a section instance was emailed
+ * about at 07:00 and was invisible on the compliance page the reader then went
+ * to look at. An alert with nowhere to go is the failure this whole module was
+ * rebuilt to end, arriving through a scope rather than through a table.
  *
- * `storeDocumentationBoards` answers from `boards.kind`, never from a key
- * comparison, so a section instance is covered the moment it is created and
- * nothing here has to learn about it. What canonical users receive is unchanged:
- * the canonical board is always in the set and always scanned first.
+ * THE OWNER'S DECISION IS THAT THE DIGEST FOLLOWS THE SCREENS. Custom Store
+ * Documentation sections are INDEPENDENT instances and are routinely sandboxes
+ * — this workspace holds sections named `test`, `testt` and `testtt` — so they
+ * must not move the primary client's headline score, totals, timeline or
+ * notifications. `headlineComplianceRegisters` is the one place that says which
+ * registers those are; `readComplianceRegister`'s default is the same function,
+ * so the scan and the screens cannot disagree again.
+ *
+ * WHAT THAT COSTS, stated rather than hidden: a real certificate held on a
+ * section instance produces no alert. The instance still shows its own RAG
+ * state on its own Compliance Tracker, so it is not silent about itself; it
+ * simply does not speak for the organisation. Bringing one INTO the headline
+ * estate is a change to `headlineComplianceBoardIds`, made on board identity —
+ * never on a section's name.
  */
 async function scan(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
 ): Promise<Scanned[]> {
   const today = new Date();
-  const registers = await storeDocumentationBoards(db, orgId);
+  const registers = await headlineComplianceRegisters(db, orgId);
   const boardNameByKey = new Map(registers.map((board) => [board.key, board.name]));
   const { entries } = await readComplianceRegister(db, orgId, {
     today,

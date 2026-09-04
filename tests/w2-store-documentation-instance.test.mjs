@@ -11,28 +11,47 @@
  *
  * ── THE FAILURE THIS FILE EXISTS TO PREVENT ────────────────────────────────
  *
- * `/api/notifications/compliance` read the canonical board and nothing else.
- * An instance would therefore look exactly like a compliance register, be
- * filled with real certificates, show them on its own Compliance Tracker with a
- * real RAG state — and never warn about a single expiry, silently, for ever.
+ * ONE SCOPE, READ BY THE SCREENS AND BY THE DIGEST. The product held two
+ * definitions of "compliance" at once: `/api/notifications/compliance` scanned
+ * EVERY Store Documentation register, by `boards.kind`, while `/api/workspace`
+ * — the compliance page, the Overview tile, the calendar, the site drawer —
+ * read the canonical register alone. So a certificate on a section instance was
+ * emailed about at 07:00 and was invisible on the page the reader then opened.
+ * An alert with nowhere to go is the failure the register was rebuilt to end,
+ * arriving through a scope rather than through the wrong table.
  *
- * That is worse than having no register: a surface that says nothing tells the
- * truth about itself, and one that quietly stops warning does not. It errs
- * towards FALSE ASSURANCE, which is the one direction a compliance screen must
- * never fail in. `app/api/workspace-sections/catalogue.ts` holds the template
- * back for exactly this reason and says so in as many words — "Available once
- * the compliance digest reads the section's own board" — so the assertions
- * below are the condition on that gate, written as behaviour.
+ * THE OWNER'S DECISION IS THAT THE DIGEST FOLLOWS THE SCREENS, not the other
+ * way round. Headline compliance — the score, the totals, the expiry timeline,
+ * the notifications — is the CANONICAL Store Documentation register for the
+ * organisation. A custom section is an INDEPENDENT instance and is routinely a
+ * sandbox: this workspace holds sections literally named `test`, `testt` and
+ * `testtt`, and a compliance percentage that falls because somebody was
+ * practising is a number that does not mean what it says.
+ *
+ * `headlineComplianceBoardIds()` in app/lib/compliance-register.ts is the one
+ * answer, and both paths read it — `readComplianceRegister`'s default IS that
+ * function, and the digest resolves `headlineComplianceRegisters`, which is
+ * built from it. The scope itself is EXECUTED in
+ * tests/compliance-scope-canonical.test.mjs; the assertions below hold the two
+ * call sites to it. Several pins in this file were re-pointed rather than
+ * removed when the decision landed, each with the reason written in beside it.
+ *
+ * WHAT THE DECISION COSTS, stated rather than hidden: a real certificate held
+ * on a section instance produces no alert. The instance still shows its own RAG
+ * state on its own Compliance Tracker, so it is not silent about itself — it
+ * simply does not speak for the organisation, and it cannot move the primary
+ * client's headline in either direction.
  *
  * ── AND THE SECOND FAILURE, WHICH IS THE MIRROR OF IT ─────────────────────
  *
- * Widening the digest must not change what the canonical estate receives. An
+ * A change of scope must not change what the canonical estate receives. An
  * organisation with one Store Documentation board must get the digest it has
  * always had, and `compliance_documents` rows that no board speaks for must be
- * reported ONCE however many registers were scanned — otherwise a workspace
- * with three sections sends three emails about the same certificate, which
- * trains people to filter the digest to junk and is how a real lapsed
- * certificate goes unread.
+ * reported ONCE however many registers exist — otherwise a workspace with three
+ * sections sends three emails about the same certificate, which trains people
+ * to filter the digest to junk and is how a real lapsed certificate goes
+ * unread. The one-pass reader that guarantees this stays, and stays pinned:
+ * narrowing the scope is not a licence to re-introduce per-board concatenation.
  *
  * ── HOW THESE ARE WRITTEN ─────────────────────────────────────────────────
  *
@@ -403,10 +422,33 @@ test("the register takes its boards from the caller and defaults to the canonica
     /options: \{ today\?: Date; boardIds\?: readonly string\[\] \} = \{\}/,
     "readComplianceRegister accepts the registers to derive from",
   );
+  /*
+   * RE-POINTED AT THE CONTRACT'S NEW HOME, AND NOT WEAKENED.
+   *
+   * This required the literal `options.boardIds ?? [STORE_DOCUMENTATION_BOARD_ID]`.
+   * The default is unchanged in VALUE — the canonical board, never everything —
+   * but it is now a call to `headlineComplianceBoardIds()`, the one function
+   * that answers which registers headline compliance is computed over, because
+   * the digest resolves its scope from that same function. While the default
+   * was a second literal the two could be, and were, edited apart: the digest
+   * scanned every register while every screen showed the canonical one, so a
+   * certificate on a section instance was emailed about and was invisible on
+   * /dashboard/compliance.
+   *
+   * The claim the old pin made is now asserted by EXECUTING the helper in
+   * tests/compliance-scope-canonical.test.mjs, which is a stronger statement
+   * than a matched literal: it fails if the scope ever returns anything but the
+   * canonical register, however that is spelled.
+   */
   assert.match(
     register,
-    /const boardIds = options\.boardIds \?\? \[STORE_DOCUMENTATION_BOARD_ID\]/,
+    /const boardIds = options\.boardIds \?\? headlineComplianceBoardIds\(\)/,
     "and omitting them selects the canonical board — never everything",
+  );
+  assert.match(
+    register,
+    /export function headlineComplianceBoardIds\(\): readonly string\[\] \{\s*return \[STORE_DOCUMENTATION_BOARD_ID\];\s*\}/,
+    "and that shared default really is the canonical register alone",
   );
 
   /*
@@ -481,23 +523,58 @@ test("which registers exist is answered by kind, never by a board key", async ()
   );
 });
 
-test("the digest scans every register and names each one", async () => {
+test("the digest scans the headline scope and names each register", async () => {
   const digest = codeOnly(await source("app/api/notifications/compliance/route.ts"));
 
-  assert.match(digest, /storeDocumentationBoards\(db, orgId\)/, "it asks which registers exist");
+  /*
+   * RE-POINTED, WITH THE REASON. This test was called "the digest scans every
+   * register and names each one" and required `storeDocumentationBoards(db, orgId)`
+   * — every Store Documentation board, by kind. That widening produced a
+   * divergence the owner has now decided against: the digest covered section
+   * instances while `/api/workspace` — the compliance page, the Overview tile,
+   * the calendar, the site drawer — covered the canonical register alone, so a
+   * certificate could be emailed about at 07:00 and be invisible on the page
+   * the reader then opened.
+   *
+   * The decision is that the digest FOLLOWS THE SCREENS: custom Store
+   * Documentation sections are independent instances and routinely sandboxes
+   * (this workspace holds sections named `test`, `testt` and `testtt`), so they
+   * must not move the primary client's score, totals, timeline or
+   * notifications.
+   *
+   * The pin is not weakened. It still requires the scan to resolve its scope
+   * out loud from a named helper rather than from a literal — and it now
+   * requires the SHARED one, `headlineComplianceRegisters`, which is built from
+   * the same `headlineComplianceBoardIds()` that `readComplianceRegister`
+   * defaults to. That is what makes re-splitting the two a test failure rather
+   * than a silent regression. The scope itself is executed in
+   * tests/compliance-scope-canonical.test.mjs.
+   */
+  assert.match(
+    digest,
+    /headlineComplianceRegisters\(db, orgId\)/,
+    "it asks which registers headline compliance covers",
+  );
+  assert.doesNotMatch(
+    digest,
+    /storeDocumentationBoards/,
+    "and does not re-widen itself to every Store Documentation register",
+  );
   assert.match(
     digest,
     /boardIds: registers\.map\(\(board\) => board\.key\)/,
-    "and scans all of them in one pass",
+    "and scans exactly that set in one pass",
   );
   assert.doesNotMatch(
     digest,
     /readComplianceRegister\(db, orgId, \{ today \}\)/,
-    "the canonical-only scan is gone",
+    "the scope is always named at the call site, never left to a default that could drift",
   );
 
   /* Both spellings reach the caller: the key so a script can open the board,
-     the name so a person recognises it. */
+     the name so a person recognises it. The register-naming machinery stays —
+     it is what a multi-register digest would need, and it is what tells a
+     register-only row (`null`) from a board row today. */
   assert.match(digest, /board: item\.board,/);
   assert.match(digest, /boardName: item\.boardName,/);
 });
@@ -902,20 +979,60 @@ test("live: a Store Documentation section is its own register, empty", async (t)
       );
     }
 
-    /* And the digest covers it, by kind — the gate this template was held on. */
+    /*
+     * AND IT IS INDEPENDENT OF THE HEADLINE — INVERTED, WITH THE REASON.
+     *
+     * This block required the opposite: `assert.ok(mine, "an instance's lapsed
+     * certificate must reach the digest")`. That was the widening described in
+     * the header, and it is the half the owner has now reversed. An instance is
+     * an independent register and routinely a sandbox — this workspace holds
+     * sections named `test`, `testt` and `testtt` — so a certificate on one
+     * must not move the primary client's compliance headline OR produce a
+     * notification, because a percentage that falls when somebody is practising
+     * is a compliance number that does not mean what it says.
+     *
+     * The assertion is not deleted or weakened; it is pointed the other way and
+     * strengthened, because it now checks BOTH surfaces at once. That is the
+     * whole contract: the digest and the compliance screens answer from one
+     * scope (`headlineComplianceBoardIds()`), so a row is either on both or on
+     * neither, and "emailed about but invisible" cannot happen in either
+     * direction.
+     *
+     * What the instance keeps is its own Compliance Tracker tab, which reads
+     * its own board and shows every RAG state on it. It is not silent about
+     * itself; it simply does not speak for the organisation.
+     */
     fixture = await lapsedStoreOn(boardKey);
-    const digest = await (await call("/api/notifications/compliance")).json();
+    const [digest, payload] = await Promise.all([
+      (await call("/api/notifications/compliance")).json(),
+      (await call("/api/workspace")).json(),
+    ]);
     const rows = [...(digest.expired ?? []), ...(digest.expiring ?? [])];
     const mine = rows.find((row) => row.id === `board:${fixture.requestId}:pat`);
-    assert.ok(mine, "an instance's lapsed certificate must reach the digest");
-    assert.equal(mine.board, boardKey, "named by its own board key");
-    assert.equal(mine.boardName, "W2SD Instance", "and by the section's own name");
-
-    /* Without changing what the canonical register receives. */
-    const canonicalRows = rows.filter((row) => row.board === CANONICAL_BOARD);
-    for (const row of canonicalRows) {
-      assert.notEqual(row.board, boardKey, "a canonical row is never relabelled as the instance");
+    assert.equal(
+      mine,
+      undefined,
+      "a sandbox instance's lapsed certificate must not reach the digest",
+    );
+    for (const row of rows) {
+      assert.notEqual(
+        row.board,
+        boardKey,
+        "no row of the digest may come from a section instance at all",
+      );
     }
+
+    /* The same row, on the screens, and absent for the same reason. */
+    const visible = payload.workspace?.compliance ?? [];
+    assert.equal(
+      visible.find((record) => record.itemId === fixture.requestId),
+      undefined,
+      "and it must not move the headline score, totals or expiry timeline either",
+    );
+    assert.ok(
+      visible.length > 0,
+      "the canonical register is still read — an empty payload would pass the check above for the wrong reason",
+    );
   } finally {
     await removeStore(boardKey ?? CANONICAL_BOARD, fixture);
     await sweepSection();

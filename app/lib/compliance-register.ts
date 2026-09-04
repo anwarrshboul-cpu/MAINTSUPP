@@ -144,6 +144,84 @@ export async function storeDocumentationBoards(
   ];
 }
 
+/* ── Headline compliance scope: one answer, read by the screens and the digest ─ */
+
+/**
+ * WHICH register the HEADLINE compliance experience is computed over.
+ *
+ * This is the single answer to "what does 'the compliance score' mean", and it
+ * is the CANONICAL Store Documentation register for the organisation and
+ * nothing else. Everything that speaks for the client's compliance posture
+ * resolves its scope here: /dashboard/compliance, the Overview compliance tile,
+ * the expiry calendar, the site drawer — all of which reach it through
+ * `readComplianceRegister`'s default — and the nightly digest and its reminder
+ * cadence, which call it by name.
+ *
+ * ── WHY THE SCOPE IS NARROW, AND WHY THAT IS THE OWNER'S DECISION ─────────
+ *
+ * A workspace section created from the Store Documentation template provisions
+ * its own board — generated key (`sec-<12hex>`), the same seeder, the same 25
+ * columns, the same four groups, the same twelve certificate slots. It is a
+ * REGISTER IN ITS OWN RIGHT and it is INDEPENDENT: an operator creates one to
+ * try the product, to model a concession estate, to rehearse a hand-over. This
+ * workspace holds sections literally named `test`, `testt` and `testtt`.
+ *
+ * A sandbox must not move the primary client's compliance headline. If it did,
+ * a percentage on the Overview tile would fall because somebody was practising,
+ * and an operations team would be emailed at 07:00 about a certificate that was
+ * never real. That is not a smaller failure than the one below; it is the same
+ * failure — a compliance number that does not mean what it says — pointed the
+ * other way.
+ *
+ * ── WHAT THIS DELIBERATELY GIVES UP ──────────────────────────────────────
+ *
+ * A real certificate held on a section instance does not alert. That was the
+ * case the digest was widened to cover, and widening it is what produced the
+ * divergence this helper exists to end: the digest scanned every register while
+ * every screen showed the canonical one, so a certificate could be emailed
+ * about and be invisible on /dashboard/compliance. The two had to be made one,
+ * and the owner chose the direction — the digest follows the screens, not the
+ * other way round.
+ *
+ * The instance is not silent about itself: its own Compliance Tracker tab reads
+ * its own board and shows every RAG state on it. What it does not do is speak
+ * for the organisation. When a section instance is ever promoted to part of the
+ * headline estate, the promotion belongs HERE, as a property of the board — and
+ * NEVER as a match on a section's NAME. `test`/`testt`/`testtt` are examples of
+ * what people call a sandbox, not a rule; the durable statement is board
+ * identity (`boards.kind`, and the canonical key).
+ *
+ * Returned as an array, and read by both callers, so the scope cannot be
+ * widened on one side and not the other again.
+ */
+export function headlineComplianceBoardIds(): readonly string[] {
+  return [STORE_DOCUMENTATION_BOARD_ID];
+}
+
+/**
+ * The same scope, with each register's display NAME — what the digest needs.
+ *
+ * Derived from `headlineComplianceBoardIds`, never from a second list, so this
+ * and `readComplianceRegister`'s default cannot disagree about which boards are
+ * in scope. The names come from `storeDocumentationBoards`, which answers from
+ * `boards.kind` and always carries the canonical register whether or not its
+ * `boards` row has been materialised yet.
+ *
+ * The SCOPE decides the result and the query only supplies names: a key with no
+ * `boards` row still comes back (named by its key), so a missing row can never
+ * silently narrow the digest to nothing. That is the same floor
+ * `storeDocumentationBoards` keeps, kept here for the same reason.
+ */
+export async function headlineComplianceRegisters(
+  db: Database,
+  orgId: string,
+): Promise<StoreDocumentationBoard[]> {
+  const named = new Map(
+    (await storeDocumentationBoards(db, orgId)).map((board) => [board.key, board.name]),
+  );
+  return headlineComplianceBoardIds().map((key) => ({ key, name: named.get(key) ?? key }));
+}
+
 /**
  * The drizzle handle, exactly as `sites-repository.ts` types it. Both callers
  * get theirs from `scopedDb`, which has already narrowed it to one organisation
@@ -617,6 +695,14 @@ export async function readNotRequiredSlots(
    * against a store on the canonical register would silently switch the same
    * requirement off for a same-named store on an instance — a compliance flag
    * crossing a boundary the operator drew on purpose.
+   *
+   * DELIBERATELY NOT `headlineComplianceBoardIds()`, even though the value is
+   * the same today. That helper answers "which register does the organisation's
+   * headline compliance cover"; this parameter answers "which board is this
+   * caller serving", and the two are different questions that happen to agree
+   * for the canonical board. Binding them would mean a section instance's own
+   * Compliance Tracker tab started reading the canonical estate's overrides the
+   * moment the headline scope changed.
    */
   boardIds: readonly string[] = [STORE_DOCUMENTATION_BOARD_ID],
 ): Promise<NotRequiredSlot[]> {
@@ -694,11 +780,23 @@ export async function readNotRequiredSlots(
  * instant, and so a test can pin the date.
  *
  * `boardIds` names WHICH Store Documentation registers to derive from, and it
- * DEFAULTS TO THE CANONICAL BOARD ALONE. That default is the compatibility
- * contract: `/api/workspace` and `readSiteComplianceRecords` call this with no
- * board argument and must keep seeing exactly the estate they see today. A
- * caller that wants section instances too — the compliance digest — asks for
- * them by name, via `storeDocumentationBoards`.
+ * DEFAULTS TO THE HEADLINE COMPLIANCE SCOPE — `headlineComplianceBoardIds()`,
+ * which is the canonical board alone and never everything. That default is the
+ * compatibility contract: `/api/workspace` and `readSiteComplianceRecords` call
+ * this with no board argument and must keep seeing exactly the estate they see
+ * today.
+ *
+ * The default is a CALL rather than a repeated literal on purpose. The digest
+ * resolves its scope from the same function (`headlineComplianceRegisters`), so
+ * the screens and the notifications cannot drift into two answers — which is
+ * precisely what happened when this default said "canonical" and the digest
+ * said "every register": a certificate on a section instance was emailed about
+ * and was invisible on /dashboard/compliance. One helper, two callers, one
+ * scope.
+ *
+ * A caller that genuinely needs another register — a screen serving THAT board
+ * — still passes its key explicitly, which is a deliberate, local widening and
+ * not a silent one.
  */
 export async function readComplianceRegister(
   db: Database,
@@ -706,7 +804,7 @@ export async function readComplianceRegister(
   options: { today?: Date; boardIds?: readonly string[] } = {},
 ): Promise<ComplianceRegister> {
   const today = options.today ?? new Date();
-  const boardIds = options.boardIds ?? [STORE_DOCUMENTATION_BOARD_ID];
+  const boardIds = options.boardIds ?? headlineComplianceBoardIds();
 
   const [siteRows, aliasRows, registerRows, boardRowsResult] = await Promise.all([
     db

@@ -174,6 +174,18 @@ export function isRegisterEditable(record: ComplianceRecordLike): boolean {
  * The portfolio filter is applied here rather than by each caller so that the
  * Overview tile and the Compliance page cannot filter differently — which they
  * were one edit away from doing, having each written the same three lines.
+ *
+ * WHICH REGISTER THESE RECORDS CAME FROM IS DECIDED SERVER-SIDE, AND THIS
+ * MODULE MUST NOT SECOND-GUESS IT. `headlineComplianceBoardIds()` in
+ * app/lib/compliance-register.ts is the one answer to "what does the headline
+ * score cover" — the canonical Store Documentation register — and
+ * `/api/workspace` takes it as `readComplianceRegister`'s default, so a custom
+ * Store Documentation section instance never reaches this function at all. That
+ * is deliberate: an instance is an independent register and is routinely a
+ * sandbox, and a percentage on the Overview tile must not fall because somebody
+ * was practising on one. Filtering by a board key or a section NAME here would
+ * be a second definition of the scope, which is exactly the divergence the
+ * shared helper exists to prevent.
  */
 export function scorableComplianceRecords<T extends ComplianceRecordLike>(
   records: readonly T[],
