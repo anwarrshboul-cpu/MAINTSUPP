@@ -300,8 +300,8 @@ export function OperationsCalendarPanel({
   /* Facet values are counted over EVERYTHING, not over what the range left, so
      a filter menu does not empty itself as the range narrows. */
   const filterOptions = useMemo(
-    () => calendarFilterOptions({ requests, complianceRecords }),
-    [complianceRecords, requests],
+    () => calendarFilterOptions({ requests, complianceRecords, manualItems }),
+    [complianceRecords, manualItems, requests],
   );
 
   /*

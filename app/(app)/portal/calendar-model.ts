@@ -902,6 +902,20 @@ const drain = (source: Map<string, CalendarFilterOption>) =>
 export function calendarFilterOptions(input: {
   requests: MaintenanceRequest[];
   complianceRecords: WorkspaceComplianceRecord[];
+  /*
+   * Manual items tally into the SITE facet too — optional, because the board's
+   * Calendar tab is a second caller with no manual layer at all.
+   *
+   * Without them the filter could hide what it was asked to show: an item on a
+   * site that happens to carry no jobs and no compliance requirement produced
+   * no option, so there was no way to filter to the one thing on that site.
+   * `matchesManualFilters` has always filtered manual items by site; it was the
+   * list of offerable sites that was short.
+   *
+   * Site only. A manual item has no status, priority, contractor or job type,
+   * and inventing facet values for it would offer filters that select nothing.
+   */
+  manualItems?: ManualCalendarItem[];
 }): CalendarFilterOptions {
   /*
    * See `buildCalendarEvents` for why both arrays are coerced rather than
@@ -910,6 +924,7 @@ export function calendarFilterOptions(input: {
    */
   const requests = input.requests ?? [];
   const complianceRecords = input.complianceRecords ?? [];
+  const manualItems = input.manualItems ?? [];
   const sites = new Map<string, CalendarFilterOption>();
   const statuses = new Map<string, CalendarFilterOption>();
   const priorities = new Map<string, CalendarFilterOption>();
@@ -949,6 +964,16 @@ export function calendarFilterOptions(input: {
     const siteId = record.siteId ?? "";
     tally(sites, siteId, record.siteName || siteId);
     if (record.kind) tally(complianceTypes, record.kind, record.kind);
+  }
+
+  /*
+   * After the two loops above, so a site the register or a job already named
+   * keeps that name: `tally` counts an existing key rather than relabelling it,
+   * and a manual item carries no site NAME of its own — only an id.
+   */
+  for (const item of manualItems) {
+    if (!item.siteId) continue;
+    tally(sites, item.siteId, siteNameById.get(item.siteId) || item.siteId);
   }
 
   return {
