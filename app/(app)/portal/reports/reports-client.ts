@@ -114,9 +114,26 @@ export function fetchWorkspaceClients(): Promise<WorkspaceClient[]> {
           };
         };
         const list = body.context?.organisations ?? [];
-        if (list.length) return list.map((entry) => ({ id: entry.id, name: entry.name }));
         const current = body.context?.currentOrganisation;
-        return current ? [{ id: current.id, name: current.name }] : [];
+        /*
+         * THE CURRENT ORGANISATION FIRST, ALWAYS.
+         *
+         * `/api/context` lists every organisation this reader belongs to in its
+         * own order — for the owner of this workspace that puts Demo Client Ltd
+         * ahead of Sunnamusk UK — while every reporting endpoint bills the one
+         * `scopedDb()` resolved and now REFUSES any other `clientId` with a 409.
+         *
+         * So the head of this list is not a cosmetic choice. The generator
+         * defaults `draft.clientId` to it, and it is the only entry the server
+         * will accept without switching workspace. Before this, the screen
+         * named one client while the document was raised for another, and once
+         * the server started refusing rather than ignoring, the preview 409'd
+         * and the generator rendered nothing at all.
+         */
+        const ordered = current
+          ? [current, ...list.filter((entry) => entry.id !== current.id)]
+          : list;
+        return ordered.map((entry) => ({ id: entry.id, name: entry.name }));
       })
       .catch((error: unknown) => {
         contextPromise = null;
