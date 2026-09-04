@@ -384,20 +384,42 @@ export async function createBoardItem(
      *
      * `onConflictDoNothing` rather than a catch, for the reason the request
      * insert gives: the D1 adapters do not promise a typed constraint error
-     * that could be told apart from a real failure. A genuine failure still
-     * throws and is compensated below.
+     * that could be told apart from a real failure.
+     *
+     * THE CATCH IS STILL HERE, AND IS A DIFFERENT CASE ENTIRELY. A conflict is
+     * an empty result and means "walk on"; anything that THROWS is a real
+     * failure — a lost connection, a constraint this insert did not name — and
+     * for that the request row is already committed and has no placement. The
+     * board route files an unplaced row into the default board's first group,
+     * so letting the error out on its own would put a job on the JOB BOARD
+     * belonging to nobody. Six appeared that way while this was first built,
+     * which is why `stage-two-section-registers.test.mjs` pins these three
+     * lines. Undo the row, then rethrow the ORIGINAL error: the caller needs
+     * the real cause, not "could not allocate a job id".
      */
-    const [placed] = await db
-      .insert(maintenanceGroupItems)
-      .values({
-        requestId: id,
-        organisationId: orgId,
-        boardId,
-        groupId: group.id,
-        position,
-      })
-      .onConflictDoNothing()
-      .returning();
+    let placed: ItemRow | undefined;
+    try {
+      const placedRows = await db
+        .insert(maintenanceGroupItems)
+        .values({
+          requestId: id,
+          organisationId: orgId,
+          boardId,
+          groupId: group.id,
+          position,
+        })
+        .onConflictDoNothing()
+        .returning();
+      placed = placedRows[0];
+    } catch (error) {
+      await db
+        .delete(maintenanceRequests)
+        .where(
+          and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
+        )
+        .catch(() => undefined);
+      throw error;
+    }
 
     if (placed) {
       created = row;

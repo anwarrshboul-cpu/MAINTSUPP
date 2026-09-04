@@ -82,6 +82,9 @@ const clientUrl = `data:text/javascript;base64,${Buffer.from(
 const { orderAfterHeaderDrop } = await asModule(
   (await read(ORDER)).replace('from "./register/register-client"', `from "${clientUrl}"`),
 );
+/* The same inlined client the module above was linked against, so the preview
+   helper and the arithmetic it previews are the one pair the component uses. */
+const { columnsInOrder } = await import(clientUrl);
 
 /* ── A register shaped like the owner's ─────────────────────────────────── */
 
@@ -501,4 +504,157 @@ test("W13 the frozen lane cannot be carried and nothing lands to its left", asyn
     if (!order) continue;
     assert.equal(order[0], "name", `dropping ${id} at the front leaves the lane in place`);
   }
+});
+
+/* ── W13 — a drop is drawn before it is saved ───────────────────────────── */
+
+/*
+ * WHAT THE OWNER ACTUALLY REPORTED, and why these are not gesture tests.
+ *
+ * The drag saved correctly from the day it shipped. What it did not do was
+ * SHOW anything: the drop fired a PATCH and then a GET, and until both came
+ * back the header row was exactly where it had been — measured at ~1.4s and
+ * ~0.2s against local dev, longer over the network, with no spinner on the
+ * table and nothing else moving. The only reading available to a person is
+ * that the drag did not take, so they reloaded the page, and the new order was
+ * there. "It only works after a refresh" is what a correct write with no
+ * feedback looks like from the outside.
+ *
+ * So what is pinned here is the two halves of the fix a pure test can see: the
+ * arithmetic that says what the preview must draw, and the wiring that says the
+ * preview is drawn first and undone ONLY when the server refuses.
+ */
+
+test("W13 the preview draws exactly the order the server is about to store", async () => {
+  const all = columns();
+  const ids = drawnIds();
+  const carried = "rcol_policyNumber";
+  const order = orderAfterHeaderDrop(all, ids, carried, ids.indexOf(carried) + 3);
+  assert.ok(order, "the fixture drop must produce a write to preview");
+
+  const preview = columnsInOrder(all, order);
+
+  /*
+   * THE POINT OF THE WHOLE HELPER. If the preview and the reconciling read
+   * disagreed, the table would jump a second time when the GET landed — which
+   * is a worse artefact than the delay it was added to remove.
+   */
+  assert.deepEqual(
+    preview.map((column) => column.key),
+    order,
+    "the preview is the written order, not an approximation of it",
+  );
+
+  /* And what a reader SEES is the same table the reload draws. */
+  assert.deepEqual(
+    preview.filter((column) => !column.hidden && column.key !== "name").map((c) => c.key),
+    drawn(order),
+  );
+
+  /*
+   * POSITIONS RENUMBERED DENSELY 0..n-1, because that is what the route does
+   * and the next drag is computed against these numbers. A preview that left
+   * the old positions on the rows would make the SECOND drag in a row wrong.
+   */
+  assert.deepEqual(
+    preview.map((column) => column.position),
+    preview.map((_, index) => index),
+  );
+  assert.equal(preview.length, all.length, "no column is dropped by the preview");
+});
+
+test("W13 the preview keeps a column it was not told about, in its stored place", async () => {
+  const all = columns();
+  /* An order missing its last two entries — the shape an older client, or a
+     future partial write, would send. The route keeps the unnamed ones at the
+     end in stored order; anything else here would preview a reshuffle that
+     never happens. */
+  const partial = all.slice(0, -2).map((column) => column.key);
+  const preview = columnsInOrder(all, partial);
+
+  assert.deepEqual(
+    preview.map((column) => column.key),
+    all.map((column) => column.key),
+  );
+});
+
+test("W13 the preview takes ids as well as keys, because the call it previews does", async () => {
+  const all = columns();
+  const byKey = columnsInOrder(all, orderAfterHeaderDrop(all, drawnIds(), "rcol_policyNumber", 0));
+  const byId = columnsInOrder(
+    all,
+    byKey.map((column) => column.id),
+  );
+  assert.deepEqual(
+    byId.map((column) => column.key),
+    byKey.map((column) => column.key),
+    "a preview that accepted less than reorderRegisterColumns would be a trap",
+  );
+});
+
+test("W13 a drop is drawn before it is written, and undone only if the write is refused", async () => {
+  const code = codeOnly(await read(GRID));
+
+  /*
+   * THE ORDER OF THESE TWO STATEMENTS IS THE FIX. `setSnap` with the previewed
+   * columns must come BEFORE the `run(...)` that sends the PATCH — a preview
+   * drawn after the await is the delay this closed, written a longer way.
+   */
+  const drop = /const previous = snap;\s*setSnap\(\{ \.\.\.previous, columns: columnsInOrder\(previous\.columns, order\) \}\);\s*void run\(\s*`move:\$\{columnId\}`,\s*\(\) => reorderRegisterColumns\("contractors", order\),\s*previous,\s*\);/;
+  assert.match(code, drop, "the drop previews the new order and hands run the snapshot to restore");
+
+  /*
+   * THE MENU IS THE KEYBOARD AND TOUCH ROUTE to the same move — the gesture
+   * refuses `pointerType === "touch"` outright and below 767px there is no
+   * header to press at all — so it gets the same immediacy. A register where
+   * the mouse felt instant and the accessible path did not would be a worse
+   * product than one where neither did.
+   */
+  assert.match(
+    code,
+    /const order = orderAfterStep\(snap\.columns, column\.key, delta, frozenKey\);\s*const previous = snap;\s*setSnap\(\{ \.\.\.previous, columns: columnsInOrder\(previous\.columns, order\) \}\);/,
+    "Move earlier / Move later previews its write too",
+  );
+
+  /*
+   * AND THE ROLLBACK IS ONLY EVER ON FAILURE. `revertTo` is read in the catch
+   * and nowhere else: a restore on the success path would put the pre-drop
+   * order back for the moment before the reload landed, which is the flicker
+   * this whole change exists to remove.
+   */
+  const body = code.slice(code.indexOf("const run = useCallback"));
+  const tryAt = body.indexOf("try {");
+  const catchAt = body.indexOf("} catch (caught) {");
+  assert.ok(tryAt > 0 && catchAt > tryAt, "run still has the try/catch this reads");
+  assert.doesNotMatch(
+    body.slice(tryAt, catchAt),
+    /revertTo/,
+    "nothing is reverted while the write is succeeding",
+  );
+  assert.match(body.slice(catchAt), /if \(revertTo\) setSnap\(revertTo\);/);
+
+  /*
+   * THE SERVER READ IS STILL THERE. The preview is a preview; `load()` after a
+   * successful write remains the thing that makes the screen true, and dropping
+   * it in favour of the optimistic copy is the drift `load`'s own note warns
+   * about.
+   */
+  assert.match(body.slice(tryAt, catchAt), /await work\(\);\s*load\(\);/);
+});
+
+test("W13 nothing but the two moves writes optimistically", async () => {
+  const code = codeOnly(await read(GRID));
+  /*
+   * A THIRD ARGUMENT TO `run` IS A LOCAL CHANGE SOMEBODY HAS ALREADY DRAWN, so
+   * every caller that passes one owes a `setSnap` before it. Rename, resize,
+   * hide, pin, add, remove and restore all still wait for the server and are
+   * unchanged — they are single-column verbs whose answer the reload draws, and
+   * previewing them would be new risk for no complaint.
+   */
+  const previews = [...code.matchAll(/setSnap\(\{ \.\.\.previous, columns: columnsInOrder\(/g)];
+  assert.equal(previews.length, 2, "exactly the drop and the menu move preview");
+  const withRevert = [
+    ...code.matchAll(/reorderRegisterColumns\("contractors", order\),\s*previous,/g),
+  ];
+  assert.equal(withRevert.length, 2, "and exactly those two hand run a snapshot to restore");
 });

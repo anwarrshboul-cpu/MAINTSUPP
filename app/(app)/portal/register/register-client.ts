@@ -622,3 +622,60 @@ export function orderAfterMove(
   keys.splice(target, 0, key);
   return keys;
 }
+
+/**
+ * The columns a `reorderRegisterColumns` call WILL produce, computed locally.
+ *
+ * WHY A SECOND PLACE THAT KNOWS WHAT A REORDER IS, given the note on `load` in
+ * `contractor-register.tsx` says one read after each write is the version that
+ * cannot drift. That note is still the rule and this does not break it: the
+ * server read still happens and still wins. This is a PREVIEW drawn in the gap
+ * before it lands, not a replacement for it.
+ *
+ * The gap is the whole problem. A header drop is a direct-manipulation gesture
+ * — the reader has physically carried the column to a new place — and it was
+ * followed by a PATCH and then a GET, measured at ~1.4s and ~0.2s against local
+ * dev, during which the header row did not move at all. There is no spinner on
+ * the table and no other feedback, so the only thing a reader can conclude is
+ * that the drag did not take, and the owner reported exactly that: the new
+ * order "only appears after a refresh". It had in fact saved every time.
+ *
+ * MIRRORS THE SERVER RATHER THAN GUESSING AT IT. `reorderRegisterColumns` on
+ * the server rewrites `position` 0..n-1 densely over the whole list, so this
+ * renumbers the same way. Anything `order` does not name keeps its relative
+ * place at the END, which is the same rule the route applies to an incomplete
+ * order — so the preview and the answer agree, and the reconciling read is
+ * invisible instead of a second jump.
+ *
+ * KEYS OR IDS, MIXED, because `reorderRegisterColumns` documents that it takes
+ * either and a preview that accepted less than the call it previews would be a
+ * trap for the next caller rather than a helper.
+ */
+export function columnsInOrder(
+  columns: readonly RegisterColumn[],
+  order: readonly string[],
+): RegisterColumn[] {
+  const remaining = new Map(columns.map((column) => [column.id, column]));
+  const byKey = new Map<string, RegisterColumn>();
+  /* Last writer wins is deliberate: two columns cannot share a key on one
+     register, and if a bug ever puts them there this resolves rather than
+     throws — a preview must never be the thing that takes the screen down. */
+  for (const column of columns) byKey.set(column.key, column);
+
+  const next: RegisterColumn[] = [];
+  for (const entry of order) {
+    const column = remaining.get(entry) ?? byKey.get(entry);
+    if (!column || !remaining.has(column.id)) continue;
+    remaining.delete(column.id);
+    next.push(column);
+  }
+  /* Iterated over `columns` rather than over `remaining.values()` so the
+     leftovers keep their STORED relative order, which is what the server does
+     with them. A Map preserves insertion order too, but relying on that to
+     express "their existing order" states the intent nowhere. */
+  for (const column of columns) if (remaining.has(column.id)) next.push(column);
+
+  return next.map((column, position) =>
+    column.position === position ? column : { ...column, position },
+  );
+}

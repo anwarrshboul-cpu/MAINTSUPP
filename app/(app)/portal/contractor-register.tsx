@@ -9,6 +9,7 @@ import {
   RegisterError,
   addRegisterColumn,
   canMoveRegisterColumn,
+  columnsInOrder,
   fetchRegister,
   frozenRegisterColumn,
   hiddenColumns,
@@ -688,16 +689,41 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
    * containment against the surface it actually rendered.
    */
 
-  /** Run one register verb, reload, and surface the server's refusal verbatim. */
+  /**
+   * Run one register verb, reload, and surface the server's refusal verbatim.
+   *
+   * `revertTo` IS THE OTHER HALF OF AN OPTIMISTIC WRITE, and is the only thing
+   * here that knows one happened. A caller that has already drawn its own
+   * change — `dropColumn` and `move` below, and nothing else — hands over the
+   * snapshot it drew over, and this puts it back if the server refuses. Taken
+   * as a VALUE the caller captured before it wrote, rather than read out of a
+   * `setSnap` updater, because an updater that also records something is impure
+   * and React is free to run it twice.
+   *
+   * Everything else passes nothing and behaves exactly as it did: no local
+   * change, so nothing to undo, and the reload after the write is still what
+   * puts the answer on screen.
+   */
   const run = useCallback(
-    async (key: string, work: () => Promise<unknown>) => {
+    async (
+      key: string,
+      work: () => Promise<unknown>,
+      revertTo?: RegisterSnapshot | null,
+    ) => {
       setBusy(key);
       setError("");
       setRemovedColumnId(null);
       try {
         await work();
+        /* The server's answer still wins. The optimistic draw was a preview of
+           this read, not a substitute for it — see `columnsInOrder`. */
         load();
       } catch (caught) {
+        /* PUT IT BACK BEFORE THE MESSAGE. The reader is looking at an order
+           that was never saved; leaving it there beside a refusal would show
+           two contradictory things at once, and the next drag would be
+           computed against a list the server does not have. */
+        if (revertTo) setSnap(revertTo);
         if (caught instanceof RegisterError && caught.body.removed === true) {
           setRemovedColumnId(
             typeof caught.body.id === "string" ? caught.body.id : null,
@@ -819,7 +845,29 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
         frozenRegisterColumn(snap.columns)?.key ?? null,
       );
       if (!order) return;
-      void run(`move:${columnId}`, () => reorderRegisterColumns("contractors", order));
+
+      /*
+       * DRAWN BEFORE IT IS SAVED, and this is the fix rather than a nicety.
+       *
+       * A drop used to change nothing on screen until the PATCH and the GET
+       * that follows it had both come back — ~1.6s against local dev, longer
+       * over the network — with no spinner on the table and nothing else
+       * moving. The order HAD saved every time; there was simply no way to
+       * tell, so a reader reloaded the page to find out, which is precisely
+       * what the owner reported.
+       *
+       * `columnsInOrder` computes exactly what the server is about to store,
+       * so the reconciling read lands on the same arrangement and is invisible.
+       * `snap` as it stands NOW is kept and handed to `run`, which puts it back
+       * if the write is refused — the rollback is only ever on failure.
+       */
+      const previous = snap;
+      setSnap({ ...previous, columns: columnsInOrder(previous.columns, order) });
+      void run(
+        `move:${columnId}`,
+        () => reorderRegisterColumns("contractors", order),
+        previous,
+      );
     },
     [dragColumns, run, snap],
   );
@@ -924,7 +972,18 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
      * what is written cannot disagree.
      */
     const order = orderAfterStep(snap.columns, column.key, delta, frozenKey);
-    void run(`move:${column.id}`, () => reorderRegisterColumns("contractors", order));
+    /* Drawn immediately and rolled back on refusal, exactly as a drop is. The
+       menu is the keyboard and touch route to the same move — `touch` never
+       reaches the gesture at all and below 767px there is no header to press —
+       so it would be a strange product where the mouse felt instant and the
+       accessible path took a second and a half to admit it had worked. */
+    const previous = snap;
+    setSnap({ ...previous, columns: columnsInOrder(previous.columns, order) });
+    void run(
+      `move:${column.id}`,
+      () => reorderRegisterColumns("contractors", order),
+      previous,
+    );
   }
 
   function rename(column: RegisterColumn) {

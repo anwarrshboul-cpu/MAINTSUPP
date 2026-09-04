@@ -1,22 +1,36 @@
 /**
  * Removes `maintenance_group_items` rows whose job no longer exists.
  *
- * WHAT BREAKS WITHOUT THIS, and why it is worth a script.
+ * TIDY-UP, NOT A PREREQUISITE — AND THAT CHANGED ON 2026-09-05.
  *
  * `maintenance_group_items.request_id` is the PRIMARY KEY, and the next job
- * reference is chosen as `max(MN-…) + 1` over `maintenance_requests` ALONE. So
- * a placement that outlives its job silently poisons the sequence: the
- * generator re-issues an id the placements table already holds, the insert
- * fails on the primary key, and `POST /api/board {action:"create_item"}`
- * answers a bare 503 — "The board change could not be saved." — with the real
- * cause swallowed by the route's catch. On the affected board NOBODY CAN CREATE
- * A JOB until the sequence has climbed past the highest orphan.
+ * reference USED TO BE chosen as `max(MN-…) + 1` over `maintenance_requests`
+ * ALONE. A placement that outlived its job therefore poisoned the sequence: the
+ * generator re-issued an id the placements table already held, the insert
+ * failed on that primary key, and `POST /api/board {action:"create_item"}`
+ * answered a bare 503 — "The board change could not be saved." — with the real
+ * cause swallowed by the route's catch. On the affected board NOBODY COULD
+ * CREATE A JOB until the sequence had climbed past the highest orphan, and the
+ * only way to climb was to run this script.
  *
  * Observed on the local dev database on 2026-09-05: `maintenance_requests`
  * topped out at MN-1157 while `maintenance_group_items` held MN-1158, MN-1160,
  * MN-1161 and MN-1162 — four placements left behind by QA runs that deleted the
  * request rows directly instead of going through the app's own purge (which
  * does remove both). Every `create_item` on the maintenance board 503'd.
+ *
+ * THE PRODUCT NO LONGER DEPENDS ON THIS BEING RUN. `nextItemNumber` in
+ * `app/lib/board-mutations.ts` now takes its floor from every table that can
+ * still hold an `MN-…` — requests, placements AND the recycle bin — and the
+ * create path allocates the request and its placement together, retrying past
+ * a reference either one has already taken. So an orphan below is untidy
+ * rather than fatal: creates walk past it. `app/lib/job-reference.ts` sets out
+ * the rule and `tests/job-reference-allocation.test.mjs` holds it.
+ *
+ * What is left for this script is what its name says — removing rows that
+ * cannot be rendered, restored or reached, so the sequence stops skipping and
+ * the estate stops carrying junk. Run it when you want the tidy; nothing is
+ * broken while you do not.
  *
  * WHAT THIS DOES NOT DO.
  *
@@ -97,8 +111,14 @@ const maxPlacement = maxOf(
 console.log(`\nmax MN in maintenance_requests:     ${maxRequest}`);
 console.log(`max MN in maintenance_group_items: ${maxPlacement}`);
 if (maxPlacement !== null && maxRequest !== null && maxPlacement > maxRequest) {
+  /* NOT AN OUTAGE ANY MORE. Said plainly, because the previous wording here
+     told a reader the board was down when it is not, and a repair tool that
+     cries wolf gets run in a hurry against a database nobody has looked at. */
   console.log(
-    `  -> the next reference (MN-${maxRequest + 1}) collides; create_item will 503 until this is cleared.`,
+    `  -> the placements table reaches past the jobs table. The allocator reads it,`,
+  );
+  console.log(
+    `     so creates continue from MN-${maxPlacement + 1}; clearing these just stops the skip.`,
   );
 }
 
