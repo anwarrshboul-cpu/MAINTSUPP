@@ -41,6 +41,23 @@ export const sites = sqliteTable(
     position: integer("position").notNull().default(0),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
 
+    /*
+     * BILLING ELIGIBILITY — deliberately separate from `active` above.
+     *
+     * `active` says the site is trading. These say it is chargeable, and the
+     * two are not the same fact: a site can be open and outside the agreement,
+     * or inside the agreement during a fit-out before it opens. Reusing
+     * `active` for both would have made every invoice a hostage to an
+     * operational flag that operations staff change for their own reasons.
+     *
+     * The window is also NOT `lease_start` / `lease_end`. A billing window is a
+     * commercial term; a lease is a property record, maintained by different
+     * people for a different purpose.
+     */
+    billable: integer("billable", { mode: "boolean" }).notNull().default(true),
+    billingActiveFrom: text("billing_active_from"),
+    billingActiveTo: text("billing_active_to"),
+
     // X2 — contacts
     managerName: text("manager_name"),
     managerPhone: text("manager_phone"),
@@ -500,6 +517,17 @@ export const maintenanceRequests = sqliteTable(
       onDelete: "set null",
     }),
     assignee: text("assignee"),
+    /*
+     * The stable identity behind the display name above, added when "Assigned
+     * To" stopped being free text and started being a person in the workspace.
+     *
+     * Exactly the `contractor` / `contractor_id` arrangement a few lines up,
+     * and for the same two reasons: a person renamed or removed must not
+     * rewrite who was named on a job that closed last year, and the hundreds of
+     * imported rows whose assignee was only ever a string keep working
+     * untouched. Both columns are written together by the picker.
+     */
+    assigneeUserId: text("assignee_user_id"),
     requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     dueAt: text("due_at"),
     completedAt: text("completed_at"),
@@ -2140,5 +2168,377 @@ export const contractorCertifications = sqliteTable(
       table.contractorId,
       table.position,
     ),
+  ],
+);
+
+/* ===========================================================================
+ * OWNER FIXES + REPORTS BILLING — additive tables, 2026-09-04.
+ *
+ * Everything below is new. Nothing above it changes shape, nothing is renamed
+ * and nothing is dropped, which is the only kind of migration `db/init.ts` can
+ * replay on the boot path of every request. Money is INTEGER PENCE throughout:
+ * `real` was available and was not used, because a fixed per-site fee summed
+ * over thirty sites and then VAT-ed is exactly the arithmetic where binary
+ * floating point stops agreeing with an invoice.
+ *
+ * "Client" here means `organisations`. There is no separate clients table in
+ * this product — the sidebar's "ALL CLIENTS" list is the organisation list, and
+ * every tenancy helper already scopes by organisation. Inventing a second
+ * customer entity for billing would have put the invoice outside the boundary
+ * `scopedDb()` enforces.
+ * ======================================================================== */
+
+/**
+ * Manual calendar items — the Planned calendar's third source.
+ *
+ * The Operations calendar draws Jobs and Compliance from their canonical
+ * records. The owner asked to "add and adjust additional calendar items
+ * manually", and the one thing that must not happen is a manual note becoming
+ * indistinguishable from a Job. So manual items are their OWN table with their
+ * own category, never a `maintenance_requests` row with a flag: a job that is
+ * not a job would leak into every job count, meter and report in the product.
+ */
+export const calendarEvents = sqliteTable(
+  "calendar_events",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    title: text("title").notNull(),
+    notes: text("notes"),
+    /** Optional. A manual item need not be about a site. */
+    siteId: text("site_id"),
+    startsOn: text("starts_on").notNull(),
+    /** NULL means a single-day item, not an open-ended one. */
+    endsOn: text("ends_on"),
+    allDay: integer("all_day", { mode: "boolean" }).notNull().default(true),
+    category: text("category").notNull().default("Manual"),
+    colour: text("colour"),
+    createdByEmail: text("created_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    archivedAt: text("archived_at"),
+    deletedAt: text("deleted_at"),
+    deletedBy: text("deleted_by"),
+  },
+  (table) => [
+    index("calendar_events_org_start_idx").on(table.organisationId, table.startsOn),
+    index("calendar_events_site_idx").on(table.siteId),
+  ],
+);
+
+/**
+ * One row per organisation: the defaults an invoice is built from.
+ *
+ * `invoiceSequence` is the invoice-number counter and is the reason this table
+ * has a UNIQUE index on `organisation_id` rather than being a bag of rows in
+ * `workspace_settings` — a number that must never be issued twice needs a row
+ * that can be updated conditionally, not a JSON blob that is read, mutated and
+ * written back.
+ */
+export const billingSettings = sqliteTable(
+  "billing_settings",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    currency: text("currency").notNull().default("GBP"),
+    /** The organisation-wide default, bottom of the three-level fee hierarchy. */
+    defaultSiteFeePence: integer("default_site_fee_pence"),
+    vatEnabled: integer("vat_enabled", { mode: "boolean" }).notNull().default(false),
+    /** Basis points: 20% VAT is 2000. Integer, for the same reason money is. */
+    vatRateBasisPoints: integer("vat_rate_basis_points").notNull().default(2000),
+    vatNumber: text("vat_number"),
+    paymentTermsDays: integer("payment_terms_days").notNull().default(30),
+    paymentTermsNote: text("payment_terms_note"),
+    billingAddress: text("billing_address"),
+    invoiceNumberPrefix: text("invoice_number_prefix").notNull().default("MS"),
+    invoiceSequence: integer("invoice_sequence").notNull().default(0),
+    /** No automatic proration unless the client genuinely has the rule. */
+    proRataEnabled: integer("pro_rata_enabled", { mode: "boolean" }).notNull().default(false),
+    updatedBy: text("updated_by"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("billing_settings_org_idx").on(table.organisationId),
+  ],
+);
+
+/**
+ * The client-level fixed site fee — middle of the hierarchy.
+ *
+ * Effective-dated rather than overwritten, so an invoice raised for March still
+ * prices at March's fee after April's rise. Rows are never edited in place by
+ * the app; a change closes the old row and opens a new one.
+ */
+export const clientSiteFees = sqliteTable(
+  "client_site_fees",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    feePence: integer("fee_pence").notNull(),
+    effectiveFrom: text("effective_from"),
+    effectiveTo: text("effective_to"),
+    note: text("note"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("client_site_fees_org_idx").on(table.organisationId, table.effectiveFrom),
+  ],
+);
+
+/** The per-site override — top of the hierarchy. Same effective-dating rule. */
+export const siteFeeOverrides = sqliteTable(
+  "site_fee_overrides",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    siteId: text("site_id").notNull(),
+    feePence: integer("fee_pence").notNull(),
+    effectiveFrom: text("effective_from"),
+    effectiveTo: text("effective_to"),
+    note: text("note"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("site_fee_overrides_site_idx").on(table.organisationId, table.siteId, table.effectiveFrom),
+  ],
+);
+
+/**
+ * The combined invoice + maintenance-report document.
+ *
+ * NOT the existing `invoices` table, which is a contractor's bill against ONE
+ * maintenance request. This is MAINTSUPP's own fixed service fee for a period,
+ * and conflating the two would have put contractor costs inside the invoice
+ * total — precisely what the owner asked to keep apart.
+ *
+ * The totals are stored, not recomputed on read. Once `status` is 'Finalised'
+ * these columns and `report_snapshots` are the document: a fee edited next
+ * month must not silently restate an invoice already sent.
+ */
+export const serviceInvoices = sqliteTable(
+  "service_invoices",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** NULL until finalisation issues one from `billing_settings.invoice_sequence`. */
+    invoiceNumber: text("invoice_number"),
+    status: text("status").notNull().default("Draft"),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    invoiceDate: text("invoice_date"),
+    dueAt: text("due_at"),
+    currency: text("currency").notNull().default("GBP"),
+    vatEnabled: integer("vat_enabled", { mode: "boolean" }).notNull().default(false),
+    vatRateBasisPoints: integer("vat_rate_basis_points").notNull().default(0),
+    purchaseOrder: text("purchase_order"),
+    clientReference: text("client_reference"),
+    internalReference: text("internal_reference"),
+    paymentTerms: text("payment_terms"),
+    clientNote: text("client_note"),
+    internalNote: text("internal_note"),
+    billingAddress: text("billing_address"),
+    billableSiteCount: integer("billable_site_count").notNull().default(0),
+    subtotalPence: integer("subtotal_pence").notNull().default(0),
+    vatPence: integer("vat_pence").notNull().default(0),
+    adjustmentPence: integer("adjustment_pence").notNull().default(0),
+    creditPence: integer("credit_pence").notNull().default(0),
+    totalPence: integer("total_pence").notNull().default(0),
+    /** Reported beside the invoice, never added to it. */
+    maintenanceSpendPence: integer("maintenance_spend_pence").notNull().default(0),
+    createdByEmail: text("created_by_email"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    approvedByEmail: text("approved_by_email"),
+    approvedAt: text("approved_at"),
+    finalisedByEmail: text("finalised_by_email"),
+    finalisedAt: text("finalised_at"),
+    voidedByEmail: text("voided_by_email"),
+    voidedAt: text("voided_at"),
+    voidReason: text("void_reason"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("service_invoices_org_period_idx").on(
+      table.organisationId,
+      table.periodStart,
+      table.periodEnd,
+    ),
+    index("service_invoices_status_idx").on(table.organisationId, table.status),
+  ],
+);
+
+/** One charge line per billable site. `feeSource` records which level won. */
+export const serviceInvoiceLines = sqliteTable(
+  "service_invoice_lines",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    lineNo: integer("line_no").notNull().default(0),
+    siteId: text("site_id"),
+    /* Names are snapshotted onto the line, not joined at read time: a site
+       renamed after finalisation must not rewrite an issued invoice. */
+    siteName: text("site_name"),
+    siteReference: text("site_reference"),
+    description: text("description"),
+    periodStart: text("period_start"),
+    periodEnd: text("period_end"),
+    quantity: integer("quantity").notNull().default(1),
+    feePence: integer("fee_pence").notNull().default(0),
+    /** 'Site override' | 'Client fee' | 'Organisation default'. */
+    feeSource: text("fee_source"),
+    feeRecordId: text("fee_record_id"),
+    vatRateBasisPoints: integer("vat_rate_basis_points").notNull().default(0),
+    lineSubtotalPence: integer("line_subtotal_pence").notNull().default(0),
+    lineVatPence: integer("line_vat_pence").notNull().default(0),
+    lineTotalPence: integer("line_total_pence").notNull().default(0),
+    included: integer("included", { mode: "boolean" }).notNull().default(true),
+    exclusionReason: text("exclusion_reason"),
+    excludedByEmail: text("excluded_by_email"),
+    excludedAt: text("excluded_at"),
+    /** Free text from the validator: why this line blocks or warns. */
+    validation: text("validation"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("service_invoice_lines_invoice_idx").on(table.invoiceId, table.lineNo),
+    index("service_invoice_lines_site_idx").on(table.organisationId, table.siteId),
+  ],
+);
+
+/** Authorised adjustments and credits. Separate rows so each carries a reason. */
+export const invoiceAdjustments = sqliteTable(
+  "invoice_adjustments",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    /** 'adjustment' | 'credit'. */
+    kind: text("kind").notNull().default("adjustment"),
+    amountPence: integer("amount_pence").notNull().default(0),
+    reason: text("reason").notNull(),
+    authorisedByEmail: text("authorised_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("invoice_adjustments_invoice_idx").on(table.invoiceId),
+  ],
+);
+
+/**
+ * The immutable snapshot a finalised document is rendered from.
+ *
+ * `payload` is the whole computed report as JSON — totals, site summary, SLA
+ * outcomes, job log, data-quality findings. Exports read THIS, never the live
+ * tables, which is what makes Word, PDF and Excel agree with each other and
+ * with what was approved months later.
+ */
+export const reportSnapshots = sqliteTable(
+  "report_snapshots",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    payload: text("payload").notNull(),
+    slaRulesVersion: text("sla_rules_version"),
+    jobIds: text("job_ids"),
+    siteIds: text("site_ids"),
+    feeIds: text("fee_ids"),
+    createdByEmail: text("created_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("report_snapshots_invoice_idx").on(table.invoiceId),
+  ],
+);
+
+/** Target working days per classification. Versioned so a report can say which. */
+export const slaRules = sqliteTable(
+  "sla_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    classification: text("classification").notNull(),
+    targetWorkingDays: integer("target_working_days").notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    version: integer("version").notNull().default(1),
+    note: text("note"),
+    updatedBy: text("updated_by"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("sla_rules_org_idx").on(table.organisationId, table.classification),
+  ],
+);
+
+/**
+ * Approved holds — the only thing allowed to reduce a measured SLA duration.
+ *
+ * `approved` defaults to FALSE on purpose. An unapproved hold is a data-quality
+ * finding the report must surface, not a silent discount on the elapsed days.
+ */
+export const jobHolds = sqliteTable(
+  "job_holds",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    requestId: text("request_id").notNull(),
+    startAt: text("start_at").notNull(),
+    endAt: text("end_at"),
+    reason: text("reason"),
+    category: text("category"),
+    approved: integer("approved", { mode: "boolean" }).notNull().default(false),
+    approvedBy: text("approved_by"),
+    approvedAt: text("approved_at"),
+    note: text("note"),
+    attachmentId: text("attachment_id"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("job_holds_request_idx").on(table.organisationId, table.requestId),
+  ],
+);
+
+/** Every state transition of a document. Append-only, like `audit_events`. */
+export const invoiceApprovals = sqliteTable(
+  "invoice_approvals",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    action: text("action").notNull(),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status"),
+    actorEmail: text("actor_email"),
+    actorUserId: text("actor_user_id"),
+    reason: text("reason"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("invoice_approvals_invoice_idx").on(table.invoiceId, table.createdAt),
+  ],
+);
+
+/** Which formats were produced, when, by whom — the export history. */
+export const invoiceExports = sqliteTable(
+  "invoice_exports",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    /** 'docx' | 'pdf' | 'xlsx'. */
+    format: text("format").notNull(),
+    filename: text("filename"),
+    attachmentId: text("attachment_id"),
+    byteSize: integer("byte_size"),
+    actorEmail: text("actor_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("invoice_exports_invoice_idx").on(table.invoiceId, table.createdAt),
   ],
 );

@@ -103,24 +103,61 @@ test("compliance trend is flat at zero, never the decorative default", () => {
   assert.ok(series.every((value) => value === 0));
 });
 
-test("active units counts units, and never falls back to the site count", async () => {
+/*
+ * RE-POINTED 2026-09-04, NOT WEAKENED.
+ *
+ * This test was written as "active units counts units, and never falls back to
+ * the site count". The contract it was really protecting is one level up from
+ * the label: THE FIRST TILE'S NUMBER MEASURES WHAT ITS LABEL SAYS, and never
+ * quietly borrows a different measurement when its own source is empty.
+ *
+ * The owner has since replaced the tile — it reads "Active sites" now, because
+ * the unit register on this account is empty and "Active units 0" was the
+ * largest and least useful number on the dashboard. So the same contract is
+ * re-pinned at its new home: the count comes from the SITE register through the
+ * shared status predicate, and is not derived from units, from sites' lifecycle
+ * (which admits the unverifiable 'other' rows) or from Jobs.
+ */
+test("the first Overview tile counts active sites, and never borrows another measurement", async () => {
   const overview = await overviewSource();
   assert.ok(
-    !/activeUnitCount = units\.length/.test(overview),
-    "the unit count must not switch to a different measurement when empty",
+    /const activeSiteCount = storeRows\.filter\(/.test(overview),
+    "the site count must come from the canonical site register",
   );
   assert.ok(
-    !/:\s*scopedStores\.length/.test(overview),
-    "sites must never be counted as units",
+    /isActiveSiteStatus\(store\.status\)/.test(overview),
+    "and must use the shared predicate, so Sites and Reports cannot disagree with it",
   );
   assert.ok(
-    /const activeUnitCount = units\.filter\(/.test(overview),
-    "the unit count must come from the unit register",
+    !/activeSiteCount = storeRows\.length/.test(overview),
+    "it must not switch to a different measurement when nothing is active",
+  );
+  assert.ok(
+    !/const activeUnitCount/.test(overview),
+    "the superseded unit count must be gone, not left beside it",
+  );
+  /*
+   * Deriving the tile from Jobs was explicitly ruled out: a site with no work
+   * on it is still an active site, and a job at a closed site must not
+   * resurrect it.
+   *
+   * Asserted against the ASSIGNMENT, not the whole component: the tile's
+   * sparkline does plot `scopedRequests`, on the same JSX line, and says so in
+   * its own label. What must not touch jobs is the number.
+   */
+  const countStatement = overview.slice(
+    overview.indexOf("const activeSiteCount ="),
+    overview.indexOf(").length;", overview.indexOf("const activeSiteCount =")),
+  );
+  assert.ok(countStatement.length > 0, "the site count assignment must be findable");
+  assert.ok(
+    !/request|Request/.test(countStatement),
+    `the site count must not be derived from jobs, got: ${countStatement}`,
   );
   // An empty register says what would fill it rather than borrowing a number.
   assert.ok(
-    overview.includes("Add units to the register"),
-    "an empty unit register needs an honest caption",
+    overview.includes("No active sites in the register"),
+    "an empty site register needs an honest caption",
   );
 });
 
@@ -236,7 +273,6 @@ test("panels with nothing behind them say so instead of drawing an empty axis", 
     "No costs recorded against jobs in this period",
     // A brand new site has no requirements loaded, which is not 0% compliant.
     "No compliance requirements recorded for these sites yet",
-    "No jobs in this period",
   ]) {
     assert.ok(overview.includes(copy), `missing honest empty state: ${copy}`);
   }
@@ -245,9 +281,44 @@ test("panels with nothing behind them say so instead of drawing an empty axis", 
     /spendSeries\.some\(\(point\) => point\.value > 0\)\s*\?\s*<TrendChart/.test(overview),
     "the spend chart must only draw when spend was recorded",
   );
+});
+
+/*
+ * RE-POINTED 2026-09-04, NOT DROPPED.
+ *
+ * The third empty-state above used to be the "Jobs by trade" panel's, asserted
+ * against portal-app.tsx as `tradeRows.length ? <HorizontalBars`. That panel is
+ * gone: it plotted `request.engineer`, which is now one of the five meters in
+ * the Job breakdown panel, and two panels over one column was the duplication
+ * the owner objected to.
+ *
+ * The contract it protected is unchanged and is re-pinned at the new address —
+ * a job-shaped panel must distinguish "nothing here" from "not loaded yet", and
+ * must not draw a chart regardless. It moved file, so the assertion did too.
+ */
+test("the job breakdown panel separates loading from empty, and draws neither blind", async () => {
+  const meters = await read("app/(app)/portal/overview-job-meters.tsx");
+
   assert.ok(
-    /tradeRows\.length\s*\?\s*<HorizontalBars/.test(overview),
-    "the trade chart must only draw when there are jobs",
+    meters.includes("No jobs in this period"),
+    "an empty period must say so in words rather than draw an empty track",
+  );
+  assert.ok(
+    meters.includes("Loading jobs…"),
+    "and must not present a period that has not loaded as an empty one",
+  );
+  // The guard order matters: loading is checked BEFORE emptiness, or a slow
+  // fetch renders as a confident "no jobs".
+  const loadingAt = meters.indexOf("Loading jobs…");
+  const emptyAt = meters.indexOf("No jobs in this period");
+  assert.ok(
+    loadingAt > -1 && loadingAt < emptyAt,
+    "loading must be tested before emptiness",
+  );
+  assert.match(
+    meters,
+    /meters\.every\(\(meter\) => meter\.total === 0\)/,
+    "emptiness must be measured from the meters themselves, not assumed",
   );
 });
 

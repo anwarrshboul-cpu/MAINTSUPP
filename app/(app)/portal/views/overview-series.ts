@@ -184,3 +184,237 @@ export function tradeBreakdown(
       color: label === UNRECORDED_TRADE ? "#6f8190" : palette[index % palette.length],
     }));
 }
+
+/* ===========================================================================
+ * THE FIVE JOB METERS ON THE OVERVIEW — 2026-09-04.
+ *
+ * The owner asked for five Main Table columns to be readable as distributions
+ * without opening the board: Tier Level, Engineer Required, Priority, Label and
+ * Status.
+ *
+ * WHY THIS IS ARITHMETIC IN A PLAIN MODULE AND NOT JSX.
+ *
+ * The same reason `tradeBreakdown` above is. A meter is a claim about every job
+ * in the window, and the way it goes wrong is silent: a value that does not
+ * match a configured option gets dropped, the bars still add to a full bar, and
+ * nothing on screen says that four jobs went missing. So the bucketing is here,
+ * where a fixture can be fed to it, and the rule below is the one that matters:
+ *
+ *   NOTHING IS EVER DROPPED. Every job lands in exactly one segment. A value
+ *   the option set does not know about keeps its own segment in a neutral
+ *   colour rather than disappearing, and a blank one joins an explicit
+ *   "Not recorded" segment. `segments` therefore always sums to `total`, which
+ *   is asserted rather than hoped for.
+ *
+ * WHY THE COLOURS COME FROM THE DATABASE.
+ *
+ * The board paints these five columns with the option colours an administrator
+ * configured — Tier 1 red, Tier 2 amber, Tier 3 blue, and so on. A meter that
+ * invented its own palette would be the same data in different colours one
+ * click away, which is exactly how a reader learns not to trust either. So the
+ * caller passes the configured options in and the segment takes its colour from
+ * them; where an option is unknown the segment is muted slate, the same
+ * treatment `tradeBreakdown` gives the unrecorded bucket.
+ * ======================================================================== */
+
+/** The five Main Table columns the Overview summarises, in the board's order. */
+export const JOB_METER_COLUMNS = [
+  { key: "tier", title: "Tier Level", optionSetKey: "tier_level" },
+  { key: "engineer", title: "Engineer Required", optionSetKey: "engineer_required" },
+  { key: "priority", title: "Priority", optionSetKey: "priority" },
+  { key: "label", title: "Label", optionSetKey: "maintenance_label" },
+  { key: "status", title: "Status", optionSetKey: "maintenance_status" },
+] as const;
+
+export type JobMeterKey = (typeof JOB_METER_COLUMNS)[number]["key"];
+
+/** The muted slate used for absence, matching `tradeBreakdown`'s bucket. */
+export const METER_UNRECORDED_COLOR = "#6f8190";
+/** A value the option set does not know about. Distinct from absence. */
+export const METER_UNKNOWN_COLOR = "#8a94a6";
+export const METER_UNRECORDED_LABEL = "Not recorded";
+
+/**
+ * ONE JOB'S VALUE IN ONE OF THE FIVE COLUMNS.
+ *
+ * This mapping is not obvious from the field names and getting it wrong would
+ * make a meter lie confidently, so it is written down once here and imported by
+ * everything that needs it — including the board's own column summary, which
+ * previously carried its own copy.
+ *
+ * The one that surprises people: the board column titled "Label" reads
+ * `request.category`. There is no `label` field on a maintenance request; the
+ * column key and the storage column were named at different times.
+ */
+export function jobColumnValue(
+  request: MaintenanceRequest,
+  key: JobMeterKey,
+): unknown {
+  switch (key) {
+    case "tier":
+      return request.tier;
+    case "engineer":
+      return request.engineer;
+    case "priority":
+      return request.priority;
+    case "label":
+      // Not a typo. See the note above.
+      return request.category;
+    case "status":
+      return request.status;
+  }
+}
+
+/** One configured option, in the shape `/api/options` returns it. */
+export interface MeterOption {
+  value: string;
+  label: string;
+  colourHex: string;
+  textColour: string;
+  position: number;
+}
+
+export interface JobMeterSegment {
+  /** The raw stored value, or "" for the not-recorded bucket. */
+  value: string;
+  label: string;
+  count: number;
+  /** Of the whole window, 0..1. Segments sum to 1 when `total` is non-zero. */
+  share: number;
+  color: string;
+  textColor: string;
+  /** True when the option set has no entry for this value. */
+  unknown: boolean;
+}
+
+export interface JobMeter {
+  key: JobMeterKey;
+  title: string;
+  total: number;
+  recorded: number;
+  unrecorded: number;
+  segments: JobMeterSegment[];
+}
+
+/**
+ * The values that mean "nobody answered", folded together.
+ *
+ * Deliberately the same set `tradeLabel` uses, plus the numeric zero a Tier
+ * column carries when it has never been set. A tier of 0 is not "Tier 0" — the
+ * option set starts at 1 — it is the default an untouched row was created with.
+ */
+function meterValueText(raw: unknown): string {
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) && raw > 0 ? String(raw) : "";
+  }
+  if (typeof raw !== "string") return "";
+  const text = raw.trim();
+  if (!text || UNUSABLE_TRADE_VALUES.has(text.toLowerCase())) return "";
+  return text;
+}
+
+/**
+ * Build all five meters from one pass over the jobs already scoped to the
+ * portfolio and the period.
+ *
+ * `optionsByKey` may be missing or partial — the Overview can paint before the
+ * option sets have loaded, and a meter with no configured colours is still a
+ * correct meter. In that case every segment falls back to the muted palette and
+ * keeps its raw value as its label, which is honest: it shows what is stored.
+ */
+export function buildJobMeters(
+  requests: MaintenanceRequest[],
+  optionsByKey: Partial<Record<JobMeterKey, readonly MeterOption[]>> = {},
+): JobMeter[] {
+  return JOB_METER_COLUMNS.map(({ key, title }) => {
+    const options = optionsByKey[key] ?? [];
+    const byValue = new Map<string, MeterOption>();
+    /*
+     * THE TIER BRIDGE. `maintenance_requests.tier` stores the bare number 1-4 —
+     * the SLA rules key on it — while the `tier_level` option set stores
+     * "Tier 1".."Tier 4" as the option VALUES. Verified against the live
+     * /api/options on 2026-09-04.
+     *
+     * Without this the meter still counted correctly, and every tier segment
+     * drew grey and captioned itself "3" — right number, anonymous label, wrong
+     * colour. live-board.tsx calls the same mapping "the one bridge" and does
+     * it with `tierCellValue` over `tierDigits` from board-sort.ts.
+     *
+     * This is a deliberate second copy of that one-line rule rather than an
+     * import, and the reason is module resolution, not taste: this file must
+     * stay importable by `node --test`, which resolves no extensionless
+     * specifiers, and board-sort.ts reaches board-ordering and board-format
+     * behind them. A test pins the two spellings together so they cannot drift.
+     */
+    const byTierDigits = new Map<string, MeterOption>();
+    for (const option of options) {
+      byValue.set(option.value.trim().toLowerCase(), option);
+      if (key === "tier") {
+        const digits = option.value.replace(/\D+/g, "");
+        if (digits) byTierDigits.set(digits, option);
+      }
+    }
+    const optionFor = (raw: string) =>
+      byValue.get(raw.toLowerCase()) ??
+      (key === "tier" ? byTierDigits.get(raw.replace(/\D+/g, "")) : undefined);
+
+    const counts = new Map<string, number>();
+    let unrecorded = 0;
+    for (const request of requests) {
+      const text = meterValueText(jobColumnValue(request, key));
+      if (!text) {
+        unrecorded += 1;
+        continue;
+      }
+      counts.set(text, (counts.get(text) ?? 0) + 1);
+    }
+
+    const total = requests.length;
+    const recorded = total - unrecorded;
+    const denominator = total || 1;
+
+    const segments: JobMeterSegment[] = Array.from(counts)
+      .map(([value, count]) => {
+        const option = optionFor(value);
+        return {
+          value,
+          label: option?.label ?? value,
+          count,
+          share: count / denominator,
+          color: option?.colourHex ?? METER_UNKNOWN_COLOR,
+          textColor: option?.textColour ?? "#ffffff",
+          unknown: !option,
+        };
+      })
+      /*
+       * Biggest first, and ties broken by the administrator's own ordering
+       * rather than by insertion order — so two labels on three jobs each keep
+       * the sequence they have on the board instead of the sequence the rows
+       * happened to arrive in.
+       */
+      .sort((left, right) => {
+        if (right.count !== left.count) return right.count - left.count;
+        const leftPos = optionFor(left.value)?.position ?? Number.MAX_SAFE_INTEGER;
+        const rightPos = optionFor(right.value)?.position ?? Number.MAX_SAFE_INTEGER;
+        if (leftPos !== rightPos) return leftPos - rightPos;
+        return left.label.localeCompare(right.label);
+      });
+
+    // Absence goes last and is always named when present — never merged into a
+    // real category and never silently omitted.
+    if (unrecorded > 0) {
+      segments.push({
+        value: "",
+        label: METER_UNRECORDED_LABEL,
+        count: unrecorded,
+        share: unrecorded / denominator,
+        color: METER_UNRECORDED_COLOR,
+        textColor: "#ffffff",
+        unknown: false,
+      });
+    }
+
+    return { key, title, total, recorded, unrecorded, segments };
+  });
+}

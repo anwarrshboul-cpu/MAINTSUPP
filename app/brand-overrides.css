@@ -1422,10 +1422,34 @@ button.analytics-metric:hover {
   gap: 12px;
 }
 
+/*
+ * THE BOTTOM PANEL ROW — two panels now, not three.
+ *
+ * "Jobs by trade" moved out of this row and into the five-meter panel below it,
+ * which plots the same `engineer` column among four others. The track widths
+ * are re-cut for the two that remain rather than left as three columns with a
+ * hole in them: Spend trend is a time series and wants the width, the
+ * compliance donut is intrinsically square and does not.
+ *
+ * `align-items: start` is the dead-space fix the owner reported. Grid items
+ * stretch to the tallest row by default, so the short donut card was being
+ * pulled to the height of the spend chart beside it and padding the difference
+ * with empty card. Each panel is now only as tall as its own contents.
+ */
 .analytics-bottom-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(260px, .7fr) minmax(300px, .85fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, .85fr);
+  align-items: start;
   gap: 12px;
+}
+
+/*
+ * The five job meters, full width beneath the row above. A section rather than
+ * a grid cell because the panel reflows its own meters into as many columns as
+ * the width allows — see overview-job-meters.css.
+ */
+.analytics-meter-row {
+  display: block;
 }
 
 .analytics-table {
@@ -1768,12 +1792,14 @@ button.analytics-score-panel {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  /*
+   * Was `1fr 1fr` with the spend panel spanning both — a rule that made sense
+   * when a third panel filled the second cell underneath. With two panels it
+   * left the compliance donut alone on a half-empty row, which is the dead
+   * space this pass is removing. Two even columns, no span.
+   */
   .analytics-bottom-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .analytics-spend-panel {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr);
   }
 }
 
@@ -1792,10 +1818,6 @@ button.analytics-score-panel {
   .analytics-overview-grid,
   .analytics-bottom-grid {
     grid-template-columns: 1fr;
-  }
-
-  .analytics-spend-panel {
-    grid-column: auto;
   }
 }
 

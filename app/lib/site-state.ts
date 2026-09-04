@@ -112,9 +112,33 @@ function lifecyclePinnedBy(status: string): SiteLifecycle | null {
   return null;
 }
 
+/**
+ * WHAT "AN ACTIVE SITE" MEANS, ONCE, FOR EVERY SURFACE THAT COUNTS THEM.
+ *
+ * Exported because the Dashboard's "Active sites" tile, the Sites register and
+ * the Reports billing engine all have to answer the same question, and the
+ * failure mode when they do not is the one the owner actually hit: a tile
+ * reading a number nobody else in the product agrees with.
+ *
+ * The axis is `status`, not `lifecycle` and not `active`. `lifecycle` says
+ * whether the RECORD is current — a legacy row nobody can vouch for is a
+ * current record and is not an active site. `active` is operational
+ * eligibility, which the reconciliation below derives FROM this answer, so
+ * counting it instead would be counting this function's own output one step
+ * removed. 'other' is excluded on purpose: it is the classification given to a
+ * row the register cannot vouch for, and those must never be billed or counted
+ * as trading estate.
+ *
+ * 'international' counts. It is a trading site under a different commercial
+ * arrangement, not a closed one.
+ */
+export function isActiveSiteStatus(status: string): boolean {
+  return status === SITE_STATUS_ACTIVE || status === SITE_STATUS_INTERNATIONAL;
+}
+
 /** Whether a status, on its own, implies operational eligibility. */
 function eligibilityPinnedBy(status: string): boolean {
-  return status === SITE_STATUS_ACTIVE || status === SITE_STATUS_INTERNATIONAL;
+  return isActiveSiteStatus(status);
 }
 
 /**

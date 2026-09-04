@@ -45,6 +45,12 @@ import type {
  * eight-thousand-line component is a derivation nothing can test.
  */
 import { EXPIRY_DUE_SOON_DAYS } from "../../lib/expiry-status";
+/*
+ * The one definition of "an active site", shared with the Sites register and
+ * the Reports billing engine. See the comment on it: the Dashboard tile that
+ * used to stand here counted something else entirely.
+ */
+import { isActiveSiteStatus } from "../../lib/site-state";
 import {
   activeFilterCount,
   documentContractorLabel,
@@ -183,7 +189,9 @@ import { AdminRolesView } from "./views/admin-roles";
 import { AdminUsersView } from "./views/admin-users";
 import { AuditLog } from "./views/audit-log";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
-import { complianceTrend, tradeBreakdown } from "./views/overview-series";
+import { buildJobMeters, complianceTrend } from "./views/overview-series";
+import OverviewJobMeters from "./overview-job-meters";
+import { useJobMeterOptions } from "./use-job-meter-options";
 import { UnitsManager } from "./units/units-manager";
 import {
   defaultWorkspaceSettings,
@@ -192,7 +200,6 @@ import {
   type WorkspacePlannedItem,
   type WorkspaceSettings,
   type WorkspaceSnapshot,
-  type WorkspaceUnit,
 } from "../../lib/workspace-data";
 import {
   WorkspaceDataManager,
@@ -1876,7 +1883,6 @@ export default function PortalApp({
   /* No fallback: an unreadable workspace has no sites, and saying so beats
      drawing somebody else's estate. */
   const currentStores = workspace?.stores ?? [];
-  const currentUnits = workspace?.units ?? [];
   const currentContractors = workspace?.contractors ?? [];
   const currentPlanned = workspace?.planned ?? [];
   const currentTeam = workspace?.team ?? [];
@@ -3014,12 +3020,11 @@ export default function PortalApp({
               stores={currentStores}
               compliance={workspace?.compliance ?? []}
               contractors={currentContractors}
-              units={currentUnits}
               workspaceReady={workspace !== null}
-              /* The workspace flag above covers units and compliance, which
-                 arrive from a different fetch. The four job tiles below it
-                 were still printing a literal 0 until /api/maintenance
-                 answered. */
+              /* The workspace flag above covers the site register and
+                 compliance, which arrive from a different fetch. The four
+                 job tiles below it were still printing a literal 0 until
+                 /api/maintenance answered. */
               jobsReady={dataMode === "live"}
               onOpenRequest={(request) => {
                 openRequest(request);
@@ -3614,7 +3619,6 @@ function OverviewView({
   stores: storeRows,
   compliance: complianceRecords,
   contractors: registeredContractors,
-  units,
   workspaceReady,
   jobsReady,
   sectionKey,
@@ -3641,7 +3645,6 @@ function OverviewView({
    * and an id is meaningless without the register that names it.
    */
   contractors: WorkspaceContractor[];
-  units: WorkspaceUnit[];
   /**
    * Whether `/api/workspace` has answered yet.
    *
@@ -3702,13 +3705,29 @@ function OverviewView({
     ),
     [now, period, portfolio, requests],
   );
-  // Counted from the unit register only. This used to fall back to the number
-  // of sites when no units had been registered, which put a plausible number
-  // under the words "Active units" that was really a count of something else —
-  // a ten-site client with an empty asset register read as ten live units. If
-  // the register is empty the honest answer is zero, and the card says why.
-  const activeUnitCount = units.filter(
-    (unit) => unit.status === "Active" && (portfolio === "all" || unit.siteId === portfolio),
+  /*
+   * ACTIVE SITES, NOT ACTIVE UNITS — the owner's first correction.
+   *
+   * The tile here counted the UNIT register: assets, not places. On this
+   * account the unit register is empty, so a workspace with 32 sites in it
+   * printed "Active units 0 — Add units to the register" as the first and
+   * largest number on the dashboard. Both halves of that were true and the
+   * impression was false, which is worse than a wrong number.
+   *
+   * It now counts SITES, from the canonical register, through the shared
+   * `isActiveSiteStatus` predicate — the same one the Sites screen and the
+   * billing engine use, so the three cannot drift. Note what is NOT the test:
+   * `lifecycle === "Current"`, which `scopedStores` below still uses for the
+   * panels, admits the 'other' rows the register cannot vouch for. Those are
+   * current records and they are not active sites.
+   *
+   * Nothing is derived from Jobs. A site with no work on it is still an active
+   * site, and a job at a closed site must not resurrect it.
+   */
+  const activeSiteCount = storeRows.filter(
+    (store) =>
+      isActiveSiteStatus(store.status) &&
+      (portfolio === "all" || store.id === portfolio),
   ).length;
   /*
    * OPEN AND CLOSED COME FROM ONE PREDICATE, SHARED WITH THE BOARD'S METERS.
@@ -3751,7 +3770,26 @@ function OverviewView({
     (complianceCounts.compliant / Math.max(complianceItems.length, 1)) * 100,
   );
   const statusSegments = jobStatusSegments(scopedRequests);
-  const tradeRows = tradeBreakdown(scopedRequests);
+  /*
+   * THE FIVE JOB METERS — Tier Level, Engineer Required, Priority, Label and
+   * Status, the columns the owner asked to be able to read without opening the
+   * board.
+   *
+   * The colours are the ones an administrator configured, fetched once; until
+   * they land the meters draw in a neutral palette rather than a guessed one.
+   * All the bucketing is in `buildJobMeters`, which guarantees every job lands
+   * in exactly one segment — see its note, and the tests that hold it.
+   *
+   * This panel replaced "Jobs by trade", which plotted `request.engineer` —
+   * the same field the Engineer Required meter now shows. Two panels over one
+   * column is the duplication the owner objected to on Reports, and it should
+   * not have been reproduced here.
+   */
+  const meterOptions = useJobMeterOptions();
+  const jobMeters = useMemo(
+    () => buildJobMeters(scopedRequests, meterOptions),
+    [meterOptions, scopedRequests],
+  );
   const spendSeries = periodSpendSeries(scopedRequests, period, now);
   const overviewWindow = resolvePeriod(period, now);
   const complianceSegments: DonutSegment[] = [
@@ -3810,7 +3848,7 @@ function OverviewView({
           sparkline counted `stage === "Attention"` only — the figure read 8
           over a line that summed 2.
         */}
-        <AnalyticsMetricCard label="Active units" value={workspaceReady ? String(activeUnitCount) : "—"} detail={!workspaceReady ? "Loading workspace…" : activeUnitCount ? "Current portfolio" : "Add units to the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Maintenance requests raised across the selected period — not a history of the unit count; the unit register keeps none." onClick={() => onNavigate("units")} />
+        <AnalyticsMetricCard label="Active sites" value={workspaceReady ? String(activeSiteCount) : "—"} detail={!workspaceReady ? "Loading workspace…" : activeSiteCount ? "Trading estate in this portfolio" : "No active sites in the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Maintenance requests raised across the selected period — not a history of the site count; the register keeps none." onClick={() => onNavigate("stores")} />
         <AnalyticsMetricCard label="Requiring attention" value={jobsReady ? String(attention.length) : "—"} detail={jobsReady ? "Urgent or escalated" : "Loading jobs…"} icon="alert" tone="orange" trend={periodTrend(attention, () => true, period, now)} trendLabel="Jobs now urgent or escalated, by the week they were raised across the selected period. Not a history of the attention count." onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Open jobs" value={jobsReady ? String(open.length) : "—"} detail={jobsReady ? `${open.filter((request) => request.priority === "Urgent").length} urgent` : "Loading jobs…"} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} trendLabel="Open jobs by the week they were raised, across the selected period. Not a history of the open count — no status history is recorded." onClick={() => onNavigate("maintenance")} />
         <AnalyticsMetricCard label="Overdue" value={jobsReady ? String(overdue.length) : "—"} detail={jobsReady ? "Target date passed" : "Loading jobs…"} icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} trendLabel="Jobs now overdue, by the week they were raised across the selected period. Not a history of the overdue count." onClick={() => onNavigate("maintenance")} />
@@ -3858,19 +3896,32 @@ function OverviewView({
               : "No compliance requirements recorded for these sites yet"}</span>
           <strong>View compliance <Icon name="chevron" size={15} /></strong>
         </button>
-        <article className="analytics-panel analytics-trades-panel">
-          <header><h2>Jobs by trade</h2></header>
-          {/*
-            An empty bar chart is indistinguishable from a broken one, so an
-            unfiltered period with no jobs says so in words instead of drawing
-            an axis with nothing on it.
-          */}
-          {tradeRows.length
-            ? <HorizontalBars items={tradeRows} />
-            : <p className="analytics-empty">{jobsReady
-                ? "No jobs in this period. Logged jobs are grouped here by the trade on the record."
-                : "Loading jobs…"}</p>}
-        </article>
+      </section>
+
+      {/*
+        The five job meters, full width.
+
+        Placed in a row of their own rather than squeezed into the three-column
+        grid above, and that is the dead-space fix as much as it is the feature:
+        the bottom row previously ran Spend trend | Compliance score | Jobs by
+        trade, where the donut is intrinsically short and left the tallest
+        column deciding the height of two mostly-empty cards beside it. Five
+        meters that reflow to the width available fill that band with something
+        a reader wants, instead of padding it.
+      */}
+      <section className="analytics-meter-row" aria-label="Job breakdown">
+        <OverviewJobMeters
+          meters={jobMeters}
+          loading={loading}
+          /*
+            Per-segment drill-through is not wired yet: the board takes no
+            filter from the URL — it reads only `item` — so a link carrying
+            "priority=Urgent" would land on an unfiltered list and quietly
+            misrepresent itself. Navigating to the job list is the honest
+            subset of the behaviour until live-board accepts a filter.
+          */
+          onSelect={() => onNavigate("maintenance")}
+        />
       </section>
 
       {/*

@@ -266,13 +266,19 @@ test("one compliance source on the Overview: the workspace register", async () =
 
 test("workspace figures say Loading, not a definitive empty claim, before the fetch lands", async () => {
   const overview = await overviewSource();
-  // The two workspace-fed tiles show a dash and say they are loading.
-  assert.match(overview, /workspaceReady \? String\(activeUnitCount\) : "—"/);
+  /*
+   * The two workspace-fed tiles show a dash and say they are loading.
+   *
+   * The first of them was "Active units" and is now "Active sites" — the tile
+   * changed, the contract did not: a figure fed by /api/workspace must not
+   * print a definitive 0 over an account that has simply not loaded.
+   */
+  assert.match(overview, /workspaceReady \? String\(activeSiteCount\) : "—"/);
   assert.match(overview, /workspaceReady \? `\$\{compliancePercent\}%` : "—"/);
   const loadingCaptions = overview.match(/"Loading workspace…"/g) ?? [];
   assert.ok(loadingCaptions.length >= 2, "both tiles need the loading caption");
   // The honest empty captions survive for the truly-empty account.
-  assert.ok(overview.includes("Add units to the register"));
+  assert.ok(overview.includes("No active sites in the register"));
   assert.ok(overview.includes("No requirements recorded yet"));
   /*
    * And the two panels are told when they are still loading.

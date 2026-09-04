@@ -1,0 +1,181 @@
+/*
+ * THE FIVE JOB METERS — layout only.
+ *
+ * Not one colour of the data is set here. Every segment and swatch takes its
+ * fill from an inline style carrying the option colour an administrator
+ * configured, because that is what the board paints the same five columns with.
+ * See the note at the top of overview-job-meters.tsx.
+ *
+ * BREAKPOINTS. 640 / 767 / 768 / 1024 / 1280 only — the agreed set the stage
+ * tests enforce. Nothing here needs a width outside it.
+ *
+ * WHY THE METERS TILE RATHER THAN STACK. This panel exists partly to answer the
+ * owner's complaint about dead space: at full width five stacked rows would
+ * leave the right two thirds of the card empty on a 1440 screen, which is the
+ * problem it was added to fix rather than a smaller version of it. So the
+ * meters flow into as many columns as fit and the panel is only as tall as it
+ * needs to be.
+ */
+
+.job-meters__list {
+  display: grid;
+  /*
+   * `auto-fit` with a min track, not a fixed column count: the panel sits in a
+   * grid whose own width changes, and a hardcoded `repeat(5, …)` would overflow
+   * the moment it shares a row with something wider than expected.
+   *
+   * 205px is measured, not chosen. At 1440 the content column is ~1112px, so a
+   * 232px track fitted four meters and left Status alone on a second row with
+   * three quarters of the band empty — the same dead space this panel was added
+   * to remove, reintroduced one row lower. 205px puts all five on one row from
+   * roughly 1105px of panel width and still holds the longest configured label
+   * ("Blocked - Awaiting Response" in maintenance_status) on its own chip line.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+  gap: 18px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.job-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-meter__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.job-meter__head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: var(--ink-strong, #eaf1f8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-meter__count {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-muted, #8fa3b8);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The stacked bar. `overflow: hidden` with a radius on the track rather than on
+ * each fill, so the segments meet flush instead of showing a hairline of the
+ * track between them at the joins.
+ */
+.job-meter__track {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-sunken, rgba(255, 255, 255, .06));
+}
+
+.job-meter__fill {
+  display: block;
+  height: 100%;
+  min-width: 2px; /* a single job in a large window must still be visible */
+}
+
+.job-meter__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.job-meter__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid var(--line-soft, rgba(255, 255, 255, .09));
+  border-radius: 999px;
+  background: var(--surface-raised, rgba(255, 255, 255, .04));
+  color: var(--ink, #c8d6e5);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.job-meter__chip:hover {
+  border-color: var(--accent-soft, rgba(18, 180, 168, .5));
+  background: var(--surface-hover, rgba(255, 255, 255, .08));
+}
+
+.job-meter__chip:focus-visible {
+  outline: 2px solid var(--accent, #12b4a8);
+  outline-offset: 2px;
+}
+
+/*
+ * A value the option set does not contain. Marked, never hidden: it is real
+ * data that an administrator has not configured, and the meter's whole contract
+ * is that nothing is dropped.
+ */
+.job-meter__chip--unknown {
+  border-style: dashed;
+}
+
+.job-meter__swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.job-meter__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-meter__chip strong {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-strong, #eaf1f8);
+}
+
+/*
+ * Phones. The chips stay as they are — they already wrap — but the meters go to
+ * one column so a label is never squeezed to two characters and an ellipsis.
+ */
+@media (max-width: 640px) {
+  .job-meters__list {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+/*
+ * Touch. 767 is the width brand-overrides.css already uses for touch targets,
+ * and a 22px-high chip is below the 44px guidance, so it grows rather than
+ * being merely tappable-in-theory.
+ */
+@media (max-width: 767px) {
+  .job-meter__chip {
+    padding: 7px 11px 7px 9px;
+    font-size: 12.5px;
+  }
+}

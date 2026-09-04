@@ -83,6 +83,7 @@ async function initialize() {
   await ensureStageTwentyThreeRecycleBin(d1);
   await ensureBoardAutomations(d1);
   await ensureCanonicalSiteLink(d1);
+  await ensureOwnerFixesAndBilling(d1);
 
   /*
    * Last, because it deletes from tables the stages above create — the forms of
@@ -3801,6 +3802,348 @@ async function ensureBoardAutomations(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS automation_runs_rule_idx ON automation_runs(organisation_id, automation_id, dedupe_key)",
+    ),
+  ]);
+}
+
+/**
+ * OWNER FIXES + REPORTS BILLING — 2026-09-04.
+ *
+ * Four guarded ALTERs and one batch of `IF NOT EXISTS` DDL, held to the same
+ * restraint as `ensureStageTwentyThreeRecycleBin` above: this runs on the boot
+ * path of every isolate, so a stage that wants twelve tables and four columns
+ * costs a fixed handful of statements and never a scan.
+ *
+ * WHY THE COLUMNS COME FIRST. `addColumn` reads `PRAGMA table_info` and returns
+ * silently when the table does not exist, so ordering it before the CREATEs
+ * below is safe; ordering the CREATEs before it would be too. They are grouped
+ * this way only because the columns extend tables other stages own and the
+ * batch creates tables nothing else touches.
+ *
+ * WHY NO SLA RULES ARE SEEDED. Every other seed in this file inserts structure
+ * — a board, a column, an option set — that the product cannot function
+ * without. A target of "Critical = 1 working day" is not structure, it is the
+ * client's contract, and a seeded guess would be indistinguishable on screen
+ * from an agreed term. A job with no matching rule is excluded from the SLA
+ * calculation and reported as a data-quality finding, which is the honest
+ * answer until an administrator enters the real rules.
+ */
+async function ensureOwnerFixesAndBilling(d1: D1DatabaseLike) {
+  /*
+   * The stable identity behind "Assigned To".
+   *
+   * `maintenance_requests.assignee` is left exactly as it is and still holds
+   * the display name — the same arrangement `contractor` / `contractor_id`
+   * already uses on this table, and for the same reason: renaming a person
+   * must not rewrite the history of who was named on a closed job, and an
+   * imported row that never had a user behind it must keep working.
+   */
+  await addColumn(d1, "maintenance_requests", "assignee_user_id", "TEXT");
+
+  /*
+   * Billing eligibility on the site itself.
+   *
+   * `billable` defaults to 1 so that turning billing on does not silently
+   * exclude an estate that predates it; `sites.active` and the lifecycle
+   * column already carry whether a site is trading, and billing deliberately
+   * does not reuse them — a site can be open and not chargeable.
+   *
+   * The two date columns are the billing window, distinct from `lease_start` /
+   * `lease_end`. A site billed from the day it joined the agreement is not the
+   * same fact as the day its lease began, and conflating them would have made
+   * the invoice depend on a property record nobody maintains for that purpose.
+   */
+  await addColumn(d1, "sites", "billable", "INTEGER NOT NULL DEFAULT 1");
+  await addColumn(d1, "sites", "billing_active_from", "TEXT");
+  await addColumn(d1, "sites", "billing_active_to", "TEXT");
+
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS calendar_events (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         title TEXT NOT NULL,
+         notes TEXT,
+         site_id TEXT,
+         starts_on TEXT NOT NULL,
+         ends_on TEXT,
+         all_day INTEGER NOT NULL DEFAULT 1,
+         category TEXT NOT NULL DEFAULT 'Manual',
+         colour TEXT,
+         created_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         archived INTEGER NOT NULL DEFAULT 0,
+         archived_at TEXT,
+         deleted_at TEXT,
+         deleted_by TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS calendar_events_org_start_idx ON calendar_events(organisation_id, starts_on)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS calendar_events_site_idx ON calendar_events(site_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS billing_settings (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         currency TEXT NOT NULL DEFAULT 'GBP',
+         default_site_fee_pence INTEGER,
+         vat_enabled INTEGER NOT NULL DEFAULT 0,
+         vat_rate_basis_points INTEGER NOT NULL DEFAULT 2000,
+         vat_number TEXT,
+         payment_terms_days INTEGER NOT NULL DEFAULT 30,
+         payment_terms_note TEXT,
+         billing_address TEXT,
+         invoice_number_prefix TEXT NOT NULL DEFAULT 'MS',
+         invoice_sequence INTEGER NOT NULL DEFAULT 0,
+         pro_rata_enabled INTEGER NOT NULL DEFAULT 0,
+         updated_by TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    /* One settings row per workspace, and the invoice counter lives in it —
+       so this uniqueness is what stops two isolates issuing the same number. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS billing_settings_org_idx ON billing_settings(organisation_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS client_site_fees (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         fee_pence INTEGER NOT NULL,
+         effective_from TEXT,
+         effective_to TEXT,
+         note TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS client_site_fees_org_idx ON client_site_fees(organisation_id, effective_from)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS site_fee_overrides (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         site_id TEXT NOT NULL,
+         fee_pence INTEGER NOT NULL,
+         effective_from TEXT,
+         effective_to TEXT,
+         note TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS site_fee_overrides_site_idx ON site_fee_overrides(organisation_id, site_id, effective_from)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS service_invoices (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_number TEXT,
+         status TEXT NOT NULL DEFAULT 'Draft',
+         period_start TEXT NOT NULL,
+         period_end TEXT NOT NULL,
+         invoice_date TEXT,
+         due_at TEXT,
+         currency TEXT NOT NULL DEFAULT 'GBP',
+         vat_enabled INTEGER NOT NULL DEFAULT 0,
+         vat_rate_basis_points INTEGER NOT NULL DEFAULT 0,
+         purchase_order TEXT,
+         client_reference TEXT,
+         internal_reference TEXT,
+         payment_terms TEXT,
+         client_note TEXT,
+         internal_note TEXT,
+         billing_address TEXT,
+         billable_site_count INTEGER NOT NULL DEFAULT 0,
+         subtotal_pence INTEGER NOT NULL DEFAULT 0,
+         vat_pence INTEGER NOT NULL DEFAULT 0,
+         adjustment_pence INTEGER NOT NULL DEFAULT 0,
+         credit_pence INTEGER NOT NULL DEFAULT 0,
+         total_pence INTEGER NOT NULL DEFAULT 0,
+         maintenance_spend_pence INTEGER NOT NULL DEFAULT 0,
+         created_by_email TEXT,
+         created_by_user_id TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         approved_by_email TEXT,
+         approved_at TEXT,
+         finalised_by_email TEXT,
+         finalised_at TEXT,
+         voided_by_email TEXT,
+         voided_at TEXT,
+         void_reason TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS service_invoices_org_period_idx ON service_invoices(organisation_id, period_start, period_end)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS service_invoices_status_idx ON service_invoices(organisation_id, status)",
+    ),
+    /* An issued number is issued once. Partial so that the many drafts which
+       have not been given one yet do not all collide on NULL. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS service_invoices_number_idx ON service_invoices(organisation_id, invoice_number) WHERE invoice_number IS NOT NULL",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS service_invoice_lines (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         line_no INTEGER NOT NULL DEFAULT 0,
+         site_id TEXT,
+         site_name TEXT,
+         site_reference TEXT,
+         description TEXT,
+         period_start TEXT,
+         period_end TEXT,
+         quantity INTEGER NOT NULL DEFAULT 1,
+         fee_pence INTEGER NOT NULL DEFAULT 0,
+         fee_source TEXT,
+         fee_record_id TEXT,
+         vat_rate_basis_points INTEGER NOT NULL DEFAULT 0,
+         line_subtotal_pence INTEGER NOT NULL DEFAULT 0,
+         line_vat_pence INTEGER NOT NULL DEFAULT 0,
+         line_total_pence INTEGER NOT NULL DEFAULT 0,
+         included INTEGER NOT NULL DEFAULT 1,
+         exclusion_reason TEXT,
+         excluded_by_email TEXT,
+         excluded_at TEXT,
+         validation TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS service_invoice_lines_invoice_idx ON service_invoice_lines(invoice_id, line_no)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS service_invoice_lines_site_idx ON service_invoice_lines(organisation_id, site_id)",
+    ),
+    /* The duplicate-charge guard the owner asked for, at the level that can
+       actually enforce it: one line per site per invoice. Charging the same
+       site twice for the same period across two invoices is a different check
+       and is done in the validator, which can see the other invoice. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS service_invoice_lines_unique_site_idx ON service_invoice_lines(invoice_id, site_id) WHERE site_id IS NOT NULL",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_adjustments (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         kind TEXT NOT NULL DEFAULT 'adjustment',
+         amount_pence INTEGER NOT NULL DEFAULT 0,
+         reason TEXT NOT NULL,
+         authorised_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS invoice_adjustments_invoice_idx ON invoice_adjustments(invoice_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS report_snapshots (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         payload TEXT NOT NULL,
+         sla_rules_version TEXT,
+         job_ids TEXT,
+         site_ids TEXT,
+         fee_ids TEXT,
+         created_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS report_snapshots_invoice_idx ON report_snapshots(invoice_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS sla_rules (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         classification TEXT NOT NULL,
+         target_working_days INTEGER NOT NULL,
+         active INTEGER NOT NULL DEFAULT 1,
+         version INTEGER NOT NULL DEFAULT 1,
+         note TEXT,
+         updated_by TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS sla_rules_org_idx ON sla_rules(organisation_id, classification)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS job_holds (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         request_id TEXT NOT NULL,
+         start_at TEXT NOT NULL,
+         end_at TEXT,
+         reason TEXT,
+         category TEXT,
+         approved INTEGER NOT NULL DEFAULT 0,
+         approved_by TEXT,
+         approved_at TEXT,
+         note TEXT,
+         attachment_id TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS job_holds_request_idx ON job_holds(organisation_id, request_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_approvals (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         action TEXT NOT NULL,
+         from_status TEXT,
+         to_status TEXT,
+         actor_email TEXT,
+         actor_user_id TEXT,
+         reason TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS invoice_approvals_invoice_idx ON invoice_approvals(invoice_id, created_at)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_exports (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         format TEXT NOT NULL,
+         filename TEXT,
+         attachment_id TEXT,
+         byte_size INTEGER,
+         actor_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS invoice_exports_invoice_idx ON invoice_exports(invoice_id, created_at)",
     ),
   ]);
 }
