@@ -9,10 +9,14 @@
 .sites-runtime
 .pglite
 .pglite-qa
-.openai
 node_modules
 dist
-build
+# NOT excluded, though the header above says Vercel only needs apps/web:
+#   .openai/hosting.json  and  build/sites-vite-plugin.ts
+# Both are imported by vite.config.ts, so stripping them makes the PORTAL
+# unbuildable from a Git checkout — `Could not resolve './.openai/hosting.json'`
+# before the build has begun. They are two small tracked source files, not
+# artifacts, and they cost nothing against the 3.6 GB this file exists to stop.
 # The legacy portal's Build Output API staging root. Deployed from inside
 # itself with `vercel deploy --prebuilt`, never as part of this project's
 # upload — it is a second copy of dist/ plus a linked project of its own.
