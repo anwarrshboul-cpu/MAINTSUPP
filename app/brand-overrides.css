@@ -4649,12 +4649,17 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
   white-space: nowrap;
 }
 
+/*
+ * Compact. 30px of vertical padding was sized for an empty state that had to
+ * hold a stretched card open; now that the row no longer stretches, the
+ * padding only has to separate the message from the heading above it.
+ */
 .insight-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 30px 16px;
+  gap: 5px;
+  padding: 16px 14px 18px;
   text-align: center;
   color: var(--muted);
 }
@@ -5009,9 +5014,23 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
   text-align: right;
 }
 
+/*
+ * `align-items: start` is the dead-space fix, and it is the whole of it.
+ *
+ * Grid items stretch to the tallest item in their row by default, so a panel
+ * whose entire content is "No budgets set yet" was being pulled to the height
+ * of the six-month chart beside it and padding the difference with empty card.
+ * The owner reported that as unused space on the Dashboard; it was never a
+ * padding value, it was the row.
+ *
+ * Each panel is now as tall as its own contents. A row can therefore end
+ * ragged, which is the correct trade: a short card that says one true sentence
+ * reads better than a tall card that says the same sentence and then nothing.
+ */
 .insight-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
   gap: 16px;
 }
 
