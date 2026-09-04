@@ -449,6 +449,40 @@ test("W2 a contractor name is refused per register, not across the workspace", a
 /* Against a running server                                           */
 /* ------------------------------------------------------------------ */
 
+/*
+ * A REAL SESSION, because `/api/workspace` WRITES need one.
+ *
+ * The dev identity header is enough to READ — `scopedDb` accepts it — and it is
+ * how every other call in this file is made. It is not enough to write:
+ * `authoriseWorkspaceWrite` checks `authenticated`, deliberately, because in
+ * production an unauthenticated stranger reached that route as a client of the
+ * live tenant. So the contractor test signs in the way
+ * `tests/member-partial-patch.test.mjs` does and sends the cookie alongside the
+ * header, and a failure to sign in leaves `cookie` empty rather than throwing —
+ * the request then 401s and the assertion says so, which is more use than a
+ * suite that cannot start.
+ */
+let cookie = null;
+async function signIn() {
+  if (cookie !== null) return cookie;
+  try {
+    const response = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: process.env.MAINTSUPP_EMAIL ?? "owner@maintsupp.com",
+        password: process.env.MAINTSUPP_PASSWORD ?? "Sunnamusk-Owner-2026",
+      }),
+    });
+    cookie = response.ok
+      ? (response.headers.getSetCookie?.() ?? []).map((raw) => raw.split(";")[0]).join("; ")
+      : "";
+  } catch {
+    cookie = "";
+  }
+  return cookie;
+}
+
 function call(path, options = {}, identity = ADMIN) {
   return fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -456,6 +490,7 @@ function call(path, options = {}, identity = ADMIN) {
       Accept: "application/json",
       "Content-Type": "application/json",
       "x-maintsupp-identity": identity,
+      ...(cookie ? { cookie } : {}),
       ...(options.headers ?? {}),
     },
   });
@@ -626,7 +661,17 @@ test("live: two Sites instances cannot see each other or the canonical register"
     return;
   }
   await sweep([ALPHA, BETA]);
-  const NAME = "W2 Scope Shared Name";
+  /*
+   * UNIQUE PER RUN, and that is not tidiness.
+   *
+   * The purge re-homes an instance's sites into the canonical register and the
+   * product cannot remove a site (see the note at the top of this file), so
+   * every run leaves its fixture behind. With a fixed name the NEXT run then
+   * found it already in the canonical register and failed an assertion about
+   * isolation that was never about the leftovers. The name is the fixture's
+   * identity here, so it carries the run.
+   */
+  const NAME = `W2 Scope Shared Name ${Math.random().toString(36).slice(2, 8)}`;
   try {
     const [alpha, beta] = await Promise.all(
       [
@@ -695,6 +740,7 @@ test("live: two Contractors instances hold the same name without breaking canoni
     t.skip(`no server at ${BASE_URL}`);
     return;
   }
+  await signIn();
   if (!templateIsAvailable("contractors")) {
     t.skip(
       "the Contractors template is `available: false` in SECTION_TEMPLATES, so no instance can be created to test with",
@@ -713,6 +759,20 @@ test("live: two Contractors instances hold the same name without breaking canoni
     const canonical = await (await call("/api/workspace")).json();
     const existing = canonical.workspace?.contractors?.[0];
     assert.ok(existing, "the canonical roster must have somebody to collide with");
+    /*
+     * Counted BEFORE, because the property is that canonical GAINS NOTHING.
+     *
+     * This asserted the canonical roster held exactly one row of that name,
+     * which is the same claim only while the register is pristine. It is not:
+     * the purge re-homes an instance's contractors into the canonical register
+     * and the product cannot remove a contractor — `DELETE` archives one — so
+     * every run of this test leaves its fixture behind and the next run counted
+     * them. Comparing before with after says what isolation actually means and
+     * cannot be defeated by a leftover.
+     */
+    const canonicalWithName = (payload) =>
+      payload.workspace.contractors.filter((row) => row.name === existing.name).length;
+    const beforeCount = canonicalWithName(canonical);
 
     /*
      * The exact blocker `SECTION_TEMPLATES` describes: a contractor added to an
@@ -734,8 +794,8 @@ test("live: two Contractors instances hold the same name without breaking canoni
       "no canonical job may lose its link because another register gained a row",
     );
     assert.equal(
-      after.workspace.contractors.filter((row) => row.name === existing.name).length,
-      1,
+      canonicalWithName(after),
+      beforeCount,
       "and the instance's row must not appear on the canonical roster",
     );
   } finally {

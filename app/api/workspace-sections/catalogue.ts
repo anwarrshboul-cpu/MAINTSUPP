@@ -230,19 +230,17 @@ export const SECTION_TEMPLATES: readonly SectionTemplate[] = [
      * `portal-app.tsx` synthesises from the job feed no longer runs on an
      * instance.
      *
-     * What is missing is plainer than either: THERE IS NO SCOPED READ PATH.
-     * Contractors are served by `GET /api/workspace`, an unparameterised
-     * monolith with thirteen consumers; there is no `/api/contractors` route at
-     * all, and asking for one answers 404. `app/lib/contractor-repository.ts`
-     * holds the scope-aware queries an endpoint would use, and nothing calls
-     * them yet. An instance turned on today would draw the workspace's entire
-     * roster under its own name — the substitution this workstream exists to
-     * remove — so it stays off until the endpoint exists and the screen reads
-     * it.
+     * The last of the three was that there was no scoped READ PATH at all:
+     * contractors came from `GET /api/workspace`, an unparameterised snapshot
+     * with thirteen consumers, and asking for `/api/contractors` answered 404.
+     * That endpoint now exists and REQUIRES a section, so it can never quietly
+     * answer with the canonical roster; the snapshot reads the canonical
+     * register explicitly rather than every register, which was itself a leak
+     * waiting for the first instance; and the three write verbs take the same
+     * scope rather than being copied, so there is still one implementation of
+     * what a contractor row may contain.
      */
-    available: false,
-    unavailable:
-      "The contractor register is still served by one workspace-wide query, so a second register would show every contractor the workspace has. Available once contractors are read through their own register.",
+    available: true,
   },
   {
     key: "sites",

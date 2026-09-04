@@ -1755,6 +1755,41 @@ export default function PortalApp({
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  /*
+   * WHICH CONTRACTOR REGISTER THIS SCREEN IS ON — W2.
+   *
+   * The section key of a Contractors-template instance, or null for the
+   * workspace's own roster. Only a section whose STORED TEMPLATE is
+   * `contractors` names itself: a legacy second door onto this screen is a view
+   * of the canonical register and must stay one, and the server would refuse
+   * its key anyway because that section holds no contractor register.
+   *
+   * It is a lookup key, not a filter. `/api/contractors` resolves it against
+   * `workspace_sections` inside the caller's own organisation, and the write
+   * verbs in `/api/workspace` do the same before they touch a row.
+   */
+  /* Bumped after any contractor write so an instance's roster reloads. The
+     snapshot reload below cannot serve it — the snapshot is the canonical
+     register by definition. */
+  const [contractorReloadToken, setContractorReloadToken] = useState(0);
+
+  /**
+   * `/api/workspace`, addressed to the register the screen is showing.
+   *
+   * Read at CALL time rather than derived above, because `activeSection` and
+   * the section catalogue are resolved further down this component and a const
+   * up here would evaluate before either exists.
+   */
+  const workspaceUrlFor = (entity: ManagerTab | "settings") => {
+    const section =
+      entity === "contractor" && activeCustom?.template === "contractors"
+        ? activeCustom.key
+        : null;
+    return section
+      ? `/api/workspace?section=${encodeURIComponent(section)}`
+      : "/api/workspace";
+  };
+
   const saveWorkspaceRecord = async (
     entity: ManagerTab | "settings",
     id: string | null,
@@ -1763,7 +1798,7 @@ export default function PortalApp({
     if (entity === "activity") return;
     setWorkspaceBusy(true);
     try {
-      const response = await fetch("/api/workspace", {
+      const response = await fetch(workspaceUrlFor(entity), {
         method: id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entity, id, data }),
@@ -1773,6 +1808,7 @@ export default function PortalApp({
         throw new Error(payload.error || "The shared record could not be saved.");
       }
       await loadWorkspace();
+      setContractorReloadToken((token) => token + 1);
       setToast("Shared workspace updated. Dashboard totals have been refreshed.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "The shared record could not be saved.");
@@ -1786,7 +1822,7 @@ export default function PortalApp({
     if (entity === "activity") return;
     setWorkspaceBusy(true);
     try {
-      const response = await fetch("/api/workspace", {
+      const response = await fetch(workspaceUrlFor(entity), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entity, id }),
@@ -1796,6 +1832,7 @@ export default function PortalApp({
         throw new Error(payload.error || "The record could not be archived.");
       }
       await loadWorkspace();
+      setContractorReloadToken((token) => token + 1);
       setToast("Record archived. Its history remains available.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "The record could not be archived.");
@@ -3157,6 +3194,10 @@ export default function PortalApp({
             <ContractorsView
               key={activeSection}
               sectionKey={activeSection}
+              registerSectionKey={
+                activeCustom?.template === "contractors" ? activeCustom.key : null
+              }
+              reloadToken={contractorReloadToken}
               scopedToInstance={activeCustom?.ownsBoard === true}
               contractors={currentContractors}
               requests={requests}
@@ -5575,6 +5616,8 @@ function ContractorsView({
   contractors: registeredContractors,
   requests,
   sectionKey,
+  registerSectionKey,
+  reloadToken,
   scopedToInstance,
   onManage,
   onNotify,
@@ -5611,8 +5654,73 @@ function ContractorsView({
    * key. Not from the route, not from the label.
    */
   scopedToInstance: boolean;
+  /**
+   * The section whose OWN contractor register this screen draws, or null for
+   * the workspace's own.
+   *
+   * Distinct from `sectionKey` above, which is only a storage namespace for
+   * this page's date range and is set for every section including the built-in
+   * one. This is the register itself, and it is null unless the section was
+   * created from the Contractors template.
+   */
+  registerSectionKey: string | null;
+  /** Bumped by the shell after a contractor write, so the roster reloads. */
+  reloadToken: number;
   onManage: (id?: string | null) => void;
 }) {
+  /*
+   * AN INSTANCE READS ITS OWN REGISTER FROM THE SERVER.
+   *
+   * Not a filter over `registeredContractors` — that prop is the workspace
+   * snapshot, which is the canonical roster by definition, and narrowing it in
+   * the browser would be the client-side isolation this workstream rules out.
+   * The request names the section; the server resolves it against
+   * `workspace_sections` and answers with that register alone.
+   */
+  const [instanceContractors, setInstanceContractors] = useState<
+    WorkspaceContractor[] | null
+  >(null);
+  useEffect(() => {
+    let active = true;
+    /*
+     * Every state write here lands on a later tick, through the same
+     * zero-delay timer the rest of this dashboard uses. The lint rule rejects a
+     * synchronous `setState` in an effect body because it cascades a render,
+     * and the reset below — the branch that runs when the reader moves from an
+     * instance back to the canonical screen — was exactly that.
+     */
+    if (!registerSectionKey) {
+      const reset = window.setTimeout(() => {
+        if (active) setInstanceContractors(null);
+      }, 0);
+      return () => {
+        active = false;
+        window.clearTimeout(reset);
+      };
+    }
+    const load = async () => {
+      try {
+        const response = await fetch(
+          `/api/contractors?section=${encodeURIComponent(registerSectionKey)}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!response.ok) throw new Error("unavailable");
+        const payload = (await response.json()) as { contractors?: WorkspaceContractor[] };
+        if (active) setInstanceContractors(payload.contractors ?? []);
+      } catch {
+        /* An empty register and an unreachable one must not look alike, so a
+           failure leaves the previous rows rather than drawing "no
+           contractors" over a register that has some. */
+        if (active) setInstanceContractors((current) => current ?? []);
+      }
+    };
+    const timer = window.setTimeout(load, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [registerSectionKey, reloadToken]);
+
   const fallbackContractors = useMemo<WorkspaceContractor[]>(
     () =>
       Array.from(
@@ -5664,8 +5772,9 @@ function ContractorsView({
   );
   /* An instance shows what it holds, and nothing else. Empty is a true answer
      for a register created five seconds ago; a derived roster is not. */
-  const roster =
-    registeredContractors.length || scopedToInstance
+  const roster = registerSectionKey
+    ? instanceContractors ?? []
+    : registeredContractors.length || scopedToInstance
       ? registeredContractors
       : fallbackContractors;
 

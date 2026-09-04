@@ -41,6 +41,14 @@ import {
  */
 import { COMPLETED_STAGE, completedStatuses } from "../../(app)/portal/dashboard-meters";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { getContractor, listContractors } from "../../lib/contractor-repository";
+import {
+  CANONICAL_REGISTER,
+  registerScopeFilter,
+  resolveRegisterScope,
+  scopeRefusal,
+  type RegisterScope,
+} from "../../lib/register-scope";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import {
   maintenanceRequests as sampleRequests,
@@ -573,7 +581,21 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
   ] = await Promise.all([
     db.select().from(sites).where(eq(sites.organisationId, orgId)).orderBy(sites.name),
     db.select().from(units).where(eq(units.organisationId, orgId)).orderBy(units.name),
-    db.select().from(contractors).where(eq(contractors.organisationId, orgId)).orderBy(contractors.name),
+    /*
+     * THE CANONICAL ROSTER, not every register — W2.
+     *
+     * This read the organisation's contractors with no scope at all, which was
+     * the whole truth until a section could own a register of its own. From the
+     * first Contractors instance it would have put that instance's rows on the
+     * workspace's own Contractors screen: a leak in the one direction the owner
+     * named, and one nothing else could have caught, because the screen would
+     * have looked entirely normal.
+     *
+     * `listContractors` defaults its scope to the canonical register, so this
+     * asks for exactly what the snapshot has always meant. An instance's roster
+     * is read through `GET /api/contractors`, which requires a section.
+     */
+    listContractors(db, orgId, { includeInactive: true }),
     db.select().from(plannedMaintenance).where(eq(plannedMaintenance.organisationId, orgId)).orderBy(plannedMaintenance.nextDueAt),
     db.select().from(users).where(eq(users.organisationId, orgId)).orderBy(users.fullName),
     db.select().from(workspaceSettings).where(eq(workspaceSettings.organisationId, orgId)).limit(1),
@@ -1378,7 +1400,9 @@ export async function POST(request: Request) {
        * `contractorNameConflict`: the register cannot attribute a job to a name
        * two contractors share, so this is where a second one is stopped.
        */
-      const badName = await contractorNameConflict(db, orgId, name, null);
+      const scoped = await contractorScope(db, orgId, request);
+      if (!scoped.ok) return scoped.refusal;
+      const badName = await contractorNameConflict(db, orgId, name, null, scoped.scope);
       if (badName) return badName;
       id = newId("contractor", name);
       /*
@@ -1388,7 +1412,7 @@ export async function POST(request: Request) {
        * kept as typed; see `contractorTradeValues`.
        */
       const trades = await contractorTradeValues(db, orgId, data.serviceCategories);
-      await db.insert(contractors).values({ id, organisationId: orgId, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), postcode: contractorPostcode(data.postcode), notes: optionalText(data.notes, 2000), ...contractorCostSet(data), otherCostLabel: optionalText(data.otherCostLabel, 80), paymentTerms: optionalText(data.paymentTerms, 60), financeReference: optionalText(data.financeReference, 80), serviceCategories: JSON.stringify(trades), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: contractorDate(data.insuranceExpiry), insurerName: optionalText(data.insurerName, 160), policyNumber: optionalText(data.policyNumber, 80), insuranceNotes: optionalText(data.insuranceNotes, 1000), availability: text(data.availability, 60) || "Available", rating: optionalRating(data.rating), active: booleanValue(data.active) });
+      await db.insert(contractors).values({ id, organisationId: orgId, boardId: scoped.scope, name, email: optionalText(data.email, 160), phone: optionalText(data.phone, 80), whatsappNumber: optionalText(data.whatsappNumber, 80), contactName: optionalText(data.contactName, 140), address: optionalText(data.address, 240), postcode: contractorPostcode(data.postcode), notes: optionalText(data.notes, 2000), ...contractorCostSet(data), otherCostLabel: optionalText(data.otherCostLabel, 80), paymentTerms: optionalText(data.paymentTerms, 60), financeReference: optionalText(data.financeReference, 80), serviceCategories: JSON.stringify(trades), coverageAreas: JSON.stringify(stringArray(data.coverageAreas)), certifications: JSON.stringify(stringArray(data.certifications)), insuranceExpiry: contractorDate(data.insuranceExpiry), insurerName: optionalText(data.insurerName, 160), policyNumber: optionalText(data.policyNumber, 80), insuranceNotes: optionalText(data.insuranceNotes, 1000), availability: text(data.availability, 60) || "Available", rating: optionalRating(data.rating), active: booleanValue(data.active) });
       // W06-08 — structured certifications, if the create carried any. Absent
       // key writes nothing at all; see `writeContractorCertifications`. Their
       // VALIDATION already ran above, so nothing here can fail after the insert
@@ -2407,11 +2431,44 @@ async function contractorTarget(
  * deliberately not consulted, because an archived contractor still answers to
  * their name when a job is being resolved.
  */
+/**
+ * WHICH CONTRACTOR REGISTER A WRITE IS AIMED AT — W2.
+ *
+ * The three contractor verbs in this file (create, edit, archive) are the one
+ * implementation of what a contractor row may contain, and they stay that way;
+ * they are simply told which register they are working in. The organisation
+ * comes from the session and the register from the `boards` row behind the
+ * section — never from a label, a route string or anything else the caller
+ * sent.
+ *
+ * ABSENT MEANS CANONICAL, and here that is intentional rather than a fallback:
+ * `/api/workspace` IS the workspace's own registers, and every one of its
+ * thirteen consumers means the canonical roster when it names no section. The
+ * refusal path is what makes that safe — a section that does not exist, is
+ * archived, belongs to another organisation, or holds a Jobs register is a
+ * refusal with the reason, never a quiet write into the canonical roster.
+ */
+async function contractorScope(
+  db: WorkspaceDb,
+  orgId: string,
+  request: Request,
+): Promise<{ ok: true; scope: RegisterScope } | { ok: false; refusal: Response }> {
+  const url = new URL(request.url);
+  const resolved = await resolveRegisterScope(db, orgId, url, "contractors");
+  const refusal = scopeRefusal(resolved);
+  if (refusal) return { ok: false, refusal };
+  if (!resolved.ok) {
+    return { ok: false, refusal: Response.json({ error: "Unknown register." }, { status: 404 }) };
+  }
+  return { ok: true, scope: resolved.scope };
+}
+
 async function contractorNameConflict(
   db: WorkspaceDb,
   orgId: string,
   name: string,
   selfId: string | null,
+  scope: RegisterScope = CANONICAL_REGISTER,
 ): Promise<Response | null> {
   const carriesName = sql`lower(trim(${contractors.name})) = lower(trim(${name}))`;
   if (selfId) {
@@ -2424,12 +2481,23 @@ async function contractorNameConflict(
       .limit(1);
     if (unchanged) return null;
   }
+  /*
+   * WITHIN ONE REGISTER — see `contractorNameHolder`, which states the whole
+   * argument. The refusal exists because `resolveContractorLink` attributes a
+   * job's free-text contractor to a row by name and cannot choose between two;
+   * that reasoning is entirely about one roster, and the resolver now searches
+   * within one. Refusing across registers would forbid something that is safe,
+   * for a reason that had stopped being true: an instance created for a
+   * subcontractor network could not hold "Apex Electrical" because the
+   * canonical roster does.
+   */
   const [clash] = await db
     .select({ id: contractors.id })
     .from(contractors)
     .where(
       and(
         eq(contractors.organisationId, orgId),
+        registerScopeFilter(contractors.boardId, scope),
         carriesName,
         ...(selfId ? [not(eq(contractors.id, selfId))] : []),
       ),
@@ -2751,6 +2819,24 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     } else if (entity === "contractor") {
+      /* The register this edit is aimed at, resolved before anything is read
+         or written — so a refusal changes nothing, and an id belonging to
+         another register is simply not found. */
+      const editScope = await contractorScope(db, orgId, request);
+      if (!editScope.ok) return editScope.refusal;
+      /*
+       * NOT IN THIS REGISTER IS A 404, NOT A QUIET NO-OP.
+       *
+       * The register is in the UPDATE's predicate below, so a row belonging to
+       * another register was already safe from being written — but the request
+       * answered 200 having changed nothing, which tells a caller its edit
+       * landed. Asked here instead, so the answer is the truth: this register
+       * does not have that contractor.
+       */
+      const editable = await getContractor(db, orgId, id, editScope.scope);
+      if (!editable) {
+        return Response.json({ error: "That contractor is not on this register." }, { status: 404 });
+      }
       /*
        * `supplied` fixed omission. It does not fix a key that was SENT
        * carrying nothing, and three of these columns are NOT NULL, so the
@@ -2824,7 +2910,13 @@ export async function PATCH(request: Request) {
        * posts the whole record, so every ordinary save arrives with a name.
        */
       if ("name" in data) {
-        const badRename = await contractorNameConflict(db, orgId, text(data.name, 140), id);
+        const badRename = await contractorNameConflict(
+          db,
+          orgId,
+          text(data.name, 140),
+          id,
+          editScope.scope,
+        );
         if (badRename) return badRename;
       }
       /*
@@ -2918,7 +3010,16 @@ export async function PATCH(request: Request) {
         // everything this cannot read. Same arrangement as the member branch.
         ...supplied(data, "active", booleanValue),
         updatedAt: new Date().toISOString(),
-      }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
+      }).where(
+        and(
+          eq(contractors.id, id),
+          eq(contractors.organisationId, orgId),
+          /* AN ID IS AN ADDRESS, NOT A CREDENTIAL. Without the register in the
+             predicate, an id seen once on an instance could be edited through
+             the canonical screen by anyone who remembered it. */
+          registerScopeFilter(contractors.boardId, editScope.scope),
+        ),
+      );
       /*
        * W06-08 — the certifications, after the row and inside the same 404.
        * `contractorTarget` above has already established that this contractor
@@ -3099,7 +3200,29 @@ export async function DELETE(request: Request) {
       await db.update(sites).set({ ...closed, updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
     } else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
-    else if (entity === "contractor") await db.update(contractors).set({ active: false, availability: "Inactive", updatedAt: new Date().toISOString() }).where(and(eq(contractors.id, id), eq(contractors.organisationId, orgId)));
+    else if (entity === "contractor") {
+      /* Same register check as the edit, and for the same reason: inactivating
+         somebody else's contractor through this screen would be a write across
+         registers, which is the isolation this workstream exists to hold. */
+      const archiveScope = await contractorScope(db, orgId, request);
+      if (!archiveScope.ok) return archiveScope.refusal;
+      /* Same as the edit: a contractor this register does not hold is a 404
+         rather than a 200 that archived nothing. */
+      const archivable = await getContractor(db, orgId, id, archiveScope.scope);
+      if (!archivable) {
+        return Response.json({ error: "That contractor is not on this register." }, { status: 404 });
+      }
+      await db
+        .update(contractors)
+        .set({ active: false, availability: "Inactive", updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(contractors.id, id),
+            eq(contractors.organisationId, orgId),
+            registerScopeFilter(contractors.boardId, archiveScope.scope),
+          ),
+        );
+    }
     else if (entity === "planned") await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
     else if (entity === "member") await db.update(users).set({ active: false, updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     else return Response.json({ error: "This record cannot be archived." }, { status: 400 });
