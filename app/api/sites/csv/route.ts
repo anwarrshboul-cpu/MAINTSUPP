@@ -672,7 +672,7 @@ export async function POST(request: Request) {
           // leaving the site without an operational reference.
           code:
             values.code ??
-            generateSiteCode(name, await existingSiteCodes(db, orgId, scope)),
+            generateSiteCode(name, await existingSiteCodes(db, orgId)),
         });
         if (address.changed) {
           await recordAnomaly(db, orgId, {

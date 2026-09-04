@@ -674,6 +674,14 @@ type WorkspaceSectionEntry = {
    * created before W02-06 — and those must keep behaving exactly as they do.
    */
   ownsBoard?: boolean;
+  /**
+   * W2 — the template this section was created from, or null.
+   *
+   * NULL is a fact, not an absence: a section created before templates existed
+   * is a second door onto one of the product's own screens and must keep
+   * behaving exactly as it does. Never read it as "assume Jobs".
+   */
+  template?: string | null;
   group: string;
 };
 
@@ -3079,7 +3087,24 @@ export default function PortalApp({
               }}
             />
           )}
-          {activeSurface === "stores" && <SitesManager onNotify={setToast} />}
+          {activeSurface === "stores" && (
+            <SitesManager
+              /* Remounted per section, because the register loads once on mount
+                 and a shared instance would keep showing the register it opened
+                 with after the reader moved to another one. */
+              key={activeSection}
+              /*
+               * ONLY A SITES INSTANCE NAMES ITSELF. A legacy section pointed at
+               * this screen is a second door onto the workspace's own register
+               * and must keep showing it — and the server would refuse its key
+               * anyway, because that section holds no Sites register. Read from
+               * the stored template, which is a fact about the row rather than
+               * anything in the route.
+               */
+              sectionKey={activeCustom?.template === "sites" ? activeCustom.key : null}
+              onNotify={setToast}
+            />
+          )}
           {activeSurface === "store-documentation" && !sectionDetached && (
             <StoreDocumentationBoard
               /* THE SECTION'S OWN REGISTER, on exactly the terms the job board

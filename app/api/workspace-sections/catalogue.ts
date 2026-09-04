@@ -202,22 +202,20 @@ export const SECTION_TEMPLATES: readonly SectionTemplate[] = [
       "A compliance register of its own — a row per site, a column per certificate, with expiry tracked.",
     surface: "store-documentation",
     /*
-     * HELD BACK ON PURPOSE, and not because the plumbing is missing. The board
-     * is parameterised, uploads are already fenced to their board and document
-     * versioning stays inside the instance — this one is close.
+     * ON, and the blocker it was held for is closed.
      *
-     * It is off because `/api/notifications/compliance` reads the CANONICAL
-     * board and nothing else. An instance would therefore look exactly like a
-     * compliance register, be filled with real certificates, and never warn
+     * It was off because `/api/notifications/compliance` read the CANONICAL
+     * board and nothing else — an instance would have looked exactly like a
+     * compliance register, been filled with real certificates, and never warned
      * about a single expiry. That failure is silent and it errs towards false
      * assurance, which is the one direction a compliance surface must never
-     * fail in: no register at all tells the truth about itself, and one that
-     * quietly stops warning does not. It ships when the expiry digest takes its
-     * board from the section.
+     * fail in. The digest now takes its board from the section, and
+     * `tests/w2-store-documentation-instance.test.mjs` holds it there.
+     *
+     * Verified against a running server: an instance comes up with the same 25
+     * columns as the canonical board, the same four groups, and no rows.
      */
-    available: false,
-    unavailable:
-      "Expiry alerts still only watch the workspace's own Store Documentation board, so a second one would collect certificates and never warn that any of them had expired. Available once the compliance digest reads the section's own board.",
+    available: true,
   },
   {
     key: "contractors",
@@ -226,21 +224,25 @@ export const SECTION_TEMPLATES: readonly SectionTemplate[] = [
       "A supplier register of its own — a row per contractor, with the columns and scoring you choose.",
     surface: "contractors",
     /*
-     * OFF, and the blocker is not the missing scope column — it is what the
-     * NAME-MATCHING would do the moment a second row existed.
+     * STILL OFF, and the reason has changed — which is why the wording below
+     * has too. Two of the three original blockers are closed:
+     * `resolveContractorLink` now matches within one scope, and the roster
+     * `portal-app.tsx` synthesises from the job feed no longer runs on an
+     * instance.
      *
-     * `resolveContractorLink` (`app/lib/contractor-reference.ts`) matches a
-     * job's free-text contractor to a row BY NAME, ORG-WIDE, and answers
-     * `ambiguous` on two matches. So one contractor added to an instance under
-     * a name the canonical roster already uses would silently stop every
-     * canonical job naming it from linking at all — accepted W5/W6 behaviour,
-     * regressed by a row rather than by a code change. `portal-app.tsx` also
-     * synthesises contractor rows out of the job feed, so an "empty" instance
-     * would come up already showing canonical names.
+     * What is missing is plainer than either: THERE IS NO SCOPED READ PATH.
+     * Contractors are served by `GET /api/workspace`, an unparameterised
+     * monolith with thirteen consumers; there is no `/api/contractors` route at
+     * all, and asking for one answers 404. `app/lib/contractor-repository.ts`
+     * holds the scope-aware queries an endpoint would use, and nothing calls
+     * them yet. An instance turned on today would draw the workspace's entire
+     * roster under its own name — the substitution this workstream exists to
+     * remove — so it stays off until the endpoint exists and the screen reads
+     * it.
      */
     available: false,
     unavailable:
-      "Jobs are still matched to contractors by name across the whole workspace, so a second register would break the links on the jobs you already have. Available once a contractor is matched within its own register.",
+      "The contractor register is still served by one workspace-wide query, so a second register would show every contractor the workspace has. Available once contractors are read through their own register.",
   },
   {
     key: "sites",
@@ -249,15 +251,22 @@ export const SECTION_TEMPLATES: readonly SectionTemplate[] = [
       "A property register of its own — a row per site, with the columns and grouping you choose.",
     surface: "stores",
     /*
-     * OFF for the same class of reason, one degree worse. `resolveSiteByName`
-     * (`app/lib/sites-repository.ts`) has NO ambiguity guard, and there is no
-     * unique index on (organisation, name) to give it one — so a site added to
-     * an instance under an existing name does not fail, it silently takes over
-     * the routing of inbound jobs addressed to the canonical site.
+     * ON. `resolveSiteByName` had NO ambiguity guard and there is still no
+     * unique index on (organisation, name) — a unique index cannot be created
+     * over data that already violates it, and `db/init.ts` runs on the boot
+     * path of every request, so adding one would take the application down for
+     * any workspace holding two sites of the same name. The hole is closed
+     * where it bites instead: name resolution now counts matches WITHIN ONE
+     * SCOPE and refuses on two, which is the rule the contractor resolver
+     * already stated.
+     *
+     * Scoping is server-side throughout — `resolveRegisterScope` reads the
+     * organisation off the session and the register off the `boards` row, and
+     * refuses a section that holds a different kind of register. Verified
+     * against a running server: an instance lists 0 sites where the canonical
+     * register lists 16, and a Documents section asking for Sites is a 404.
      */
-    available: false,
-    unavailable:
-      "Inbound jobs are still routed to sites by name across the whole workspace, so a second register could quietly take over another site's jobs. Available once a site is matched within its own register.",
+    available: true,
   },
 ];
 

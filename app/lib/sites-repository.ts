@@ -480,20 +480,31 @@ export function generateSiteCode(name: string, taken: Iterable<string>) {
   return `${stem}${suffix}`;
 }
 
-export async function existingSiteCodes(
-  db: Database,
-  organisationId: string,
-  scope: RegisterScope = CANONICAL_REGISTER,
-) {
+/**
+ * Every site code in the workspace — DELIBERATELY UNSCOPED, and the only read
+ * here that is.
+ *
+ * A site code is not register data. It is a workspace-level reference printed
+ * on work orders, and `sites_organisation_code_idx` is unique on
+ * (organisation, code) with no board in it. Narrowing this read to one register
+ * therefore breaks the thing it exists for: `generateSiteCode` is handed the
+ * codes already TAKEN so it can pick a free one, and an empty instance offers
+ * an empty list, so it re-derived a code the canonical register already had and
+ * the insert died on the index — "Another site already uses that code", for a
+ * site the operator could not see.
+ *
+ * It took a scope argument briefly, while the register scope was being added,
+ * and that is what this note is here to prevent being done again. Two registers
+ * may hold a site of the same NAME — that is the point of instances, and the
+ * name resolvers are scope-aware for exactly that reason. They cannot hold the
+ * same CODE, because the code names the site to a contractor reading a job, and
+ * ambiguity there is a real-world failure rather than a data-model one.
+ */
+export async function existingSiteCodes(db: Database, organisationId: string) {
   const rows = await db
     .select({ code: sites.code })
     .from(sites)
-    .where(
-      and(
-        eq(sites.organisationId, organisationId),
-        registerScopeFilter(sites.boardId, scope),
-      ),
-    );
+    .where(eq(sites.organisationId, organisationId));
   return rows.map((row) => row.code).filter((code): code is string => Boolean(code));
 }
 

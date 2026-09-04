@@ -10,6 +10,7 @@ import {
   type OptionChoice,
   type SiteGroupRecord,
   type SiteRecord,
+  scopedUrl,
 } from "./site-types";
 
 type FormState = Record<string, string>;
@@ -128,6 +129,7 @@ const SECTIONS = [
 const TAB_PREFIX = "site-editor";
 
 export function SiteForm({
+  sectionKey = null,
   site,
   siteTypes,
   statuses,
@@ -137,6 +139,8 @@ export function SiteForm({
   onSaved,
   onCancel,
 }: {
+  /** The register a NEW site is created in, and an existing one is edited in. */
+  sectionKey?: string | null;
   site: SiteRecord | null;
   siteTypes: OptionChoice[];
   statuses: OptionChoice[];
@@ -161,7 +165,7 @@ export function SiteForm({
     setError("");
     try {
       const body = { data: { ...form, groupIds }, confirmDuplicate, id: site?.id };
-      await api(site ? "/api/sites" : "/api/sites", {
+      await api(scopedUrl("/api/sites", sectionKey), {
         method: site ? "PATCH" : "POST",
         body,
       });

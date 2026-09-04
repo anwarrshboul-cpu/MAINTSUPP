@@ -29,6 +29,7 @@ import {
   type OptionChoice,
   type SiteGroupRecord,
   type SiteRecord,
+  scopedUrl,
 } from "./site-types";
 
 type ListPayload = {
@@ -112,7 +113,23 @@ function searchableText(site: SiteRecord): string[] {
     .map((field) => String(field).toLowerCase());
 }
 
-export function SitesManager({ onNotify }: { onNotify: (message: string) => void }) {
+export function SitesManager({
+  sectionKey = null,
+  onNotify,
+}: {
+  /**
+   * WHICH SITES REGISTER THIS SCREEN IS SHOWING.
+   *
+   * The section key of a Sites-template instance, or null for the workspace's
+   * own register. It is a LOOKUP KEY and nothing more: the server resolves it
+   * against `workspace_sections` inside the caller's own organisation and
+   * refuses a section that is archived, that belongs to someone else, or that
+   * holds a different kind of register. Nothing here filters rows — asking for
+   * the wrong register is a 404, not a smaller list.
+   */
+  sectionKey?: string | null;
+  onNotify: (message: string) => void;
+}) {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -194,7 +211,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
   const { data, error, setError, reload } = useLoader<ListPayload & { accessMethods: OptionChoice[] }>(
     async () => {
       const [list, access] = await Promise.all([
-        api<ListPayload>("/api/sites"),
+        api<ListPayload>(scopedUrl("/api/sites", sectionKey)),
         api<{ values: OptionChoice[] }>("/api/options?key=access_method").catch(() => ({
           values: [] as OptionChoice[],
         })),
@@ -255,7 +272,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
      */
     if (!confirmSiteClosure(site.name)) return;
     try {
-      await api("/api/sites", { method: "DELETE", body: { id: site.id } });
+      await api(scopedUrl("/api/sites", sectionKey), { method: "DELETE", body: { id: site.id } });
       onNotify(`${site.name} closed.`);
       reload();
     } catch (caught) {
@@ -265,7 +282,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
 
   async function runImport(csv: string, dryRun: boolean) {
     try {
-      const result = await api<ImportResult>("/api/sites/csv", {
+      const result = await api<ImportResult>(scopedUrl("/api/sites/csv", sectionKey), {
         method: "POST",
         body: { csv, dryRun },
       });
@@ -283,6 +300,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
   if (mode.kind === "detail") {
     return (
       <SiteDetail
+        sectionKey={sectionKey}
         siteId={mode.siteId}
         siteTypes={data?.siteTypes ?? []}
         statuses={data?.statuses ?? []}
@@ -318,6 +336,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
           <h1>{mode.site ? `Edit ${mode.site.name}` : "Add a site"}</h1>
         </header>
         <SiteForm
+          sectionKey={sectionKey}
           site={mode.site}
           siteTypes={data?.siteTypes ?? []}
           statuses={data?.statuses ?? []}
@@ -353,7 +372,7 @@ export function SitesManager({ onNotify }: { onNotify: (message: string) => void
           </p>
         </div>
         <div className="section-header__actions">
-          <a className="secondary-button" href="/api/sites/csv" download>
+          <a className="secondary-button" href={scopedUrl("/api/sites/csv", sectionKey)} download>
             Export CSV
           </a>
           <button

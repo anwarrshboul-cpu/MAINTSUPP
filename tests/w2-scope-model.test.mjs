@@ -224,6 +224,24 @@ const DELIBERATELY_ORGANISATION_WIDE = [
   "claimedGroupSlugs",
   // site_aliases_organisation_normalised_idx is (organisation_id, normalised).
   "nameConflict",
+  /*
+   * sites_organisation_code_idx is (organisation_id, code) — and this one was
+   * found the hard way, which is why it is worth the extra words.
+   *
+   * `existingSiteCodes` feeds `generateSiteCode` the codes already TAKEN so it
+   * can pick a free one. Scoped, an empty instance offers an empty list, so it
+   * re-derived a code the canonical register already held and the insert died
+   * on the index — "Another site already uses that code", for a site the
+   * operator could not see. Creating a second Sites instance holding a site of
+   * the same name failed for a reason that named neither the register nor the
+   * name.
+   *
+   * Two registers may hold a site of the same NAME — that is what instances
+   * are for, and the name resolvers are scope-aware. They may not hold the same
+   * CODE: the code names the site to a contractor reading a job, so ambiguity
+   * there is a real-world failure rather than a data-model one.
+   */
+  "existingSiteCodes",
 ];
 
 test("W2 every register read and write carries the scope in its SQL", async () => {
@@ -451,6 +469,23 @@ async function serverIsUp() {
   }
 }
 
+/*
+ * A LIMITATION THIS FILE CANNOT CLEAN UP AFTER, named here so nobody spends an
+ * afternoon on it twice.
+ *
+ * THE PRODUCT HAS NO WAY TO REMOVE A SITE. `DELETE /api/sites` CLOSES one —
+ * `status: 'closed'`, deliberately, because jobs point at the record — and
+ * there is no purge beside it. So the two sites this file creates inside its
+ * fixture instances survive the sweep: `rehome=1` returns them to the
+ * workspace's own register, where they stay, and each run adds two more.
+ *
+ * That predates the register scope and is not caused by it; every live test
+ * that has ever created a site has left it behind. It is recorded here because
+ * the scope work is what made it visible, and because the fix is a product
+ * decision — a way to move a site between registers, or to remove one that
+ * nothing references — rather than something a test may invent for itself.
+ */
+
 /* Namespaced so a sweep can name them EXACTLY. A substring sweep has eaten
    other lanes' fixtures in this repository before; these are removed by key. */
 const PROBE = "section:w2scope-probe";
@@ -460,9 +495,22 @@ const BETA = "section:w2scope-beta";
 async function sweep(keys) {
   for (const key of keys) {
     await call(`/api/workspace-sections?key=${key}`, { method: "DELETE" }).catch(() => {});
-    await call(`/api/workspace-sections?key=${key}&purge=1`, { method: "DELETE" }, SUPER).catch(
-      () => {},
-    );
+    /*
+     * `rehome=1`, because the purge now REFUSES a register that still holds
+     * sites rather than orphaning them — and a fixture instance holds exactly
+     * that by the time this runs. The flag is the confirmed second look the
+     * product asks for; without it a failed assertion would leave the section
+     * behind and poison the next run, which is how the shared fixture keys in
+     * `w2-template-parity` poisoned theirs.
+     *
+     * The rows come back to the canonical register, so the assertions below
+     * also check it is left as it was found.
+     */
+    await call(
+      `/api/workspace-sections?key=${key}&purge=1&rehome=1`,
+      { method: "DELETE" },
+      SUPER,
+    ).catch(() => {});
   }
 }
 

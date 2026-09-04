@@ -96,7 +96,8 @@
 
 import { and, eq, isNull, type AnyColumn, type SQL } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { boards, workspaceSections } from "../../db/schema";
+import { boards, contractors, siteGroups, sites, workspaceSections } from "../../db/schema";
+import { count } from "drizzle-orm";
 
 type ScopeDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -265,4 +266,108 @@ export function scopeRefusal(resolution: ScopeResolution): Response | null {
   return resolution.ok
     ? null
     : Response.json({ error: resolution.error }, { status: resolution.status });
+}
+
+
+/**
+ * A DESTROYED REGISTER'S ROWS, RETURNED TO THE CANONICAL ONE.
+ *
+ * The third option, and the only one that is not a trap.
+ *
+ *   · ORPHAN them — what happened before this existed. The board goes, the rows
+ *     keep its key, and they are then reachable by nothing: the canonical
+ *     register filters `board_id IS NULL` and no section resolves to that key
+ *     any more. Observed during testing, and the row was not merely invisible —
+ *     it still held its name against a unique id, so creating a site of the
+ *     same name afterwards answered 409 for a row nobody could see.
+ *   · CASCADE-DELETE them — ruled out by name: nothing that exists
+ *     independently of a board may be deleted because a menu entry was removed.
+ *     A site is real operational data whichever register it sits in, and jobs
+ *     reference it.
+ *   · REFUSE the purge while rows remain — which reads as the safe option and
+ *     is a dead end. `DELETE /api/sites` CLOSES a site rather than removing it;
+ *     the product has no hard delete, deliberately, because jobs point at the
+ *     record. A Sites section that had ever held one site could then never be
+ *     removed at all.
+ *
+ * So the rows come home — BUT ONLY WHEN THE CALLER ASKS FOR IT. `board_id` goes
+ * back to NULL and they appear in the workspace's own register, where a person
+ * can see them and decide.
+ *
+ * The confirmation is not ceremony. This was written to re-home
+ * unconditionally, and within one test session it had quietly moved eight
+ * fixture sites into the workspace's own register: routine teardown, purging a
+ * section, adding rows to the main Sites screen with nobody told. That is a
+ * smaller failure than orphaning them and it is still the wrong default,
+ * because it moves a register's data on an act the operator described as
+ * removing a menu entry. The purge therefore REFUSES first and says what is
+ * there — the same shape as its refusals for items and for the bin — and does
+ * this only when asked again with `rehome=1`, which is the `confirmDuplicate`
+ * idiom this codebase already uses for exactly this kind of second look.
+ */
+export async function rehomeRegisterRows(
+  db: ScopeDatabase,
+  organisationId: string,
+  boardKey: string,
+) {
+  const held = await scopedRegisterRows(db, organisationId, boardKey);
+  if (held.total === 0) return held;
+
+  for (const table of [sites, contractors, siteGroups]) {
+    await db
+      .update(table)
+      .set({ boardId: CANONICAL_REGISTER })
+      .where(and(eq(table.organisationId, organisationId), eq(table.boardId, boardKey)));
+  }
+  return held;
+}
+
+/**
+ * WHAT A REGISTER STILL HOLDS, so destroying it cannot orphan anything.
+ *
+ * The section purge already refuses a register with items on it, and again with
+ * items in its bin, and both refusals exist for the same reason: a board
+ * destroyed underneath its rows leaves them reachable by nothing. Sites and
+ * Contractors instances have exactly that shape and were not covered, because
+ * their rows are not board-PLACED — they carry `board_id` directly, which
+ * `deleteBoardStructure` does not clear and was never meant to.
+ *
+ * The failure was observed, not theorised: a Sites instance created during
+ * testing was purged with a site in it, and the row survived carrying the key
+ * of a board that no longer existed. It was then invisible to every register —
+ * the canonical one filters `board_id IS NULL`, and no section resolved to that
+ * key any more — while still holding its name against a unique id, so the next
+ * attempt to create a site of the same name answered 409 for a row nobody could
+ * see.
+ *
+ * Counted rather than cascaded ON PURPOSE. Deleting the rows here would be the
+ * cascade the owner ruled out — "never cascade-delete shared canonical entities
+ * merely because a section is permanently removed" — and a site is real
+ * operational data whichever register it sits in. The operator empties the
+ * register first, deliberately, exactly as they must for a board's items.
+ */
+export async function scopedRegisterRows(
+  db: ScopeDatabase,
+  organisationId: string,
+  boardKey: string,
+) {
+  const tally = async (table: typeof sites | typeof contractors | typeof siteGroups) => {
+    const [row] = await db
+      .select({ total: count() })
+      .from(table)
+      .where(and(eq(table.organisationId, organisationId), eq(table.boardId, boardKey)));
+    return Number(row?.total ?? 0);
+  };
+
+  const [siteRows, contractorRows, groupRows] = [
+    await tally(sites),
+    await tally(contractors),
+    await tally(siteGroups),
+  ];
+  return {
+    sites: siteRows,
+    contractors: contractorRows,
+    groups: groupRows,
+    total: siteRows + contractorRows + groupRows,
+  };
 }

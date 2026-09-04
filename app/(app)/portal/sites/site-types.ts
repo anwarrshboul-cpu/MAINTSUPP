@@ -186,6 +186,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A SITES URL, ADDRESSED TO ONE REGISTER.
+ *
+ * The server decides the scope — `resolveRegisterScope` in
+ * `app/lib/register-scope.ts` reads the organisation off the session, looks the
+ * section up inside it, and refuses anything that is not a Sites instance. This
+ * only says WHICH register the screen is asking about, and it is the one place
+ * that says it, so a call site cannot forget the parameter and quietly read the
+ * canonical estate instead.
+ *
+ * `null` is the canonical register, exactly as it is in the database: the
+ * workspace's own Sites screen, which has no board behind it. Absent parameter,
+ * canonical rows — so every caller that predates instances is unchanged.
+ */
+export function scopedUrl(url: string, sectionKey: string | null) {
+  if (!sectionKey) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}section=${encodeURIComponent(sectionKey)}`;
+}
+
 export async function api<T>(
   url: string,
   init?: { method?: string; body?: unknown },

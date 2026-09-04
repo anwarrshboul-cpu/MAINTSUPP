@@ -884,7 +884,7 @@ export async function POST(request: Request) {
     }
     const code =
       payload.code ??
-      generateSiteCode(payload.name, await existingSiteCodes(db, orgId, scope));
+      generateSiteCode(payload.name, await existingSiteCodes(db, orgId));
     const position = await nextSitePosition(db, orgId, scope);
 
     await db.insert(sites).values({

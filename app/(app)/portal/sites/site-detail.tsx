@@ -18,6 +18,7 @@ import {
   type OptionChoice,
   type SiteRecord,
   type UnitRecord,
+  scopedUrl,
 } from "./site-types";
 /*
  * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the Documents
@@ -181,12 +182,15 @@ const COMPLIANCE_TONES: Record<ComplianceState, string> = {
  */
 
 export function SiteDetail({
+  sectionKey = null,
   siteId,
   siteTypes,
   statuses,
   onEdit,
   onClose,
 }: {
+  /** The register this site belongs to — see `scopedUrl`. */
+  sectionKey?: string | null;
   siteId: string;
   siteTypes: OptionChoice[];
   statuses: OptionChoice[];
@@ -207,7 +211,7 @@ export function SiteDetail({
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   const { data, error } = useLoader<DetailPayload>(
-    () => api<DetailPayload>(`/api/sites?id=${encodeURIComponent(siteId)}`),
+    () => api<DetailPayload>(scopedUrl(`/api/sites?id=${encodeURIComponent(siteId)}`, sectionKey)),
     "This site could not be loaded.",
   );
 

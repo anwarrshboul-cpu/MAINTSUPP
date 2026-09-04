@@ -68,6 +68,7 @@ import {
   deleteBoardStructure,
   renameBoard,
 } from "../../lib/board-registry";
+import { rehomeRegisterRows, scopedRegisterRows } from "../../lib/register-scope";
 
 /** The headings a section may be filed under. `layout.ts` is the authority. */
 const GROUP_KEYS = BUILT_IN_GROUPS.map((group) => group.key);
@@ -1187,6 +1188,69 @@ export async function DELETE(request: Request) {
       }
     }
 
+    /*
+     * THE ROWS THAT ARE NOT BOARD-PLACED — REFUSED, OR RETURNED WHEN ASKED.
+     *
+     * A Sites or Contractors instance keeps its register in `sites` /
+     * `contractors` / `site_groups`, scoped by `board_id` rather than by a
+     * placement row — so neither the item count nor the bin count above can see
+     * them, and `deleteBoardStructure` does not clear them. Purging such a
+     * section used to destroy the board and leave its sites carrying the key of
+     * a board that no longer existed: invisible to every register, and still
+     * holding their names against a unique id, so re-creating one answered 409
+     * for a row nobody could see.
+     *
+     * Deleting them is ruled out by name — nothing that exists independently of
+     * a board may be deleted because a menu entry was removed, and a site is
+     * real operational data whichever register it sits in. So the purge refuses
+     * and says what is there, exactly as it does for a register that still
+     * holds items and for one whose bin still offers them back.
+     *
+     * `rehome=1` is the second look. It returns the rows to the workspace's own
+     * register and destroys the section, and the response says how many moved.
+     * It is deliberately not the default: re-homing silently turns "remove this
+     * menu entry" into "add twelve sites to the main register", which is a
+     * bigger act than the one the operator asked for.
+     *
+     * THE LIMITATION THIS LEAVES, stated rather than hidden: the product has no
+     * way to move a single site between registers, and `DELETE /api/sites`
+     * closes a site rather than removing it, so `rehome=1` is currently the
+     * only way to empty a Sites or Contractors instance. That is why it exists
+     * now instead of waiting for a reassignment screen.
+     */
+    const wantsRehome = ["1", "true", "yes"].includes(
+      (new URL(request.url).searchParams.get("rehome") ?? "").toLowerCase(),
+    );
+    let rehomed = { sites: 0, contractors: 0, groups: 0, total: 0 };
+    if (ownedBoard) {
+      const held = await scopedRegisterRows(context.db, context.orgId, ownedBoard);
+      if (held.total > 0 && !wantsRehome) {
+        const parts = [
+          held.sites ? `${held.sites} ${held.sites === 1 ? "site" : "sites"}` : null,
+          held.contractors
+            ? `${held.contractors} ${held.contractors === 1 ? "contractor" : "contractors"}`
+            : null,
+          held.groups
+            ? `${held.groups} reporting ${held.groups === 1 ? "group" : "groups"}`
+            : null,
+        ].filter(Boolean);
+        return Response.json(
+          {
+            error: `"${row.label}" still holds ${parts.join(" and ")}. Removing the section permanently would leave them with no register to belong to. Move them into the workspace's own register and remove it, or keep the section.`,
+            key: row.key,
+            board: ownedBoard,
+            scoped: held,
+            /* The caller repeats the request with this to accept the move. */
+            rehomeParam: "rehome=1",
+          },
+          { status: 409 },
+        );
+      }
+      if (held.total > 0) {
+        rehomed = await rehomeRegisterRows(context.db, context.orgId, ownedBoard);
+      }
+    }
+
     /* Counted BEFORE they are cleared, so the audit line and the response say
        what the deletion actually discarded. */
     const references = await referencesTo(context, row.key);
@@ -1223,13 +1287,17 @@ export async function DELETE(request: Request) {
       "workspace.section_deleted",
       row.key,
       `Permanently deleted the "${row.label}" workspace section.`,
-      { key: row.key, label: row.label, recoverable: false, discarded: references, board: removedBoard },
+      { key: row.key, label: row.label, recoverable: false, discarded: references, board: removedBoard, rehomed },
     );
     return Response.json({
       ok: true,
       key: row.key,
       deleted: true,
       discarded: references,
+      /* What came back to the workspace's own register rather than being
+         destroyed with the board. Zero for every section that is not a Sites or
+         Contractors instance, which is nearly all of them. */
+      rehomed,
       /* Null when the section was a door onto a shared screen, or when another
          section still uses the register. Named so the caller can tell the two
          outcomes apart rather than inferring them. */
