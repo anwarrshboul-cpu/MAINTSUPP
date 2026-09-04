@@ -15,7 +15,7 @@
  * resolved tenancy and nothing here may widen it.
  */
 
-import { and, asc, eq, inArray, isNull, max, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, max, sql, type AnyColumn } from "drizzle-orm";
 import { maintenanceGroups as maintenanceGroupSeeds } from "../../db/monday-board-spec";
 import type { getDb } from "../../db";
 import {
@@ -25,12 +25,17 @@ import {
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
+  recycleBin,
 } from "../../db/schema";
 import type { RequestStage } from "./types";
 import { statusForStage } from "./stage-status";
 import { selectInChunks } from "./sql-batching";
 import { PRIMARY_ORGANISATION_ID } from "./tenant-access";
 import { unassignedSiteId } from "./site-reference";
+import {
+  JOB_REFERENCE_FLOOR,
+  nextJobReferenceNumber,
+} from "./job-reference";
 
 export type BoardDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -102,15 +107,62 @@ export function tenantSeedId(base: string, orgId: string) {
  * sitting in the recycle bin still owns its id; excluding binned rows would
  * hand the same reference to a new job, and the collision would only surface
  * when somebody restored the old one — the worst possible moment.
+ *
+ * PRE-W14 — AND A JOB'S REFERENCE OUTLIVES THE JOB ROW.
+ *
+ * The `MAX` used to be taken over `maintenance_requests` alone, which is only
+ * the table the reference is a PRIMARY KEY *of*. It is also the primary key of
+ * `maintenance_group_items` and half of the unique key of `recycle_bin`, and a
+ * row in either can outlive the request it names — a purge that removed the
+ * request and left the placement, a bin entry whose job was later hard-deleted.
+ * When that happens the MAX drops back below a reference that is still spoken
+ * for, the allocator re-issues it, and the insert that collides is not the one
+ * the retry below guards:
+ *
+ *   · a surviving placement  -> `create_item`  answers a bare 503
+ *   · a surviving bin entry  -> `delete_items` answers a bare 503
+ *
+ * Both were observed on the dev estate: `maintenance_requests` topped out at
+ * MN-1157 while placements held MN-1162, so no job could be created on the
+ * board at all until the leftovers were removed by hand.
+ *
+ * So the floor is now the highest reference ANY of those tables still holds.
+ * The product no longer depends on a cleanup script having been run, and
+ * `scripts/repair-orphaned-placements.mjs` goes back to being what it should
+ * always have been: a tidy-up, not a prerequisite.
+ *
+ * Scoped per organisation, like the read it replaces. `recycle_bin` is filtered
+ * to `entity_type = 'job'` because its `entity_id` also carries group, column
+ * and board-view ids, and those share no numbering with `MN-…`.
  */
 async function nextItemNumber(db: BoardDatabase, orgId: string) {
-  const [latest] = await db
-    .select({
-      maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
-    })
+  const digits = (column: AnyColumn) =>
+    sql<number>`coalesce(max(cast(substr(${column}, 4) as integer)), ${JOB_REFERENCE_FLOOR})`;
+
+  const [fromRequests] = await db
+    .select({ maxNumber: digits(maintenanceRequests.id) })
     .from(maintenanceRequests)
     .where(eq(maintenanceRequests.organisationId, orgId));
-  return Number(latest.maxNumber ?? 1048) + 1;
+
+  const [fromPlacements] = await db
+    .select({ maxNumber: digits(maintenanceGroupItems.requestId) })
+    .from(maintenanceGroupItems)
+    .where(eq(maintenanceGroupItems.organisationId, orgId));
+
+  const [fromBin] = await db
+    .select({ maxNumber: digits(recycleBin.entityId) })
+    .from(recycleBin)
+    .where(
+      and(eq(recycleBin.organisationId, orgId), eq(recycleBin.entityType, "job")),
+    );
+
+  /* The arithmetic lives in ./job-reference.ts so a test can RUN it; this
+     function is only the three reads that feed it. */
+  return nextJobReferenceNumber([
+    fromRequests?.maxNumber,
+    fromPlacements?.maxNumber,
+    fromBin?.maxNumber,
+  ]);
 }
 
 /**
@@ -308,6 +360,7 @@ export async function createBoardItem(
    */
   const base = await nextItemNumber(db, orgId);
   let created: RequestRow | undefined;
+  let placement: ItemRow | undefined;
   let id = "";
   for (let attempt = 0; attempt < MAX_ITEM_ID_ATTEMPTS; attempt++) {
     id = `MN-${base + attempt}`;
@@ -316,12 +369,56 @@ export async function createBoardItem(
       .values({ id, ...values })
       .onConflictDoNothing()
       .returning();
-    if (row) {
+    if (!row) continue;
+
+    /*
+     * THE PLACEMENT IS PART OF THE ALLOCATION, not a step after it.
+     *
+     * `nextItemNumber` now starts above every table that still holds a
+     * reference, so this should not fire — but the retry is what makes the
+     * guarantee not depend on that list being complete. The reference is a key
+     * in more than one table, and a create is only safe once the row AND its
+     * placement are both down. Inserting the request, declaring victory, and
+     * discovering the placement was taken is exactly how `create_item` came to
+     * answer a bare 503.
+     *
+     * `onConflictDoNothing` rather than a catch, for the reason the request
+     * insert gives: the D1 adapters do not promise a typed constraint error
+     * that could be told apart from a real failure. A genuine failure still
+     * throws and is compensated below.
+     */
+    const [placed] = await db
+      .insert(maintenanceGroupItems)
+      .values({
+        requestId: id,
+        organisationId: orgId,
+        boardId,
+        groupId: group.id,
+        position,
+      })
+      .onConflictDoNothing()
+      .returning();
+
+    if (placed) {
       created = row;
+      placement = placed;
       break;
     }
+
+    /*
+     * The reference was free in `maintenance_requests` and taken in the
+     * placements table. Undo the row we just made and walk on — leaving it
+     * would strand an unplaced row, which the board files onto the default
+     * board belonging to nobody. Best-effort, as below.
+     */
+    await db
+      .delete(maintenanceRequests)
+      .where(
+        and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
+      )
+      .catch(() => undefined);
   }
-  if (!created) {
+  if (!created || !placement) {
     throw new Error("Could not allocate a job id; too many simultaneous creates.");
   }
 
@@ -331,38 +428,17 @@ export async function createBoardItem(
    *
    * `maintenance_requests` carries no board id: a row's board comes from its
    * placement, and the board route deliberately files an UNPLACED row into the
-   * default board's first group so nothing is ever stranded. Which means that
-   * if this insert throws after the request row is already committed, the new
-   * row does not vanish — it appears on the JOB BOARD, belonging to nobody,
-   * under whatever title it was given. Six of them were produced that way while
-   * W02-06 was being built, on a board carrying real work.
+   * default board's first group so nothing is ever stranded. A request row left
+   * behind without one therefore does not vanish — it appears on the JOB BOARD,
+   * belonging to nobody, under whatever title it was given. Six were produced
+   * that way while W02-06 was being built, on a board carrying real work.
    *
-   * There is no transaction to lean on here — D1 and the Postgres shim do not
-   * give this code one — so the compensation is explicit: undo the row we just
-   * made, then let the failure surface. Best-effort, because a failed cleanup
-   * must not replace the real error with its own.
+   * There is still no transaction to lean on — D1 and the Postgres shim do not
+   * give this code one — so the two inserts are paired inside the allocation
+   * loop above instead, and every path that leaves a request without a
+   * placement deletes it again before moving on. By here both are down.
    */
-  let item;
-  try {
-    [item] = await db
-      .insert(maintenanceGroupItems)
-      .values({
-        requestId: id,
-        organisationId: orgId,
-        boardId,
-        groupId: group.id,
-        position,
-      })
-      .returning();
-  } catch (error) {
-    await db
-      .delete(maintenanceRequests)
-      .where(
-        and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
-      )
-      .catch(() => undefined);
-    throw error;
-  }
+  const item = placement;
 
   await db.insert(activityLog).values({
     id: crypto.randomUUID(),
