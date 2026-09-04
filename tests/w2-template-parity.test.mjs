@@ -431,10 +431,26 @@ test("live: a Jobs section is the job board, empty", async (t) => {
 
     /* And they must be REQUEST-BACKED, like the canonical board's. A column
        seeded `system = 0` renders "Add value" on every row because the grid
-       looks it up in `maintenance_board_cells` instead of on the request. */
-    const systemOf = (board) => board.columns.filter((column) => column.system).length;
-    assert.equal(systemOf(instance), instance.columns.length);
-    assert.equal(systemOf(canonical), canonical.columns.length);
+       looks it up in `maintenance_board_cells` instead of on the request.
+
+       RE-POINTED 2026-09-05, NOT WEAKENED. There is now exactly ONE column that
+       is cell-backed on purpose: `contractorComments`, the Main Table's
+       "Contractor Comments". Owner Part 7 needs an append-only history, and the
+       obvious request column — `completion_note` — is replace-on-write by
+       design and deliberately withheld from the field editor, so the log lives
+       in `maintenance_board_cells` instead. It is empty until a contractor
+       writes, which is the right rendering for a comment column.
+
+       So the guard is unchanged for every other column and the exception is
+       pinned BY NAME, which is stricter than the count it replaces: a second
+       cell-backed column, or this one going missing, both fail. */
+    const CELL_BACKED = ["contractorComments"];
+    const nonSystemOf = (board) =>
+      board.columns.filter((column) => !column.system).map((column) => column.key).sort();
+    assert.deepEqual(nonSystemOf(instance), CELL_BACKED,
+      "an instance may carry only the deliberately cell-backed columns as non-system");
+    assert.deepEqual(nonSystemOf(canonical), CELL_BACKED,
+      "and the canonical board carries exactly the same one");
 
     /* Empty. Nothing is cloned — not a row, not a group membership. */
     assert.equal((instance.requests ?? []).length, 0, "an instance starts empty");
