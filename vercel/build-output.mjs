@@ -251,6 +251,33 @@ await fsp.writeFile(
          */
         { src: "^/(.*)$", dest: `/${FUNCTION_NAME}` },
       ],
+      /*
+       * W2-A — THE THIRTY-DAY RETENTION SWEEP.
+       *
+       * The recycle bin has always expired entries after thirty days; until now
+       * nothing ran the purge on a timer, so the bin emptied only when somebody
+       * opened /api/trash (see `maybeSweepRecycleBin`). That is fine for a
+       * workspace in daily use and means "never" for one that is not.
+       *
+       * 03:20 UTC daily. Off the hour on purpose — the top of the hour is when
+       * every other scheduled job on the platform runs.
+       *
+       * TWO THINGS TO KNOW BEFORE TRUSTING THIS.
+       *
+       * 1. VERCEL RUNS CRONS ON PRODUCTION DEPLOYMENTS ONLY. The portal ships
+       *    to Preview (docs/DEPLOYMENT-PORTAL.md), so declaring it here does
+       *    NOT make it fire on the Preview the owner reviews. It starts running
+       *    at the first Production promotion and not one moment earlier. The
+       *    opportunistic sweep in /api/trash therefore stays.
+       *
+       * 2. IT NEEDS `CRON_SECRET` IN THE PROJECT'S ENVIRONMENT. Vercel sends it
+       *    as `Authorization: Bearer $CRON_SECRET`. The route refuses with 503
+       *    when the variable is unset — it fails closed rather than exposing an
+       *    unauthenticated endpoint that empties every workspace's bin, so a
+       *    deployment that forgets the variable gets a sweep that does nothing
+       *    rather than a hole.
+       */
+      crons: [{ path: "/api/cron/retention", schedule: "20 3 * * *" }],
     },
     null,
     2,
@@ -264,3 +291,4 @@ console.log(`Build output written to ${out}`);
 console.log(`  static/                    ${mb(await dirSize(staticDir))}`);
 console.log(`  functions/${FUNCTION_NAME}.func/   ${mb(await dirSize(funcDir))}`);
 console.log(`  routes: /assets → immutable cache, filesystem, catch-all → /${FUNCTION_NAME}`);
+console.log("  crons:  /api/cron/retention daily at 03:20 UTC (PRODUCTION deployments only)");

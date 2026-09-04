@@ -118,20 +118,22 @@ export async function GET(request: Request) {
     /*
      * `?sweep=1` — THE UNSAMPLED SWEEP, ON REQUEST.
      *
-     * There is no scheduler in this deployment: no cron trigger, no queue, no
-     * Durable Object alarm, nothing in `vercel.json` or `railway.json`. The
-     * thirty days are swept opportunistically by the line above, on roughly one
-     * call in ten to this route — which is honest and is what the screen says,
-     * and which means the bin empties when somebody uses the app rather than at
-     * midnight.
+     * The thirty days are ALSO swept opportunistically by the line above, on
+     * roughly one call in ten to this route — the bin empties when somebody
+     * uses the app rather than only at midnight.
      *
      * This is the deterministic version of the same sweep, so the retention can
      * be RUN rather than waited for: by an operator who wants the bin emptied
-     * now, by a test that must not depend on `Math.random`, and — the reason it
-     * takes a parameter rather than being a private helper — by whatever
-     * scheduler this deployment eventually grows. It is not itself automation
-     * and nothing calls it on a timer today; wiring it to one is a deployment
-     * change, not a code change.
+     * now, and by a test that must not depend on `Math.random`.
+     *
+     * W2-A, 2026-09-04: the scheduler this comment used to say did not exist
+     * now does — `app/api/cron/retention/route.ts`, which calls the same
+     * `sweepRecycleBin` over an unscoped handle so it covers every workspace
+     * rather than only the caller's. Read that file before changing retention:
+     * it is bearer-authenticated and, on Vercel, only FIRES on a Production
+     * deployment. Until the portal is promoted to Production the opportunistic
+     * sweep above remains the only thing actually emptying the bin, which is
+     * why it stays.
      *
      * `data.delete`, because it destroys. The guard above is `board.view`, so
      * the capability is resolved again here rather than assumed — a client can
@@ -426,7 +428,7 @@ export async function DELETE(request: Request) {
  * only resolves inside the Worker, and keeping it here is what lets a test drive
  * the sweep with a stub.
  */
-function purgeFor(db: Database): PurgeFn {
+export function purgeFor(db: Database): PurgeFn {
   return async (organisationId, entityType, entityId) => {
     if (entityType === "job") return purgeJob(db, organisationId, entityId);
     if (entityType === "group") return purgeGroup(db, organisationId, entityId);
