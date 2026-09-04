@@ -358,15 +358,35 @@ async function sweep(keys) {
         .then((response) => (response.ok ? response.json() : {}), () => ({}));
       const ids = (board.requests ?? []).map((row) => row.id);
       if (ids.length) {
+        /* `delete_items` with `requestIds` — the board route's actual verb and
+           its actual field. This said `bin_items` with `ids`, which is neither:
+           the call 400d, the row stayed, and the purge below was then refused
+           for holding an item. Every step of the sweep reported success. */
         await call(`/api/board?board=${encodeURIComponent(section.boardKey)}`, {
           method: "POST",
-          body: JSON.stringify({ action: "bin_items", ids }),
+          body: JSON.stringify({ action: "delete_items", requestIds: ids }),
         });
-        /* The bin still counts against the purge, so empty it by the exact bin
-           ids this sweep just created — never by a name or a sweep-all. */
-        const bin = await call(`/api/trash?board=${encodeURIComponent(section.boardKey)}`)
-          .then((response) => (response.ok ? response.json() : {}), () => ({}));
-        for (const entry of bin.items ?? []) {
+        /*
+         * The bin still counts against the purge, so empty it by the exact bin
+         * ids this sweep just created — never by a name or a sweep-all.
+         *
+         * `payload.bin.entries`, not `payload.items`. It read the wrong field,
+         * found nothing to purge, and the purge was then refused because the
+         * bin still offered the row back — so the section survived ARCHIVED and
+         * the next run answered 409 "restore it instead" on create. A cleanup
+         * that silently cleans nothing is worse than none, because it reports
+         * success either way.
+         */
+        /* Listed as the identity that will PURGE, not as the one that binned.
+           Emptying the bin needs `data.delete`, and the listing is filtered by
+           the same capability — so an admin's listing came back empty and the
+           sweep purged nothing while reporting success. */
+        const trash = await call(
+          `/api/trash?board=${encodeURIComponent(section.boardKey)}`,
+          {},
+          SUPER,
+        ).then((response) => (response.ok ? response.json() : {}), () => ({}));
+        for (const entry of trash.bin?.entries ?? []) {
           await call(`/api/trash?id=${encodeURIComponent(entry.id)}`, { method: "DELETE" }, SUPER);
         }
       }

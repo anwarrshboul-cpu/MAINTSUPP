@@ -529,6 +529,37 @@ const BETA = "section:w2scope-beta";
 
 async function sweep(keys) {
   for (const key of keys) {
+    /*
+     * RENAMED BEFORE THE PURGE, and this is the only way to leave the shared
+     * database as clean as the product allows.
+     *
+     * `rehome=1` returns an instance's sites to the canonical register, and the
+     * product cannot remove a site — `DELETE /api/sites` closes one, because
+     * jobs point at the record. So this file's fixtures survive it. That is
+     * documented at the top and is unavoidable; what IS avoidable is the shape
+     * they survive in. Two instances deliberately hold a site of the SAME name
+     * — that is the property under test — and re-homing both put a DUPLICATE
+     * PAIR into the canonical register, which
+     * `tests/workstream-five-sites.test.mjs` then correctly flagged as an
+     * estate that holds two sites of one name.
+     *
+     * The isolation assertions have already run by the time this does, so the
+     * names are made unique here. The leftovers stay leftovers; they stop being
+     * a duplicate.
+     */
+    const held = await call(`/api/sites?section=${key}`)
+      .then((response) => (response.ok ? response.json() : { sites: [] }))
+      .catch(() => ({ sites: [] }));
+    for (const site of held.sites ?? []) {
+      await call(`/api/sites?section=${key}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: site.id,
+          data: { name: `${site.name} ${key.slice(-6)}` },
+          confirmDuplicate: true,
+        }),
+      }).catch(() => {});
+    }
     await call(`/api/workspace-sections?key=${key}`, { method: "DELETE" }).catch(() => {});
     /*
      * `rehome=1`, because the purge now REFUSES a register that still holds
