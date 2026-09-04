@@ -13,56 +13,47 @@ app/(marketing)/marketing.css
 That is what `maintsupp-preview.vercel.app` serves, and it is the one the
 client reviews.
 
-## But this directory is not dead either
+## This directory is no longer deployed anywhere
 
-It would be easier if it were. `apps/web` is a parallel "Phase 2" rewrite
-(Next.js + `apps/api` on Railway + `packages/db`), and it is **built and
-deployed by its own Vercel projects**, so its landing page is publicly
-reachable:
+`apps/web` is a parallel "Phase 2" rewrite (Next.js + `apps/api` on Railway +
+`packages/db`). Until **2026-09-04** it was built and served by two Vercel
+projects of its own, so its landing page was publicly reachable. It is not any
+more: that day's infrastructure consolidation reduced the account to a single
+Vercel project, `maintsupp-portal`, and **nothing builds this directory now.**
 
-| Project | URL | Production deployment |
-| --- | --- | --- |
-| `maintsupp` | https://maintsupp.vercel.app | 2026-08-19, `dpl_A63M6tzAKAYc1KvBXffPEL7hTEsA` |
-| `website` | https://website-rho-seven-8mdd7vw83c.vercel.app | 2026-08-19, `dpl_C47iGxpsNGuWQoZcDbuGm1Wcbnds` |
+> **Historical, for anyone reading an older branch or following an old link.**
+> The two projects were `maintsupp` (https://maintsupp.vercel.app) and
+> `website` (https://website-rho-seven-8mdd7vw83c.vercel.app), each carrying a
+> production deployment from 2026-08-19 — two distinct deployments of
+> byte-identical pages apart from chunk hashes, because one push to `main`
+> built both. A third project, `maintsupp-legacy-portal`, held a **stale
+> portal** deployment from 2026-08-17 (one `__portal` function,
+> `X-Frame-Options: DENY` from `worker/index.ts`, `__vinext` markup rather than
+> `/_next/` chunks) — it was never this directory, whatever an earlier draft of
+> this file said. All three projects were deleted on 2026-09-04, and those
+> hostnames now 404.
 
-Two projects, two distinct deployments, byte-identical pages apart from chunk
-hashes — one push to `main` on 2026-08-19 built both.
-
-**`maintsupp-legacy-portal.vercel.app` is NOT this directory**, whatever an
-earlier draft of this file said. `vercel inspect` shows one `__portal`
-function in `lhr1` — the shape `vercel/build-output.mjs` produces — and it
-answers with `X-Frame-Options: DENY` from `worker/index.ts`, which nothing
-here sets, and with `__vinext` markup rather than `/_next/` chunks. It is a
-**stale portal deployment** from 2026-08-17. Editing this directory cannot
-change it; only a portal redeploy can.
-
-The root `vercel.json` points at this directory explicitly — `"buildCommand":
-"cd apps/web && next build"` — and it has its own scripts (`npm run
+**So there is no live URL to be careful about, and nothing here can break a
+public page.** That is a change in the stakes, not a licence to delete the
+directory: the root `vercel.json` still points at it — `"buildCommand": "cd
+apps/web && next build"` — and it still has its own scripts (`npm run
 web:build`, `web:test`, `web:start`), its own test suite under
 `apps/web/tests/`, and at least one cross-check that reads it
 (`apps/api/tests/stage-parity.test.ts` compares its `lib/job-stages.ts`
 against the API's).
 
-So do not delete it, and do not assume nobody sees it.
+## What would put this directory back on the internet
 
-## What rebuilds those URLs, and what does not
+Nothing automatic. No Vercel project is linked to this repository any more, so
+no push to any branch builds anything here, and the
+`git.deploymentEnabled.main: false` flag in both the root `vercel.json` and
+this directory's is now a belt to a brace that no longer exists. Leave the flag
+alone anyway — it costs nothing and it is the guard that would matter first if
+a project were ever linked again.
 
-`git.deploymentEnabled.main: false` — in both the root `vercel.json` and this
-directory's — holds, and the dashboard is the evidence: the flag landed
-2026-08-20, `main` has carried commits since, and neither project has produced
-a production deployment after 2026-08-19. Pushing a feature branch **does**
-build both projects (19 Preview deployments in three days), but a Preview gets
-its own URL; it does not touch the two production aliases above.
-
-So editing this directory does not, by itself, change what those URLs serve.
-What would:
-
-- promoting a Preview deployment to Production from the dashboard;
-- `vercel deploy --prod` from the repository root;
-- flipping `deploymentEnabled.main` back to `true`, or changing either
-  project's Production Branch away from `main`;
-- a redeploy of the current production deployment — same commit, so same
-  content.
+Reaching a public URL again would take a deliberate act: creating a new Vercel
+project linked to this repository, or adding this build to `maintsupp-portal`,
+which deploys by manual prebuilt upload and builds the portal rather than this.
 
 ## The two landings have diverged, deliberately and not
 
@@ -82,23 +73,27 @@ What has **not** been aligned, because it needs a decision rather than an edit:
   composed from two of those three dropdowns. The portal's copy posts to its
   own `/api/leads` route, which dropped that requirement. Removing the fields
   here without relaxing `apps/api/src/routes/public.ts` would 400 every
-  submission — and on `website-rho-seven-…` that form is live: the `website`
-  project has `NEXT_PUBLIC_API_URL` set and `/api/health` answers 200. (The
-  `maintsupp` project has no environment variables at all, so its `/api/*`
-  rewrite targets `localhost:8787` and 404s — that form is already inert.)
+  submission. That was once a live-site concern: until 2026-09-04 the `website`
+  project had `NEXT_PUBLIC_API_URL` set and its `/api/health` answered 200, so
+  the form really did submit, while the `maintsupp` project had no environment
+  variables at all and its `/api/*` rewrite targeted `localhost:8787`. With
+  both projects deleted, no deployment of this form exists to break — the 400
+  would now surface only in local development, or in whatever is stood up next.
 - The approved v3 How-it-works photography, the founder section, the mobile
   pricing comparison table and the compact services register are portal work
   this copy has never carried.
 
-Bringing the rest into line means editing live production sites, which is a
-decision about what those URLs are for — not a tidy-up. Whoever takes it on
-should decide first whether these projects should still be serving a landing
-page at all.
+Bringing the rest into line was once a decision about live production sites.
+It is not any more: the projects that served them are gone, so the open
+question has moved from "what are those URLs for" to whether this copy of the
+landing page should exist at all now that nothing publishes it.
 
 
 ## Where the real deployment story is written
 
 `docs/DEPLOYMENT-PORTAL.md` — "The three deploy targets in this repository".
-Read it before touching any Vercel project. In particular: the green "Vercel"
-checks on pull requests build **this** directory, and prove nothing about the
-portal.
+Read it before touching any Vercel project. Note that pull requests no longer
+carry a "Vercel" check at all: the GitHub-linked projects that produced it
+built **this** directory, and they were deleted on 2026-09-04. While one
+existed it proved nothing about the portal, which has never deployed from a
+push.

@@ -20,9 +20,13 @@ anything. The deployment behind it still reports `target: preview`, and
 `maintsupp-portal` still reports no production URL at all — checked before and
 after, and re-checked by the script on every run.
 
-The two older projects, `maintsupp` and `website`, own their own production
-domains (`maintsupp.vercel.app`, `website-rho-seven-8mdd7vw83c.vercel.app`).
-Nothing in this workflow touches either.
+`maintsupp-portal` is the only Vercel project in the account. The two older
+ones, `maintsupp` and `website`, owned their own production domains
+(`maintsupp.vercel.app`, `website-rho-seven-8mdd7vw83c.vercel.app`) and were
+deleted on 2026-09-04; a third, `maintsupp-legacy-portal`, went with them once
+`maintsupp.com` and `www.maintsupp.com` had been moved onto `maintsupp-portal`.
+Nothing in this workflow ever touched any of them, and the script still refuses
+their hostnames by name — see `scripts/update-preview-alias.sh`.
 
 ---
 

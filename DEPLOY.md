@@ -123,7 +123,7 @@ authenticated request 401s — which looks exactly like a broken login.
 ### Cookies across two origins
 
 Cookies are `HttpOnly; SameSite=Lax; Secure`. `SameSite=Lax` works because the
-browser treats `maintsupp.vercel.app` → `maintsupp-api.up.railway.app` as
+browser treats a `*.vercel.app` page calling `maintsupp-api.up.railway.app` as
 cross-**site**, so **`SameSite=Lax` will not send the cookie on those calls**
 unless both are served from one registrable domain.
 

@@ -16,9 +16,13 @@
 # ---------------------------------------------------------------------------
 #   · a deployment whose target is `production` — the whole point of this
 #     workflow is that nothing is ever promoted;
-#   · a deployment belonging to any project other than `maintsupp-portal`, so a
-#     stray URL from the older `maintsupp` or `website` projects cannot end up
-#     behind the client's link;
+#   · a deployment belonging to any project other than `maintsupp-portal`.
+#     `maintsupp-portal` is now the ONLY project in the account — the older
+#     `maintsupp`, `website` and `maintsupp-legacy-portal` were deleted on
+#     2026-09-04 — so today this refusal has nothing left to catch. It stays
+#     because "there is only one project" is a fact about an account, not an
+#     invariant of this script, and the day a second one appears is exactly
+#     the day nobody remembers to add the check back;
 #   · a deployment that is not READY, or that does not answer 200 on both the
 #     landing page and the sign-in page. The alias only ever moves to something
 #     that has been shown to work, which is what makes the previous deployment
@@ -48,13 +52,27 @@ ALIAS="${ALIAS:-maintsupp-preview.vercel.app}"
 die() { printf '\n  REFUSED: %s\n\n' "$1" >&2; exit 1; }
 say() { printf '  %s\n' "$1"; }
 
-# The alias must not be one of the production domains already in use. Belt and
-# braces: the names are known, so there is no reason to rely on remembering.
+# The alias must never be one of these host names. Two different reasons, and
+# both still hold after the 2026-09-04 consolidation:
+#
+#   · `maintsupp-portal.vercel.app` is a live project's own production domain.
+#     Handing it to this script would point the client's link at the project
+#     that owns it, which is not a preview alias at all.
+#
+#   · the other four belonged to `maintsupp` and `website`, both deleted on
+#     2026-09-04. They are NOT "production domains" any more — they are worse.
+#     A deleted project's `*.vercel.app` name is released, so anybody with a
+#     Vercel account can now claim one. The client's link resolving to a
+#     stranger's deployment is a failure mode the old wording did not even
+#     describe, so the entries stay and the reason is written down.
+#
+# Belt and braces: the names are known, so there is no reason to rely on
+# remembering them.
 case "$ALIAS" in
   maintsupp.vercel.app|maintsupp-maintsupp.vercel.app|\
   website-rho-seven-8mdd7vw83c.vercel.app|website-maintsupp.vercel.app|\
   maintsupp-portal.vercel.app)
-    die "$ALIAS is a project's production domain. This script only moves a preview alias."
+    die "$ALIAS is a project's own host name, or a released one a stranger could claim. This script only moves a preview alias."
     ;;
 esac
 

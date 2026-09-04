@@ -23,8 +23,11 @@ from them. They are issued separately and shown exactly once.
 2. **Storage** in the left sidebar → **S3 Access Keys** (under Configuration; on
    some plans it is *Settings → Storage → S3 access keys*).
 3. **New access key**. Give it a description that names the thing using it —
-   `maintsupp-legacy-portal` — because the only way to work out later which
-   deployment a key belongs to is what you typed here.
+   `maintsupp-portal`, the only Vercel project in the account since the
+   2026-09-04 consolidation — because the only way to work out later which
+   deployment a key belongs to is what you typed here. Keys issued before that
+   date were labelled `maintsupp-legacy-portal`, after the project that has
+   since been deleted; that is the same portal, under its old project name.
 4. Copy **both** halves immediately:
    - `Access key ID` → `S3_ACCESS_KEY_ID`
    - `Secret access key` → `S3_SECRET_ACCESS_KEY`

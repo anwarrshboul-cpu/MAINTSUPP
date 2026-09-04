@@ -161,6 +161,10 @@ await copyDir(
  */
 await fsp.writeFile(
   path.join(funcDir, "package.json"),
+  /* The name is arbitrary and unread — `type: "module"` is the load-bearing
+     field. It dates from the `maintsupp-legacy-portal` Vercel project, deleted
+     2026-09-04; left alone so the emitted artifact does not change during a
+     documentation pass. */
   JSON.stringify({ name: "maintsupp-legacy-portal", private: true, type: "module" }, null, 2) + "\n",
 );
 

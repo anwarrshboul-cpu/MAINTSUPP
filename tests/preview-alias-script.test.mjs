@@ -41,7 +41,16 @@ test("it refuses anything that is not a ready maintsupp-portal preview", async (
   assert.match(
     script,
     /\[\[ "\$NAME" == "\$PROJECT" \]\] \|\| die/,
-    "a deployment from another project must be refused — the older maintsupp and website projects both have live production domains",
+    /*
+     * Re-pointed 2026-09-04, not dropped. This used to say the older
+     * `maintsupp` and `website` projects "both have live production domains",
+     * which was the reason at the time and is no longer true — both were
+     * deleted in the consolidation to a single project. The CHECK is what the
+     * contract was, and it outlives the account state that motivated it: the
+     * script must refuse a foreign deployment whether or not a second project
+     * happens to exist this week.
+     */
+    "a deployment from another project must be refused, however few projects the account currently has",
   );
   assert.match(
     script,
@@ -55,11 +64,26 @@ test("it refuses anything that is not a ready maintsupp-portal preview", async (
   );
 });
 
-test("the alias itself can never be a production domain", async () => {
+test("the alias itself can never be a project host name", async () => {
+  /*
+   * Renamed from "…can never be a production domain" on 2026-09-04, because
+   * four of these five stopped being production domains that day and the
+   * guard still matters — more, not less.
+   *
+   * `maintsupp-portal.vercel.app` is the surviving project's own domain. The
+   * other four belonged to `maintsupp` and `website`, which were deleted; a
+   * deleted project releases its `*.vercel.app` name, so those are now
+   * claimable by anyone. Pointing the client's link at a name a stranger
+   * controls is a worse outcome than the one the original list guarded
+   * against, so every entry is pinned here — including the two the earlier
+   * version of this test did not cover.
+   */
   const script = await read(SCRIPT);
   const guard = script.slice(script.indexOf('case "$ALIAS" in'), script.indexOf("esac"));
   for (const domain of [
     "maintsupp.vercel.app",
+    "maintsupp-maintsupp.vercel.app",
+    "website-rho-seven-8mdd7vw83c.vercel.app",
     "website-maintsupp.vercel.app",
     "maintsupp-portal.vercel.app",
   ]) {

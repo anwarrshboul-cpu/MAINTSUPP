@@ -38,12 +38,14 @@ every portal route.
 | Target | Code | Deploys by |
 | --- | --- | --- |
 | **The portal** (the real product) | root `app/`, `worker/`, `db/` | Manual prebuilt upload only. **Not** wired to GitHub pushes. |
-| Phase 2 rewrite (not the current product) | `apps/web`, `apps/api`, `packages/db` | The Vercel GitHub integrations. |
+| Phase 2 rewrite (not the current product) | `apps/web`, `apps/api`, `packages/db` | **Nothing.** Its two Vercel GitHub integrations were deleted 2026-09-04. |
 | Railway | the portal on a persistent Node box | `railway.json` + `scripts/railway-start.sh` |
 
-**Green "Vercel" checks on a PR are building `apps/web`, not the portal.** They
-prove nothing about the product. The `pg:*`, `api:*` and `web:*` npm scripts all
-belong to Phase 2 and have no effect on the portal.
+**PRs no longer carry a "Vercel" check**, because the GitHub-linked projects
+that produced it were deleted on 2026-09-04. While it existed it built
+`apps/web`, not the portal, and proved nothing about the product. The `pg:*`,
+`api:*` and `web:*` npm scripts all belong to Phase 2 and have no effect on the
+portal.
 
 ## Architecture
 

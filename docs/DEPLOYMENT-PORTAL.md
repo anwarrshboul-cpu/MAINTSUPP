@@ -14,11 +14,12 @@ this file — names and shapes only.
 | Target | What it is | How it deploys |
 | --- | --- | --- |
 | **The portal** (root `app/` + `worker/` + `db/`) | The real product: board, forms, tickets | **Manual prebuilt upload** via the Vercel Build Output API — see below. NOT wired to GitHub pushes. |
-| `apps/web` (+ `apps/api`, `packages/db`) | A parallel "Phase 2" rewrite (Next 16 + Hono/Railway), not the current product | The two existing Vercel GitHub integrations ("maintsupp", "website") build THIS — root `vercel.json` and `apps/web/vercel.json`. Green PR checks prove `apps/web` builds, nothing about the portal. Its own doc is `DEPLOY.md`. |
+| `apps/web` (+ `apps/api`, `packages/db`) | A parallel "Phase 2" rewrite (Next 16 + Hono/Railway), not the current product | **Nothing deploys it any more.** Two Vercel GitHub integrations ("maintsupp", "website") built it from root `vercel.json` and `apps/web/vercel.json` until they were deleted on 2026-09-04, which is also why PRs no longer carry a "Vercel" check. Its own doc is `DEPLOY.md`. |
 | Railway | The portal on a persistent Node box (SQLite + volume) | `railway.json` + `scripts/railway-start.sh`. |
 
-**The green "Vercel" checks on PRs are not portal deployments.** Deploying the
-portal is a deliberate, separate act.
+**PRs carry no "Vercel" check at all now**, and when they did it was never a
+portal deployment — it built `apps/web`. Deploying the portal is a deliberate,
+separate act, and it always has been.
 
 ## Architecture on Vercel + Supabase
 
@@ -59,8 +60,9 @@ portal is a deliberate, separate act.
 
 ## Environment variables
 
-Set in the **portal's** Vercel project (not the apps/web projects). Preview
-should point at a **staging/branch** database and bucket, never production.
+Set in the **portal's** Vercel project, `maintsupp-portal` — since 2026-09-04
+the only one in the account. Preview should point at a **staging/branch**
+database and bucket, never production.
 
 | Variable | Side | Required | Vercel env | Purpose / source |
 | --- | --- | --- | --- | --- |
@@ -85,8 +87,9 @@ Build environment: bash + Node 24 (`.nvmrc`), Linux/WSL/git-bash.
    migrated one; snapshot or branch the database; create a **private** Storage
    bucket; generate S3 access keys (Storage → S3); note the session-pooler
    URL (:5432).
-2. **Vercel**: create/confirm the dedicated portal project (do NOT reuse the
-   two apps/web projects); enter the variables above.
+2. **Vercel**: confirm the dedicated portal project `maintsupp-portal` (the
+   two apps/web projects that this step once warned against reusing were
+   deleted on 2026-09-04); enter the variables above.
 3. **Build the artifact** (the flag is load-bearing — without it the bundle is
    workerd-only and dead on Vercel; the packager refuses it):
    ```bash

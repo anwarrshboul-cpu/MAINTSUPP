@@ -845,6 +845,17 @@ class NodePgConnection {
          * log.
          */
         DateStyle: "ISO, MDY",
+        /*
+         * A HISTORICAL NAME, KEPT ON PURPOSE.
+         *
+         * `maintsupp-legacy-portal` was the Vercel project this connected
+         * from, and that project was deleted on 2026-09-04 — the portal now
+         * deploys as `maintsupp-portal`. The string is not renamed to match,
+         * because `application_name` is what identifies these connections in
+         * `pg_stat_activity` and in Supabase's logs, and changing it splits
+         * the log record either side of the rename for no gain. Whoever is
+         * reading a slow-query log should know this label means the portal.
+         */
         application_name: "maintsupp-legacy-portal",
       },
       /*
