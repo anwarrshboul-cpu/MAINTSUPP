@@ -102,7 +102,37 @@ if (maxPlacement !== null && maxRequest !== null && maxPlacement > maxRequest) {
   );
 }
 
-if (!orphans.length) {
+/*
+ * THE SAME FAULT IN A SECOND TABLE.
+ *
+ * `recycle_bin` is UNIQUE on (organisation_id, entity_type, entity_id). An
+ * entry left behind by a purge therefore blocks the DELETE of whatever that
+ * reference is next issued to: the bin insert collides and `delete_items`
+ * answers the same bare 503. Observed here as entries for MN-1161 and MN-1162
+ * written at 09:36 by a QA run whose jobs are long gone, against jobs created
+ * at 21:46 that are very much alive.
+ *
+ * The test is deliberately NOT "the job is missing". It is "the bin claims a
+ * job is deleted while that job is LIVE" — `deleted_at IS NULL`. A bin row
+ * whose job really is soft-deleted is a genuine entry and is left alone.
+ */
+const staleBin = db
+  .prepare(
+    `SELECT b.id, b.entity_type, b.entity_id, b.title, b.deleted_at
+       FROM recycle_bin b
+       JOIN maintenance_requests r ON r.id = b.entity_id
+      WHERE b.entity_type = 'job' AND r.deleted_at IS NULL
+      ORDER BY b.entity_id`,
+  )
+  .all();
+
+console.log(`
+Stale bin entries (bin says deleted, job is live): ${staleBin.length}`);
+for (const row of staleBin) {
+  console.log(`  ${row.entity_id}  binned=${row.deleted_at}  ${String(row.title).slice(0, 56)}`);
+}
+
+if (!orphans.length && !staleBin.length) {
   console.log("\nNothing to do.");
   process.exit(0);
 }
@@ -126,3 +156,21 @@ for (const row of orphans) {
   console.log(`removed ${row.request_id}`);
 }
 console.log(`\nRemoved ${removed} orphaned placement(s).`);
+
+const stillLive = db.prepare(
+  "SELECT 1 AS live FROM maintenance_requests WHERE id = ? AND deleted_at IS NULL",
+);
+const dropBin = db.prepare("DELETE FROM recycle_bin WHERE id = ?");
+let binRemoved = 0;
+for (const row of staleBin) {
+  // Re-checked by exact id: if the job has been soft-deleted since the scan,
+  // the entry is genuine now and must stay.
+  if (!stillLive.get(row.entity_id)) {
+    console.log(`SKIP ${row.entity_id} — its job is soft-deleted, so the entry is real.`);
+    continue;
+  }
+  binRemoved += dropBin.run(row.id).changes;
+  console.log(`removed stale bin entry for ${row.entity_id}`);
+}
+console.log(`Removed ${binRemoved} stale bin entr${binRemoved === 1 ? "y" : "ies"}.`);
+
