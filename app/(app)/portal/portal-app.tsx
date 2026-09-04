@@ -3284,6 +3284,7 @@ export default function PortalApp({
               requests={requests}
               planned={currentPlanned}
               complianceRecords={workspace?.compliance ?? []}
+              stores={currentStores}
               onManage={(id) => openWorkspaceManager("planned", id)}
               onOpenCompliance={(id) => openWorkspaceManager("compliance", id)}
               onOpenRequest={(request) => {
@@ -4886,6 +4887,7 @@ function CalendarView({
   requests,
   planned,
   complianceRecords,
+  stores: storeRows,
   sectionKey,
   onManage,
   onOpenRequest,
@@ -4907,6 +4909,17 @@ function CalendarView({
   requests: MaintenanceRequest[];
   planned: WorkspacePlannedItem[];
   complianceRecords: WorkspaceSnapshot["compliance"];
+  /*
+   * The site register, for the manual calendar item's "Site (optional)" picker.
+   *
+   * That control offered "No site" and nothing else, and the cause was
+   * structural rather than a bad query: `OperationsCalendarPanel` declares
+   * `sites` optional with a default of `[]`, and no caller passed it — so the
+   * picker could not list a site however many the workspace had. This is the
+   * prop that was missing, threaded from the same `currentStores` every other
+   * screen already reads.
+   */
+  stores: StoreRecord[];
   onManage: (id?: string | null) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
   /* A renewal on the grid opens the certificate behind it, the same way a job
@@ -4945,6 +4958,26 @@ function CalendarView({
   const [period, setPeriod] = useStoredPeriod(sectionKey, "all");
   const periodWindow = resolvePeriod(period, nowMs);
 
+  /*
+   * The sites a manual calendar item may be attached to.
+   *
+   * Filtered by `isActiveSiteStatus` — the one predicate the Dashboard's
+   * "Active sites" tile and the billing engine also use. A closed site, or one
+   * the register carries as 'other' because it cannot vouch for it, is not
+   * somewhere work gets scheduled, and three surfaces deciding "active" for
+   * themselves is how they come to disagree.
+   *
+   * Names are carried for display only; the item stores the id.
+   */
+  const calendarSites = useMemo(
+    () =>
+      storeRows
+        .filter((store) => isActiveSiteStatus(store.status))
+        .map((store) => ({ id: store.id, name: store.name }))
+        .sort((left, right) => left.name.localeCompare(right.name, "en-GB")),
+    [storeRows],
+  );
+
   return (
     <div className="section-stack">
       <section className="section-header">
@@ -4978,6 +5011,9 @@ function CalendarView({
       <OperationsCalendarPanel
         requests={requests}
         complianceRecords={complianceRecords}
+        /* id is what the item stores; name is only what the picker shows, so a
+           later rename appears on the saved item instead of being frozen. */
+        sites={calendarSites}
         periodWindow={
           periodWindow &&
           Number.isFinite(periodWindow.start) &&
