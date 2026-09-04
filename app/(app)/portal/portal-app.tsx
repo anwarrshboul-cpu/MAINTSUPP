@@ -51,6 +51,19 @@ import { EXPIRY_DUE_SOON_DAYS } from "../../lib/expiry-status";
  * used to stand here counted something else entirely.
  */
 import { isActiveSiteStatus } from "../../lib/site-state";
+/*
+ * One definition of the compliance score, and one answer to "may this row be
+ * edited here". Both screens below read them, so the Overview tile and the
+ * Compliance page cannot drift — they were one edit away from doing so, having
+ * each written the same three lines.
+ */
+import {
+  complianceCoverage,
+  complianceCoverageNotice,
+  complianceScore,
+  isRegisterEditable,
+  scorableComplianceRecords,
+} from "./compliance-links";
 import {
   activeFilterCount,
   documentContractorLabel,
@@ -3762,20 +3775,16 @@ function OverviewView({
     // here: `open` is the canonical partition's other half.
     (request) => request.dueAt && duePassed(request.dueAt, now),
   );
-  const complianceItems = complianceRecords.filter(
-    (record) =>
-      record.state !== "Not required" &&
-      (portfolio === "all" || record.siteId === portfolio),
-  );
+  // The same subset the Compliance page scores, so the tile cannot disagree
+  // with the screen it links to.
+  const complianceItems = scorableComplianceRecords(complianceRecords, portfolio);
   const complianceCounts = {
     compliant: complianceItems.filter((item) => item.state === "Compliant").length,
     expiring: complianceItems.filter((item) => item.state === "Expiring soon").length,
     expired: complianceItems.filter((item) => item.state === "Expired").length,
     missing: complianceItems.filter((item) => item.state === "Missing").length,
   };
-  const compliancePercent = Math.round(
-    (complianceCounts.compliant / Math.max(complianceItems.length, 1)) * 100,
-  );
+  const compliancePercent = complianceScore(complianceItems);
   const statusSegments = jobStatusSegments(scopedRequests);
   /*
    * THE FIVE JOB METERS — Tier Level, Engineer Required, Priority, Label and
@@ -4550,9 +4559,14 @@ function ComplianceView({
     return complianceRecords.filter((record) => record.siteId === portfolio);
   }, [complianceRecords, portfolio]);
 
+  /*
+   * `scopedCompliance` above is kept: the expiry timeline further down still
+   * reads it, and it INCLUDES "Not required" on purpose. This is the scorable
+   * subset — the same filter the Overview tile applies, now from one place.
+   */
   const records = useMemo(
-    () => scopedCompliance.filter((record) => record.state !== "Not required"),
-    [scopedCompliance],
+    () => scorableComplianceRecords(complianceRecords, portfolio),
+    [complianceRecords, portfolio],
   );
 
   /** Every store the register speaks for, whether or not it has a `sites` row. */
@@ -4575,8 +4589,15 @@ function ComplianceView({
     Expired: records.filter((record) => record.state === "Expired").length,
     Missing: records.filter((record) => record.state === "Missing").length,
   }), [records]);
-  const compliantPercent = Math.round(
-    (counts.Compliant / Math.max(records.length, 1)) * 100,
+  const compliantPercent = complianceScore(records);
+  /*
+   * Computed from the WHOLE register against the WHOLE site list, not the
+   * portfolio-filtered subset: the question it answers is "how much of the
+   * estate does this register speak for", which a filter would flatter.
+   */
+  const coverageNotice = useMemo(
+    () => complianceCoverageNotice(complianceCoverage(complianceRecords, storeRows.map((store) => store.id))),
+    [complianceRecords, storeRows],
   );
   const managerFor = (siteId: string) =>
     storeRows.find((store) => store.id === siteId)?.manager ?? "";
@@ -4756,6 +4777,18 @@ function ComplianceView({
             <DonutLegend segments={scoreSegments} />
           </div>
           <p>{counts.Compliant} of {records.length} requirements on track</p>
+          {/*
+            WHY THE SCORE LOOKS LIKE THAT.
+
+            A compliance score is a fraction of the requirements the register
+            KNOWS about, and it knows about a store only if that store has a
+            Store Documentation row. On an estate where almost none do, "0 of 24
+            on track" is arithmetically correct and operationally meaningless —
+            and the screen said nothing about the gap, so the number read as a
+            failing estate rather than an unbuilt register. This says which it
+            is, and names the one action that changes it.
+          */}
+          {coverageNotice && <p className="analytics-compliance-score__coverage">{coverageNotice}</p>}
         </article>
 
         <article className="analytics-panel analytics-certificate-register">
@@ -4771,7 +4804,29 @@ function ComplianceView({
                     <td data-label="Responsibility">{responsibilityFor(record.kind, record.siteId)}</td>
                     <td data-label="Due date">{record.expiry ? formatDate(record.expiry) : "—"}</td>
                     <td data-label="Status"><span className={complianceTone(record.state)}><span />{record.state}</span></td>
-                    <td data-label="Actions"><div className="table-row-actions"><button className="table-text-action" type="button" onClick={() => setSelectedSiteId(record.siteId)}>View</button><button className="table-text-action" type="button" onClick={() => onManage(record.id.startsWith("board:") ? null : record.id)}>Edit <Icon name="chevron" size={14} /></button></div></td>
+                    <td data-label="Actions"><div className="table-row-actions"><button className="table-text-action" type="button" onClick={() => setSelectedSiteId(record.siteId)}>View</button>{/*
+                      A board-derived requirement is NOT editable here. "Manage
+                      register" would open a blank compliance_documents form
+                      whose save the next read recomputes away — and a register
+                      row minted that way can go on to switch a real board slot
+                      off, because DELETE {entity:"compliance"} sets
+                      `not_required` and that maps back onto the slot. The row
+                      is read on Store Documentation instead.
+                    */}
+                    {isRegisterEditable(record) ? (
+                      <button className="table-text-action" type="button" onClick={() => onManage(record.id)}>Edit <Icon name="chevron" size={14} /></button>
+                    ) : (
+                      <button
+                        className="table-text-action"
+                        type="button"
+                        onClick={() =>
+                          onNotify(
+                            `${record.kind} at ${record.siteName} is read from the Store Documentation board. Open that board to change it — editing it here would write into a copy the next read discards.`,
+                          )
+                        }
+                      >
+                        Read-only <Icon name="chevron" size={14} /></button>
+                    )}</div></td>
                   </tr>
                 ))}
                 {!filteredRecords.length && <tr><td className="analytics-empty" colSpan={6}>No certificate records match these filters.</td></tr>}

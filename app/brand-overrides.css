@@ -9667,3 +9667,18 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   flex: 1 1 auto;
   min-width: 0;
 }
+
+/*
+ * The compliance coverage notice — why the score is what it is.
+ *
+ * Muted and small: it is context for the figure above it, not a second finding
+ * competing with it. Left-aligned against the panel's own padding so it reads
+ * as a footnote to the donut rather than a caption centred under it.
+ */
+.analytics-compliance-score__coverage {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-muted, #8fa3b8);
+  text-align: left;
+}

@@ -145,9 +145,29 @@ test("the calendar draws the compliance renewals its own heading promises", asyn
   const portal = await read("app/(app)/portal/portal-app.tsx");
   const model = await read("app/(app)/portal/calendar-model.ts");
   const surface = await read("app/(app)/portal/calendar-surface.tsx");
-  assert.match(model, /export type CalendarEvent = \{/, "one shape for both sources");
+  assert.match(model, /export type CalendarEvent = \{/, "one shape for every source");
   assert.match(model, /kind: CalendarEntity;/);
-  assert.match(model, /export type CalendarEntity = "job" \| "compliance";/);
+  /*
+   * RE-POINTED 2026-09-04, NOT WEAKENED.
+   *
+   * This pinned the union as exactly `"job" | "compliance"`. The owner has
+   * since asked for manual calendar items, so there is a third member. The
+   * contract this test protects is unchanged — compliance renewals are a
+   * first-class calendar entity carried in the SAME shape as jobs, not a
+   * second event type bolted on — so both members are still required by name,
+   * and `manual` is required to be a distinct third rather than folded into
+   * either of them. A manual note that claimed to be a job would put itself
+   * into every job count in the product.
+   */
+  const entity = model.match(/export type CalendarEntity = ([^;]+);/);
+  assert.ok(entity, "CalendarEntity must still be a named union");
+  const members = entity[1].split("|").map((part) => part.trim());
+  assert.ok(members.includes('"job"'), "jobs are a calendar entity");
+  assert.ok(members.includes('"compliance"'), "compliance renewals are a calendar entity");
+  assert.ok(
+    members.includes('"manual"'),
+    "manual items are their own entity, never disguised as a job",
+  );
   assert.match(model, /for \(const record of complianceRecords\) \{/, "renewals are placed on the grid");
   assert.match(model, /title: `\$\{record\.kind\} renewal`/);
   assert.match(surface, /onOpenCompliance\(event\.recordId \?\? null\)/, "and clicking one opens the certificate");
