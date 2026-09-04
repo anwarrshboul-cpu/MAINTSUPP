@@ -77,7 +77,7 @@ export const CALENDAR_COLOURS_KEY = "maintsupp:calendar:colours";
 
 /* ── Colours ──────────────────────────────────────────────────────────────── */
 
-export type CalendarColours = { job: string; compliance: string };
+export type CalendarColours = { job: string; compliance: string; manual: string };
 
 /**
  * The default event colours, as concrete hex.
@@ -101,6 +101,15 @@ export type CalendarColours = { job: string; compliance: string };
 export const DEFAULT_CALENDAR_COLOURS: CalendarColours = {
   job: "#1b4662",
   compliance: "#6b3fa0",
+  /*
+   * W11 — the manual items. `--teal-600` #0f7f78 in light, and it is the one
+   * entity default drawn from the tones the comment above reserved. The
+   * reservation was for TIMING — "this is late", "this is a visit" — and a
+   * manual item has no timing of its own to clash with it: it is never overdue
+   * and never resolved. What it needs is to be unmistakable beside navy and
+   * purple at chip size, which a teal is and a third blue would not be.
+   */
+  manual: "#0f7f78",
 };
 
 /** `#rgb` or `#rrggbb`. Anything else is not a colour this picker produced. */
@@ -197,11 +206,10 @@ export function calendarChipStyle(
   event: CalendarEvent,
   colours: CalendarColours,
 ): CSSProperties {
-  const chosen = event.kind === "compliance" ? colours.compliance : colours.job;
-  const fallback =
-    event.kind === "compliance"
-      ? DEFAULT_CALENDAR_COLOURS.compliance
-      : DEFAULT_CALENDAR_COLOURS.job;
+  /* One lookup per entity, keyed rather than nested ternaries: a fourth kind
+     would otherwise be a third condition in two places that must agree. */
+  const chosen = colours[event.kind] ?? colours.job;
+  const fallback = DEFAULT_CALENDAR_COLOURS[event.kind] ?? DEFAULT_CALENDAR_COLOURS.job;
   const { background, color } = chipStyle(colourOrFallback(chosen, fallback));
   const urgent = event.timing === "overdue" || event.timing === "due-today";
   const settled = event.timing === "resolved" || event.timing === "past";
@@ -470,6 +478,10 @@ export function decodeCalendarColours(raw: unknown): CalendarColours {
       source.compliance,
       DEFAULT_CALENDAR_COLOURS.compliance,
     ),
+    /* Absent from anything stored before W11, which is every reader's saved
+       preference — so the fallback is not an edge case, it is the normal path
+       for a while, and it has to be the default rather than "". */
+    manual: colourOrFallback(source.manual, DEFAULT_CALENDAR_COLOURS.manual),
   };
 }
 

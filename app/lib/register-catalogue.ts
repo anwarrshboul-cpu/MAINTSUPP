@@ -285,14 +285,21 @@ export const SITE_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
  * for about six, so the DEFAULT has to be the six and the rest has to be one
  * press away in the Columns panel.
  *
- * WHAT STAYS SHOWN, and why it is only `availability`. The Contractors page
- * draws six figures beside the register that are NOT register columns —
- * assigned, completed, completion rate, open urgent, documents and spend (see
- * `ExtraColumn` in `app/(app)/portal/contractor-register.tsx`) — and the grid
- * draws the contractor's identity and contact details in a pinned lane of its
- * own. So the default view is already seven lanes wide before a single native
- * column is on it. `availability` is the one field that changes which
- * contractor a coordinator rings NEXT, so it earns the eighth.
+ * WHAT STAYS SHOWN, and why it is only `contactName` and `availability`. The
+ * Contractors page draws six figures beside the register that are NOT register
+ * columns — assigned, completed, completion rate, open urgent, documents and
+ * spend (see `ExtraColumn` in `app/(app)/portal/contractor-register.tsx`) — and
+ * the grid draws the contractor's identity in a pinned lane of its own. So the
+ * default view is already seven lanes wide before a single native column is on
+ * it.
+ *
+ * `contactName` earns the eighth because it is no longer just a field: W13 made
+ * it the lane the actionable contact block is drawn in, so hiding it by default
+ * would be a roster with no telephone number anywhere on it. The reasoning is
+ * written beside the entry itself.
+ *
+ * `availability` earns the ninth because it is the one field that changes which
+ * contractor a coordinator rings NEXT, and it is a single short word per row.
  *
  * AND `name` SEEDS PINNED RATHER THAN HIDDEN, which is the same decision
  * arrived at from the other end. The register has always drawn the
@@ -313,11 +320,45 @@ export const SITE_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
  * `NativeColumnSeed.hidden`.
  */
 export const CONTRACTOR_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
-  // Identity and contact. The archived badge and the actionable
-  // phone/WhatsApp/email are drawn in the grid's frozen identity lane, so the
-  // contact fields do not seed onto the table as well. `name` IS that lane:
-  // it seeds pinned, which is what puts a column in it.
+  // Identity. The name and the archived badge, drawn in the grid's frozen
+  // lane — `name` IS that lane, and it seeds pinned, which is what puts a
+  // column in it. The actionable phone/WhatsApp/email block used to be the
+  // second half of this cell and is now the `contactName` column below, so the
+  // three standalone contact fields still do not seed onto the table: they are
+  // the sortable-text form of facts the block already shows.
   { field: "name", title: "Contractor", type: "text", width: 220, pinned: true },
+
+  /*
+   * W13 — CONTACT DETAILS, SECOND AND SHOWN.
+   *
+   * The owner's review of /dashboard/contractors asked for two things about the
+   * front of this register: the first column is who they are, and the second is
+   * how to reach them. This is the second one, and both halves of it are a
+   * change from what was here.
+   *
+   * IT MOVED UP, past the six measurements. Seeded after them it landed
+   * eighth, so on a fresh register "how do I ring them" sat behind five counts
+   * and a percentage — and a count is what you read when you are auditing a
+   * roster, not when you are standing in a shop with a broken freezer.
+   *
+   * IT SEEDS SHOWN, where every other contact field still seeds hidden. That is
+   * not an inconsistency: `email`, `phone` and `whatsappNumber` are seeded
+   * hidden because they are the SORTABLE TEXT form of three facts, for a reader
+   * who wants one of them as a column. This one is the lane the grid draws the
+   * whole actionable block in — the contact person, the tappable telephone, the
+   * WhatsApp row and the mailto, from `ContractorContact` — so hiding it by
+   * default would leave a register with no way to reach anybody on it. See
+   * `contactRegisterColumn` in `app/(app)/portal/contractor-register.tsx`.
+   *
+   * THE BLOCK USED TO BE PART OF THE IDENTITY LANE, which is why this column
+   * was ever hidden: drawing both would have printed the contact person's name
+   * twice on every row. The identity lane is now the name and the archived
+   * badge, and the block rides with THIS column, so the two no longer collide.
+   *
+   * `width: 220` because the widest thing in the stack is an email address, and
+   * 220 is what the standalone Email column takes for the same reason.
+   */
+  { field: "contactName", title: "Contact details", type: "text", width: 220 },
 
   /*
    * THE MEASUREMENTS, declared here so their ORDER belongs to the operator.
@@ -353,7 +394,8 @@ export const CONTRACTOR_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
   { field: "urgent", title: "Open urgent", type: "text", width: 135, measurement: true },
   { field: "documents", title: "Documents", type: "text", width: 130, measurement: true },
   { field: "spend", title: "Spend", type: "text", width: 120, measurement: true },
-  { field: "contactName", title: "Contact", type: "text", hidden: true },
+  /* `contactName` used to be here, seeded hidden. It is now the second column
+     of the register and shown — the reasoning is written beside it above. */
   { field: "email", title: "Email", type: "email", hidden: true },
   { field: "phone", title: "Phone", type: "phone", hidden: true },
   { field: "whatsappNumber", title: "WhatsApp", type: "phone", hidden: true },

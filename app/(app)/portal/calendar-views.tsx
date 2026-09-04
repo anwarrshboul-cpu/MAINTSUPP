@@ -113,6 +113,12 @@ const UNIT: Record<CalendarViewMode, string> = {
 const KIND_ICON: Record<CalendarEvent["kind"], IconName> = {
   job: "wrench",
   compliance: "shield",
+  /* W11 — a manual item is a note somebody wrote, and a pen is what a reader
+     already reads as "somebody put this here" rather than "the system found
+     it". The glyph matters as much as the colour: the KEY row's own comment
+     says a legend that reads "the teal ones are manual" stops being true the
+     moment somebody picks a different teal. */
+  manual: "edit",
 };
 
 const EMPTY_EVENTS: readonly CalendarEvent[] = [];

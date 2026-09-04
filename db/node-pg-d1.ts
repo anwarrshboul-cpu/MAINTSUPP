@@ -83,7 +83,7 @@ import {
   BOOLEAN_COLUMNS,
   translateSql,
   type TranslateOptions,
-} from "./sqlite-to-postgres.ts";
+} from "./sqlite-to-postgres";
 
 /* ----------------------------------------------------------------- node -- */
 

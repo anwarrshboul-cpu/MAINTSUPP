@@ -18,6 +18,8 @@
  */
 
 import { useMemo, useState } from "react";
+import { PeriodPicker, useStoredPeriod } from "../period-picker";
+import { resolvePeriod } from "../period-model";
 import "./parity-views.css";
 import { Icon } from "../../../components";
 import { maintenanceFormSpec } from "../../../../db/monday-board-spec";
@@ -181,8 +183,67 @@ const BREAKDOWN_ROWS = 8;
  * `maintenanceFormSpec`, so a question added to the form appears here without
  * anyone editing this file.
  */
+/**
+ * The storage key Results remembers its range under.
+ *
+ * Namespaced to this view rather than to the board, so a range chosen here does
+ * not follow the reader onto the Overview or Reports — the same rule
+ * `useStoredPeriod` was written for and the same reason those pages key
+ * theirs by section.
+ */
+const RESULTS_PERIOD_KEY = "board-form-results";
+
 export function FormResultsView({ items }: { items: BoardItem[] }) {
-  const responses = useMemo(() => formResponses(items), [items]);
+  /*
+   * THE RESULTS DATE RANGE — the owner's Part 8.
+   *
+   * This panel had no range at all: it summarised whatever the board's own
+   * filters happened to leave in `items`, so "Responses in view" was a number
+   * about the grid's current state that nothing on this screen explained. A
+   * form-response summary that cannot be asked "and in August?" is not a
+   * report.
+   *
+   * `useStoredPeriod` + `PeriodPicker` are the same pair the Overview and
+   * Reports use — the same presets, the same custom start/end, the same
+   * validation and the same persistence — rather than a fourth date control
+   * with its own vocabulary.
+   *
+   * DEFAULT "all". Results is a summary of every response a form has ever
+   * collected; opening it onto a 90-day window would silently drop older
+   * submissions from a total that has always counted them, which is a
+   * behaviour change disguised as a feature.
+   */
+  const [period, setPeriod] = useStoredPeriod(RESULTS_PERIOD_KEY, "all");
+  /*
+   * Pinned at mount. `Date.now()` read during render would give every render a
+   * new "now", so a to-date window would recompute — and the memos below would
+   * never hit — on every keystroke in the custom range fields.
+   */
+  const [now] = useState(() => Date.now());
+  const window = useMemo(() => resolvePeriod(period, now), [now, period]);
+
+  const inPeriod = useMemo(() => {
+    const all = formResponses(items);
+    /*
+     * A half-specified custom range is not an empty period and must not be
+     * reported as one — the screen prints `window.reason` below and this
+     * returns nothing rather than silently falling back to "everything".
+     */
+    if (!window.recognised) return [];
+    if (window.start === -Infinity && window.end === Infinity) return all;
+    return all.filter((item) => {
+      if (!item.requestedAt) return false;
+      const at = new Date(item.requestedAt).getTime();
+      return Number.isFinite(at) && at >= window.start && at <= window.end;
+    });
+  }, [items, window]);
+
+  /*
+   * Every figure below reads from this one array — the totals, the first and
+   * latest response, and each question's breakdown — so the range cannot move
+   * the headline without moving the bars underneath it.
+   */
+  const responses = inPeriod;
 
   const questions = useMemo(
     () =>
@@ -211,27 +272,79 @@ export function FormResultsView({ items }: { items: BoardItem[] }) {
     [responses],
   );
 
-  if (!responses.length) {
-    return (
-      <p className="view-empty">
-        No responses to <strong>{maintenanceFormSpec.title}</strong> yet. Every submission
-        through the Form tab lands on this board and is counted here — jobs typed straight
-        onto the board are not form responses and are left out.
-      </p>
-    );
-  }
-
   const submitted = responses
     .map((item) => item.requestedAt)
     .filter((value): value is string => Boolean(value))
     .sort();
 
-  return (
-    <div className="form-results">
-      <header className="form-results__head">
+  /*
+   * THE HEADER IS DRAWN IN EVERY STATE, and that is the point rather than
+   * tidiness: it carries the range control. An empty state that replaced the
+   * whole panel would take the picker with it, leaving a reader who had chosen
+   * a quiet week looking at "no responses" with no way to widen the window —
+   * the failure mode of every filter that hides its own control.
+   */
+  const head = (
+    <header className="form-results__head">
+      <div>
         <h3>{maintenanceFormSpec.title}</h3>
         <p>{maintenanceFormSpec.description}</p>
-      </header>
+      </div>
+      <div className="form-results__period">
+        <PeriodPicker value={period} onChange={setPeriod} now={now} />
+      </div>
+    </header>
+  );
+
+  /*
+   * A half-specified custom range — one end filled in, a blank month — is not
+   * an empty period, and reporting it as one would put "no responses" over a
+   * form that has collected hundreds. `resolvePeriod` says so and the reason
+   * it gives names the missing part.
+   */
+  if (!window.recognised) {
+    return (
+      <div className="form-results">
+        {head}
+        <p className="view-empty">{window.reason}</p>
+      </div>
+    );
+  }
+
+  if (!responses.length) {
+    /*
+     * Two different facts, and they must not share a sentence. "This form has
+     * never been submitted" is about the form; "nothing in the range you chose"
+     * is about the range, and only the second one is fixed by moving the
+     * picker directly above it.
+     */
+    const everCollected = formResponses(items).length;
+    return (
+      <div className="form-results">
+        {head}
+        <p className="view-empty">
+          {everCollected > 0 ? (
+            <>
+              No responses to <strong>{maintenanceFormSpec.title}</strong> in{" "}
+              {window.label}. {everCollected}{" "}
+              {everCollected === 1 ? "response has" : "responses have"} been
+              recorded outside it — widen the range above to include them.
+            </>
+          ) : (
+            <>
+              No responses to <strong>{maintenanceFormSpec.title}</strong> yet. Every
+              submission through the Form tab lands on this board and is counted here —
+              jobs typed straight onto the board are not form responses and are left out.
+            </>
+          )}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="form-results">
+      {head}
 
       <ul className="form-results__totals">
         <li>
@@ -254,8 +367,9 @@ export function FormResultsView({ items }: { items: BoardItem[] }) {
 
       <p className="form-results__scope">
         Counted from the {responses.length} of {items.length} rows in view that are
-        recorded as a form submission. A job typed straight onto the board, or one whose
-        name has since been rewritten, cannot be traced back to a response and is left out.
+        recorded as a form submission, raised in {window.label}. A job typed straight onto
+        the board, or one whose name has since been rewritten, cannot be traced back to a
+        response and is left out.
       </p>
 
       <ol className="form-results__questions">

@@ -47,7 +47,17 @@ import { isClosedRequest } from "./dashboard-meters";
 /** Always `YYYY-MM-DD`. Never an instant, never a `Date`. */
 export type CalendarDay = string;
 
-export type CalendarEntity = "job" | "compliance";
+/**
+ * W11 — "manual" IS A THIRD KIND, NOT A FLAG ON ONE OF THE OTHER TWO.
+ *
+ * The owner asked to add calendar items by hand, and the one thing that must
+ * not happen is a manual note reading as a Job. A third entity is what makes
+ * that structural rather than a matter of styling: it has its own icon, its own
+ * colour, its own entry in the KEY row, its own row in `calendar_events` and its
+ * own write path, so there is nowhere for the two to be confused. See the note
+ * beside `calendarEvents` in `db/schema.ts` for why it is a table of its own.
+ */
+export type CalendarEntity = "job" | "compliance" | "manual";
 
 const MS_PER_DAY = 86_400_000;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -392,7 +402,107 @@ export const CALENDAR_DATE_SOURCES: readonly CalendarDateSource[] = [
     defaultOn: true,
     editable: true,
   },
+  /*
+   * W10 — THE ADVANCE WARNINGS, AND WHY THEY ARE A SOURCE RATHER THAN ROWS.
+   *
+   * The owner asked for a certificate to appear on the calendar 90, 60, 30 and
+   * 14 days before it lapses as well as on the day itself. Every one of those
+   * marks is `expiry - n days` and nothing else, so they are DERIVED on read
+   * from the same record the expiry mark comes from. Nothing is stored.
+   *
+   * That is not a shortcut, it is the whole requirement. "If an expiry date
+   * changes, the reminders move with it. If a document is replaced, removed or
+   * archived, the calendar updates accordingly." Persisted reminder rows would
+   * have to be re-derived on every one of those events — a date edited on the
+   * board, a certificate replaced by a new version, a row binned, a slot marked
+   * Not required — by a reconciler that would have to be written, scheduled and
+   * kept correct, and whose failure mode is a calendar quietly reminding
+   * somebody about a certificate that was renewed last month. Derivation cannot
+   * drift, cannot duplicate and cannot be left behind.
+   *
+   * A SOURCE OF ITS OWN, so it can be turned off. Five marks per dated
+   * certificate is a real increase in ink, and the picker is where this
+   * product already lets a reader say which dates they want to see. It is
+   * `defaultOn` because the owner asked for the warnings, and it is one press
+   * to switch off.
+   *
+   * NOT EDITABLE, and this is load-bearing rather than a limitation. A reminder
+   * is a projection of the expiry; there is no column behind it to write to.
+   * `calendarWriteTarget` refuses any event whose source is not editable, so a
+   * drag on a reminder cannot silently write 90 days before an expiry into the
+   * expiry cell — which is exactly what "must update the CANONICAL record, not
+   * a calendar-only copy" rules out. Moving the EXPIRY moves all four reminders
+   * with it, which is the operation somebody actually wants.
+   */
+  {
+    id: "compliance:reminder",
+    entity: "compliance",
+    field: "expiry",
+    label: "Renewal reminders",
+    description: "90, 60, 30 and 14 days before a certificate lapses.",
+    defaultOn: true,
+    editable: false,
+  },
+  /*
+   * W11 — the manual items. On by default, because an item somebody typed onto
+   * this calendar by hand and then could not see would be the worst outcome of
+   * the feature; and editable, because "add and ADJUST" was the request.
+   *
+   * `field: "startsOn"` is the column a drag writes — see `nextRange` in
+   * `app/api/maintenance/calendar/route.ts`, where moving the start moves the
+   * end with it so a three-day item stays three days long.
+   */
+  {
+    id: "manual:item",
+    entity: "manual",
+    field: "startsOn",
+    label: "Manual items",
+    description: "Notes and dates added to this calendar by hand.",
+    defaultOn: true,
+    editable: true,
+  },
 ];
+
+/**
+ * How far ahead a lapse is announced, in days.
+ *
+ * Four thresholds, and the spacing is the renewal round trip rather than a
+ * round number. None of these certificates can be renewed in-house: each needs
+ * a third party booked, quoted, raised on a purchase order and got to site (see
+ * `EXPIRY_DUE_SOON_DAYS` in `app/lib/expiry-status.ts`, which is 60 for the
+ * same reason). So 90 is "start now", 60 is the register turning amber, 30 is
+ * "this is late", and 14 is "it will lapse".
+ *
+ * Descending, and read in that order everywhere, so the derived marks come out
+ * in the order somebody would meet them.
+ */
+export const COMPLIANCE_REMINDER_DAYS: readonly number[] = [90, 60, 30, 14];
+
+/**
+ * The days a certificate expiring on `expiry` is announced on.
+ *
+ * Pure and exported so the thresholds can be tested against dates rather than
+ * inferred from a rendered calendar. Returns `[]` for anything that is not a
+ * calendar day, which is the same answer `calendarDay` gives the expiry mark —
+ * a record with no date produces no marks of any kind.
+ *
+ * ONE DAY PER THRESHOLD, AND THEY CANNOT COLLIDE. The four offsets are distinct
+ * and `shiftCalendarDay` is injective, so four thresholds produce four
+ * different days; there is no de-duplication step here because there is nothing
+ * to de-duplicate. The expiry itself is not in this list — it is the other
+ * source's mark, and emitting it here as well is how one certificate would come
+ * to be drawn twice on one day.
+ */
+export function complianceReminderDays(
+  expiry: string | null | undefined,
+): { day: CalendarDay; daysBefore: number }[] {
+  const day = calendarDay(expiry);
+  if (!day) return [];
+  return COMPLIANCE_REMINDER_DAYS.map((daysBefore) => ({
+    day: shiftCalendarDay(day, -daysBefore),
+    daysBefore,
+  }));
+}
 
 export const DEFAULT_CALENDAR_SOURCE_IDS: readonly string[] =
   CALENDAR_DATE_SOURCES.filter((source) => source.defaultOn).map(
@@ -464,6 +574,31 @@ export type CalendarTiming =
   | "resolved"
   | "past";
 
+/**
+ * A manual calendar item, as `GET /api/maintenance/calendar` returns it.
+ *
+ * Declared here rather than imported from the route so the model stays free of
+ * server code — `calendar-model.ts` is transpiled and imported by tests with no
+ * bundler, and pulling in a route would drag drizzle and the schema behind it.
+ * The route's `ManualCalendarEventPayload` is the same shape; a test pins that
+ * the two agree.
+ */
+export type ManualCalendarItem = {
+  id: string;
+  title: string;
+  notes: string | null;
+  siteId: string | null;
+  /** `YYYY-MM-DD`. */
+  startsOn: string;
+  /** `YYYY-MM-DD`, or null for a single-day item. */
+  endsOn: string | null;
+  allDay: boolean;
+  category: string;
+  colour: string | null;
+  createdByEmail: string | null;
+  archived: boolean;
+};
+
 export type CalendarEvent = {
   /**
    * `${sourceId}::${recordId}`.
@@ -498,7 +633,55 @@ export type CalendarEvent = {
   editable: boolean;
   request?: MaintenanceRequest;
   record?: WorkspaceComplianceRecord;
+  /**
+   * The manual item behind this mark, and the day WITHIN it that this mark is.
+   *
+   * A multi-day item is drawn on every day it covers, so a drag has to know
+   * which of those days was picked up: dropping the middle day of a three-day
+   * item on the 20th means the item starts on the 19th, not the 20th.
+   * `spanOffset` is that answer, in days from `item.startsOn`, and
+   * `calendarWriteTarget` turns it into the start date to send.
+   */
+  manual?: ManualCalendarItem;
+  spanOffset?: number;
 };
+
+/**
+ * How many days of one manual item this calendar will draw.
+ *
+ * A ceiling rather than a policy: nothing in the product creates a year-long
+ * item, but `endsOn` is a date somebody types, and a typo of "2126" would ask
+ * the grid for thirty-six thousand chips and take the page down. Past the
+ * ceiling the item is drawn for its first `MAX_MANUAL_SPAN_DAYS` days and the
+ * subtitle still names the real end date, so nothing is hidden — the reader
+ * sees a long item and the true dates, not a hung tab.
+ */
+export const MAX_MANUAL_SPAN_DAYS = 366;
+
+/**
+ * Every day one manual item covers, inclusive, capped.
+ *
+ * Exported and pure so the span arithmetic is tested against dates. An item
+ * with no valid start covers nothing; an `endsOn` before the start is treated
+ * as a single day, which is the same defensive reading the route refuses to
+ * store in the first place.
+ */
+export function manualItemDays(item: {
+  startsOn: string;
+  endsOn: string | null;
+}): CalendarDay[] {
+  const start = calendarDay(item.startsOn);
+  if (!start) return [];
+  const end = calendarDay(item.endsOn) || start;
+  if (end <= start) return [start];
+  const days: CalendarDay[] = [];
+  for (let index = 0; index < MAX_MANUAL_SPAN_DAYS; index += 1) {
+    const day = shiftCalendarDay(start, index);
+    days.push(day);
+    if (day >= end) break;
+  }
+  return days;
+}
 
 /**
  * Timing for a job date.
@@ -564,6 +747,26 @@ function complianceTiming(
   today: CalendarDay,
 ): CalendarTiming {
   if (record.state === "Expired") return "overdue";
+  if (day < today) return "past";
+  if (day === today) return "due-today";
+  return "upcoming";
+}
+
+/**
+ * Timing for one of the four advance warnings.
+ *
+ * DELIBERATELY NEVER `overdue`, and this is the difference from the expiry rule
+ * above rather than an oversight. A certificate that has lapsed already carries
+ * one red mark — its expiry — and its four reminder days are all behind it, so
+ * taking the record's state here would paint FIVE red marks across the previous
+ * three months for a single lapsed certificate. On the owner's estate that is
+ * the difference between a calendar you can read and a wall of alerts.
+ *
+ * A warning that has gone by is `past`: it is a day something should have been
+ * started on, not a thing that is itself late. What is late is the certificate,
+ * and the calendar says so once, on the day it lapsed.
+ */
+function reminderTiming(day: CalendarDay, today: CalendarDay): CalendarTiming {
   if (day < today) return "past";
   if (day === today) return "due-today";
   return "upcoming";
@@ -774,6 +977,25 @@ function jobPasses(request: MaintenanceRequest, filters: CalendarFilters) {
   return true;
 }
 
+/**
+ * Which facets a manual item answers to.
+ *
+ * ONLY `sites`, and for the reason the header of `CalendarFilters` gives: a
+ * facet that describes something only a job has must not empty a layer that has
+ * no such property, or picking "Urgent" reads as "there are no manual items"
+ * rather than "that filter does not apply here". A manual item has a site or it
+ * does not, and that is the one facet it shares.
+ *
+ * An item with NO site is kept when a site filter is on. It is not "some other
+ * site's" item — it belongs to nobody's, so hiding it would make a
+ * site-filtered calendar quietly lose the reader's general notes.
+ */
+function manualPasses(item: ManualCalendarItem, filters: CalendarFilters) {
+  if (!filters.sites?.length) return true;
+  if (!item.siteId) return true;
+  return filters.sites.includes(item.siteId);
+}
+
 function compliancePasses(
   record: WorkspaceComplianceRecord,
   filters: CalendarFilters,
@@ -786,7 +1008,15 @@ function compliancePasses(
 /* ── Building the grid's contents ─────────────────────────────────────────── */
 
 /** Jobs before certificates on the same day, then alphabetical by title. */
-const KIND_ORDER: Record<CalendarEntity, number> = { job: 0, compliance: 1 };
+/**
+ * Jobs, then certificates, then manual items, within one day.
+ *
+ * Manual items sort LAST deliberately. They are the reader's own annotations
+ * and the two derived layers are the product's answer about work and
+ * compliance; a note pushed to the top of a day would read as the most
+ * important thing on it, which is a claim nobody made when they typed it.
+ */
+const KIND_ORDER: Record<CalendarEntity, number> = { job: 0, compliance: 1, manual: 2 };
 
 function compareEvents(a: CalendarEvent, b: CalendarEvent) {
   if (a.day !== b.day) return a.day < b.day ? -1 : 1;
@@ -820,6 +1050,8 @@ function compareEvents(a: CalendarEvent, b: CalendarEvent) {
 export function buildCalendarEvents(input: {
   requests: MaintenanceRequest[];
   complianceRecords: WorkspaceComplianceRecord[];
+  /** W11 — the hand-added items. Absent is an empty list, never a crash. */
+  manualItems?: ManualCalendarItem[];
   sourceIds: readonly string[];
   filters: CalendarFilters;
   today: CalendarDay;
@@ -827,6 +1059,7 @@ export function buildCalendarEvents(input: {
   const { sourceIds, today } = input;
   const requests = input.requests ?? [];
   const complianceRecords = input.complianceRecords ?? [];
+  const manualItems = input.manualItems ?? [];
   const filters = input.filters ?? EMPTY_CALENDAR_FILTERS;
   const selected = new Set(sourceIds ?? []);
   const events: CalendarEvent[] = [];
@@ -906,7 +1139,145 @@ export function buildCalendarEvents(input: {
     }
   }
 
+  /*
+   * W10 — THE ADVANCE WARNINGS.
+   *
+   * A SEPARATE PASS OVER THE SAME RECORDS, not a nested loop inside the expiry
+   * pass, because the two are independent sources: a reader may want the
+   * warnings without the lapse dates or the other way round, and the picker
+   * already offers each of them separately. Nesting would have tied the
+   * reminders to the expiry source being on, which is a coupling nothing asked
+   * for and nobody could see the cause of.
+   *
+   * The same record, the same filters and the same "Not required has no date"
+   * rule, so a certificate that is off the calendar is off it four more times
+   * as well.
+   */
+  const reminderSource = calendarDateSource("compliance:reminder");
+  if (reminderSource && selected.has(reminderSource.id)) {
+    for (const record of complianceRecords) {
+      if (record.state === "Not required") continue;
+      if (!compliancePasses(record, filters)) continue;
+      for (const { day, daysBefore } of complianceReminderDays(record.expiry)) {
+        events.push({
+          /*
+           * The threshold is IN THE KEY. Without it four reminders for one
+           * certificate share `compliance:reminder::<id>` — React calls them
+           * duplicates, `groupCalendarEventsByDay` keeps all four anyway, and
+           * the grid draws four chips it cannot tell apart. The same reason
+           * `key` carries the source id in the first place.
+           */
+          key: `${reminderSource.id}:${daysBefore}::${record.id}`,
+          kind: "compliance",
+          sourceId: reminderSource.id,
+          recordId: record.id,
+          field: reminderSource.field,
+          /*
+           * "60-day reminder", not "Certificate expiry". The chip's title says
+           * WHICH certificate and the meta line says WHAT this mark is, so a
+           * reader can tell a warning from the lapse itself without opening
+           * anything — which matters most in the month view, where the same
+           * certificate may appear twice.
+           */
+          fieldLabel: `${daysBefore}-day reminder`,
+          day,
+          /*
+           * No time of day. The expiry mark carries whatever time the board
+           * decoration recorded, because that is a real value on a real cell; a
+           * reminder is a day this product computed, and giving it 09:00 would
+           * be inventing a fact about a record.
+           */
+          time: "",
+          title: `${record.kind} renewal`,
+          /*
+           * The store AND the date being warned about, because a warning three
+           * months early is unreadable without the thing it is warning about.
+           */
+          subtitle: `${record.siteName} · expires ${formatCalendarDayShort(day, daysBefore)}`,
+          timing: reminderTiming(day, today),
+          /*
+           * FALSE, from the source. A reminder has no column behind it, so
+           * `calendarWriteTarget` refuses it and neither a drag nor the date
+           * dialog can write through it. Moving the EXPIRY moves all four.
+           */
+          editable: reminderSource.editable,
+          record,
+        });
+      }
+    }
+  }
+
+  /*
+   * W11 — THE MANUAL ITEMS.
+   *
+   * One mark per DAY the item covers, so a three-day item reads as three days
+   * on the grid rather than as a note on its first morning. The item itself is
+   * one row; these are its appearances, and the write path is told which
+   * appearance was dragged through `spanOffset`.
+   *
+   * ARCHIVED ITEMS ARE NOT DRAWN. The API's default read already drops them —
+   * this is the second guard, for a caller that asked for
+   * `?archived=include` in order to show a management list and then handed the
+   * same array to the grid.
+   */
+  const manualSource = calendarDateSource("manual:item");
+  if (manualSource && selected.has(manualSource.id)) {
+    for (const item of manualItems) {
+      if (item.archived) continue;
+      if (!manualPasses(item, filters)) continue;
+      const days = manualItemDays(item);
+      const last = days.length > 0 ? days[days.length - 1] : "";
+      for (const [offset, day] of days.entries()) {
+        events.push({
+          /* The DAY is in the key, because one item legitimately appears on
+             several days and they must not collapse into one another. */
+          key: `${manualSource.id}:${day}::${item.id}`,
+          kind: "manual",
+          sourceId: manualSource.id,
+          recordId: item.id,
+          field: manualSource.field,
+          fieldLabel:
+            days.length > 1
+              ? `Day ${offset + 1} of ${days.length}`
+              : manualSource.label,
+          day,
+          /* Days, not appointments. `all_day` defaults true and nothing in this
+             product writes a time onto a manual item yet. */
+          time: "",
+          title: item.title,
+          subtitle:
+            days.length > 1
+              ? `${calendarDayLabel(days[0])} — ${calendarDayLabel(last)}`
+              : (item.notes ?? "").trim().slice(0, 120),
+          /*
+           * A manual item is a note, not work anybody is late on. It is never
+           * `overdue`: nothing is chasing it and painting it red would put a
+           * reader's own annotation in the same visual class as a lapsed fire
+           * alarm certificate.
+           */
+          timing: day < today ? "past" : day === today ? "due-today" : "upcoming",
+          editable: manualSource.editable,
+          manual: item,
+          spanOffset: offset,
+        });
+      }
+    }
+  }
+
   return events.sort(compareEvents);
+}
+
+/**
+ * "expires 12 Mar 2027", built from the reminder day and its offset.
+ *
+ * Derived rather than read off `record.expiry` so the sentence cannot
+ * contradict the mark it is printed on: the day IS `expiry - daysBefore`, so
+ * adding the offset back is the expiry by construction. Reading the record
+ * would be a second source for the same fact and would be wrong the moment a
+ * caller passed a record and a day that did not correspond.
+ */
+function formatCalendarDayShort(day: CalendarDay, daysBefore: number): string {
+  return calendarDayLabel(shiftCalendarDay(day, daysBefore));
 }
 
 /**
@@ -994,6 +1365,17 @@ export function groupCalendarEventsByDay(
  */
 export type CalendarWriteTarget =
   | { path: "job"; id: string; field: "dueAt" | "requestedAt" | "completedAt" | "nextUpdateAt" }
+  /**
+   * W11 — a manual item moved.
+   *
+   * `startsOn` is the item's NEW START, already corrected for which day of a
+   * multi-day item was dragged. The caller sends exactly this and nothing else,
+   * and the route moves `ends_on` by the same number of days so the item keeps
+   * its length — see `nextRange` in `app/api/maintenance/calendar/route.ts`.
+   * Computing the start HERE rather than in the drag handler is what stops two
+   * callers inventing two different answers to "which day did they pick up".
+   */
+  | { path: "manual"; id: string; startsOn: string }
   | {
       path: "board-cell";
       /** Always the Store Documentation board — `update_cell` reads it from `?board=`. */
@@ -1021,9 +1403,38 @@ export type CalendarWriteTarget =
     }
   | { path: "none"; reason: string };
 
-export function calendarWriteTarget(event: CalendarEvent): CalendarWriteTarget {
+export function calendarWriteTarget(
+  event: CalendarEvent,
+  /**
+   * The day the mark was dropped on. Only a manual item needs it — a job or a
+   * certificate is one mark on one day, so the new date IS the drop day and the
+   * caller passes it to the endpoint itself. A multi-day manual item is drawn
+   * on several days, so the target has to say which START that drop implies,
+   * and it cannot without knowing where the mark landed.
+   */
+  droppedOn?: CalendarDay,
+): CalendarWriteTarget {
   if (!event.editable) {
     return { path: "none", reason: "This date cannot be changed here." };
+  }
+
+  if (event.kind === "manual") {
+    const item = event.manual;
+    if (!item) {
+      return { path: "none", reason: "This calendar item is no longer here." };
+    }
+    const landing = droppedOn || event.day;
+    /*
+     * The dragged mark is `spanOffset` days into the item, so the item starts
+     * that many days before wherever the mark was dropped. Dropping the third
+     * day of a three-day item on the 20th starts it on the 18th, which is what
+     * a person watching the whole block move expects.
+     */
+    return {
+      path: "manual",
+      id: event.recordId,
+      startsOn: shiftCalendarDay(landing, -(event.spanOffset ?? 0)),
+    };
   }
 
   if (event.kind === "job") {
@@ -1094,6 +1505,10 @@ export function calendarEditCapability(
 ): "board.edit" | "sites.edit" | null {
   const target = calendarWriteTarget(event);
   if (target.path === "job" || target.path === "board-cell") return "board.edit";
+  /* W11 — a manual item is planning data, the same system a job's own dates
+     belong to, so it takes the same capability. See the note on
+     `WRITE_CAPABILITY` in `app/api/maintenance/calendar/route.ts`. */
+  if (target.path === "manual") return "board.edit";
   if (target.path === "workspace-compliance") return "sites.edit";
   return null;
 }

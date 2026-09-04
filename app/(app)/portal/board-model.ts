@@ -42,6 +42,9 @@ export type EditableFields = Partial<
     | "status"
     | "contractor"
     | "assignee"
+    /* Written WITH `assignee`, never instead of it — see the note on the field
+       in app/lib/types.ts and the resolution in PATCH /api/maintenance. */
+    | "assigneeUserId"
     | "requestedAt"
     | "completedAt"
     | "dueAt"

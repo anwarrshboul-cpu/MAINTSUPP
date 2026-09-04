@@ -1,0 +1,263 @@
+/*
+ * The "Assigned To" person picker.
+ *
+ * A stylesheet of its own rather than an addition to globals.css, for the same
+ * reason `cells/cells.css` exists: the board's existing vocabulary is
+ * `.sheet-option-cell`, a single coloured chip over a grid of labels, and this
+ * is a person row — avatar, name, job title, a search box and a highlighted
+ * keyboard cursor. Nothing here restyles an existing class.
+ *
+ * Every colour is a custom property from globals.css, so both themes follow
+ * without this file knowing which one is active. The one exception is the
+ * avatar disc, whose ground is DATA (a person's stored `avatar_colour`, or a
+ * colour derived from their id) and is set inline — its ink is white with a
+ * shadow rather than a computed contrast, because the palette in
+ * `assignee-directory.ts` is chosen dark enough for white to clear 4.5:1 on
+ * every entry.
+ */
+
+.assignee-cell {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.assignee-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted, #4e5f6f);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assignee-trigger.is-assigned {
+  color: var(--ink, #132537);
+}
+
+.assignee-trigger:hover {
+  background: var(--surface-hover, #eef3f5);
+}
+
+.assignee-trigger:focus-visible {
+  outline: 2px solid var(--teal-500, #0073ea);
+  outline-offset: 1px;
+}
+
+.assignee-trigger__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignee-trigger__name--empty {
+  color: var(--muted-2, #64707b);
+}
+
+.assignee-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/*
+ * Two discs that are deliberately NOT a person's colour.
+ *
+ * `--empty` is nobody, and `--unknown` is a name the roster does not recognise
+ * — an imported row, or somebody who has since left the workspace. Giving
+ * either one of the identity colours would say "this is a member of your
+ * workspace" about a cell where that is precisely the thing not known.
+ */
+.assignee-avatar--empty {
+  background: var(--surface-sunken, #eef2f5);
+  color: var(--muted-2, #64707b);
+  border: 1px dashed var(--line-strong, #c8d3da);
+}
+
+.assignee-avatar--unknown {
+  background: var(--surface-sunken, #eef2f5);
+  color: var(--muted, #4e5f6f);
+  border: 1px solid var(--line-strong, #c8d3da);
+}
+
+/* ── The popover ─────────────────────────────────────────────────────────── */
+
+/*
+ * Width, not height: the height cap arrives inline from `useAnchoredPosition`,
+ * which measures the room the anchor actually has. Setting one here would
+ * fight it.
+ */
+.ms-popover.assignee-popover {
+  width: 280px;
+  padding: 8px;
+  border: 1px solid var(--line, #dce4e9);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-card, #ffffff);
+  box-shadow: var(--shadow-md, 0 12px 36px rgba(7, 24, 38, 0.09));
+}
+
+.assignee-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  margin-bottom: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong, #c8d3da);
+  border-radius: 7px;
+  background: var(--surface-card-lo, #f6f9fa);
+  color: var(--muted, #4e5f6f);
+}
+
+.assignee-search:focus-within {
+  border-color: var(--teal-500, #0073ea);
+}
+
+.assignee-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--ink, #132537);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+/* Safari draws its own clear affordance over the one the list already has. */
+.assignee-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.assignee-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 264px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.assignee-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink, #132537);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/*
+ * ONE highlight, driven by the keyboard cursor.
+ *
+ * `:hover` sets the same state through `onMouseEnter` rather than painting its
+ * own, so the mouse and the arrow keys cannot disagree about which row Enter
+ * would choose — two highlights on screen at once is the classic combobox bug.
+ */
+.assignee-option.is-active {
+  background: var(--surface-hover, #eef3f5);
+}
+
+.assignee-option:focus-visible {
+  outline: 2px solid var(--teal-500, #0073ea);
+  outline-offset: -2px;
+}
+
+.assignee-option__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.assignee-option__text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.assignee-option__text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-2, #64707b);
+  font-size: 11px;
+}
+
+.assignee-option__me {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken, #eef2f5);
+  color: var(--muted, #4e5f6f);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.assignee-note {
+  margin: 6px 4px;
+  color: var(--muted-2, #64707b);
+  font-size: 12px;
+}
+
+.assignee-note--error {
+  color: var(--red-600, #bc3a3a);
+}
+
+/* ── The mobile sheet ────────────────────────────────────────────────────── */
+
+/*
+ * The sheet is `MobileCellSheet`, which already owns the panel, the backdrop
+ * and the scroll lock; only the list inside it needs sizing. The height cap is
+ * dropped because the sheet's own body scrolls, and the touch targets grow to
+ * 44px — the smallest target this product ships on a phone.
+ */
+.assignee-sheet .assignee-list {
+  max-height: none;
+  gap: 2px;
+}
+
+.assignee-sheet .assignee-option {
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.assignee-sheet .assignee-search {
+  height: 40px;
+}
+
+@media (max-width: 767px) {
+  .assignee-trigger {
+    min-height: 34px;
+  }
+}

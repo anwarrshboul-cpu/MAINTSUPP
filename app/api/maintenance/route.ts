@@ -33,6 +33,8 @@ import { unassignedSiteId } from "../../lib/site-reference";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
 import { contractorLinkValues } from "../../lib/contractor-reference";
+import { assigneeLinkValues } from "../../lib/assignee-reference";
+import { recordContractorComment } from "../../lib/contractor-comments";
 import {
   automationContext,
   dispatchAutomationEvents,
@@ -893,6 +895,36 @@ export async function PATCH(request: Request) {
         await contractorLinkValues(db, orgId, values);
       Object.assign(values, contractorLinkFields);
       void contractorLink;
+
+      /*
+       * ASSIGNING A JOB TO A PERSON IN THE WORKSPACE.
+       *
+       * The board's Assigned To cell now picks from the workspace roster rather
+       * than from the names already on its own rows, and sends the chosen
+       * `users.id`. This is where that id becomes a write, and it does three
+       * things that only the server can do:
+       *
+       *   · proves the id names an ACTIVE membership of THIS organisation —
+       *     without which "assign my job to another tenant's user" is one
+       *     hand-written request away;
+       *   · DERIVES `assignee` from that membership, so the display name beside
+       *     the id is the roster's and not the caller's;
+       *   · refuses rather than drops. `requestFieldValues` throws malformed
+       *     values away, which is right for the automation engine and wrong
+       *     here: an assignment answered 200 that did not happen is the one
+       *     answer this route must never give (the same reasoning as
+       *     `invalidRequestFields`).
+       *
+       * Applied AFTER `requestFieldValues`, deliberately. That function clears
+       * `assignee_user_id` for any write that carries the NAME — so a rule or an
+       * importer setting text alone cannot leave a stale link behind — and this
+       * puts the chosen person back when a person was actually chosen.
+       */
+      const assigneeLink = await assigneeLinkValues(db, orgId, fields);
+      if (!assigneeLink.ok) {
+        return Response.json({ error: assigneeLink.reason }, { status: 404 });
+      }
+      Object.assign(values, assigneeLink.values);
     }
 
     const [before] = await db
@@ -936,6 +968,31 @@ export async function PATCH(request: Request) {
     }
     if (!updated) {
       return Response.json({ error: "Request not found." }, { status: 404 });
+    }
+
+    /*
+     * A CONTRACTOR COMMENT ALSO LANDS ON THE MAIN TABLE — owner Part 7.
+     *
+     * The Fix Tracker's "Add Comment" is the contractor workflow's comment box,
+     * and until now it reached `activity_log` and the row's comment COUNT and
+     * nothing a coordinator could read from the board itself. `noteFrom` is
+     * what separates it from an ordinary drawer note, which must NOT be filed
+     * as something a contractor said: an opt-in flag rather than a guess about
+     * which screen the request came from.
+     *
+     * The author is the signed-in actor — whoever actually typed it — because
+     * that is what `activity_log` records for the same note, and a digest that
+     * disagreed with the trail beside it would be worse than no digest.
+     *
+     * Appends; see `app/lib/contractor-comments.ts`. The comment is already
+     * saved by the time this runs, so a failure here costs the digest and
+     * nothing else.
+     */
+    if (note && trimString(payload.noteFrom, 20) === "contractor") {
+      await recordContractorComment(db, orgId, id, {
+        body: note,
+        author: actor.displayName || actor.email,
+      });
     }
 
     await db.insert(activityLog).values({

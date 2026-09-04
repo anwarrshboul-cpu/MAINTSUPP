@@ -1,0 +1,96 @@
+/*
+ * The Timeline duration card.
+ *
+ * Its own stylesheet, next to the component, for the same reason
+ * `assignee-cell.css` is: the board has no existing vocabulary for a hover
+ * card, and globals.css is not where a new one belongs. Colours are custom
+ * properties from globals.css, so both themes follow.
+ *
+ * `.ms-popover` positions it (inline `left`/`top` from `useAnchoredPosition`)
+ * and hides it until measured. Everything here is skin.
+ */
+
+.ms-popover.timeline-tip {
+  width: max-content;
+  max-width: 260px;
+  padding: 9px 11px;
+  border: 1px solid var(--line, #dce4e9);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-card, #ffffff);
+  color: var(--ink, #132537);
+  box-shadow: var(--shadow-md, 0 12px 36px rgba(7, 24, 38, 0.09));
+  font-size: 12px;
+  /*
+   * A tooltip must not eat the pointer. Without this, a card drawn under the
+   * cursor takes the `mouseleave` from the button it describes and the pair
+   * flickers — the classic hover-card loop.
+   */
+  pointer-events: none;
+}
+
+.timeline-tip__title {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted, #4e5f6f);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.timeline-tip__facts {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.timeline-tip__facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.timeline-tip__facts dt {
+  color: var(--muted-2, #64707b);
+}
+
+.timeline-tip__facts dd {
+  margin: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.timeline-tip__duration {
+  color: var(--teal-600, #0e8f88);
+}
+
+.timeline-tip__note {
+  margin: 7px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft, #eaf0f3);
+  color: var(--muted-2, #64707b);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+/* ── The same facts in the mobile sheet, where there is no hover ─────────── */
+
+.timeline-duration-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-sunken, #eef2f5);
+  color: var(--muted, #4e5f6f);
+  font-size: 13px;
+  text-align: center;
+}
+
+.timeline-duration-line strong {
+  color: var(--ink, #132537);
+  font-size: 15px;
+}

@@ -92,8 +92,32 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
   if (typeof fields.contractor === "string" || fields.contractor === null) {
     values.contractor = trimString(fields.contractor, 120) || null;
   }
+  /*
+   * Naming an assignee also UN-NAMES the person the job was linked to.
+   *
+   * `assignee` is free text and stays free text — it is the record of who the
+   * job was given to. Beside it, `assignee_user_id` is the account that name
+   * refers to, and it is only ever set by a caller that named an ACCOUNT: the
+   * route resolves it, against this organisation's memberships, immediately
+   * after this function returns.
+   *
+   * So a write that carries only the name clears the id, exactly as
+   * `contractorLinkValues` clears `contractor_id` when the contractor's name
+   * changes. Leaving the previous id behind would leave a job counted against a
+   * person it no longer names, for ever and invisibly — and that is not
+   * hypothetical here: the automation engine's "Replace assignee" and "Clear
+   * assignees" actions call this function with a NAME and nothing else, and an
+   * unattended rule is exactly where a stale link would never be noticed.
+   *
+   * `assigneeUserId` itself is deliberately NOT coerced here. Like `siteId` and
+   * `parentId` it needs a database read scoped to the caller's organisation,
+   * which this module has neither of — and the automation engine calls this
+   * function with no reference validation of its own, so coercing it would hand
+   * an unattended rule the power to assign a job to another tenant's user.
+   */
   if (typeof fields.assignee === "string" || fields.assignee === null) {
     values.assignee = trimString(fields.assignee, 120) || null;
+    values.assigneeUserId = null;
   }
   if (typeof fields.approvedBy === "string" || fields.approvedBy === null) {
     values.approvedBy = trimString(fields.approvedBy, 120) || null;
@@ -208,6 +232,20 @@ export function invalidRequestFields(fields: Record<string, unknown>): string[] 
 
   if (has("parentId") && typeof fields.parentId !== "string" && fields.parentId !== null) {
     note("parentId", "an item id or null");
+  }
+
+  /*
+   * `assigneeUserId` is shape-checked here and RESOLVED in the route, exactly as
+   * `parentId` above and `siteId` below, and for the same reason: deciding
+   * whether a user id names somebody in THIS organisation needs a database read
+   * this module cannot make. `null` is how an assignment is cleared.
+   */
+  if (
+    has("assigneeUserId") &&
+    typeof fields.assigneeUserId !== "string" &&
+    fields.assigneeUserId !== null
+  ) {
+    note("assigneeUserId", "a workspace member's user id, or null to unassign");
   }
 
   /*

@@ -785,7 +785,23 @@ export async function PATCH(request: Request) {
     }
     if (typeof body.status === "string") patch.status = text(body.status, 80);
     if (typeof body.priority === "string") patch.priority = text(body.priority, 40);
-    if (typeof body.assignee === "string") patch.assignee = text(body.assignee, 120);
+    /*
+     * A batch that renames the assignee UN-NAMES the account behind it.
+     *
+     * `assignee_user_id` is the stable `users.id` beside the free-text name (see
+     * app/lib/assignee-reference.ts). This handler takes the NAME and has never
+     * taken an id, so leaving the previous id in place would leave every job in
+     * the batch counted against a person it no longer names — the same defect
+     * `contractor_id` is protected from on the single-job path, and the same fix
+     * `requestFieldValues` applies there. Choosing a person is a single-cell
+     * action through PATCH /api/maintenance, which is the one writer that can
+     * prove an id belongs to this organisation; this route deliberately does not
+     * grow that power.
+     */
+    if (typeof body.assignee === "string") {
+      patch.assignee = text(body.assignee, 120);
+      patch.assigneeUserId = null;
+    }
     if (typeof body.title === "string") {
       const title = text(body.title, 200);
       if (!title) return bad("Title cannot be empty.");

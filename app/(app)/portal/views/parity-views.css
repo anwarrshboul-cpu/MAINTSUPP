@@ -38,6 +38,39 @@
   color: var(--ink);
 }
 
+/*
+ * The heading now shares its row with the range picker, so it becomes a flex
+ * row. `align-items: flex-start` rather than centre: the left side is two lines
+ * (title and description) and the control is one, and centring it against a
+ * growing block makes it drift as the description wraps.
+ */
+.form-results__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+}
+
+.form-results__period {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/*
+ * Phones. The control goes full width under the heading rather than being
+ * squeezed beside it — the custom-range shape is two date fields and a select,
+ * which cannot share a 320px row with a title.
+ */
+@media (max-width: 640px) {
+  .form-results__period {
+    width: 100%;
+  }
+}
+
 .form-results__head h3 {
   margin: 0;
   font-size: 17px;

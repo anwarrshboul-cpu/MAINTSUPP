@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RaiseTicketButton } from "../raise-ticket";
 import { useLoader } from "./use-loader";
 import { SiteDetail } from "./site-detail";
 import { SiteForm } from "./site-form";
@@ -615,41 +614,33 @@ export function SitesManager({
                   <td data-label="Manager">{site.managerName ?? "—"}</td>
                   <td data-label="Actions">
                     {/*
-                      The same flex row the other tables' action cells use, so
-                      the three controls share a baseline and a gap. Without it
-                      they are inline-flex boxes of two different heights
-                      sitting on the text baseline, and the taller one — the
-                      raise control, which keeps the 44px touch floor — rides
-                      up out of line with Edit and Close.
+                      W12 — "Raise a ticket" NO LONGER LIVES IN THIS CELL.
+
+                      It used to sit here on the reasoning that a fault is
+                      noticed while somebody is looking at the site. The owner
+                      review of /dashboard/sites asked for it out of the
+                      register TABLE: the Actions column is where a row is
+                      administered — opened, edited, closed — and a per-row
+                      ticket button turned a maintenance register into a
+                      reporting form, one copy per site, thirty-one buttons
+                      down the page.
+
+                      Raising against a site is UNCHANGED everywhere it still
+                      belongs: the site DETAIL header and its per-unit rows
+                      (units-manager.tsx), the compliance chase lines
+                      (views/store-compliance-tracker.tsx), the documentation
+                      board (views/store-documentation-board.tsx) and the
+                      portal-wide control. `RaiseTicketButton` itself is
+                      untouched — only this one mounting is gone, so the
+                      import above went with it.
+
+                      The flex row stays. Edit and Close are still two
+                      inline-flex boxes that would otherwise sit on the text
+                      baseline at different heights, and `.table-row-actions`
+                      is what wraps them onto a second line at 390px instead
+                      of pushing "Close" off a cell that does not scroll.
                     */}
                     <div className="table-row-actions">
-                    {/*
-                      A fault is usually noticed while somebody is looking at
-                      the site, not while they are looking at the job board.
-                      Raising it here carries the site through, so the ticket
-                      lands attributed instead of on whichever store the board
-                      happens to default to.
-                    */}
-                    <RaiseTicketButton
-                      context={{
-                        siteId: site.id,
-                        siteName: site.name,
-                        section: "Site",
-                      }}
-                      label="Raise a ticket"
-                      // Sits in the Actions column beside Edit and Close, so it
-                      // takes the same control they do. "quiet" maps to
-                      // .icon-button — a 36px square sized for a glyph with no
-                      // label — and the words overflowed it and painted under
-                      // the row.
-                      variant="secondary"
-                      onRaised={(ticket) =>
-                        onNotify(
-                          `${ticket.reference ?? ticket.title} raised for ${ticket.siteName}.`,
-                        )
-                      }
-                      onNotify={onNotify}
-                    />
                     <button
                       type="button"
                       className="secondary-button"

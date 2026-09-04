@@ -581,7 +581,7 @@ test("SOT-3 there can never be both a `name` and a `contractor` column on one re
   );
 });
 
-test("SOT-3 Contact, Email, Phone and WhatsApp are standalone columns, independent of the lane", async () => {
+test("SOT-3 Contact details is the second column; Email, Phone and WhatsApp stay standalone", async () => {
   const catalogue = await read(CATALOGUE);
   const block = catalogue.slice(
     catalogue.indexOf("export const CONTRACTOR_NATIVE_COLUMNS"),
@@ -589,14 +589,51 @@ test("SOT-3 Contact, Email, Phone and WhatsApp are standalone columns, independe
   );
 
   /*
-   * FOUR COLUMNS OF THEIR OWN, seeded hidden. A reader who wants the email as
-   * sortable text ticks Email; the ACTIONABLE phone / WhatsApp / email block
-   * inside the composite lane is a different rendering of the same facts and is
-   * drawn from the page's `contact` prop, not from these rows. Duplication is
-   * allowed exactly when somebody asked for it.
+   * ── RE-POINTED FOR W13, AND WHAT CHANGED ────────────────────────────────
+   *
+   * This test used to assert that FOUR columns — Contact, Email, Phone and
+   * WhatsApp — were standalone and seeded HIDDEN, on the reasoning that the
+   * actionable contact block was the second half of the composite identity
+   * lane and a `contactName` column beside it would print the contact person's
+   * name twice on every row.
+   *
+   * The owner's review of /dashboard/contractors changed the first half of
+   * that: the first column is to be the name and the SECOND is to be contact
+   * details. So the block moved out of the identity lane and onto the
+   * `contactName` COLUMN, which is therefore now seeded shown and second. The
+   * duplication the old rule was protecting against is gone with it — there is
+   * one lane drawing the block, never two.
+   *
+   * THE OTHER THREE ARE UNCHANGED, and the reasoning they carried is intact:
+   * Email, Phone and WhatsApp are the SORTABLE TEXT form of three facts the
+   * block already shows, for a reader who wants one of them as a column of its
+   * own, and they stay off by default. That is still duplication permitted
+   * because somebody asked for it, and it is still pinned here.
    */
+  assert.match(
+    block,
+    /\{ field: "contactName", title: "Contact details", type: "text", width: 220 \}/,
+    "Contact details is a seeded column, shown by default — it is where the " +
+      "actionable contact block is drawn, so hiding it by default would seed a " +
+      "roster with no telephone number anywhere on it",
+  );
+  assert.doesNotMatch(
+    block,
+    /\{ field: "contactName"[^}]*hidden: true/,
+    "and it must not go back to seeding hidden",
+  );
+
+  /*
+   * SECOND, and measured rather than asserted about the source order. The
+   * catalogue's array order IS the seeded position order — `seedNativeColumns`
+   * writes `position: index` — so "second" is a fact about the indexes, and
+   * reading it that way survives a reformat of the literal.
+   */
+  const seeded = [...block.matchAll(/\{ field: "([A-Za-z]+)"/g)].map((match) => match[1]);
+  assert.equal(seeded[0], "name", "the identity column seeds first");
+  assert.equal(seeded[1], "contactName", "and contact details seeds immediately after it");
+
   for (const [field, title] of [
-    ["contactName", "Contact"],
     ["email", "Email"],
     ["phone", "Phone"],
     ["whatsappNumber", "WhatsApp"],
@@ -613,6 +650,13 @@ test("SOT-3 Contact, Email, Phone and WhatsApp are standalone columns, independe
    * one does not take anything out of the lane. Derived rather than argued: the
    * owner's register has all four hidden, and the answer for each is the same
    * whether the identity is pinned, unpinned or unticked.
+   *
+   * `contactName` STAYS IN THIS LOOP even though it is no longer seeded hidden,
+   * and it is now carrying a second contract as well as the first: the owner's
+   * fixture has it hidden, and a hidden contact column must take the contact
+   * block OFF the table with it. A lane that reappears under the name the
+   * moment somebody unticks it is a checkbox that appears to do nothing, which
+   * is defect 1 at the top of this file wearing different clothes.
    */
   const standalone = ["contactName", "email", "phone", "whatsappNumber"];
   for (const columns of [
@@ -632,12 +676,28 @@ test("SOT-3 Contact, Email, Phone and WhatsApp are standalone columns, independe
   assert.equal(frozenRegisterColumn(withEmail)?.key, "name", "and the lane is untouched by it");
 
   /*
-   * AND HIDING EMAIL CANNOT STRIP EMAIL FROM THE LANE, because the lane's
-   * contact block is a prop the page passes and not a register column at all.
-   * A source pin, because this is wiring a pure function cannot see.
+   * WHERE THE CONTACT BLOCK IS DRAWN — RE-POINTED, NOT DROPPED.
+   *
+   * The old pin was `/\{contact\?\.\(row\)\}/` against the identity lane, and
+   * it was protecting a real contract: the block is a prop the PAGE passes and
+   * is never derived from a register column, so hiding Email cannot strip the
+   * email out of it. That contract is unchanged; only its address moved. It is
+   * now drawn in the lane belonging to the contact COLUMN, so the pin follows
+   * it there — and the fallback under the name is kept and pinned too, because
+   * a register that holds no contact column at all must still say how to reach
+   * anybody.
    */
   const grid = codeOnly(await read(GRID));
-  assert.match(grid, /\{contact\?\.\(row\)\}/, "the lane renders the page's contact block");
+  assert.match(
+    grid,
+    /if \(lane\.contact\) \{[\s\S]{0,600}\{contact\?\.\(row\)\}/,
+    "the contact column's lane renders the page's contact block",
+  );
+  assert.match(
+    grid,
+    /\{contactColumn === null && contact\?\.\(row\)\}/,
+    "and the identity lane keeps it only when there is no contact column at all",
+  );
   assert.doesNotMatch(
     grid,
     /contact\?\.\(row\)[\s\S]{0,200}column\.hidden/,

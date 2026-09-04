@@ -176,6 +176,23 @@ const build = (input) =>
     ...input,
   });
 
+/**
+ * THE EXPIRY MARK ON ITS OWN.
+ *
+ * W10 added `compliance:reminder`, a second compliance source drawing the four
+ * advance warnings (90/60/30/14 days) derived from the same expiry date and
+ * stored nowhere. It is on by default, because the owner asked to be warned
+ * before a certificate lapses rather than on the day it does, so one dated
+ * certificate now produces FIVE marks on a default calendar.
+ *
+ * The assertions below that read `events[0]` or count a certificate as one
+ * event were always assertions about the EXPIRY mark. They are re-pointed at
+ * that source by name — same fixture, same claim, now unambiguous — rather than
+ * having their numbers relaxed. The reminders have their own pins in
+ * `tests/w10-compliance-reminders.test.mjs`.
+ */
+const EXPIRY_ONLY = ["compliance:expiry"];
+
 /* ── 1. The board tab's shape ─────────────────────────────────────────────── */
 
 test("the board tab's input — one board's jobs and no compliance layer — draws a job calendar", () => {
@@ -207,6 +224,7 @@ test("a missing jobs array is a compliance calendar, not a crash", () => {
   const events = build({
     requests: undefined,
     complianceRecords: [derivedCertificate({ expiry: "2026-09-02" })],
+    sourceIds: EXPIRY_ONLY,
   });
   assert.equal(events.length, 1);
   assert.equal(events[0].kind, "compliance");
@@ -587,18 +605,29 @@ test("a completion date is resolved even when it is in the future", () => {
 });
 
 test("a certificate is overdue only when the register says Expired", () => {
+  const only = (record) =>
+    build({ complianceRecords: [record], sourceIds: EXPIRY_ONLY })[0].timing;
   const expired = derivedCertificate({ state: "Expired", expiry: "2026-08-01" });
   const lapsed = derivedCertificate({ state: "Compliant", expiry: "2026-08-01" });
-  assert.equal(build({ complianceRecords: [expired] })[0].timing, "overdue");
-  assert.equal(build({ complianceRecords: [lapsed] })[0].timing, "past");
-  assert.equal(
-    build({ complianceRecords: [derivedCertificate({ expiry: TODAY })] })[0].timing,
-    "due-today",
-  );
-  assert.equal(
-    build({ complianceRecords: [derivedCertificate({ expiry: "2027-01-01" })] })[0]
-      .timing,
-    "upcoming",
+  assert.equal(only(expired), "overdue");
+  assert.equal(only(lapsed), "past");
+  assert.equal(only(derivedCertificate({ expiry: TODAY })), "due-today");
+  assert.equal(only(derivedCertificate({ expiry: "2027-01-01" })), "upcoming");
+  /*
+   * AND A REMINDER IS NEVER RED. Four more marks for the lapsed certificate,
+   * all of them behind us, and none of them "overdue" — the certificate is what
+   * is late and the calendar says so once, on the day it lapsed. Five red marks
+   * spread across the previous quarter for one certificate is the noise this
+   * rule exists to refuse.
+   */
+  const withReminders = build({
+    complianceRecords: [expired],
+    sourceIds: ["compliance:expiry", "compliance:reminder"],
+  });
+  assert.equal(withReminders.length, 5);
+  assert.deepEqual(
+    withReminders.filter((event) => event.timing === "overdue").map((e) => e.fieldLabel),
+    ["Certificate expiry"],
   );
 });
 
@@ -630,7 +659,13 @@ test("no event this product can produce carries a time", () => {
     ],
     complianceRecords: [derivedCertificate({ expiry: "2026-09-01" })],
   });
-  assert.equal(events.length, 3);
+  /*
+   * SEVEN, not three, and every one of them still timeless. Two jobs, one
+   * expiry and the four W10 reminders derived from it — a reminder is a day
+   * this product computed, and giving it a time of day would be inventing a
+   * fact about a record, which is exactly what this test exists to forbid.
+   */
+  assert.equal(events.length, 7);
   for (const event of events) assert.equal(event.time, "");
   // The parse itself still reads a decoration correctly where one reaches it.
   assert.equal(
@@ -776,7 +811,16 @@ test("a whole calendar — events, timings, grids and headings — is identical 
   // And the answers are the right ones, not merely the same wrong one.
   assert.equal(utc.today, "2026-08-24");
   assert.equal(utc.todayEarly, "2026-08-24");
-  assert.equal(utc.events.length, 47);
+  /*
+   * NINETY-ONE, not forty-seven: the eleven dated certificates in this fixture
+   * each carry four W10 reminder marks as well as their expiry. The count is
+   * asserted rather than derived so the reminder derivation cannot silently
+   * change how much it draws — and because the reminders are computed with
+   * `shiftCalendarDay`, which is the arithmetic this whole test exists to prove
+   * is timezone-independent, forty-four of the ninety-one are now new evidence
+   * for exactly that.
+   */
+  assert.equal(utc.events.length, 91);
   assert.ok(utc.events.every(([, , , time]) => time === ""));
   assert.ok(
     utc.events.some(([key, day]) => key === "job:dueAt::J-0" && day === "2025-12-31"),

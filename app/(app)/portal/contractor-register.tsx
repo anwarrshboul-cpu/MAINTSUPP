@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components";
 import { AnchoredPopover } from "./overlay/anchored";
 import { RegisterColumnsPanel } from "./register/register-columns-panel";
@@ -28,6 +28,20 @@ import {
   type RegisterColumn,
   type RegisterSnapshot,
 } from "./register/register-client";
+/*
+ * W13 — THE HEADER DRAG. The owner asked for columns to be reorderable by
+ * holding and dragging the header, not only through the menu's Move left /
+ * Move right. The gesture is next door; its arithmetic is the board's, imported
+ * rather than re-derived. Read that file's header for why it is a sibling of
+ * `board-column-drag-gesture.ts` and not a second copy of it.
+ */
+import { useRegisterColumnDrag } from "./contractor-column-drag";
+import { orderAfterHeaderDrop } from "./contractor-column-order";
+/*
+ * The drop indicator, the grab cursors and the contact lane's stack. A file of
+ * its own rather than more of `globals.css` — the reasoning is at the top of it.
+ */
+import "./contractor-register-drag.css";
 
 /**
  * W06-11 — THE CONTRACTORS REGISTER, configurable.
@@ -72,10 +86,17 @@ import {
  *
  * ── ONE FROZEN LANE, AND THE READER DECIDES WHETHER IT IS FROZEN ─────────
  *
- * THE IDENTITY LANE — who the contractor is and how to reach them — is the
- * `name` register column drawn as the row's first cell. It exists because the
- * register let an operator hide that column, and the live register did exactly
- * that, leaving rows of rates and postcodes with no name anywhere on them.
+ * THE IDENTITY LANE — who the contractor is — is the `name` register column
+ * drawn as the row's first cell. It exists because the register let an operator
+ * hide that column, and the live register did exactly that, leaving rows of
+ * rates and postcodes with no name anywhere on them.
+ *
+ * W13 SPLIT "HOW TO REACH THEM" OUT OF IT. The lane used to carry the name AND
+ * the actionable contact block; the owner asked for the first column to be the
+ * name and the SECOND to be contact details, so the block moved onto the
+ * `contactName` column — see `contactRegisterColumn` below. The lane is now the
+ * name and the archived badge, and the contact block is an ordinary column that
+ * can be moved, resized, renamed and hidden like any other.
  *
  * WHAT IS PINNED IS A COLUMN, NOT A LANE INVENTED BESIDE ONE. The pin lives in
  * `register_columns.settings` as `{"pinned": true}`, at most one per register.
@@ -96,9 +117,19 @@ import {
  *
  * UNPINNED, it is an ordinary column: no sticky, no reserved offset, no
  * shadow, and it takes its configured position among the others. The only
- * thing that survives is the identity RENDERING — the name, the archived badge
- * and the actionable phone/WhatsApp/email travel with the column wherever it
- * goes, and are drawn in exactly one place either way.
+ * thing that survives is the identity RENDERING — the name and the archived
+ * badge travel with the column wherever it goes, and are drawn in exactly one
+ * place either way. The contact block does the same with ITS column.
+ *
+ * ── AND THE ORDER IS DRAGGABLE, NOT ONLY MENU-DRIVEN ─────────────────────
+ *
+ * W13. Every header carrying a `data-column-id` — every register column that is
+ * not the frozen lane — can be picked up and dropped between the others. The
+ * gesture is `contractor-column-drag.ts`, its arithmetic is the job board's,
+ * and what a drop MEANS is `contractor-column-order.ts`. Move left / Move right
+ * in the header menu are unchanged and are still the keyboard and touch route:
+ * a drag has no keyboard equivalent, and on a phone this stops being a table at
+ * all.
  *
  * THE ACTION LANE IS GONE. It was a second frozen lane at the right carrying a
  * chevron and a pencil, permanently occupying eighty-six pixels of a table the
@@ -113,6 +144,43 @@ import {
 
 /** The contractor rows this grid draws. Native values are read off these. */
 export type RegisterEntityRow = { id: string; name: string };
+
+/**
+ * W13 — THE COLUMN THE COMPOSITE CONTACT BLOCK RIDES WITH.
+ *
+ * `contactName` is the contractor's contact PERSON, and it is the only one of
+ * the four stored channels that is a name rather than an address — so it is the
+ * column a reader means when they say "contact". `contactRegisterColumn` finds
+ * it, the grid draws the whole block there, and the other three (`email`,
+ * `phone`, `whatsappNumber`) stay available as ordinary text columns for a
+ * reader who wants one of them sortable on its own.
+ *
+ * WHY IT IS NOT A NEW COLUMN CALLED `contactDetails`. For a native column the
+ * key IS the entity field — `seedNativeColumns` writes `columnKey: seed.field`
+ * and `registerCellValue` reads `entity[column.nativeField]` — so a key with no
+ * field behind it would be a column that can only ever be blank, and
+ * `addMissingNativeColumns` would insert it into every register that has
+ * already seeded, leaving the owner with a second contact column beside the one
+ * they are already looking at. The rendering changes; the schema does not.
+ *
+ * NOTHING IS DUPLICATED. The block appears in exactly one lane per render:
+ * here when the register holds this column, and back under the name only when
+ * it holds none at all. See `gridLanes`.
+ */
+export const CONTACT_COLUMN_KEY = "contactName";
+
+/**
+ * The contact column — shown or hidden — or null when the register holds none.
+ *
+ * Matched on `nativeField` for the same reason `identityRegisterColumn` is: the
+ * reader may have dragged it anywhere and it is still the contact column. The
+ * null / hidden distinction matters to the caller; `gridLanes` says how.
+ */
+export function contactRegisterColumn(
+  columns: readonly RegisterColumn[],
+): RegisterColumn | null {
+  return columns.find((column) => column.nativeField === CONTACT_COLUMN_KEY) ?? null;
+}
 
 /**
  * A column the register does not own — and cannot.
@@ -147,9 +215,19 @@ export type ExtraColumn<Row> = {
  *
  * `frozen` is what makes a lane sticky. `column` is set for a register column
  * and `extra` for one of the page's period-scoped figures; `identity` says the
- * cell draws the name, the archived badge and the actionable contact block
- * rather than a stored value, and travels with the identity column whether it
- * is the frozen lane or an ordinary cell somewhere in the middle.
+ * cell draws the name and the archived badge rather than a stored value, and
+ * travels with the identity column whether it is the frozen lane or an ordinary
+ * cell somewhere in the middle.
+ *
+ * `contact` is the W13 half of that split. The owner asked for the first column
+ * to be the NAME and the second to be CONTACT DETAILS; until then the identity
+ * lane carried both, so "contact details" was a sub-stack of the name cell and
+ * the register's own `Contact` column beside it showed nothing but the contact
+ * person's name in plain text. The composite block — the person, the tappable
+ * telephone, the WhatsApp row and the mailto — now rides with the `contactName`
+ * COLUMN, exactly the way the identity rendering rides with `name`. So it can
+ * be moved, resized, renamed and hidden like any other column, and it is drawn
+ * in one place: a lane is `identity` or `contact`, never both.
  */
 type GridLane<Row> = {
   key: string;
@@ -158,6 +236,7 @@ type GridLane<Row> = {
   column: RegisterColumn | null;
   extra: ExtraColumn<Row> | null;
   identity: boolean;
+  contact: boolean;
 };
 
 /**
@@ -194,6 +273,21 @@ function gridLanes<Row>(
   table: readonly RegisterColumn[],
   frozen: RegisterColumn | null,
   identity: RegisterColumn | null,
+  /**
+   * The column the composite contact block rides with, or null when the
+   * register holds none at all.
+   *
+   * NULL AND HIDDEN ARE DIFFERENT ANSWERS, and this is the same distinction the
+   * identity fallback below turns on. A register that has no `contactName`
+   * column — one seeded before the catalogue described it — has nowhere to draw
+   * the block, so it goes back under the name where it used to live and a
+   * roster is never left with no way to reach anybody. A register whose contact
+   * column is HIDDEN is a reader's own decision: the block goes off the table
+   * with it, because a tick that puts the thing straight back is a tick that
+   * appears to do nothing. That exact bug is recorded two paragraphs down for
+   * the identity lane; it is not being rebuilt here.
+   */
+  contactColumn: RegisterColumn | null,
   extras: readonly ExtraColumn<Row>[],
   /*
    * EVERY COLUMN THE REGISTER HOLDS, hidden ones included — and it has to be
@@ -212,6 +306,13 @@ function gridLanes<Row>(
     column,
     extra: extraByKey.get(column.key) ?? null,
     identity: identity !== null && column.id === identity.id,
+    /*
+     * MATCHED ON THE COLUMN, NOT ON THE POSITION — the same rule the identity
+     * flag keeps. The reader may have dragged the contact column anywhere, and
+     * the composite block has to follow it there rather than staying wherever
+     * it was drawn the day this was written.
+     */
+    contact: contactColumn !== null && column.id === contactColumn.id,
   });
 
   /*
@@ -255,6 +356,7 @@ function gridLanes<Row>(
       column: null,
       extra,
       identity: false,
+      contact: false,
     });
   }
   if (identity === null) {
@@ -265,6 +367,7 @@ function gridLanes<Row>(
       column: null,
       extra: null,
       identity: true,
+      contact: false,
     });
   }
   return lanes;
@@ -660,6 +763,79 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
     };
   }, [dragWidth, run, snap]);
 
+  /* ── W13: reorder, as a pointer drag on the header itself ───────────────── */
+
+  /**
+   * The columns a drag can pick up and drop between, in the order they are
+   * drawn — the scrolling run, with the frozen lane taken out of it.
+   *
+   * COMPUTED HERE AND NOT READ OFF `lanes`, and the reason is a rule of React
+   * rather than a design choice: the two early returns below stand between this
+   * point and `lanes`, so a hook called down there would be called on some
+   * renders and not others. It is the same answer either way —
+   * `registerTableColumns` is the one function that decides what is on the
+   * table and in what order, and both readings call it — and the drawn header
+   * asserts it: only these lanes get a `data-column-id`, and that attribute is
+   * exactly what the gesture measures.
+   *
+   * THE FROZEN LANE IS NOT IN IT. It carries no id, so it cannot be picked up
+   * and nothing can be dropped to its left — which is the "fixed first column"
+   * constraint the architecture already had, kept by construction rather than
+   * by a check that could be forgotten. Dropping at index 0 means "first of the
+   * scrolling run", which is the earliest place anything may go.
+   */
+  const dragColumns = useMemo(() => {
+    if (!snap) return [] as { column: { id: string } }[];
+    const lane = frozenRegisterColumn(snap.columns);
+    return registerTableColumns(snap.columns, lane)
+      .filter((column) => !lane || column.id !== lane.id)
+      .map((column) => ({ column: { id: column.id } }));
+  }, [snap]);
+
+  /**
+   * A HEADER DROPPED IN A NEW PLACE, SENT AS THE WHOLE ORDER.
+   *
+   * The arithmetic — a gap in the DRAWN run translated into a target index in
+   * the STORED order, hidden columns and all — is in
+   * `contractor-column-order.ts`, pure and tested against numbers. Null means
+   * the reader dropped it back where it started, and nothing is written: a
+   * reorder in the audit for a gesture that changed nothing is worse than no
+   * gesture at all.
+   */
+  const dropColumn = useCallback(
+    (columnId: string, insertBefore: number) => {
+      if (!snap) return;
+      const order = orderAfterHeaderDrop(
+        snap.columns,
+        dragColumns.map((entry) => entry.column.id),
+        columnId,
+        insertBefore,
+        /*
+         * The same key the header menu's two buttons are drawn from, so what a
+         * press refuses and what a drop refuses cannot disagree. Read here
+         * rather than taken from the render below, because that value is
+         * computed past the two early returns this callback is declared above.
+         */
+        frozenRegisterColumn(snap.columns)?.key ?? null,
+      );
+      if (!order) return;
+      void run(`move:${columnId}`, () => reorderRegisterColumns("contractors", order));
+    },
+    [dragColumns, run, snap],
+  );
+
+  const headerDrag = useRegisterColumnDrag({
+    order: dragColumns,
+    /*
+     * Gated on the SERVER'S answer, not on a role name. `canConfigure` is
+     * `board.edit` as the server resolved it — the same gate the Columns button
+     * and the header menu take — so a reader who may not reorder is not offered
+     * a gesture that would be refused, and there is one answer rather than two.
+     */
+    enabled: snap?.canConfigure === true,
+    onDrop: dropColumn,
+  });
+
   if (error && !snap) {
     return (
       <section className="panel sites-panel">
@@ -712,7 +888,23 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
   const frozen = frozenRegisterColumn(snap.columns);
   const frozenKey = frozen ? frozen.key : null;
   const tableColumns = registerTableColumns(snap.columns, frozen);
-  const lanes = gridLanes(tableColumns, frozen, identityColumn, extraColumns, snap.columns);
+  /*
+   * W13 — WHERE THE CONTACT DETAILS ARE DRAWN.
+   *
+   * Asked of every column the register holds, hidden ones included, because
+   * `gridLanes` needs to tell "there is no contact column" from "the reader
+   * unticked it" and only the full list can answer that. See the parameter's
+   * own note.
+   */
+  const contactColumn = contactRegisterColumn(snap.columns);
+  const lanes = gridLanes(
+    tableColumns,
+    frozen,
+    identityColumn,
+    contactColumn,
+    extraColumns,
+    snap.columns,
+  );
 
   /** One press of Move earlier / Move later, sent as the WHOLE order. */
   function move(column: RegisterColumn, delta: number) {
@@ -979,22 +1171,71 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                   column && !lane.frozen
                     ? { width: `${widthOf(column)}px`, minWidth: `${widthOf(column)}px` }
                     : undefined;
+                /*
+                 * W13 — WHICH HEADERS THE DRAG CAN SEE.
+                 *
+                 * `data-column-id` is set on exactly the lanes that may be
+                 * carried and dropped between: a register column, not the
+                 * frozen lane. The gesture measures `th[data-column-id]` and
+                 * the CSS puts the `grab` cursor on the same selector, so what
+                 * LOOKS draggable, what IS draggable and what the drop index is
+                 * counted against are one fact rather than three that can
+                 * drift. A lane with no column — the identity fallback, or a
+                 * measurement the register has no row for — is not orderable,
+                 * so it carries none.
+                 */
+                const draggable = column !== null && !lane.frozen;
+                const dropSide =
+                  headerDrag.drag?.marker && column
+                    ? headerDrag.drag.marker.columnId === column.id
+                      ? headerDrag.drag.marker.side
+                      : null
+                    : null;
+                const headClass = [
+                  lane.frozen
+                    ? "contractor-register__lane contractor-register__lane--start"
+                    : null,
+                  headerDrag.drag && column && headerDrag.drag.columnId === column.id
+                    ? "is-register-column-dragging"
+                    : null,
+                  dropSide === "before" ? "is-register-column-drop-before" : null,
+                  dropSide === "after" ? "is-register-column-drop-after" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ");
                 return (
                   <th
                     key={lane.key}
                     scope="col"
+                    data-column-id={draggable ? column.id : undefined}
                     /*
                      * `--start` rather than `--left`, because the property that
                      * pins it is `inset-inline-start` in spirit — and because
                      * "left" would be a lie the day this product is read
                      * right-to-left.
                      */
-                    className={
-                      lane.frozen
-                        ? "contractor-register__lane contractor-register__lane--start"
+                    className={headClass || undefined}
+                    style={sized}
+                    /*
+                     * THE HANDLERS ARE ON EVERY HEADER, not only the draggable
+                     * ones. `pointermove` and `pointerup` have to fire on the
+                     * cell that CAPTURED the pointer, and a drag that started
+                     * on one header very often ends over another — but the
+                     * capture means the events keep arriving at the origin, so
+                     * these are hung uniformly and the gesture itself decides
+                     * whether a press on this particular cell begins anything.
+                     * `onPointerDown` is the one that is conditional, because a
+                     * cell with no id has nothing to carry.
+                     */
+                    onPointerDown={
+                      draggable
+                        ? (event) => headerDrag.onHeaderPointerDown(column.id, event)
                         : undefined
                     }
-                    style={sized}
+                    onPointerMove={headerDrag.onHeaderPointerMove}
+                    onPointerUp={headerDrag.onHeaderPointerUp}
+                    onPointerCancel={headerDrag.onHeaderPointerCancel}
+                    onClickCapture={headerDrag.onHeaderClickCapture}
                   >
                     {column && snap.canConfigure ? (
                       <span className="contractor-register__head">
@@ -1191,6 +1432,70 @@ export function ContractorRegister<Row extends RegisterEntityRow>({
                             )}
                             {badge?.(row)}
                           </span>
+                          {/*
+                            W13 — THE CONTACT BLOCK IS NORMALLY NOT HERE.
+
+                            It used to be the second half of this lane, which is
+                            why the register's own `Contact` column beside it
+                            showed nothing but the contact person's name and the
+                            owner asked for a real Contact Details column. It
+                            now rides with that column — see `lane.contact`.
+
+                            This is the fallback for the one case with nowhere
+                            else to put it: a register that holds no
+                            `contactName` column AT ALL, which is only true of
+                            one seeded before the catalogue described it. A
+                            HIDDEN contact column gets nothing back, because a
+                            tick that puts the thing straight onto the table
+                            again is a tick that appears to do nothing — the
+                            exact defect recorded above for this lane's own
+                            checkbox.
+                          */}
+                          {contactColumn === null && contact?.(row)}
+                        </span>
+                      </td>
+                    );
+                  }
+
+                  /*
+                    THE CONTACT DETAILS. The contact person, the tappable
+                    telephone, the WhatsApp row and the mailto, drawn by
+                    `ContractorContact` — one component, one `wa.me` rule, and
+                    the page passes it in so the profile drawer and this grid
+                    cannot grow two ideas of what a WhatsApp link is.
+
+                    IT REPLACES THE CELL'S STORED VALUE RATHER THAN JOINING IT.
+                    The stored value of this column IS the contact person, and
+                    the block prints that person on its first line — so drawing
+                    both would print the name twice on every row that has one.
+
+                    NOT EDITABLE HERE, and that is unchanged rather than lost: a
+                    native cell was never editable in this grid. `contactName`,
+                    `phone`, `whatsappNumber` and `email` belong to the
+                    contractor and are written through `PATCH /api/workspace`,
+                    where their validation and their audit line already live.
+
+                    AND IT DOES NOT CALL `registerCellValue`. There is exactly
+                    ONE reader of a cell's stored value in this component and it
+                    is the branch below; a second call here — even as a fallback
+                    for a grid mounted without the `contact` prop — would be a
+                    second place that decides where a value lives, which is the
+                    one rule this file exists to keep. `contact?.(...)` renders
+                    nothing when the prop is absent, exactly as it did while
+                    this block lived in the identity lane.
+                  */
+                  if (lane.contact) {
+                    return (
+                      <td
+                        key={lane.key}
+                        className={
+                          laneClass
+                            ? `${laneClass} contractor-register__contact`
+                            : "contractor-register__contact"
+                        }
+                        data-label={lane.title}
+                      >
+                        <span className="contractor-register__contact-stack">
                           {contact?.(row)}
                         </span>
                       </td>

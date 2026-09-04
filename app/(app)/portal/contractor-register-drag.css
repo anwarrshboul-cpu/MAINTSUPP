@@ -1,0 +1,123 @@
+/*
+ * W13 — THE CONTRACTOR REGISTER'S HEADER DRAG, as it looks.
+ *
+ * A NEW FILE RATHER THAN MORE OF `globals.css`. Everything the register already
+ * draws lives in the `.contractor-register__` block of `globals.css`, and this
+ * would naturally have gone there — but this workstream does not own that file,
+ * and a 16,000-line stylesheet is the worst place to land a change two people
+ * are editing at once. The prefix is the same, so the rules still read as one
+ * block wherever they are, and `contractor-register.tsx` imports this beside
+ * the component that needs it.
+ *
+ * THE VISUAL LANGUAGE IS THE BOARD'S, DELIBERATELY. `#0073ea` at 3px inset, a
+ * `grab` cursor on the header, `grabbing` on the body while the pointer is
+ * captured, and the carried column faded to 0.45 — every one of those is copied
+ * from `.live-sheet th.is-column-drop-before` and its neighbours in
+ * `globals.css`. A second drop indicator that looked different would be a
+ * second thing to learn for a gesture that is meant to feel like the one the
+ * reader already knows from the job board.
+ *
+ * WHY THE RULE IS `inset` AND NOT A BORDER OR A PSEUDO-ELEMENT. A border on a
+ * `<th>` changes the cell's box, and this table's widths are declared per-cell
+ * in pixels — a 3px border would push every column behind it and set off a
+ * horizontal scroll of the indicator's own making. `box-shadow: inset` paints
+ * inside the box the cell already has.
+ */
+
+/*
+ * The grab area is the whole header cell.
+ *
+ * Unlike the board's, this header's title is an ordinary in-flow `<span>`
+ * rather than an absolutely positioned overlay, so it takes the cursor with the
+ * cell and there is no hole in the middle of the target.
+ *
+ * `[data-column-id]` and not `th` — the frozen identity lane and any lane the
+ * register has no column for carry no id, and they must not offer a grab they
+ * would refuse. That is the same attribute the gesture measures against, so
+ * what LOOKS draggable and what IS draggable are the one fact.
+ */
+.contractor-register__table thead th[data-column-id] {
+  cursor: grab;
+}
+
+/*
+ * The controls that sit inside the header keep their own cursors, so the
+ * pointer says which of the three things under it is about to happen. Both are
+ * also in `DRAG_IGNORE_SELECTOR` in `contractor-column-drag.ts` — the cursor
+ * and the exclusion have to name the same children or the pointer lies.
+ */
+.contractor-register__table thead th[data-column-id] .contractor-register__resize {
+  cursor: col-resize;
+}
+
+.contractor-register__table thead th[data-column-id] .contractor-register__menu-anchor {
+  cursor: default;
+}
+
+/* The column being carried. Faded, so the table underneath stays readable. */
+.contractor-register__table th.is-register-column-dragging {
+  cursor: grabbing;
+  opacity: 0.45;
+}
+
+/* Where it would land. Drawn inside the cell so it cannot widen the table. */
+.contractor-register__table th.is-register-column-drop-before {
+  box-shadow: inset 3px 0 0 #0073ea;
+}
+
+.contractor-register__table th.is-register-column-drop-after {
+  box-shadow: inset -3px 0 0 #0073ea;
+}
+
+/*
+ * While a drag is running the whole page takes the grabbing cursor and stops
+ * selecting text. Both are on `body` because the pointer is CAPTURED by one
+ * header cell and may be anywhere on screen — including outside the table, and
+ * including over the row handler that opens a contractor.
+ */
+body.is-dragging-register-column,
+body.is-dragging-register-column .contractor-register__table th {
+  cursor: grabbing;
+}
+
+body.is-dragging-register-column {
+  user-select: none;
+}
+
+/*
+ * NOTHING IS DRAGGABLE ON A PHONE, and it is not a rule so much as an
+ * observation: `.analytics-table--mobile-cards` hides `thead` outright below
+ * 767px, so there is no header to press. The cursor rules above are stated
+ * anyway rather than wrapped in a media query — a cursor on an element with
+ * `display: none` costs nothing, and a `@media` here would be one more of this
+ * codebase's five agreed breakpoints to keep in step for no effect.
+ *
+ * The gesture itself refuses `pointerType === "touch"` for the reason written
+ * beside that check: swallowing touch would cost the horizontal scroll that is
+ * the only way a narrow screen reads a thirty-one-column table.
+ */
+
+/*
+ * THE CONTACT LANE.
+ *
+ * `.contractor-register__contact` is the cell that carries the composite
+ * contact block — the contact person, the tappable telephone, the WhatsApp row
+ * and the mailto. It is a stack of up to four lines in a table whose `td` is
+ * `white-space: nowrap`, so it opts out for exactly the reason the identity
+ * lane does: without this a long email address pushes the rows out of the cell
+ * instead of wrapping inside it.
+ *
+ * The width is NOT declared here. It is an ordinary register column now, so its
+ * width is the one stored against it and dragged by the reader — see the
+ * `sized` style in `contractor-register.tsx`. Declaring a width here as well is
+ * how a column comes to have two owners and ignore the drag.
+ */
+.contractor-register__table td.contractor-register__contact {
+  white-space: normal;
+}
+
+.contractor-register__contact-stack {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}

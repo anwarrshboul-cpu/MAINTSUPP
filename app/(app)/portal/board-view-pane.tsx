@@ -183,6 +183,10 @@ export function boardItemsAsRequests(items: BoardItem[]): MaintenanceRequest[] {
      */
     contractorId: null,
     assignee: item.assignee,
+    /* Same reasoning as `contractorId` above: `BoardItem` carries the NAME and
+       not the reference, and inventing one would be a guess. The views this
+       feeds read the name. */
+    assigneeUserId: null,
     /* `requestedAt` is the one non-null date on the request. An item with none
        gets the empty string, which `calendarDay` rejects like any other
        unparseable value — so the row simply carries no Date Requested event. */

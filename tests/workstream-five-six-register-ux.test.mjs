@@ -731,10 +731,35 @@ test("UX-1 the contact block is drawn once, in the pinned lane, and not as a scr
   const grid = await read(GRID);
   const app = await read(APP);
 
-  // The grid takes it as the identity lane's second half rather than as one of
-  // the page's period-scoped figures.
+  /*
+   * RE-POINTED FOR W13 — THE BLOCK MOVED OUT OF THE IDENTITY LANE.
+   *
+   * This asserted that the block was the identity lane's second half. The
+   * owner's review of /dashboard/contractors asked for the first column to be
+   * the name and the SECOND to be contact details, so the block now rides with
+   * the `contactName` COLUMN — which makes it reorderable, resizable,
+   * renameable and hideable like everything else on the register, and stops the
+   * register's own "Contact" column showing nothing but a person's name beside
+   * a lane that already had the numbers.
+   *
+   * WHAT THE TEST IS ABOUT IS UNCHANGED and is still asserted below: the block
+   * is a PROP the page passes, drawn in exactly ONE lane, and it is not one of
+   * the page's period-scoped figures. Both halves of "drawn once" are pinned —
+   * the contact lane draws it, and the identity lane draws it only when the
+   * register holds no contact column at all, which is a register seeded before
+   * the catalogue described one.
+   */
   assert.match(grid, /contact\?: \(row: Row\) => React\.ReactNode;/, "a prop of its own");
-  assert.match(codeOnly(grid), /\{contact\?\.\(row\)\}/, "rendered inside the identity lane");
+  assert.match(
+    codeOnly(grid),
+    /if \(lane\.contact\) \{[\s\S]{0,600}\{contact\?\.\(row\)\}/,
+    "rendered inside the contact column's lane",
+  );
+  assert.match(
+    codeOnly(grid),
+    /\{contactColumn === null && contact\?\.\(row\)\}/,
+    "and under the name only when the register has no contact column at all",
+  );
 
   /*
    * IT WAS AN `extraColumn` TITLED "Reach them". As an extra it was drawn after
@@ -807,29 +832,39 @@ test("UX-8 the contractor catalogue's default view is the operational one, not a
   );
 
   /*
-   * ONE STORED FIELD on by default, and it is `availability`. The six figures
-   * — assigned, completed, completion rate, open urgent, documents, spend —
-   * are now catalogue columns too, so that they can be reordered and hidden
+   * TWO STORED FIELDS on by default, and this is the W13 change. The six
+   * figures — assigned, completed, completion rate, open urgent, documents,
+   * spend — are catalogue columns too, so that they can be reordered and hidden
    * like anything else, but they are computed rather than stored and are
-   * counted separately above. The grid draws identity and contact in a frozen
-   * lane, so the default view is seven lanes wide before a stored field is on
-   * it. `availability` is the field that decides who gets rung next, so it
-   * earns the eighth.
+   * counted separately above.
+   *
+   * `contactName` JOINED `availability`, and it is not a loosening of the "an
+   * operational screen has room for about six" rule this test protects. The
+   * owner's review asked for the register's second column to be Contact
+   * Details, so the actionable contact block moved out of the identity lane and
+   * onto that column. It is therefore no longer merely the contact PERSON's
+   * name as sortable text — it is the only place a telephone number appears on
+   * the register — and seeding it hidden would seed a roster nobody can be rung
+   * from. The other three contact fields (`email`, `phone`, `whatsappNumber`)
+   * are unchanged and still seed hidden, because they remain exactly what this
+   * rule was written about: the sortable-text form of facts the block shows.
+   *
+   * `availability` is unchanged too: the field that decides who gets rung next.
    */
   const visible = seeds.filter((seed) => !seed.hidden).map((seed) => seed.field);
   /*
    * RE-POINTED alongside the count above. The six measurements seed VISIBLE
-   * because they are the default operational view the owner asked for — the
-   * register reads Reach them, Assigned, Completed, Completion rate, Open
-   * urgent, Documents, Spend — and they are listed here in catalogue order so a
-   * silent reordering of the default view fails this test rather than shipping.
-   * The contract is unchanged: exactly ONE stored field is on by default, and
-   * it is still `availability`.
+   * because they are the default operational view the owner asked for, and the
+   * list is in catalogue ORDER so a silent reordering of the default view fails
+   * this test rather than shipping. `contactName` sits second here for that
+   * reason and not incidentally — "first the name, then how to reach them" is
+   * the arrangement that was asked for, and this is what pins it.
    */
   assert.deepEqual(
     visible,
     [
       "name",
+      "contactName",
       "assigned",
       "completed",
       "completion",
@@ -838,12 +873,20 @@ test("UX-8 the contractor catalogue's default view is the operational one, not a
       "spend",
       "availability",
     ],
-    "the default view is the identity lane, the six figures, and availability",
+    "the default view is the identity lane, contact details, the six figures, and availability",
   );
+  /*
+   * RE-POINTED: "exactly one stored field" became "exactly two, and they are
+   * these two". The rule this protects is that the default view stays an
+   * OPERATIONAL screen and not all twenty-five fields — the owner hid
+   * twenty-five of them by hand once and must not be made to do it again — and
+   * naming both survivors keeps a third from being added quietly. Which two
+   * they are, and why, is written above.
+   */
   assert.deepEqual(
     visible.filter((field) => !["name", "assigned", "completed", "completion", "urgent", "documents", "spend"].includes(field)),
-    ["availability"],
-    "exactly one STORED field seeds onto the scrolling table",
+    ["contactName", "availability"],
+    "exactly two STORED fields seed onto the scrolling table, and these are they",
   );
 
   /*

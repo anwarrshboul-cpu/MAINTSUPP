@@ -218,9 +218,21 @@ test("GEO-15/16 unticking a measurement takes it OFF the table, it does not move
     /const tableColumns = registerTableColumns\(snap\.columns, frozen\);/,
     "the run is derived once, by the shared rule",
   );
+  /*
+   * RE-POINTED FOR W13, AND THE CONTRACT IS UNCHANGED. `gridLanes` gained a
+   * fifth thing to be told — `contactColumn`, the column the actionable contact
+   * block now rides with, after the owner asked for the second column of the
+   * register to be Contact Details — so the call is on several lines and one
+   * argument longer. What this assertion has always been about is still exactly
+   * what it checks: `tableColumns` (the run to draw) and `snap.columns` (the
+   * FULL set, hidden columns included) are both handed over, so the measurement
+   * fallback can still tell "no row for this key" from "not on the table".
+   * Written as a shape rather than a literal so a reformat does not fail it,
+   * and both arguments are still named.
+   */
   assert.match(
     code,
-    /const lanes = gridLanes\(tableColumns, frozen, identityColumn, extraColumns, snap\.columns\);/,
+    /const lanes = gridLanes\(\s*tableColumns,\s*frozen,\s*identityColumn,\s*contactColumn,\s*extraColumns,\s*snap\.columns,?\s*\);/,
     "and the full column set is still what is handed to it beside that run",
   );
 });

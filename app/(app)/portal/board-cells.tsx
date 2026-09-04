@@ -45,6 +45,13 @@ import {
   MobileCellSheet,
   useRevealBoardPopover,
 } from "./board-primitives";
+/* The Timeline strip and the duration card it shows on hover or focus. In its
+   own file because this one is at its enforced ceiling, and because a hover
+   surface has reasoning of its own. */
+import {
+  TimelineDurationLine,
+  TimelineRangeButton,
+} from "./timeline-tooltip";
 export function ItemNameEditor({
   value,
   onSave,
@@ -1155,9 +1162,15 @@ export function TimelineCell({
 
   return (
     <div className="sheet-timeline" ref={ref}>
-      <button
-        type="button"
-        onClick={() => {
+      {/* The strip, plus the duration it never stated. `TimelineRangeButton`
+          owns the hover/focus card so this file keeps no positioning of its
+          own — see timeline-tooltip.tsx. */}
+      <TimelineRangeButton
+        label={label}
+        title={title}
+        start={start}
+        end={end}
+        onOpenEditor={() => {
           const nextStart = dateInputValue(start);
           const nextEnd = dateInputValue(end);
           setDraftStart(nextStart);
@@ -1166,9 +1179,7 @@ export function TimelineCell({
           setError(null);
           setOpen((current) => !current);
         }}
-      >
-        <span>{label}</span>
-      </button>
+      />
       {open && !mobile && (
         <div className="sheet-timeline-popover">
           <strong>Set timeline</strong>
@@ -1214,6 +1225,11 @@ export function TimelineCell({
             </button>
           }
         >
+          {/* No hover on a phone, so the duration is stated outright rather
+              than hidden behind a gesture the device does not have. Reads the
+              SAVED dates, not the draft: it describes the timeline as it
+              stands, which is what the reader opened the sheet knowing. */}
+          <TimelineDurationLine start={start} end={end} />
           <div className="mobile-timeline-calendar">
             <button
               className="mobile-timeline-calendar__clear"

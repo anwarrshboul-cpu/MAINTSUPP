@@ -1001,14 +1001,25 @@ function FixTrackerDetail({
       const response = await fetch("/api/maintenance", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: item.id, note }),
+        /*
+         * `noteFrom: "contractor"` is what puts this on the MAIN TABLE — owner
+         * Part 7. Without it the comment reaches the drawer's Updates tab and
+         * the row's comment count and nothing a coordinator can read from the
+         * board, which is where they are looking.
+         *
+         * An opt-in flag rather than something the server infers, because an
+         * ordinary note typed in the job drawer must NOT be filed as something
+         * a contractor said. THIS panel is the contractor workflow; that one is
+         * not. See app/lib/contractor-comments.ts.
+         */
+        body: JSON.stringify({ id: item.id, note, noteFrom: "contractor" }),
       });
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "The comment could not be saved.");
       }
       setComment("");
-      setNotice("Comment added.");
+      setNotice("Comment added to Contractor Comments.");
       announceChange(onChanged);
     } catch (error) {
       setNotice(

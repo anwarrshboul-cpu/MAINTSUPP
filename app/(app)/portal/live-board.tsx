@@ -79,6 +79,17 @@ import {
   storeTypeFilterColumn,
 } from "./board-model";
 import { boardColumnOptions, boardDisplayColumns } from "./board-columns";
+/*
+ * The Assigned To cell is a PERSON PICKER, not an option cell.
+ *
+ * It lives in its own file because `board-cells.tsx` is at its enforced ceiling
+ * and because the roster it reads is a network resource with a cache, which is
+ * not what the rest of that file is. `assigneeOptions` below is untouched and
+ * still feeds the FILTER — filtering by a name only makes sense for names the
+ * board already holds, which is exactly why deriving the EDITOR's list the same
+ * way left an empty estate with nobody to assign to.
+ */
+import { AssigneeCell } from "./assignee-cell";
 import {
   boardItemName,
   moveBoardItemPlacement,
@@ -5092,14 +5103,13 @@ function BoardRow({
       case "assignee":
         return (
           <td {...shared}>
-            <OptionCell
+            {/* Both columns move together — the server derives the name from
+                the id, so the pair cannot drift. See assignee-cell.tsx. */}
+            <AssigneeCell
               title={column.title}
-              mobileKind="people"
-              value={request.assignee ?? ""}
-              options={assigneeOptions}
-              onChange={(assignee) =>
-                onSave({ assignee: assignee || null })
-              }
+              assignee={request.assignee ?? ""}
+              assigneeUserId={request.assigneeUserId ?? null}
+              onChange={(change) => onSave(change)}
             />
           </td>
         );

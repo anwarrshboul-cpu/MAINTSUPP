@@ -52,6 +52,10 @@ import {
   optionValues,
 } from "../../../db/schema";
 import { invalidateOptionCache } from "../../lib/options-repository";
+import {
+  CONTRACTOR_COMMENTS_KEY,
+  ensureContractorCommentsColumn,
+} from "../../lib/contractor-comments";
 import { auditActor, changeDetail, recordAudit } from "../../lib/audit";
 import { summariesFor } from "../../lib/column-types";
 import { exposeRequest } from "../../lib/request-payload";
@@ -993,6 +997,28 @@ async function ensureBoardState(
    * are already there.
    */
   const existingColumnKeys = new Set(existingColumns.map((column) => column.key));
+
+  /*
+   * "CONTRACTOR COMMENTS" — owner Part 7, and the one column here that is
+   * deliberately NOT a system column.
+   *
+   * A system column is a field on `maintenance_requests` that the board draws,
+   * and `update_cell` refuses to write one for exactly that reason. This holds
+   * a running log written by an external party, has no field behind it, and
+   * therefore lives in `maintenance_board_cells` like every other workspace
+   * column. `app/lib/contractor-comments.ts` explains why that is the right
+   * home rather than `completion_note`.
+   *
+   * Seeded here so the column is on the Main Table before the first comment
+   * arrives — a mapping nobody can see until it is used is a mapping nobody
+   * trusts. Guarded by the same key set as the loop below, so a board that
+   * already has it (or has BINNED it — a deleted column keeps its key) pays one
+   * `Set.has` and nothing else.
+   */
+  if (!existingColumnKeys.has(CONTRACTOR_COMMENTS_KEY)) {
+    await ensureContractorCommentsColumn(db, orgId, boardId);
+  }
+
   const missingSystemColumns = systemBoardColumns.filter(
     (column) => !existingColumnKeys.has(column.key),
   );

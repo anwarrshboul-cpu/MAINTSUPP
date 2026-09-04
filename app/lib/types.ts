@@ -327,6 +327,24 @@ export interface MaintenanceRequest {
    */
   contractorId: string | null;
   assignee: string | null;
+  /*
+   * The person beside the name, and the reason a renamed colleague keeps their
+   * jobs.
+   *
+   * Exactly the `contractor` / `contractorId` pair above, for the same reason.
+   * `assignee` is the display name — the historical record of who a job was
+   * given to, and what every export, filter and imported row already holds.
+   * This is the stable `users.id` behind it, so the board can offer the real
+   * workspace roster instead of the names that happen to be on the rows
+   * already (which on a fresh estate is nobody at all — the defect this closes).
+   *
+   * The server DERIVES the name from the id whenever the id is part of a write
+   * (`PATCH /api/maintenance`), so the two cannot disagree; and writing the name
+   * alone CLEARS the id, so a job can never be counted against somebody it no
+   * longer names. Null is unassigned, and null is also an old row whose name was
+   * never matched to an account — see `resolveAssignee` in assignee-cell.tsx.
+   */
+  assigneeUserId: string | null;
   requestedAt: string;
   dueAt: string | null;
   completedAt: string | null;

@@ -324,10 +324,20 @@ test("REN-F a hidden Contractor leaves no frozen spacer, width or offset behind"
     2,
     "the lane class is written exactly twice: once for the header, once for the cell",
   );
+  /*
+   * RE-POINTED FOR W13, AND ONLY THE ELSE-BRANCH MOVED. This read
+   * `: undefined` on both, because both were a bare ternary handed straight to
+   * `className`. The header now composes its class from a list — the lane
+   * class, the "being carried" class and the two drop-indicator classes — so
+   * its else-branch is a `null` that `.filter(Boolean)` drops. The CONDITION is
+   * what this pin is about and it is unchanged: the sticky class is applied
+   * only while `lane.frozen`, never applied and then overridden, so there is
+   * still no stale offset or width to unset.
+   */
   assert.equal(
     (
       grid.match(
-        /lane\.frozen\s*\?\s*"contractor-register__lane contractor-register__lane--start"\s*:\s*undefined/g,
+        /lane\.frozen\s*\?\s*"contractor-register__lane contractor-register__lane--start"\s*:\s*(?:undefined|null)/g,
       ) ?? []
     ).length,
     2,

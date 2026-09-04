@@ -10,6 +10,7 @@ import {
   sites,
 } from "../../../../db/schema";
 import { boardKeyForRequest } from "../../../lib/board-registry";
+import { recordContractorComment } from "../../../lib/contractor-comments";
 import {
   contractorSafeJob,
   recordTokenUse,
@@ -128,13 +129,19 @@ async function fileEvidenceOntoBoard(
 /**
  * Records a contractor's comment where the app already reads comments from.
  *
- * Three writes, because the app reads a comment from three places and a
- * comment that lands in only one of them is a comment nobody sees:
+ * FOUR writes, because the app reads a comment from four places and a comment
+ * that lands in only one of them is a comment nobody sees:
  *
  *  · `item_updates` is the comment table, and the durable record.
  *  · `activity_log` with `request.note_added` is what the job drawer's
  *    Updates tab actually renders — it reads activity, not `item_updates`.
  *  · `maintenance_requests.comment_count` is the bubble on the board row.
+ *  · the Main Table's "Contractor Comments" column — owner Part 7. The three
+ *    above are all things a coordinator has to OPEN something to read; the
+ *    board itself showed a number and no words. See
+ *    `app/lib/contractor-comments.ts` for why that column is a board cell
+ *    rather than a field, and for why appending cannot lose an earlier
+ *    comment.
  *
  * Written here rather than by calling `/api/maintenance` because that route
  * needs a session and this caller has none by design.
@@ -181,6 +188,21 @@ async function recordComment(
         eq(maintenanceRequests.organisationId, scope.organisationId),
       ),
     );
+
+  /*
+   * And onto the board, where a coordinator will actually see it.
+   *
+   * Scoped to the token's own job and organisation, like every other statement
+   * in this function — this route never reads a job id from a request body, and
+   * that is what the counters test asserts by enumerating the WHEREs in it.
+   *
+   * It appends, so a contractor who comments twice has two comments; and it is
+   * best-effort, because the three writes above have already saved the words.
+   */
+  await recordContractorComment(db, scope.organisationId, scope.requestId, {
+    body,
+    author,
+  });
 }
 
 /**

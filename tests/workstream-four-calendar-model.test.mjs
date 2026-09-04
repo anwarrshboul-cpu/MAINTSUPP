@@ -155,6 +155,26 @@ const build = (input) =>
     ...input,
   });
 
+/**
+ * THE EXPIRY MARK ON ITS OWN — and why several tests below now name it.
+ *
+ * W10 added a second compliance source, `compliance:reminder`, which draws the
+ * four advance warnings (90/60/30/14 days) derived from the same expiry. It is
+ * on by default, because the owner asked to be warned in advance rather than on
+ * the day, so ONE dated certificate now produces FIVE marks on a default
+ * calendar.
+ *
+ * Every test that had written `build({ complianceRecords: [one] })` and then
+ * read `events[0]` or asserted `events.length === 1` was, without ever saying
+ * so, asserting something about the EXPIRY mark. The pins are re-pointed at
+ * that source by name rather than loosened: each one still asserts exactly what
+ * it always did — the timing rule, the sort order, the facet semantics, the
+ * write target — and now says which mark it is asserting it about. The
+ * reminders get pins of their own in
+ * `tests/w10-compliance-reminders.test.mjs`.
+ */
+const EXPIRY_ONLY = ["compliance:expiry"];
+
 /* ── 1. A day is a day, in every timezone ────────────────────────────────── */
 
 test("a UTC-midnight instant is the day it says, not the day before", () => {
@@ -415,20 +435,24 @@ test("a completion date is a record of the past and can never be overdue", () =>
 test("a certificate is overdue when the register says Expired, and past otherwise", () => {
   const expired = build({
     complianceRecords: [compliance({ state: "Expired", expiry: "2026-06-01" })],
+    sourceIds: EXPIRY_ONLY,
   });
   assert.equal(expired[0].timing, "overdue");
 
   const lapsedButNotFlagged = build({
     complianceRecords: [compliance({ state: "Compliant", expiry: "2026-06-01" })],
+    sourceIds: EXPIRY_ONLY,
   });
   assert.equal(lapsedButNotFlagged[0].timing, "past");
 
   assert.equal(
-    build({ complianceRecords: [compliance({ expiry: TODAY })] })[0].timing,
+    build({ complianceRecords: [compliance({ expiry: TODAY })], sourceIds: EXPIRY_ONLY })[0]
+      .timing,
     "due-today",
   );
   assert.equal(
-    build({ complianceRecords: [compliance({ expiry: "2026-12-01" })] })[0].timing,
+    build({ complianceRecords: [compliance({ expiry: "2026-12-01" })], sourceIds: EXPIRY_ONLY })[0]
+      .timing,
     "upcoming",
   );
 });
@@ -458,7 +482,18 @@ test("a requirement that does not apply to a store puts nothing on the calendar"
 
 /* ── 5. Sources ──────────────────────────────────────────────────────────── */
 
-test("five sources, two of them on by default", () => {
+test("six sources, three of them on by default", () => {
+  /*
+   * RE-POINTED, NOT RELAXED. This was five and two. W10 added
+   * `compliance:reminder` — the four advance warnings, derived from the same
+   * expiry and stored nowhere — because the owner asked for a certificate to
+   * appear 90, 60, 30 and 14 days before it lapses as well as on the day.
+   *
+   * It is on by DEFAULT and that is the substance of the requirement rather
+   * than a convenience: a warning nobody switched on is a warning nobody gets.
+   * The list is still exhaustive and still in picker order, so a sixth source
+   * appearing without a decision still fails here.
+   */
   assert.deepEqual(
     calendar.CALENDAR_DATE_SOURCES.map((source) => source.id),
     [
@@ -467,11 +502,12 @@ test("five sources, two of them on by default", () => {
       "job:completedAt",
       "job:nextUpdateAt",
       "compliance:expiry",
+      "compliance:reminder",
     ],
   );
   assert.deepEqual(
     [...calendar.DEFAULT_CALENDAR_SOURCE_IDS],
-    ["job:dueAt", "compliance:expiry"],
+    ["job:dueAt", "compliance:expiry", "compliance:reminder"],
   );
   assert.equal(calendar.calendarDateSource("job:dueAt").label, "Due Date");
   assert.equal(
@@ -510,6 +546,7 @@ test("events are sorted by day, then jobs before certificates, then title", () =
   const events = build({
     requests: [job({ title: "Zebra", dueAt: TODAY }), job({ title: "Apple", dueAt: TODAY })],
     complianceRecords: [compliance({ kind: "PAT Test", expiry: TODAY })],
+    sourceIds: [...calendar.DEFAULT_CALENDAR_SOURCE_IDS.filter((id) => id !== "compliance:reminder")],
   });
   /* "renewal" on the certificate title: the date on a certificate is the day it
      stops being valid, and the work it implies is booking the renewal. */
@@ -529,6 +566,7 @@ test("an empty facet constrains nothing", () => {
   const events = build({
     requests: [job({ dueAt: TODAY })],
     complianceRecords: [compliance({ expiry: TODAY })],
+    sourceIds: ["job:dueAt", ...EXPIRY_ONLY],
   });
   assert.equal(events.length, 2);
   assert.equal(calendar.calendarFilterCount(calendar.EMPTY_CALENDAR_FILTERS), 0);
@@ -560,14 +598,18 @@ test("a job facet narrows jobs and leaves certificates alone", () => {
     requests: [job({ dueAt: TODAY, priority: "Medium" })],
     complianceRecords: [compliance({ expiry: TODAY })],
     filters,
+    sourceIds: ["job:dueAt", ...EXPIRY_ONLY],
   });
   assert.deepEqual(events.map((event) => event.kind), ["compliance"]);
 
-  // And the mirror: a compliance facet must not empty the job layer.
+  // And the mirror: a compliance facet must not empty the job layer. The
+  // reminders obey the same facet, so this narrows to the expiry mark and
+  // `w10-compliance-reminders.test.mjs` pins that they do.
   const mirrored = build({
     requests: [job({ dueAt: TODAY })],
     complianceRecords: [compliance({ expiry: TODAY, kind: "PAT Test" })],
     filters: { ...calendar.EMPTY_CALENDAR_FILTERS, complianceTypes: ["Sprinkler"] },
+    sourceIds: ["job:dueAt", ...EXPIRY_ONLY],
   });
   assert.deepEqual(mirrored.map((event) => event.kind), ["job"]);
 });
@@ -671,8 +713,21 @@ test("job type is the board's own category, never inferred from the words", () =
 
 /* ── 7. Where an edit goes ───────────────────────────────────────────────── */
 
+/**
+ * The single event a fixture is expected to produce, and there must be exactly
+ * one.
+ *
+ * `sourceIds` DEFAULTS TO THE EXPIRY MARK for the compliance cases below.
+ * Every one of them names one record and asks where its date is written, which
+ * has only ever been a question about the expiry: the four advance warnings
+ * W10 derives from it carry no column of their own and `calendarWriteTarget`
+ * refuses them by design. Leaving this on the default source set would have
+ * turned "exactly one" into "exactly five" and the pin would have been read as
+ * broken rather than as re-pointed. The job cases pass their own source and are
+ * untouched.
+ */
 const onlyEvent = (input) => {
-  const events = build(input);
+  const events = build({ sourceIds: EXPIRY_ONLY, ...input });
   assert.equal(events.length, 1);
   return events[0];
 };
