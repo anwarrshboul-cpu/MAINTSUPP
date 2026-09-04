@@ -27,7 +27,7 @@
  * invited somebody can pick them up without a reload.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 export type WorkspaceMember = {
   id: string;
@@ -51,11 +51,25 @@ const EMPTY: AssigneeDirectory = { members: [], loading: false, error: null };
 
 let cached: AssigneeDirectory = EMPTY;
 let inflight: Promise<void> | null = null;
-const listeners = new Set<(value: AssigneeDirectory) => void>();
+/*
+ * Argument-free, because `useSyncExternalStore` subscribes with a bare
+ * "something changed" callback and reads the value itself. Passing the value to
+ * the listener would give React a second source for it, which is exactly the
+ * duplication that store contract exists to remove.
+ */
+const listeners = new Set<() => void>();
 
 function publish(next: AssigneeDirectory) {
   cached = next;
-  for (const listener of listeners) listener(next);
+  for (const listener of listeners) listener();
+}
+
+/** The store's subscribe half. Returns its own unsubscribe, as React requires. */
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 /**
@@ -140,15 +154,29 @@ export function invalidateAssigneeDirectory() {
  * cache rather than the network.
  */
 export function useAssigneeDirectory(enabled: boolean): AssigneeDirectory {
-  const [state, setState] = useState<AssigneeDirectory>(cached);
-
-  useEffect(() => {
-    listeners.add(setState);
-    setState(cached);
-    return () => {
-      listeners.delete(setState);
-    };
-  }, []);
+  /*
+   * READ THROUGH THE STORE, NOT COPIED INTO STATE BY AN EFFECT.
+   *
+   * This was `useState(cached)` plus an effect that re-ran `setState(cached)`
+   * on mount to catch a publish that landed between render and subscribe. That
+   * is a synchronous setState inside an effect — a cascading render on every
+   * mount of every picker on the board, and what `react-hooks/set-state-in-effect`
+   * was reporting.
+   *
+   * `useSyncExternalStore` closes the same gap without the extra render: React
+   * re-reads the snapshot itself after subscribing, so a publish that lands in
+   * that window is picked up by contract rather than by a second write. It is
+   * the pattern `useStoredPeriod` in period-picker.tsx already uses here, for
+   * the same reason.
+   *
+   * `cached` is a module-level value that `publish` REPLACES rather than
+   * mutates, so the snapshot is referentially stable between publishes — which
+   * is the one thing this hook must guarantee or React will loop.
+   *
+   * The server snapshot is EMPTY: a roster is a client fetch and there is
+   * nothing truthful to render for it during SSR.
+   */
+  const state = useSyncExternalStore(subscribe, () => cached, () => EMPTY);
 
   useEffect(() => {
     if (!enabled) return;

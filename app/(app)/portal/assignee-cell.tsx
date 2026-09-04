@@ -109,7 +109,7 @@ export function AssigneeCell({
   const mobile = useContext(MobileBoardContext);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [active, setActive] = useState(0);
+  const [activeOverride, setActiveOverride] = useState<number | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const { members, loading, error } = useAssigneeDirectory(open);
@@ -132,21 +132,33 @@ export function AssigneeCell({
     [visible],
   );
 
-  // Reopening starts clean, and the highlight starts on the current assignee so
-  // Enter with no typing is a no-op rather than a silent un-assignment.
-  useEffect(() => {
-    if (!open) return;
-    setSearch("");
-    setActive(0);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const index = person ? rows.findIndex((row) => row?.id === person.id) : 0;
-    setActive(index === -1 ? 0 : index);
-    // Only when the roster or the person changes — typing moves the highlight
-    // itself, and re-running on every keystroke would fight the arrow keys.
-  }, [open, person, rows.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  /*
+   * THE HIGHLIGHTED ROW IS DERIVED, not stored and then corrected.
+   *
+   * This was two effects: one resetting the search and the highlight when the
+   * picker opened, and one moving the highlight onto the current assignee.
+   * Both wrote state synchronously inside an effect, which is a cascading
+   * render on every open of every picker on the board — `react-hooks/
+   * set-state-in-effect` was reporting exactly that, and the second effect
+   * needed an exhaustive-deps suppression to stop it fighting the arrow keys.
+   *
+   * The default IS the current assignee's row, computed from the same `rows`
+   * the list renders, so it needs no correction after the roster arrives late:
+   * `person` resolves, `defaultActive` recomputes, and the highlight is simply
+   * in the right place on the next render. Enter with no typing therefore
+   * re-picks whoever is already assigned rather than silently un-assigning.
+   *
+   * `activeOverride` is what the reader has done since — arrow keys, Home/End,
+   * hover, or typing. Null means "follow the assignee", and every path that
+   * should forget a manual choice sets it back to null in its own handler,
+   * where a state write belongs.
+   */
+  const defaultActive = useMemo(() => {
+    if (!person) return 0;
+    const index = rows.findIndex((row) => row?.id === person.id);
+    return index === -1 ? 0 : index;
+  }, [person, rows]);
+  const active = activeOverride ?? defaultActive;
 
   const commit = (member: WorkspaceMember | null) => {
     setOpen(false);
@@ -169,23 +181,19 @@ export function AssigneeCell({
   const onSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      setActive((current) => {
-        const step = event.key === "ArrowDown" ? 1 : -1;
-        const next = current + step;
-        if (next < 0) return rows.length - 1;
-        if (next >= rows.length) return 0;
-        return next;
-      });
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const next = active + step;
+      setActiveOverride(next < 0 ? rows.length - 1 : next >= rows.length ? 0 : next);
       return;
     }
     if (event.key === "Home") {
       event.preventDefault();
-      setActive(0);
+      setActiveOverride(0);
       return;
     }
     if (event.key === "End") {
       event.preventDefault();
-      setActive(rows.length - 1);
+      setActiveOverride(rows.length - 1);
       return;
     }
     if (event.key === "Enter") {
@@ -209,7 +217,7 @@ export function AssigneeCell({
       aria-selected={member ? person?.id === member.id : !person && !assignee}
       data-active={index === active ? "true" : undefined}
       className={`assignee-option${index === active ? " is-active" : ""}`}
-      onMouseEnter={() => setActive(index)}
+      onMouseEnter={() => setActiveOverride(index)}
       onClick={() => commit(member)}
     >
       {member ? (
@@ -244,7 +252,8 @@ export function AssigneeCell({
           aria-label={`Search people to assign to ${title}`}
           onChange={(event) => {
             setSearch(event.target.value);
-            setActive(0);
+            // Typing is a manual move: the first match leads, not the assignee.
+            setActiveOverride(0);
           }}
           onKeyDown={onSearchKeyDown}
         />
@@ -281,7 +290,19 @@ export function AssigneeCell({
         aria-haspopup="listbox"
         aria-expanded={open}
         title={person ? `${person.name}${person.email ? ` · ${person.email}` : ""}` : assignee || "Unassigned"}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+            /*
+             * Opening starts clean. Done here rather than in an effect on
+             * `open` — resetting in the gesture that causes it is one render,
+             * and an effect was two.
+             */
+            const next = !open;
+            setOpen(next);
+            if (next) {
+              setSearch("");
+              setActiveOverride(null);
+            }
+          }}
       >
         {person ? (
           <>

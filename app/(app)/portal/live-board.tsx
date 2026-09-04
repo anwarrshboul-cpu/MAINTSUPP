@@ -149,6 +149,7 @@ import {
   systemOptionOrders as buildOptionOrders,
   tierDigits,
 } from "./board-sort";
+import { tierCellValue } from "./board-tier";
 import {
   EMPTY_FILTER,
   type BoardFilterState,
@@ -199,28 +200,6 @@ function boardUrl(path: string, boardId: string) {
 
 /** The anchor a group the memo never saw gets: nothing to measure against. */
 const DETACHED_ANCHOR = createRef<HTMLButtonElement>();
-
-/*
- * TIER OPTIONS STORE MONDAY'S LABELS; THE FIELD STORES THE NUMBER.
- *
- * `maintenance_requests.tier` has been the bare number 1–4 since Stage 1 — the
- * SLA rules key on it — while the option registry (and the monday spec it is
- * seeded from) stores "Tier 1"–"Tier 4" as the option VALUES. Left unmapped,
- * that mismatch broke every tier surface at once: the cell drew the raw digit
- * in an anonymous grey chip, picking "Tier 3" saved `Number("Tier 3")` — NaN —
- * sorting by Tier ranked every row identically, and a Tier filter matched
- * nothing. The two helpers below are the one bridge, used by the cell, the
- * sort's option order and the filter's choices, so the number and the label
- * can never disagree again.
- */
-
-/** The option value the tier cell should light up — "3" resolved to "Tier 3". */
-function tierCellValue(tier: string, options: Option[]): string {
-  if (options.some((option) => option.value === tier)) return tier;
-  return (
-    options.find((option) => tierDigits(option.value) === tier)?.value ?? tier
-  );
-}
 
 export function LiveMaintenanceBoard({
   boardId = "maintenance",
