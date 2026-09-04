@@ -152,6 +152,8 @@ import {
 } from "./board-filter";
 import {
   stickyColumnOffsets,
+  pinnedColumnClass,
+  pinnedColumnStyle,
   stickyZIndex,
   type StickyColumn,
 } from "./board-pinning";
@@ -3866,7 +3868,24 @@ export function LiveMaintenanceBoard({
         <div
           className="live-board-scroll"
           tabIndex={0}
-          aria-label="Maintenance board"
+          /*
+           * A ROLE, BECAUSE A BARE `div` MAY NOT CARRY A LABEL.
+           *
+           * `aria-label` on an element whose implicit role is `generic` is
+           * prohibited, and axe reports it serious — the label is simply
+           * dropped, so a keyboard user tabbing into this scroller was told
+           * nothing at all. `region` is what it is: a labelled, focusable area
+           * holding the grid.
+           *
+           * The label follows the BOARD rather than saying "Maintenance board"
+           * on every one of them. That string was written when there were two
+           * boards and one of them was maintenance; a section's own register
+           * announced itself as somebody else's board, which is the same
+           * substitution in the accessibility tree that W02-06 removed from the
+           * data.
+           */
+          role="region"
+          aria-label={`${identity.heading} board`}
           // The grid stays mounted and measurable; a phone showing cards simply
           // does not draw it. `hidden` rather than unmounting keeps column
           // widths, scroll position and the drag machinery intact for the
@@ -4818,30 +4837,10 @@ function BoardRow({
   const moreRef = useRef<HTMLButtonElement | null>(null);
   // Move column: 38 groups x 744 rows = 28,272 <option>s. Build them on focus.
   const [moveListOpen, setMoveListOpen] = useState(false);
-  const columnStyle = (column: MaintenanceBoardColumn): CSSProperties => {
-    const width = displayedBoardColumnWidth(column, mobile);
-    const style: CSSProperties = {
-      width,
-      minWidth: width,
-      maxWidth: width,
-    };
-    /*
-     * A frozen column's left offset is the running width of everything frozen
-     * ahead of it, which is data rather than a stylesheet constant — see
-     * board-pinning.ts. The stylesheet still owns the Items column's own sticky
-     * rules; this only supplies the number, and only where one applies.
-     */
-    const sticky = stickyOffsets.get(column.id);
-    if (sticky) {
-      style.left = sticky.left;
-      style.zIndex = stickyZIndex(sticky.order, false);
-    }
-    return style;
-  };
-
-  /** Marks a cell whose column is pinned, so the stylesheet can make it opaque. */
-  const pinnedClass = (column: MaintenanceBoardColumn) =>
-    column.pinned === true ? " is-pinned-column" : "";
+  /* Both live in board-pinning.ts, which owns the sticky offsets they read. */
+  const columnStyle = (column: MaintenanceBoardColumn) =>
+    pinnedColumnStyle(column, mobile, stickyOffsets);
+  const pinnedClass = pinnedColumnClass;
   const systemCell = (
     key: ColumnKey,
     column: MaintenanceBoardColumn,

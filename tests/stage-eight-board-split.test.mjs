@@ -119,6 +119,17 @@ test("no board file exceeds a reviewable size", async () => {
      * without anyone noticing.
      */
     "app/(app)/portal/board-sort.ts": 450,
+    /*
+     * Grown when the column style and the pinned-cell class followed the sticky
+     * offsets they read out of live-board — the extraction that bought the room
+     * to give the board's scroll region a role and its own name, live-board
+     * having been fifteen lines over the 5,600 guard in
+     * `tests/workstream-seven-official-document-ui.test.mjs`.
+     *
+     * Capped for the reason the notes above give: a file that absorbs another's
+     * overflow is the easiest place for the next thing to be dropped quietly.
+     */
+    "app/(app)/portal/board-pinning.ts": 250,
   };
   for (const [file, limit] of Object.entries(limits)) {
     const source = await read(file);

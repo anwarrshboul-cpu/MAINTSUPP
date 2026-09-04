@@ -52,6 +52,7 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export function StoreDocumentationBoard({
   boardId = CANONICAL_BOARD_ID,
+  sectionKey,
   onNotify,
   onOpenApps,
   onOpenRequest,
@@ -59,6 +60,18 @@ export function StoreDocumentationBoard({
 }: {
   /** The board this screen draws. Absent means the workspace's own register. */
   boardId?: string;
+  /**
+   * THE SECTION THIS SCREEN IS BEING DRAWN IN, for the view memory.
+   *
+   * `BoardChrome` resolves `sectionKey ?? boardId` and asks
+   * `/api/workspace-sections/view` which tab to land on. Without this it asked
+   * with a BOARD key, and for a Documents-template instance that is `sec-…`,
+   * which names no section — so every load of an instance fired a 404 and the
+   * reader silently lost the "remember my last view" behaviour the canonical
+   * board has. Canonical worked by coincidence: `store-documentation` is both
+   * a board key and a built-in section key.
+   */
+  sectionKey?: string;
   onNotify: (message: string) => void;
   onOpenApps: () => void;
   /**
@@ -246,6 +259,7 @@ export function StoreDocumentationBoard({
            */
           <LiveMaintenanceBoard
             boardId={boardId}
+            sectionKey={sectionKey}
             /* This screen IS the compliance register, on the canonical board
                and on a Documents-template section's own. Said once here so the
                grid does not have to infer it from a board key that differs

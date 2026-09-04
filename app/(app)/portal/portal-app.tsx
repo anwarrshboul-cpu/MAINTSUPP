@@ -3153,6 +3153,9 @@ export default function PortalApp({
                  a section detached from its register draws nothing rather than
                  borrowing one. */
               boardId={activeCustom ? activeCustom.boardKey ?? "" : "store-documentation"}
+              /* The section, so the view memory is asked about a section rather
+                 than about a board key that names none. */
+              sectionKey={activeSection}
               onNotify={setToast}
               onOpenApps={() => setSection("settings")}
               /* `openRequest` only sets the drawer's record and tab — it does

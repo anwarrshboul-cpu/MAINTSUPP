@@ -36,6 +36,8 @@
  * PHONE". `stickyColumnOffsets` returns an empty map here and is not consulted.
  */
 
+import type { CSSProperties } from "react";
+import type { MaintenanceBoardColumn } from "../../lib/types";
 import type { BoardDisplayColumn } from "./board-model";
 import { displayedBoardColumnWidth } from "./board-format";
 
@@ -134,4 +136,46 @@ export function stickyZIndex(order: number, header: boolean) {
 /** How many columns are frozen, Items included. Used for the toolbar's label. */
 export function pinnedColumnCount(columns: BoardDisplayColumn[]) {
   return columns.filter((entry) => entry.column.pinned === true).length;
+}
+
+
+/* ── What a column looks like once pinning has had its say ───────────────── */
+
+/**
+ * THE INLINE STYLE FOR ONE COLUMN'S CELLS.
+ *
+ * Extracted from `live-board.tsx`, unchanged. It belongs here rather than in a
+ * 5,600-line component because it is pure — a column, a breakpoint and the
+ * sticky map in, a style object out — and because the comment it carries
+ * already pointed at this file for the offsets it reads.
+ *
+ * The width is written three ways on purpose. A table cell honours `width` as a
+ * suggestion and will still stretch to fit its content, which on a board whose
+ * columns are resizable data (`column.width`) means one long value silently
+ * widening a column the operator sized by hand; `minWidth` and `maxWidth` are
+ * what actually pin it.
+ *
+ * A frozen column's left offset is data rather than a stylesheet constant — the
+ * running width of everything frozen ahead of it. The stylesheet still owns the
+ * Items column's own sticky rules; this only supplies the number, and only
+ * where one applies.
+ */
+export function pinnedColumnStyle(
+  column: MaintenanceBoardColumn,
+  mobile: boolean,
+  stickyOffsets: Map<string, StickyColumn>,
+): CSSProperties {
+  const width = displayedBoardColumnWidth(column, mobile);
+  const style: CSSProperties = { width, minWidth: width, maxWidth: width };
+  const sticky = stickyOffsets.get(column.id);
+  if (sticky) {
+    style.left = sticky.left;
+    style.zIndex = stickyZIndex(sticky.order, false);
+  }
+  return style;
+}
+
+/** Marks a cell whose column is pinned, so the stylesheet can make it opaque. */
+export function pinnedColumnClass(column: MaintenanceBoardColumn) {
+  return column.pinned === true ? " is-pinned-column" : "";
 }
