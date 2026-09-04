@@ -865,6 +865,25 @@ async function ensureTemplateStructure(db: BoardDb, orgId: string, boardId: stri
         eq(maintenanceBoardColumns.boardId, boardId),
       ),
     );
+  /*
+   * "Contractor Comments" is part of the job board, so a Jobs INSTANCE has it
+   * too — W02-06 parity is with the product as it stands, not with a snapshot
+   * of the day the section was made.
+   *
+   * Outside the count guard below on purpose. The guard exists to stop 27 no-op
+   * inserts on every warm load, and it compares against
+   * `templateColumnCount(template)`, which counts the SPEC. This column is not
+   * in the spec — it is a workspace column, seeded rather than declared (see
+   * app/lib/contractor-comments.ts) — so an instance that has it would already
+   * be at `expected` and would never reach the provisioner that could add it.
+   * `ensureContractorCommentsColumn` is itself a `Set`-cheap read plus an
+   * `onConflictDoNothing`, and only the JOBS template gets one: a Contractors
+   * or Sites register has no contractor writing on it.
+   */
+  if (template === "jobs") {
+    await ensureContractorCommentsColumn(db, orgId, boardId);
+  }
+
   if (Number(counted?.total ?? 0) >= expected) return;
 
   await provisionDefaultStructure(db, orgId, boardId, template);
