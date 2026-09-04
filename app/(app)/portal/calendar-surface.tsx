@@ -34,7 +34,7 @@
  * and the drawer read. There is deliberately no `calendar_events` table.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../../components";
 import { useCapability } from "../../lib/client-capabilities";
 import type { MaintenanceRequest } from "../../lib/types";
@@ -53,7 +53,27 @@ import {
   type CalendarDay,
   type CalendarEvent,
   type CalendarWriteTarget,
+  type ManualCalendarItem,
 } from "./calendar-model";
+/*
+ * W11 — manual items. The panel owns this feature end to end: it reads them,
+ * writes them and draws them, and the HOST is not involved at all.
+ *
+ * That is deliberate rather than convenient. Jobs and certificates arrive as
+ * props because the host already holds them for five other screens and a second
+ * fetch would be a second answer; a manual item exists for this calendar and
+ * nowhere else, so a prop for it would make every mounting of this panel
+ * responsible for plumbing a feature it does not otherwise touch.
+ */
+import {
+  createManualEvent,
+  deleteManualEvent,
+  fetchManualEvents,
+  moveManualEvent,
+  updateManualEvent,
+  type ManualEventDraft,
+} from "./manual-event-client";
+import { ManualEventDialog } from "./manual-event-dialog";
 import {
   CalendarNav,
   CalendarSurface,
@@ -116,6 +136,12 @@ export type OperationsCalendarPanelProps = {
     target: CalendarWriteTarget,
     day: string,
   ) => Promise<void>;
+  /**
+   * W11 — the sites a manual item may be attached to. Optional, and an absent
+   * list is a working feature rather than a broken one: an item need not be
+   * about a site at all, so the picker simply offers "No site" and nothing else.
+   */
+  sites?: { id: string; name: string }[];
 };
 
 export function OperationsCalendarPanel({
@@ -128,6 +154,7 @@ export function OperationsCalendarPanel({
   onNotify,
   onJobDateChange,
   onComplianceDateChange,
+  sites = [],
 }: OperationsCalendarPanelProps) {
   const today = useMemo(() => new Date(), []);
   const todayDay = useMemo(() => todayCalendarDay(today), [today]);
@@ -150,6 +177,55 @@ export function OperationsCalendarPanel({
    */
   const [anchor, setAnchor] = useState<CalendarDay>(todayDay);
   const [selectedDay, setSelectedDay] = useState<CalendarDay>(todayDay);
+
+  /*
+   * W11 — the manual items, and the counter that reloads them.
+   *
+   * A COUNTER RATHER THAN A CALLABLE LOADER, which is the pattern
+   * `use-loader.ts` and the rest of this dashboard use: the work is declared
+   * inside the effect and state is only touched after the await resolves, so
+   * there is no synchronous set in an effect body and no cascading render.
+   * `active` guards a response that arrives after the screen has moved on.
+   *
+   * RE-READ AFTER EVERY WRITE, never patched locally. Every verb answers with
+   * the row it changed and splicing that in would be cheaper — and would be a
+   * second model of what an item is, which is exactly how a moved range and a
+   * resized one came to disagree once already. One read after each write is the
+   * version of this that cannot drift.
+   */
+  const [manualItems, setManualItems] = useState<ManualCalendarItem[]>([]);
+  const [manualNonce, setManualNonce] = useState(0);
+  const reloadManual = useCallback(() => setManualNonce((n) => n + 1), []);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const next = await fetchManualEvents();
+        if (active) setManualItems(next);
+      } catch {
+        /*
+         * SILENT, AND ONLY HERE. A workspace whose `calendar_events` table has
+         * not been created yet — a deployment mid-migration — would otherwise
+         * put a toast in front of every reader on every page load, about a
+         * feature they may not use. The jobs and the certificates are still
+         * drawn, which is the calendar doing its main job. Every WRITE reports
+         * its own failure loudly, because a write that appears to have
+         * succeeded is a different and much worse silence.
+         */
+        if (active) setManualItems([]);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, [manualNonce]);
+
+  /** The item being created or edited, or null. `"new"` is the create form. */
+  const [manualEditing, setManualEditing] = useState<ManualCalendarItem | "new" | null>(
+    null,
+  );
 
   /*
    * A STABLE KEY FOR THE HOST'S RANGE.
@@ -243,11 +319,12 @@ export function OperationsCalendarPanel({
       buildCalendarEvents({
         requests: periodRequests,
         complianceRecords: periodCompliance,
+        manualItems,
         sourceIds: EVERY_CALENDAR_SOURCE_ID,
         filters,
         today: todayDay,
       }),
-    [filters, periodCompliance, periodRequests, todayDay],
+    [filters, manualItems, periodCompliance, periodRequests, todayDay],
   );
 
   /*
@@ -368,11 +445,67 @@ export function OperationsCalendarPanel({
       onOpenRequest(event.request);
       return;
     }
+    /*
+     * W11 — a manual chip opens the item that made it. It must never fall
+     * through to `onOpenCompliance`, which would hand a `cal-…` id to the
+     * compliance register and open an empty drawer for a record that is not
+     * one — the class of confusion this whole feature is built to prevent.
+     */
+    if (event.kind === "manual") {
+      if (event.manual) setManualEditing(event.manual);
+      return;
+    }
     onOpenCompliance(event.recordId ?? null);
   };
 
+  /* ── W11: the manual item verbs, each ending in one re-read ──────────── */
+
+  const saveManual = async (draft: ManualEventDraft) => {
+    const editing = manualEditing;
+    if (editing === "new") {
+      await createManualEvent(draft);
+      onNotify(`"${draft.title}" added to the calendar.`);
+    } else if (editing) {
+      await updateManualEvent(editing.id, draft);
+      onNotify(`"${draft.title}" updated.`);
+    }
+    reloadManual();
+    setManualEditing(null);
+  };
+
+  const archiveManual = async (archived: boolean) => {
+    const editing = manualEditing;
+    if (!editing || editing === "new") return;
+    await updateManualEvent(editing.id, { archived });
+    onNotify(
+      archived
+        ? `"${editing.title}" archived. It is off the calendar until you restore it.`
+        : `"${editing.title}" is back on the calendar.`,
+    );
+    reloadManual();
+    setManualEditing(null);
+  };
+
+  const removeManual = async () => {
+    const editing = manualEditing;
+    if (!editing || editing === "new") return;
+    await deleteManualEvent(editing.id);
+    /* The word is chosen: it is a SOFT delete and the row keeps its dates and
+       its note, so promising it is gone for good would be untrue. */
+    onNotify(`"${editing.title}" removed from the calendar.`);
+    reloadManual();
+    setManualEditing(null);
+  };
+
   const commitDate = async (event: CalendarEvent, day: CalendarDay) => {
-    const target = calendarWriteTarget(event);
+    /*
+     * The DROP DAY is passed in, and only a manual item uses it. A job or a
+     * certificate is one mark on one day, so its new date IS `day`; a
+     * multi-day manual item is drawn on every day it covers, and the target has
+     * to work out which START that drop implies from which day was picked up.
+     * See `calendarWriteTarget`, where that arithmetic lives — once.
+     */
+    const target = calendarWriteTarget(event, day);
     if (target.path === "none") {
       onNotify(target.reason);
       return;
@@ -380,6 +513,11 @@ export function OperationsCalendarPanel({
     try {
       if (target.path === "job") {
         await onJobDateChange(target.id, target.field, day);
+      } else if (target.path === "manual") {
+        /* The start alone: the route moves the end with it, so a three-day
+           item stays three days long. See `moveManualEvent`. */
+        await moveManualEvent(target.id, target.startsOn);
+        reloadManual();
       } else {
         await onComplianceDateChange(target, day);
       }
@@ -427,7 +565,8 @@ export function OperationsCalendarPanel({
       <strong>Nothing is scheduled here.</strong>
       <p>
         Jobs appear on the dates their records carry and certificates on their
-        expiry. Nothing is shown here that is not on a record.
+        expiry. Nothing is shown here that is not on a record — except an item
+        you add yourself.
       </p>
     </div>
   );
@@ -453,6 +592,26 @@ export function OperationsCalendarPanel({
               counts={sourceCounts}
             />
             <CalendarColourSettings colours={colours} onChange={setColours} />
+            {/*
+              W11 — ADD AN ITEM, on the calendar's own bar.
+
+              Gated on `board.edit`, which is what the route enforces
+              (`WRITE_CAPABILITY` in app/api/maintenance/calendar/route.ts), so a
+              reader who may not write is not offered a form that would be
+              refused. `useCapability` answers `false` only when the snapshot
+              has landed and said no — undefined while it is loading — so the
+              button is offered rather than flickering away and back.
+            */}
+            {mayEditBoard !== false && (
+              <button
+                type="button"
+                className="secondary-button manual-event-add"
+                onClick={() => setManualEditing("new")}
+              >
+                <Icon name="plus" size={15} />
+                Add item
+              </button>
+            )}
           </div>
         </div>
 
@@ -485,7 +644,16 @@ export function OperationsCalendarPanel({
           today={todayDay}
           eventsByDay={eventsByDay}
           chipStyle={(event) => calendarChipStyle(event, colours)}
-          typeLabel={(event) => (event.kind === "compliance" ? "Compliance" : "Job")}
+          /* Three kinds, three words. Read out on every chip and every agenda
+             row, so a manual item announces itself as one rather than being
+             told apart by colour alone. */
+          typeLabel={(event) =>
+            event.kind === "compliance"
+              ? "Compliance"
+              : event.kind === "manual"
+                ? "Manual"
+                : "Job"
+          }
           onOpen={openEvent}
           onEditDate={
             canEditAnything
@@ -550,6 +718,20 @@ export function OperationsCalendarPanel({
           event={editing}
           onCancel={() => setEditing(null)}
           onSave={(day) => commitDate(editing, day)}
+        />
+      )}
+
+      {manualEditing && (
+        <ManualEventDialog
+          item={manualEditing === "new" ? null : manualEditing}
+          /* A new item starts on the day the reader is looking at, which is
+             almost always the day they meant. */
+          defaultDay={selectedDay}
+          sites={sites}
+          onCancel={() => setManualEditing(null)}
+          onSave={saveManual}
+          onArchive={archiveManual}
+          onDelete={removeManual}
         />
       )}
     </>

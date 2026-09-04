@@ -429,16 +429,20 @@ export function InvoiceReportGenerator({
     return () => window.clearTimeout(timer);
   }, [compute, documentId]);
 
-  const reloadDocument = useCallback(async (id: string) => {
-    const result = await fetchDocument(id);
-    if (!result.ok) {
-      setMessage({ tone: "bad", text: result.error });
-      return;
-    }
-    setPayload(result.data.payload);
-    setBlockers(result.data.blockers);
-    setSnapshot(result.data.snapshot);
-  }, []);
+  /* `.then` rather than `await` — see the note on `load` in generated-documents.tsx. */
+  const reloadDocument = useCallback(
+    (id: string) =>
+      fetchDocument(id).then((result) => {
+        if (!result.ok) {
+          setMessage({ tone: "bad", text: result.error });
+          return;
+        }
+        setPayload(result.data.payload);
+        setBlockers(result.data.blockers);
+        setSnapshot(result.data.snapshot);
+      }),
+    [],
+  );
 
   /*
    * "View" on the Generated Documents table lands here.
@@ -448,9 +452,21 @@ export function InvoiceReportGenerator({
    * document endpoints, and the preview refetch only runs when the QUESTION
    * changes, which opening a document does not do.
    */
+  /*
+   * The id is adopted DURING RENDER rather than in the effect, which is React's
+   * documented way to adjust state when a prop changes and is what stops the
+   * debounce below firing one recomputation against a period the reader never
+   * asked about, in the frame between the prop arriving and an effect running.
+   * The FETCH stays in the effect, where a side effect belongs.
+   */
+  const [adoptedDocumentId, setAdoptedDocumentId] = useState<string | null>(null);
+  if (openDocumentId && openDocumentId !== adoptedDocumentId) {
+    setAdoptedDocumentId(openDocumentId);
+    setDocumentId(openDocumentId);
+  }
+
   useEffect(() => {
     if (!openDocumentId) return;
-    setDocumentId(openDocumentId);
     void reloadDocument(openDocumentId);
   }, [openDocumentId, reloadDocument]);
 

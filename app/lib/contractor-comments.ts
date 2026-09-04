@@ -43,85 +43,28 @@
  * at the Updates tab. A comment is never silently replaced.
  */
 
+
 import { and, eq } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { maintenanceBoardCells, maintenanceBoardColumns } from "../../db/schema";
 import { setBoardCell } from "./board-mutations";
 import { boardKeyForRequest } from "./board-registry";
-import { formatDate } from "./format-date";
+import {
+  CONTRACTOR_COMMENTS_KEY,
+  CONTRACTOR_COMMENTS_TITLE,
+  appendContractorComment,
+} from "./contractor-comment-log";
+
+/* Re-exported so a caller needs one import, not two. The definitions live in
+   `contractor-comment-log.ts` — see the note at the top of that file. */
+export {
+  CONTRACTOR_COMMENTS_KEY,
+  CONTRACTOR_COMMENTS_LIMIT,
+  CONTRACTOR_COMMENTS_TITLE,
+  appendContractorComment,
+} from "./contractor-comment-log";
 
 type CommentDatabase = Awaited<ReturnType<typeof getDb>>;
-
-/** The board column key. One spelling, used by the seeder and by the writer. */
-export const CONTRACTOR_COMMENTS_KEY = "contractorComments";
-export const CONTRACTOR_COMMENTS_TITLE = "Contractor Comments";
-
-/**
- * What a `long_text` cell may hold — `normalizeBoardCellValue` trims to this,
- * and trimming a LOG at an arbitrary character is how the newest comment ends
- * mid-word. Kept in step deliberately: this file does the trimming itself, at
- * an entry boundary, and says that it did.
- */
-export const CONTRACTOR_COMMENTS_LIMIT = 5000;
-
-const OVERFLOW_NOTE =
-  "…older comments are not shown here. The full history is in the job's Updates tab.";
-
-const SEPARATOR = "\n\n";
-
-/**
- * The log with one more comment on the front.
- *
- * PURE, so the rule can be tested without a database, and NEWEST FIRST, because
- * a board cell shows its first line and the first line a coordinator wants is
- * the latest thing the contractor said.
- *
- * `at` is a parameter rather than a call to the clock so every entry in one
- * write agrees about the time and so this is testable without freezing it.
- */
-export function appendContractorComment(
-  existing: string | null | undefined,
-  entry: { body: string; author?: string | null; at: Date },
-): string {
-  const body = entry.body.trim();
-  if (!body) return (existing ?? "").trim();
-
-  const author = (entry.author ?? "").trim() || "Contractor";
-  const stamp = `${formatDate(entry.at.toISOString())} · ${author}`;
-  const head = `${stamp}\n${body}`;
-
-  const previous = (existing ?? "")
-    .trim()
-    // A previous overflow note is not history; it is a marker, and it is
-    // re-added below if it is still true. Left in place it would accumulate.
-    .split(SEPARATOR)
-    .filter((block) => block.trim() && block.trim() !== OVERFLOW_NOTE);
-
-  const blocks = [head, ...previous];
-
-  // Drop the OLDEST whole entries until it fits, then say that it happened.
-  let dropped = false;
-  while (blocks.length > 1 && blocks.join(SEPARATOR).length > CONTRACTOR_COMMENTS_LIMIT) {
-    blocks.pop();
-    dropped = true;
-  }
-  if (dropped) {
-    blocks.push(OVERFLOW_NOTE);
-    while (blocks.length > 2 && blocks.join(SEPARATOR).length > CONTRACTOR_COMMENTS_LIMIT) {
-      blocks.splice(blocks.length - 2, 1);
-    }
-  }
-
-  /*
-   * A single comment longer than the cell itself is cut, and only then — the
-   * one case where a character boundary is unavoidable, because there is no
-   * entry boundary left to cut at. The whole thing is still in `item_updates`.
-   */
-  const joined = blocks.join(SEPARATOR);
-  return joined.length > CONTRACTOR_COMMENTS_LIMIT
-    ? joined.slice(0, CONTRACTOR_COMMENTS_LIMIT)
-    : joined;
-}
 
 /**
  * The id of this board's Contractor Comments column, creating it if the board
@@ -176,7 +119,16 @@ export async function ensureContractorCommentsColumn(
       type: "long_text",
       position: 90_000,
       width: 260,
-      settings: JSON.stringify({ wrap: true }),
+      /*
+       * NOT wrapped, like every other column this board seeds.
+       *
+       * A wrapped `long_text` cell grows to fit its content, and this cell's
+       * content is a LOG — measured on the board, a job with six comments made
+       * its row ~250px tall and pushed every other row off the screen. One
+       * line, with the whole thing on click and in the drawer; "Wrap text" is
+       * in the column menu for anybody who wants the other behaviour.
+       */
+      settings: JSON.stringify({ wrap: false }),
       // NOT a system column — see the header. A system cell is refused by
       // `update_cell`, and this value is a cell.
       system: false,

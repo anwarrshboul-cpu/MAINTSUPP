@@ -74,16 +74,30 @@ export function GeneratedDocuments({
   const [notice, setNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | InvoiceStatus>("all");
 
-  const load = useCallback(async () => {
-    const result = await fetchDocuments();
-    if (!result.ok) {
-      setError(result.error);
-      setRows([]);
-      return;
-    }
-    setError(null);
-    setRows(result.data);
-  }, []);
+  /**
+   * Read the register.
+   *
+   * Written `.then(…)` rather than `await` on purpose. The state is set from a
+   * CALLBACK the fetch invokes, which is the shape `react-hooks/set-state-in-effect`
+   * is asking for — "subscribe for updates from some external system, calling
+   * setState in a callback" — and an `async` body that awaits and then assigns
+   * reads to that rule as a synchronous set inside the effect. Same behaviour,
+   * and the linter can see it is the network answering rather than the effect
+   * cascading a render.
+   */
+  const load = useCallback(
+    () =>
+      fetchDocuments().then((result) => {
+        if (!result.ok) {
+          setError(result.error);
+          setRows([]);
+          return;
+        }
+        setError(null);
+        setRows(result.data);
+      }),
+    [],
+  );
 
   useEffect(() => {
     void load();

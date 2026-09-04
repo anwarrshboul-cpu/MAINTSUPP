@@ -1,0 +1,198 @@
+/*
+ * W11 — the manual calendar item form.
+ *
+ * A NEW FILE, NOT MORE OF `calendar-page.css`, because that file styles the
+ * PANEL — its bar, its empty states and the "Change date" dialog — and this is
+ * a second dialog with a fuller form. The prefix keeps them recognisable as
+ * siblings; keeping them apart keeps a change to one from touching the other.
+ *
+ * THE GEOMETRY IS `.calendar-date-dialog`'s, DELIBERATELY. The scrim, the
+ * radius, the border, the shadow and the 20px padding are the same values, so
+ * the two dialogs on this screen look like one product rather than like two
+ * features that arrived separately. What differs is the width — this form has
+ * six fields where that one has a single date — and the action row, which has
+ * a destructive half.
+ *
+ * NO `@media` OF ITS OWN. Everything below is fluid: `min(520px, 100%)` for the
+ * dialog and `repeat(auto-fit, minmax(150px, 1fr))` for the date pair, which
+ * collapses to one column at any width where two would not fit. This codebase
+ * only permits five breakpoints (640/767/768/1024/1280) and none of them is
+ * where this layout actually needs to change, so it does not declare one.
+ */
+
+.manual-event-dialog__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  /* Scrolls when the form is taller than a short landscape phone — a modal
+     that cannot be scrolled to its Save button is a modal that cannot be used. */
+  overflow-y: auto;
+  background: rgba(7, 24, 38, 0.5);
+}
+
+.manual-event-dialog {
+  position: relative;
+  z-index: var(--z-modal);
+  display: flex;
+  width: min(520px, 100%);
+  flex-direction: column;
+  gap: 13px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-card);
+  box-shadow: 0 26px 80px rgba(7, 24, 38, 0.3);
+}
+
+.manual-event-dialog h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+/*
+ * The sentence under the heading says what this record IS.
+ *
+ * `.portal-content p` sets `color: var(--muted)` at (0,1,1), which outranks a
+ * single class — the exact bug that shipped once on this screen, recorded
+ * against `calendar-surface__today` in calendar-views.tsx. The colour here IS
+ * muted, so nothing is lost, but the size is declared explicitly rather than
+ * inherited from whatever that rule happens to set next.
+ */
+.manual-event-dialog__lede {
+  max-width: 46ch;
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.manual-event-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.manual-event-dialog__field > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.manual-event-dialog__field input,
+.manual-event-dialog__field select {
+  width: 100%;
+  /* 42px, the same control height the sibling dialog and the rest of the
+     portal's forms use. Above the 44px touch floor once the 1px borders and
+     the row gap are counted, and identical to the control beside it. */
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--control-fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.manual-event-dialog__field textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--control-fg);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  /* Vertical only: a textarea a reader can drag WIDER inside a fixed-width
+     dialog is one that pushes the dialog's own layout out of shape. */
+  resize: vertical;
+}
+
+/*
+ * The two dates side by side while there is room for two, and stacked when
+ * there is not — `auto-fit` with a 150px floor, so the switch happens at the
+ * width where a date input actually stops fitting rather than at a number
+ * somebody picked.
+ */
+.manual-event-dialog__dates {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.manual-event-dialog__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--danger-line, #e2445c);
+  border-radius: 9px;
+  color: var(--danger-fg, #b3283c);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/*
+ * Destructive on one side, confirmations on the other, and the row wraps.
+ *
+ * Four buttons is wider than a phone. Left to `nowrap` the pair on the right
+ * would be pushed off a dialog that does not scroll horizontally, which is the
+ * same defect `.table-row-actions` was introduced to fix on the Sites table —
+ * measured there at 390px, where "Close" simply was not on the screen.
+ */
+.manual-event-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.manual-event-dialog__destructive,
+.manual-event-dialog__confirmations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/*
+ * REMOVE IS NOT A RED BUTTON UNTIL IT IS THE REAL ONE.
+ *
+ * The first press only asks; painting it as the danger control would spend the
+ * whole vocabulary on a question. `--confirm` is the press that actually
+ * removes, and it is the one that gets the ground — so the colour means "this
+ * one does it" rather than "this one is about removal".
+ */
+.manual-event-dialog__danger {
+  color: var(--danger-fg, #b3283c);
+  border-color: var(--danger-line, #e2445c);
+}
+
+.manual-event-dialog__confirm {
+  border-color: var(--danger-line, #e2445c);
+  background: var(--danger-fg, #b3283c);
+  color: #fff;
+}
+
+/*
+ * The button that opens this form, on the calendar's own bar.
+ *
+ * It sits with the view switcher and the two pickers rather than above them:
+ * "add an item" is a thing you do TO this calendar, and the bar is where
+ * everything else this calendar does already lives.
+ */
+.calendar-bar__controls .manual-event-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  white-space: nowrap;
+}

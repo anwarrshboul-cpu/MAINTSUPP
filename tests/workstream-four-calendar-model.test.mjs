@@ -482,7 +482,7 @@ test("a requirement that does not apply to a store puts nothing on the calendar"
 
 /* ── 5. Sources ──────────────────────────────────────────────────────────── */
 
-test("six sources, three of them on by default", () => {
+test("seven sources, four of them on by default", () => {
   /*
    * RE-POINTED, NOT RELAXED. This was five and two. W10 added
    * `compliance:reminder` — the four advance warnings, derived from the same
@@ -491,7 +491,13 @@ test("six sources, three of them on by default", () => {
    *
    * It is on by DEFAULT and that is the substance of the requirement rather
    * than a convenience: a warning nobody switched on is a warning nobody gets.
-   * The list is still exhaustive and still in picker order, so a sixth source
+   *
+   * W11 then added `manual:item`, the hand-added notes, which is on by default
+   * for the sharper version of the same reason: an item somebody TYPED onto
+   * this calendar and then could not see would be the worst possible outcome of
+   * the feature.
+   *
+   * The list is still exhaustive and still in picker order, so an eighth source
    * appearing without a decision still fails here.
    */
   assert.deepEqual(
@@ -503,11 +509,12 @@ test("six sources, three of them on by default", () => {
       "job:nextUpdateAt",
       "compliance:expiry",
       "compliance:reminder",
+      "manual:item",
     ],
   );
   assert.deepEqual(
     [...calendar.DEFAULT_CALENDAR_SOURCE_IDS],
-    ["job:dueAt", "compliance:expiry", "compliance:reminder"],
+    ["job:dueAt", "compliance:expiry", "compliance:reminder", "manual:item"],
   );
   assert.equal(calendar.calendarDateSource("job:dueAt").label, "Due Date");
   assert.equal(

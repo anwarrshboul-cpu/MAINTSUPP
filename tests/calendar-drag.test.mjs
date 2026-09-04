@@ -349,7 +349,32 @@ test("a drop goes through commitDate and nowhere else", () => {
   assert.equal([...panel.matchAll(/onJobDateChange\(/g)].length, 1);
   assert.equal([...panel.matchAll(/onComplianceDateChange\(/g)].length, 1);
   assert.match(panel, /const commitDate = async \(event: CalendarEvent, day: CalendarDay\)/);
-  assert.match(panel, /const target = calendarWriteTarget\(event\);/);
+  /*
+   * RE-POINTED FOR W11 — the target now takes the DROP DAY as well.
+   *
+   * Only a manual item uses it. A job or a certificate is one mark on one
+   * day, so its new date IS the drop day. A manual item may span several
+   * days, so the target has to work out which START that drop implies from
+   * which day of the span was picked up — and that arithmetic belongs in the
+   * model beside the span, not in a drag handler where a second caller would
+   * have to reinvent it.
+   *
+   * The contract this test is about is unchanged and still asserted above:
+   * ONE commitDate, routing through ONE calendarWriteTarget, with exactly one
+   * call to each host writer.
+   */
+  assert.match(panel, /const target = calendarWriteTarget\(event, day\);/);
+  /*
+   * AND A MANUAL ITEM IS MOVED BY EXACTLY ONE CALL, from inside commitDate.
+   *
+   * moveManualEvent sends the start alone, which the route reads as 'keep the
+   * length'. updateManualEvent sends whatever it is given and is the EDITOR —
+   * the dialog saves a title, a note, a site and both dates through it. Two
+   * verbs deliberately, because a move and a resize are different intentions,
+   * so a second moveManualEvent call site would be a second answer to 'which
+   * day did they pick up'.
+   */
+  assert.equal([...panel.matchAll(/moveManualEvent\(/g)].length, 1);
   assert.doesNotMatch(views, /fetch\(/, "the views never write");
   assert.doesNotMatch(code, /fetch\(/, "and neither does the gesture");
 });

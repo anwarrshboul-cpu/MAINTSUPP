@@ -26,7 +26,7 @@
  *
  * EACH TAB OWNS ITS OWN PERIOD
  *
- * Deliberate, and it is why this file exports `REPORT_TAB_PERIOD_KEYS` rather
+ * Deliberate, and it is why this file exports `reportTabPeriodKey` rather
  * than holding a period itself. Spend Overview opens on Last 12 months because
  * it answers "is this year worse than last"; the generator opens on this month
  * because an invoice is a month. Sharing one period would mean choosing which
@@ -34,7 +34,7 @@
  * keys, so neither can move the other.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { Icon, type IconName } from "../../../components";
 import { periodStorageKey } from "../period-picker";
 
@@ -97,49 +97,82 @@ function isReportTab(value: unknown): value is ReportTab {
 const TAB_NAMESPACE = "maintsupp:reports-tab:";
 
 /**
+ * The choice for this session when storage refuses it, and the subscription
+ * that announces a change.
+ *
+ * Both lifted verbatim in shape from `useStoredPeriod` in period-picker.tsx,
+ * for the reasons its header gives: `setItem` throws in a private window and
+ * under blocked storage, and without an in-memory fallback the control appears
+ * inert there — the click writes nowhere and the snapshot reads the default
+ * straight back. `storage` fires only in OTHER tabs, so same-tab writes are
+ * announced through the listener set.
+ */
+const tabMemory = new Map<string, ReportTab>();
+const tabListeners = new Set<() => void>();
+
+function subscribeToTab(onChange: () => void) {
+  tabListeners.add(onChange);
+  window.addEventListener("storage", onChange);
+  window.addEventListener("hashchange", onChange);
+  return () => {
+    tabListeners.delete(onChange);
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener("hashchange", onChange);
+  };
+}
+
+/**
  * Which tab is showing, remembered per section and linkable by hash.
  *
- * Read in an effect rather than in `useState`'s initialiser: `localStorage` and
- * `location.hash` do not exist during the server render, and seeding state from
- * them makes the server's markup and the first client render disagree — which
- * React reports as a hydration error and repairs by throwing the client tree
- * away. Both are read after mount, which costs one paint of the default tab and
- * is the same pattern the theme toggle uses.
+ * `useSyncExternalStore` rather than an effect that calls `setState`, which is
+ * the pattern `useStoredPeriod`, the theme toggle and the sort control all use
+ * here — and for the same two reasons its header gives: the server render and
+ * the first client render agree, and there is no cascading re-render on mount.
+ * An effect would also paint the default tab for one frame before correcting
+ * itself, which on this screen is a visible flash of the wrong panel.
+ *
+ * The hash wins over storage. A link somebody clicked is a stronger statement
+ * of intent than what they last looked at.
  */
 export function useReportTab(sectionKey: string): [ReportTab, (next: ReportTab) => void] {
   const storageKey = `${TAB_NAMESPACE}${periodStorageKey(sectionKey)}`;
-  const [tab, setTab] = useState<ReportTab>("overview");
 
-  useEffect(() => {
+  const read = useCallback((): ReportTab => {
     const fromHash = window.location.hash.replace(/^#/, "");
-    if (isReportTab(fromHash)) {
-      setTab(fromHash);
-      return;
-    }
+    if (isReportTab(fromHash)) return fromHash;
+    const remembered = tabMemory.get(storageKey);
     try {
       const saved = window.localStorage.getItem(storageKey);
-      if (isReportTab(saved)) setTab(saved);
+      if (isReportTab(saved)) return saved;
     } catch {
-      // Storage blocked. The default tab is a correct place to start.
+      // Storage blocked. The in-memory choice, or the default, still applies.
     }
+    return remembered ?? "overview";
   }, [storageKey]);
+
+  // The server has no hash and no storage, so it renders the default.
+  const readOnServer = useCallback((): ReportTab => "overview", []);
+
+  const tab = useSyncExternalStore(subscribeToTab, read, readOnServer);
 
   const choose = useCallback(
     (next: ReportTab) => {
-      setTab(next);
+      tabMemory.set(storageKey, next);
       try {
         window.localStorage.setItem(storageKey, next);
       } catch {
-        // Not remembered for next time; still switched for this one.
+        // Kept in memory above, so the control still works for this session.
       }
       try {
         // `replaceState`, not a hash assignment: assigning to `location.hash`
         // pushes a history entry, so Back would walk the reader through every
-        // tab they had looked at instead of leaving the page.
+        // tab they had looked at instead of leaving the page. It also fires
+        // `hashchange`, which would re-enter the subscription below.
         window.history.replaceState(null, "", `#${next}`);
       } catch {
         // Some embedded contexts refuse history writes. Nothing depends on it.
       }
+      for (const listener of tabListeners) listener();
     },
     [storageKey],
   );

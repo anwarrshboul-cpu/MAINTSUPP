@@ -35,6 +35,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import { Icon } from "../../components";
+import type { IconName } from "../../components";
 import { MobileCellSheet } from "./board-primitives";
 import { AnchoredPopover } from "./overlay/anchored";
 import {
@@ -259,9 +260,17 @@ function ControlTrigger({
 const ENTITY_LABEL: Record<CalendarEntity, string> = {
   job: "Jobs",
   compliance: "Compliance",
+  manual: "Manual items",
 };
 
-const ENTITY_ORDER: readonly CalendarEntity[] = ["job", "compliance"];
+/*
+ * W11 — manual items come LAST in every list on this screen, and it is one
+ * decision made once. They are the reader's own annotations; jobs and
+ * certificates are what the product knows. Putting notes above either would
+ * present them as the more important of the two, which is a claim nobody made
+ * when they typed one.
+ */
+const ENTITY_ORDER: readonly CalendarEntity[] = ["job", "compliance", "manual"];
 
 /**
  * Which date fields the calendar draws from.
@@ -701,18 +710,56 @@ export function CalendarFilterBar({
  * the function that paints the calendar rather than by a second copy of its
  * rules. If `calendarChipStyle` changes, the preview changes with it.
  */
+/**
+ * What each entity's preview chip says, in one table.
+ *
+ * A table rather than the pair of ternaries this was, because a third entity
+ * turned every one of them into a nested conditional that had to agree with
+ * four others — the source id, the field, the label, the title and the glyph
+ * are five facts about one kind, and they belong in one place.
+ */
+const PREVIEW: Record<
+  CalendarEntity,
+  { sourceId: string; field: string; fieldLabel: string; title: string; short: string; icon: IconName }
+> = {
+  job: {
+    sourceId: "job:dueAt",
+    field: "dueAt",
+    fieldLabel: "Due",
+    title: "Boiler service",
+    short: "Boiler service",
+    icon: "wrench",
+  },
+  compliance: {
+    sourceId: "compliance:expiry",
+    field: "expiry",
+    fieldLabel: "Expires",
+    title: "Gas safety certificate",
+    short: "Gas certificate",
+    icon: "shield",
+  },
+  manual: {
+    sourceId: "manual:item",
+    field: "startsOn",
+    fieldLabel: "Manual item",
+    title: "Area manager visit",
+    short: "Manager visit",
+    icon: "edit",
+  },
+};
+
 function previewEvent(kind: CalendarEntity): CalendarEvent {
-  const job = kind === "job";
+  const preview = PREVIEW[kind];
   return {
     key: `calendar-preview:${kind}`,
     kind,
-    sourceId: job ? "job:dueAt" : "compliance:expiry",
+    sourceId: preview.sourceId,
     recordId: "preview",
-    field: job ? "dueAt" : "expiry",
-    fieldLabel: job ? "Due" : "Expires",
+    field: preview.field,
+    fieldLabel: preview.fieldLabel,
     day: "",
     time: "",
-    title: job ? "Boiler service" : "Gas safety certificate",
+    title: preview.title,
     subtitle: "Riverside Court",
     timing: "upcoming",
     editable: true,
@@ -731,11 +778,11 @@ function ColourRow({
   onChange: (next: CalendarColours) => void;
 }) {
   const inputId = useId();
-  const value = kind === "job" ? colours.job : colours.compliance;
-  const fallback =
-    kind === "job" ? DEFAULT_CALENDAR_COLOURS.job : DEFAULT_CALENDAR_COLOURS.compliance;
-  const set = (next: string) =>
-    onChange(kind === "job" ? { ...colours, job: next } : { ...colours, compliance: next });
+  /* Keyed by entity, so a fourth kind is one entry in `PREVIEW` and not three
+     more branches that have to agree with each other. */
+  const value = colours[kind];
+  const fallback = DEFAULT_CALENDAR_COLOURS[kind];
+  const set = (next: string) => onChange({ ...colours, [kind]: next });
   /*
    * `chipInk` returns the best ink available, not a guaranteed pass — on a
    * mid-tone ground neither white nor the dark ink reaches AA, and no amount
@@ -763,8 +810,8 @@ function ColourRow({
         className="calendar-colour-preview"
         style={calendarChipStyle(previewEvent(kind), colours)}
       >
-        <Icon name={kind === "job" ? "wrench" : "shield"} size={12} />
-        <strong>{kind === "job" ? "Boiler service" : "Gas certificate"}</strong>
+        <Icon name={PREVIEW[kind].icon} size={12} />
+        <strong>{PREVIEW[kind].short}</strong>
       </span>
       <button
         type="button"
@@ -804,9 +851,12 @@ export function CalendarColourSettings({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const custom =
-    (colours.job !== DEFAULT_CALENDAR_COLOURS.job ? 1 : 0) +
-    (colours.compliance !== DEFAULT_CALENDAR_COLOURS.compliance ? 1 : 0);
+  /* Counted over the entities rather than named one by one, for the same
+     reason `ColourRow` reads its value by key: a kind added and forgotten here
+     would silently stop counting as customised. */
+  const custom = ENTITY_ORDER.filter(
+    (entity) => colours[entity] !== DEFAULT_CALENDAR_COLOURS[entity],
+  ).length;
 
   return (
     <div className="calendar-control" data-board-popover="">
@@ -827,13 +877,15 @@ export function CalendarColourSettings({
         subtitle="Kept in this browser, not on your account"
       >
         <div className="calendar-colours">
-          <ColourRow kind="job" label="Jobs" colours={colours} onChange={onChange} />
-          <ColourRow
-            kind="compliance"
-            label="Compliance"
-            colours={colours}
-            onChange={onChange}
-          />
+          {ENTITY_ORDER.map((entity) => (
+            <ColourRow
+              key={entity}
+              kind={entity}
+              label={ENTITY_LABEL[entity]}
+              colours={colours}
+              onChange={onChange}
+            />
+          ))}
         </div>
       </ControlSurface>
     </div>
@@ -860,6 +912,10 @@ export function CalendarLegend({
   const compliance = {
     background: colours.compliance,
     color: calendarInk(colours.compliance),
+  };
+  const manual = {
+    background: colours.manual,
+    color: calendarInk(colours.manual),
   };
   return (
     /*
@@ -896,6 +952,24 @@ export function CalendarLegend({
             <Icon name="shield" size={11} />
           </span>
           Compliance
+        </li>
+        {/*
+          W11 — THE THIRD KIND, AND IT IS IN THE KEY FOR THE REASON THE KEY
+          EXISTS.
+
+          A manual item is something a reader typed onto this calendar, and it
+          must never be mistaken for a Job. The word and the SHAPE both say so:
+          a pen glyph rather than a spanner, on its own ground. The comment at
+          the top of this component makes the argument in full — the ground is
+          user-chosen, so "the teal ones are manual" stops being true the moment
+          somebody picks a colour, and never was true for a reader who cannot
+          separate two hues.
+        */}
+        <li className="calendar-key__item">
+          <span className="calendar-key__swatch" style={manual}>
+            <Icon name="edit" size={11} />
+          </span>
+          Manual
         </li>
         <li className="calendar-key__item">
           <span

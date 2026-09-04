@@ -28,7 +28,7 @@
  * override either end into a custom range without leaving the vocabulary.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Icon } from "../../../components";
 import { isoDay } from "../period-picker";
 import { rangeToken, resolvePeriod } from "../period-model";
@@ -513,9 +513,17 @@ export function useSettingsPrepopulation(
     for (const field of fields) touched.current.add(field);
   }, []);
 
-  const [seeded, setSeeded] = useState(false);
+  /*
+   * A ref, not state: whether the seed has already run changes nothing on
+   * screen, so putting it in state would cost a render and — because the
+   * effect sets it — would be a setState in an effect body, which is the
+   * cascading-render pattern `react-hooks/set-state-in-effect` exists to
+   * catch. The one thing that must actually re-render is the draft, and that
+   * is what `apply` does.
+   */
+  const seeded = useRef(false);
   useEffect(() => {
-    if (!settings || seeded) return;
+    if (!settings || seeded.current) return;
     const patch: Partial<GeneratorDraft> = {};
     const put = <K extends DraftField>(field: K, value: GeneratorDraft[K] | undefined | null) => {
       if (touched.current.has(field)) return;
@@ -533,9 +541,9 @@ export function useSettingsPrepopulation(
     if (!touched.current.has("dueAt") && !draft.dueAt && draft.invoiceDate) {
       patch.dueAt = addCalendarDays(draft.invoiceDate, settings.paymentTermsDays ?? 30);
     }
-    setSeeded(true);
+    seeded.current = true;
     if (Object.keys(patch).length) apply(patch);
-  }, [apply, draft.dueAt, draft.invoiceDate, seeded, settings]);
+  }, [apply, draft.dueAt, draft.invoiceDate, settings]);
 
   return markTouched;
 }
