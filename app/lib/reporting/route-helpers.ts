@@ -13,7 +13,7 @@ import { anonymousRefusal, scopedDbWithCapability, type ScopedDatabase } from ".
 import type { InvoiceStatus, IsoDate, ReportPeriod, ReportPeriodPreset } from "./contract";
 import { REPORT_PERIOD_PRESETS } from "./contract";
 import { visibleStatusesFor } from "./access";
-import { resolveReportPeriod } from "./period";
+import { dateOnly, resolveReportPeriod } from "./period";
 
 /**
  * Today, as a UTC calendar date.
@@ -55,6 +55,39 @@ export async function guard(
 }
 
 /**
+ * Refuse a request that names a client this scope is not billing.
+ *
+ * THE SCOPE IS STILL THE ONLY AUTHORITY. `scopedDb()` decides `orgId` from the
+ * actor's memberships, never from the request, and nothing here widens that —
+ * a `clientId` naming another organisation does not select it, it is refused.
+ * This is not a second tenant filter; it is a check that the caller and the
+ * server agree about whose invoice is being produced.
+ *
+ * It exists because they can disagree in one specific, silent way. "Client" IS
+ * the organisation in this product, `/api/context` lists every organisation the
+ * reader belongs to, and the generator's client selector defaults to the first
+ * of them — which need not be the one the session is scoped to. Ignoring the
+ * field, as these routes did, means the screen names one client and the
+ * document is raised for another, with no sign on either that they differ.
+ *
+ * An absent or empty `clientId` is fine: most callers do not send one, and the
+ * scope answers the question on its own.
+ */
+export function clientMismatch(
+  body: Record<string, unknown>,
+  scope: ScopedDatabase,
+): Response | null {
+  const clientId = text(body.clientId, 64);
+  if (!clientId || clientId === scope.orgId) return null;
+  return Response.json(
+    {
+      error: `This session is billing ${scope.organisation.name}. Switch workspace to raise a document for another client.`,
+    },
+    { status: 409 },
+  );
+}
+
+/**
  * Whether the caller may see working documents, or only finalised ones.
  *
  * Resolved against the workspace's own capability table rather than a role
@@ -71,23 +104,96 @@ function isPreset(value: unknown): value is ReportPeriodPreset {
 }
 
 /**
+ * `period-model.ts`'s tokens, mapped onto the contract's presets.
+ *
+ * THE TWO VOCABULARIES ARE REAL AND BOTH ARE CORRECT. `contract.ts` names the
+ * eight reporting periods (`this-month`, `last-month`, …) and is frozen.
+ * `app/(app)/portal/period-model.ts` names the same eight windows in the tokens
+ * every other screen in the product already speaks (`mtd`, `month-1`, …), and
+ * `GENERATOR_PERIOD_PRESETS` in `generator-setup.tsx` deliberately reuses them
+ * so the reporting screen does not invent a ninth vocabulary for a control the
+ * dashboard already has.
+ *
+ * What was missing was the translation. Without it every token but `today` — the
+ * one word the two vocabularies happen to share — fell through `isPreset` and,
+ * because the browser sends its dates as `periodStart`/`periodEnd` while this
+ * function only read `start`/`end`, landed on the `"last-month"` default. Every
+ * document generated from the screen was therefore computed for LAST MONTH
+ * whatever the operator chose, silently, which is the exact failure the comment
+ * below promises does not happen.
+ */
+const PRESET_ALIASES: Record<string, ReportPeriodPreset> = {
+  week: "this-week",
+  mtd: "this-month",
+  "month-1": "last-month",
+  quarter: "this-quarter",
+  ytd: "this-year",
+  "12m": "last-12-months",
+  range: "custom",
+};
+
+/** `rangeToken(from, to)` in `period-model.ts` — a hand-edited range, as one token. */
+const RANGE_TOKEN = /^range:(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/;
+
+/** The first of several candidate fields that parses as a calendar date. */
+function firstIsoDate(...candidates: unknown[]): string | null {
+  for (const candidate of candidates) {
+    const parsed = dateOnly(typeof candidate === "string" ? candidate : null);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+/**
  * The period a request is asking about.
  *
  * Accepts either a preset or an explicit range; an explicit range without
  * `preset: "custom"` is still treated as custom, because a caller that sent two
  * dates plainly means them. Refuses rather than defaulting: a report silently
  * generated for the wrong month is worse than one that was not generated.
+ *
+ * THE RANGE MAY ARRIVE UNDER EITHER NAME. `start`/`end` is this function's own
+ * spelling; `periodStart`/`periodEnd` is what the browser sends and what
+ * `PATCH /api/reports/documents/[id]` already reads for the same two dates.
+ * Reading both here rather than renaming either is what lets one endpoint serve
+ * the generator screen, the export buttons and a hand-written call without any
+ * of the three learning a second name for the same thing.
+ *
+ * AN UNRECOGNISED PRESET IS REFUSED, not defaulted. That is the sentence above
+ * made true: a token this function cannot place is a caller asking for a period
+ * nobody has defined, and answering it with last month's figures under the
+ * caller's own heading is worse than answering nothing.
  */
 export function periodFromPayload(
   body: Record<string, unknown>,
 ): { ok: true; period: ReportPeriod } | { ok: false; error: string } {
-  const start = typeof body.start === "string" ? body.start : null;
-  const end = typeof body.end === "string" ? body.end : null;
-  const preset: ReportPeriodPreset = isPreset(body.preset)
-    ? body.preset
-    : start && end
-      ? "custom"
-      : "last-month";
+  const raw = typeof body.preset === "string" ? body.preset.trim() : "";
+  const token = RANGE_TOKEN.exec(raw);
+
+  /* Dates win wherever two of them parse — see the header. `dateOnly` rather
+     than a truthiness check, so the `""` that `/api/reports/exports` sends for
+     an absent field reads as absent rather than as a malformed date. */
+  const start = firstIsoDate(body.start, body.periodStart, token?.[1]);
+  const end = firstIsoDate(body.end, body.periodEnd, token?.[2]);
+  if (start && end) {
+    const resolved = resolveReportPeriod({ preset: "custom", todayIso: todayIso(), start, end });
+    return resolved.ok ? { ok: true, period: resolved.period } : { ok: false, error: resolved.error };
+  }
+
+  let preset: ReportPeriodPreset;
+  if (!raw) {
+    preset = "last-month";
+  } else if (isPreset(raw)) {
+    preset = raw;
+  } else if (raw in PRESET_ALIASES) {
+    preset = PRESET_ALIASES[raw] as ReportPeriodPreset;
+  } else {
+    return {
+      ok: false,
+      error: `"${raw.slice(0, 40)}" is not a reporting period. Send one of ${REPORT_PERIOD_PRESETS.join(", ")}, or a start and end date.`,
+    };
+  }
+
   const resolved = resolveReportPeriod({ preset, todayIso: todayIso(), start, end });
   return resolved.ok ? { ok: true, period: resolved.period } : { ok: false, error: resolved.error };
 }

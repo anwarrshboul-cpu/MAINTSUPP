@@ -43,6 +43,7 @@
 import { EXPORT_FORMATS, exportFilename } from "../../../lib/reporting/contract";
 import type { CombinedReportPayload, ExportFormat } from "../../../lib/reporting/contract";
 import { auditActor, recordAudit } from "../../../lib/audit";
+import { IDENTITY_HEADER } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import type { ScopedDatabase } from "../../../lib/tenant-db";
 import { DOCX_CONTENT_TYPE, renderDocx } from "../../../lib/exports/docx";
@@ -110,10 +111,29 @@ interface PayloadSource {
 /**
  * Forward the caller's identity, and nothing else.
  *
- * Only `cookie` and `authorization` are copied. Copying the whole header set
- * would carry `content-length`, `content-type` and `accept-encoding` from the
- * outer request into a subrequest with a different body, which is a class of
- * bug that presents as an intermittent truncated read.
+ * Only `cookie`, `authorization` and the non-production identity header are
+ * copied. Copying the whole header set would carry `content-length`,
+ * `content-type` and `accept-encoding` from the outer request into a subrequest
+ * with a different body, which is a class of bug that presents as an
+ * intermittent truncated read.
+ *
+ * ── WHY `x-maintsupp-identity` IS IN THAT LIST ─────────────────────────────
+ *
+ * The header above says the subrequest "can never see more than the caller
+ * can". That was only true while the caller's identity lived in the cookie. In
+ * development it need not: `IDENTITY_HEADER` in `app/lib/tenant-access.ts` is a
+ * deliberate affordance so a test or a `curl` proof can act as somebody without
+ * signing in, and dropping it here did not make the subrequest anonymous in the
+ * safe sense — an anonymous request in development resolves to the seeded super
+ * admin of EVERY organisation.
+ *
+ * Proven against this server before the header was added: a Demo Client Ltd
+ * admin, answered 404 by `GET /api/reports/documents/<id>` as they should be,
+ * was handed the whole of Sunnamusk UK's finalised invoice MS-00001 as a PDF by
+ * this route — filename, invoice number, £2,040.00 total and all. Production
+ * was never exposed (`demoIdentityAllowed()` is false there, and a real caller's
+ * identity is in the forwarded cookie), but the export path must not be the one
+ * door in this feature where the identity is quietly weaker than at the front.
  */
 function forwardedHeaders(request: Request, extra: Record<string, string> = {}) {
   const headers = new Headers({ accept: "application/json", ...extra });
@@ -121,6 +141,8 @@ function forwardedHeaders(request: Request, extra: Record<string, string> = {}) 
   if (cookie) headers.set("cookie", cookie);
   const authorization = request.headers.get("authorization");
   if (authorization) headers.set("authorization", authorization);
+  const identity = request.headers.get(IDENTITY_HEADER);
+  if (identity) headers.set(IDENTITY_HEADER, identity);
   return headers;
 }
 

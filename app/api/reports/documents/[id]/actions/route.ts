@@ -29,6 +29,7 @@
 import { auditActor, recordAudit } from "../../../../../lib/audit";
 import { REPORT_CAPABILITIES, type ReportOperation } from "../../../../../lib/reporting/access";
 import { draftWarnings, finalisationBlockers } from "../../../../../lib/reporting/blockers";
+import type { InvoiceStatus } from "../../../../../lib/reporting/contract";
 import {
   documentPayload,
   documentStatus,
@@ -151,7 +152,7 @@ export async function POST(
     }
 
     if (action === "submit" || action === "approve") {
-      const to = action === "submit" ? "Ready for Review" : "Approved";
+      const to: InvoiceStatus = action === "submit" ? "Ready for Review" : "Approved";
       /* An approval is a statement that the figures are right, so the stored
          totals are refreshed first — approving a document whose lines were
          computed before a fee changed would approve numbers nobody has seen. */
@@ -166,6 +167,16 @@ export async function POST(
         reason,
       });
       if (!moved.ok) return Response.json({ error: moved.error }, { status: moved.status });
+
+      /* The payload was computed BEFORE the move, so its `status` is the old
+         one — and `finalisationBlockers` reads that status. Left as it was, the
+         answer to "approve" carried `status: "Approved"` and, beside it,
+         "The document must be approved before it can be finalised.", which is
+         the screen telling the operator their approval did not happen. Stamped
+         rather than recomputed: a second computation here would read the estate
+         again and could return a document different from the one whose totals
+         were just written. */
+      const settled = { ...payload, invoice: { ...payload.invoice, status: to } };
       await recordAudit({
         db: scope.db,
         organisationId: scope.orgId,
@@ -182,9 +193,13 @@ export async function POST(
       });
       return Response.json({
         status: to,
-        payload,
-        blockers: finalisationBlockers({ payload, confirmedPartialPeriod: false, requireApproval: true }),
-        warnings: draftWarnings(payload),
+        payload: settled,
+        blockers: finalisationBlockers({
+          payload: settled,
+          confirmedPartialPeriod: false,
+          requireApproval: true,
+        }),
+        warnings: draftWarnings(settled),
       });
     }
 

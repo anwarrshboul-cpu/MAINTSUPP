@@ -56,7 +56,7 @@ import type {
 } from "./contract";
 import { computeReport } from "./engine";
 import type { LineDecision } from "./inputs";
-import { dateOnly } from "./period";
+import { dateOnly, isWholeCalendarMonth, isWholeCalendarYear, periodLabel } from "./period";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -78,21 +78,30 @@ export function documentStatus(row: ServiceInvoiceRow): InvoiceStatus {
   return isStatus(row.status) ? row.status : "Draft";
 }
 
-/** The period a stored document describes, rebuilt from its own columns. */
+/**
+ * The period a stored document describes, rebuilt from its own columns.
+ *
+ * The calendar rules are `period.ts`'s — `isWholeCalendarMonth`,
+ * `isWholeCalendarYear` and `periodLabel`, the same three `resolveReportPeriod`
+ * uses when the period is first chosen. A stored document must not be able to
+ * describe its own period differently from the request that raised it, and a
+ * second hand-rolled month test here was exactly that: it produced
+ * "2026-08-01 to 2026-08-31" on the register and on the exported invoice where
+ * the preview of the very same period said "August 2026".
+ *
+ * A range that is neither a whole month nor a whole year keeps its dates rather
+ * than taking `periodLabel`'s "Custom range": on a filed invoice the two dates
+ * are the information, and the word is not.
+ */
 export function documentPeriod(row: ServiceInvoiceRow): ReportPeriod {
   const start = dateOnly(row.periodStart) ?? row.periodStart;
   const end = dateOnly(row.periodEnd) ?? row.periodEnd;
-  const wholeMonth =
-    start.slice(8) === "01" &&
-    start.slice(0, 7) === end.slice(0, 7) &&
-    end === new Date(Date.UTC(Number(end.slice(0, 4)), Number(end.slice(5, 7)), 0))
-      .toISOString()
-      .slice(0, 10);
+  const named = isWholeCalendarMonth(start, end) || isWholeCalendarYear(start, end);
   return {
     start,
     end,
-    label: `${start} to ${end}`,
-    partialMonth: !wholeMonth,
+    label: named ? periodLabel("custom", start, end) : `${start} to ${end}`,
+    partialMonth: !isWholeCalendarMonth(start, end),
   };
 }
 

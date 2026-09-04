@@ -20,6 +20,7 @@ import { REPORT_CAPABILITIES } from "../../../lib/reporting/access";
 import { computeReport } from "../../../lib/reporting/engine";
 import {
   badRequest,
+  clientMismatch,
   guard,
   periodFromPayload,
   reportUnavailable,
@@ -34,6 +35,12 @@ export async function POST(request: Request) {
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+    /* Before anything is computed: a preview headed with one client's name and
+       filled with another's figures is the one wrong answer this route can give
+       that nobody would notice. See `clientMismatch`. */
+    const mismatch = clientMismatch(body, scope);
+    if (mismatch) return mismatch;
 
     const period = periodFromPayload(body);
     if (!period.ok) return badRequest(period.error);

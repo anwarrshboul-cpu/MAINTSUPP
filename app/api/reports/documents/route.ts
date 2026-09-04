@@ -17,6 +17,7 @@ import { draftWarnings, finalisationBlockers } from "../../../lib/reporting/bloc
 import { createDraft, listDocuments } from "../../../lib/reporting/documents";
 import {
   badRequest,
+  clientMismatch,
   guard,
   periodFromPayload,
   reportUnavailable,
@@ -52,6 +53,11 @@ export async function POST(request: Request) {
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+    /* A document raised under the wrong client's name is the one mistake here
+       that survives into a filed record. Refuse before anything is written. */
+    const mismatch = clientMismatch(body, scope);
+    if (mismatch) return mismatch;
 
     const period = periodFromPayload(body);
     if (!period.ok) return badRequest(period.error);
