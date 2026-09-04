@@ -912,7 +912,7 @@ function ComplianceTrackerEmpty({ storeCount }: { storeCount: number }) {
       </h3>
       <p>
         {storeCount === 0
-          ? "The Compliance Tracker fills in from the Store Documentation UK board. Import the monday export, or add stores in the register, and every store will appear here as a row."
+          ? "The Compliance Tracker fills in from the Store Documentation UK board. Import the store list, or add stores in the register, and every store will appear here as a row."
           : `${storeCount} store${storeCount === 1 ? " is" : "s are"} on the board, but no certificate has been recorded against ${storeCount === 1 ? "it" : "them"} yet. As documents are attached and expiry dates entered, each one takes its place in the grid below.`}
       </p>
       <p>

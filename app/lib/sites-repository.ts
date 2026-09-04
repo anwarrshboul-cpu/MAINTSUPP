@@ -163,6 +163,50 @@ export async function listSites(
 }
 
 /**
+ * Every site in SEVERAL NAMED REGISTERS — the management surface, and only it.
+ *
+ * ── WHY THIS IS NOT `listSites` WITH A WIDER ARGUMENT ─────────────────────
+ *
+ * `listSites` above defaults its scope to the canonical register, and that
+ * default is the model's default-deny: a caller that forgets the argument reads
+ * the workspace's own register and never somebody else's. Widening its
+ * parameter to accept a list would leave that default in place but stop the
+ * suite being able to see it — `tests/w2-scope-model.test.mjs` reads the
+ * declaration `scope: RegisterScope = CANONICAL_REGISTER` to prove omission
+ * cannot mean "everything". So the plural read is a SEPARATE function with NO
+ * default at all: naming the registers is compulsory, which is the same rule
+ * stated the other way round.
+ *
+ * ── ONE QUERY, NOT ONE PER REGISTER ───────────────────────────────────────
+ *
+ * The scopes arrive as a list and leave as a single `IS NULL OR IN (…)`
+ * predicate built by `registerScopeFilter`. That is the difference between this
+ * and the loop it replaces: an organisation with six Sites sections costs one
+ * statement here and seven in the obvious implementation. It is also the reason
+ * the rows are not fetched organisation-wide and sorted out afterwards — the
+ * owner ruled that out by name, and it would return the rows of any register
+ * this workspace no longer has a section for.
+ */
+export async function listSitesInRegisters(
+  db: Database,
+  organisationId: string,
+  scopes: RegisterScope[],
+  options: { includeInactive?: boolean } = {},
+) {
+  const rows = await db
+    .select()
+    .from(sites)
+    .where(
+      and(
+        eq(sites.organisationId, organisationId),
+        registerScopeFilter(sites.boardId, scopes),
+      ),
+    )
+    .orderBy(asc(sites.position), asc(sites.name));
+  return options.includeInactive ? rows : rows.filter((row) => row.active);
+}
+
+/**
  * One site, BY ID AND BY REGISTER.
  *
  * The scope is in the predicate even though an id is already unique, because

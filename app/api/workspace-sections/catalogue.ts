@@ -416,6 +416,22 @@ export type WorkspaceSection = {
    * `template === null` means legacy, never "assume Jobs".
    */
   template?: string | null;
+  /**
+   * W2C — the section and everything it owns are in the RECYCLE BIN.
+   *
+   * A third state, and it is not a stronger `archived`. Archived means "taken
+   * out of every sidebar, indefinitely, put it back whenever"; deleted means
+   * "in the bin with its register, its rows, its views, its forms and its
+   * files, for thirty days, then gone". Both flags are set on a deleted
+   * section so every reader that already drops an archived one drops this one
+   * too — see the column's note in `db/schema.ts` — and this is what lets the
+   * screens tell the two apart rather than offering Restore for something the
+   * bin owns.
+   */
+  deleted?: boolean;
+  /** When it went to the bin, and when the bin will empty it. ISO-8601 UTC. */
+  deletedAt?: string | null;
+  expiresAt?: string | null;
   key: string;
   label: string;
   icon: string;
@@ -523,6 +539,11 @@ export function sectionsToCatalogue(
     .filter(
       (section) =>
         !section.archived &&
+        /* W2C — and one in the Recycle Bin, which is belt and braces: deleting
+           a section archives it as well, so the line above already drops it.
+           Stated anyway, because a reader of this filter should not have to
+           know that to be sure a deleted section cannot be drawn. */
+        !section.deleted &&
         isWorkspaceSectionKey(section.key) &&
         surfaceDefinition(section.surface) !== null,
     )

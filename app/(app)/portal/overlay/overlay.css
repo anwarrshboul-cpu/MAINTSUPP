@@ -125,10 +125,20 @@
  * them, but the POSITIONED element is now the `.ms-popover` around them, so
  * their own `absolute` offsets, caps and nudges stand down. The popover
  * scrolls; the menu inside it just lays out.
+ *
+ * `.board-rules` — the sort and filter panels — joined this list when they
+ * moved onto the layer. Their inline-era rules in globals.css (`position:
+ * absolute`, `top: calc(100% + 7px)`, the `right: 0` desktop anchor) and the
+ * fixed bottom sheet in brand-overrides.css are all written against an
+ * ancestor that no longer exists, so they are stood down here in one place
+ * rather than unpicked across two stylesheets. What those rules give the panel
+ * that is still wanted — its width, ground, border, shadow and both themes'
+ * colours — is untouched, which is the whole reason the class stays on it.
  */
 .ms-popover > .sheet-row-menu,
 .ms-popover > .sheet-group__menu,
-.ms-popover > .live-board-menu {
+.ms-popover > .live-board-menu,
+.ms-popover > .board-rules {
   position: static;
   top: auto;
   right: auto;
@@ -136,6 +146,21 @@
   max-height: none;
   overflow: visible;
   transform: none;
+}
+
+/*
+ * The panel is the popover's only child and the popover is what is positioned,
+ * so the two must agree about width. `.board-rules` asks for
+ * `min(520px, calc(100vw - 32px))` and the popover is shrink-to-fit around it;
+ * the popover's own inline `max-width` — the BOUNDS minus their padding, not
+ * the window — is the cap that actually binds, and without this the panel
+ * would keep its 520px and hang out of the surface that was placed for it.
+ * The rail-underlap defect is a placement bug, so it is fixed by the placement
+ * being honoured, and a child wider than its own surface is how that stops
+ * being true.
+ */
+.ms-popover.board-rules-layer > .board-rules {
+  max-width: 100%;
 }
 
 .ms-popover.notification-layer {

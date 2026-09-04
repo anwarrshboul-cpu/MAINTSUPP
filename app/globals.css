@@ -400,7 +400,13 @@ h1, h2, h3, .brand-word { font-family: Manrope, Inter, ui-sans-serif, system-ui,
   border-right-color: var(--rail-border);
   background: var(--rail-bg);
 }
-.portal-nav { gap: 2px; margin-top: 18px; overflow-y: auto; }
+/* `overflow-y: auto` was here (and in the copy of this block in
+   brand-overrides.css). The nav is no longer its own scroller: `.sidebar-scroll`
+   wraps the nav AND the support card and scrolls the two together, so leaving
+   this as `auto` would nest a second scroll container inside the first — the
+   double-scrollbar trap, where the outer scroller takes the wheel gesture and
+   the inner list can never be scrolled to its own end. */
+.portal-nav { gap: 2px; margin-top: 18px; overflow-y: visible; }
 .portal-nav button { min-height: 39px; color: var(--rail-fg-muted); font-size: 11px; }
 .portal-nav button.is-active {
   background: var(--rail-active-bg);
@@ -2641,6 +2647,38 @@ a {
   color: var(--rail-fg-faint);
 }
 
+/*
+ * The rail's single scroll region: the nav, and the support card at the end of
+ * it.
+ *
+ * `min-height: 0` is the load-bearing half. `.portal-sidebar` is a fixed-height
+ * flex column, and a flex item's automatic minimum size is its content — so
+ * without this the region would refuse to shrink below the full height of the
+ * nav list and push the profile block off the bottom of a short screen instead
+ * of scrolling.
+ *
+ * The siblings are pinned with `flex-shrink: 0` for the opposite reason: they
+ * are the brand, the workspace picker, the identity line and the profile
+ * footer, none of which may be squeezed to buy room for a list that is already
+ * allowed to scroll. That is the compression defect this pairing prevents —
+ * the workspace picker was crushed to its min-height on a short viewport while
+ * its own <select> kept full size and spilled out of it.
+ */
+.sidebar-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-y: auto;
+  /* The rail keeps its scrolling to itself: flicking past the end of the nav
+     must not start scrolling the board behind it. */
+  overscroll-behavior: contain;
+}
+
+.portal-sidebar > *:not(.sidebar-scroll) {
+  flex-shrink: 0;
+}
+
 .portal-nav {
   display: flex;
   flex-direction: column;
@@ -2726,7 +2764,24 @@ a {
   grid-template-columns: 34px 1fr;
   gap: 10px;
   align-items: center;
-  margin-top: auto;
+  /*
+   * `margin-top: auto` was here, and it is what made the card furniture.
+   *
+   * As the last flex item of the rail column it consumed the free height and
+   * sat permanently between the scrolling nav and the profile block — visible
+   * on every screen, on every route, whether or not you had scrolled anywhere
+   * near the end of your own navigation. Inside `.sidebar-scroll` an auto
+   * margin would do the same thing again, pinning the card to the bottom of
+   * the scroll viewport whenever the nav is short enough to fit.
+   *
+   * A fixed margin makes it what it should be: the last block of the
+   * scrollable content, sitting under the final nav row and reached only by
+   * scrolling to the bottom.
+   */
+  margin-top: 18px;
+  /* The card must not be squeezed thinner than its two lines when the nav
+     above it is long — it is the end of a scroller, not a compressible gap. */
+  flex-shrink: 0;
   padding: 13px 10px;
   border: 1px solid var(--rail-card-border);
   border-radius: 9px;

@@ -1762,6 +1762,38 @@ export const workspaceSections = sqliteTable(
     position: integer("position").notNull().default(0),
     /** Set instead of deleting when the section still holds content. */
     archivedAt: text("archived_at"),
+    /**
+     * W2C — THE SECTION IS IN THE RECYCLE BIN, AS ONE BUNDLE.
+     *
+     * `archived_at` and this column are two different statements and the
+     * product needs both. Archiving is an ARRANGEMENT act: the section leaves
+     * every sidebar, nothing else changes, and it can sit there for ever.
+     * `deleted_at` is a LIFECYCLE act: the section and everything it owns — its
+     * register, that register's rows, views, forms, columns, attachments, and
+     * any sites or contractors created inside it — are in the Recycle Bin for
+     * thirty days, after which they are destroyed.
+     *
+     * NOTHING ELSE MOVES WHEN THIS IS SET, and that is the whole design. The
+     * children keep their `board_id`, their placements, their cells and their
+     * files exactly where they are; the section is the only door onto a
+     * `sec-` register, so hiding the section hides the bundle. Restore is then
+     * one UPDATE back to NULL and is atomic by construction — there is no
+     * partially-restored state available, because nothing was taken apart.
+     * Cascading tombstones would have given the bin hundreds of rows to put
+     * back and a way to get half of it wrong.
+     *
+     * Deleting also sets `archived_at` when it is not already set, so every
+     * reader that already excludes an archived section — the nav catalogue,
+     * `resolveRegisterScope`, the section manager's live list — excludes a
+     * deleted one with no change at all. The pre-delete value is snapshotted
+     * into the bin entry so Restore puts the row back in the state it left.
+     *
+     * Nullable TEXT, no default, no backfill: every existing row reads NULL,
+     * which means "not deleted". See `sendSectionToBin` in
+     * `app/lib/recycle-bin.ts` for the bundle, and the `bin=1` branch of
+     * `DELETE /api/workspace-sections` for what writes it.
+     */
+    deletedAt: text("deleted_at"),
     createdBy: text("created_by"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),

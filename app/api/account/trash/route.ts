@@ -73,6 +73,27 @@ const RECOVERY_MATRIX = [
     note: "Deleting a board removes the row. Archiving is reversible.",
   },
   {
+    /*
+     * W2C — the biggest recoverable object in the product, and the newest.
+     *
+     * Deleting a workspace section moves the SECTION AND ITS REGISTER to the
+     * bin as one entry: its rows and subitems, its columns, groups and views,
+     * its form and its share token, its files, and any sites or contractors
+     * created inside it. Nothing is taken apart to get there — the section is
+     * the only door onto a `sec-` register, so hiding it hides the bundle —
+     * which is what makes Restore a single act rather than a hundred.
+     *
+     * `archivable: true` as well, and the two are genuinely different promises:
+     * "Remove" archives the section indefinitely and leaves every row in place,
+     * "Delete" starts the 30-day countdown over all of it.
+     */
+    entity: "Workspace sections",
+    table: "workspace_sections",
+    softDelete: true,
+    archivable: true,
+    note: "Deleting a section moves it to the recycle bin for 30 days WITH its register — the items on it, their files, its columns, groups, views and form, and any sites or contractors created inside it. It appears as one entry and comes back as one. Removing a section instead archives it: it leaves every sidebar and nothing else changes. Only the product's own sections cannot be deleted this way.",
+  },
+  {
     entity: "Board views",
     table: "board_views",
     softDelete: true,

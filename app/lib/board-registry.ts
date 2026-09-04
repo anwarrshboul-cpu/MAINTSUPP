@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getD1, type getDb } from "../../db";
 import { seedBoardStructure } from "../../db/init";
 import {
@@ -9,6 +9,7 @@ import {
 import { defaultBoardOptions } from "../../db/seed-options";
 import { seedStoreDocumentationBoard } from "../../db/seed-store-documentation";
 import {
+  attachments,
   automationRuns,
   boardAutomations,
   boardViews,
@@ -19,6 +20,7 @@ import {
   maintenanceGroupItems,
   maintenanceGroups,
   recycleBin,
+  workspaceSections,
 } from "../../db/schema";
 import {
   GENERIC_BOARD_COLUMNS,
@@ -237,6 +239,56 @@ export async function resolveBoard(
     .where(and(eq(boards.organisationId, organisationId), eq(boards.key, wanted)));
 
   if (existing) {
+    /*
+     * W2C — A REGISTER WHOSE SECTION IS IN THE RECYCLE BIN IS NOT REACHABLE.
+     *
+     * Deleting a custom section hides it from every sidebar, but a board key
+     * that somebody bookmarked, or a stale tab, still names a live row — and
+     * `/api/board*` resolves boards by key, not through the section. Without
+     * this, a deleted section's register kept answering to anyone who had ever
+     * copied its URL, which would make "deleted" mean "no longer in the menu"
+     * rather than what the Recycle Bin says it means.
+     *
+     * ONLY FOR `sec-` KEYS, so the product's own two boards never pay for it.
+     * `maintenance` and `store-documentation` skip the query entirely, which is
+     * every request that matters; a generated key costs one indexed read, and
+     * only on a board that a section created.
+     *
+     * `BoardNotFoundError` rather than a new class: every route already turns it
+     * into a 404, and 404 is the right answer — the register is not available
+     * to this workspace right now, and saying more would leak the bin's
+     * contents to a caller who cannot see the bin.
+     */
+    if (isSectionBoardKey(existing.key)) {
+      const [binned] = await db
+        .select({ key: workspaceSections.key })
+        .from(workspaceSections)
+        .where(
+          and(
+            eq(workspaceSections.organisationId, organisationId),
+            eq(workspaceSections.surfaceRef, existing.key),
+            isNotNull(workspaceSections.deletedAt),
+          ),
+        )
+        .limit(1);
+      /* Only when NOTHING else opens it. Two sections can share a register;
+         one of them being in the bin must not close the other's door. */
+      if (binned) {
+        const [live] = await db
+          .select({ key: workspaceSections.key })
+          .from(workspaceSections)
+          .where(
+            and(
+              eq(workspaceSections.organisationId, organisationId),
+              eq(workspaceSections.surfaceRef, existing.key),
+              isNull(workspaceSections.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!live) throw new BoardNotFoundError(wanted);
+      }
+    }
+
     return {
       id: existing.id,
       key: existing.key,
@@ -786,4 +838,138 @@ export async function nextReference(
   const year = new Date().getUTCFullYear();
   const sequence = String(row?.counter ?? 1).padStart(4, "0");
   return `${row?.prefix ?? "MS"}-${year}-${sequence}`;
+}
+/**
+ * W2C — WHAT A SECTION'S REGISTER IS CARRYING, counted once.
+ *
+ * The child summary the Recycle Bin shows under `Section — North Region Jobs`,
+ * and the snapshot the bundle keeps. It answers the question a person actually
+ * has in front of a destructive confirmation — "how much is in there?" — which
+ * the old refusals answered one table at a time and only by refusing.
+ *
+ * ONLY ON THE DELIBERATE PATH. Six COUNTs and one sub-select, run when a
+ * section is deleted and when the bin's confirmation is drawn. It has no
+ * business on a page load and none at all on a boot path.
+ *
+ * `attachments` is counted through the board's own columns rather than through
+ * its items, and that is a bound rather than a shortcut: a register with eight
+ * hundred rows would need eight hundred bound ids to ask the question the other
+ * way round, which is exactly the variable-limit failure `chunkIds` exists for.
+ * Every file a register holds arrives in a file COLUMN — that is how the
+ * Documents template stores a certificate and how a Jobs board stores evidence
+ * — so the sub-select sees them without the caller ever listing an item id.
+ */
+export async function sectionBundleCounts(
+  db: Database,
+  organisationId: string,
+  boardKey: string,
+): Promise<Record<string, number>> {
+  const tally = async (value: Promise<Array<{ value: unknown }>>) => {
+    const [row] = await value;
+    return Number(row?.value ?? 0);
+  };
+
+  const items = await boardItemCount(db, organisationId, boardKey);
+  /* Jobs only, deliberately — NOT `boardBinCount`, which counts every kind of
+     bin entry filed on the board. A view or a column already in the bin is
+     counted by the `views` and `columns` lines below, and reporting it a second
+     time as "1 item in the bin" would describe a row that is not one. */
+  const binnedItems = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(recycleBin)
+      .where(
+        and(
+          eq(recycleBin.organisationId, organisationId),
+          eq(recycleBin.boardId, boardKey),
+          eq(recycleBin.entityType, "job"),
+        ),
+      ),
+  );
+
+  const columns = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(maintenanceBoardColumns)
+      .where(
+        and(
+          eq(maintenanceBoardColumns.organisationId, organisationId),
+          eq(maintenanceBoardColumns.boardId, boardKey),
+        ),
+      ),
+  );
+  const groups = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(maintenanceGroups)
+      .where(
+        and(
+          eq(maintenanceGroups.organisationId, organisationId),
+          eq(maintenanceGroups.boardId, boardKey),
+        ),
+      ),
+  );
+  const views = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(boardViews)
+      .where(
+        and(eq(boardViews.organisationId, organisationId), eq(boardViews.boardId, boardKey)),
+      ),
+  );
+  const forms = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(formConfigurations)
+      .where(
+        and(
+          eq(formConfigurations.organisationId, organisationId),
+          eq(formConfigurations.boardId, boardKey),
+        ),
+      ),
+  );
+  const automations = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(boardAutomations)
+      .where(
+        and(
+          eq(boardAutomations.organisationId, organisationId),
+          eq(boardAutomations.boardId, boardKey),
+        ),
+      ),
+  );
+  const files = await tally(
+    db
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(attachments)
+      .where(
+        and(
+          eq(attachments.organisationId, organisationId),
+          inArray(
+            attachments.boardColumnId,
+            db
+              .select({ id: maintenanceBoardColumns.id })
+              .from(maintenanceBoardColumns)
+              .where(
+                and(
+                  eq(maintenanceBoardColumns.organisationId, organisationId),
+                  eq(maintenanceBoardColumns.boardId, boardKey),
+                ),
+              ),
+          ),
+        ),
+      ),
+  );
+
+  return {
+    items,
+    binnedItems,
+    columns,
+    groups,
+    views,
+    forms,
+    automations,
+    attachments: files,
+  };
 }

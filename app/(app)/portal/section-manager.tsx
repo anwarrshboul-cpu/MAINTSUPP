@@ -29,11 +29,27 @@
  * restored next week come back where it was.
  *
  * REMOVAL IS TWO DIFFERENT ACTS AND THE UI SAYS SO. "Remove" archives, which is
- * reversible and is what the button does. "Remove permanently" purges, is
- * refused by the server while any arrangement or remembered view still points
- * at the section, and is guarded here by an inline confirmation step that has
- * to be read past — not a `window.confirm`, which is the shape W07-06 is still
- * marked PARTIAL for.
+ * reversible and is what that button does. "Delete" sends the whole section to
+ * the Recycle Bin, guarded here by an inline confirmation step that has to be
+ * read past — not a `window.confirm`, which is the shape W07-06 is still marked
+ * PARTIAL for.
+ *
+ * W2C — AND THE DESTRUCTIVE BUTTON NO LONGER LIES.
+ *
+ * It used to say "Remove permanently", send `?purge=1`, and be refused by the
+ * server while the section's register held a single row — or while a single row
+ * of it sat in the recycle bin, or while it held one site. The owner's report
+ * was that removing a custom section therefore meant emptying it by hand first,
+ * twice over, for what he regards as one object.
+ *
+ * So the button is "Delete", it sends `?bin=1`, and the section goes to the
+ * Recycle Bin AS ONE ENTRY with its register, its rows, its views, its forms
+ * and its files. It is restorable there for 30 days and destroyed after them,
+ * which is what the confirmation says. The truly irreversible act — "Delete for
+ * good" — lives in the bin, behind `data.delete`, where every other permanent
+ * deletion in this product already lives. `?purge=1` still exists on the API,
+ * unchanged and still refusing an occupied register; nothing in the product
+ * sends it.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -57,7 +73,35 @@ export type WorkspaceSectionRow = {
   group: string;
   position: number;
   archived: boolean;
+  /**
+   * W2C — in the Recycle Bin, with its register and everything on it.
+   *
+   * A THIRD state, not a stronger `archived`, and it has to be read first: the
+   * server sets both flags so that every reader which already drops an archived
+   * section drops a deleted one too. Archived means "out of the sidebar, put it
+   * back whenever"; deleted means "in the bin for 30 days, then gone".
+   */
+  deleted?: boolean;
+  deletedAt?: string | null;
+  /** When the bin will empty it. ISO-8601 UTC, or null when it is not deleted. */
+  expiresAt?: string | null;
 };
+
+/**
+ * "6 days left", from the stored expiry.
+ *
+ * Days rather than a date, matching the Recycle Bin's own line — "4 days left"
+ * is the fact somebody acts on, and a timestamp makes them do the arithmetic.
+ * The exact moment is still available: it is on the bin entry.
+ */
+function daysLeftLabel(expiresAt: string | null | undefined) {
+  if (!expiresAt) return "In the Recycle Bin";
+  const remaining = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(remaining)) return "In the Recycle Bin";
+  if (remaining <= 0) return "Due to be deleted for good";
+  const days = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+  return `${days} day${days === 1 ? "" : "s"} left`;
+}
 
 /** A screen a section may draw, as the server describes it. */
 type Surface = {
@@ -508,8 +552,21 @@ function SectionManagerBody({
     () => (catalogue?.sections ?? []).filter((entry) => !entry.archived),
     [catalogue],
   );
+  /*
+   * W2C — THREE LISTS, BECAUSE THERE ARE NOW THREE STATES.
+   *
+   * Deleting a section sets `archived` as well as `deleted` — see the column's
+   * note in `db/schema.ts` — so `deleted` has to be tested FIRST or a section
+   * in the recycle bin would appear under "Removed" offering a Restore that the
+   * server refuses. The bin owns the recovery of a deleted section; this screen
+   * says where it is and gets out of the way.
+   */
   const archived = useMemo(
-    () => (catalogue?.sections ?? []).filter((entry) => entry.archived),
+    () => (catalogue?.sections ?? []).filter((entry) => entry.archived && !entry.deleted),
+    [catalogue],
+  );
+  const binned = useMemo(
+    () => (catalogue?.sections ?? []).filter((entry) => entry.deleted),
     [catalogue],
   );
 
@@ -678,6 +735,21 @@ function SectionManagerBody({
                         >
                           Remove
                         </button>
+                        {/* W2C — the lifecycle's third step, reachable without
+                            archiving first. "Remove" takes the section out of
+                            the sidebar and leaves everything in place; this
+                            takes the section AND its register, its rows, views,
+                            forms and files to the Recycle Bin as one thing. The
+                            owner asked for a custom section to be deletable as
+                            one object rather than emptied row by row first. */}
+                        <button
+                          type="button"
+                          className="ba-btn ba-btn--small ba-btn--danger"
+                          disabled={busy}
+                          onClick={() => setPurging(entry.key)}
+                        >
+                          Delete
+                        </button>
                       </span>
                     )}
                   </li>
@@ -726,16 +798,52 @@ function SectionManagerBody({
                           >
                             Restore
                           </button>
+                          {/* W2C — "Delete", not "Remove permanently", because
+                              it is not permanent. It moves the section and
+                              everything on it to the Recycle Bin, where it can
+                              be restored for 30 days. The irreversible act
+                              lives in the bin and is called "Delete for
+                              good" there. */}
                           <button
                             type="button"
                             className="ba-btn ba-btn--small ba-btn--danger"
                             disabled={busy}
                             onClick={() => setPurging(entry.key)}
                           >
-                            Remove permanently
+                            Delete
                           </button>
                         </span>
                       )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {/* W2C — the third state, read-only on purpose.
+                A section in the bin has ONE owner of its recovery, and it is
+                the Recycle Bin: restoring it there brings back the register,
+                the rows, the views, the forms and the files in one act. A
+                Restore button here would either duplicate that or half-do it,
+                so this says where the section is and how long is left. */}
+            {canEdit && binned.length > 0 && (
+              <>
+                <h3 className="sec-heading">In the Recycle Bin</h3>
+                <p className="ba-hint">
+                  Deleted, with everything the section held. Restore it — or
+                  delete it for good — from the Recycle Bin in the sidebar. It
+                  is emptied automatically after 30 days.
+                </p>
+                <ul className="sec-list sec-list--archived">
+                  {binned.map((entry) => (
+                    <li key={entry.key} className="sec-row">
+                      <span className="sec-row__icon">
+                        <Icon name="trash" size={17} />
+                      </span>
+                      <span className="sec-row__text">
+                        <strong>{entry.label}</strong>
+                        <small>{daysLeftLabel(entry.expiresAt)}</small>
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -753,14 +861,31 @@ function SectionManagerBody({
                 ref={confirmRef}
               >
                 <strong id="sec-confirm-title">
-                  Permanently remove “
-                  {archived.find((entry) => entry.key === purging)?.label ?? "this section"}”?
+                  Delete “
+                  {(catalogue?.sections ?? []).find((entry) => entry.key === purging)?.label ??
+                    "this section"}
+                  ”?
                 </strong>
+                {/* W2C — THE CONSEQUENCE, STATED HONESTLY.
+                    This used to say "It cannot be restored and it cannot be
+                    undone", which was true of the old one-step purge and is
+                    false of this one. The sentence a confirmation makes has to
+                    match what the button does, or the next confirmation is not
+                    believed either. So: what moves, where it goes, how long
+                    there is, and — still — the one thing that really cannot be
+                    undone, which is what happens at the end of the thirty days
+                    or when somebody chooses "Delete for good" in the bin. */}
                 <p>
-                  This deletes the section itself. It cannot be restored and it
-                  cannot be undone. Its place in every sidebar, including
-                  colleagues&rsquo; own, and the view it opened on are discarded
-                  with it.
+                  This section and its data will move to the Recycle Bin for 30
+                  days — its register, the items on it, its views, its forms and
+                  its files, together as one entry. Restoring it brings all of
+                  it back exactly where it was.
+                </p>
+                <p>
+                  It leaves every sidebar straight away, including
+                  colleagues&rsquo; own. After 30 days, or if somebody chooses
+                  Delete for good in the Recycle Bin, it is destroyed — and that
+                  cannot be undone.
                 </p>
                 <div className="sec-confirm__foot">
                   <button
@@ -775,20 +900,28 @@ function SectionManagerBody({
                     className="ba-btn ba-btn--danger"
                     disabled={busy}
                     onClick={() => {
-                      const target = archived.find((entry) => entry.key === purging);
+                      const target = (catalogue?.sections ?? []).find(
+                        (entry) => entry.key === purging,
+                      );
                       const key = purging;
                       setPurging(null);
                       void run(
                         () =>
+                          /* W2C — `bin=1`, NOT `purge=1`. `purge=1` is the old
+                             one-step destruction: it still exists, still needs
+                             `data.delete`, and still refuses a register that
+                             holds anything — which is exactly the dead end this
+                             screen was making people walk into. Nothing in the
+                             product sends it any more. */
                           send(
-                            `/api/workspace-sections?key=${encodeURIComponent(key)}&purge=1`,
+                            `/api/workspace-sections?key=${encodeURIComponent(key)}&bin=1`,
                             { method: "DELETE" },
                           ),
-                        `${target?.label ?? "The section"} permanently removed.`,
+                        `${target?.label ?? "The section"} deleted. It is in the Recycle Bin for 30 days.`,
                       );
                     }}
                   >
-                    Remove permanently
+                    Delete
                   </button>
                 </div>
               </div>

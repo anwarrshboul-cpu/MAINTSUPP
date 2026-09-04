@@ -267,7 +267,7 @@ export function StoreDocumentationBoard({
             storeDocumentation
 
             requests={stores}
-            onCreateDetailed={() => onNotify("Add stores by importing the monday export.")}
+            onCreateDetailed={() => onNotify("Add stores by importing the store list.")}
             onOpenRequest={onOpenRequest}
             onRequestChange={() => void load()}
             onRequestCreated={() => void load()}

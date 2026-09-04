@@ -214,6 +214,15 @@ const BIN_KIND_LABEL: Record<string, string> = {
   group: "Board group",
   board_view: "Board view",
   column: "Board column",
+  /*
+   * W2C — a whole workspace section, with its register and everything on it.
+   *
+   * ONE entry, not one per child: `listBin` folds a deleted section's own rows,
+   * views and columns into this line, and its `summary` says what is under it
+   * ("12 items · 3 views · 1 form"). Restoring it brings all of them back at
+   * once, which is why the children are not offered separately.
+   */
+  section: "Section",
 };
 
 /**
@@ -370,7 +379,7 @@ export function AccountTrashPanel({
         title="Trash"
         lede={
           bin
-            ? `Deleted jobs and board groups stay here for ${bin.retentionDays} days, then empty automatically. Restoring puts a job back in its group, at the position it held.`
+            ? `Deleted jobs, board groups, views, columns and whole sections stay here for ${bin.retentionDays} days, then empty automatically. Restoring puts a job back in its group at the position it held, and a section back with its register and everything on it.`
             : "What has been deleted in this workspace, and what can be brought back."
         }
       />
@@ -467,7 +476,7 @@ export function AccountTrashPanel({
               >
                 {filtered
                   ? `The bin holds ${bin.total} item${bin.total === 1 ? "" : "s"}; none of them match. Clear the filters to see everything.`
-                  : "Nothing has been deleted recently. Deleted jobs and board groups appear here for 30 days."}
+                  : "Nothing has been deleted recently. Deleted jobs, board groups, views, columns and whole sections appear here for 30 days."}
               </AccountEmpty>
             ) : (
               <div className="account-table-wrap">

@@ -53,11 +53,18 @@ import {
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { expiryStatus } from "../../lib/expiry-status";
-import { listContractors } from "../../lib/contractor-repository";
+import { listContractorsInRegisters } from "../../lib/contractor-repository";
 import {
   SCOPE_PARAM,
+  aggregateScopes,
+  listRegisterInstances,
+  registerProvenanceReader,
+  registersRequest,
   resolveRegisterScope,
   scopeRefusal,
+  type RecordProvenance,
+  type RegisterInstance,
+  type RegisterScope,
 } from "../../lib/register-scope";
 import type { WorkspaceCertification, WorkspaceContractor } from "../../lib/workspace-data";
 
@@ -80,30 +87,88 @@ export async function GET(request: Request) {
     const { db, orgId } = await scopedDb(request);
 
     const url = new URL(request.url);
-    if (!url.searchParams.get(SCOPE_PARAM)) {
+    const named = url.searchParams.get(SCOPE_PARAM);
+    const aggregate = registersRequest(url);
+
+    /*
+     * ONE QUESTION PER REQUEST. `?section=` asks about one register and
+     * `?registers=` asks about several; a request carrying both has not decided
+     * what it wants, and answering it by preferring one would be exactly the
+     * silent substitution this route was written to remove.
+     */
+    if (named && aggregate) {
       return Response.json(
         {
           error:
-            "Name the register to read. The workspace's own contractor register is part of the workspace snapshot; this route answers for a section's own register.",
+            "Ask for one register or for the aggregate, not both. `section` names a single register; `registers` asks across the ones this workspace owns.",
+        },
+        { status: 400 },
+      );
+    }
+    if (!named && !aggregate) {
+      return Response.json(
+        {
+          error:
+            "Name the register to read. The workspace's own contractor register is part of the workspace snapshot; this route answers for a section's own register, or for the aggregate with `registers=custom` or `registers=all`.",
         },
         { status: 400 },
       );
     }
 
     /*
-     * Organisation from the SESSION, register from the DATABASE. An unknown
-     * section, one belonging to another organisation, an archived one, or one
-     * holding a different kind of register are each a refusal with the reason —
-     * never a quiet fall back to the canonical roster.
+     * THE REGISTERS THIS ANSWER COVERS, and the labels their records will carry.
+     *
+     * Both branches end with the same two values — a list of scopes to read and
+     * a list of instances to describe them — so everything below is written once
+     * and knows nothing about which question was asked.
+     *
+     * The aggregate branch reads the instances THIS ORGANISATION OWNS, from the
+     * database, in one query. It is not "every register": a section belonging to
+     * another tenant, an archived section, and a section built from the Jobs
+     * template are all absent for the same reasons `resolveRegisterScope`
+     * refuses them one at a time.
      */
-    const resolved = await resolveRegisterScope(db, orgId, url, "contractors");
-    const refused = scopeRefusal(resolved);
-    if (refused) return refused;
-    if (!resolved.ok) return refused;
-    const scope = resolved.scope;
+    let scopes: RegisterScope[];
+    let instances: RegisterInstance[];
+    let sectionKey: string | null;
+
+    if (aggregate) {
+      instances = await listRegisterInstances(db, orgId, "contractors");
+      scopes = aggregateScopes(aggregate, instances);
+      sectionKey = null;
+    } else {
+      /*
+       * Organisation from the SESSION, register from the DATABASE. An unknown
+       * section, one belonging to another organisation, an archived one, or one
+       * holding a different kind of register are each a refusal with the reason —
+       * never a quiet fall back to the canonical roster.
+       */
+      const resolved = await resolveRegisterScope(db, orgId, url, "contractors");
+      const refused = scopeRefusal(resolved);
+      if (refused) return refused;
+      if (!resolved.ok) return refused;
+      scopes = [resolved.scope];
+      sectionKey = resolved.sectionKey;
+      /*
+       * The single-register answer still carries provenance, and it is read the
+       * same way: from the section that owns the scope, never from the request.
+       * One shape for both questions means the browser never has to know which
+       * one it asked in order to read the answer.
+       */
+      instances = (await listRegisterInstances(db, orgId, "contractors")).filter(
+        (instance) => instance.scopeId === resolved.scope,
+      );
+    }
+
+    /* Derived from the SCOPE ID the database returned for each row — never from
+       the row's name. Two registers may each hold a "John Ltd", and on the live
+       Preview two contractors are already called "test" in one organisation,
+       one canonical and one inside a section. The name says nothing about
+       which register a record is in. */
+    const provenance = registerProvenanceReader(instances);
 
     const includeInactive = url.searchParams.get("archived") === "all";
-    const rows = await listContractors(db, orgId, { includeInactive: true }, scope);
+    const rows = await listContractorsInRegisters(db, orgId, scopes, { includeInactive: true });
     const ids = rows.map((row) => row.id);
 
     /*
@@ -191,7 +256,7 @@ export async function GET(request: Request) {
       certificationsById.set(row.contractorId, list);
     }
 
-    const payload: WorkspaceContractor[] = rows
+    const payload: Array<WorkspaceContractor & { register: RecordProvenance }> = rows
       .filter((row) => includeInactive || row.active)
       .map((contractor) => {
         const jobs = jobsById.get(contractor.id);
@@ -231,15 +296,35 @@ export async function GET(request: Request) {
           urgentJobs: Number(jobs?.urgent ?? 0),
           spend: Number(jobs?.spend ?? 0),
           documentCount: documentsById.get(contractor.id) ?? 0,
+          /*
+           * WHERE THIS RECORD LIVES — the record id, the scope it belongs to,
+           * the section key a mutation must carry, and a name for a person to
+           * read. All four come from `contractor.boardId`, which is the value
+           * the database holds for the row; nothing here consults the name.
+           *
+           * The section key travels with the record because the screen must be
+           * able to route an edit back to the SAME register, and a display
+           * label cannot do that: it is not unique, it changes when somebody
+           * renames a section, and it is not re-checked by the server. The
+           * server re-resolves the key against this organisation before it
+           * writes anything, so the label stays what it is — text on a screen —
+           * and never becomes the boundary.
+           */
+          register: provenance(contractor.id, contractor.boardId),
         };
       });
 
     return Response.json({
       contractors: payload,
       /* Echoed so the browser can prove it is looking at the register it asked
-         for, rather than inferring it from the URL it typed. */
-      section: resolved.sectionKey,
-      scope,
+         for, rather than inferring it from the URL it typed. Both are null for
+         an aggregate, which asked about no single register — the per-record
+         `register` block is where that answer lives. */
+      section: sectionKey,
+      scope: scopes.length === 1 ? scopes[0] : null,
+      /* The registers this answer covers, so the screen can name them without
+         deriving a name from anything a record happens to be called. */
+      registers: instances,
     });
   } catch (error) {
     const denied = anonymousRefusal(error);

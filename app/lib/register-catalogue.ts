@@ -264,8 +264,8 @@ export const SITE_NATIVE_COLUMNS: readonly NativeColumnSeed[] = [
   { field: "lifecycle", title: "Lifecycle (legacy)", type: "text", hidden: true },
   { field: "manager", title: "Manager (legacy)", type: "text", hidden: true },
   { field: "address", title: "Address (legacy)", type: "text", hidden: true },
-  { field: "mondayMaintenanceName", title: "monday maintenance name", type: "text", hidden: true },
-  { field: "mondayComplianceName", title: "monday compliance name", type: "text", hidden: true },
+  { field: "mondayMaintenanceName", title: "Maintenance board name", type: "text", hidden: true },
+  { field: "mondayComplianceName", title: "Compliance board name", type: "text", hidden: true },
 ];
 
 /**

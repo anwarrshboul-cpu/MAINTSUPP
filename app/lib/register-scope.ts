@@ -94,7 +94,7 @@
  * hold different registers.
  */
 
-import { and, eq, isNull, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { boards, contractors, siteGroups, sites, workspaceSections } from "../../db/schema";
 import { count } from "drizzle-orm";
@@ -136,10 +136,62 @@ export const SCOPE_PARAM = "section";
  * puts on every statement in this codebase. `board_id` is TEXT in both and is
  * not in `BOOLEAN_COLUMNS`, so no coercion applies to it.
  */
-export function registerScopeFilter(column: AnyColumn, scope: RegisterScope): SQL {
+export function registerScopeFilter(
+  column: AnyColumn,
+  scope: RegisterScope | RegisterScope[],
+): SQL {
+  if (Array.isArray(scope)) return registerScopesFilter(column, scope);
   return scope === null || scope === undefined
     ? (isNull(column) as SQL)
     : (eq(column, scope) as SQL);
+}
+
+/**
+ * THE PREDICATE FOR SEVERAL NAMED REGISTERS AT ONCE — the management surface.
+ *
+ * ── WHY A SECOND SHAPE EXISTS AT ALL ──────────────────────────────────────
+ *
+ * Everything above is written for ONE register, because every screen in the
+ * product looks at one: the canonical Sites page, an instance's Contractors
+ * page. "Manage dashboard data" is the exception the model always implied and
+ * never had. It is an INVENTORY of what this organisation holds, so a
+ * contractor created inside "North Region Contractors" belongs on it exactly as
+ * much as a canonical one — and until this existed it was invisible there,
+ * which is the defect the owner photographed: three canonical contractors
+ * listed, two custom-section ones missing entirely.
+ *
+ * ── WHY IT IS STILL ONE FUNCTION, NOT A HAND-ROLLED `or()` ────────────────
+ *
+ * The `x = NULL` trap does not go away when the list gets longer, it gets
+ * worse: `inArray(column, [null, 'sec-abc'])` compiles, runs, and silently
+ * drops every canonical row, because SQL `IN` compares with `=`. So the
+ * canonical register has to be spelled `IS NULL` here too, and this is still
+ * the only place in the codebase allowed to spell it. `registerScopeFilter`
+ * above simply forwards an array here, which is what keeps the single entry
+ * point — and keeps `tests/w2-scope-model.test.mjs`'s statement scan, which
+ * looks for the literal `registerScopeFilter(` in every register statement,
+ * meaningful rather than something a wider read can slip past.
+ *
+ * ── AN EMPTY LIST MATCHES NOTHING, WHICH IS THE WHOLE POINT ───────────────
+ *
+ * DEFAULT-DENY BY OMISSION, restated for the plural case. An organisation with
+ * no Contractors instances asks for "every instance" and gets an empty list;
+ * the naive `and(...[])` that would produce is TRUE, i.e. every register in the
+ * table, which on this predicate means every row of every tenant's instance
+ * this query's other filters did not happen to exclude. `1 = 0` is the honest
+ * answer and is spelled identically in SQLite and Postgres.
+ *
+ * Duplicates and repeated NULLs are harmless — `IN` and `OR` both absorb them —
+ * so callers may pass a list built by concatenation without deduplicating it.
+ */
+export function registerScopesFilter(column: AnyColumn, scopes: RegisterScope[]): SQL {
+  const keys = scopes.filter((scope): scope is string => typeof scope === "string");
+  const canonical = scopes.some((scope) => scope === null || scope === undefined);
+
+  if (canonical && keys.length === 0) return isNull(column) as SQL;
+  if (!canonical && keys.length === 0) return sql`1 = 0`;
+  if (!canonical) return inArray(column, keys) as SQL;
+  return or(isNull(column), inArray(column, keys)) as SQL;
 }
 
 /** Which register an endpoint serves. Matches the template keys in the catalogue. */
@@ -193,6 +245,9 @@ export async function resolveRegisterScope(
       template: workspaceSections.template,
       surfaceRef: workspaceSections.surfaceRef,
       archivedAt: workspaceSections.archivedAt,
+      /* W2C — and whether the whole section is in the Recycle Bin, which is a
+         different fact from being archived. See the refusal below. */
+      deletedAt: workspaceSections.deletedAt,
     })
     .from(workspaceSections)
     .where(
@@ -209,6 +264,26 @@ export async function resolveRegisterScope(
      this whole model exists to prevent. */
   if (!section) {
     return { ok: false, status: 404, error: "That section does not exist in this workspace." };
+  }
+  /*
+   * W2C — A SECTION IN THE RECYCLE BIN, CHECKED FIRST AND SAID DIFFERENTLY.
+   *
+   * Deleting a section sets `archived_at` as well, so the archived refusal
+   * below would already catch this — and would describe it wrongly. "Archived"
+   * means somebody took it out of the sidebar and can put it back whenever;
+   * this means the section, its register and everything on it are in the bin
+   * with a thirty-day countdown running. A caller told the wrong one goes
+   * looking in the wrong place.
+   *
+   * It is also the belt to that brace: if anything ever clears `archived_at`
+   * without clearing `deleted_at`, the scope must still refuse.
+   */
+  if (section.deletedAt) {
+    return {
+      ok: false,
+      status: 404,
+      error: "That section is in the recycle bin. Restore it to use its register again.",
+    };
   }
   if (section.archivedAt) {
     return { ok: false, status: 404, error: "That section has been archived." };
@@ -266,6 +341,203 @@ export function scopeRefusal(resolution: ScopeResolution): Response | null {
   return resolution.ok
     ? null
     : Response.json({ error: resolution.error }, { status: resolution.status });
+}
+
+/**
+ * ONE INSTANCE OF A REGISTER, as the management surface needs to describe it.
+ *
+ * Three facts, and each is used for a different thing, which is why none of
+ * them stands in for another:
+ *
+ *  · `scopeId` is the SCOPE — `boards.key`, the literal value the row's
+ *    `board_id` holds. It is what a query filters on and what a record's
+ *    provenance is derived FROM.
+ *  · `sectionKey` is the LOOKUP KEY a mutation must carry, because
+ *    `resolveRegisterScope` resolves a section key and deliberately refuses a
+ *    bare board key — see `SCOPE_PARAM`.
+ *  · `sectionDisplayName` is for a PERSON to read, and for nothing else. It is
+ *    read live on every request so a renamed section relabels its records at
+ *    once, and it is never compared, matched or routed on.
+ */
+export type RegisterInstance = {
+  sectionKey: string;
+  sectionDisplayName: string;
+  scopeId: string;
+};
+
+/**
+ * EVERY INSTANCE OF ONE REGISTER THAT THIS ORGANISATION OWNS — one query.
+ *
+ * ── WHY THIS IS A JOIN AND NOT A LOOP ─────────────────────────────────────
+ *
+ * The obvious implementation is to list the sections and then call
+ * `resolveRegisterScope` once per section, which is a second query per section
+ * — the N+1 the performance boundary rules out by name, on a screen an owner
+ * opens constantly. The join answers "which sections of this template have a
+ * board that still exists in this organisation" in one statement, and it
+ * answers it with the same three checks `resolveRegisterScope` makes: the
+ * organisation comes from the caller's session, the template must be the
+ * register being asked about, and an archived section is not offered.
+ *
+ * The board is INNER JOINED rather than read from `surface_ref` alone, for the
+ * reason `resolveRegisterScope` reads it back: a section whose board was purged
+ * must not open a scope nothing can furnish. The `scopeId` returned is
+ * `boards.key` AS THE DATABASE RETURNED IT, exactly as the single-section
+ * resolver returns it — not the `surface_ref` string that was matched against.
+ *
+ * The organisation filter is on BOTH sides of the join. `boards.key` is unique
+ * per organisation and not globally, so joining on the key alone would let a
+ * section of this workspace pick up another tenant's board of the same key and
+ * hand back a scope that reads that tenant's rows.
+ *
+ * ── WHAT THIS DOES NOT DO ─────────────────────────────────────────────────
+ *
+ * It returns the REGISTERS, never the rows. Handing the caller a list of scope
+ * ids is what lets the rows come back in one `IN` query afterwards; fetching
+ * rows per section here is the same N+1 wearing a different hat.
+ */
+export async function listRegisterInstances(
+  db: ScopeDatabase,
+  organisationId: string,
+  register: RegisterTemplate,
+): Promise<RegisterInstance[]> {
+  const rows = await db
+    .select({
+      sectionKey: workspaceSections.key,
+      sectionDisplayName: workspaceSections.label,
+      scopeId: boards.key,
+    })
+    .from(workspaceSections)
+    .innerJoin(
+      boards,
+      and(
+        eq(boards.key, workspaceSections.surfaceRef),
+        eq(boards.organisationId, organisationId),
+      ),
+    )
+    .where(
+      and(
+        eq(workspaceSections.organisationId, organisationId),
+        eq(workspaceSections.template, register),
+        isNull(workspaceSections.archivedAt),
+        isNotNull(workspaceSections.surfaceRef),
+      ),
+    )
+    .orderBy(asc(workspaceSections.label));
+
+  return rows.map((row) => ({
+    sectionKey: row.sectionKey,
+    sectionDisplayName: row.sectionDisplayName,
+    scopeId: row.scopeId,
+  }));
+}
+
+/**
+ * WHERE ONE RECORD CAME FROM — enough to label it and enough to route a write.
+ *
+ * The owner's rule, in his words: derive it from the actual register scope id,
+ * never from the record's name. Two instances may legitimately hold a
+ * contractor called "John Ltd" and the canonical roster may hold a third; the
+ * name tells you nothing about which register any of them is in, and the live
+ * Preview data proves it — there are two contractors called "test" in one
+ * organisation right now, one canonical and one inside a custom section.
+ *
+ * `sectionKey` is here because a LABEL IS NOT A SECURITY BOUNDARY. The screen
+ * prints `sectionDisplayName`; every mutation carries `sectionKey`, which the
+ * server re-resolves through `resolveRegisterScope` against the caller's own
+ * organisation before it writes anything. The two are produced together so a
+ * record can never be shown as belonging to one register and edited in another.
+ */
+export type RecordProvenance = {
+  recordId: string;
+  scopeId: RegisterScope;
+  scopeType: "canonical" | "section";
+  sectionKey: string | null;
+  sectionDisplayName: string | null;
+  isCustom: boolean;
+};
+
+/**
+ * WHICH REGISTERS ONE REQUEST IS ASKING ABOUT, when it is asking for several.
+ *
+ * `?section=<key>` names ONE instance and is what every existing caller sends.
+ * `?registers=custom` and `?registers=all` are the management surface, and they
+ * exist because "Manage dashboard data" is an INVENTORY rather than a view of
+ * one register: it has to list what this organisation holds, wherever it was
+ * created. On the live Preview it listed three contractors and silently omitted
+ * two that live inside a custom Contractors section — nothing on screen said
+ * anything was missing, which is what makes that class of gap so expensive.
+ *
+ * `custom` is the spelling the manager uses, because the canonical registers
+ * are already in the workspace snapshot it draws from and asking for them twice
+ * would put two answers to "what is on the canonical register" on one screen.
+ * `all` exists so the union can be asked for whole — by a test, or by a caller
+ * with no snapshot to hand — rather than being hand-rolled at a call site.
+ *
+ * An unrecognised value is NOT an aggregate request. It falls through to null,
+ * and the route then treats the request as whatever its `section` parameter
+ * says — which for `/api/contractors` is a refusal. A typo must never widen a
+ * read.
+ */
+export type RegistersRequest = "custom" | "all" | null;
+
+export function registersRequest(url: URL): RegistersRequest {
+  const raw = (url.searchParams.get("registers") ?? "").trim().toLowerCase();
+  return raw === "custom" || raw === "all" ? raw : null;
+}
+
+/**
+ * The scope list an aggregate request means, from the instances it may read.
+ *
+ * One line, in one place, because the difference between `custom` and `all` is
+ * exactly one element and a route that spelled it itself would eventually spell
+ * it differently. The canonical register goes FIRST for `all` so a caller that
+ * prints the list in order shows the workspace's own register before the
+ * sections that were added to it.
+ */
+export function aggregateScopes(
+  request: Exclude<RegistersRequest, null>,
+  instances: RegisterInstance[],
+): RegisterScope[] {
+  const keys = instances.map((instance) => instance.scopeId);
+  return request === "all" ? [CANONICAL_REGISTER, ...keys] : keys;
+}
+
+/**
+ * A provenance stamper, built once per request from the instances above.
+ *
+ * A closure over a Map rather than a lookup per row: the alternative is a scan
+ * of the instance list for every record, which is the in-memory version of the
+ * N+1 this whole shape exists to avoid.
+ *
+ * An unrecognised scope id is reported as a custom record with NO section — an
+ * orphan, the state `scopedRegisterRows` exists to prevent. It is deliberately
+ * not reported as canonical: a row carrying a board key is not in the canonical
+ * register, and saying it was would invite an edit through the canonical door.
+ */
+export function registerProvenanceReader(instances: RegisterInstance[]) {
+  const byScope = new Map(instances.map((instance) => [instance.scopeId, instance]));
+  return (recordId: string, scopeId: string | null | undefined): RecordProvenance => {
+    if (scopeId === null || scopeId === undefined) {
+      return {
+        recordId,
+        scopeId: CANONICAL_REGISTER,
+        scopeType: "canonical",
+        sectionKey: null,
+        sectionDisplayName: null,
+        isCustom: false,
+      };
+    }
+    const instance = byScope.get(scopeId) ?? null;
+    return {
+      recordId,
+      scopeId,
+      scopeType: "section",
+      sectionKey: instance?.sectionKey ?? null,
+      sectionDisplayName: instance?.sectionDisplayName ?? null,
+      isCustom: true,
+    };
+  };
 }
 
 

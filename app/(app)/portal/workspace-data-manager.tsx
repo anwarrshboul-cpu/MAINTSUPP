@@ -20,6 +20,16 @@ import { confirmSiteClosure } from "./sites/site-closure";
 import { confirmContractorRosterExit, leavesContractorRoster } from "./contractor-closure";
 import { SITE_LIFECYCLE_CLOSED, SITE_LIFECYCLES } from "../../lib/site-state";
 import { expiryStatus } from "../../lib/expiry-status";
+/*
+ * W2C — the provenance block the two aggregate reads stamp on every record.
+ *
+ * `import type`, so nothing of `register-scope.ts` — drizzle, the schema, the
+ * database handle — is pulled into the browser bundle. The type is imported
+ * rather than restated because a second copy of this shape is a second answer
+ * to "what does the server promise about a record's register", and the whole
+ * point of the block is that the screen and the route agree about it.
+ */
+import type { RecordProvenance } from "../../lib/register-scope";
 import type {
   WorkspaceCertification,
   WorkspaceEntity,
@@ -494,6 +504,80 @@ function recordsFor(tab: ManagerTab, workspace: WorkspaceSnapshot): Array<Record
   return workspace.activity as unknown as Array<Record<string, unknown>>;
 }
 
+/**
+ * W2C — WHERE A RECORD CAME FROM, read off the record and never off its name.
+ *
+ * ── THE DEFECT ────────────────────────────────────────────────────────────
+ *
+ * "Manage dashboard data" is the workspace's INVENTORY, and it was showing the
+ * canonical registers alone. On the live Preview that meant three contractors
+ * listed and two missing — both created inside a custom Contractors section,
+ * both real, and nothing on screen to say anything was absent. Sites had the
+ * same hole. The fix is the two aggregate reads (`?registers=custom`), and the
+ * moment records from several registers share one list they have to say which
+ * one they came from, or the list becomes a set of duplicates nobody can tell
+ * apart.
+ *
+ * ── WHY IT IS A BLOCK ON THE RECORD AND NOT A GUESS ───────────────────────
+ *
+ * The server stamps `register` on every aggregated record from the row's own
+ * `board_id`. Two registers may legitimately hold one name — Contractors Alpha
+ * and Contractors Beta may both have a "John Ltd", and the owner's own data
+ * already has two contractors called "test", one canonical and one in a section
+ * — so a name tells you nothing about which register a record is in. Nothing
+ * here parses a name, a title or a URL.
+ *
+ * Canonical records have no block, or a block that says so, and are shown
+ * without a badge: the workspace's own register is the unmarked default, and
+ * badging every row would make the exception invisible again.
+ */
+function recordProvenance(record: Record<string, unknown>): RecordProvenance | null {
+  const block = record.register;
+  if (!block || typeof block !== "object" || Array.isArray(block)) return null;
+  const value = block as Partial<RecordProvenance>;
+  return value.isCustom === true ? (value as RecordProvenance) : null;
+}
+
+/**
+ * The words. `(Custom · <Section Name>)`, following the section's CURRENT
+ * display name because the server reads `workspace_sections.label` on every
+ * request — rename a section and its records relabel themselves.
+ *
+ * The fallback is for a record whose register resolved to no live section: an
+ * orphan, which `scopedRegisterRows` exists to prevent and which the aggregate
+ * cannot currently produce. It says what is true rather than inventing a name,
+ * because a made-up section name here would be exactly the display-name
+ * isolation the model rules out, arrived at from the other end.
+ */
+function provenanceLabel(provenance: RecordProvenance) {
+  return `(Custom · ${provenance.sectionDisplayName ?? "register not listed"})`;
+}
+
+/**
+ * A site from the aggregate, wearing the two fields the snapshot derives.
+ *
+ * `GET /api/sites` answers with the `sites` ROW, which is right for the Sites
+ * register; the workspace snapshot answers with `StoreRecord`, which resolves
+ * `type` through the configured option value and prints "Unassigned" for a site
+ * with no manager. This list draws both halves with one `recordTitle` and one
+ * `recordSubtitle`, so without these two lines a custom site would show its
+ * legacy type beside a canonical site showing its configured one, and an empty
+ * Manager box would open where the canonical row shows a word.
+ *
+ * Only the fields THIS SCREEN reads are reconciled. Nothing here is injected
+ * into `workspace.stores`: that list feeds the Compliance, Units and Planned
+ * tabs' site pickers, and a picker is an assignment surface rather than an
+ * inventory — offering another register's site there would attach a job to a
+ * site the job's own register does not hold.
+ */
+function customSiteRecord(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...row,
+    type: row.siteTypeValue ?? row.type,
+    manager: row.manager ?? "Unassigned",
+  };
+}
+
 function recordTitle(tab: ManagerTab, record: Record<string, unknown>) {
   if (tab === "site") return String(record.name ?? "Site");
   if (tab === "compliance") return String(record.kind ?? "Requirement");
@@ -632,7 +716,18 @@ function recordSubtitle(tab: ManagerTab, record: Record<string, unknown>) {
  * change to Sites' search belongs to somebody looking at Sites.
  */
 function searchText(tab: ManagerTab, record: Record<string, unknown>) {
-  const printed = `${recordTitle(tab, record)} ${recordSubtitle(tab, record)}`;
+  /*
+   * W2C — the provenance line is IN the haystack, on every tab.
+   *
+   * It is printed, and this function's own note says the printed line stays in
+   * the haystack because "archived" is a real thing to search for and exists
+   * nowhere else. A section name is the same kind of thing: "show me everything
+   * in North Region Contractors" is the question an owner asks of an inventory
+   * that spans registers, and it has no other answer on this screen.
+   */
+  const custom = recordProvenance(record);
+  const provenance = custom ? ` ${provenanceLabel(custom)}` : "";
+  const printed = `${recordTitle(tab, record)} ${recordSubtitle(tab, record)}${provenance}`;
   if (tab !== "contractor") return printed.toLowerCase();
   const flat = (value: unknown) =>
     Array.isArray(value) ? value.join(" ") : typeof value === "string" ? value : "";
@@ -754,18 +849,143 @@ export function WorkspaceDataManager({
       ? recordToEditor(initialTab, initialRecord)
       : null,
   );
+  /*
+   * W2C — WHICH REGISTER THE OPEN RECORD BELONGS TO.
+   *
+   * Held beside the form rather than re-derived from the list, because the list
+   * can be re-filtered, re-sorted and reloaded while the editor is open and the
+   * record being edited must not change register underneath it. Null means the
+   * canonical register, which is every record the snapshot supplied and every
+   * record this screen creates.
+   *
+   * `initialRecordId` resolves against `recordsFor(initialTab, workspace)` —
+   * the snapshot — so a deep link from the contractor drawer always opens a
+   * canonical record and starts here at null, unchanged.
+   */
+  const [editorRegister, setEditorRegister] = useState<RecordProvenance | null>(null);
+  /*
+   * The reason a scoped save failed, on the editor rather than in a toast.
+   *
+   * The canonical path throws to `saveWorkspaceRecord`, which puts the API's
+   * message in the dashboard toast. A scoped write does not go through it, so
+   * without this a refusal — a section archived in another tab, a record moved
+   * — would be swallowed by the same `catch {}` and the editor would simply not
+   * close, which reads as the button not working.
+   */
+  const [scopedProblem, setScopedProblem] = useState<string | null>(null);
+  const [scopedBusy, setScopedBusy] = useState(false);
+
+  /*
+   * ── W2C: WHAT THIS WORKSPACE HOLDS IN ITS OTHER REGISTERS ──────────────
+   *
+   * The snapshot in `workspace` is the CANONICAL registers and has always been
+   * exactly that, deliberately — it has thirteen consumers and every one of
+   * them means the workspace's own Sites and Contractors. This screen is the
+   * one that means something wider: it is the inventory, so a contractor
+   * created inside "North Region Contractors" belongs on it.
+   *
+   * Two requests, both `registers=custom`, both answered SERVER-SIDE against
+   * the sections this organisation owns. `custom` rather than `all` because the
+   * canonical rows are already in `workspace` and asking twice would put two
+   * answers to one question on one screen — and because appending is the only
+   * merge that leaves the existing list byte-identical when there are no
+   * instances at all.
+   *
+   * `archived=all` on the contractor read matches the snapshot, which carries
+   * inactive contractors so this screen can print "Archived" beside them; the
+   * site aggregate includes closed sites for the same reason. Filtering to the
+   * active ones here would make the two halves of one list obey different
+   * rules, which is worse than either rule.
+   */
+  const [customRecords, setCustomRecords] = useState<{
+    site: Array<Record<string, unknown>>;
+    contractor: Array<Record<string, unknown>>;
+  }>({ site: [], contractor: [] });
+  /*
+   * A FAILED AGGREGATE IS SAID OUT LOUD. The defect being fixed here is a list
+   * that was silently short; falling back to the canonical rows without saying
+   * so would reproduce it exactly, one layer further in.
+   */
+  const [aggregateProblem, setAggregateProblem] = useState<string | null>(null);
+  /* Bumped after a scoped write, so the custom half of the list reloads. The
+     canonical half is refreshed by the dashboard, which owns the snapshot. */
+  const [aggregateToken, setAggregateToken] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    const read = async (url: string, key: "contractors" | "sites") => {
+      const response = await fetch(url);
+      const payload = (await response.json()) as {
+        error?: string;
+        contractors?: Array<Record<string, unknown>>;
+        sites?: Array<Record<string, unknown>>;
+      };
+      if (!response.ok) throw new Error(payload.error || "Register unavailable.");
+      const rows = key === "contractors" ? payload.contractors : payload.sites;
+      return Array.isArray(rows) ? rows : [];
+    };
+    void (async () => {
+      try {
+        const [contractorRows, siteRows] = await Promise.all([
+          read("/api/contractors?registers=custom&archived=all", "contractors"),
+          read("/api/sites?registers=custom", "sites"),
+        ]);
+        if (!live) return;
+        setCustomRecords({
+          contractor: contractorRows,
+          site: siteRows.map(customSiteRecord),
+        });
+        setAggregateProblem(null);
+      } catch {
+        if (!live) return;
+        setCustomRecords({ site: [], contractor: [] });
+        setAggregateProblem(
+          "Records held in this workspace's other registers could not be loaded, so this list is showing the workspace's own registers only.",
+        );
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [aggregateToken]);
 
   const records = useMemo(() => {
     const needle = query.trim().toLowerCase();
     // A pasted number brings its own spacing. Four digits, so a search for a
     // year or a house number does not start matching phone numbers.
     const digits = needle.replace(/\D/g, "");
-    return recordsFor(tab, workspace).filter((record) => {
+    /*
+     * ONE ALPHABETICAL INVENTORY, not two lists stacked.
+     *
+     * Both halves already arrive ordered by name — the snapshot orders by
+     * `sites.name` and `contractors.name`, and so do the aggregate reads — so
+     * re-sorting the union is what keeps a custom "Apex" next to a canonical
+     * one instead of forty rows below it. `localeCompare` at base sensitivity
+     * matches how a person reads a list rather than how bytes sort.
+     *
+     * With no instances the extra list is empty and the pool is the same array
+     * `recordsFor` returned, in the same order, which is what makes this change
+     * invisible to a workspace that has not created a section.
+     */
+    const extra =
+      tab === "contractor"
+        ? customRecords.contractor
+        : tab === "site"
+          ? customRecords.site
+          : [];
+    const pool = extra.length
+      ? [...recordsFor(tab, workspace), ...extra].sort((first, second) =>
+          recordTitle(tab, first).localeCompare(recordTitle(tab, second), undefined, {
+            sensitivity: "base",
+          }),
+        )
+      : recordsFor(tab, workspace);
+    return pool.filter((record) => {
       if (!needle) return true;
       const hay = searchText(tab, record);
       return hay.includes(needle) || (digits.length >= 4 && hay.includes(digits));
     });
-  }, [query, tab, workspace]);
+  }, [query, tab, workspace, customRecords]);
   const readOnlyTab = tab === "activity" || tab === "import";
 
   /*
@@ -872,12 +1092,116 @@ export function WorkspaceDataManager({
     if (tab === "site" && !defaults.type) defaults.type = siteTypes[0]?.value ?? "";
     setEditorId(null);
     setForm(defaults);
+    /*
+     * NEW RECORDS ARE CANONICAL, and that is the existing policy stated rather
+     * than changed. This screen is the workspace's own register manager; a
+     * section's register is created from inside that section, which is where an
+     * owner is when they mean "add one of these to THIS list". Defaulting a
+     * creation here into whichever register happened to be highlighted would be
+     * the kind of implicit scope the model exists to remove.
+     */
+    setEditorRegister(null);
+    setScopedProblem(null);
   };
 
   const editRecord = (record: Record<string, unknown>) => {
     if (readOnlyTab) return;
     setEditorId(String(record.id));
     setForm(recordToEditor(tab, record));
+    /* The register travels with the record, from the server's own block. This
+       is what a save and an archive are routed by — never the name printed
+       above them, and never the section the dashboard happens to be showing. */
+    setEditorRegister(recordProvenance(record));
+    setScopedProblem(null);
+  };
+
+  /**
+   * THE STORED RECORD BEHIND THE OPEN EDITOR, wherever this workspace keeps it.
+   *
+   * The two closure confirmations compare the FORM against what is STORED —
+   * "is this save the one that takes them off the roster" — and both used to
+   * look only in the snapshot. With custom records on the list that lookup
+   * misses them, `stored` comes back undefined, and both guards fall silent:
+   * closing a custom site or unticking a custom contractor's Active box would
+   * go straight through with no question asked, which is the exact defect
+   * W05-05 and W06-04 were written to close, reappearing on the rows they never
+   * covered.
+   *
+   * Normalised to the three fields the guards read, so a snapshot record and an
+   * aggregate record are compared the same way rather than by whichever shape
+   * each half happens to have.
+   */
+  const storedRecordFor = (entity: "site" | "contractor") => {
+    if (!editorId) return undefined;
+    const canonical =
+      entity === "site"
+        ? (workspace.stores as unknown as Array<Record<string, unknown>>)
+        : (workspace.contractors as unknown as Array<Record<string, unknown>>);
+    const custom = entity === "site" ? customRecords.site : customRecords.contractor;
+    const found = [...canonical, ...custom].find((item) => item.id === editorId);
+    if (!found) return undefined;
+    return {
+      name: String(found.name ?? ""),
+      lifecycle: typeof found.lifecycle === "string" ? found.lifecycle : "",
+      active: Boolean(found.active),
+    };
+  };
+
+  /**
+   * A WRITE THAT NAMES THE REGISTER IT IS AIMED AT — W2C.
+   *
+   * ── WHY IT IS NOT `onSave` ────────────────────────────────────────────────
+   *
+   * `onSave` and `onArchive` post to `/api/workspace`, and the dashboard picks
+   * that URL from the section it is CURRENTLY SHOWING. That is right for the
+   * canonical rows and wrong for these: this screen can be opened from the job
+   * board and still list a contractor that lives in "North Region Contractors",
+   * and a write routed by the surface behind the modal would land in the
+   * canonical register — creating or editing the wrong record entirely, which
+   * is the isolation failure this workstream exists to prevent.
+   *
+   * ── WHAT IT CARRIES ───────────────────────────────────────────────────────
+   *
+   * The record's ID and the SECTION KEY the server stamped on it. Not the name,
+   * not the label a person reads: `resolveRegisterScope` re-resolves that key
+   * inside the caller's own organisation, checks the section's template and
+   * reads the board back before a single column is written. The label on screen
+   * is text; the key is what the server is asked to prove.
+   *
+   * A record whose section key is missing is REFUSED here rather than sent
+   * without one — an absent `section` means the canonical register to
+   * `/api/workspace`, so a silent omission would edit a canonical record while
+   * the operator was looking at a custom one.
+   */
+  const scopedWrite = async (
+    entity: Exclude<ManagerTab, "activity" | "import">,
+    register: RecordProvenance,
+    method: "PATCH" | "DELETE",
+    id: string,
+    data?: Record<string, unknown>,
+  ) => {
+    if (!register.sectionKey) {
+      throw new Error(
+        "This record's register is no longer listed in this workspace, so it cannot be changed from here.",
+      );
+    }
+    const response = await fetch(
+      `/api/workspace?section=${encodeURIComponent(register.sectionKey)}`,
+      {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(method === "DELETE" ? { entity, id } : { entity, id, data }),
+      },
+    );
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "The record could not be saved.");
+    }
+    /* The custom half of the list is this component's own; the canonical half
+       and every dashboard total belong to the page, which reloads the snapshot
+       through the hook it already has for a write it did not make itself. */
+    setAggregateToken((token) => token + 1);
+    onImported?.();
   };
 
   /*
@@ -1028,13 +1352,78 @@ export function WorkspaceDataManager({
               <label><Icon name="search" size={17} /><input type="search" aria-label={`Search ${activeTabLabel}`} placeholder={`Search ${activeTabLabel.toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
               {!readOnlyTab && <button className="primary-button" type="button" onClick={startNew}><Icon name="plus" size={17} />New</button>}
             </div>
+            {/*
+              W2C — a list that could not load half of itself says so.
+
+              The defect this whole change closes is a list that was silently
+              short. Falling back to the canonical rows without a word would
+              reproduce it exactly, so the failure is stated where the missing
+              rows would have been.
+            */}
+            {aggregateProblem && (tab === "site" || tab === "contractor") ? (
+              <p
+                role="status"
+                style={{
+                  margin: "0 8px 4px",
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  background: "var(--surface-hover)",
+                  color: "var(--red-600)",
+                  fontSize: "12px",
+                  lineHeight: 1.4,
+                }}
+              >
+                {aggregateProblem}
+              </p>
+            ) : null}
             <div className="workspace-record-list">
-              {records.map((record) => (
-                <button key={String(record.id)} type="button" className={editorId === record.id ? "is-active" : ""} onClick={() => editRecord(record)}>
-                  <span><strong>{recordTitle(tab, record)}</strong><small>{recordSubtitle(tab, record)}</small></span>
-                  {!readOnlyTab && <Icon name="chevron" size={15} />}
-                </button>
-              ))}
+              {records.map((record) => {
+                /*
+                  W2C — THE PROVENANCE LINE.
+
+                  Its own element between the name and the subtitle, inside the
+                  grid the list item already uses, so it reads as a second line
+                  under the name rather than as more of the status line. 12px
+                  against the name's 13px and the subtitle's 11px: smaller than
+                  the name, deliberately NOT the smallest thing in the row, and
+                  muted rather than coloured, because it is context and not a
+                  warning about the record.
+
+                  Inline styles rather than a class: this component's CSS lives
+                  in `app/brand-overrides.css`, which two other workstreams are
+                  editing concurrently. `overflowWrap` instead of the row's
+                  ellipsis so a long section name is READ rather than truncated
+                  — the whole purpose of the line is to tell two same-named
+                  records apart, and "(Custom · North Regi…" tells you nothing
+                  when the other one says "(Custom · North Regio…".
+
+                  Canonical records get nothing at all. The workspace's own
+                  register is the unmarked default; badging every row would make
+                  the exception invisible again.
+                */
+                const from = recordProvenance(record);
+                return (
+                  <button key={String(record.id)} type="button" className={editorId === record.id ? "is-active" : ""} onClick={() => editRecord(record)}>
+                    <span>
+                      <strong>{recordTitle(tab, record)}</strong>
+                      {from ? (
+                        <span
+                          style={{
+                            color: "var(--muted)",
+                            fontSize: "12px",
+                            lineHeight: 1.3,
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          {provenanceLabel(from)}
+                        </span>
+                      ) : null}
+                      <small>{recordSubtitle(tab, record)}</small>
+                    </span>
+                    {!readOnlyTab && <Icon name="chevron" size={15} />}
+                  </button>
+                );
+              })}
               {!records.length && <div className="workspace-record-list__empty"><Icon name="search" size={22} /><strong>No records found</strong><span>Try another search or add a new record.</span></div>}
             </div>
           </div>
@@ -1085,7 +1474,20 @@ export function WorkspaceDataManager({
               is made, the editor stays open with the tick box exactly as the
               user left it, and nothing on the dashboard moves.
             */
-            <form className="workspace-record-editor" onSubmit={async (event) => { event.preventDefault(); if (tab === "site" && editorId && String(form.lifecycle ?? "") === SITE_LIFECYCLE_CLOSED) { const stored = workspace.stores.find((site) => site.id === editorId); if (stored && stored.lifecycle !== SITE_LIFECYCLE_CLOSED && !confirmSiteClosure(String(form.name ?? stored.name))) return; } if (tab === "contractor" && editorId) { const stored = workspace.contractors.find((item) => item.id === editorId); if (leavesContractorRoster(stored, Boolean(form.active)) && !confirmContractorRosterExit(String(form.name ?? stored?.name ?? ""))) return; } try { await onSave(tab, editorId, form); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } }}>
+            /*
+              W2C — THE SAVE GOES BACK TO THE REGISTER THE RECORD CAME FROM.
+
+              `editorRegister` is the block the server stamped on the record, so
+              a custom record's PATCH carries its own section key and can only
+              land in that register. The canonical path is untouched and still
+              goes through `onSave`, which is the dashboard's one writer for the
+              workspace's own registers.
+
+              Both closure confirmations run FIRST and unchanged, for both
+              halves of the list — see `storedRecordFor`, which is what stops a
+              custom record slipping past a question a canonical one is asked.
+            */
+            <form className="workspace-record-editor" onSubmit={async (event) => { event.preventDefault(); setScopedProblem(null); if (tab === "site" && editorId && String(form.lifecycle ?? "") === SITE_LIFECYCLE_CLOSED) { const stored = storedRecordFor("site"); if (stored && stored.lifecycle !== SITE_LIFECYCLE_CLOSED && !confirmSiteClosure(String(form.name ?? stored.name))) return; } if (tab === "contractor" && editorId) { const stored = storedRecordFor("contractor"); if (leavesContractorRoster(stored, Boolean(form.active)) && !confirmContractorRosterExit(String(form.name ?? stored?.name ?? ""))) return; } if (editorRegister && editorId) { setScopedBusy(true); try { await scopedWrite(tab, editorRegister, "PATCH", editorId, form); setForm(null); setEditorId(null); setEditorRegister(null); } catch (error) { setScopedProblem(error instanceof Error ? error.message : "The record could not be saved."); } finally { setScopedBusy(false); } return; } try { await onSave(tab, editorId, form); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } }}>
               {/*
                 `role="presentation"` for the reason the manager's own header
                 is a `div`: a bare `<header>` is scoped out of the `banner`
@@ -1318,6 +1720,33 @@ export function WorkspaceDataManager({
                   );
                 })}
               </div>
+              {/*
+                W2C — WHY A SCOPED WRITE SAYS ITS OWN REFUSAL HERE.
+
+                The canonical path throws to the dashboard, which owns the
+                toast. A scoped write is made by this component, so its refusal
+                has nowhere else to go — and the refusals it can hit are real
+                and worth reading: a section archived in another tab, a record
+                whose register was purged, a name another contractor on that
+                register already answers to. Without this the editor would
+                simply fail to close, which reads as a button that does nothing.
+
+                `role="alert"` so it is announced when it appears; the message
+                is the server's own words, which name the register.
+              */}
+              {scopedProblem ? (
+                <p
+                  role="alert"
+                  style={{
+                    margin: "0 16px",
+                    color: "var(--red-600)",
+                    fontSize: "12px",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {scopedProblem}
+                </p>
+              ) : null}
               <footer>
                 {/*
                   W05-05 — the Archive button is the drawer's THIRD route to
@@ -1343,9 +1772,21 @@ export function WorkspaceDataManager({
                   Sites and contractors now ask; every other register keeps the
                   wording it had, because nothing else here has a second door.
                 */}
-                {editorId && <button className="secondary-button workspace-archive-button" type="button" disabled={busy} onClick={async () => { const named = (fallback: string) => String(form.name ?? fallback ?? ""); const agreed = tab === "site" ? confirmSiteClosure(named(workspace.stores.find((site) => site.id === editorId)?.name ?? "")) : tab === "contractor" ? confirmContractorRosterExit(named(workspace.contractors.find((item) => item.id === editorId)?.name ?? "")) : window.confirm("Archive this record? It will remain in the activity history."); if (agreed) { try { await onArchive(tab, editorId); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } } }}>Archive</button>}
+                {/*
+                  W2C — and the archive goes back to the same register.
+
+                  The scoped branch sits AFTER the confirmation and before the
+                  canonical one, so a declined question still writes nothing and
+                  the canonical path below is exactly the code it always was.
+                  The names offered to both questions now come from
+                  `storedRecordFor`, which looks in both halves of the list — a
+                  custom record used to produce an empty name here, so the
+                  dialog asked about "" and the operator was asked to confirm
+                  the closure of nothing in particular.
+                */}
+                {editorId && <button className="secondary-button workspace-archive-button" type="button" disabled={busy || scopedBusy} onClick={async () => { setScopedProblem(null); const named = (fallback: string) => String(form.name ?? fallback ?? ""); const agreed = tab === "site" ? confirmSiteClosure(named(storedRecordFor("site")?.name ?? "")) : tab === "contractor" ? confirmContractorRosterExit(named(storedRecordFor("contractor")?.name ?? "")) : window.confirm("Archive this record? It will remain in the activity history."); if (agreed && editorRegister) { setScopedBusy(true); try { await scopedWrite(tab, editorRegister, "DELETE", editorId); setForm(null); setEditorId(null); setEditorRegister(null); } catch (error) { setScopedProblem(error instanceof Error ? error.message : "The record could not be archived."); } finally { setScopedBusy(false); } return; } if (agreed) { try { await onArchive(tab, editorId); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } } }}>Archive</button>}
                 <button className="secondary-button" type="button" onClick={() => setForm(null)}>Cancel</button>
-                <button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
+                <button className="primary-button" type="submit" disabled={busy || scopedBusy}>{busy || scopedBusy ? "Saving…" : "Save changes"}</button>
               </footer>
             </form>
           )}

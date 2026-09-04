@@ -65,10 +65,18 @@ export function TabGlyph({ view }: { view: BoardView }) {
     /*
       A framed spark, not a four-square grid: the grid is already the Main
       table's and the Table's view icon, and at 15px two square-based marks are
-      the same mark. The frame reads as the app's own tile, which is what
-      monday puts there.
+      the same mark. The frame reads as the app's own tile, which is what the
+      source board puts there.
+
+      THE ACCESSIBLE NAME CARRIES NO BRAND. It used to read "monday app", which
+      told a screen-reader user the name of a product they are not using and
+      nothing about the tab in front of them. "App view" is what the Vibe
+      panel's own pill says, so the two agree — and agreeing matters more than
+      either wording: the glyph is the only thing marking these tabs, and a
+      reader who hears one name and sees another has to work out whether they
+      are the same thing.
     */
-    <svg {...shared} className="board-views__glyph" aria-label="monday app">
+    <svg {...shared} className="board-views__glyph" aria-label="App view">
       <rect x="3" y="3" width="18" height="18" rx="4.5" />
       <path d="M12 7.6l1.2 3.2 3.2 1.2-3.2 1.2L12 16.4l-1.2-3.2L7.6 12l3.2-1.2Z" />
     </svg>

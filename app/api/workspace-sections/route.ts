@@ -67,8 +67,15 @@ import {
   createBoard,
   deleteBoardStructure,
   renameBoard,
+  sectionBundleCounts,
 } from "../../lib/board-registry";
 import { rehomeRegisterRows, scopedRegisterRows } from "../../lib/register-scope";
+import {
+  RETENTION_DAYS,
+  describeSectionBundle,
+  expiryFrom,
+  sendSectionToBin,
+} from "../../lib/recycle-bin";
 
 /** The headings a section may be filed under. `layout.ts` is the authority. */
 const GROUP_KEYS = BUILT_IN_GROUPS.map((group) => group.key);
@@ -81,7 +88,7 @@ const GROUP_KEYS = BUILT_IN_GROUPS.map((group) => group.key);
  * Anything not in here was created by `createBoard` for the section that names
  * it, and is the only kind of board a purge may remove.
  */
-const BUILT_IN_BOARD_KEYS: ReadonlySet<string> = new Set<string>(
+export const BUILT_IN_BOARD_KEYS: ReadonlySet<string> = new Set<string>(
   /* `SECTION_SURFACES` is `as const`, so `boardKey` is a literal union and a
      `Set` inferred from it would only accept those two strings — the membership
      test below is asked about an arbitrary stored key. Widened to `string` here
@@ -121,6 +128,13 @@ function toSection(row: SectionRow): WorkspaceSection {
     group: isGroupChoice(row.groupKey, GROUP_KEYS) ? row.groupKey : FALLBACK_GROUP,
     position: row.position,
     archived: row.archivedAt !== null,
+    /* W2C — in the Recycle Bin, which is a different state from archived and
+       has to be reported as one. Deleting sets both columns, so `archived` is
+       true here as well; the screens read `deleted` first because the bin owns
+       the recovery and this dialog must not offer a second Restore. */
+    deleted: row.deletedAt !== null,
+    deletedAt: row.deletedAt ?? null,
+    expiresAt: row.deletedAt ? expiryFrom(row.deletedAt) : null,
   };
 }
 
@@ -215,6 +229,11 @@ export async function GET(request: Request) {
          server's answer and the browser does not get to second-guess it: POST
          refuses an unchoosable template whatever the dialog drew. */
       templates: SECTION_TEMPLATES,
+      /* W2C — how long a deleted section stays recoverable, from the one place
+         the number is written down. The dialog says "30 days" to the person
+         about to press Delete, and a second copy of that figure in the browser
+         is how it comes to disagree with the sweep. */
+      retentionDays: RETENTION_DAYS,
       /* Stated rather than inferred from the role, because a role whose
          `settings.edit` was revoked in Roles is still called "Admin". */
       canEdit: !guard.denied,
@@ -342,6 +361,28 @@ export async function POST(request: Request) {
 
     const existing = await findByKey(context, key);
     if (existing) {
+      /*
+       * W2C — A NAME HELD BY A SECTION IN THE RECYCLE BIN, said plainly.
+       *
+       * Checked BEFORE the archived branch, because a deleted section is also
+       * archived and would otherwise be described as merely removed — sending
+       * somebody to a Restore button that the section manager deliberately does
+       * not offer for a section the bin owns. The bin is where it is and the bin
+       * is where it comes back from, or is finished off; either way the name is
+       * free the moment one of those has happened, which is the promise §29
+       * makes about reuse.
+       */
+      if (existing.deletedAt) {
+        return Response.json(
+          {
+            error: `"${existing.label}" is in the recycle bin, and still holds this name. Restore it, or delete it for good, and then the name is free.`,
+            deleted: true,
+            key,
+            expiresAt: expiryFrom(existing.deletedAt),
+          },
+          { status: 409 },
+        );
+      }
       /* An archived section reappearing under its old name is a RESTORE, not a
          duplicate. Refusing here would leave the owner unable to re-add a
          section they removed, with no clue why — the row they cannot see is in
@@ -594,6 +635,30 @@ export async function PATCH(request: Request) {
     const row = key ? await findByKey(context, key) : null;
     if (!row) {
       return Response.json({ error: "That section does not exist." }, { status: 404 });
+    }
+
+    /*
+     * W2C — A SECTION IN THE RECYCLE BIN IS NOT EDITABLE, AND NOT RESTORABLE
+     * FROM HERE.
+     *
+     * Two different reasons, one refusal. Editing it would change a row the bin
+     * is holding a snapshot of, so a later Restore would put back something
+     * nobody deleted. And `PATCH { archived: false }` would un-archive the
+     * section while its bin entry still stood and its register was still
+     * archived — a half-restored state with two owners, which is precisely the
+     * incoherence the single-bundle model exists to make unreachable. The bin's
+     * own Restore does the whole thing in one act; this points at it.
+     */
+    if (row.deletedAt) {
+      return Response.json(
+        {
+          error: `"${row.label}" is in the recycle bin. Restore it from there — it comes back with its register and everything on it — or delete it for good.`,
+          key: row.key,
+          deleted: true,
+          expiresAt: expiryFrom(row.deletedAt),
+        },
+        { status: 409 },
+      );
     }
 
     const patch: Partial<typeof workspaceSections.$inferInsert> = {
@@ -883,24 +948,41 @@ async function mayPurge(context: ScopedDatabase) {
  * a JSON blob. There is one row per person per organisation, so this is a small
  * loop over a small table, and it runs only on the deliberate destructive path.
  */
-async function forgetSection(context: ScopedDatabase, key: string) {
-  await context.db
+export async function forgetSection(context: ScopedDatabase, key: string) {
+  await forgetSectionReferences(context.db, context.orgId, key);
+}
+
+/**
+ * The same work, addressed by database and organisation rather than by scope.
+ *
+ * W2C — the Recycle Bin's "Delete for good" reaches this from `/api/trash`,
+ * which holds a `db` and an `orgId` but not this file's `ScopedDatabase`. Two
+ * copies of "forget a section" is exactly the drift that leaves one of them
+ * missing a table, so the wrapper above stays the call this file uses and this
+ * is the one implementation underneath it.
+ */
+export async function forgetSectionReferences(
+  db: ScopedDatabase["db"],
+  orgId: string,
+  key: string,
+) {
+  await db
     .delete(sectionViewPreferences)
     .where(
       and(
-        eq(sectionViewPreferences.organisationId, context.orgId),
+        eq(sectionViewPreferences.organisationId, orgId),
         eq(sectionViewPreferences.sectionKey, key),
       ),
     );
 
-  const layouts = await context.db
+  const layouts = await db
     .select({
       id: navigationLayouts.id,
       items: navigationLayouts.items,
       locked: navigationLayouts.locked,
     })
     .from(navigationLayouts)
-    .where(eq(navigationLayouts.organisationId, context.orgId));
+    .where(eq(navigationLayouts.organisationId, orgId));
 
   for (const layout of layouts) {
     let items: unknown;
@@ -931,7 +1013,7 @@ async function forgetSection(context: ScopedDatabase, key: string) {
       (Array.isArray(items) && keptItems.length !== items.length) ||
       (Array.isArray(locked) && keptLocked.length !== locked.length);
     if (!changed) continue;
-    await context.db
+    await db
       .update(navigationLayouts)
       .set({
         items: JSON.stringify(keptItems),
@@ -944,7 +1026,7 @@ async function forgetSection(context: ScopedDatabase, key: string) {
          statement, which is the kind that stops being true after a refactor. */
       .where(
         and(
-          eq(navigationLayouts.organisationId, context.orgId),
+          eq(navigationLayouts.organisationId, orgId),
           eq(navigationLayouts.id, layout.id),
         ),
       );
@@ -1063,6 +1145,176 @@ export async function DELETE(request: Request) {
       return Response.json({ error: "That section does not exist." }, { status: 404 });
     }
 
+    /*
+     * W2C — DELETE THE WHOLE SECTION, AS ONE THING: `&bin=1`.
+     *
+     * THE WORKFLOW THIS REPLACES. `&purge=1` below is a destruction, and it is
+     * right to refuse one while a register still holds items, or holds items in
+     * the bin, or holds sites and contractors. But those three refusals added up
+     * to a product in which removing a custom section meant deleting every row
+     * by hand, then emptying the bin, then coming back — for what the owner
+     * regards as one object. His instruction was to make the section deletable
+     * as one: "the user must not have to empty the section first."
+     *
+     * SO THIS IS A DIFFERENT VERB, NOT A LOOSENED ONE. `bin=1` destroys
+     * nothing. It moves the section AND everything its register owns into the
+     * Recycle Bin, where the whole bundle sits as ONE entry for
+     * `RETENTION_DAYS` and can be restored in one act. `purge=1` keeps every
+     * refusal it ever had and is left exactly as it was, because scripted
+     * teardown and every caller that predates this rely on it and because a
+     * path that can only destroy an EMPTY register is the safe direction to
+     * leave a second door open in.
+     *
+     * WHY `settings.edit` AND NOT `data.delete`. This is the reversible act.
+     * The product already draws that line the same way one level down: sending
+     * a ROW to the bin needs `board.edit`, and only "Delete for good" in the bin
+     * needs `data.delete`. Making the reversible half need the irreversible
+     * capability would leave the owner's own admins unable to remove a section
+     * they can create, and would push them at `purge=1` — the one that really
+     * is irreversible. The thirty-day sweep does eventually destroy what is in
+     * the bin, which is the same property the row-level bin has had since
+     * Stage 23 and is stated on the screen rather than hidden.
+     *
+     * CANONICAL SECTIONS CANNOT REACH THIS, and it is enforced here rather than
+     * in the dialog. `jobs`, `contractors`, `sites`, `store-documentation` and
+     * every other built-in section is not a `workspace_sections` row at all, so
+     * `findByKey` above has already answered 404; the namespace check below says
+     * so out loud, and the board-ownership test further down refuses to take a
+     * register the product owns even if a row somehow named one.
+     */
+    const toBin = ["1", "true", "yes"].includes(
+      (params.get("bin") ?? "").toLowerCase(),
+    );
+    if (toBin) {
+      if (!isWorkspaceSectionKey(row.key)) {
+        return Response.json(
+          {
+            error:
+              "Only a section this workspace added can be deleted. The product's own sections are part of the platform.",
+            key: row.key,
+          },
+          { status: 403 },
+        );
+      }
+      if (row.deletedAt) {
+        /* Already there. Idempotent rather than a 409: a double-click and a
+           retry after a dropped response are the same request twice, and the
+           outcome the caller wanted is already true. */
+        return Response.json({
+          ok: true,
+          key: row.key,
+          deleted: true,
+          alreadyDeleted: true,
+          expiresAt: expiryFrom(row.deletedAt),
+          retentionDays: RETENTION_DAYS,
+        });
+      }
+
+      /* The register this section owns — the row's own `surface_ref` when it is
+         not one of the product's, and otherwise the one its creation audit line
+         names, for the rows detached before the PATCH guard existed. Identical
+         to the test `purge=1` applies, deliberately: the two verbs must agree
+         about what a section owns or one of them is wrong. */
+      const ownedBoard =
+        (row.surfaceRef && !BUILT_IN_BOARD_KEYS.has(row.surfaceRef)
+          ? row.surfaceRef
+          : null) ?? (await abandonedBoardFor(context, row.key));
+
+      /*
+       * A SHARED REGISTER IS NOT THIS SECTION'S TO TAKE.
+       *
+       * `PATCH { board }` can point a second section at the same register, and
+       * while any LIVE section still opens it the register stays exactly where
+       * it is: only this section's own row goes to the bin. Restoring it later
+       * finds the register still there, because the sibling was keeping it.
+       */
+      const sharing = ownedBoard
+        ? (await loadWorkspaceSections(context.db, context.orgId)).filter(
+            (section) =>
+              section.key !== row.key &&
+              section.boardKey === ownedBoard &&
+              !section.deleted,
+          )
+        : [];
+      const bundleBoard = ownedBoard && sharing.length === 0 ? ownedBoard : null;
+
+      /* What is at stake, counted BEFORE anything is written so the entry, the
+         audit line and the response all say the same thing. */
+      const counts = bundleBoard
+        ? await sectionBundleCounts(context.db, context.orgId, bundleBoard)
+        : {};
+      if (bundleBoard) {
+        const held = await scopedRegisterRows(context.db, context.orgId, bundleBoard);
+        counts.sites = held.sites;
+        counts.contractors = held.contractors;
+        counts.siteGroups = held.groups;
+      }
+
+      const [boardRow] = bundleBoard
+        ? await context.db
+            .select({ archived: boards.archived })
+            .from(boards)
+            .where(
+              and(
+                eq(boards.organisationId, context.orgId),
+                eq(boards.key, bundleBoard),
+              ),
+            )
+            .limit(1)
+        : [];
+
+      const entry = await sendSectionToBin(
+        context.db,
+        context.orgId,
+        /* The same actor shape the board route hands `sendJobsToBin`, so one
+           person's name reads the same whichever thing they deleted. */
+        { email: context.identityEmail || context.actor.email, displayName: context.actor.displayName },
+        {
+          sectionKey: row.key,
+          label: row.label,
+          boardKey: bundleBoard,
+          wasArchived: row.archivedAt !== null,
+          boardWasArchived: boardRow?.archived === true,
+          counts,
+        },
+      );
+
+      await recordSectionChange(
+        context,
+        request,
+        "workspace.section_binned",
+        row.key,
+        `Deleted the "${row.label}" workspace section. It is in the recycle bin for ${RETENTION_DAYS} days.`,
+        {
+          key: row.key,
+          label: row.label,
+          /* TRUE, and it is the whole point of this verb. The `false` on
+             `workspace.section_deleted` below still means what it says. */
+          recoverable: true,
+          board: bundleBoard,
+          sharedWith: sharing.map((section) => section.key),
+          counts,
+          binEntry: entry.id,
+          expiresAt: entry.expiresAt,
+        },
+      );
+
+      return Response.json({
+        ok: true,
+        key: row.key,
+        deleted: true,
+        /* Named so a caller can tell this apart from `purge=1`'s answer without
+           inferring it from which keys are present. */
+        binned: true,
+        binEntry: entry.id,
+        expiresAt: entry.expiresAt,
+        retentionDays: RETENTION_DAYS,
+        board: bundleBoard,
+        summary: describeSectionBundle(counts),
+        counts,
+      });
+    }
+
     const purge = params.get("purge") === "1" || params.get("purge") === "true";
     if (!purge) {
       if (row.archivedAt) {
@@ -1109,6 +1361,29 @@ export async function DELETE(request: Request) {
           error: `"${row.label}" is still in use. Remove it first, which archives it and takes it out of every sidebar, and then it can be deleted permanently.`,
           key: row.key,
           archived: false,
+        },
+        { status: 409 },
+      );
+    }
+
+    /*
+     * W2C — AND A SECTION THE RECYCLE BIN IS HOLDING IS THE BIN'S TO FINISH.
+     *
+     * `purge=1` destroys a section and an EMPTY register directly. A section in
+     * the bin is neither of those things: it is a bundle with one entry, one
+     * countdown and one owner, and letting a second endpoint destroy it behind
+     * the bin's back would leave the entry pointing at a section that no longer
+     * exists. "Delete for good" in the bin runs the full ownership traversal —
+     * items, files, forms, register rows — which this path deliberately never
+     * had, so it is also the one that can actually finish the job.
+     */
+    if (row.deletedAt) {
+      return Response.json(
+        {
+          error: `"${row.label}" is in the recycle bin. Delete it for good from there — that removes it and everything its register holds — or restore it first.`,
+          key: row.key,
+          deleted: true,
+          expiresAt: expiryFrom(row.deletedAt),
         },
         { status: 409 },
       );

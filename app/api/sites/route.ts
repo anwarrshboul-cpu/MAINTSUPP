@@ -24,6 +24,7 @@ import {
   listAliases,
   listSiteGroups,
   listSites,
+  listSitesInRegisters,
   mirrorAddress,
   nameConflict,
   nextSitePosition,
@@ -51,9 +52,14 @@ import { coordinateRefusal, reconcileSiteState } from "../../lib/site-state";
  * REFUSAL rather than a quiet fall back onto the workspace's real estate.
  */
 import {
+  aggregateScopes,
+  listRegisterInstances,
+  registerProvenanceReader,
   registerScopeFilter,
+  registersRequest,
   resolveRegisterScope,
   scopeRefusal,
+  SCOPE_PARAM,
   type RegisterScope,
   CANONICAL_REGISTER,
 } from "../../lib/register-scope";
@@ -584,6 +590,79 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const { db, orgId } = await scopedDb(request);
     const url = new URL(request.url);
+
+    /*
+     * ── THE AGGREGATE, FOR THE MANAGEMENT SURFACE ONLY — W2C ──────────────
+     *
+     * "Manage Data → Sites" is an INVENTORY of what this organisation holds,
+     * not a view of one register, and it was listing the canonical register
+     * alone: a site created inside a custom Sites section was missing from it
+     * entirely, with nothing on screen to say so. This is the read that closes
+     * that, and it is deliberately a SEPARATE, EXPLICITLY REQUESTED answer
+     * rather than a widening of the register read below — the Sites screen, the
+     * pickers, the CSV export and the public form all go through that one, and
+     * every one of them means a single register.
+     *
+     * `id` is refused alongside it because a single site is a question about
+     * one register by definition: it comes back with that register's groups and
+     * aliases, and there is no honest way to answer it across several.
+     */
+    const aggregate = registersRequest(url);
+    const named = url.searchParams.get(SCOPE_PARAM);
+    if (aggregate && named) {
+      return Response.json(
+        {
+          error:
+            "Ask for one register or for the aggregate, not both. `section` names a single register; `registers` asks across the ones this workspace owns.",
+        },
+        { status: 400 },
+      );
+    }
+    if (aggregate && url.searchParams.get("id")) {
+      return Response.json(
+        {
+          error:
+            "A single site belongs to one register. Ask for it with `section`, or drop `id` to read the aggregate.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (aggregate) {
+      /* The instances THIS ORGANISATION OWNS, read from the database in one
+         query — not "every register". A section belonging to another tenant, an
+         archived section and a section built from another template are all
+         absent for the reasons `resolveRegisterScope` refuses them singly. */
+      const instances = await listRegisterInstances(db, orgId, "sites");
+      const scopes = aggregateScopes(aggregate, instances);
+      /* Derived from `sites.board_id` as the database returned it. Two Sites
+         instances may each legitimately hold a "Wood Green"; the name is not
+         an identifier across registers and is never consulted here. */
+      const provenance = registerProvenanceReader(instances);
+      /* ONE statement over the whole scope list. A read per section would be
+         the N+1 the performance boundary rules out, and reading the whole
+         organisation and sorting it out afterwards is the fetch-all-then-filter
+         the owner ruled out by name. */
+      const aggregated = await listSitesInRegisters(db, orgId, scopes, {
+        includeInactive: true,
+      });
+      return Response.json({
+        sites: aggregated.map((row) => ({
+          ...row,
+          register: provenance(row.id, row.boardId),
+        })),
+        registers: instances,
+        /*
+         * No `groups`, `aliases`, `siteTypes` or `statuses`. Groups and aliases
+         * are per-register — `site_groups` carries the scope column itself —
+         * and folding several registers' groups into one list would invite a
+         * screen to offer one register's reporting group for another register's
+         * site. The option vocabularies are workspace settings and the manager
+         * already fetches them from `/api/options`.
+         */
+      });
+    }
+
     const resolved = await resolveRegisterScope(db, orgId, url, "sites");
     const refused = scopeRefusal(resolved);
     if (refused) return refused;

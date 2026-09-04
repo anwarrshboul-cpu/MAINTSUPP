@@ -21,6 +21,13 @@
  * top — so a surface's depth is declared by role rather than by a number
  * chosen to beat whichever number was last in the way.
  *
+ * WHY THE WINDOW IS NOT THE LIMIT. Being above the fixed rail is not the same
+ * as being clear of it, and a surface drawn on top of the navigation is a
+ * different defect from one drawn underneath it, not a fix. `bounds` lets a
+ * caller name the layout region its anchor lives in, and the clamp then pushes
+ * the surface into that region instead of into the window — see
+ * `resolveBounds`.
+ *
  * Exports are the contract the board chrome codes against; keep the names and
  * signatures stable.
  */
@@ -69,6 +76,70 @@ const DEFAULT_OFFSET = 6;
  * further — and is pushed back inside the viewport instead.
  */
 const MIN_HEIGHT = 120;
+
+/**
+ * The narrowest a `bounds` region may be before it is ignored.
+ *
+ * A bounded surface is clamped into a region rather than into the window, and
+ * a region that has collapsed — a rail mid-transition, a pane that measures 0
+ * because an ancestor is `display: none` — would otherwise squeeze the panel
+ * into an unreadable column or off the screen entirely. When the region is
+ * this narrow the window is used instead, which is the behaviour every caller
+ * had before `bounds` existed.
+ */
+const MIN_BOUNDS_WIDTH = 240;
+
+/** The horizontal band a surface may occupy, in viewport coordinates. */
+type Bounds = { left: number; right: number };
+
+/**
+ * THE REGION A SURFACE MAY NOT LEAVE — and why the window is not it.
+ *
+ * `position: fixed` and a clamp against `document.documentElement.clientWidth`
+ * put a surface inside the WINDOW, and the window is not what the reader can
+ * see. The portal's left 248px (220px on a narrow desktop) is a fixed rail at
+ * `--z-sidebar`, painted over everything in the document flow; a panel clamped
+ * to `left: 8` is inside the window and underneath the rail, which is exactly
+ * the defect this argument exists to stop: the board's sort panel opened with
+ * its heading reading "ort by" because its first 250px were behind the rail.
+ *
+ * Raising the panel's z-index is not the cure, and this is worth writing down
+ * because it is the first thing anyone tries: the panel would then be drawn ON
+ * TOP of the rail — still overlapping it, just winning the paint — and the
+ * reader loses the navigation instead of the heading. The panel has to be
+ * PUT somewhere it fits.
+ *
+ * So a caller may name the layout region its anchor lives in (`.portal-main`,
+ * whose `margin-left` already tracks the rail's width at every breakpoint and
+ * is 0 once the rail is away). It is resolved from the ANCHOR first —
+ * `closest()`, so a board inside one region is bounded by that region and not
+ * by whichever one `querySelector` happens to reach — and intersected with the
+ * window, because a region may itself be scrolled partly off screen.
+ *
+ * IT IS A PURE READ. The region is not the surface and never contains it — the
+ * surface is `position: fixed` inside a zero-sized host on <body>, out of flow
+ * — so nothing this function returns can be changed by what is written back
+ * onto the surface. That matters here more than it would elsewhere: every
+ * measurement in this file has to be a read of something the surface cannot
+ * move, or the loop documented under `SETTLE_EPSILON` comes back.
+ */
+function resolveBounds(
+  anchor: HTMLElement | null,
+  selector: string | undefined,
+  vw: number,
+): Bounds {
+  const windowBounds: Bounds = { left: 0, right: vw };
+  if (!selector) return windowBounds;
+  const region =
+    anchor?.closest<HTMLElement>(selector) ?? document.querySelector<HTMLElement>(selector);
+  if (!region) return windowBounds;
+  const rect = region.getBoundingClientRect();
+  if (rect.width <= 0) return windowBounds;
+  const left = Math.max(0, Math.min(rect.left, vw));
+  const right = Math.min(vw, Math.max(rect.right, 0));
+  if (right - left < MIN_BOUNDS_WIDTH) return windowBounds;
+  return { left, right };
+}
 
 /** What the menu's arrow keys walk across. */
 const MENU_ITEMS = '[role="menuitem"], button, a[href]';
@@ -240,9 +311,22 @@ function computePosition(
   offset: number,
   matchWidth: boolean,
   padding: number,
+  bounds: Bounds,
 ): Measured {
-  const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
+
+  /*
+   * Horizontal room is the BOUNDS, vertical room is the window.
+   *
+   * `bounds` defaults to the whole window, so every caller that does not name
+   * a region computes exactly what it computed before. Only the horizontal
+   * axis is bounded: the regions this is used with (`.portal-main`) are
+   * full-height columns beside a full-height rail, so there is nothing on the
+   * vertical axis to be pushed out of, and clamping height to a region that
+   * is taller than the screen would put a menu off the bottom of it.
+   */
+  const minX = bounds.left;
+  const maxX = bounds.right;
 
   /*
    * HOW TALL THE SURFACE WANTS TO BE, MEASURED WITHOUT ITS OWN SCROLLBAR.
@@ -271,7 +355,7 @@ function computePosition(
   const wantedHeight = surface.scrollHeight + borderY;
   const wantedWidth = matchWidth ? anchor.width : surface.offsetWidth;
 
-  const maxWidth = Math.max(0, vw - padding * 2);
+  const maxWidth = Math.max(0, maxX - minX - padding * 2);
   const width = Math.min(wantedWidth, maxWidth);
 
   const [preferredSide, align] = placement.split("-") as [
@@ -280,8 +364,8 @@ function computePosition(
   ];
   const spaceBelow = vh - anchor.bottom - offset - padding;
   const spaceAbove = anchor.top - offset - padding;
-  const spaceRight = vw - anchor.right - offset - padding;
-  const spaceLeft = anchor.left - offset - padding;
+  const spaceRight = maxX - anchor.right - offset - padding;
+  const spaceLeft = anchor.left - minX - offset - padding;
 
   let side = preferredSide;
   if (side === "bottom" && wantedHeight > spaceBelow && spaceAbove > spaceBelow) {
@@ -350,9 +434,20 @@ function computePosition(
     top = Math.min(anchor.top, vh - padding - height);
   }
 
-  // Clamp into the viewport. Height is already bounded by maxHeight, so only
-  // the top edge needs holding; the surface scrolls rather than overflowing.
-  left = Math.max(padding, Math.min(left, vw - padding - width));
+  /*
+   * Clamp into the bounds. Height is already bounded by maxHeight, so only the
+   * top edge needs holding; the surface scrolls rather than overflowing.
+   *
+   * This is the line that turns an underlap into a reposition: a surface whose
+   * preferred `left` falls inside the rail is PUSHED RIGHT to the region's own
+   * edge rather than drawn where it was asked for and left to fight over which
+   * one paints on top. `min` before `max` in the composition below matters when
+   * the surface is wider than the region — then the left edge wins, so what is
+   * cut off is the far edge inside the region rather than the near edge under
+   * the rail. It cannot normally happen: `width` is already capped at
+   * `maxWidth`, which is the region minus its padding.
+   */
+  left = Math.max(minX + padding, Math.min(left, maxX - padding - width));
   top = Math.max(padding, Math.min(top, vh - padding - MIN_HEIGHT));
 
   /*
@@ -407,6 +502,13 @@ export function useAnchoredPosition(args: {
   offset?: number;
   matchWidth?: boolean;
   padding?: number;
+  /**
+   * A CSS selector for the layout region the surface must stay inside,
+   * resolved from the anchor with `closest()` and falling back to the first
+   * match in the document. Omitted, the surface is clamped to the window as it
+   * always was. See `resolveBounds`.
+   */
+  bounds?: string;
 }): {
   ref: RefObject<HTMLDivElement | null>;
   style: CSSProperties;
@@ -420,16 +522,41 @@ export function useAnchoredPosition(args: {
     offset = DEFAULT_OFFSET,
     matchWidth = false,
     padding = DEFAULT_PADDING,
+    bounds,
   } = args;
   const ref = useRef<HTMLDivElement | null>(null);
   const [measured, setMeasured] = useState<Measured>(UNMEASURED);
 
   useLayoutEffect(() => {
     if (!open) return undefined;
+    let cancelled = false;
+    /*
+     * AN ANCHOR THAT IS NOT THERE YET IS NOT AN ANCHOR THAT IS NOT COMING.
+     *
+     * A caller may derive its anchor from the DOM rather than hold a ref to it
+     * — the board's sort and filter panels find the toolbar button they hang
+     * off, because the file that renders the button does not pass one. Ref
+     * callbacks are committed before a parent's layout effects, so that is in
+     * place by the time this runs; but "is in place because of commit
+     * ordering" is a promise about React's internals, and if it were ever
+     * broken the surface would stay `visibility: hidden` forever with nothing
+     * on screen to say why. Two frames of retry costs nothing and turns a
+     * silent blank panel into, at worst, a frame of delay. It is bounded and
+     * it is not a loop: the counter only resets once a measurement succeeds.
+     */
+    let retries = 0;
     const measure = () => {
+      if (cancelled) return;
       const anchor = anchorRef.current;
       const surface = ref.current;
-      if (!anchor || !surface) return;
+      if (!anchor || !surface) {
+        if (retries < 2 && typeof requestAnimationFrame === "function") {
+          retries += 1;
+          requestAnimationFrame(measure);
+        }
+        return;
+      }
+      retries = 0;
       const next = computePosition(
         anchor.getBoundingClientRect(),
         surface,
@@ -437,6 +564,7 @@ export function useAnchoredPosition(args: {
         offset,
         matchWidth,
         padding,
+        resolveBounds(anchor, bounds, document.documentElement.clientWidth),
       );
       setMeasured((current) => (sameMeasure(current, next) ? current : next));
     };
@@ -450,11 +578,12 @@ export function useAnchoredPosition(args: {
       if (anchorRef.current) observer.observe(anchorRef.current);
     }
     return () => {
+      cancelled = true;
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
       observer?.disconnect();
     };
-  }, [open, anchorRef, placement, offset, matchWidth, padding]);
+  }, [open, anchorRef, placement, offset, matchWidth, padding, bounds]);
 
   /*
    * Gated on `open` rather than reset by an effect: while closed the caller
@@ -492,6 +621,8 @@ export function AnchoredPopover(props: {
   placement?: AnchoredPlacement;
   offset?: number;
   matchWidth?: boolean;
+  /** The layout region the surface may not leave — see `resolveBounds`. */
+  bounds?: string;
   layer?: "popover" | "submenu" | "popover-raised";
   role?: "menu" | "dialog" | "listbox";
   label?: string;
@@ -507,6 +638,7 @@ export function AnchoredPopover(props: {
     placement,
     offset,
     matchWidth,
+    bounds,
     layer = "popover",
     role = "menu",
     label,
@@ -521,6 +653,7 @@ export function AnchoredPopover(props: {
     placement,
     offset,
     matchWidth,
+    bounds,
   });
 
   // The latest close, without rebinding the listeners on every render.

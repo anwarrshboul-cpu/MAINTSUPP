@@ -2602,31 +2602,56 @@ export default function PortalApp({
         )}
 
         {/*
-          The sidebar, arranged by whoever is looking at it.
+          THE RAIL'S ONE SCROLLER, and the support card lives inside it.
 
-          What used to be two `.map`s over two constants is now a rendering of
-          the layout `/api/navigation` resolves: this person's own arrangement
-          over the workspace default over the built-in order. `navCatalogue` is
-          what may appear; the stored layout only decides how. Nothing about the
-          resting appearance changed — same pill, same 19px icon, same counts.
+          "Need a hand?" used to be a sibling of the nav carrying `margin-top:
+          auto`, which parked it permanently between the scrolling nav and the
+          profile block: at 1440x900 the nav was a 472px window onto an 839px
+          list and the card ate 59px of that window for ever, clipping the last
+          nav row — "Customise sidebar" — in half against the card's top edge.
+          A promotional card is not chrome; it must not cost every reader
+          vertical room on every screen, and it must not be the thing you hit
+          when you scroll to the end of your own navigation.
+
+          Wrapping the nav and the card in ONE scroll container makes the card
+          the last thing in the scrollable content, reached only by scrolling to
+          the bottom, and hands the whole of the rail's spare height back to the
+          nav. It is deliberately a single container: two nested scrollers is
+          the double-scrollbar trap, where the outer one swallows the gesture
+          and the inner list never reaches its own end.
+
+          Below 768px this element stops scrolling and the whole rail scrolls
+          instead (brand-overrides.css) — the drawer is short enough that one
+          gesture should move everything in it, including the workspace picker.
         */}
-        <SidebarNav
-          catalogue={navCatalogue}
-          activeSection={activeSection}
-          onSelect={(key) => setSection(key)}
-          badges={{ maintenance: urgentCount }}
-          badgeDescriptions={{ maintenance: "urgent jobs open" }}
-          onNotify={setToast}
-          onManageSections={() => setSectionManagerOpen(true)}
-        />
+        <div className="sidebar-scroll">
+          {/*
+            The sidebar, arranged by whoever is looking at it.
 
-        <div className="sidebar-help">
-          <span className="sidebar-help__icon">
-            <Icon name="spark" size={17} />
-          </span>
-          <div>
-            <strong>Need a hand?</strong>
-            <span>MAINTSUPP support is online</span>
+            What used to be two `.map`s over two constants is now a rendering of
+            the layout `/api/navigation` resolves: this person's own arrangement
+            over the workspace default over the built-in order. `navCatalogue` is
+            what may appear; the stored layout only decides how. Nothing about the
+            resting appearance changed — same pill, same 19px icon, same counts.
+          */}
+          <SidebarNav
+            catalogue={navCatalogue}
+            activeSection={activeSection}
+            onSelect={(key) => setSection(key)}
+            badges={{ maintenance: urgentCount }}
+            badgeDescriptions={{ maintenance: "urgent jobs open" }}
+            onNotify={setToast}
+            onManageSections={() => setSectionManagerOpen(true)}
+          />
+
+          <div className="sidebar-help">
+            <span className="sidebar-help__icon">
+              <Icon name="spark" size={17} />
+            </span>
+            <div>
+              <strong>Need a hand?</strong>
+              <span>MAINTSUPP support is online</span>
+            </div>
           </div>
         </div>
 

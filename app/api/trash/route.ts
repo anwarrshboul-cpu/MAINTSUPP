@@ -28,28 +28,54 @@
  * sidebar can decide whether to list the bin at all.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
   attachments,
+  complianceDocuments,
+  contractorCertifications,
+  contractorSites,
+  contractors,
+  invoices,
+  itemActivity,
+  itemUpdateLikes,
+  itemUpdates,
   jobAccessTokens,
   maintenanceBoardCells,
   maintenanceBoardColumns,
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
+  plannedMaintenance,
+  quotations,
   recycleBin,
+  registerValues,
+  siteAliases,
+  siteGroupMembers,
+  siteGroups,
+  sites,
+  units,
+  workspaceSections,
 } from "../../../db/schema";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { can, resolvePermissions } from "../../lib/permissions";
 import {
   RETENTION_DAYS,
+  SECTION_ENTITY_TYPE,
+  binnedSectionBoards,
   listBin,
   maybeSweepRecycleBin,
   restoreFromBin,
+  sweepRecycleBin,
   type PurgeFn,
 } from "../../lib/recycle-bin";
+import { deleteBoardStructure } from "../../lib/board-registry";
+import {
+  BUILT_IN_BOARD_KEYS,
+  forgetSectionReferences,
+} from "../workspace-sections/route";
+import { CANONICAL_REGISTER } from "../../lib/register-scope";
 import { chunkIds } from "../../lib/sql-batching";
 import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
 
@@ -88,6 +114,44 @@ export async function GET(request: Request) {
     await maybeSweepRecycleBin(db, purgeFor(db));
 
     const url = new URL(request.url);
+
+    /*
+     * `?sweep=1` — THE UNSAMPLED SWEEP, ON REQUEST.
+     *
+     * There is no scheduler in this deployment: no cron trigger, no queue, no
+     * Durable Object alarm, nothing in `vercel.json` or `railway.json`. The
+     * thirty days are swept opportunistically by the line above, on roughly one
+     * call in ten to this route — which is honest and is what the screen says,
+     * and which means the bin empties when somebody uses the app rather than at
+     * midnight.
+     *
+     * This is the deterministic version of the same sweep, so the retention can
+     * be RUN rather than waited for: by an operator who wants the bin emptied
+     * now, by a test that must not depend on `Math.random`, and — the reason it
+     * takes a parameter rather than being a private helper — by whatever
+     * scheduler this deployment eventually grows. It is not itself automation
+     * and nothing calls it on a timer today; wiring it to one is a deployment
+     * change, not a code change.
+     *
+     * `data.delete`, because it destroys. The guard above is `board.view`, so
+     * the capability is resolved again here rather than assumed — a client can
+     * read this route and must not be able to empty the bin by adding a query
+     * parameter.
+     */
+    if (["1", "true", "yes"].includes((url.searchParams.get("sweep") ?? "").toLowerCase())) {
+      const sweeper = await scopedDbWithCapability(request, "data.delete");
+      if (sweeper.denied) return sweeper.denied;
+      const swept = await sweepRecycleBin(db, purgeFor(db));
+      return Response.json({
+        ok: true,
+        swept,
+        retentionDays: RETENTION_DAYS,
+        /* Capped per pass on purpose. A bin holding ten thousand expired rows
+           drains over several calls; nothing is lost, because what is left is
+           still expired and still first in line. */
+        more: swept > 0,
+      });
+    }
     const kind = url.searchParams.get("kind");
     const board = url.searchParams.get("board");
     const actor = url.searchParams.get("actor");
@@ -202,6 +266,9 @@ const RESTORED_ENTITY_TYPES: Record<string, string> = {
   // The correction: a column can be in the bin now, and a restored one is a
   // `maintenance_board_column` in the audit trail like every change to it.
   column: "maintenance_board_column",
+  /* W2C — a restored section is a `workspace_section` in the audit trail, the
+     same name its create, rename and archive lines already carry. */
+  section: "workspace_section",
 };
 
 /* ── DELETE — permanent ────────────────────────────────────────────────── */
@@ -233,11 +300,12 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const entries = await db
+    const all = await db
       .select({
         id: recycleBin.id,
         entityType: recycleBin.entityType,
         entityId: recycleBin.entityId,
+        boardId: recycleBin.boardId,
         title: recycleBin.title,
       })
       .from(recycleBin)
@@ -246,6 +314,36 @@ export async function DELETE(request: Request) {
           ? and(eq(recycleBin.id, id), eq(recycleBin.organisationId, orgId))
           : eq(recycleBin.organisationId, orgId),
       );
+
+    /*
+     * W2C — A CHILD OF A DELETED SECTION IS NOT SEPARATELY DESTROYABLE.
+     *
+     * The same rule the restore path applies, for the same reason and with a
+     * second one of its own. The bin does not list these entries — they are
+     * folded into their section's line — so anything naming one here is a stale
+     * tab or a script; and `?all=true` would otherwise walk a list in which the
+     * section's own entry destroys its children mid-loop, leaving the rest of
+     * the loop deleting rows that are already gone. Skipping them is exact:
+     * whatever they point at goes when the section does, and the section's entry
+     * is still in this list.
+     */
+    const binnedBoards = await binnedSectionBoards(db, orgId);
+    const entries = all.filter(
+      (entry) =>
+        entry.entityType === SECTION_ENTITY_TYPE ||
+        !entry.boardId ||
+        !binnedBoards.has(entry.boardId),
+    );
+
+    if (id && all.length && !entries.length) {
+      return Response.json(
+        {
+          error:
+            "That belongs to a section which is in the recycle bin. Delete the section for good and this goes with it, or restore the section first.",
+        },
+        { status: 409 },
+      );
+    }
 
     if (!entries.length) {
       return Response.json(
@@ -341,6 +439,18 @@ function purgeFor(db: Database): PurgeFn {
      */
     if (entityType === "board_view") return true;
     if (entityType === "column") return purgeColumn(db, organisationId, entityId);
+    /*
+     * W2C — a whole custom section, and everything its register owned.
+     *
+     * The only entity kind here whose purge is a TRAVERSAL rather than one
+     * row's worth of cleanup, because it is the only one that is a bundle. It
+     * reuses `purgeJob` and `purgeColumn` above rather than restating what
+     * destroying a row or a column means: two definitions of that is how one of
+     * them ends up forgetting the files.
+     */
+    if (entityType === SECTION_ENTITY_TYPE) {
+      return purgeSection(db, organisationId, entityId);
+    }
     // An entity kind this build does not know how to destroy. Declining leaves
     // the entry in the bin, which is visible and fixable; pretending otherwise
     // would strand the row.
@@ -590,4 +700,443 @@ async function purgeGroup(db: Database, orgId: string, groupId: string) {
     );
 
   return true;
+}
+
+/* ── W2C — a section bundle, destroyed for good ────────────────────────── */
+
+/**
+ * ONE CUSTOM SECTION AND EVERYTHING IT OWNED, PERMANENTLY.
+ *
+ * Reached two ways and no others: somebody with `data.delete` pressed "Delete
+ * for good" on the section's entry in the bin, or thirty days elapsed and the
+ * sweep did it for them. Both are the same code, which is the point — the
+ * automatic ending must not be a different, quieter deletion than the one a
+ * person chose.
+ *
+ * ── WHAT IS OWNED, AND WHAT IS ONLY REFERENCED ────────────────────────────
+ *
+ * The whole of the safety here is one distinction, applied per table:
+ *
+ *   OWNED — it exists BECAUSE this register exists and is addressed by its
+ *   `board_id`: the board row, its columns, options, groups, views, forms,
+ *   automations and runs; the items placed on it and their subitems, cells,
+ *   files, comments, activity and public links; the sites, contractors and
+ *   reporting groups created inside a Sites or Contractors instance; the
+ *   section's own row, its remembered views and its name in every arrangement.
+ *
+ *   SHARED — it existed before this section and will exist after it: the
+ *   canonical Jobs, Sites, Contractors and Documentation registers (`board_id`
+ *   NULL or one of `BUILT_IN_BOARD_KEYS`), the workspace's option sets, and
+ *   `register_columns`, which is keyed by REGISTER KIND rather than by board
+ *   and so is one shared definition every Sites instance draws with. Not one
+ *   of them is touched here.
+ *
+ * ── THE ONE PLACE OWNERSHIP IS NOT ENOUGH ─────────────────────────────────
+ *
+ * A site or a contractor created inside an instance is owned by it, and is also
+ * the target of NOT NULL foreign keys from six other tables. Destroying one
+ * that a canonical job, a planned visit, a unit or a compliance document still
+ * points at would be a cascade across data this section never owned — and on
+ * Postgres it would simply throw, which is the class of failure that passes
+ * locally and fails deployed. So each row is checked, and a row referenced from
+ * OUTSIDE the bundle is RETURNED TO THE CANONICAL REGISTER instead of
+ * destroyed. The section still goes, the register still goes, the name is still
+ * free; what survives is the row somebody else was relying on, in the one place
+ * a person can see it.
+ *
+ * Returns true when the section is gone, which is what lets the bin entry go
+ * with it. See `sweepRecycleBin` for why returning false has to leave both.
+ */
+async function purgeSection(db: Database, orgId: string, sectionKey: string) {
+  const [section] = await db
+    .select()
+    .from(workspaceSections)
+    .where(
+      and(
+        eq(workspaceSections.organisationId, orgId),
+        eq(workspaceSections.key, sectionKey),
+      ),
+    )
+    .limit(1);
+
+  /* The row is already gone. True, not false: leaving the entry behind would
+     offer a Restore for a section that no longer exists, which is the one
+     outcome worse than an over-eager purge. */
+  if (!section) return true;
+
+  /* A board key that is one of the product's own is a DOOR onto a shared
+     screen, never this section's register. Checked here as well as at the point
+     the bundle was made, because this function can also be reached by the sweep
+     thirty days after anybody last looked at it. */
+  const boardKey =
+    section.surfaceRef && !BUILT_IN_BOARD_KEYS.has(section.surfaceRef)
+      ? section.surfaceRef
+      : null;
+
+  let ownsBoard = false;
+  if (boardKey) {
+    /* Any other section naming this register — archived and deleted included.
+       A register a second section still points at is not this one's to destroy,
+       and a section sitting in the bin beside this one is exactly the caller
+       whose Restore would otherwise come back to nothing. */
+    const others = await db
+      .select({ key: workspaceSections.key })
+      .from(workspaceSections)
+      .where(
+        and(
+          eq(workspaceSections.organisationId, orgId),
+          eq(workspaceSections.surfaceRef, boardKey),
+          ne(workspaceSections.key, sectionKey),
+        ),
+      )
+      .limit(1);
+    ownsBoard = others.length === 0;
+  }
+
+  if (boardKey && ownsBoard) {
+    await purgeRegisterContents(db, orgId, boardKey);
+    /*
+     * The board's own configuration, last and through the canonical primitive.
+     *
+     * `deleteBoardStructure` clears the eight board-scoped configuration tables
+     * and the board row, and it deliberately deletes no item, file, site or
+     * contractor — that is its whole contract and a test holds it. Everything
+     * above is what makes calling it safe here: by this line the register is
+     * genuinely empty.
+     */
+    await deleteBoardStructure(db, orgId, boardKey);
+  }
+
+  /* Its remembered views and its name in every stored arrangement. Not done
+     when the section merely went to the bin — an arrangement is somebody's work
+     and a restored section has to come back where they had it — so this is the
+     one point at which those are discarded. */
+  await forgetSectionReferences(db, orgId, sectionKey);
+
+  await db
+    .delete(workspaceSections)
+    .where(
+      and(
+        eq(workspaceSections.organisationId, orgId),
+        eq(workspaceSections.key, sectionKey),
+      ),
+    );
+
+  return true;
+}
+
+/**
+ * Everything filed ON a register, destroyed — the half `deleteBoardStructure`
+ * is not allowed to do.
+ *
+ * Items first, because purging one deletes its files and its public links, and
+ * a link that outlives its job is a no-login credential waiting for the id to
+ * be reissued (see `purgeJobRow`). Columns second, so a file column's uploads
+ * go with it. Then the comment thread, the per-item activity, and any cell that
+ * somehow survived both.
+ */
+async function purgeRegisterContents(db: Database, orgId: string, boardKey: string) {
+  /*
+   * Live placements AND the register's own bin entries, together.
+   *
+   * A row deleted yesterday has no placement — binning LIFTS it — so reading
+   * only `maintenance_group_items` would leave every recently-deleted row of
+   * this register behind, still flagged deleted, pointing at a board that no
+   * longer exists. That is the orphan the `boardBinCount` refusal existed to
+   * prevent, answered here by destroying them rather than by refusing.
+   */
+  const placed = await db
+    .select({ id: maintenanceGroupItems.requestId })
+    .from(maintenanceGroupItems)
+    .where(
+      and(
+        eq(maintenanceGroupItems.organisationId, orgId),
+        eq(maintenanceGroupItems.boardId, boardKey),
+      ),
+    );
+  const binned = await db
+    .select({ id: recycleBin.entityId })
+    .from(recycleBin)
+    .where(
+      and(
+        eq(recycleBin.organisationId, orgId),
+        eq(recycleBin.boardId, boardKey),
+        eq(recycleBin.entityType, "job"),
+      ),
+    );
+
+  const itemIds = new Set([
+    ...placed.map((row) => row.id),
+    ...binned.map((row) => row.id),
+  ]);
+  for (const id of itemIds) {
+    // Subitems and their own bin entries go with each parent. See `purgeJob`.
+    await purgeJob(db, orgId, id);
+  }
+
+  const columns = await db
+    .select({ id: maintenanceBoardColumns.id })
+    .from(maintenanceBoardColumns)
+    .where(
+      and(
+        eq(maintenanceBoardColumns.organisationId, orgId),
+        eq(maintenanceBoardColumns.boardId, boardKey),
+      ),
+    );
+  for (const column of columns) {
+    await purgeColumn(db, orgId, column.id);
+  }
+
+  /* The update thread and its likes. `item_update_likes` is keyed on the update
+     rather than the board, so the ids have to be named — chunked, because a
+     busy register can carry more of them than D1 will bind in one statement. */
+  const updates = await db
+    .select({ id: itemUpdates.id })
+    .from(itemUpdates)
+    .where(and(eq(itemUpdates.organisationId, orgId), eq(itemUpdates.boardId, boardKey)));
+  for (const chunk of chunkIds(updates.map((row) => row.id), 90)) {
+    await db
+      .delete(itemUpdateLikes)
+      .where(
+        and(
+          eq(itemUpdateLikes.organisationId, orgId),
+          inArray(itemUpdateLikes.updateId, chunk),
+        ),
+      );
+  }
+  await db
+    .delete(itemUpdates)
+    .where(and(eq(itemUpdates.organisationId, orgId), eq(itemUpdates.boardId, boardKey)));
+  await db
+    .delete(itemActivity)
+    .where(and(eq(itemActivity.organisationId, orgId), eq(itemActivity.boardId, boardKey)));
+  /* Defensive, and by board rather than by row: a cell whose item or column was
+     already gone before this ran has nothing left to be reached through. */
+  await db
+    .delete(maintenanceBoardCells)
+    .where(
+      and(
+        eq(maintenanceBoardCells.organisationId, orgId),
+        eq(maintenanceBoardCells.boardId, boardKey),
+      ),
+    );
+
+  await purgeInstanceRegisterRows(db, orgId, boardKey);
+
+  /*
+   * The register's remaining bin entries — its views, its columns, its groups.
+   *
+   * NOT the section's own entry: that one is the caller's, and `sweepRecycleBin`
+   * and the DELETE handler both remove it only after this returns true.
+   */
+  await db
+    .delete(recycleBin)
+    .where(
+      and(
+        eq(recycleBin.organisationId, orgId),
+        eq(recycleBin.boardId, boardKey),
+        ne(recycleBin.entityType, SECTION_ENTITY_TYPE),
+      ),
+    );
+}
+
+/**
+ * The rows a Sites or Contractors instance holds — destroyed, or sent home.
+ *
+ * See the ownership note on `purgeSection`. A row nothing outside the bundle
+ * points at is destroyed with its own satellites; one that is still referenced
+ * has `board_id` set back to `CANONICAL_REGISTER` and appears in the
+ * workspace's own register, where it is visible and a person can decide.
+ */
+async function purgeInstanceRegisterRows(
+  db: Database,
+  orgId: string,
+  boardKey: string,
+) {
+  const totalOf = async (statements: Array<Promise<Array<{ value: unknown }>>>) => {
+    let total = 0;
+    for (const statement of statements) {
+      const [row] = await statement;
+      total += Number(row?.value ?? 0);
+    }
+    return total;
+  };
+
+  const ownedSites = await db
+    .select({ id: sites.id })
+    .from(sites)
+    .where(and(eq(sites.organisationId, orgId), eq(sites.boardId, boardKey)));
+  const ownedContractors = await db
+    .select({ id: contractors.id })
+    .from(contractors)
+    .where(and(eq(contractors.organisationId, orgId), eq(contractors.boardId, boardKey)));
+  const ownedGroups = await db
+    .select({ id: siteGroups.id })
+    .from(siteGroups)
+    .where(and(eq(siteGroups.organisationId, orgId), eq(siteGroups.boardId, boardKey)));
+
+  /* ── contractors ── */
+  for (const { id } of ownedContractors) {
+    /* Everything outside this bundle that still names the contractor. The
+       bundle's own jobs are already gone by the time this runs, so anything
+       counted here belongs to somebody else's register. */
+    const referenced = await totalOf([
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(maintenanceRequests)
+        .where(
+          and(
+            eq(maintenanceRequests.organisationId, orgId),
+            eq(maintenanceRequests.contractorId, id),
+          ),
+        ),
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(quotations)
+        .where(and(eq(quotations.organisationId, orgId), eq(quotations.contractorId, id))),
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(invoices)
+        .where(and(eq(invoices.organisationId, orgId), eq(invoices.contractorId, id))),
+    ]);
+    if (referenced > 0) {
+      await db
+        .update(contractors)
+        .set({ boardId: CANONICAL_REGISTER })
+        .where(and(eq(contractors.organisationId, orgId), eq(contractors.id, id)));
+      continue;
+    }
+    await db
+      .delete(contractorSites)
+      .where(
+        and(eq(contractorSites.organisationId, orgId), eq(contractorSites.contractorId, id)),
+      );
+    await db
+      .delete(contractorCertifications)
+      .where(
+        and(
+          eq(contractorCertifications.organisationId, orgId),
+          eq(contractorCertifications.contractorId, id),
+        ),
+      );
+    await db
+      .delete(registerValues)
+      .where(
+        and(
+          eq(registerValues.organisationId, orgId),
+          eq(registerValues.registerKey, "contractors"),
+          eq(registerValues.entityId, id),
+        ),
+      );
+    await purgeAttachmentsOf(db, orgId, eq(attachments.contractorId, id));
+    await db
+      .delete(contractors)
+      .where(and(eq(contractors.organisationId, orgId), eq(contractors.id, id)));
+  }
+
+  /* ── sites ── */
+  for (const { id } of ownedSites) {
+    const referenced = await totalOf([
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(units)
+        .where(and(eq(units.organisationId, orgId), eq(units.siteId, id))),
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(plannedMaintenance)
+        .where(
+          and(
+            eq(plannedMaintenance.organisationId, orgId),
+            eq(plannedMaintenance.siteId, id),
+          ),
+        ),
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(complianceDocuments)
+        .where(
+          and(
+            eq(complianceDocuments.organisationId, orgId),
+            eq(complianceDocuments.siteId, id),
+          ),
+        ),
+      db
+        .select({ value: sql<number>`COUNT(*)` })
+        .from(maintenanceRequests)
+        .where(
+          and(
+            eq(maintenanceRequests.organisationId, orgId),
+            eq(maintenanceRequests.siteId, id),
+          ),
+        ),
+    ]);
+    if (referenced > 0) {
+      await db
+        .update(sites)
+        .set({ boardId: CANONICAL_REGISTER })
+        .where(and(eq(sites.organisationId, orgId), eq(sites.id, id)));
+      continue;
+    }
+    await db
+      .delete(siteAliases)
+      .where(and(eq(siteAliases.organisationId, orgId), eq(siteAliases.siteId, id)));
+    await db
+      .delete(siteGroupMembers)
+      .where(and(eq(siteGroupMembers.organisationId, orgId), eq(siteGroupMembers.siteId, id)));
+    await db
+      .delete(contractorSites)
+      .where(and(eq(contractorSites.organisationId, orgId), eq(contractorSites.siteId, id)));
+    await db
+      .delete(registerValues)
+      .where(
+        and(
+          eq(registerValues.organisationId, orgId),
+          eq(registerValues.registerKey, "sites"),
+          eq(registerValues.entityId, id),
+        ),
+      );
+    await purgeAttachmentsOf(db, orgId, eq(attachments.siteId, id));
+    await db.delete(sites).where(and(eq(sites.organisationId, orgId), eq(sites.id, id)));
+  }
+
+  /* ── reporting groups ── */
+  for (const { id } of ownedGroups) {
+    await db
+      .delete(siteGroupMembers)
+      .where(
+        and(eq(siteGroupMembers.organisationId, orgId), eq(siteGroupMembers.siteGroupId, id)),
+      );
+    await db
+      .delete(siteGroups)
+      .where(and(eq(siteGroups.organisationId, orgId), eq(siteGroups.id, id)));
+  }
+}
+
+/**
+ * Files matching one condition, out of storage and then out of the database.
+ *
+ * The same order and the same tolerance as `purgeJobRow`: the objects first,
+ * then the rows that point at them, and a bucket that is unavailable does not
+ * wedge a thirty-day-old entry in the bin for ever. A stranded object is
+ * recoverable; a bin that never empties is not.
+ */
+async function purgeAttachmentsOf(
+  db: Database,
+  orgId: string,
+  condition: ReturnType<typeof eq>,
+) {
+  const where = and(eq(attachments.organisationId, orgId), condition);
+  const files = await db
+    .select({ objectKey: attachments.objectKey })
+    .from(attachments)
+    .where(where);
+  if (!files.length) return;
+
+  const { env } = await import("cloudflare:workers");
+  const runtimeEnv = env as unknown as { BUCKET?: R2Bucket };
+  if (runtimeEnv.BUCKET) {
+    for (const keys of chunkIds(files.map((file) => file.objectKey), 1000)) {
+      await runtimeEnv.BUCKET.delete(keys);
+    }
+  }
+  await db.delete(attachments).where(where);
 }

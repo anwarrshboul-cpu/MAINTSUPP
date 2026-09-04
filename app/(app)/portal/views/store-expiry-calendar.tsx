@@ -719,7 +719,7 @@ export function StoreExpiryCalendar({
             This calendar fills itself from the expiry columns on the Store
             Documentation board. Once a store row carries a date, its renewal
             appears on that day, and anything already past shows in an overdue list
-            above the month. Dates arrive with the monday export, or by typing one
+            above the month. Dates arrive with the store import, or by typing one
             into a store&rsquo;s expiry cell.
           </p>
           <p>The {DATED_SLOTS.length} documents that carry a renewal date:</p>
@@ -856,8 +856,8 @@ export function StoreExpiryCalendar({
       </div>
 
       <p className="store-expiry__notes">
-        <strong>Not plotted:</strong> {undated.join(", ")}. monday records no expiry
-        date for {undated.length === 1 ? "it" : "these"}, so there is no renewal to
+        <strong>Not plotted:</strong> {undated.join(", ")}. No expiry date is recorded
+        for {undated.length === 1 ? "it" : "these"}, so there is no renewal to
         book — they are tracked on the board itself rather than on a calendar. Use the
         arrow keys to move day by day, Page Up and Page Down to change month, Enter to
         step into a day&rsquo;s renewals and Escape to step back out.

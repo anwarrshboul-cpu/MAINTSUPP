@@ -579,7 +579,34 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     contractorDocumentRows,
     certificationRows,
   ] = await Promise.all([
-    db.select().from(sites).where(eq(sites.organisationId, orgId)).orderBy(sites.name),
+    /*
+     * THE CANONICAL SITE REGISTER, not every register — W2C.
+     *
+     * The contractor read below this was scoped when instances arrived and the
+     * long note beside it explains why: an instance's rows on the workspace's
+     * own screen is "a leak in the one direction the owner named, and one
+     * nothing else could have caught, because the screen would have looked
+     * entirely normal". The site read was left organisation-wide, and the leak
+     * it describes was not hypothetical — it was measured. A site created
+     * inside a Sites section appeared in `workspace.stores`, which is the
+     * dashboard's site count, the Sites tab of the manager, and the location
+     * select on Compliance, Units and Planned. So an instance's site was
+     * offered as a place to file a canonical job.
+     *
+     * `registerScopeFilter` rather than a hand-rolled `isNull`, because it is
+     * the one place allowed to turn a scope into a predicate; the ordering is
+     * left exactly as it was, so nothing that reads this list moves.
+     */
+    db
+      .select()
+      .from(sites)
+      .where(
+        and(
+          eq(sites.organisationId, orgId),
+          registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+        ),
+      )
+      .orderBy(sites.name),
     db.select().from(units).where(eq(units.organisationId, orgId)).orderBy(units.name),
     /*
      * THE CANONICAL ROSTER, not every register — W2.
@@ -1252,6 +1279,11 @@ export async function POST(request: Request) {
     let id = "";
 
     if (entity === "site") {
+      /* W2C — which register this site is being created in. Absent means the
+         workspace's own, which is what this route has always meant and what
+         every existing caller keeps getting. */
+      const scoped = await siteScope(db, orgId, request);
+      if (!scoped.ok) return scoped.refusal;
       const name = text(data.name, 120);
       if (!name || !text(data.address, 300)) throw new Error("A site name and address are required.");
       id = newId("store", name);
@@ -1281,7 +1313,12 @@ export async function POST(request: Request) {
         // before anybody has said anything about it.
         { status: "active", lifecycle: "Current", active: true },
       );
-      await db.insert(sites).values({ id, organisationId: orgId, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", ...siteState, address: text(data.address, 300), manager: optionalText(data.manager, 120) });
+      /* `boardId` is written from the RESOLVED scope and never from `data` —
+         a crafted `data.boardId` must not be able to choose which register a
+         row lands in, which is the rule `tests/w2-scope-model.test.mjs` holds
+         over the Sites route's own inserts. Nothing here spreads the caller's
+         payload, so there is nothing for it to overwrite. */
+      await db.insert(sites).values({ id, organisationId: orgId, boardId: scoped.scope, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", ...siteState, address: text(data.address, 300), manager: optionalText(data.manager, 120) });
     } else if (entity === "compliance") {
       /*
        * The same validation the PATCH does, for the same reasons — see the long
@@ -2463,6 +2500,87 @@ async function contractorScope(
   return { ok: true, scope: resolved.scope };
 }
 
+/**
+ * WHICH SITE REGISTER A WRITE IS AIMED AT — W2C, and the hole it closes.
+ *
+ * The contractor verbs above were taught the register when instances arrived;
+ * the site verbs were not, and the consequence was not merely that a custom
+ * site could not be created from this screen. It was worse than that in the
+ * other direction: `PATCH` and `DELETE` matched a site on `id` AND
+ * `organisation_id` and nothing else, so a site belonging to a Sites INSTANCE
+ * could be edited, renamed and archived through the canonical door by anybody
+ * who had its id. `getSite` has carried the scope in its predicate from the
+ * start for exactly that reason — "an id is an address, not a credential" — and
+ * this route was the one write path that did not ask.
+ *
+ * Same contract as `contractorScope`: the organisation comes from the session,
+ * the register from the `boards` row behind the section, and ABSENT MEANS
+ * CANONICAL because `/api/workspace` is the workspace's own registers and every
+ * one of its consumers means them. An unresolvable section is a refusal with
+ * the reason, never a quiet write into the canonical register.
+ */
+async function siteScope(
+  db: WorkspaceDb,
+  orgId: string,
+  request: Request,
+): Promise<{ ok: true; scope: RegisterScope } | { ok: false; refusal: Response }> {
+  const url = new URL(request.url);
+  const resolved = await resolveRegisterScope(db, orgId, url, "sites");
+  const refusal = scopeRefusal(resolved);
+  if (refusal) return { ok: false, refusal };
+  if (!resolved.ok) {
+    return { ok: false, refusal: Response.json({ error: "Unknown register." }, { status: 404 }) };
+  }
+  return { ok: true, scope: resolved.scope };
+}
+
+/**
+ * THE SITE THIS REGISTER HOLDS, or a refusal that says so.
+ *
+ * The same shape as `contractorTarget`, and it exists for the same measured
+ * failure: an UPDATE whose WHERE clause matches nothing answers 200, and the
+ * caller — and `logChange` — is then told an edit happened to a row that was
+ * never touched. With the register in the predicate that stops being a
+ * theoretical case: every write aimed at the wrong register would look like a
+ * success and change nothing.
+ *
+ * The refusal is the tenancy wording, deliberately. "Site not found" is what a
+ * caller is told when the id belongs to another organisation, and saying "not
+ * on this register" here would tell them the id exists in their workspace but
+ * in a register they were not asking about.
+ */
+async function siteInRegister(
+  db: WorkspaceDb,
+  orgId: string,
+  id: string,
+  scope: RegisterScope,
+): Promise<
+  | { ok: true; current: { status: string; lifecycle: string; active: boolean } }
+  | { ok: false; refusal: Response }
+> {
+  const [row] = await db
+    .select({ status: sites.status, lifecycle: sites.lifecycle, active: sites.active })
+    .from(sites)
+    .where(
+      and(
+        eq(sites.id, id),
+        eq(sites.organisationId, orgId),
+        registerScopeFilter(sites.boardId, scope),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    return {
+      ok: false,
+      refusal: Response.json({ error: "Site not found." }, { status: 404 }),
+    };
+  }
+  return {
+    ok: true,
+    current: { status: row.status, lifecycle: row.lifecycle, active: Boolean(row.active) },
+  };
+}
+
 async function contractorNameConflict(
   db: WorkspaceDb,
   orgId: string,
@@ -2640,6 +2758,21 @@ export async function PATCH(request: Request) {
        * including "", all three are fixed-option selects, and adding a default
        * would change behaviour for the full payloads the form sends.
        */
+      /*
+       * W2C — THE REGISTER, BEFORE ANYTHING IS WRITTEN.
+       *
+       * Every statement in this branch used to key on `id` and
+       * `organisation_id` alone, so a site belonging to a Sites instance was
+       * editable through the canonical door by anyone holding its id. The scope
+       * is resolved first and then appears in the read AND in the update, and a
+       * site the named register does not hold is a 404 rather than an UPDATE
+       * that matches nothing and answers 200.
+       */
+      const editScope = await siteScope(db, orgId, request);
+      if (!editScope.ok) return editScope.refusal;
+      const editable = await siteInRegister(db, orgId, id, editScope.scope);
+      if (!editable.ok) return editable.refusal;
+
       const badName = requiredTextRefusal(data, "name", 120, "A site name is required.");
       if (badName) return badName;
       const badAddress = requiredTextRefusal(data, "address", 300, "A site address is required.");
@@ -2678,24 +2811,17 @@ export async function PATCH(request: Request) {
         if ("lifecycle" in data && !normaliseSiteLifecycle(data.lifecycle)) {
           return Response.json({ error: siteLifecycleRefusal() }, { status: 400 });
         }
-        const [current] = await db
-          .select({ status: sites.status, lifecycle: sites.lifecycle, active: sites.active })
-          .from(sites)
-          .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)))
-          .limit(1);
-        if (current) {
-          lifecycleState = reconcileSiteState(
-            {
-              ...("lifecycle" in data ? { lifecycle: data.lifecycle } : {}),
-              ...("active" in data ? { active: data.active } : {}),
-            },
-            {
-              status: current.status,
-              lifecycle: current.lifecycle,
-              active: Boolean(current.active),
-            },
-          );
-        }
+        /* The stored trio comes from `siteInRegister` above rather than from a
+           second read: it is the same row, read once, inside the same register,
+           and two reads could disagree if a concurrent write landed between
+           them. */
+        lifecycleState = reconcileSiteState(
+          {
+            ...("lifecycle" in data ? { lifecycle: data.lifecycle } : {}),
+            ...("active" in data ? { active: data.active } : {}),
+          },
+          editable.current,
+        );
       }
       await db.update(sites).set({
         ...supplied(data, "name", (value) => text(value, 120)),
@@ -2712,7 +2838,17 @@ export async function PATCH(request: Request) {
         ...supplied(data, "address", (value) => text(value, 300)),
         ...supplied(data, "manager", (value) => optionalText(value, 120)),
         updatedAt: new Date().toISOString(),
-      }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+      }).where(
+        and(
+          eq(sites.id, id),
+          eq(sites.organisationId, orgId),
+          /* The register is in the UPDATE as well as in the read above. The
+             read decides whether to proceed; this decides what is written, and
+             a check that is only in the read is one refactor away from being a
+             check that is nowhere. */
+          registerScopeFilter(sites.boardId, editScope.scope),
+        ),
+      );
     } else if (entity === "compliance") {
       /*
        * THE FULL REPLACE IS DELIBERATE AND IS KEPT. The UPDATE at the end of
@@ -3193,18 +3329,28 @@ export async function DELETE(request: Request) {
      * `{ other, Closed, false }` for an 'other' one.
      */
     if (entity === "site") {
-      const [current] = await db
-        .select({ status: sites.status, lifecycle: sites.lifecycle, active: sites.active })
-        .from(sites)
-        .where(and(eq(sites.id, id), eq(sites.organisationId, orgId)))
-        .limit(1);
+      /* W2C — the same register check as the edit, and for the same reason:
+         closing somebody else's register's site through this screen would be a
+         write across registers. `siteInRegister` also replaces the old
+         "assume it was open" fallback, which turned an archive aimed at a site
+         this register does not hold into a 200 that changed nothing and then
+         filed an "archived" entry in the activity feed about it. */
+      const archiveScope = await siteScope(db, orgId, request);
+      if (!archiveScope.ok) return archiveScope.refusal;
+      const archivable = await siteInRegister(db, orgId, id, archiveScope.scope);
+      if (!archivable.ok) return archivable.refusal;
+      const current = archivable.current;
       const closed = reconcileSiteState(
         { lifecycle: "Closed" },
-        current
-          ? { status: current.status, lifecycle: current.lifecycle, active: Boolean(current.active) }
-          : { status: "active", lifecycle: "Current", active: true },
+        { status: current.status, lifecycle: current.lifecycle, active: current.active },
       );
-      await db.update(sites).set({ ...closed, updatedAt: new Date().toISOString() }).where(and(eq(sites.id, id), eq(sites.organisationId, orgId)));
+      await db.update(sites).set({ ...closed, updatedAt: new Date().toISOString() }).where(
+        and(
+          eq(sites.id, id),
+          eq(sites.organisationId, orgId),
+          registerScopeFilter(sites.boardId, archiveScope.scope),
+        ),
+      );
     } else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     else if (entity === "contractor") {

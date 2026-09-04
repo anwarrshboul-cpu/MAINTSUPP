@@ -18,13 +18,22 @@
  * bypasses it.
  */
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  notExists,
+  sql,
+} from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import {
   boards,
   maintenanceGroups,
   maintenanceRequests,
   teams,
+  workspaceSections,
 } from "../../../../db/schema";
 import {
   anonymousRefusal,
@@ -94,7 +103,35 @@ export async function GET(request: Request) {
           updatedAt: boards.updatedAt,
         })
         .from(boards)
-        .where(and(eq(boards.organisationId, orgId), eq(boards.archived, true)))
+        .where(
+          and(
+            eq(boards.organisationId, orgId),
+            eq(boards.archived, true),
+            /*
+             * W2C — NOT a register whose section is in the Recycle Bin.
+             *
+             * Deleting a workspace section archives its register too, and that
+             * flag is what stops the public form token, the form editor and the
+             * compliance digest reaching a bundle sitting in the bin. Listing
+             * the board here would let somebody un-archive it on its own: the
+             * section stays deleted and hidden, while its share link starts
+             * answering again. The recovery for these is the section's own
+             * Restore, which puts both back together.
+             */
+            notExists(
+              context.db
+                .select({ one: sql`1` })
+                .from(workspaceSections)
+                .where(
+                  and(
+                    eq(workspaceSections.organisationId, orgId),
+                    eq(workspaceSections.surfaceRef, boards.key),
+                    isNotNull(workspaceSections.deletedAt),
+                  ),
+                ),
+            ),
+          ),
+        )
         .orderBy(desc(boards.updatedAt))
         .limit(200),
       context.db

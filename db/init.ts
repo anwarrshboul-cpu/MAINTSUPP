@@ -3367,6 +3367,15 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
          group_key TEXT NOT NULL DEFAULT 'group:operations',
          position INTEGER NOT NULL DEFAULT 0,
          archived_at TEXT,
+         /* W2C — the section is in the Recycle Bin, as one bundle. A different
+            statement from archived_at: archiving takes it out of every sidebar
+            and can sit there for ever, this starts a thirty-day countdown over
+            the section AND everything its register owns. Nullable, no default,
+            no backfill — NULL means "not deleted", which is every row that
+            existed before this column. See the column's own note in
+            db/schema.ts. (No backticks in here: this is inside a template
+            literal, and one would end the SQL string.) */
+         deleted_at TEXT,
          created_by TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -3425,6 +3434,23 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
      templates. A template added to `SECTION_TEMPLATES` later slots into this
      column with no further migration, which is why it carries no CHECK. */
   await addColumn(d1, "workspace_sections", "template", "TEXT");
+  /*
+   * W2C — the same column for a database provisioned before it existed.
+   *
+   * Additive in the strictest sense this file allows: one guarded `addColumn`
+   * — which is the only way this file adds one, and the reason is on the
+   * helper itself — nullable, no default, no backfill and no index. (The two
+   * words for the raw statement are deliberately not written out here:
+   * `tests/stage-twenty-schema.test.mjs` reads a slice of this file and fails
+   * on them, which is what stops an unguarded one being added by hand.) Every existing
+   * row therefore reads NULL, which the product defines as "not in the Recycle
+   * Bin" — so no section changes state because this shipped, and there is no
+   * `UPDATE` anywhere on the boot path. A partial unique index over it would be
+   * the dangerous shape (it can fail against data that already violates it, on
+   * every request); this needs none, because the bin's own
+   * `recycle_bin_entity_idx` already holds "one live bin entry per thing".
+   */
+  await addColumn(d1, "workspace_sections", "deleted_at", "TEXT");
   /*
    * W2 - the same fact on the REGISTER rather than on the menu entry, because
    * the two answer different questions and the register is the one that has to

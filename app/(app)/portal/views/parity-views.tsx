@@ -253,8 +253,8 @@ export function FormResultsView({ items }: { items: BoardItem[] }) {
       </ul>
 
       <p className="form-results__scope">
-        Counted from the {responses.length} of {items.length} rows in view that monday
-        records as a form submission. A job typed straight onto the board, or one whose
+        Counted from the {responses.length} of {items.length} rows in view that are
+        recorded as a form submission. A job typed straight onto the board, or one whose
         name has since been rewritten, cannot be traced back to a response and is left out.
       </p>
 
@@ -348,7 +348,7 @@ export function FormResponsesView({
     <div className="form-responses">
       <p className="form-responses__count">
         Showing {Math.min(shown, responses.length)} of {responses.length} responses, newest
-        first — the rows of the {items.length} in view that monday records as a form
+        first — the rows of the {items.length} in view that are recorded as a form
         submission.
       </p>
 
@@ -551,7 +551,7 @@ export function FlatTableView({
   return (
     <div className="flat-table">
       <p className="flat-table__hint">
-        Every job in view as one list, ungrouped — monday&rsquo;s second table view. All{" "}
+        Every job in view as one list, ungrouped — a second table view. All{" "}
         {FLAT_COLUMNS.length} columns are shown; any heading sorts.
       </p>
 
@@ -642,15 +642,16 @@ export function BuildVibeView({ items }: { items: BoardItem[] }) {
       <header className="vibe-view__head">
         <span className="vibe-view__badge">
           <Icon name="spark" size={14} />
-          monday app
+          App view
         </span>
         <h3>Build Vibe view</h3>
         <p>
-          This tab is not a board view. On monday it is an installed app —{" "}
-          <strong>Vibe, app 15528052</strong> — whose panel is monday&rsquo;s in-board app
-          builder. MAINTSUPP has no app builder, so rather than draw a canvas that does
-          nothing, the tab shows what an app built against this board would read: the
-          board&rsquo;s own figures, counted from the rows currently in view.
+          This is an app-style board view rather than a table, board or calendar. On the
+          board this one was rebuilt from it was an installed app —{" "}
+          <strong>Vibe, app 15528052</strong> — whose panel was an in-board app builder.
+          MAINTSUPP has no app builder, so rather than draw a canvas that does nothing,
+          the tab shows what an app built against this board would read: the board&rsquo;s
+          own figures, counted from the rows currently in view.
         </p>
       </header>
 
@@ -664,10 +665,10 @@ export function BuildVibeView({ items }: { items: BoardItem[] }) {
       </ul>
 
       <p className="vibe-view__foot">
-        A job counts as complete when its Status is &ldquo;{DONE_STATUS}&rdquo; — monday&rsquo;s
-        own done flag — or it carries a completion date. Fix Tracker is the other app tab
-        on this board (app 22247989) and it is fully rebuilt; both carry the app glyph in
-        the tab strip, as monday marks them.
+        A job counts as complete when its Status is &ldquo;{DONE_STATUS}&rdquo; — the
+        board&rsquo;s own done flag — or it carries a completion date. Fix Tracker is the
+        other app tab on this board (app 22247989) and it is fully rebuilt; both carry the
+        app glyph in the tab strip, which is how an app tab is marked.
       </p>
     </div>
   );

@@ -79,6 +79,55 @@ export async function listContractors(
 }
 
 /**
+ * Every contractor in SEVERAL NAMED REGISTERS — the management surface only.
+ *
+ * ── WHAT THIS IS FOR ──────────────────────────────────────────────────────
+ *
+ * "Manage dashboard data → Contractors" is an INVENTORY of what the
+ * organisation holds, not a view of one register, and it was showing the
+ * canonical roster alone: on the live Preview that meant three contractors
+ * listed and two — created inside a custom Contractors section — missing
+ * entirely, with nothing on screen to say anything was missing. Aggregating
+ * here is what closes that, and it aggregates registers THIS ORGANISATION OWNS
+ * rather than widening the query, which is a different and much worse thing.
+ *
+ * ── WHY IT IS A SEPARATE FUNCTION FROM `listContractors` ──────────────────
+ *
+ * `listContractors` defaults its scope to `CANONICAL_REGISTER`, and that
+ * default is the model's default-deny — omission means the workspace's own
+ * roster, never every roster. Widening its parameter would leave the default in
+ * place but stop it being provable: `tests/w2-scope-model.test.mjs` reads the
+ * literal declaration to hold it there. So the plural read has NO default and
+ * the registers must be named, which is the same rule said the other way round.
+ *
+ * ── ONE QUERY ─────────────────────────────────────────────────────────────
+ *
+ * The scopes become one `IS NULL OR IN (…)` predicate in `registerScopeFilter`.
+ * A per-section loop would be an N+1 on a screen the owner opens constantly,
+ * and fetching every contractor in the organisation and sorting them out in
+ * React is the fetch-all-then-filter the owner ruled out by name — it would
+ * also return rows belonging to registers no live section resolves to.
+ */
+export async function listContractorsInRegisters(
+  db: Database,
+  organisationId: string,
+  scopes: RegisterScope[],
+  options: { includeInactive?: boolean } = {},
+): Promise<ContractorRow[]> {
+  const rows = await db
+    .select()
+    .from(contractors)
+    .where(
+      and(
+        eq(contractors.organisationId, organisationId),
+        registerScopeFilter(contractors.boardId, scopes),
+      ),
+    )
+    .orderBy(asc(contractors.name));
+  return options.includeInactive ? rows : rows.filter((row) => row.active);
+}
+
+/**
  * One contractor, BY ID AND BY REGISTER.
  *
  * The scope is in the predicate even though an id is unique, for the reason

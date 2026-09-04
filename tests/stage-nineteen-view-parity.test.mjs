@@ -102,7 +102,19 @@ test("the pinned form and the two monday apps carry their own glyph", async () =
   const glyphs = await read(TAB_GLYPH);
   assert.match(glyphs, /export function TabGlyph/, "something must draw the two glyphs");
   assert.match(glyphs, /aria-label="Pinned view"/);
-  assert.match(glyphs, /aria-label="monday app"/);
+  /*
+   * RE-POINTED, W2C: the accessible name is now "App view", not "monday app".
+   *
+   * The contract this line has always protected is that the app glyph HAS an
+   * accessible name — it is the only mark distinguishing an app tab from a
+   * view tab, and an unnamed <svg> announces nothing at all. What the name
+   * says is a copy decision, and the owner has taken the brand out of every
+   * string a signed-in reader meets; the assertion follows the name to its new
+   * wording rather than being dropped, and is deliberately tied to the Vibe
+   * panel's own pill below so the two cannot drift apart.
+   */
+  assert.match(glyphs, /aria-label="App view"/);
+  assert.doesNotMatch(glyphs, /aria-label="[^"]*monday/i, "no brand in an accessible name");
   // An app tab gets the app glyph INSTEAD of a view icon, as monday draws it.
   assert.match(glyphs, /if \(!glyph\) return <Icon name=\{iconFor\(view\.icon\)\}/);
   // And the chrome still uses it, or the file above would be dead code.
@@ -210,9 +222,22 @@ test("the flat table is group-free and carries every monday column", async () =>
 test("the Vibe tab says what it is instead of faking an app builder", async () => {
   const views = await read(VIEWS);
   const vibe = views.slice(views.indexOf("export function BuildVibeView"));
-  assert.match(vibe, /monday app/);
+  /*
+   * RE-POINTED, W2C. The pill read "monday app" (uppercased by
+   * `.vibe-view__badge`, so the reader saw "MONDAY APP") and the paragraph
+   * opened "This tab is not a board view. On monday it is an installed app".
+   * Both named a product the reader is not using. The pill is now "App view"
+   * and the paragraph says what the tab IS rather than what it was elsewhere.
+   *
+   * What is pinned is unchanged in substance: the tab must still declare that
+   * it is an app surface rather than a table, and must still name the app it
+   * stands in for, because the whole point of this panel is that it does not
+   * pretend to be an app builder.
+   */
+  assert.match(vibe, /App view/, "the pill must still mark the tab as an app surface");
   assert.match(vibe, /15528052/, "the panel must name the app it stands in for");
-  assert.match(vibe, /not a board view/);
+  assert.match(vibe, /app-style board view/);
+  assert.doesNotMatch(vibe, /monday/i, "no brand in the copy a reader meets");
 });
 
 test("the parity upgrade runs once and never resurrects a deleted tab", async () => {

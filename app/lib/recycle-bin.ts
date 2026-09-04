@@ -46,12 +46,14 @@ import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import {
   boardViews,
+  boards,
   maintenanceBoardCells,
   maintenanceBoardColumns,
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
   recycleBin,
+  workspaceSections,
 } from "../../db/schema";
 import { chunkIds, chunkRows } from "./sql-batching";
 
@@ -409,6 +411,196 @@ export async function sendBoardViewToBin(
   return true;
 }
 
+/* ── A whole section, as ONE thing ─────────────────────────────────────── */
+
+/**
+ * W2C — THE SECTION BUNDLE. One bin entry for a section and everything it owns.
+ *
+ * THE PROBLEM THIS REPLACES. Permanently removing a custom section used to
+ * refuse three times over: once while its register held items, once while those
+ * items were in the bin, and once while it held sites or contractors. Each
+ * refusal was individually right — a board destroyed underneath its rows leaves
+ * them reachable by nothing — and together they made "delete this section" a
+ * chore of emptying every row by hand and then emptying the bin as well. The
+ * owner asked for the opposite: a custom section is ONE product object and
+ * should be deletable as one.
+ *
+ * WHAT THIS DOES, AND WHAT IT DELIBERATELY DOES NOT DO.
+ *
+ * It writes ONE row into `recycle_bin`, sets `workspace_sections.deleted_at`,
+ * and archives the register. NOTHING ELSE MOVES. No item is soft-deleted, no
+ * placement is lifted, no cell, file, view, form, site or contractor is touched.
+ *
+ * That is the whole design, and it is not laziness. A cascade would have put
+ * hundreds of tombstones in the bin — the opposite of the "one top-level entry"
+ * the owner asked for — and every one of them would be a way for a restore to
+ * come back half-done. Because a `sec-` register has exactly one door (the
+ * section; `PATCH` refuses to re-home the last section off its own register,
+ * and `resolveRegisterScope` refuses an archived one), hiding the section hides
+ * the bundle. Restore is then one UPDATE back to NULL, and it is atomic by
+ * construction because nothing was taken apart.
+ *
+ * WHY THE BOARD IS ARCHIVED TOO, and this is the load-bearing half. Three
+ * existing readers already treat `boards.archived` as "this register is out of
+ * use", and each of them is a way the bundle would otherwise stay reachable
+ * while it sits in the bin:
+ *
+ *   · `loadFormByToken` — the PUBLIC share link. A form left resolving would be
+ *     an unauthenticated intake filing rows onto a register in the bin.
+ *   · `GET /api/board/form` — the form editor.
+ *   · `complianceRegister` — the expiry digest, which must not warn about
+ *     certificates on a register nobody can open.
+ *
+ * Setting one boolean closes all three, reversibly, using a concept the product
+ * already has. Its previous value is snapshotted below so restore puts back what
+ * was there rather than assuming `false`.
+ */
+export const SECTION_ENTITY_TYPE = "section";
+
+/** What a section bundle records, so restore and the bin's line can be exact. */
+export type SectionBundleSnapshot = {
+  /** `section:north-region-jobs`. The bin entry's `entity_id`. */
+  sectionKey: string;
+  label: string;
+  /** The register it owns, or NULL for a legacy second door / a shared one. */
+  boardKey: string | null;
+  /** Was it already archived when it was deleted? Restore puts that back. */
+  wasArchived: boolean;
+  /** Was its register already archived? Same reason. */
+  boardWasArchived: boolean;
+  /** The child summary the bin shows — `12 items · 3 views · 1 form`. */
+  counts: Record<string, number>;
+};
+
+/**
+ * The one-line summary under the bin entry's title.
+ *
+ * Only what is actually there: a section with no forms does not read
+ * "0 forms", because a count of zero is noise on a line whose job is to say
+ * what is at stake. An entirely empty section says so in words.
+ */
+export function describeSectionBundle(counts: Record<string, number>) {
+  const order: Array<[string, string, string]> = [
+    ["items", "item", "items"],
+    ["subitems", "subitem", "subitems"],
+    ["binnedItems", "item in the bin", "items in the bin"],
+    ["columns", "column", "columns"],
+    ["groups", "group", "groups"],
+    ["views", "view", "views"],
+    ["forms", "form", "forms"],
+    ["automations", "automation", "automations"],
+    ["attachments", "attachment", "attachments"],
+    ["sites", "site", "sites"],
+    ["contractors", "contractor", "contractors"],
+  ];
+  const parts = order
+    .filter(([key]) => Number(counts[key] ?? 0) > 0)
+    .map(([key, one, many]) => {
+      const total = Number(counts[key] ?? 0);
+      return `${total} ${total === 1 ? one : many}`;
+    });
+  return parts.length ? parts.join(" · ") : "Empty — nothing was filed on it";
+}
+
+/**
+ * Move a section and everything it owns into the bin.
+ *
+ * The bin row is deleted first for the same `(organisation, entity_type,
+ * entity_id)` — `recycle_bin_entity_idx` allows one live entry per thing, and a
+ * section restored and deleted again would otherwise collide with its own
+ * previous entry rather than replacing it.
+ */
+export async function sendSectionToBin(
+  db: Database,
+  orgId: string,
+  actor: BinActor,
+  snapshot: SectionBundleSnapshot,
+): Promise<{ id: string; deletedAt: string; expiresAt: string }> {
+  const deletedAt = nowIso();
+  const expiresAt = expiryFrom(deletedAt);
+
+  await db
+    .delete(recycleBin)
+    .where(
+      and(
+        eq(recycleBin.organisationId, orgId),
+        eq(recycleBin.entityType, SECTION_ENTITY_TYPE),
+        eq(recycleBin.entityId, snapshot.sectionKey),
+      ),
+    );
+
+  const id = newId();
+  await db.insert(recycleBin).values({
+    id,
+    organisationId: orgId,
+    entityType: SECTION_ENTITY_TYPE,
+    entityId: snapshot.sectionKey,
+    /* The register, so the bin's board filter groups the bundle with the board
+       it belongs to, and so `binnedSectionBoards` can find it in one read. */
+    boardId: snapshot.boardKey,
+    title: snapshot.label,
+    summary: describeSectionBundle(snapshot.counts),
+    placement: JSON.stringify(snapshot),
+    deletedByEmail: actor.email ?? null,
+    deletedByName: actor.displayName ?? null,
+    deletedAt,
+    expiresAt,
+  });
+
+  /* The section itself. `archived_at` is set as well as `deleted_at` when it is
+     not already, so every reader that already drops an archived section — the
+     nav catalogue, `resolveRegisterScope`, the sidebar — drops a deleted one
+     with no change at all. */
+  await db
+    .update(workspaceSections)
+    .set({
+      deletedAt,
+      archivedAt: snapshot.wasArchived ? undefined : deletedAt,
+      updatedAt: deletedAt,
+    })
+    .where(
+      and(
+        eq(workspaceSections.organisationId, orgId),
+        eq(workspaceSections.key, snapshot.sectionKey),
+      ),
+    );
+
+  if (snapshot.boardKey) {
+    await db
+      .update(boards)
+      .set({ archived: true, updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(and(eq(boards.organisationId, orgId), eq(boards.key, snapshot.boardKey)));
+  }
+
+  return { id, deletedAt, expiresAt };
+}
+
+/**
+ * The registers currently sitting in the bin inside a section bundle.
+ *
+ * One indexed read, and it is what stops a child escaping its parent: the bin's
+ * listing hides anything filed on one of these boards, `restoreFromBin` refuses
+ * a child while its parent is in the bin, and `resolveBoard` refuses the board
+ * outright so a kept deep link cannot open it.
+ */
+export async function binnedSectionBoards(
+  db: Database,
+  orgId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ boardId: recycleBin.boardId })
+    .from(recycleBin)
+    .where(
+      and(
+        eq(recycleBin.organisationId, orgId),
+        eq(recycleBin.entityType, SECTION_ENTITY_TYPE),
+      ),
+    );
+  return new Set(
+    rows.map((row) => row.boardId).filter((key): key is string => Boolean(key)),
+  );
+}
+
 /**
  * Send a board column to the bin, keeping every value it holds.
  *
@@ -551,6 +743,36 @@ export async function restoreFromBin(
 
   if (!entry) {
     return { ok: false, error: "That item is no longer in the bin.", status: 404 };
+  }
+
+  if (entry.entityType === SECTION_ENTITY_TYPE) return restoreSection(db, orgId, entry);
+
+  /*
+   * W2C — A CHILD CANNOT ESCAPE A DELETED PARENT, and this is the chosen policy
+   * rather than the only one available.
+   *
+   * The alternative was "restore the parent first, silently". It was rejected:
+   * restoring one row would then put a whole section, its register and every
+   * other row on it back into the sidebar for everybody, which is a far bigger
+   * act than the one the person clicked — and they would have no way to tell it
+   * had happened. Refusing says what is in the way and names the one thing to
+   * do about it, and it makes the section the single recovery object the owner
+   * asked for.
+   *
+   * It is enforced HERE rather than in the screen because the bin's listing
+   * already hides these entries, so anything reaching this line is a stale tab
+   * or a script — exactly the caller a UI-only rule does not stop.
+   */
+  if (entry.boardId) {
+    const binnedBoards = await binnedSectionBoards(db, orgId);
+    if (binnedBoards.has(entry.boardId)) {
+      return {
+        ok: false,
+        status: 409,
+        error:
+          "The section this belonged to is in the recycle bin. Restore the section and this comes back with it, exactly where it was.",
+      };
+    }
   }
 
   if (entry.entityType === "job") return restoreJob(db, orgId, entry);
@@ -1127,6 +1349,111 @@ async function restoreBoardView(
   };
 }
 
+/**
+ * W2C — PUT THE WHOLE SECTION BACK, as one act.
+ *
+ * There are exactly three writes, and that is the point: the section row, the
+ * register's archived flag, and the bin entry. Nothing else has to be put back
+ * because nothing else was taken away — the items, subitems, groups, columns,
+ * cells, files, views, forms, automations, sites and contractors never left
+ * their board, so the section reappearing is the register reappearing with
+ * every one of them where it was. Deep links work again for the same reason:
+ * the board key never changed.
+ *
+ * IT RESTORES THE STATE IT LEFT, NOT A DEFAULT. `wasArchived` is read from the
+ * snapshot, so a section that was already archived when it was deleted comes
+ * back archived — out of the sidebar, restorable in the section manager — and
+ * one that was live comes back live. Clearing `archived_at` unconditionally
+ * would have quietly re-added a section somebody had removed from the sidebar
+ * months earlier.
+ *
+ * THE ONE THING THAT CAN GO WRONG is a key that has been taken in the meantime,
+ * which cannot happen: `POST /api/workspace-sections` refuses a key held by a
+ * section in the bin and says so. The `boards.key` is `sec-<12hex>` and is never
+ * derived from a name, so nothing can have claimed that either.
+ */
+async function restoreSection(
+  db: Database,
+  orgId: string,
+  entry: BinRow,
+): Promise<RestoreOutcome> {
+  let snapshot: Partial<SectionBundleSnapshot> = {};
+  try {
+    snapshot = (JSON.parse(entry.placement ?? "{}") ?? {}) as Partial<SectionBundleSnapshot>;
+  } catch {
+    /* A snapshot that will not parse is not a reason to refuse the restore —
+       the section row is the thing being recovered and it is still there. The
+       defaults below are the safe reading: come back archived, out of every
+       sidebar, where a person can look at it before putting it back in use. */
+    snapshot = {};
+  }
+
+  const [section] = await db
+    .select()
+    .from(workspaceSections)
+    .where(
+      and(
+        eq(workspaceSections.organisationId, orgId),
+        eq(workspaceSections.key, entry.entityId),
+      ),
+    )
+    .limit(1);
+
+  if (!section) {
+    /* The entry outlived the thing it points at — only reachable if the row was
+       removed by something other than this module. Cleared rather than left,
+       because an entry offering a Restore that can never work is the one state
+       worse than an empty bin. */
+    await db.delete(recycleBin).where(
+      and(eq(recycleBin.id, entry.id), eq(recycleBin.organisationId, orgId)),
+    );
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "That section's record is gone, so there is nothing left to restore. Its entry has been cleared from the bin.",
+    };
+  }
+
+  await db
+    .update(workspaceSections)
+    .set({
+      deletedAt: null,
+      /* `undefined` leaves the column alone; `null` clears it. A section that
+         was archived before it was deleted keeps its archive. */
+      archivedAt: snapshot.wasArchived === true ? undefined : null,
+      updatedAt: nowIso(),
+    })
+    .where(
+      and(
+        eq(workspaceSections.organisationId, orgId),
+        eq(workspaceSections.key, section.key),
+      ),
+    );
+
+  const boardKey = snapshot.boardKey ?? entry.boardId ?? null;
+  if (boardKey && snapshot.boardWasArchived !== true) {
+    await db
+      .update(boards)
+      .set({ archived: false, updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(and(eq(boards.organisationId, orgId), eq(boards.key, boardKey)));
+  }
+
+  await db.delete(recycleBin).where(
+    and(eq(recycleBin.id, entry.id), eq(recycleBin.organisationId, orgId)),
+  );
+
+  return {
+    ok: true,
+    entityType: SECTION_ENTITY_TYPE,
+    entityId: section.key,
+    message:
+      snapshot.wasArchived === true
+        ? `"${section.label}" is back, with its register and everything on it. It was archived when it was deleted, so it is archived again — restore it in Manage sections to put it back in the sidebar.`
+        : `"${section.label}" is back in the sidebar, with its register and everything that was on it.`,
+  };
+}
+
 function parsePlacement(raw: string | null) {
   if (!raw) return null;
   try {
@@ -1241,14 +1568,45 @@ export async function listBin(db: Database, orgId: string) {
     .orderBy(sql`${recycleBin.deletedAt} DESC`)
     .limit(500);
 
+  /*
+   * W2C — A DELETED SECTION IS ONE ENTRY, NOT A HUNDRED.
+   *
+   * A section bundle can be sitting on top of rows, views and columns that were
+   * binned individually before it. Listing those beside their parent would give
+   * the bin a hundred entries for one act and offer a Restore that
+   * `restoreFromBin` then refuses — a screen full of buttons that cannot work.
+   * They are folded into the parent's own line instead, counted so the entry can
+   * say what is under it, and they come back with the section.
+   *
+   * Read from the rows already in hand rather than a second query.
+   */
+  const binnedBoards = new Set(
+    rows
+      .filter((row) => row.entityType === SECTION_ENTITY_TYPE && row.boardId)
+      .map((row) => row.boardId as string),
+  );
+  const folded = new Map<string, number>();
+  const visible = rows.filter((row) => {
+    if (row.entityType === SECTION_ENTITY_TYPE) return true;
+    if (!row.boardId || !binnedBoards.has(row.boardId)) return true;
+    folded.set(row.boardId, (folded.get(row.boardId) ?? 0) + 1);
+    return false;
+  });
+
   const now = Date.now();
-  return rows.map((row) => ({
+  return visible.map((row) => ({
     id: row.id,
     entityType: row.entityType,
     entityId: row.entityId,
     boardId: row.boardId,
     title: row.title,
-    summary: row.summary,
+    /* A section's line names what is under it, and says out loud when things
+       that were binned separately have been folded into it — otherwise a row
+       somebody deleted last week appears to have vanished from the bin. */
+    summary:
+      row.entityType === SECTION_ENTITY_TYPE && folded.get(row.boardId ?? "")
+        ? `${row.summary ?? ""}${row.summary ? " · " : ""}${folded.get(row.boardId ?? "")} already in the bin, restored with it`
+        : row.summary,
     group: parsePlacement(row.placement)?.groupName ?? null,
     deletedBy: row.deletedByName || row.deletedByEmail || null,
     deletedByEmail: row.deletedByEmail,

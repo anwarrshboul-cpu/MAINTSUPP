@@ -323,7 +323,27 @@ test("W02-05 a permanent removal is confirmed by a dialog, not by window.confirm
   );
   // It must say what is lost, not ask whether you are sure.
   assert.match(manager, /cannot be undone/);
-  assert.match(manager, /purge=1/, "and only the explicit flag destroys anything");
+  /*
+   * W2C — RE-POINTED, and the contract it was protecting is now stronger.
+   *
+   * This asserted `purge=1`: "only the explicit flag destroys anything", which
+   * was the right guard while the button was a one-step permanent removal. It
+   * no longer is. Deleting a section moves it AND its register, rows, views,
+   * forms and files to the Recycle Bin as one entry for 30 days, so the flag
+   * this screen must send is `bin=1` — and `purge=1`, which still exists on the
+   * API and still refuses a register that holds anything, is now the one the
+   * product must NOT send: sending it is what made removing a populated section
+   * a dead end the owner reported.
+   *
+   * Comments stripped, because this file's own header names the old flag as the
+   * record of what changed.
+   */
+  assert.match(codeOnly(manager), /&bin=1`/, "the destructive button sends the reversible verb");
+  assert.doesNotMatch(
+    codeOnly(manager),
+    /purge=1/,
+    "and never the irreversible one — see tests/w2-section-recycle.test.mjs for the whole lifecycle",
+  );
   // Cancelling has to actually cancel.
   assert.match(manager, /onClick=\{\(\) => setPurging\(null\)\}/);
 });

@@ -195,14 +195,111 @@ test("W2 the scope is resolved from the session and the database, never from a s
     "a section built from a different template must refuse — a Jobs section has no Sites register",
   );
 
-  /* No display name, no slug, no label, no path segment anywhere in the resolution. */
+  /*
+   * No display name, no slug, no label, no path segment anywhere in the
+   * resolution.
+   *
+   * RE-POINTED FOR W2C, CONTRACT UNCHANGED AND NOW CHECKED WHERE IT LIVES.
+   *
+   * This scanned the WHOLE module, which was the same statement while the
+   * module did nothing but resolve one section key into one scope. It now also
+   * LISTS the registers an organisation owns, for the management surface that
+   * shows canonical and custom records on one screen, and that list carries
+   * each section's display name — `workspace_sections.label` — because a person
+   * reading a row of an inventory that spans registers has to be told which
+   * section the row came from. A name PRINTED beside a record is not a name the
+   * server routes on, and a file-wide scan for the word "label" cannot tell
+   * those two apart: it would fail on the provenance block whose entire purpose
+   * is to be text somebody reads.
+   *
+   * So the pin moves to `resolveRegisterScope` itself, which is the function
+   * the owner's clause has always been about — "no display-name-based
+   * isolation, no route-string-based isolation" is a rule about how a request
+   * becomes a scope. Scoped to that function it is a stronger assertion than
+   * the file-wide one was, because it survives the module growing and still
+   * fails the moment resolution consults a name. `listRegisterInstances` is
+   * pinned separately below: it may READ a label, and it may not FILTER on one.
+   */
+  const resolution = module.slice(
+    module.indexOf("export async function resolveRegisterScope("),
+    module.indexOf("export function scopeRefusal("),
+  );
+  assert.ok(
+    resolution.length > 0 && resolution.includes("workspaceSections"),
+    "resolveRegisterScope must still be in this module for the rule to be checked against it",
+  );
   for (const name of ["label", "\\.name\\b", "pathname", "slugFromLabel", "startsWith"]) {
     assert.doesNotMatch(
-      module,
+      resolution,
       new RegExp(name),
       `resolution must not consult ${name} — display-name and route-string isolation are both ruled out by name`,
     );
   }
+});
+
+test("W2C the register list is bounded by organisation and template, never by a name", async () => {
+  /*
+   * The aggregate read behind "Manage dashboard data". It is the one query in
+   * the codebase that spans registers, so the three things that bound it are
+   * the whole of its safety:
+   *
+   *  · the ORGANISATION, on both sides of the join — `boards.key` is unique per
+   *    organisation and not globally, so joining on the key alone would let a
+   *    section of this workspace pick up another tenant's board of the same key;
+   *  · the TEMPLATE, so a Jobs section never contributes a Sites register;
+   *  · ARCHIVED sections are absent, exactly as `resolveRegisterScope` refuses
+   *    one singly.
+   *
+   * And the label is read for DISPLAY only: it may be selected and it may order
+   * the list, but it may not appear in the `where`. A filter on a display name
+   * is the isolation-by-label the model rules out, arrived at from the far end.
+   */
+  const scopeModule = codeOnly(await source("app/lib/register-scope.ts"));
+  const listing = scopeModule.slice(
+    scopeModule.indexOf("export async function listRegisterInstances("),
+    scopeModule.indexOf("export type RecordProvenance"),
+  );
+  assert.ok(listing.length > 0, "listRegisterInstances must exist in the scope module");
+
+  assert.match(
+    listing,
+    /eq\(boards\.organisationId, organisationId\)/,
+    "the board side of the join must be organisation-scoped — a board key is unique per organisation, not globally",
+  );
+  assert.match(
+    listing,
+    /eq\(workspaceSections\.organisationId, organisationId\)/,
+    "and so must the section side",
+  );
+  assert.match(
+    listing,
+    /eq\(workspaceSections\.template, register\)/,
+    "a section built from another template holds another register and must not be listed",
+  );
+  assert.match(
+    listing,
+    /isNull\(workspaceSections\.archivedAt\)/,
+    "an archived section is refused singly and must be absent from the aggregate too",
+  );
+
+  const where = listing.slice(listing.indexOf(".where("), listing.indexOf(".orderBy("));
+  assert.ok(where.length > 0, "the listing must have a where clause to check");
+  assert.doesNotMatch(
+    where,
+    /label/,
+    "the register list must not filter on a display name — that is display-name isolation from the other end",
+  );
+
+  /*
+   * ONE QUERY, NOT ONE PER SECTION. The performance boundary the owner set:
+   * this must not become a loop that resolves each section separately, which is
+   * an N+1 on a screen an owner opens constantly.
+   */
+  assert.equal(
+    (listing.match(/await db/g) ?? []).length,
+    1,
+    "listRegisterInstances must be a single statement — a query per section is the N+1 this shape exists to avoid",
+  );
 });
 
 /* ------------------------------------------------------------------ */
