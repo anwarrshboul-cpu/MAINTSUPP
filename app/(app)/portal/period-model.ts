@@ -808,6 +808,44 @@ export interface PeriodSeriesPoint {
  * contract; the one place that divided by 100 was the bug `formatMoney` in
  * views/view-model.ts was fixed for.
  */
+/**
+ * HOW MANY JOBS PER BUCKET — the volume series beside the spend one.
+ *
+ * Deliberately a sibling of `periodSpendSeries` below rather than a variation
+ * on it, and deliberately sharing `periodBuckets`, `resolvePeriod` and
+ * `bucketFor` with it. The two are read side by side on Reports to answer one
+ * question — "is spend up because we raised more work, or because the work got
+ * more expensive?" — and that comparison is only valid if both lines are cut on
+ * exactly the same edges. Two functions computing their own buckets would drift
+ * the moment one of them handled a to-date window differently, and the drift
+ * would look like a finding about the portfolio.
+ *
+ * The window test is the same one `periodSpendSeries` documents at length: rows
+ * outside the resolved period are dropped rather than swept into the last
+ * bucket, so a panel handed the whole board does not draw December on 31 July.
+ */
+export function periodVolumeSeries<T extends { requestedAt: string }>(
+  rows: T[],
+  period: string,
+  now: number,
+): PeriodSeriesPoint[] {
+  const stamps = rows.map((row) => parseStamp(row.requestedAt));
+  const buckets = periodBuckets(period, now, stamps);
+  const window = resolvePeriod(period, now);
+  const counts = new Array<number>(buckets.length).fill(0);
+  rows.forEach((_row, index) => {
+    const stamp = stamps[index];
+    if (stamp < window.start || stamp > window.end) return;
+    const at = bucketFor(buckets, stamp);
+    if (at < 0) return;
+    counts[at] += 1;
+  });
+  return buckets.map((bucket, index) => ({
+    label: bucket.label,
+    value: counts[index],
+  }));
+}
+
 export function periodSpendSeries<T extends { requestedAt: string; cost: number | null }>(
   rows: T[],
   period: string,

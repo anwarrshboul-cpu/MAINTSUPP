@@ -36,7 +36,7 @@ import {
   bucketFor,
   parseStamp,
   periodColumns,
-  periodSpendSeries,
+  periodVolumeSeries,
   resolvePeriod,
 } from "./period-model";
 import { isClosedRequest, isOpenRequest } from "./dashboard-meters";
@@ -1277,15 +1277,33 @@ export function SpendMatrix({
 
 /** Which kinds of fault cost the most. Nominal categories, so one hue. */
 /**
- * Spend over time, on Reports.
+ * JOB VOLUME TREND — the chart that replaced the second Spend trend.
  *
- * Overview has had this chart since it gained a date range; Reports — the page
- * whose whole subject is money — did not, so "is this quarter worse than the
- * last" could be answered on the dashboard but not on the report. It is the
- * same series and the same honest empty state, drawn from the same
- * `periodSpendSeries` so the two pages cannot disagree about a month.
+ * THE DEFECT THIS FIXES. /dashboard/reports drew "Spend trend" twice: once as
+ * the `analytics-report-trend` panel and again as the first arrangeable widget
+ * beneath it. Same rows, same period, same axis, same title — the owner
+ * screenshotted the pair. Two identical charts do not merely waste a screen;
+ * they make a reader look for the difference between them and invent one.
+ *
+ * WHY VOLUME, of the four candidates offered. "Reactive vs planned" is already
+ * a widget on this page, so it would have moved the duplication rather than
+ * removed it. SLA has its own panel on the Overview and is not a spend
+ * question. Job volume is the one analysis that is provably absent from the
+ * product AND makes the chart above it more informative: spend and volume side
+ * by side answer "is spend up because we raised more work, or because the work
+ * got more expensive?", which is the question a spend report is opened to ask
+ * and which neither line answers alone.
+ *
+ * It shares `periodVolumeSeries` with the spend chart's bucketing — same edges,
+ * same window rule — because the comparison is only valid if the two lines are
+ * cut identically.
+ *
+ * NOTE WHAT IT COUNTS: jobs RAISED in each bucket, by `requestedAt`. Not jobs
+ * closed, and not the open count over time — no status history is recorded
+ * anywhere in this product, so a "how has our backlog moved" line cannot be
+ * drawn honestly and is not attempted. The hint says so on the panel.
  */
-export function SpendTrend({
+export function JobVolumeTrend({
   requests,
   period,
   now,
@@ -1294,37 +1312,28 @@ export function SpendTrend({
   requests: MaintenanceRequest[];
   period: string;
   now: number;
-  /**
-   * Whether the rows have arrived yet. `InsightPanel` has rendered a
-   * "Loading…" state since it was written; the panels simply were not told,
-   * so on a slow first load each one announced "Nothing in this period"
-   * against a named window — a finding about the portfolio, made before the
-   * portfolio had been read. `SpendAgainstBudget` already took this prop;
-   * these are the rest of the panels Reports draws.
-   */
   loading?: boolean;
 }) {
   const series = useMemo(
-    () => periodSpendSeries(requests, period, now),
+    () => periodVolumeSeries(requests, period, now),
     [now, period, requests],
   );
   const window = resolvePeriod(period, now);
+  const total = series.reduce((sum, point) => sum + point.value, 0);
 
   /*
-   * Cost is optional on a job and most are still open, so a portfolio can
-   * genuinely have no spend recorded. Plotting that as a line pinned to the
-   * axis looks like a charting failure and, worse, invites the reader to
-   * conclude the work was free.
+   * Unlike spend, a zero here is unambiguous — no job was raised — so an empty
+   * period says exactly that rather than hedging about missing cost data.
    */
-  if (!series.some((point) => point.value > 0)) {
+  if (total === 0) {
     return (
       <InsightPanel
         loading={loading}
-        title="Spend trend"
+        title="Job volume"
         hint={window.label}
         empty={{
-          message: "No costs recorded against jobs in this period",
-          hint: "Spend appears here once jobs carry a Cost of Works.",
+          message: "No jobs were raised in this period",
+          hint: "This counts jobs by the date they were raised.",
         }}
       >
         <span />
@@ -1333,10 +1342,15 @@ export function SpendTrend({
   }
 
   return (
-    <InsightPanel title="Spend trend" hint={window.label}>
+    <InsightPanel
+      title="Job volume"
+      /* `plural` already prints the count, so interpolating `total` beside it
+         rendered "73 73 jobs raised" on the live page. */
+      hint={`${plural(total, "job")} raised · ${window.label}`}
+    >
       <TrendChart
         items={series}
-        valueFormatter={(value) => money(value)}
+        valueFormatter={(value) => `${Math.round(value)}`}
       />
     </InsightPanel>
   );

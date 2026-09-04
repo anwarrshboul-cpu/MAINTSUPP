@@ -178,7 +178,7 @@ import {
   SlaPerformance,
   SpendAgainstBudget,
   SpendMatrix,
-  SpendTrend,
+  JobVolumeTrend,
 } from "./dashboard-insights";
 import { storeDocumentationResponsibility } from "../../../db/monday-board-spec";
 import ContractorLinkPanel from "./contractor-link-panel";
@@ -6523,15 +6523,25 @@ function ReportsView({
         widgets={[
           {
             /*
-             * First, because "is this quarter worse than the last" is the
-             * question a spend report is opened to answer, and Reports could
-             * not answer it — the chart existed only on Overview.
+             * WAS A SECOND "Spend trend", identical to the panel above it —
+             * same rows, same period, same axis, same title. The owner
+             * screenshotted the pair. Two identical charts do not just waste a
+             * screen; they make a reader hunt for the difference and invent one.
+             *
+             * Volume is the replacement because it is the one candidate that is
+             * provably absent from the product AND makes the chart above it
+             * more informative: spend and volume together answer "is spend up
+             * because we raised more work, or because the work got dearer?",
+             * which neither line answers alone. "Reactive vs planned" was the
+             * obvious alternative and is already a widget further down this
+             * same list, so it would have moved the duplication rather than
+             * removed it.
              */
-            key: "spend-trend",
-            label: "Spend trend",
+            key: "job-volume-trend",
+            label: "Job volume",
             wide: true,
             render: () => (
-              <SpendTrend requests={scopedRequests} period={period} now={now} loading={loading} />
+              <JobVolumeTrend requests={scopedRequests} period={period} now={now} loading={loading} />
             ),
           },
           {

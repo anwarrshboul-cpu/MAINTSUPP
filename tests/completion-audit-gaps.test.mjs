@@ -206,28 +206,99 @@ test("Reports can answer the question a spend report is opened for", async () =>
    * Reports carried five panels and none of them was spend over time — the
    * chart existed only on Overview, so "is this quarter worse than the last"
    * could be answered on the dashboard but not on the report.
+   *
+   * RE-POINTED 2026-09-04. The fix for that gap was a `SpendTrend` widget, and
+   * it overshot: the page then drew spend over time TWICE — the
+   * `analytics-report-trend` panel and the widget beneath it, same rows, same
+   * period, same title. The owner screenshotted the pair.
+   *
+   * So the contract is unchanged and now has two halves. Reports must still
+   * show spend over time, with its honest empty state — and must show it ONCE.
+   * The surviving chart is the panel, which is where it was before the widget
+   * was added.
    */
-  const insights = await read("app/(app)/portal/dashboard-insights.tsx");
-  assert.match(insights, /export function SpendTrend\(/);
-  assert.match(insights, /periodSpendSeries\(requests, period, now\)/, "the same series Overview plots");
+  const portal = await read("app/(app)/portal/portal-app.tsx");
+  const reports = portal.slice(
+    portal.indexOf("function ReportsView("),
+    portal.indexOf("function TeamView("),
+  );
+  assert.ok(reports.length > 0, "ReportsView must still exist");
+
   assert.match(
-    insights,
-    /!series\.some\(\(point\) => point\.value > 0\)/,
+    reports,
+    /<h2>Spend trend<\/h2>/,
+    "Reports must still chart spend over time",
+  );
+  /*
+   * Counted over the RENDERED source only. The comments explaining why the
+   * duplicate was removed naturally say "Spend trend" several times, and a pin
+   * that counts prose would go red for describing its own subject.
+   */
+  const rendered = reports
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.equal(
+    (rendered.match(/Spend trend/g) ?? []).length,
+    1,
+    "and exactly once — two identical charts make a reader invent a difference",
+  );
+  assert.match(
+    reports,
+    /spendTrend\.some\(\(point\) => point\.value > 0\)/,
     "no spend is an empty state, not a line pinned to the axis",
   );
 
-  const portal = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(portal, /key: "spend-trend"/, "and it is a Reports widget");
   /*
-   * Workstream 8 added `loading`: the panel drew "Nothing in this period"
-   * against a named window during the first fetch — a finding about the
-   * portfolio, made before the portfolio had been read. Pinned with the prop
-   * so it cannot be dropped again.
+   * The duplicate slot now carries job volume — the one candidate that is
+   * absent from the product AND makes the chart above it more informative.
+   * "Reactive vs planned" was rejected as the replacement because it is
+   * already a widget on this same page, so it would have moved the
+   * duplication rather than removed it. Pinned so it cannot come back.
+   */
+  assert.match(portal, /key: "job-volume-trend"/);
+  assert.ok(
+    !/key: "spend-trend"/.test(portal),
+    "the duplicate spend widget must not return",
+  );
+  /*
+   * Within THIS surface's list. Overview and Reports each draw their own
+   * `DashboardWidgets` and legitimately share several keys — spend-budget,
+   * contractor-spend and reactive-planned are on both pages — so a check over
+   * the whole file would fail on a duplication that is not one. What must not
+   * happen is the same panel twice on one page, which is the defect this test
+   * now exists to prevent.
+   */
+  const widgetKeys = [...reports.matchAll(/key: "([a-z-]+)",\n\s*label:/g)].map((m) => m[1]);
+  assert.ok(widgetKeys.length >= 5, `expected the Reports widget list, got ${widgetKeys.join(", ")}`);
+  assert.equal(
+    new Set(widgetKeys).size,
+    widgetKeys.length,
+    `Reports widget keys must be unique, got ${widgetKeys.join(", ")}`,
+  );
+
+  const insights = await read("app/(app)/portal/dashboard-insights.tsx");
+  assert.match(insights, /export function JobVolumeTrend\(/);
+  assert.match(
+    insights,
+    /periodVolumeSeries\(requests, period, now\)/,
+    "volume must share the spend chart's bucketing, or the two lines are not comparable",
+  );
+  /*
+   * Workstream 8 added `loading`: a panel drew "Nothing in this period" against
+   * a named window during the first fetch — a finding about the portfolio, made
+   * before the portfolio had been read. Pinned with the prop so it cannot be
+   * dropped again.
    */
   assert.match(
     portal,
-    /<SpendTrend requests=\{scopedRequests\} period=\{period\} now=\{now\} loading=\{loading\} \/>/,
+    /<JobVolumeTrend requests=\{scopedRequests\} period=\{period\} now=\{now\} loading=\{loading\} \/>/,
   );
+  /*
+   * And it must not claim a history nobody records. No status history exists in
+   * this product, so "open jobs over time" cannot be drawn honestly; this
+   * counts jobs by the date they were RAISED and says so.
+   */
+  assert.match(insights, /jobs by the date they were raised/i);
 });
 
 test("the desktop date cell shows a calendar, not just the browser's own picker", async () => {
