@@ -562,7 +562,21 @@ test("W06-04: taking a contractor off the roster names them and says what surviv
   assert.doesNotMatch(route, /db\.delete\(contractors\)/, "contractors are never deleted");
   assert.match(
     route,
-    /entity === "contractor"\) await db\.update\(contractors\)\.set\(\{ active: false, availability: "Inactive"/,
+    /*
+     * RE-POINTED: the statement moved, the rule did not.
+     *
+     * This matched the archive as a ONE-LINER. W2 gave the contractor verbs a
+     * register — a section created from the Contractors template owns its own
+     * roster — so the branch now resolves that register, refuses a contractor
+     * this register does not hold with a 404 rather than a 200 that archived
+     * nothing, and puts the scope in the predicate. It is a block, and the
+     * one-line regex could not survive that.
+     *
+     * What it was protecting is unchanged and is still checked below: archiving
+     * writes BOTH `active` and `availability`, neither half standing in for the
+     * other, and it is still an update rather than a delete.
+     */
+    /\.set\(\{ active: false, availability: "Inactive", updatedAt: new Date\(\)\.toISOString\(\) \}\)/,
     "archiving is an update, and it is the only removal there is",
   );
 });

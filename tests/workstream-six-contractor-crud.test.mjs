@@ -284,13 +284,30 @@ test("a contractor mutation is refused, not silently ignored, across a tenant bo
   assert.match(route, /async function contractorTarget\(/, "one target read");
   assert.match(route, /error: "Contractor not found\." \}, \{ status: 404 \}/);
 
-  // The scoped WHERE is the thing that makes the no-op a no-op. It stays.
+  /*
+   * The scoped WHERE is the thing that makes the no-op a no-op. It stays — and
+   * it has GAINED a clause rather than lost one.
+   *
+   * RE-POINTED: this matched the predicate written on a single line. W2 added
+   * the REGISTER to it, because a section created from the Contractors template
+   * owns its own roster and an id belonging to one must not be writable through
+   * another, so the call is spread over several lines now. Asserted clause by
+   * clause instead of as one string, which is both stricter and immune to
+   * formatting: the organisation is still there, and the register is there too.
+   */
   const patchSource = route.slice(route.indexOf("export async function PATCH"));
   const branch = patchSource.slice(patchSource.indexOf('entity === "contractor"'));
+  const updateBranch = branch.slice(0, branch.indexOf('} else if (entity === "planned")'));
+  assert.match(updateBranch, /eq\(contractors\.id, id\)/, "addressed by id");
   assert.match(
-    branch.slice(0, branch.indexOf('} else if (entity === "planned")')),
-    /\.where\(and\(eq\(contractors\.id, id\), eq\(contractors\.organisationId, orgId\)\)\)/,
+    updateBranch,
+    /eq\(contractors\.organisationId, orgId\)/,
     "the UPDATE stays organisation-scoped",
+  );
+  assert.match(
+    updateBranch,
+    /registerScopeFilter\(contractors\.boardId, editScope\.scope\)/,
+    "and register-scoped, so an id is an address rather than a credential",
   );
 
   // And the archive verb answers for a row it cannot see, before `logChange`.
@@ -308,7 +325,21 @@ test("archiving still writes both state columns, and restoring will not leave th
   // both of them; neither half is a substitute for the other.
   assert.match(
     route,
-    /entity === "contractor"\) await db\.update\(contractors\)\.set\(\{ active: false, availability: "Inactive"/,
+    /*
+     * RE-POINTED: the statement moved, the rule did not.
+     *
+     * This matched the archive as a ONE-LINER. W2 gave the contractor verbs a
+     * register — a section created from the Contractors template owns its own
+     * roster — so the branch now resolves that register, refuses a contractor
+     * this register does not hold with a 404 rather than a 200 that archived
+     * nothing, and puts the scope in the predicate. It is a block, and the
+     * one-line regex could not survive that.
+     *
+     * What it was protecting is unchanged and is still checked below: archiving
+     * writes BOTH `active` and `availability`, neither half standing in for the
+     * other, and it is still an update rather than a delete.
+     */
+    /\.set\(\{ active: false, availability: "Inactive", updatedAt: new Date\(\)\.toISOString\(\) \}\)/,
   );
   assert.match(route, /function contractorResurrectionRefusal\(/, "one guard");
   assert.match(route, /const ARCHIVED_AVAILABILITY = "Inactive";/);

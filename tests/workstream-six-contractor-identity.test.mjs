@@ -379,11 +379,30 @@ test("the name rule is the resolver's rule, not a second opinion", async () => {
   // And it must be able to say "this row already carries it", or every save 409s.
   assert.match(body, /if \(selfId\)/, "the transition, not the state");
 
-  // Wired into BOTH write paths, and the PATCH one after the tenancy answer.
-  assert.match(api, /const badName = await contractorNameConflict\(db, orgId, name, null\)/, "create");
+  /*
+   * Wired into BOTH write paths, and the PATCH one after the tenancy answer.
+   *
+   * RE-POINTED: both calls gained a fifth argument, the REGISTER, because W2
+   * lets a section own its own contractor roster and the whole reason for this
+   * refusal is one roster — `resolveContractorLink` attributes a job's
+   * free-text contractor to a row by name and cannot choose between two. Once
+   * that resolver searches within a register, a name held in a DIFFERENT
+   * register cannot make anything ambiguous, so refusing across registers would
+   * forbid something that is safe. An instance created for a subcontractor
+   * network could not otherwise hold a name the canonical roster uses.
+   *
+   * Matched up to the scope argument rather than through it, so the pin says
+   * what it is for — both paths ask — without breaking again the next time the
+   * signature grows.
+   */
   assert.match(
     api,
-    /const badRename = await contractorNameConflict\(db, orgId, text\(data\.name, 140\), id\)/,
+    /const badName = await contractorNameConflict\(db, orgId, name, null, scoped\.scope\)/,
+    "create",
+  );
+  assert.match(
+    api,
+    /const badRename = await contractorNameConflict\(\s*db,\s*orgId,\s*text\(data\.name, 140\),\s*id,\s*editScope\.scope,\s*\)/,
     "update",
   );
   const patchBranch = api.slice(api.lastIndexOf('} else if (entity === "contractor") {'));

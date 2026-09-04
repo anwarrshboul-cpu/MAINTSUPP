@@ -2835,7 +2835,14 @@ export async function PATCH(request: Request) {
        */
       const editable = await getContractor(db, orgId, id, editScope.scope);
       if (!editable) {
-        return Response.json({ error: "That contractor is not on this register." }, { status: 404 });
+        /* THE SAME WORDS AS THE TENANCY REFUSAL, deliberately. Both are 404, and
+           saying "not on this register" where the other says "not found" would
+           tell a caller which boundary it hit — that the id exists in their
+           organisation but in a register they were not asking about. The
+           surrounding code already refuses to answer a cross-tenant id with a
+           fact about somebody else's workspace; this is the same rule one level
+           in. */
+        return Response.json({ error: "Contractor not found." }, { status: 404 });
       }
       /*
        * `supplied` fixed omission. It does not fix a key that was SENT
@@ -3210,7 +3217,14 @@ export async function DELETE(request: Request) {
          rather than a 200 that archived nothing. */
       const archivable = await getContractor(db, orgId, id, archiveScope.scope);
       if (!archivable) {
-        return Response.json({ error: "That contractor is not on this register." }, { status: 404 });
+        /* THE SAME WORDS AS THE TENANCY REFUSAL, deliberately. Both are 404, and
+           saying "not on this register" where the other says "not found" would
+           tell a caller which boundary it hit — that the id exists in their
+           organisation but in a register they were not asking about. The
+           surrounding code already refuses to answer a cross-tenant id with a
+           fact about somebody else's workspace; this is the same rule one level
+           in. */
+        return Response.json({ error: "Contractor not found." }, { status: 404 });
       }
       await db
         .update(contractors)
