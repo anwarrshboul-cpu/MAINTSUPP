@@ -69,6 +69,8 @@ import {
   occurrenceKey,
   type ReminderRuleRow,
 } from "../../../lib/reminders/schedule";
+import { readReminderSettings } from "../../../lib/reminders/settings";
+import { deferPastQuietHours } from "../../../lib/reminders/schedule";
 import { reminderEmail } from "../../../lib/reminders/template";
 
 export const dynamic = "force-dynamic";
@@ -214,8 +216,32 @@ export type DispatchOutcome = {
   sent: number;
   skipped: number;
   failed: number;
+  /** Moved to the next permitted slot by quiet hours. Not sent, not lost. */
+  deferred: number;
   more: boolean;
 };
+
+/**
+ * Push a rule's next send into the permitted window.
+ *
+ * `status` stays `pending` and no dispatch is claimed, so the reminder is still
+ * owed — which is the entire difference between deferring and suppressing.
+ */
+async function noteQuietHoursDeferral(
+  db: Db,
+  organisationId: string,
+  reminderId: string,
+  nextSendAt: string,
+): Promise<void> {
+  const { reminderRules } = await import("../../../../db/schema");
+  const { and, eq } = await import("drizzle-orm");
+  await db
+    .update(reminderRules)
+    .set({ nextSendAt, updatedAt: new Date().toISOString() })
+    .where(
+      and(eq(reminderRules.id, reminderId), eq(reminderRules.organisationId, organisationId)),
+    );
+}
 
 async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
   await ensureDatabase();
@@ -228,6 +254,7 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
     sent: 0,
     skipped: 0,
     failed: 0,
+    deferred: 0,
     more: due.length === BATCH,
   };
   if (due.length === 0) return outcome;
@@ -245,6 +272,23 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
     const dueAt = rule.nextSendAt ? new Date(String(rule.nextSendAt)) : null;
     if (!dueAt || Number.isNaN(dueAt.getTime())) {
       outcome.skipped += 1;
+      continue;
+    }
+
+    /*
+     * QUIET HOURS DEFER, THEY DO NOT CANCEL.
+     *
+     * If this send falls outside the permitted window the rule's `next_send_at`
+     * is moved to the next slot and NOTHING is dispatched this run. Note what
+     * is deliberately not done: no dispatch row is claimed, so the reminder is
+     * not marked as handled — a suppressed compliance reminder is a reminder
+     * that did not happen, and §7.4 asks for a delay rather than a loss.
+     */
+    const settings = await readReminderSettings(db, organisationId);
+    const permitted = deferPastQuietHours(dueAt, settings.quietHours);
+    if (permitted.getTime() !== dueAt.getTime()) {
+      await noteQuietHoursDeferral(db, organisationId, reminderId, permitted.toISOString());
+      outcome.deferred += 1;
       continue;
     }
 
