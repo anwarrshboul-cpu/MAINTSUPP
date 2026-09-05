@@ -41,6 +41,14 @@ import {
   isKnownCalendarItemType,
   type CalendarItemType,
 } from "./calendar-item-types";
+import {
+  ReminderRows,
+  persistReminderDrafts,
+  reminderDraftsProblem,
+  reminderScopeFor,
+  useReminderDrafts,
+} from "./reminder-rows";
+import { fetchManualEvents } from "./manual-event-client";
 import "./manual-event-dialog.css";
 
 export type ManualEventSite = { id: string; name: string };
@@ -60,7 +68,19 @@ export function ManualEventDialog({
   defaultDay: string;
   sites: ManualEventSite[];
   onCancel: () => void;
-  onSave: (draft: ManualEventDraft) => Promise<void>;
+  /*
+   * RESOLVING WITH THE CREATED ITEM IS OPTIONAL, AND IT IS THE FAST PATH.
+   *
+   * A new record's reminders cannot be written until the record has an id —
+   * `/api/reminders` is keyed on `subjectType` + `subjectId` — so this dialog
+   * needs to learn the id its save produced. A caller that returns the created
+   * item hands it over directly. A caller that returns nothing (which is what
+   * `saveManual` on the calendar surface does today) is not left broken: the
+   * dialog falls back to identifying the new row by diffing the item list
+   * around the save, which is slower and is why the return value is worth
+   * having. `Promise<void>` still satisfies this type, so no caller breaks.
+   */
+  onSave: (draft: ManualEventDraft) => Promise<{ id?: string | null } | void | null>;
   onArchive: (archived: boolean) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -102,6 +122,27 @@ export function ManualEventDialog({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
   const firstChoiceRef = useRef<HTMLButtonElement | null>(null);
+
+  /*
+   * THE REMINDERS ON THIS RECORD.
+   *
+   * The hook is called UNCONDITIONALLY, above the chooser's early return,
+   * because that return is inside a component and hooks may not sit behind it
+   * — the same discipline the focus effect below is written to. `enabled` is
+   * what actually defers the work until a type has been chosen, so nothing is
+   * fetched while the reader is still deciding what they are adding.
+   *
+   * The scope decides the ladder: a Certificate arrives with the 90/60/30/14 +
+   * expiry + overdue cascade, a Planned visit with one step the day before,
+   * and a Note with nothing, which is what the brief asks for.
+   */
+  const reminderScope = reminderScopeFor(chosenType?.key ?? "Note");
+  const reminders = useReminderDrafts({
+    scope: reminderScope,
+    subjectId: item?.id ?? null,
+    anchorDate: startsOn,
+    enabled: chosenType !== null,
+  });
 
   /*
    * Focus lands on the first thing worth doing, and it does so on EVERY STEP.
@@ -154,7 +195,39 @@ export function ManualEventDialog({
       if (endsOn && endsOn < startsOn) {
         throw new Error("The end date cannot be before the start date.");
       }
-      await onSave({
+      /*
+       * A MALFORMED RECIPIENT BLOCKS THE SAVE, which the brief asks for in as
+       * many words. Checked before anything is written so the record and its
+       * cascade never disagree about whether the edit went through — and
+       * checked again by the route, because a browser is not a validator.
+       */
+      const badRecipient = reminderDraftsProblem(reminders.rows);
+      if (badRecipient) throw new Error(badRecipient);
+
+      /*
+       * AN EXISTING RECORD'S REMINDERS ARE WRITTEN FIRST.
+       *
+       * `onSave` closes this dialog, so anything awaited after it runs in an
+       * unmounted component and its failure has nowhere to be shown. Writing
+       * the cascade first means a reminder the server refuses stops the whole
+       * edit with the reason on screen, rather than saving the item and
+       * losing the refusal.
+       */
+      if (item) {
+        await persistReminderDrafts({
+          scope: reminderScope,
+          subjectId: item.id,
+          anchorDate: startsOn,
+          rows: reminders.rows,
+          baseline: reminders.baseline,
+        });
+      }
+
+      /* A new record's cascade needs the id the save is about to mint, so the
+         ids that exist BEFORE it are noted — see `createdItemId`. */
+      const before = !item && reminders.rows.length ? await existingItemIds() : null;
+
+      const saved = await onSave({
         title: trimmed,
         startsOn,
         /* "" is not a date and must not be sent as one. `null` is the route's
@@ -174,6 +247,31 @@ export function ManualEventDialog({
         category: type.key,
         colour: item?.colour ?? type.colour,
       });
+
+      if (!item && reminders.rows.length) {
+        const created =
+          (saved && typeof saved === "object" && typeof saved.id === "string"
+            ? saved.id
+            : null) ?? (await createdItemId(before, trimmed, startsOn, type.key));
+        if (!created) {
+          /*
+           * Deliberately loud. Reminders that were configured and not written
+           * are exactly the silent misconfiguration the preview panel exists
+           * to prevent, so it is said rather than swallowed — the record
+           * itself is safely saved, and re-opening it offers the ladder again.
+           */
+          throw new Error(
+            "The item was saved, but its reminders could not be attached to it. Open the item again to set them.",
+          );
+        }
+        await persistReminderDrafts({
+          scope: reminderScope,
+          subjectId: created,
+          anchorDate: startsOn,
+          rows: reminders.rows,
+          baseline: [],
+        });
+      }
     });
 
   /*
@@ -251,7 +349,10 @@ export function ManualEventDialog({
       }}
     >
       <div
-        className="manual-event-dialog"
+        /* Wider than the chooser and than the sibling date dialog, because a
+           reminder row carries three controls on one line and 520px puts them
+           on three. The bottom sheet under 640px ignores both numbers. */
+        className="manual-event-dialog manual-event-dialog--form"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -354,6 +455,24 @@ export function ManualEventDialog({
           />
         </label>
 
+        {/*
+          THE REMINDERS, LAST BUT NOT OPTIONAL.
+          Below the fields they depend on — every row is an offset from the
+          date above, so a panel that sat above the date field would spend its
+          first render telling the reader to scroll down and choose one.
+        */}
+        <ReminderRows
+          scope={reminderScope}
+          anchorDate={startsOn}
+          rows={reminders.rows}
+          onChange={reminders.setRows}
+          disabled={busy !== null}
+          loading={reminders.loading}
+          loadError={reminders.error}
+          recordTitle={title.trim() || type.label}
+          siteName={sites.find((site) => site.id === siteId)?.name ?? null}
+        />
+
         {error ? (
           <p className="manual-event-dialog__error" role="alert">
             <Icon name="alert" size={15} />
@@ -417,4 +536,54 @@ export function ManualEventDialog({
       </div>
     </div>
   );
+}
+
+/**
+ * The ids on the calendar right now.
+ *
+ * Only read when a NEW record is about to be saved with reminders on it — see
+ * the note on `onSave`. It is one extra request on one path, and it buys the
+ * difference between a cascade that attaches itself to the right row and one
+ * that is silently dropped by a caller that returns nothing.
+ */
+async function existingItemIds(): Promise<Set<string>> {
+  try {
+    const events = await fetchManualEvents({ archived: true });
+    return new Set(events.map((event) => event.id));
+  } catch {
+    /* A failure here costs the fast path, not the save. The caller falls back
+       to reporting that the reminders could not be attached. */
+    return new Set();
+  }
+}
+
+/**
+ * The id the save just minted, found by diffing the list around it.
+ *
+ * The id must be NEW and the row must match what was written, so a colleague
+ * creating something else at the same moment cannot be mistaken for this
+ * save. Returns null rather than guessing between two equally good matches:
+ * attaching a compliance cascade to the wrong record silently is worse than
+ * saying it could not be attached at all.
+ */
+async function createdItemId(
+  before: Set<string> | null,
+  title: string,
+  startsOn: string,
+  category: string,
+): Promise<string | null> {
+  if (!before) return null;
+  try {
+    const events = await fetchManualEvents({ archived: true });
+    const candidates = events.filter(
+      (event) =>
+        !before.has(event.id) &&
+        event.title === title &&
+        event.startsOn === startsOn &&
+        event.category === category,
+    );
+    return candidates.length === 1 ? candidates[0].id : null;
+  } catch {
+    return null;
+  }
 }

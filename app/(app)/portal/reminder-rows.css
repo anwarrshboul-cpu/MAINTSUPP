@@ -1,0 +1,720 @@
+/*
+ * THE REMINDER EDITOR AND ITS PREVIEW PANEL.
+ *
+ * Shared by `reminder-rows.tsx` and `recipient-picker.tsx`, which are one
+ * feature drawn in two files. Both import this stylesheet, so the picker is
+ * styled the same whether it sits inside a reminder row or beside the
+ * escalation-contact field a later screen will add.
+ *
+ * ── EVERY COLOUR IS A TOKEN ────────────────────────────────────────────────
+ *
+ * No literals. A previous pass on this product shipped hard-coded hex values
+ * and broke dark mode in a way that only showed up on somebody else's laptop,
+ * so the rule here is absolute: `var(--…)` or nothing. The tokens used below —
+ * `--surface-card`, `--surface-sunken`, `--line`, `--line-strong`, `--ink`,
+ * `--muted`, `--muted-2`, `--paper`, `--control-fg`, `--accent-fg`, the two
+ * switch pairs, `--red-600`/`--red-100`, `--amber-600`/`--amber-100` and
+ * `--teal-600` — are all declared in BOTH themes in globals.css.
+ *
+ * ── ONE BREAKPOINT, 640 ────────────────────────────────────────────────────
+ *
+ * The only `@media` here is the phone one, at the width the brief itself names
+ * for the bottom sheet, and 640 is on this repository's agreed list
+ * (640/767/768/1024/1280). Everything else is fluid: `auto-fit` grids and
+ * `flex-wrap`, which collapse where the content actually stops fitting rather
+ * than at a number somebody picked.
+ */
+
+/* ─────────────────────────────────────────────────── the recipient picker ── */
+
+.recipient-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/*
+ * The chips and the text box share one bordered field, because they are one
+ * control: a reader who sees a box beside a list of chips will type into the
+ * box expecting it to be a separate thing.
+ */
+.recipient-picker__field {
+  display: flex;
+  min-height: 44px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--paper);
+  cursor: text;
+}
+
+.recipient-picker__field:focus-within {
+  border-color: var(--accent-fg);
+}
+
+.recipient-picker__field.is-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.recipient-picker__input {
+  min-width: 8ch;
+  flex: 1 1 8ch;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--control-fg);
+  /* 16px, or iOS zooms the whole dialog on focus and does not zoom back —
+     the same rule the board's mobile inputs are held to. */
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+/* ── The chips ──────────────────────────────────────────────────────────────
+ *
+ * A PERSON and a GROUP must be told apart at a glance, because they behave
+ * differently: the group is resolved when the reminder sends and the person is
+ * not. The difference is carried by SHAPE — a dashed edge and a two-person
+ * glyph — and not by colour alone, so it survives greyscale and colour
+ * blindness, which is the accessibility rule §8 sets for the expiry scale and
+ * which applies just as much here.
+ */
+
+.recipient-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 3px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+.recipient-chip--group {
+  /* Dashed, and this is the whole signal. See the block comment above. */
+  border-style: dashed;
+  border-color: var(--teal-600);
+  background: var(--surface-sunken);
+}
+
+.recipient-chip--external {
+  border-color: var(--line-strong);
+}
+
+.recipient-chip__label {
+  overflow: hidden;
+  max-width: 22ch;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The word "group" beside the glyph — the signal that needs no eyesight at
+   all, for a screen reader and for a printed page. */
+.recipient-chip__kind {
+  color: var(--muted-2);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.recipient-chip__avatar {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--on-brand-solid);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.recipient-chip__avatar--group,
+.recipient-chip__avatar--external {
+  background: var(--surface-hover);
+  color: var(--muted);
+}
+
+.recipient-chip__remove {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.recipient-chip__remove:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.recipient-chip__remove:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 1px;
+}
+
+/* ── The dropdown ─────────────────────────────────────────────────────────── */
+
+.recipient-picker__list {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 244px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-md);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.recipient-picker__option {
+  display: flex;
+  width: 100%;
+  /* 44px, the phone touch floor, on a control people tap repeatedly. */
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recipient-picker__option.is-active {
+  background: var(--surface-hover);
+}
+
+.recipient-picker__glyph {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+/* The group row carries the same dashed edge its chip will, so the dropdown is
+   a preview of the answer rather than a menu of words. */
+.recipient-picker__glyph--group {
+  border: 1px dashed var(--teal-600);
+  color: var(--teal-600);
+}
+
+.recipient-picker__text {
+  min-width: 0;
+}
+
+.recipient-picker__text strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.recipient-picker__text em {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recipient-picker__note {
+  padding: 9px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.recipient-picker__note--error {
+  color: var(--red-600);
+}
+
+.recipient-picker__problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  color: var(--red-600);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.recipient-picker__problem svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* ────────────────────────────────────────────────────── the reminder rows ── */
+
+.reminder-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.reminder-rows__head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.reminder-rows__head p {
+  /* Declared explicitly rather than inherited: `.portal-content p` sets its
+     own colour and size at a specificity a single class cannot beat, which is
+     the exact bug already recorded against this dialog's lede. */
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.reminder-rows__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reminder-rows__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reminder-rows__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--red-600);
+  border-radius: 9px;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.reminder-rows__add {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.reminder-row {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-card-lo, var(--surface-card));
+}
+
+/*
+ * A disabled row FADES BUT STAYS READABLE. §7.1 keeps it deliberately — "rows
+ * can be switched off without deleting them" — so it has to stay legible
+ * enough to be switched back on and to explain why nothing arrived.
+ */
+.reminder-row.is-off {
+  opacity: 0.62;
+}
+
+.reminder-row__bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.reminder-row__name {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reminder-row__status {
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: var(--surface-sunken);
+  color: var(--muted-2);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/*
+ * The switch, on the dedicated switch tokens rather than the chip greys. The
+ * note in form-builder.css records the measurement: the chip palette made an
+ * off switch 1.27:1 against the panel, which is invisible, and a control
+ * nobody can read the state of is worse than no control.
+ */
+.reminder-row__switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--switch-off);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.reminder-row__switch::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--switch-off-knob);
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+
+.reminder-row__switch[aria-checked="true"] {
+  background: var(--switch-on);
+}
+
+.reminder-row__switch[aria-checked="true"]::after {
+  background: var(--switch-on-knob);
+  transform: translateX(16px);
+}
+
+.reminder-row__switch:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.reminder-row__delete {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.reminder-row__delete:hover {
+  border-color: var(--red-600);
+  color: var(--red-600);
+}
+
+.reminder-row__delete:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 1px;
+}
+
+/*
+ * The offset and the time side by side while both fit. `auto-fit` with a 210px
+ * floor, so they stack at the width where three controls in a row actually
+ * stop fitting — not at a breakpoint somebody guessed.
+ */
+.reminder-row__grid {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.reminder-row__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reminder-row__field > span,
+.reminder-row__label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reminder-row__offset {
+  display: flex;
+  gap: 6px;
+}
+
+.reminder-row__offset input {
+  width: 4.5em;
+  flex: 0 0 auto;
+}
+
+.reminder-row__offset select {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.reminder-row__time {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.reminder-row__time input {
+  flex: 0 1 auto;
+}
+
+/* Read-only by construction — a <span>, not a disabled control, because there
+   is nothing here to enable. §7.1 asks only that the zone be unambiguous. */
+.reminder-row__zone {
+  color: var(--muted-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.reminder-row input[type="number"],
+.reminder-row input[type="time"],
+.reminder-row select,
+.reminder-row textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--control-fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.reminder-row textarea {
+  min-height: 0;
+  padding: 8px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.reminder-row__repeat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+
+.reminder-row__check {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.reminder-row__check input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--switch-on);
+}
+
+.reminder-row__interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reminder-row__interval input {
+  width: 4.5em;
+}
+
+/* ──────────────────────────────────────────────────── the preview panel ── */
+
+/*
+ * PROMINENT, NOT A FOOTNOTE. §7.4 calls this "the single best defence against
+ * silent misconfiguration", so it gets its own ground, its own border and the
+ * top of the section — a reader who has typed last year's expiry date must be
+ * told before they scroll past six rows, not after.
+ */
+.reminder-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--surface-sunken);
+}
+
+.reminder-preview__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reminder-preview__head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.reminder-preview__test {
+  min-height: 36px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.reminder-preview__count,
+.reminder-preview__empty,
+.reminder-preview__result {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.reminder-preview__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reminder-preview__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.reminder-preview__item.is-warned {
+  border-color: var(--amber-600);
+  background: var(--amber-100);
+}
+
+.reminder-preview__when {
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.reminder-preview__when em {
+  margin-left: 6px;
+  color: var(--muted-2);
+  font-size: 11.5px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.reminder-preview__step {
+  flex: 1 1 auto;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.reminder-preview__warning {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  gap: 5px;
+  color: var(--amber-600);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/*
+ * A PAST reminder is the loud one. The other two warnings — no date, switched
+ * off — are configurations somebody chose or has not finished; a date that has
+ * already gone is the one that silently sends nothing on a compliance record.
+ */
+.reminder-preview__warning.is-past {
+  color: var(--red-600);
+}
+
+/* The class is put on by the component rather than derived with `:has()`.
+   This repository has already hit a case where a `:has()` rule did not
+   survive, and a warning that loses its ground is a warning nobody reads. */
+.reminder-preview__item.is-past {
+  border-color: var(--red-600);
+  background: var(--red-100);
+}
+
+/* ── The phone ──────────────────────────────────────────────────────────────
+ *
+ * 640px, which is the width §2 names for the bottom sheet and is on this
+ * repository's agreed breakpoint list. Below it the offset controls stack
+ * rather than squeezing three of them into a 380px row, and the test-send
+ * button goes full width so it is a thumb target rather than a corner.
+ */
+@media (max-width: 640px) {
+  .reminder-row__offset {
+    flex-wrap: wrap;
+  }
+
+  .reminder-row__offset input {
+    width: 5em;
+  }
+
+  .reminder-row__offset select {
+    flex: 1 1 42%;
+  }
+
+  .reminder-preview__test {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .recipient-chip__label {
+    max-width: 16ch;
+  }
+}

@@ -13,11 +13,15 @@
  * six fields where that one has a single date — and the action row, which has
  * a destructive half.
  *
- * NO `@media` OF ITS OWN. Everything below is fluid: `min(520px, 100%)` for the
- * dialog and `repeat(auto-fit, minmax(150px, 1fr))` for the date pair, which
- * collapses to one column at any width where two would not fit. This codebase
- * only permits five breakpoints (640/767/768/1024/1280) and none of them is
- * where this layout actually needs to change, so it does not declare one.
+ * ONE `@media`, AT 640. Everything about the layout is still fluid —
+ * `min(…, 100%)` for the dialog and `repeat(auto-fit, minmax(150px, 1fr))` for
+ * the date pair, which collapses to one column at any width where two would
+ * not fit — so the query does not exist to move a column. It exists because
+ * the brief requires the modal to become a BOTTOM SHEET under 640px rather
+ * than a centred card, and that is a change of kind, not of width: the form
+ * anchors to the bottom of the screen so its fields and its Save button are
+ * inside thumb reach. 640 is one of this codebase's five permitted
+ * breakpoints (640/767/768/1024/1280) and is the number the brief names.
  */
 
 .manual-event-dialog__scrim {
@@ -45,6 +49,17 @@
   border-radius: 14px;
   background: var(--surface-card);
   box-shadow: 0 26px 80px rgba(7, 24, 38, 0.3);
+}
+
+/*
+ * The FORM is wider than the chooser.
+ *
+ * A reminder row puts a number, a unit and a direction on one line, and at
+ * 520px those three wrap onto three lines each — six rows of that is a wall.
+ * The chooser keeps 520: three stacked buttons gain nothing from more.
+ */
+.manual-event-dialog--form {
+  width: min(620px, 100%);
 }
 
 .manual-event-dialog h2 {
@@ -302,4 +317,55 @@
 .manual-event-dialog__back:hover {
   background: var(--surface-hover);
   color: var(--ink);
+}
+
+/*
+ * UNDER 640px THIS IS A BOTTOM SHEET, NOT A SHRUNKEN CARD.
+ *
+ * The brief is explicit that the modal "renders as a bottom sheet" on a phone,
+ * and the reason is reach rather than fashion: a centred dialog on a 380px
+ * screen puts Save in the middle of the display, where a thumb holding the
+ * phone one-handed on a shop floor cannot get to it. Anchored to the bottom,
+ * the actions are the closest thing to the thumb and the form scrolls above
+ * them.
+ *
+ * `max-height: 92vh` with the scrim's own `overflow-y: auto` is what keeps a
+ * six-step certificate cascade reachable — the sheet scrolls internally rather
+ * than growing past the top of the screen.
+ */
+@media (max-width: 640px) {
+  .manual-event-dialog__scrim {
+    padding: 0;
+    /* end = the bottom edge, stretch = the full width. */
+    place-items: end stretch;
+  }
+
+  .manual-event-dialog,
+  .manual-event-dialog--form {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 16px 16px 0 0;
+    overflow-y: auto;
+  }
+
+  /*
+   * The confirmations go full width and the primary one sits last, closest to
+   * the thumb. `column-reverse` puts Save under Cancel in the DOM order that
+   * a keyboard still reads as Cancel-then-Save.
+   */
+  .manual-event-dialog__confirmations {
+    width: 100%;
+    flex-direction: column-reverse;
+  }
+
+  .manual-event-dialog__confirmations button,
+  .manual-event-dialog__destructive button {
+    width: 100%;
+    /* 44px is the touch floor; the desktop rows sit at 36-42px. */
+    min-height: 44px;
+  }
+
+  .manual-event-dialog__destructive {
+    width: 100%;
+  }
 }

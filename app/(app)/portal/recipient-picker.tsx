@@ -219,22 +219,39 @@ export function RecipientPicker({
     return rows;
   }, [members, typed, value]);
 
-  /* The highlight is an INDEX into a list that changes as you type, so it is
-     pulled back into range whenever the list shrinks — otherwise Enter after
-     a narrowing keystroke selects nothing and looks broken. */
-  useEffect(() => {
-    setActive((current) => (current < options.length ? current : 0));
-  }, [options.length]);
+  /*
+   * The highlight is an INDEX into a list that changes as you type, so it is
+   * clamped where it is READ rather than corrected in an effect. An effect
+   * that called `setActive` would be a synchronous setState inside an effect
+   * — a cascading render on every keystroke, and the pattern
+   * `react-hooks/set-state-in-effect` reports. Deriving it costs nothing and
+   * cannot go stale: a list that has shrunk below the stored index highlights
+   * its last row this render, not next.
+   */
+  const activeIndex = options.length ? Math.min(active, options.length - 1) : 0;
 
-  /* Clicking away commits nothing and closes the list. Bound on the document
-     because the click that dismisses this is by definition outside it. */
+  /*
+   * Clicking away commits nothing and closes the list. Bound on the document,
+   * because the click that dismisses this is by definition outside it.
+   *
+   * IN THE CAPTURE PHASE, AND THAT IS NOT A DETAIL. On the bubble phase this
+   * listener runs after React has already handled the same mousedown and
+   * flushed the re-render it caused — so when somebody picks a recipient, the
+   * option element they clicked has been removed from the tree by the time
+   * this runs, `contains()` is asked about a detached node, and it answers
+   * false. The list closed on every single selection. Measured in a browser:
+   * choosing one recipient dismissed the dropdown, and the Escape that was
+   * meant to close it then closed the whole dialog instead. Capture runs
+   * top-down before the target sees the event, so the DOM is still the one
+   * the reader clicked on.
+   */
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    document.addEventListener("mousedown", dismiss);
-    return () => document.removeEventListener("mousedown", dismiss);
+    document.addEventListener("mousedown", dismiss, true);
+    return () => document.removeEventListener("mousedown", dismiss, true);
   }, [open]);
 
   const choose = (option: Option) => {
@@ -255,12 +272,20 @@ export function RecipientPicker({
   const remove = (recipient: RecipientDraft) => {
     const key = recipientKey(recipient);
     onChange(value.filter((entry) => recipientKey(entry) !== key));
+    /*
+     * Focus follows the chip back into the input, because the button holding
+     * it is about to be unmounted. Left to fall, focus lands on
+     * `document.body` — outside the dialog's scrim, where its Escape handler
+     * is — and the modal stops closing on Escape until something inside it is
+     * clicked. Measured in a browser, not theorised.
+     */
+    inputRef.current?.focus();
   };
 
   const commitTyped = () => {
     if (!typed) return;
     if (options.length) {
-      choose(options[Math.min(active, options.length - 1)]);
+      choose(options[activeIndex]);
       return;
     }
     /* No option matched, so this is a free-typed address. An invalid one is
@@ -307,7 +332,7 @@ export function RecipientPicker({
           aria-autocomplete="list"
           aria-label={label ?? "Recipients"}
           aria-activedescendant={
-            open && options.length ? `${listId}-${Math.min(active, options.length - 1)}` : undefined
+            open && options.length ? `${listId}-${activeIndex}` : undefined
           }
           autoComplete="off"
           disabled={disabled}
@@ -316,6 +341,9 @@ export function RecipientPicker({
           onFocus={() => setOpen(true)}
           onChange={(changed) => {
             setSearch(changed.target.value);
+            /* Back to the first row on every keystroke: the list under it has
+               just changed, so the old position points at a different thing. */
+            setActive(0);
             setOpen(true);
           }}
           onBlur={commitTyped}
@@ -323,14 +351,12 @@ export function RecipientPicker({
             if (pressed.key === "ArrowDown") {
               pressed.preventDefault();
               setOpen(true);
-              setActive((current) => (options.length ? (current + 1) % options.length : 0));
+              setActive(options.length ? (activeIndex + 1) % options.length : 0);
               return;
             }
             if (pressed.key === "ArrowUp") {
               pressed.preventDefault();
-              setActive((current) =>
-                options.length ? (current - 1 + options.length) % options.length : 0,
-              );
+              setActive(options.length ? (activeIndex - 1 + options.length) % options.length : 0);
               return;
             }
             if (pressed.key === "Enter" || pressed.key === "," || pressed.key === ";") {
@@ -383,8 +409,8 @@ export function RecipientPicker({
                 type="button"
                 id={`${listId}-${index}`}
                 role="option"
-                aria-selected={index === active}
-                className={`recipient-picker__option${index === active ? " is-active" : ""}`}
+                aria-selected={index === activeIndex}
+                className={`recipient-picker__option${index === activeIndex ? " is-active" : ""}`}
                 /* mousedown, not click: the input's blur would otherwise fire
                    first, commit the typed text and re-render the list out from
                    under the pointer. */
