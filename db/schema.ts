@@ -532,6 +532,17 @@ export const maintenanceRequests = sqliteTable(
     dueAt: text("due_at"),
     completedAt: text("completed_at"),
     nextUpdateAt: text("next_update_at"),
+    /*
+     * When the visit is booked for. THE JOB owns this, not a calendar row —
+     * see `app/(app)/portal/planned-visit.ts`. `dueAt` above is already the SLA
+     * deadline and `completedAt` the completion date, so Module 2 §10's list
+     * only needs these three added.
+     */
+    scheduledDate: text("scheduled_date"),
+    scheduledTime: text("scheduled_time"),
+    targetCompletionDate: text("target_completion_date"),
+    isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
+    seedBatchId: text("seed_batch_id"),
     cost: real("cost"),
     approvedBy: text("approved_by"),
     invoice: text("invoice"),
@@ -561,6 +572,7 @@ export const maintenanceRequests = sqliteTable(
     // Kept in step with db/init.ts, which is what actually runs: CREATE INDEX
     // IF NOT EXISTS matches on name, so an index declared only here can never
     // be applied to a database the bootstrap has already touched.
+    index("maintenance_scheduled_idx").on(table.organisationId, table.scheduledDate),
     index("maintenance_org_archived_created_idx").on(
       table.organisationId,
       table.archived,
@@ -1042,6 +1054,31 @@ export const complianceDocuments = sqliteTable(
       .default(false),
     lastAlertAt: text("last_alert_at"),
     lastAlertStage: text("last_alert_stage"),
+    /*
+     * Certificate fields, HERE rather than in a `certificates` table of their
+     * own. This register already holds every compliance document in the
+     * product — the Store Documentation board reads it and the expiry
+     * dashboard counts it — so a second table would mean two answers to "how
+     * many certificates expire this month".
+     */
+    reference: text("reference"),
+    issuedBy: text("issued_by"),
+    issueDate: text("issue_date"),
+    nextInspectionDate: text("next_inspection_date"),
+    /** Accountable for booking the renewal; a dynamic reminder group resolves to it. */
+    renewalOwnerEmail: text("renewal_owner_email"),
+    escalationEmail: text("escalation_email"),
+    costPence: integer("cost_pence"),
+    remedialsRequired: integer("remedials_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /** The job spawned by "Create job from this", when remedials were flagged. */
+    remedialRequestId: text("remedial_request_id"),
+    /** Not started | Quote requested | Booked | Attended | Certificate received. */
+    renewalStatus: text("renewal_status"),
+    supersededById: text("superseded_by_id"),
+    isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
+    seedBatchId: text("seed_batch_id"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -2220,6 +2257,28 @@ export const calendarEvents = sqliteTable(
     archivedAt: text("archived_at"),
     deletedAt: text("deleted_at"),
     deletedBy: text("deleted_by"),
+    /*
+     * THE HINGE OF THE HYBRID VISIT MODEL.
+     *
+     * Set: this row is a VIEW of a maintenance job, the job owns the schedule,
+     * and `startsOn` above must be NULL. Unset: this is a standalone visit — a
+     * survey, an inspection — that has no job and needs none invented for it.
+     * `app/(app)/portal/planned-visit.ts` holds the rules and the invariant.
+     */
+    requestId: text("request_id"),
+    /** Reactive repair | Planned maintenance | Inspection | Survey | Installation | Other. */
+    visitType: text("visit_type"),
+    startsAtTime: text("starts_at_time"),
+    endsAtTime: text("ends_at_time"),
+    assignedTo: text("assigned_to"),
+    contractorId: text("contractor_id"),
+    accessNotes: text("access_notes"),
+    priority: text("priority"),
+    status: text("status"),
+    responseDeadlineAt: text("response_deadline_at"),
+    recurrence: text("recurrence"),
+    isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
+    seedBatchId: text("seed_batch_id"),
   },
   (table) => [
     index("calendar_events_org_start_idx").on(table.organisationId, table.startsOn),
@@ -2252,6 +2311,8 @@ export const billingSettings = sqliteTable(
     paymentTermsNote: text("payment_terms_note"),
     billingAddress: text("billing_address"),
     invoiceNumberPrefix: text("invoice_number_prefix").notNull().default("MS"),
+    /** The year `invoiceSequence` is counting within, for `MS-YYYY-NNN`. */
+    invoiceSequenceYear: integer("invoice_sequence_year"),
     invoiceSequence: integer("invoice_sequence").notNull().default(0),
     /** No automatic proration unless the client genuinely has the rule. */
     proRataEnabled: integer("pro_rata_enabled", { mode: "boolean" }).notNull().default(false),
@@ -2541,4 +2602,237 @@ export const invoiceExports = sqliteTable(
   (table) => [
     index("invoice_exports_invoice_idx").on(table.invoiceId, table.createdAt),
   ],
+);
+
+/* -------------------------------------------------------------------------- */
+/*  Pre-W14 — the reminder engine, the status map and the holiday calendar     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One reminder row.
+ *
+ * `subjectType` + `subjectId` rather than a nullable foreign key per kind: the
+ * same row shape hangs off a certificate, a planned visit and a job, which is
+ * what "one engine, not two" means in practice. Offsets are stored and
+ * `nextSendAt` is a cache, so moving a certificate's expiry date recalculates
+ * the cascade instead of migrating it.
+ */
+export const reminderRules = sqliteTable(
+  "reminder_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** 'certificate' | 'visit' | 'job' | 'note'. */
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    /** 'd90' through 'overdue' for a generated step; NULL for one somebody added. */
+    stepKey: text("step_key"),
+    /*
+     * `is_enabled`, not `enabled`. `board_automations.enabled` is TEXT, and the
+     * Postgres translator's boolean rule works on the bare column NAME — so a
+     * second `enabled` that is boolean would make that rule wrong for one of
+     * the two tables. See BOOLEAN_COLUMNS in db/sqlite-to-postgres.ts.
+     */
+    isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
+    offsetValue: integer("offset_value").notNull().default(0),
+    /** 'day' | 'week' | 'month'. */
+    offsetUnit: text("offset_unit").notNull().default("day"),
+    /** 'before' | 'after' | 'on'. */
+    offsetDirection: text("offset_direction").notNull().default("before"),
+    /** HH:MM, local to `timezone`. Defaults to 08:00, editable per row. */
+    sendTime: text("send_time").notNull().default("08:00"),
+    timezone: text("timezone").notNull().default("Europe/London"),
+    repeatEnabled: integer("repeat_enabled", { mode: "boolean" }).notNull().default(false),
+    repeatIntervalDays: integer("repeat_interval_days").notNull().default(3),
+    repeatCap: integer("repeat_cap").notNull().default(10),
+    sendsCount: integer("sends_count").notNull().default(0),
+    customMessage: text("custom_message"),
+    channel: text("channel").notNull().default("email"),
+    nextSendAt: text("next_send_at"),
+    /** 'pending' | 'sent' | 'acknowledged' | 'cancelled' | 'failed'. */
+    status: text("status").notNull().default("pending"),
+    acknowledgedAt: text("acknowledged_at"),
+    acknowledgedBy: text("acknowledged_by"),
+    createdByEmail: text("created_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    deletedAt: text("deleted_at"),
+  },
+  (table) => [
+    index("reminder_rules_subject_idx").on(
+      table.organisationId,
+      table.subjectType,
+      table.subjectId,
+    ),
+    index("reminder_rules_due_idx").on(table.nextSendAt, table.status),
+  ],
+);
+
+/** Exactly one of `userId`, `email`, `groupKey` is set on each row. */
+export const reminderRecipients = sqliteTable(
+  "reminder_recipients",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    reminderId: text("reminder_id").notNull(),
+    userId: text("user_id"),
+    email: text("email"),
+    /** A DYNAMIC group, resolved at send time so staff changes cannot stale it. */
+    groupKey: text("group_key"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("reminder_recipients_rule_idx").on(table.reminderId)],
+);
+
+/**
+ * The idempotency ledger. One row per (rule, occurrence) — the UNIQUE index is
+ * what makes a double-firing cron harmless, enforced by the database rather
+ * than by a check the application races with itself.
+ */
+export const reminderDispatch = sqliteTable(
+  "reminder_dispatch",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    reminderId: text("reminder_id").notNull(),
+    occurrenceDate: text("occurrence_date").notNull(),
+    sentAt: text("sent_at"),
+    providerMessageId: text("provider_message_id"),
+    recipientsJson: text("recipients_json"),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("reminder_dispatch_once_idx").on(table.reminderId, table.occurrenceDate),
+  ],
+);
+
+/** The editable global cascade. Editing it never retro-applies to a record. */
+export const reminderDefaults = sqliteTable(
+  "reminder_defaults",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** 'certificate' | 'visit' | 'job'. */
+    scope: text("scope").notNull().default("certificate"),
+    stepKey: text("step_key").notNull(),
+    stepOrder: integer("step_order").notNull().default(0),
+    offsetValue: integer("offset_value").notNull().default(0),
+    offsetUnit: text("offset_unit").notNull().default("day"),
+    offsetDirection: text("offset_direction").notNull().default("before"),
+    sendTime: text("send_time").notNull().default("08:00"),
+    /** Group KEYS, never addresses. */
+    recipientGroupsJson: text("recipient_groups_json").notNull().default("[]"),
+    repeatEnabled: integer("repeat_enabled", { mode: "boolean" }).notNull().default(false),
+    repeatIntervalDays: integer("repeat_interval_days").notNull().default(3),
+    repeatCap: integer("repeat_cap").notNull().default(10),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("reminder_defaults_step_idx").on(
+      table.organisationId,
+      table.scope,
+      table.stepKey,
+    ),
+  ],
+);
+
+/**
+ * Acknowledge / snooze / renew, as single-use links that work with no session.
+ * Only the HASH is stored: a leaked row must not be a working link.
+ */
+export const reminderTokens = sqliteTable(
+  "reminder_tokens",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    reminderId: text("reminder_id").notNull(),
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    /** 'ack' | 'snooze' | 'renew'. */
+    action: text("action").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+    usedByEmail: text("used_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("reminder_tokens_hash_idx").on(table.tokenHash)],
+);
+
+/**
+ * Status text to colour, shape and meaning. Data because the statuses came
+ * from monday and will change; an unmapped one renders grey with its raw label
+ * and raises an admin notice rather than disappearing.
+ */
+export const jobStatusMap = sqliteTable(
+  "job_status_map",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    sourceStatusLabel: text("source_status_label").notNull(),
+    displayLabel: text("display_label").notNull(),
+    colourHex: text("colour_hex").notNull().default("#64748B"),
+    icon: text("icon"),
+    /** 'solid' | 'outline' | 'hatched' | 'strikethrough'. */
+    chipStyle: text("chip_style").notNull().default("solid"),
+    countsAsOpen: integer("counts_as_open", { mode: "boolean" }).notNull().default(true),
+    countsAsOverdueEligible: integer("counts_as_overdue_eligible", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("job_status_map_label_idx").on(table.organisationId, table.sourceStatusLabel),
+  ],
+);
+
+/**
+ * England and Wales bank holidays, as DATA and not as an algorithm.
+ *
+ * Substitute days are rows in their own right. Not organisation-scoped: a bank
+ * holiday is a fact about the country, not about a tenant.
+ */
+export const bankHolidays = sqliteTable(
+  "bank_holidays",
+  {
+    id: text("id").primaryKey(),
+    jurisdiction: text("jurisdiction").notNull().default("england-and-wales"),
+    holidayDate: text("holiday_date").notNull(),
+    title: text("title").notNull(),
+    source: text("source"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("bank_holidays_date_idx").on(table.jurisdiction, table.holidayDate)],
+);
+
+/**
+ * A waived data issue.
+ *
+ * `reason` is NOT NULL because the waiver is only meaningful with one: it is
+ * printed into the report's data-quality notes, so an empty reason would put a
+ * blank line where the justification should be.
+ */
+export const reportIssueWaivers = sqliteTable(
+  "report_issue_waivers",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    issueCode: text("issue_code").notNull(),
+    subjectId: text("subject_id"),
+    reason: text("reason").notNull(),
+    waivedByEmail: text("waived_by_email"),
+    waivedAt: text("waived_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    revokedAt: text("revoked_at"),
+    revokedByEmail: text("revoked_by_email"),
+  },
+  (table) => [index("report_issue_waivers_invoice_idx").on(table.invoiceId)],
 );

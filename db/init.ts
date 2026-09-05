@@ -92,6 +92,9 @@ async function initialize() {
    * fresh database and a working one everywhere else, which is the shape of bug
    * that is found a year later.
    */
+  /* Pre-W14 — reminder engine, status map, bank holidays, number sequence. */
+  await ensurePreW14Foundation(d1);
+
   await repairOrphanedSectionBoards(d1);
 }
 
@@ -4146,4 +4149,589 @@ async function ensureOwnerFixesAndBilling(d1: D1DatabaseLike) {
       "CREATE INDEX IF NOT EXISTS invoice_exports_invoice_idx ON invoice_exports(invoice_id, created_at)",
     ),
   ]);
+}
+
+/**
+ * PRE-W14 — the reminder engine, the job status map, the bank-holiday calendar
+ * and the document number sequence.
+ *
+ * ── ONE REMINDER ENGINE, NOT TWO ───────────────────────────────────────────
+ *
+ * `/api/notifications/compliance` already walks a 90/60/30/14/7/0 ladder over
+ * `compliance_documents.last_alert_stage`. It is not replaced here and it is
+ * not duplicated here. The difference between the two is a real one:
+ *
+ *   · the ladder answers "has this document crossed a threshold since the last
+ *     run", carries no recipients of its own, and cannot be edited per record;
+ *   · `reminder_rules` is a ROW — its own offset, its own send time, its own
+ *     recipients, its own repeat — because the specification requires a cascade
+ *     that an operator can edit on one certificate without editing every other.
+ *
+ * A ladder cannot express that, so the rows exist. What must NOT happen is two
+ * things sending email on two schedules with two logs, so both paths dispatch
+ * through the same sender and both write `notification_log`. `reminder_dispatch`
+ * below is the idempotency ledger for the row engine specifically — the thing
+ * that makes "the cron double-fired" harmless — and it is deliberately separate
+ * from `notification_log`, which records what was SENT rather than what has
+ * already HAPPENED. One row can produce several log lines (one per recipient);
+ * it must produce exactly one dispatch.
+ *
+ * ── WHY OFFSETS ARE STORED, NOT DATES ──────────────────────────────────────
+ *
+ * A reminder row stores `offset_value`/`offset_unit`/`offset_direction` and a
+ * `send_time`, not a computed timestamp. `next_send_at` is a cache. Editing a
+ * certificate's expiry date has to move every pending reminder with it, and a
+ * row that had stored an absolute date would need a migration pass to follow;
+ * a row that stores an offset simply recomputes. The specification requires
+ * exactly that behaviour ("changing the expiry date recalculates pending
+ * reminders"), and storing the anchor-relative form is what makes it a
+ * recalculation rather than a data migration.
+ *
+ * ── BOOLEANS ───────────────────────────────────────────────────────────────
+ *
+ * Every INTEGER flag declared here is registered in `BOOLEAN_COLUMNS` in
+ * `db/sqlite-to-postgres.ts`. Skipping that step produces the exact fault
+ * documented there: the DDL creates an `integer`, rule 10 compares it with
+ * `= true`, and Postgres answers 42883 on a path whose error is swallowed.
+ */
+async function ensurePreW14Foundation(d1: D1DatabaseLike) {
+  await d1.batch([
+    /*
+     * A reminder row. `subject_type` + `subject_id` rather than a column per
+     * kind, because the specification puts the SAME row shape on certificates,
+     * planned visits, notes and jobs — "one engine, not two" — and a nullable
+     * foreign key per subject kind would grow a column every time a fifth kind
+     * appears.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS reminder_rules (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         subject_type TEXT NOT NULL,
+         subject_id TEXT NOT NULL,
+         step_key TEXT,
+         is_enabled INTEGER NOT NULL DEFAULT 1,
+         offset_value INTEGER NOT NULL DEFAULT 0,
+         offset_unit TEXT NOT NULL DEFAULT 'day',
+         offset_direction TEXT NOT NULL DEFAULT 'before',
+         send_time TEXT NOT NULL DEFAULT '08:00',
+         timezone TEXT NOT NULL DEFAULT 'Europe/London',
+         repeat_enabled INTEGER NOT NULL DEFAULT 0,
+         repeat_interval_days INTEGER NOT NULL DEFAULT 3,
+         repeat_cap INTEGER NOT NULL DEFAULT 10,
+         sends_count INTEGER NOT NULL DEFAULT 0,
+         custom_message TEXT,
+         channel TEXT NOT NULL DEFAULT 'email',
+         next_send_at TEXT,
+         status TEXT NOT NULL DEFAULT 'pending',
+         acknowledged_at TEXT,
+         acknowledged_by TEXT,
+         created_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         deleted_at TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS reminder_rules_subject_idx ON reminder_rules(organisation_id, subject_type, subject_id)",
+    ),
+    /* The cron's only selection index: due, and not yet done. */
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS reminder_rules_due_idx ON reminder_rules(next_send_at, status)",
+    ),
+
+    /*
+     * Recipients, one row each, with exactly one of the three populated.
+     *
+     * `group_key` is a DYNAMIC group — "renewal owner", "all admins" — resolved
+     * at send time and never at save time. The specification is explicit about
+     * why: a cascade written in January must still reach whoever holds the role
+     * in December, and a resolved-at-save copy of a staff list silently stops
+     * being true the first time somebody leaves.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS reminder_recipients (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         reminder_id TEXT NOT NULL,
+         user_id TEXT,
+         email TEXT,
+         group_key TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS reminder_recipients_rule_idx ON reminder_recipients(reminder_id)",
+    ),
+
+    /*
+     * The idempotency ledger.
+     *
+     * UNIQUE(reminder_id, occurrence_date) is the whole point of the table: the
+     * hourly cron may run twice for the same hour — a retry, an overlapping
+     * invocation, a clock that steps backwards at the end of BST — and the
+     * second attempt must be refused by the DATABASE rather than by a check the
+     * application does first and then races with itself.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS reminder_dispatch (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         reminder_id TEXT NOT NULL,
+         occurrence_date TEXT NOT NULL,
+         sent_at TEXT,
+         provider_message_id TEXT,
+         recipients_json TEXT,
+         status TEXT NOT NULL DEFAULT 'pending',
+         attempts INTEGER NOT NULL DEFAULT 0,
+         error TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS reminder_dispatch_once_idx ON reminder_dispatch(reminder_id, occurrence_date)",
+    ),
+
+    /*
+     * The editable global cascade. `scope` separates the certificate ladder
+     * from the job ladder so Admin can hold both without two tables.
+     *
+     * Editing a default never retro-applies: the rows on an existing record
+     * were copied at creation and are the record's own. The specification says
+     * so, and it is the difference between an admin screen that is safe to
+     * touch and one that silently rewrites history.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS reminder_defaults (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         scope TEXT NOT NULL DEFAULT 'certificate',
+         step_key TEXT NOT NULL,
+         step_order INTEGER NOT NULL DEFAULT 0,
+         offset_value INTEGER NOT NULL DEFAULT 0,
+         offset_unit TEXT NOT NULL DEFAULT 'day',
+         offset_direction TEXT NOT NULL DEFAULT 'before',
+         send_time TEXT NOT NULL DEFAULT '08:00',
+         recipient_groups_json TEXT NOT NULL DEFAULT '[]',
+         repeat_enabled INTEGER NOT NULL DEFAULT 0,
+         repeat_interval_days INTEGER NOT NULL DEFAULT 3,
+         repeat_cap INTEGER NOT NULL DEFAULT 10,
+         active INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS reminder_defaults_step_idx ON reminder_defaults(organisation_id, scope, step_key)",
+    ),
+
+    /*
+     * Acknowledge / snooze / renew, as signed single-use links that work with
+     * no session.
+     *
+     * Only the HASH is stored, for the same reason `job_access_tokens` stores
+     * only a hash: a leaked database row must not be a working link. The token
+     * itself exists once, in the email that carried it.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS reminder_tokens (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         reminder_id TEXT NOT NULL,
+         subject_type TEXT NOT NULL,
+         subject_id TEXT NOT NULL,
+         token_hash TEXT NOT NULL,
+         action TEXT NOT NULL,
+         expires_at TEXT NOT NULL,
+         used_at TEXT,
+         used_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS reminder_tokens_hash_idx ON reminder_tokens(token_hash)",
+    ),
+
+    /*
+     * The status map. Module 2 is emphatic that statuses came from monday and
+     * will change, so the calendar must not hardcode them; an unmapped status
+     * falls back to grey WITH ITS RAW LABEL and raises an admin notice, because
+     * the alternative — hiding it — loses a job silently.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS job_status_map (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         source_status_label TEXT NOT NULL,
+         display_label TEXT NOT NULL,
+         colour_hex TEXT NOT NULL DEFAULT '#64748B',
+         icon TEXT,
+         chip_style TEXT NOT NULL DEFAULT 'solid',
+         counts_as_open INTEGER NOT NULL DEFAULT 1,
+         counts_as_overdue_eligible INTEGER NOT NULL DEFAULT 1,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         active INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS job_status_map_label_idx ON job_status_map(organisation_id, source_status_label)",
+    ),
+
+    /*
+     * England & Wales bank holidays, as DATA.
+     *
+     * `app/lib/reporting/period.ts` used to say in its header that there was no
+     * holiday calendar anywhere in the product and that adding one would put a
+     * number on a client's SLA report that no agreement supports. That was the
+     * right call while nobody had agreed one. The owner has now agreed it
+     * (Module 4 §4.2 — "maintain a `bank_holidays` table; do not compute them
+     * in code"), so the table exists and the header records the change.
+     *
+     * Not computed. The English calendar has substitute days, one-off royal
+     * holidays and a spring bank holiday that has twice been moved by statute;
+     * an algorithm that derives them is wrong in exactly the years anybody
+     * remembers. `jurisdiction` is carried because Scotland differs and this
+     * table will eventually be asked about it.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS bank_holidays (
+         id TEXT PRIMARY KEY,
+         jurisdiction TEXT NOT NULL DEFAULT 'england-and-wales',
+         holiday_date TEXT NOT NULL,
+         title TEXT NOT NULL,
+         source TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS bank_holidays_date_idx ON bank_holidays(jurisdiction, holiday_date)",
+    ),
+
+    /*
+     * A waived data issue.
+     *
+     * The waiver is the reason the Finalise block can stay meaningful. A hard
+     * block on every error means somebody eventually bypasses the whole system;
+     * warn-only means wrong numbers reach a client. So an error can be waived
+     * one at a time, by a named approver, with a typed reason that is PRINTED
+     * in the report's data-quality notes rather than merely stored.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS report_issue_waivers (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         issue_code TEXT NOT NULL,
+         subject_id TEXT,
+         reason TEXT NOT NULL,
+         waived_by_email TEXT,
+         waived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         revoked_at TEXT,
+         revoked_by_email TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS report_issue_waivers_invoice_idx ON report_issue_waivers(invoice_id)",
+    ),
+  ]);
+
+  /*
+   * The year on the EXISTING invoice counter.
+   *
+   * `billing_settings.invoice_sequence` is already a gapless, compare-and-swap
+   * counter with a UNIQUE index behind it (`issueInvoiceNumber` in
+   * `app/lib/billing/settings.ts`). Module 4 only changes the FORMAT it is
+   * rendered in — `MS-00042` becomes `MS-YYYY-NNN` — so the counter is kept and
+   * given a year to reset against. A second sequence table was drafted here and
+   * removed: two counters for one number is exactly the duplication that ends
+   * with a client holding two documents numbered the same.
+   */
+  await addColumn(d1, "billing_settings", "invoice_sequence_year", "INTEGER");
+
+  /*
+   * Job scheduling fields.
+   *
+   * These live on the JOB and not on a calendar row, which is the hybrid model
+   * the owner settled: a planned visit attached to a maintenance job keeps the
+   * job as its single source of truth and the calendar renders it through the
+   * existing feed. `due_at` is already the SLA deadline and `completed_at` the
+   * completion date, so neither is added again.
+   */
+  const jobColumns: Array<[string, string]> = [
+    ["scheduled_date", "TEXT"],
+    ["scheduled_time", "TEXT"],
+    ["target_completion_date", "TEXT"],
+    ["is_seed", "INTEGER NOT NULL DEFAULT 0"],
+    ["seed_batch_id", "TEXT"],
+  ];
+  for (const [column, definition] of jobColumns) {
+    await addColumn(d1, "maintenance_requests", column, definition);
+  }
+
+  /*
+   * Calendar-native planned-visit fields.
+   *
+   * `request_id` is the hinge of the hybrid model. When it is set the row is a
+   * VIEW of a job and the job owns the schedule; when it is null the row is a
+   * standalone visit — a survey, an inspection, a general attendance — that has
+   * no job and does not need one invented for it. "Create job from this visit"
+   * fills `request_id` in, which links the two rather than copying one into the
+   * other.
+   */
+  const eventColumns: Array<[string, string]> = [
+    ["request_id", "TEXT"],
+    ["visit_type", "TEXT"],
+    ["starts_at_time", "TEXT"],
+    ["ends_at_time", "TEXT"],
+    ["assigned_to", "TEXT"],
+    ["contractor_id", "TEXT"],
+    ["access_notes", "TEXT"],
+    ["priority", "TEXT"],
+    ["status", "TEXT"],
+    ["response_deadline_at", "TEXT"],
+    ["recurrence", "TEXT"],
+    ["is_seed", "INTEGER NOT NULL DEFAULT 0"],
+    ["seed_batch_id", "TEXT"],
+  ];
+  for (const [column, definition] of eventColumns) {
+    await addColumn(d1, "calendar_events", column, definition);
+  }
+
+  /*
+   * Certificate fields, added to `compliance_documents` rather than to a new
+   * `certificates` table.
+   *
+   * The register already holds every compliance document in the product, the
+   * Store Documentation board reads it, and the expiry dashboard counts it. A
+   * second certificate table would mean two answers to "how many certificates
+   * expire this month", which is the duplication the brief forbids.
+   */
+  const complianceColumns: Array<[string, string]> = [
+    ["reference", "TEXT"],
+    ["issued_by", "TEXT"],
+    ["issue_date", "TEXT"],
+    ["next_inspection_date", "TEXT"],
+    ["renewal_owner_email", "TEXT"],
+    ["escalation_email", "TEXT"],
+    ["cost_pence", "INTEGER"],
+    ["remedials_required", "INTEGER NOT NULL DEFAULT 0"],
+    ["remedial_request_id", "TEXT"],
+    ["renewal_status", "TEXT"],
+    ["superseded_by_id", "TEXT"],
+    ["is_seed", "INTEGER NOT NULL DEFAULT 0"],
+    ["seed_batch_id", "TEXT"],
+  ];
+  for (const [column, definition] of complianceColumns) {
+    await addColumn(d1, "compliance_documents", column, definition);
+  }
+
+  /* Seed markers on the remaining tables a seed run writes. */
+  for (const table of ["sites", "contractors", "users", "calendar_events"]) {
+    await addColumn(d1, table, "is_seed", "INTEGER NOT NULL DEFAULT 0");
+    await addColumn(d1, table, "seed_batch_id", "TEXT");
+  }
+
+  await seedBankHolidays(d1);
+  await seedJobStatusMap(d1);
+  await seedReminderDefaults(d1);
+}
+
+/**
+ * England & Wales bank holidays, 2024–2028.
+ *
+ * Transcribed from the GOV.UK calendar rather than derived. Substitute days are
+ * included as their own rows and named as such — 28 December 2026 is a bank
+ * holiday because Boxing Day fell on a Saturday, and a working-day count that
+ * misses it is wrong by a day for every job open over that Christmas.
+ *
+ * Extending this is a data edit: add the rows. `INSERT OR IGNORE` against the
+ * unique index means re-running is free and a hand-added row is never
+ * overwritten.
+ */
+const BANK_HOLIDAYS_ENGLAND_WALES: ReadonlyArray<readonly [string, string]> = [
+  ["2024-01-01", "New Year's Day"],
+  ["2024-03-29", "Good Friday"],
+  ["2024-04-01", "Easter Monday"],
+  ["2024-05-06", "Early May bank holiday"],
+  ["2024-05-27", "Spring bank holiday"],
+  ["2024-08-26", "Summer bank holiday"],
+  ["2024-12-25", "Christmas Day"],
+  ["2024-12-26", "Boxing Day"],
+
+  ["2025-01-01", "New Year's Day"],
+  ["2025-04-18", "Good Friday"],
+  ["2025-04-21", "Easter Monday"],
+  ["2025-05-05", "Early May bank holiday"],
+  ["2025-05-26", "Spring bank holiday"],
+  ["2025-08-25", "Summer bank holiday"],
+  ["2025-12-25", "Christmas Day"],
+  ["2025-12-26", "Boxing Day"],
+
+  ["2026-01-01", "New Year's Day"],
+  ["2026-04-03", "Good Friday"],
+  ["2026-04-06", "Easter Monday"],
+  ["2026-05-04", "Early May bank holiday"],
+  ["2026-05-25", "Spring bank holiday"],
+  ["2026-08-31", "Summer bank holiday"],
+  ["2026-12-25", "Christmas Day"],
+  ["2026-12-28", "Boxing Day (substitute day)"],
+
+  ["2027-01-01", "New Year's Day"],
+  ["2027-03-26", "Good Friday"],
+  ["2027-03-29", "Easter Monday"],
+  ["2027-05-03", "Early May bank holiday"],
+  ["2027-05-31", "Spring bank holiday"],
+  ["2027-08-30", "Summer bank holiday"],
+  ["2027-12-27", "Christmas Day (substitute day)"],
+  ["2027-12-28", "Boxing Day (substitute day)"],
+
+  ["2028-01-03", "New Year's Day (substitute day)"],
+  ["2028-04-14", "Good Friday"],
+  ["2028-04-17", "Easter Monday"],
+  ["2028-05-01", "Early May bank holiday"],
+  ["2028-05-29", "Spring bank holiday"],
+  ["2028-08-28", "Summer bank holiday"],
+  ["2028-12-25", "Christmas Day"],
+  ["2028-12-26", "Boxing Day"],
+];
+
+async function seedBankHolidays(d1: D1DatabaseLike) {
+  const statements = BANK_HOLIDAYS_ENGLAND_WALES.map(([date, title]) =>
+    d1
+      .prepare(
+        `INSERT OR IGNORE INTO bank_holidays (id, jurisdiction, holiday_date, title, source)
+         VALUES (?, 'england-and-wales', ?, ?, 'gov.uk')`,
+      )
+      .bind(`bh_ew_${date}`, date, title),
+  );
+  await d1.batch(statements);
+}
+
+/**
+ * The default status map (Module 2 §4.2).
+ *
+ * Seeded per organisation and only where the label is absent, so an operator
+ * who has already recoloured "On hold" keeps their colour across a redeploy.
+ * `counts_as_open` and `counts_as_overdue_eligible` are what the overdue
+ * overlay and the unscheduled tray read; they are data because the answer for
+ * "Awaiting parts" is an operational decision, not a constant.
+ */
+const JOB_STATUS_MAP_SEED: ReadonlyArray<{
+  label: string;
+  colour: string;
+  style: string;
+  icon: string;
+  open: number;
+  overdue: number;
+}> = [
+  { label: "New", colour: "#3B82F6", style: "outline", icon: "sparkle", open: 1, overdue: 1 },
+  { label: "Reported", colour: "#3B82F6", style: "outline", icon: "sparkle", open: 1, overdue: 1 },
+  { label: "Quote required", colour: "#8B5CF6", style: "outline", icon: "quote", open: 1, overdue: 1 },
+  { label: "Awaiting approval", colour: "#F59E0B", style: "hatched", icon: "clock", open: 1, overdue: 1 },
+  { label: "Scheduled", colour: "#14B8A6", style: "solid", icon: "calendar", open: 1, overdue: 1 },
+  { label: "Booked", colour: "#14B8A6", style: "solid", icon: "calendar", open: 1, overdue: 1 },
+  { label: "In progress", colour: "#06B6D4", style: "solid", icon: "wrench", open: 1, overdue: 1 },
+  { label: "On hold", colour: "#64748B", style: "hatched", icon: "pause", open: 1, overdue: 0 },
+  { label: "Awaiting parts", colour: "#F97316", style: "hatched", icon: "package", open: 1, overdue: 0 },
+  { label: "No access", colour: "#EAB308", style: "outline", icon: "lock", open: 1, overdue: 1 },
+  { label: "Completed", colour: "#22C55E", style: "solid", icon: "check", open: 0, overdue: 0 },
+  { label: "Cancelled", colour: "#475569", style: "strikethrough", icon: "cross", open: 0, overdue: 0 },
+];
+
+async function seedJobStatusMap(d1: D1DatabaseLike) {
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    const statements = JOB_STATUS_MAP_SEED.map((entry, index) =>
+      d1
+        .prepare(
+          `INSERT OR IGNORE INTO job_status_map (
+             id, organisation_id, source_status_label, display_label, colour_hex,
+             icon, chip_style, counts_as_open, counts_as_overdue_eligible, sort_order, active
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        )
+        .bind(
+          `jsm_${row.id}_${entry.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          row.id,
+          entry.label,
+          entry.label,
+          entry.colour,
+          entry.icon,
+          entry.style,
+          entry.open,
+          entry.overdue,
+          index,
+        ),
+    );
+    await d1.batch(statements);
+  }
+}
+
+/**
+ * The default certificate cascade (Module 1 §7.2) and the job cascade
+ * (Module 2 §8), as editable rows rather than constants.
+ *
+ * `recipient_groups_json` holds GROUP KEYS, never addresses. The groups are
+ * resolved when the reminder is sent, so a cascade written today still reaches
+ * whoever is the renewal owner in ninety days.
+ */
+const REMINDER_DEFAULTS_SEED: ReadonlyArray<{
+  scope: string;
+  key: string;
+  value: number;
+  direction: string;
+  groups: string[];
+  repeat: number;
+  interval: number;
+  cap: number;
+}> = [
+  { scope: "certificate", key: "d90", value: 90, direction: "before", groups: ["renewal-owner"], repeat: 0, interval: 3, cap: 10 },
+  { scope: "certificate", key: "d60", value: 60, direction: "before", groups: ["renewal-owner", "internal-team"], repeat: 0, interval: 3, cap: 10 },
+  { scope: "certificate", key: "d30", value: 30, direction: "before", groups: ["renewal-owner", "internal-team", "client-contact"], repeat: 0, interval: 3, cap: 10 },
+  { scope: "certificate", key: "d14", value: 14, direction: "before", groups: ["renewal-owner", "internal-team", "client-contact", "escalation-contact"], repeat: 1, interval: 3, cap: 10 },
+  { scope: "certificate", key: "expiry", value: 0, direction: "on", groups: ["renewal-owner", "internal-team", "client-contact", "escalation-contact"], repeat: 1, interval: 3, cap: 10 },
+  { scope: "certificate", key: "overdue", value: 7, direction: "after", groups: ["renewal-owner", "internal-team", "client-contact", "escalation-contact"], repeat: 1, interval: 7, cap: 8 },
+
+  { scope: "visit", key: "day-before", value: 1, direction: "before", groups: ["assigned-engineer", "site-contact"], repeat: 0, interval: 3, cap: 10 },
+
+  { scope: "job", key: "day-before", value: 1, direction: "before", groups: ["assigned-engineer", "site-contact"], repeat: 0, interval: 3, cap: 10 },
+  { scope: "job", key: "unassigned", value: 1, direction: "after", groups: ["all-admins"], repeat: 0, interval: 3, cap: 10 },
+  { scope: "job", key: "stale", value: 14, direction: "after", groups: ["job-owner"], repeat: 1, interval: 7, cap: 8 },
+];
+
+async function seedReminderDefaults(d1: D1DatabaseLike) {
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    const statements = REMINDER_DEFAULTS_SEED.map((entry, index) =>
+      d1
+        .prepare(
+          `INSERT OR IGNORE INTO reminder_defaults (
+             id, organisation_id, scope, step_key, step_order, offset_value, offset_unit,
+             offset_direction, send_time, recipient_groups_json, repeat_enabled,
+             repeat_interval_days, repeat_cap, active
+           ) VALUES (?, ?, ?, ?, ?, ?, 'day', ?, '08:00', ?, ?, ?, ?, 1)`,
+        )
+        .bind(
+          `rd_${row.id}_${entry.scope}_${entry.key}`,
+          row.id,
+          entry.scope,
+          entry.key,
+          index,
+          entry.value,
+          entry.direction,
+          JSON.stringify(entry.groups),
+          entry.repeat,
+          entry.interval,
+          entry.cap,
+        ),
+    );
+    await d1.batch(statements);
+  }
 }
