@@ -790,7 +790,13 @@ export async function ensureOwnerAccount(d1: D1DatabaseLike) {
     )
     .all();
   const organisations = (organisationResult.results ?? []) as OrganisationRow[];
-  if (!organisations.length) return;
+  if (!organisations.length) {
+    /* Nothing to attach an owner to yet. Not a fault on a database whose
+       seeding has not run, but it is indistinguishable from a failed bootstrap
+       from the outside, so it says so. */
+    console.error("[auth] owner bootstrap skipped: no active organisation exists yet");
+    return;
+  }
 
   const home =
     organisations.find((row) => row.slug === OWNER_ORGANISATION_SLUG) ??
@@ -813,6 +819,23 @@ export async function ensureOwnerAccount(d1: D1DatabaseLike) {
     // No seed in production without a secret. The row stays password-less and
     // sign-in fails closed — see `ownerSeedPassword`.
     if (seed) await setPassword(d1, String(credential.id), seed);
+    else {
+      /*
+       * THE ONE STATE THAT LOOKS EXACTLY LIKE A WRONG PASSWORD.
+       *
+       * A password-less owner row is refused by `checkPassword`, so sign-in
+       * answers "That email and password do not match an account" — which
+       * sends whoever holds the correct password off to check the password.
+       * On a fresh Production database this is the difference between "the
+       * secret is missing" and "the secret is wrong", and nothing said which.
+       * No value is logged, only the decision.
+       */
+      console.error(
+        "[auth] owner row has no password and no seed is available: " +
+          "MAINTSUPP_OWNER_PASSWORD is unset, shorter than 12 characters, or " +
+          "not reaching this runtime. Sign-in will fail closed until it is set.",
+      );
+    }
   }
 
   const userId = credential?.id ? String(credential.id) : OWNER_USER_ID;
