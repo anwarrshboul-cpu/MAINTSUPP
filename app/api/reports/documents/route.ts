@@ -14,6 +14,7 @@
 import { auditActor, recordAudit } from "../../../lib/audit";
 import { REPORT_CAPABILITIES } from "../../../lib/reporting/access";
 import { draftWarnings, finalisationBlockers } from "../../../lib/reporting/blockers";
+import { loadWaivedIssueKeys } from "../../../lib/reporting/waiver-repository";
 import { createDraft, listDocuments } from "../../../lib/reporting/documents";
 import {
   badRequest,
@@ -79,6 +80,8 @@ export async function POST(request: Request) {
         internalNote: text(body.internalNote, 2000),
       },
     });
+    /* Waived data issues stop being blockers; a revoked waiver puts the block back. */
+    const waivedIssueKeys = await loadWaivedIssueKeys(scope.db, scope.orgId, invoiceId);
 
     await recordAudit({
       db: scope.db,
@@ -101,6 +104,7 @@ export async function POST(request: Request) {
         invoiceId,
         payload,
         blockers: finalisationBlockers({
+          waivedIssueKeys,
           payload,
           confirmedPartialPeriod: false,
           requireApproval: true,

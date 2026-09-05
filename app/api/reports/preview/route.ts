@@ -16,6 +16,7 @@
  */
 
 import { finalisationBlockers, draftWarnings } from "../../../lib/reporting/blockers";
+import { loadWaivedIssueKeys } from "../../../lib/reporting/waiver-repository";
 import { REPORT_CAPABILITIES } from "../../../lib/reporting/access";
 import { computeReport } from "../../../lib/reporting/engine";
 import {
@@ -34,6 +35,8 @@ export async function POST(request: Request) {
     const guarded = await guard(request, REPORT_CAPABILITIES["report.preview"]);
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
+    /* Waived data issues stop being blockers; a revoked waiver puts the block back. */
+    const waivedIssueKeys = await loadWaivedIssueKeys(scope.db, scope.orgId, null);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 
     /* Before anything is computed: a preview headed with one client's name and
@@ -61,6 +64,7 @@ export async function POST(request: Request) {
          the caller is asking "what would stop this being finalised", and
          "it has not been approved yet" is not a fault in the data. */
       blockers: finalisationBlockers({
+          waivedIssueKeys,
         payload,
         confirmedPartialPeriod: Boolean(body.confirmPartialPeriod),
         requireApproval: false,

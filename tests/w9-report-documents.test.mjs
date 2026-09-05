@@ -60,7 +60,22 @@ test("nothing that computes a number can reach the database", async () => {
    * three that are allowed a handle, and they are named here so that adding a
    * fourth is a deliberate edit to this list.
    */
-  const allowed = new Set(["engine.ts", "documents.ts", "route-helpers.ts"]);
+  const allowed = new Set([
+    "engine.ts",
+    "documents.ts",
+    "route-helpers.ts",
+    /*
+     * The fourth, added deliberately as the comment above requires.
+     *
+     * `waiver-repository.ts` READS ROWS and computes no number: it turns
+     * `report_issue_waivers` into a set of keys that `blockers.ts` matches
+     * against. The rules about what a waiver means — which severities block,
+     * what makes one live, what its printed note says — stayed in the pure
+     * `waivers.ts`, which is still on the wrong side of this fence and must
+     * remain there.
+     */
+    "waiver-repository.ts",
+  ]);
   const files = await readdir(path.join(root, "app/lib/reporting"));
   const pure = files.filter((file) => file.endsWith(".ts") && !allowed.has(file));
   assert.ok(pure.length >= 9, "the pure modules are the bulk of the engine");

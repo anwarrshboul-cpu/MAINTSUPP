@@ -34,6 +34,7 @@ import { auditActor, changeDetail, recordAudit } from "../../../../lib/audit";
 import { listAdjustments } from "../../../../lib/billing/repository";
 import { REPORT_CAPABILITIES } from "../../../../lib/reporting/access";
 import { draftWarnings, finalisationBlockers } from "../../../../lib/reporting/blockers";
+import { loadWaivedIssueKeys } from "../../../../lib/reporting/waiver-repository";
 import {
   documentPayload,
   documentStatus,
@@ -63,6 +64,8 @@ export async function GET(
     const guarded = await guard(request, REPORT_CAPABILITIES["document.read"]);
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
+    /* Waived data issues stop being blockers; a revoked waiver puts the block back. */
+    const waivedIssueKeys = await loadWaivedIssueKeys(scope.db, scope.orgId, id);
 
     const invoice = await readInvoice(scope.db, scope.orgId, id);
     if (!invoice) return notFound();
@@ -85,6 +88,7 @@ export async function GET(
       payload: result.payload,
       fromSnapshot: result.fromSnapshot,
       blockers: finalisationBlockers({
+          waivedIssueKeys,
         payload: result.payload,
         confirmedPartialPeriod: false,
         requireApproval: true,
@@ -107,6 +111,8 @@ export async function PATCH(
     const guarded = await guard(request, REPORT_CAPABILITIES["document.edit"]);
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
+    /* Waived data issues stop being blockers; a revoked waiver puts the block back. */
+    const waivedIssueKeys = await loadWaivedIssueKeys(scope.db, scope.orgId, id);
 
     const invoice = await readInvoice(scope.db, scope.orgId, id);
     if (!invoice) return notFound();
@@ -188,6 +194,7 @@ export async function PATCH(
       document: updated,
       payload: result.payload,
       blockers: finalisationBlockers({
+          waivedIssueKeys,
         payload: result.payload,
         confirmedPartialPeriod: false,
         requireApproval: true,

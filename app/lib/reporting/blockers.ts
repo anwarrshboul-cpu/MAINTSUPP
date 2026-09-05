@@ -23,7 +23,11 @@
  * which is the property that stops the two drifting.
  */
 
-import type { CombinedReportPayload, FinalisationBlocker } from "./contract";
+import type {
+  CombinedReportPayload,
+  DataQualityFinding,
+  FinalisationBlocker,
+} from "./contract";
 
 export const BLOCKER = {
   noClient: "client.missing",
@@ -37,6 +41,7 @@ export const BLOCKER = {
   voided: "status.voided",
   invoiceNumberUnavailable: "invoice.number_unavailable",
   negativeTotal: "totals.negative",
+  dataQualityErrors: "data.quality_errors",
 } as const;
 
 export interface BlockerInput {
@@ -49,12 +54,54 @@ export interface BlockerInput {
   confirmedPartialPeriod: boolean;
   /** Whether the workflow requires an Approved status before finalising. */
   requireApproval: boolean;
+  /**
+   * `${code}:${entityId ?? ""}` for every data-quality error an approver has
+   * waived, and for which the waiver has not been revoked.
+   *
+   * PASSED IN AS DATA rather than computed here, for the same reason the
+   * bank-holiday calendar is: `tests/w9-report-engine.test.mjs` stages this
+   * module and a fixed list of its neighbours into a temp directory, and a
+   * value import of `./waivers` would resolve to a file that suite does not
+   * stage. The matching rules live in `app/lib/reporting/waivers.ts`; the
+   * caller applies them and hands the result down.
+   *
+   * Omitted means nothing is waived, which is the safe direction: an absent set
+   * blocks more, never less.
+   */
+  waivedIssueKeys?: ReadonlySet<string>;
 }
 
 export function finalisationBlockers(input: BlockerInput): FinalisationBlocker[] {
   const { payload } = input;
   const blockers: FinalisationBlocker[] = [];
   const add = (code: string, message: string) => blockers.push({ code, message });
+
+  /*
+   * DATA-QUALITY ERRORS BLOCK, AND A WAIVER IS THE ONLY WAY THROUGH.
+   *
+   * Module 4 §6 is explicit about why it is neither of the two obvious
+   * designs. Blocking on all 48 findings means somebody eventually bypasses
+   * the whole system; warning on all 48 means wrong numbers reach a client.
+   * So only `blocking` severity stops a finalisation, and an approver can
+   * waive one at a time with a typed reason that is then PRINTED in the
+   * report's data-quality notes rather than merely stored.
+   *
+   * `waivedIssueKeys` is supplied by the caller — see the field's own note.
+   */
+  const waived = input.waivedIssueKeys ?? new Set<string>();
+  const unwaived = payload.maintenance.dataQuality.filter(
+    (finding: DataQualityFinding) =>
+      finding.severity === "blocking" &&
+      !waived.has(`${finding.code}:${finding.entityId ?? ""}`),
+  );
+  if (unwaived.length > 0) {
+    add(
+      BLOCKER.dataQualityErrors,
+      unwaived.length === 1
+        ? `One data issue must be fixed or waived before finalising: ${unwaived[0].message}`
+        : `${unwaived.length} data issues must be fixed or waived before finalising. The first is: ${unwaived[0].message}`,
+    );
+  }
 
   if (!payload.organisationId || !payload.invoice.clientName) {
     add(BLOCKER.noClient, "The document has no client. Choose one before finalising.");

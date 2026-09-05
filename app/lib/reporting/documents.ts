@@ -589,7 +589,22 @@ export async function finaliseDocument(
 
   let invoiceNumber: string;
   try {
-    invoiceNumber = await issueInvoiceNumber(db, input.organisationId);
+    /*
+     * The year the NUMBER belongs to is the invoice's own date, not today's.
+     * A December period finalised in January must not be numbered as the new
+     * year's first invoice — the document's date is what a client and an
+     * auditor read it by.
+     */
+    const numberYear = Number(
+      (input.invoice.invoiceDate ?? input.invoice.periodEnd ?? "").slice(0, 4),
+    );
+    invoiceNumber = await issueInvoiceNumber(
+      db,
+      input.organisationId,
+      Number.isFinite(numberYear) && numberYear > 1900
+        ? numberYear
+        : new Date().getUTCFullYear(),
+    );
   } catch {
     return {
       ok: false,

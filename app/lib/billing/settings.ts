@@ -29,6 +29,7 @@
 import { and, eq } from "drizzle-orm";
 import type { getDb } from "../../../db";
 import { billingSettings } from "../../../db/schema";
+import { formatDocumentNumber, nextSequenceForYear } from "../reporting/numbering";
 import type { BillingConfiguration } from "../reporting/inputs";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -125,9 +126,17 @@ export async function writeBillingSettings(
   return readBillingSettings(db, organisationId);
 }
 
-/** `MS-00042`. Prefix from the settings, sequence zero-padded so they sort. */
-export function formatInvoiceNumber(prefix: string, sequence: number): string {
-  return `${prefix}-${String(sequence).padStart(5, "0")}`;
+/**
+ * `MS-2026-042`. Prefix from the settings, YEAR, sequence zero-padded.
+ *
+ * The format changed from `MS-00042` when Module 4 §5.1 asked for
+ * `MS-YYYY-NNN`. The allocator below did NOT change: it was already gapless and
+ * already compare-and-swap, and a second counter would have been the surest way
+ * to hand two documents one number. Only the rendering moved, into
+ * `app/lib/reporting/numbering.ts`, which is pure and tested at its edges.
+ */
+export function formatInvoiceNumber(prefix: string, year: number, sequence: number): string {
+  return formatDocumentNumber(prefix, year, sequence);
 }
 
 /**
@@ -147,15 +156,31 @@ export function formatInvoiceNumber(prefix: string, sequence: number): string {
 export async function issueInvoiceNumber(
   db: Database,
   organisationId: string,
+  year: number,
   attempts = 5,
 ): Promise<string> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const settings = await readBillingSettings(db, organisationId);
     const current = settings.invoiceSequence;
-    const next = current + 1;
+    /*
+     * The year decides whether this is the next number or the first of a new
+     * one. `nextSequenceForYear` restarts at 001 when the year moves FORWARD
+     * and refuses to restart when it moves backwards — a backdated document,
+     * or a container whose clock is wrong, must not walk back through numbers
+     * that have already been issued.
+     */
+    const nextNumber = nextSequenceForYear(
+      settings.invoiceSequenceYear ?? year,
+      current,
+      year,
+    );
     const updated = await db
       .update(billingSettings)
-      .set({ invoiceSequence: next, updatedAt: new Date().toISOString() })
+      .set({
+        invoiceSequence: nextNumber.sequence,
+        invoiceSequenceYear: nextNumber.year,
+        updatedAt: new Date().toISOString(),
+      })
       .where(
         and(
           eq(billingSettings.organisationId, organisationId),
@@ -164,7 +189,11 @@ export async function issueInvoiceNumber(
       )
       .returning({ sequence: billingSettings.invoiceSequence });
     if (updated.length > 0) {
-      return formatInvoiceNumber(settings.invoiceNumberPrefix, next);
+      return formatInvoiceNumber(
+        settings.invoiceNumberPrefix,
+        nextNumber.year,
+        nextNumber.sequence,
+      );
     }
   }
   throw new Error("An invoice number could not be issued; the counter is contended.");

@@ -29,6 +29,7 @@
 import { auditActor, recordAudit } from "../../../../../lib/audit";
 import { REPORT_CAPABILITIES, type ReportOperation } from "../../../../../lib/reporting/access";
 import { draftWarnings, finalisationBlockers } from "../../../../../lib/reporting/blockers";
+import { loadWaivedIssueKeys } from "../../../../../lib/reporting/waiver-repository";
 import type { InvoiceStatus } from "../../../../../lib/reporting/contract";
 import {
   documentPayload,
@@ -79,6 +80,8 @@ export async function POST(
     const guarded = await guard(request, REPORT_CAPABILITIES[ACTION_OPERATION[action]]);
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
+    /* Waived data issues stop being blockers; a revoked waiver puts the block back. */
+    const waivedIssueKeys = await loadWaivedIssueKeys(scope.db, scope.orgId, id);
 
     const invoice = await readInvoice(scope.db, scope.orgId, id);
     if (!invoice) return notFound();
@@ -146,7 +149,7 @@ export async function POST(
       return Response.json({
         status,
         payload,
-        blockers: finalisationBlockers({ payload, confirmedPartialPeriod: false, requireApproval: true }),
+        blockers: finalisationBlockers({ waivedIssueKeys, payload, confirmedPartialPeriod: false, requireApproval: true }),
         warnings: draftWarnings(payload),
       });
     }
@@ -195,6 +198,7 @@ export async function POST(
         status: to,
         payload: settled,
         blockers: finalisationBlockers({
+          waivedIssueKeys,
           payload: settled,
           confirmedPartialPeriod: false,
           requireApproval: true,
@@ -205,6 +209,7 @@ export async function POST(
 
     /* finalise */
     const blockers = finalisationBlockers({
+          waivedIssueKeys,
       payload,
       confirmedPartialPeriod: Boolean(body.confirmPartialPeriod),
       requireApproval: true,
