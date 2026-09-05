@@ -47,13 +47,23 @@ const expiryUrl = asModule(
 const metersUrl = asModule(
   transpile(await read("app/(app)/portal/dashboard-meters.ts")),
 );
+/*
+ * The record-type vocabulary. `calendar-model.ts` reads it to colour a manual
+ * chip and to decide that an expired certificate is overdue while a note in
+ * the past is merely past, so this suite — which imports the shipped model
+ * rather than re-implementing it — has to resolve it like the other three.
+ */
+const itemTypesUrl = asModule(
+  transpile(await read("app/(app)/portal/calendar-item-types.ts")),
+);
 
 const calendar = await import(
   asModule(
     transpile(await read("app/(app)/portal/calendar-model.ts"))
       .replace(/from ["']\.\.\/\.\.\/lib\/format-date["']/g, `from "${formatDateUrl}"`)
       .replace(/from ["']\.\.\/\.\.\/lib\/expiry-status["']/g, `from "${expiryUrl}"`)
-      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`),
+      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`)
+      .replace(/from ["']\.\/calendar-item-types["']/g, `from "${itemTypesUrl}"`),
   )
 );
 
