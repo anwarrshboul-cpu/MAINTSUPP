@@ -98,11 +98,21 @@ export function DocumentThumbnail({
   return (
     <span className={`${className} has-thumb`}>
       {/*
-        eslint-disable-next-line @next/next/no-img-element — `next/image` would
-        proxy these through the image optimiser, which means a second service
-        holding an authenticated, per-organisation URL and caching what it gets
-        back. The bytes are private to a workspace; they are served by one
-        authorised route and they stay on it.
+        WHY A PLAIN <img> AND NOT `next/image`.
+
+        `next/image` would proxy these through the image optimiser, which means
+        a second service holding an authenticated, per-organisation URL and
+        caching what it gets back. The bytes are private to a workspace; they
+        are served by one authorised route and they stay on it.
+
+        This paragraph is deliberately NOT an eslint directive. It used to begin
+        `eslint-disable-next-line @next/next/no-img-element — …`, and ESLint
+        reads everything after the rule name as more comma-separated RULE NAMES
+        — across line breaks. So "`next/image` would proxy these through the
+        image optimiser", "which means a second service holding an
+        authenticated" and "per-organisation URL and caching what it gets"
+        were each reported as an unknown rule: three errors in the baseline,
+        from an explanation. The working directive is the one line below.
       */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
