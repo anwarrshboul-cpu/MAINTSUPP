@@ -70,7 +70,7 @@ import type { BankHolidayCalendar } from "./bank-holidays";
 import type { IsoDate, SlaOutcomeRow, SlaResult } from "./contract";
 import type { ReportHold, ReportJob, ReportSlaRule } from "./inputs";
 import { isCompletedJob, isProjectJob } from "./job-classification";
-import { workingDaysInclusive } from "./period";
+import { workingDaysAfterRequest, workingDaysInclusive } from "./period";
 
 /**
  * The reasons a job is left out of the measurement.
@@ -242,8 +242,14 @@ export function computeSlaOutcome(
   if (!job.completedOn) return excluded(SLA_EXCLUSION.completedWithoutDate);
   if (job.completedOn < job.requestedOn) return excluded(SLA_EXCLUSION.invalidSequence);
 
-  // One calendar for both halves of the subtraction — see the header.
-  const elapsed = workingDaysInclusive(job.requestedOn, job.completedOn, holidays);
+  /*
+   * One calendar for both halves of the subtraction — see the header — and the
+   * ELAPSED half starts the day AFTER the request (Module 4 §4.2). The HELD
+   * half stays inclusive of its own ends, because every day a hold covers is a
+   * day the clock was stopped. The two rules are different on purpose;
+   * `workingDaysAfterRequest` in `period.ts` explains why.
+   */
+  const elapsed = workingDaysAfterRequest(job.requestedOn, job.completedOn, holidays);
   const held = approvedHoldDays(holds, job.requestedOn, job.completedOn, holidays);
   // Never below zero. A hold cannot make a job take negative time, and a
   // clamped hold that still overshoots is a data-quality finding, not a
@@ -293,7 +299,9 @@ export function openJobDaysPastTarget(
 ): { workingDaysOpen: number | null; daysPastTarget: number | null; targetOn: IsoDate | null } {
   if (!job.requestedOn) return { workingDaysOpen: null, daysPastTarget: null, targetOn: job.targetOn };
   const end = asOf > job.requestedOn ? asOf : job.requestedOn;
-  const elapsed = workingDaysInclusive(job.requestedOn, end, holidays);
+  /* Same rule as a completed job, so "3 days past target" on the open list and
+     "outside SLA by 3 days" once it closes remain the same three days. */
+  const elapsed = workingDaysAfterRequest(job.requestedOn, end, holidays);
   const held = approvedHoldDays(holds, job.requestedOn, end, holidays);
   const open = Math.max(0, elapsed - held);
   const rule = ruleFor(rules, job.classification);

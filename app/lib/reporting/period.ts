@@ -207,6 +207,43 @@ export function workingDaysInclusive(
   return count;
 }
 
+/**
+ * WORKING DAYS ELAPSED ON A JOB — the day AFTER the request, to completion.
+ *
+ * Module 4 §4.2: "counted from the day after the request to the day of
+ * completion inclusive". The owner confirmed that reading on 2026-09-05, and
+ * this function is where it lives.
+ *
+ * ── WHY THIS IS NOT `workingDaysInclusive` WITH A SHIFTED ARGUMENT ─────────
+ *
+ * It is exactly that, and it is named anyway. The distinction it encodes is a
+ * commercial one that a reader of a call site cannot see in `addDays(x, 1)`:
+ * the day a job is REPORTED is not a day the contractor had to fix it. A job
+ * raised at 16:55 on Monday and closed on Tuesday took one working day, not
+ * two, and the agreement is written in those terms.
+ *
+ * A hold's own span is measured differently and deliberately so — see
+ * `holdWorkingDays` in `sla.ts`. A hold running Monday to Wednesday removes
+ * three days, inclusive of both ends, because every one of those days is a day
+ * the clock was stopped. Only the ELAPSED measurement drops its first day.
+ *
+ * ── SAME-DAY WORK IS ZERO, NOT ONE ────────────────────────────────────────
+ *
+ * A job raised and completed on the same day returns 0 under this rule, where
+ * the old inclusive count returned 1. That is the intended consequence: it was
+ * fixed inside the day it was reported, and against a two-working-day target
+ * zero is the honest number. Every SLA outcome therefore reads one day lower
+ * than it did before, which is why finalised documents are served from their
+ * snapshots and never recomputed — see `documents.ts`.
+ */
+export function workingDaysAfterRequest(
+  requestedOn: IsoDate,
+  completedOn: IsoDate,
+  holidays?: ReadonlySet<string> | null,
+): number {
+  return workingDaysInclusive(addDays(requestedOn, 1), completedOn, holidays);
+}
+
 /** Whether the range is exactly one whole calendar month. */
 export function isWholeCalendarMonth(start: IsoDate, end: IsoDate): boolean {
   return start === startOfMonth(start) && end === endOfMonth(start) && start.slice(0, 7) === end.slice(0, 7);

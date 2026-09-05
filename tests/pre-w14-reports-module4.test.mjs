@@ -291,19 +291,25 @@ test("computeSlaOutcome measures elapsed and held against the SAME calendar", ()
    * hold is two days either way — which is what makes the elapsed figure the
    * only thing the calendar moves, and the comparison honest.
    *
-   *   without the calendar: elapsed 9, held 2, adjusted 7 — target 5 -> Outside
-   *   with the calendar:    elapsed 7, held 2, adjusted 5 — target 5 -> Within
+   * RE-POINTED for the working-day rule confirmed on 2026-09-05: elapsed now
+   * counts FROM THE DAY AFTER the request (Module 4 §4.2), so every elapsed
+   * figure here is one lower. The HOLD is unchanged at two days, which is the
+   * point worth keeping — the two measurements follow different rules on
+   * purpose, and this test is where that would show if somebody unified them.
+   *
+   *   without the calendar: elapsed 8, held 2, adjusted 6 — target 5 -> Outside
+   *   with the calendar:    elapsed 6, held 2, adjusted 4 — target 5 -> Within
    */
   const plain = sla.computeSlaOutcome(job(), [hold()], RULES);
-  assert.equal(plain.elapsedWorkingDays, 9);
+  assert.equal(plain.elapsedWorkingDays, 8);
   assert.equal(plain.approvedHoldDays, 2);
-  assert.equal(plain.adjustedWorkingDays, 7);
+  assert.equal(plain.adjustedWorkingDays, 6);
   assert.equal(plain.result, "Outside");
 
   const measured = sla.computeSlaOutcome(job(), [hold()], RULES, CALENDAR);
-  assert.equal(measured.elapsedWorkingDays, 7, "Christmas Day and the substitute Monday come out");
+  assert.equal(measured.elapsedWorkingDays, 6, "Christmas Day and the substitute Monday come out");
   assert.equal(measured.approvedHoldDays, 2, "the hold spans no holiday, so it is unchanged");
-  assert.equal(measured.adjustedWorkingDays, 5);
+  assert.equal(measured.adjustedWorkingDays, 4);
   assert.equal(measured.result, "Within", "the same job, judged differently, only because of the calendar");
 
   /* All three are still returned, on both paths. §10 requires elapsed, held and
@@ -338,10 +344,16 @@ test("an open job's days past target use the calendar too", () => {
   const open = job({ status: "In progress", stage: "In progress", completedOn: null });
   const plain = sla.openJobDaysPastTarget(open, [], RULES, "2026-12-31");
   const measured = sla.openJobDaysPastTarget(open, [], RULES, "2026-12-31", CALENDAR);
-  assert.equal(plain.workingDaysOpen, 9);
-  assert.equal(plain.daysPastTarget, 4);
-  assert.equal(measured.workingDaysOpen, 7);
-  assert.equal(measured.daysPastTarget, 2, "or the open list and the closed table disagree by two days");
+  /*
+   * One lower on both paths, for the same reason as the completed job above:
+   * an OPEN job's age is measured by the same rule, or "3 days past target" on
+   * the open list and "outside SLA by 3 days" once it closes would not be the
+   * same three days.
+   */
+  assert.equal(plain.workingDaysOpen, 8);
+  assert.equal(plain.daysPastTarget, 3);
+  assert.equal(measured.workingDaysOpen, 6);
+  assert.equal(measured.daysPastTarget, 1, "or the open list and the closed table disagree by two days");
 });
 
 test("sla.ts and period.ts stay importable without the calendar module", () => {

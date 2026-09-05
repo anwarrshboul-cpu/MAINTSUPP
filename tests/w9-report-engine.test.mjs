@@ -677,15 +677,21 @@ const PLUMBING_RULE = {
 };
 
 test("a completed job inside its target is Within, outside it is Outside", () => {
-  // 2026-03-02 Monday to 2026-03-06 Friday is five working days.
+  /*
+   * RE-POINTED for the working-day rule the owner confirmed on 2026-09-05:
+   * Module 4 §4.2 counts FROM THE DAY AFTER the request. 2026-03-02 Monday to
+   * 2026-03-06 Friday is therefore Tue–Fri = FOUR working days, where the old
+   * inclusive count made it five. Every number below is one lower for that one
+   * reason; nothing else about the measurement changed.
+   */
   const within = sla.computeSlaOutcome(
     job({ status: "Job Completed", stage: "Completed", requestedOn: "2026-03-02", completedOn: "2026-03-06" }),
     [],
     [PLUMBING_RULE],
   );
   assert.equal(within.result, "Within");
-  assert.equal(within.elapsedWorkingDays, 5);
-  assert.equal(within.adjustedWorkingDays, 5);
+  assert.equal(within.elapsedWorkingDays, 4, "Tue, Wed, Thu, Fri — the Monday it was raised is not owed");
+  assert.equal(within.adjustedWorkingDays, 4);
   assert.equal(within.targetWorkingDays, 5);
 
   const outside = sla.computeSlaOutcome(
@@ -694,7 +700,7 @@ test("a completed job inside its target is Within, outside it is Outside", () =>
     [PLUMBING_RULE],
   );
   assert.equal(outside.result, "Outside");
-  assert.equal(outside.elapsedWorkingDays, 8);
+  assert.equal(outside.elapsedWorkingDays, 7, "Tue 3rd through Wed 11th, weekends excluded");
 });
 
 test("only APPROVED holds reduce the measured duration", () => {
@@ -726,8 +732,13 @@ test("only APPROVED holds reduce the measured duration", () => {
     [{ ...hold, approved: true, approvedBy: "ops@example.com", approvedAt: "2026-03-07" }],
     [PLUMBING_RULE],
   );
+  /*
+   * The hold is UNCHANGED at three days. A hold's own span stays inclusive of
+   * both its ends — every day it covers is a day the clock was stopped — so
+   * only the elapsed side moved. 7 − 3 = 4.
+   */
   assert.equal(approved.approvedHoldDays, 3, "Wed, Thu, Fri");
-  assert.equal(approved.adjustedWorkingDays, 5);
+  assert.equal(approved.adjustedWorkingDays, 4);
   assert.equal(approved.result, "Within");
 });
 

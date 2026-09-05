@@ -123,16 +123,38 @@ store prefixed. Both guards fail closed and neither can satisfy the other.
 
 ## Open questions for the owner
 
-### A. Working days: "from the day after the request", or from the request?
+### A. Working days — DECIDED 2026-09-05, and implemented
 
-Module 4 §4.2 says working days are counted "from the day after the request to
-the day of completion inclusive". The shipped `sla.ts` counts from `requestedOn`
-INCLUSIVE — one day more on every job.
+The owner confirmed Module 4 §4.2 exactly: working days run **from the day
+AFTER the request** to the completion date inclusive, excluding Saturdays,
+Sundays and England & Wales bank holidays from `bank_holidays`.
 
-This was **not changed**, deliberately. Changing it moves every SLA figure the
-product has ever produced, including those in documents already sent, and breaks
-pins in `w9-report-engine`. It needs a decision, not a patch, and the decision
-belongs to whoever agreed the term with the client.
+`workingDaysAfterRequest` in `app/lib/reporting/period.ts` is the rule.
+`computeSlaOutcome` and `openJobDaysPastTarget` both use it, so the open list
+and the closed table cannot disagree about the same days.
+
+**A hold's own span was NOT changed** and the asymmetry is deliberate: a hold
+running Monday to Wednesday still removes three days, inclusive of both ends,
+because every day it covers is a day the clock was stopped. Only the ELAPSED
+measurement drops its first day. A test asserts both halves so that unifying
+them would fail loudly.
+
+Two consequences worth stating plainly:
+
+- **Same-day work is now zero working days, not one.** Raised and closed on
+  Monday, against a two-day target, is zero — which is the honest number.
+- **Every new SLA figure is one working day lower** than the same job would have
+  produced yesterday.
+
+**No historical figure moved, and that is structural rather than a promise.**
+`documentPayload` in `documents.ts` branches on `Finalised`/`Voided` BEFORE it
+recomputes anything, serves the stored `report_snapshots` payload, and has no
+path from a snapshot failure back to a recomputation. Two tests pin that
+ordering, and a third was added to `pre-w14-working-days.test.mjs` for this
+change specifically.
+
+Four existing expectations in `w9-report-engine` and `pre-w14-reports-module4`
+were re-pointed by exactly one day each, with the reason written in.
 
 ### B. Sub-daily job reminders
 
