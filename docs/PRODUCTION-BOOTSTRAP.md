@@ -224,6 +224,41 @@ deploy. Confirm afterwards in Vercel → project → Cron Jobs that the job is l
 
 ---
 
+## 6b. Reading a pooler auth failure (this one message is a trap)
+
+The first Production deployment (`e0c644d`, 2026-09-05) came up with every static
+route at 200 and **`/login` and `/api/context` at 500**. The runtime log said:
+
+```
+[node-pg-d1] serving aws-0-eu-west-2.pooler.supabase.com:5432/postgres (search_path=portal, pg_catalog)
+PostgresError: password authentication failed for user "postgres"   code: 28P01
+```
+
+**`user "postgres"` does not mean the username is wrong.** Supavisor strips the
+`.<project-ref>` suffix when it reports 28P01, so a perfectly correct
+`postgres.<ref>` login prints as `postgres`. Chasing the username here wastes an
+hour. Probe the pooler directly instead — three wrong-password attempts tell the
+three cases apart unambiguously:
+
+| Username used | Error returned | Means |
+| --- | --- | --- |
+| `postgres` (bare) | `XX000 (ENOIDENTIFIER) no tenant identifier provided` | username really is missing the `.<ref>` suffix |
+| `postgres.<wrong-ref>` | `XX000 (ENOTFOUND) tenant/user … not found` | the project ref is wrong |
+| `postgres.<right-ref>` | **`28P01 password authentication failed for user "postgres"`** | ref and username are right — **the password is wrong** |
+
+So 28P01 is the *good* failure: it proves host, port, database, ref and username
+are all correct and isolates the fault to the password alone.
+
+**The usual cause is URL encoding, not a typo.** The connection string is a URI,
+so a password containing `@ : / ? # % &` must be percent-encoded or the parser
+splits the string in the wrong place. The reliable fix is to reset the database
+password to a long alphanumeric value (Settings → Database → Reset password) and
+paste the dashboard's own **Session pooler** string, which then needs no
+escaping. Changing the variable is not enough on its own — Vercel bakes
+environment values in at build time, so **redeploy** afterwards.
+
+---
+
 ## 7. Production smoke test, when you get there
 
 ```
