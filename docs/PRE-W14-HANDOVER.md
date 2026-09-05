@@ -172,3 +172,56 @@ That is a recorded owner decision about the Reports section specifically, and
 reversing it is the owner's call, not a developer's. Reports remain
 store-and-download. The rule does not extend to the calendar, which already
 ships a compliance digest.
+
+---
+
+## 7. This pass's Preview
+
+| | |
+| --- | --- |
+| Deployment | `https://maintsupp-portal-ijea0jfnt-maintsupp.vercel.app` |
+| Stable alias | `https://maintsupp-preview.vercel.app` |
+| Target | `preview` — confirmed with `vercel inspect` |
+| Commit | `60b7b1a` on `feat/owner-polish-pass` |
+
+`scripts/update-preview-alias.sh` printed a warning that `maintsupp-portal` now
+reports a production URL of `https://maintsupp.com`. **That is not this pass.**
+The project's Production deployments are 4–6 hours older than this Preview and
+were made by the account owner; `vercel inspect` reports this deployment's
+target as `preview`, and it does not appear in `vercel ls --prod`. The warning
+is the script doing its job — it fires on the project's state, not on what the
+alias assignment did — and it is worth reading each time.
+
+**What was verified on the deployed Preview, and what was not.** `/`, `/login`,
+`/request` and `/contractors` all answer 200, and the landing page's new mobile
+contact row was checked on the deployed site at 320 / 360 / 380 / 390 / 430 with
+no horizontal overflow. The AUTHENTICATED surfaces — the phone board's sticky
+header, the Form editor, the Calendar type chooser, the Reports tabs — were
+verified against localhost only. The Staging owner password is not in this
+checkout (`maintsupp-preview-CLIENT-LOGIN.txt` is absent) and the documented dev
+credential is rejected by Staging, so signing in would have meant asking for a
+secret. The deployed artifact is the same build that was verified locally, but
+that is an inference, not an observation, and it is recorded here as one.
+
+---
+
+## 8. Two environment traps that cost time, for whoever is next
+
+**The board remembers a landing view per user per section, server-side.** After
+a full test-suite run this account's `maintenance` section was remembered as
+`fix-tracker`, and that preference restores roughly six seconds after mount —
+long enough that a browser check can select Main table, measure, and be
+overruled. Every geometric assertion then reads `0` against a `display: none`
+ancestor and PASSES vacuously, while the one honest assertion fails with a
+baffling message. Reset it with
+`PUT /api/workspace-sections/view {section, view:"main", scope:"user"}` before
+measuring the grid, and make any such check refuse to run when the scroller is
+hidden.
+
+**`core.autocrlf=true` makes a class of source-pinning tests fail on this
+machine regardless of the change.** Tests whose regexes contain a bare newline
+match zero times against files git has rewritten to CRLF, and fail with an empty
+capture rather than an encoding error. Diagnose by checking the same file in a
+baseline worktree — if it is CRLF there too, the failure is the machine. This is
+most of the difference between the historical ~27 failing names and the ~60 seen
+in a full run today.
