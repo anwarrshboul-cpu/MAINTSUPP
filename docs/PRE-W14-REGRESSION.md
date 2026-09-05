@@ -4,9 +4,22 @@ Measured 2026-09-05 at the head of `feat/owner-polish-pass`, against a quiet
 tree with one dev server and nothing else running.
 
 ```
-full suite at HEAD          2720 tests   2444 pass   63 fail   213 skipped
+full suite at HEAD, run 1   2720 tests   2444 pass   63 fail   213 skipped
+full suite at HEAD, run 2   2722 tests   2451 pass   75 fail   196 skipped
 the same 38 files at 67e02f3  576 tests    466 pass   64 fail    46 skipped
 ```
+
+**THE COUNT IS NOT STABLE, AND THAT IS THE FINDING.** Two runs of the same
+commit, minutes apart on a quiet tree, differ by twelve — and the difference is
+almost entirely which live tests ran rather than skipped (213 skipped against
+196). Reporting either number as "the failure count" would be inventing a
+precision the suite does not have. CLAUDE.md says as much: compare by NAME,
+never by count.
+
+Twenty-four names differ between the two runs. Eighteen are `live:`. The six
+that are not were re-run alone, and **three of them passed while three
+different ones failed** — with individual tests taking 7 to 28 seconds. A
+failing set that rotates under re-run is not a defect; it is contention.
 
 **HEAD fails one fewer than the baseline it is compared against.** The point of
 the comparison is not the count, though — it is which names move.
