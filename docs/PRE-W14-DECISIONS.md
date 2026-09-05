@@ -119,6 +119,50 @@ Verified independently of the seeding code: all nineteen §3.3 boundary offsets
 exact, byte-identical across two runs, no address outside `@example.com`, every
 store prefixed. Both guards fail closed and neither can satisfy the other.
 
+## 8. Marking a database, and why it is created empty
+
+The seed and purge guards want two independent facts: a deployment marker from
+the platform's variables, and an answer from the DATABASE. On Supabase the
+second is unavailable — `current_database()` is `postgres`, the schema is
+`portal`, and the project reference is opaque — so a Staging connection and a
+Production connection are indistinguishable over the wire.
+
+`deployment_marker` is that missing answer. It carries no seed and no default:
+an unmarked database stays unidentifiable, and the guard treats unidentifiable
+as production and refuses. Marking one is a deliberate act performed against
+that database, which is what keeps it a genuinely second factor rather than a
+second reading of the same variable.
+
+**Never seed it.** A default would mark Production safe on its first boot, which
+is the one outcome the guard exists to prevent.
+
+Consequence, stated plainly: **Preview seeding is refused until somebody marks
+the Staging database.** That is the design working, not a defect. One row does
+it:
+
+```sql
+insert into portal.deployment_marker (id, environment, note, set_by)
+values ('staging', 'staging', 'MAINTSUPP Staging — safe for seed and purge', 'owner');
+```
+
+A direct write to Staging was attempted from this session and refused by the
+permission layer, so it remains an owner action.
+
+## 9. Reducing lint debt without refactoring
+
+Six of nineteen lint errors were not findings. Three were an EXPLANATION:
+`document-thumbnail.tsx` carried a multi-line `eslint-disable-next-line` and
+ESLint reads everything after the rule name as more comma-separated rule names,
+across line breaks — so three sentences of prose were reported as unknown rules.
+Three were React rules applied to `db/**`, which contains no React: the hooks
+rule decides what a hook is from the NAME, and the database layer has
+`usePostgres` and `usePreparedStatements`.
+
+The remaining 13 are recorded as BASELINE DEBT rather than fixed. They are
+React-compiler findings about setState inside effects, one impure call during
+render and one skipped memoization, across seven portal components — behavioural
+changes, and the owner asked that broad refactors not be chased before W14.
+
 ---
 
 ## Open questions for the owner
