@@ -326,9 +326,20 @@ test("the recycle bin is a portal section, not only a menu item", () => {
   assert.match(portal, /"recycle-bin": \{\s*\n\s*label: "Recycle Bin"/, "and is labelled");
   assert.match(portal, /"recycle-bin": "recycle-bin",/, "and has a route");
   assert.match(portal, /activeSurface === "recycle-bin" && <RecycleBinSection/, "and renders");
+  /*
+   * RE-POINTED, not relaxed. The property being protected is that the bin is
+   * placed in the administration cluster beside the audit trail and ENDS the
+   * catalogue, rather than being left to fall through — which is exactly what
+   * it did on the day it was added.
+   *
+   * Pre-W14 put `"reconcile"` between the two, for the same reason both of
+   * them are there: it is the third screen somebody opens when a number looks
+   * wrong. So siblings are now allowed between `"audit"` and the bin, and the
+   * bin must still be last.
+   */
   assert.match(
     portal,
-    /"audit",\s*\n(?:\s*\/\/[^\n]*\n)*\s*"recycle-bin",\s*\n\];/,
+    /"audit",[\s\S]{0,400}?"recycle-bin",\s*\n\];/,
     "and is placed in the sidebar rather than left to fall through",
   );
 });

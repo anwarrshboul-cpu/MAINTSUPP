@@ -30,6 +30,7 @@ const routes: Record<string, Section> = {
   team: "team",
   admin: "admin-users",
   audit: "audit",
+  reconcile: "reconcile",
   "recycle-bin": "recycle-bin",
   "admin/roles": "admin-roles",
   "admin/clients": "admin-clients",
