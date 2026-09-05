@@ -114,7 +114,16 @@ function useGroupUnderHeader(
    * every scroll frame it caused.
    */
   const idsRef = useRef(groupIds);
-  idsRef.current = groupIds;
+  /*
+   * Kept current in an effect rather than during render, for the same reason
+   * as the viewer's `onCloseRef`: a ref written while rendering is a side
+   * effect in a function React may call more than once. `measure` only ever
+   * runs from a scroll handler or an effect — after paint — so it never reads
+   * a list one render out of date.
+   */
+  useEffect(() => {
+    idsRef.current = groupIds;
+  });
 
   const measure = useCallback(() => {
     const row = rowRef.current;

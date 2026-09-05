@@ -290,7 +290,17 @@ export function MediaViewer({
    * arrow function every render.
    */
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  /*
+   * Refreshed in an effect, not during render. Assigning to a ref while
+   * rendering is a side effect in a function React may call more than once, and
+   * the compiler lint says so. Seeded by `useRef(onClose)` above, so the value
+   * is already correct on the mount pass that the history effect below reads
+   * it on; this only keeps it current afterwards. No dependency array — the
+   * point is to run after EVERY render.
+   */
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
   const mediaRef = useRef<HTMLElement | null>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef({
