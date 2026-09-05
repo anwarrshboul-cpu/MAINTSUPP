@@ -29,7 +29,10 @@ import { useEffect, useMemo } from "react";
 import type { BoardView } from "./board-view-types";
 import { Icon } from "../../components";
 import { OperationsCalendarPanel } from "./calendar-surface";
-import type { CalendarWriteTarget } from "./calendar-model";
+import type {
+  CalendarJobDateField,
+  CalendarWriteTarget,
+} from "./calendar-model";
 import type { MaintenanceRequest } from "../../lib/types";
 import type { WorkspaceSnapshot } from "../../lib/workspace-data";
 import {
@@ -85,7 +88,7 @@ export type BoardCalendarWiring = {
   /** The audited write path for a job's own date field. */
   onJobDateChange?: (
     id: string,
-    field: "dueAt" | "requestedAt" | "completedAt" | "nextUpdateAt",
+    field: CalendarJobDateField,
     day: string | null,
   ) => Promise<void>;
   /** The audited write path for a certificate expiry. */

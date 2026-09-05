@@ -36,6 +36,40 @@ export function optionalIsoDate(value: unknown): string | null | undefined {
 }
 
 /**
+ * A plain calendar DAY, `null` to clear, or `undefined` when unreadable.
+ *
+ * Deliberately NOT `optionalIsoDate`. That one turns a date into a UTC instant,
+ * which is right for `requested_at` and `due_at` — moments something happened
+ * or must happen by — and wrong for a scheduled visit. A visit booked for the
+ * twentieth is the twentieth; storing it as `2026-09-20T00:00:00.000Z` makes it
+ * the nineteenth for a reader west of Greenwich, and the calendar draws its
+ * chip on the wrong cell. `app/lib/reporting/period.ts` makes the same
+ * distinction at length for the same reason.
+ *
+ * So this accepts `YYYY-MM-DD` and takes the leading ten characters of a longer
+ * stamp rather than parsing it, because the stamp names one calendar day and no
+ * timezone is consulted to find out which.
+ */
+export function optionalIsoDay(value: unknown): string | null | undefined {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") return undefined;
+  const day = value.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
+  /* Reject 2026-13-40 rather than storing it. */
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString().slice(0, 10) === day ? day : undefined;
+}
+
+/** `HH:MM`, `null` to clear, or `undefined` when unreadable. */
+export function optionalClockTime(value: unknown): string | null | undefined {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") return undefined;
+  const time = value.trim().slice(0, 5);
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : undefined;
+}
+
+/**
  * Turns a caller's `fields` into column values. Unknown keys are ignored;
  * malformed values are dropped rather than rejected, exactly as the route has
  * always behaved. `updatedAt` is the caller's to set.
@@ -149,6 +183,26 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
     }
   }
 
+  /*
+   * The scheduling fields, as calendar DAYS.
+   *
+   * These are the hybrid visit model's storage: a planned visit attached to a
+   * job keeps its schedule HERE, on the job, and the calendar renders it from
+   * this rather than from a second row. Without this loop the route accepted
+   * `scheduledDate`, answered 200 and stored nothing — which is worse than
+   * refusing, because the caller is told it worked.
+   */
+  for (const key of ["scheduledDate", "targetCompletionDate"] as const) {
+    if (!(key in fields)) continue;
+    const value = optionalIsoDay(fields[key]);
+    if (value === undefined) continue;
+    values[key] = value;
+  }
+  if ("scheduledTime" in fields) {
+    const value = optionalClockTime(fields.scheduledTime);
+    if (value !== undefined) values.scheduledTime = value;
+  }
+
   return values;
 }
 
@@ -228,6 +282,15 @@ export function invalidRequestFields(fields: Record<string, unknown>): string[] 
     if (has(key) && optionalIsoDate(fields[key]) === undefined) {
       note(key, "a date, or null to clear it");
     }
+  }
+
+  for (const key of ["scheduledDate", "targetCompletionDate"]) {
+    if (has(key) && optionalIsoDay(fields[key]) === undefined) {
+      note(key, "a calendar day as YYYY-MM-DD, or null to clear it");
+    }
+  }
+  if (has("scheduledTime") && optionalClockTime(fields.scheduledTime) === undefined) {
+    note("scheduledTime", "a time as HH:MM, or null to clear it");
   }
 
   if (has("parentId") && typeof fields.parentId !== "string" && fields.parentId !== null) {

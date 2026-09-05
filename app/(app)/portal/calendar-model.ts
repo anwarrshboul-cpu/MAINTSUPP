@@ -381,6 +381,30 @@ export type CalendarDateSource = {
  */
 export const CALENDAR_DATE_SOURCES: readonly CalendarDateSource[] = [
   {
+    /*
+     * THE PRIMARY ANCHOR, and the one this calendar was missing.
+     *
+     * Module 2 §3 is a table of which job date drives which mark, and its first
+     * row is "Scheduled / booked date — primary anchor, this is what appears by
+     * default". Until `scheduled_date` existed the calendar had no column for
+     * it, so a job that had actually been BOOKED for a day drew no chip on that
+     * day; the four marks it did draw were a due date, a raised date, a
+     * completion and a promised update — none of which is "somebody is coming
+     * on Tuesday".
+     *
+     * `defaultOn` because a coordinator opens this screen to see what is
+     * booked. It joins Due Date and Certificate expiry as the third layer that
+     * is on before anybody chooses, which is the point of the whole module.
+     */
+    id: "job:scheduledDate",
+    entity: "job",
+    field: "scheduledDate",
+    label: "Scheduled visit",
+    description: "When somebody is booked to attend.",
+    defaultOn: true,
+    editable: true,
+  },
+  {
     id: "job:dueAt",
     entity: "job",
     field: "dueAt",
@@ -542,9 +566,15 @@ export function calendarDateSource(id: string): CalendarDateSource | null {
 }
 
 /** The job fields a source may name, narrowed for the write target. */
-type JobDateField = "dueAt" | "requestedAt" | "completedAt" | "nextUpdateAt";
+type JobDateField =
+  | "scheduledDate"
+  | "dueAt"
+  | "requestedAt"
+  | "completedAt"
+  | "nextUpdateAt";
 
 const JOB_DATE_FIELDS: readonly JobDateField[] = [
+  "scheduledDate",
   "dueAt",
   "requestedAt",
   "completedAt",
@@ -555,6 +585,13 @@ function jobDateValue(
   request: MaintenanceRequest,
   field: JobDateField,
 ): string | null {
+  /*
+   * `scheduled_date` is a plain calendar DAY (`2026-09-20`) while the other
+   * four are instants. `calendarDay` takes the leading ten characters of
+   * either, so both shapes land on the day they name and neither consults a
+   * timezone to find out which — the same rule `optionalIsoDay` applies on the
+   * way in.
+   */
   return request[field] ?? null;
 }
 
@@ -1467,8 +1504,33 @@ export function groupCalendarEventsByDay(
  * produce a dated event in the first place, so this is a guard rather than a
  * path anybody reaches.
  */
+/**
+ * The job date columns a calendar mark can be written back to.
+ *
+ * Exported and named because four files declared this union inline and a fifth
+ * value had to be added to all of them at once. A union spelled out in four
+ * places is a union that will be five in three of them.
+ */
+export type CalendarJobDateField =
+  | "scheduledDate"
+  | "dueAt"
+  | "requestedAt"
+  | "completedAt"
+  | "nextUpdateAt";
+
 export type CalendarWriteTarget =
-  | { path: "job"; id: string; field: "dueAt" | "requestedAt" | "completedAt" | "nextUpdateAt" }
+  | {
+      path: "job";
+      id: string;
+      /*
+       * `scheduledDate` joins the four when the hybrid visit model arrived, and
+       * it is the one a drag most often means: moving a booked visit to another
+       * day writes the JOB's scheduled date, which is what
+       * `planned-visit.ts:visitScheduleTarget` decides and what stops the
+       * calendar and the job record disagreeing about when somebody is coming.
+       */
+      field: CalendarJobDateField;
+    }
   /**
    * W11 — a manual item moved.
    *

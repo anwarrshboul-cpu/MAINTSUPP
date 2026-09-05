@@ -603,14 +603,36 @@ test("the three unmapped statuses are genuinely absent from job_status_map", asy
     label: match[1],
     countsAsOpen: match[2] === "1",
   }));
-  assert.equal(mapped.length, 12, "the default map holds twelve statuses");
+  /*
+   * RE-POINTED from "exactly twelve" to "a subset whose meanings agree", and
+   * the reason is a real one rather than a convenience.
+   *
+   * The seed originally held Module 2 §4.2's twelve labels. Reading the live
+   * board afterwards showed seven more in use on 86 jobs — "Pending Approval"
+   * on 59 — so those were seeded too, and `JOB_STATUS_MAP_SEED` is now
+   * nineteen. The harness does not need to seed a job in every one of them.
+   *
+   * What it must never do is disagree about what a status MEANS: if
+   * `dataset.ts` thinks "On hold" counts as open and the application thinks it
+   * does not, `jobs_open` moves and the reconciliation is checking one bug
+   * against another. So the assertion is now: every status the harness uses
+   * exists in the map, and carries the same `countsAsOpen` there. Nothing is
+   * weakened — the drift this test was written to catch still fails it.
+   */
+  assert.ok(mapped.length >= 12, "the default map must still hold at least §4.2's twelve");
 
-  /* The harness's own copy must be the map, or every open/closed count is wrong. */
-  assert.deepEqual(
-    built.jobStatusCatalogue.mapped.map((entry) => [entry.label, entry.countsAsOpen]),
-    mapped.map((entry) => [entry.label, entry.countsAsOpen]),
-    "app/lib/seed/dataset.ts keeps its own copy of the status map on purpose — the harness must be able to disagree with the application — but it has drifted, and a drift here silently moves jobs_open",
-  );
+  const meaning = new Map(mapped.map((entry) => [entry.label, entry.countsAsOpen]));
+  for (const entry of built.jobStatusCatalogue.mapped) {
+    assert.ok(
+      meaning.has(entry.label),
+      `the harness seeds "${entry.label}" but db/init.ts does not map it — a job seeded under an unmapped status silently joins the fallback fixtures`,
+    );
+    assert.equal(
+      entry.countsAsOpen,
+      meaning.get(entry.label),
+      `the harness and the application disagree about whether "${entry.label}" is open; a drift here silently moves jobs_open`,
+    );
+  }
 
   const labels = new Set(mapped.map((entry) => entry.label));
   for (const status of built.jobStatusCatalogue.unmapped) {

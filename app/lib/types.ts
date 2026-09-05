@@ -349,6 +349,22 @@ export interface MaintenanceRequest {
   dueAt: string | null;
   completedAt: string | null;
   nextUpdateAt: string | null;
+  /*
+   * When the visit is BOOKED for, as a calendar day and a wall-clock time.
+   *
+   * These are the hybrid planned-visit model's storage. A visit attached to a
+   * maintenance job keeps its schedule on the JOB — see
+   * `app/(app)/portal/planned-visit.ts` — so that the calendar renders one
+   * record rather than drifting between two.
+   *
+   * A DAY, not an instant, and the distinction is load-bearing: a visit booked
+   * for the twentieth is the twentieth, and storing it as a UTC midnight makes
+   * it the nineteenth for a reader west of Greenwich. `optionalIsoDay` in
+   * `request-fields.ts` is what keeps it a day on the way in.
+   */
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+  targetCompletionDate?: string | null;
   cost: number | null;
   approvedBy?: string | null;
   invoice?: string | null;

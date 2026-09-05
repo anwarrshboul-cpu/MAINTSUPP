@@ -1,0 +1,311 @@
+/*
+ * The job side panel's own chrome.
+ *
+ * TOKENS ONLY, and the reason is a defect this product has already paid for
+ * once: a pass that appended literal colours to a shared sheet made a screen
+ * legible in light and invisible in dark, and nothing caught it because a
+ * literal has no theme to be wrong in. Every surface, line and ink below is a
+ * custom property defined in BOTH themes.
+ *
+ * The one colour that is allowed to be a literal never appears in this file:
+ * the status colour comes from `job_status_map` and is written as an inline
+ * style by `jobChipCss`, because a value the database holds cannot be a token.
+ *
+ * TOUCH TARGETS ARE 44px. Every control here is one somebody uses standing in
+ * a store with a phone in one hand, which is the whole reason the panel exists
+ * beside the calendar rather than three taps away from it.
+ */
+
+.job-panel {
+  display: flex;
+  width: min(380px, 100%);
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-card);
+  color: var(--ink);
+}
+
+.job-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.job-panel__identity {
+  min-width: 0;
+}
+
+.job-panel__reference {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.job-panel__title {
+  margin: 2px 0 0;
+  font-size: 16px;
+  line-height: 1.3;
+  /* Wraps rather than truncates. A job title is how somebody recognises the
+     row they clicked, and an ellipsis on the calendar chip is already as much
+     truncation as one job should suffer. */
+  overflow-wrap: anywhere;
+}
+
+.job-panel__close {
+  display: grid;
+  min-width: 44px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card-lo);
+  color: var(--control-fg);
+  cursor: pointer;
+}
+
+.job-panel__close:hover {
+  background: var(--surface-hover);
+  color: var(--control-fg-strong);
+}
+
+/* ── The status line ─────────────────────────────────────────────────────── */
+
+.job-panel__status-line {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/*
+ * SQUARE, like the chip on the grid. §4.3 makes shape carry the record type so
+ * the distinction survives greyscale, and a panel that rounded the same status
+ * would teach the reader the opposite of what the calendar teaches them.
+ */
+.job-panel__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.job-panel__overdue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--red-600);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.job-panel__unmapped {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.job-panel__failure {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--red-600);
+  border-radius: 10px;
+  background: var(--red-100);
+  color: var(--red-600);
+  font-size: 12px;
+}
+
+/* ── The editable five ───────────────────────────────────────────────────── */
+
+.job-panel__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.job-panel__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.job-panel__field > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.job-panel__field select,
+.job-panel__field input {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-card-lo);
+  color: var(--ink);
+  /* 16px or iOS zooms the whole page on focus and will not zoom back. */
+  font-size: 16px;
+}
+
+.job-panel__field select:disabled,
+.job-panel__field input:disabled {
+  background: var(--surface-sunken);
+  color: var(--muted-2);
+  cursor: not-allowed;
+}
+
+.job-panel__sla {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  gap: 6px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card-lo);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Red only when the commitment has actually been missed — see `slaCountdown`,
+   which measures against the END of the deadline day and not its midnight. */
+.job-panel__sla.is-breached {
+  border-color: var(--red-600);
+  background: var(--red-100);
+  color: var(--red-600);
+  font-weight: 700;
+}
+
+/* ── Read-only context ───────────────────────────────────────────────────── */
+
+.job-panel__facts {
+  display: grid;
+  margin: 0;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.job-panel__facts dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.job-panel__facts dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.job-panel__description h3,
+.job-panel__certificates h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.job-panel__description p {
+  margin: 0;
+  /* Long enough to read, short enough that the schedule stays on screen. The
+     whole description is on the record, one button away. */
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.job-panel__certificates ul {
+  display: flex;
+  margin: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.job-panel__certificates button {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  /* ROUNDED, and a shield — a certificate is not a job, and §4.3 says the two
+     are told apart by shape and icon before they are told apart by colour. */
+  border-radius: 999px;
+  background: var(--surface-card-lo);
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.job-panel__certificates button:hover {
+  background: var(--surface-hover);
+}
+
+.job-panel__certificates em {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.job-panel__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.job-panel__foot .primary-button {
+  min-height: 44px;
+}
+
+.job-panel__foot p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/*
+ * On a phone the two-column grid puts a date input in about 140px, which is
+ * narrower than the native picker and clips it. One column instead.
+ */
+@media (max-width: 640px) {
+  .job-panel {
+    width: 100%;
+  }
+
+  .job-panel__grid,
+  .job-panel__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

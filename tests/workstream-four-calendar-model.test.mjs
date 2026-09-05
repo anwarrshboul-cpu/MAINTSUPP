@@ -493,7 +493,7 @@ test("a requirement that does not apply to a store puts nothing on the calendar"
 
 /* ── 5. Sources ──────────────────────────────────────────────────────────── */
 
-test("seven sources, four of them on by default", () => {
+test("eight sources, five of them on by default", () => {
   /*
    * RE-POINTED, NOT RELAXED. This was five and two. W10 added
    * `compliance:reminder` — the four advance warnings, derived from the same
@@ -508,12 +508,25 @@ test("seven sources, four of them on by default", () => {
    * this calendar and then could not see would be the worst possible outcome of
    * the feature.
    *
-   * The list is still exhaustive and still in picker order, so an eighth source
+   * PRE-W14 then added `job:scheduledDate` — the Scheduled visit layer — and
+   * put it FIRST, because Module 2 §3's own table opens with "Scheduled /
+   * booked date — primary anchor, this is what appears by default". Until
+   * `maintenance_requests.scheduled_date` existed there was no column for it,
+   * so a job that had actually been BOOKED for a day drew no chip on that day:
+   * the four job marks were a due date, a raised date, a completion and a
+   * promised update, none of which is "somebody is coming on Tuesday".
+   *
+   * On by default for the same reason the other three are: a coordinator opens
+   * this screen to see what is booked, and a layer nobody switched on is a
+   * layer nobody looks at.
+   *
+   * The list is still exhaustive and still in picker order, so a NINTH source
    * appearing without a decision still fails here.
    */
   assert.deepEqual(
     calendar.CALENDAR_DATE_SOURCES.map((source) => source.id),
     [
+      "job:scheduledDate",
       "job:dueAt",
       "job:requestedAt",
       "job:completedAt",
@@ -525,7 +538,17 @@ test("seven sources, four of them on by default", () => {
   );
   assert.deepEqual(
     [...calendar.DEFAULT_CALENDAR_SOURCE_IDS],
-    ["job:dueAt", "compliance:expiry", "compliance:reminder", "manual:item"],
+    [
+      "job:scheduledDate",
+      "job:dueAt",
+      "compliance:expiry",
+      "compliance:reminder",
+      "manual:item",
+    ],
+  );
+  assert.equal(
+    calendar.calendarDateSource("job:scheduledDate").label,
+    "Scheduled visit",
   );
   assert.equal(calendar.calendarDateSource("job:dueAt").label, "Due Date");
   assert.equal(

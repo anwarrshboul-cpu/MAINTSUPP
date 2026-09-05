@@ -147,7 +147,10 @@ import { chipInk } from "./chip-ink";
  * range, and the planned register underneath.
  */
 import { OperationsCalendarPanel } from "./calendar-surface";
-import type { CalendarWriteTarget } from "./calendar-model";
+import type {
+  CalendarJobDateField,
+  CalendarWriteTarget,
+} from "./calendar-model";
 import {
   awaitingApprovalStatuses,
   awaitingPartsStatuses,
@@ -201,6 +204,7 @@ import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
 import { AdminUsersView } from "./views/admin-users";
 import { AuditLog } from "./views/audit-log";
+import { ReconcilePanel } from "./views/reconcile-panel";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
 import { buildJobMeters, complianceTrend } from "./views/overview-series";
 import OverviewJobMeters from "./overview-job-meters";
@@ -281,6 +285,15 @@ export type Section =
    * reads.
    */
   | "audit"
+  /*
+   * The reconciliation harness. Preview only, and gated again on the server.
+   *
+   * Its whole value is that the numbers on it were computed by DIFFERENT code
+   * from the numbers the dashboard shows — see `app/lib/seed/expected.ts`. A
+   * screen that cannot be reached is a check nobody runs, which is how the
+   * audit log and the recycle bin were each lost before it.
+   */
+  | "reconcile"
   /*
    * The recycle bin, for the same reason and with a sharper edge. The bin, its
    * 30-day retention, its API and its screen all existed; the only route to
@@ -407,6 +420,12 @@ const sectionMeta: Record<
     label: "Audit",
     eyebrow: "Administration",
     title: "Audit trail",
+    icon: "shield",
+  },
+  reconcile: {
+    label: "Reconcile",
+    eyebrow: "Administration",
+    title: "Numbers reconciliation",
     icon: "shield",
   },
   "recycle-bin": {
@@ -554,6 +573,8 @@ const navSecondary: Section[] = [
   // Filtered out of the catalogue entirely for a role without `audit.read` —
   // see `navCatalogue`.
   "audit",
+  // Beside the audit trail: both are opened when a number looks wrong.
+  "reconcile",
   // Beside the audit trail, which is the other screen someone opens when
   // something has gone wrong and they need to know what happened to it.
   "recycle-bin",
@@ -609,6 +630,7 @@ const sectionRoutes: Record<Section, string> = {
   // is that it now resolves through the shell like every other section, so the
   // person reading it can get back out.
   audit: "audit",
+  reconcile: "reconcile",
   /*
    * A route of its own rather than a link into /dashboard/account/trash: the
    * account area is a different shell with a different rail, and a sidebar item
@@ -2016,6 +2038,14 @@ export default function PortalApp({
            */
           return runtimeContext?.capabilities?.["board.edit"] === true;
         }
+        if (entry.key === "reconcile") {
+          /*
+           * `settings.edit`, matching the route. The harness reports figures
+           * across the whole workspace and offers a purge, so it belongs to
+           * whoever administers it rather than to anyone who can read a board.
+           */
+          return runtimeContext?.capabilities?.["settings.edit"] === true;
+        }
         if (entry.key !== "audit") return true;
         return runtimeContext?.capabilities?.["audit.read"] === true;
       }),
@@ -2269,7 +2299,7 @@ export default function PortalApp({
    */
   const changeJobDate = async (
     id: string,
-    field: "dueAt" | "requestedAt" | "completedAt" | "nextUpdateAt",
+    field: CalendarJobDateField,
     day: string | null,
   ) => {
     const before = requestsRef.current.find((request) => request.id === id);
@@ -3357,6 +3387,7 @@ export default function PortalApp({
             permission and never was.
           */}
           {activeSurface === "audit" && <AuditLog />}
+          {activeSurface === "reconcile" && <ReconcilePanel />}
           {/*
             The recycle bin — the same panel the account area draws, over the
             same /api/trash. See recycle-bin-section.tsx for why it is a door
@@ -4932,7 +4963,7 @@ function CalendarView({
   /** Writes a job's own date field. Rejects with a readable message on refusal. */
   onJobDateChange: (
     id: string,
-    field: "dueAt" | "requestedAt" | "completedAt" | "nextUpdateAt",
+    field: CalendarJobDateField,
     day: string | null,
   ) => Promise<void>;
   /** Writes a certificate expiry back to whichever store actually holds it. */

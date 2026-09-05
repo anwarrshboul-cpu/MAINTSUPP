@@ -1,0 +1,345 @@
+/* ── Numbers reconciliation — Module 3 §4.2 ────────────────────────────────
+ *
+ * A reading surface with exactly one control on it. Everything here is either
+ * a number or the reason a number is what it is, so the styling has one job:
+ * make a failing row impossible to miss in a table of a hundred and thirty.
+ *
+ * COLOUR IS NEVER THE ONLY SIGNAL. Every result carries its word — Pass, Fail,
+ * Not measured — and the difference column carries a sign, so a reader who
+ * cannot separate the two hues loses nothing. That is the same rule the job
+ * status chips follow, and the reason the pill has text in it rather than being
+ * a coloured dot.
+ *
+ * Every colour is a token from globals.css, so the page follows the workspace
+ * theme in both light and dark. `--red-*`, `--green-*` and `--amber-*` are all
+ * defined twice there, once per theme, which is why nothing below needs a
+ * media query for the dark case.
+ */
+
+.reconcile {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.reconcile__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.reconcile__head h2 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+}
+
+.reconcile__sub {
+  margin: 6px 0 0;
+  max-width: 62ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.reconcile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.reconcile__actions button {
+  padding: 8px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--control-fg-strong);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reconcile__actions button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.reconcile__actions button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.reconcile__ran {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── The notices ─────────────────────────────────────────────────────────
+ *
+ * Two of them, and deliberately different. The plain one says "there is
+ * nothing seeded yet", which is a state; the `--stop` one says "this
+ * deployment refused", which is a decision somebody has to act on.
+ */
+
+.reconcile__notice {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-2);
+}
+
+.reconcile__notice--stop {
+  border-color: var(--red-600);
+  background: var(--red-100);
+  color: var(--ink);
+}
+
+.reconcile__notice p {
+  margin: 8px 0 0;
+}
+
+.reconcile__check code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-card);
+  font-size: 12px;
+}
+
+.reconcile__check .is-pass {
+  font-weight: 700;
+  color: var(--green-700);
+}
+
+.reconcile__check .is-fail {
+  font-weight: 700;
+  color: var(--red-600);
+}
+
+/* ── The headline ───────────────────────────────────────────────────────── */
+
+.reconcile__headline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.reconcile__headline > div {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.reconcile__headline dt {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--table-head-fg);
+}
+
+.reconcile__headline dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.reconcile__headline dd code {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted-2);
+}
+
+.reconcile__headline dd.is-pass {
+  color: var(--green-700);
+}
+
+.reconcile__headline dd.is-fail {
+  color: var(--red-600);
+}
+
+/* ── The sections ───────────────────────────────────────────────────────── */
+
+.reconcile__section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  overflow: hidden;
+}
+
+.reconcile__section > summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  background: var(--surface-head);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.reconcile__tally {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.reconcile__tally.is-pass {
+  color: var(--muted);
+}
+
+.reconcile__tally.is-fail {
+  color: var(--red-600);
+}
+
+/* Wide content scrolls inside its own box; the page itself must never scroll
+   sideways, which on a table of five columns is only true if this exists. */
+.reconcile__scroll {
+  overflow-x: auto;
+}
+
+.reconcile__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.reconcile__table th,
+.reconcile__table td {
+  padding: 8px 14px;
+  border-top: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reconcile__table thead th {
+  border-top: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--table-head-fg);
+}
+
+.reconcile__table .is-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reconcile__table tbody th {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* The failing row is tinted as well as pilled. One row in a hundred and thirty
+   has to be findable by scrolling, not only by reading. */
+.reconcile__table tbody tr.is-fail {
+  background: var(--red-100);
+}
+
+.reconcile__table tbody tr.is-not-measured {
+  color: var(--muted-2);
+}
+
+.reconcile__expand {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.reconcile__detail {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface-sunken);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted-2);
+}
+
+.reconcile__detail p {
+  margin: 0 0 8px;
+}
+
+.reconcile__detail p:last-child {
+  margin-bottom: 0;
+}
+
+.reconcile__detail code {
+  display: block;
+  margin-top: 3px;
+  /* Record ids run to hundreds of characters; they wrap rather than widening
+     the table, which would push the numbers off screen — the one thing a
+     reconciliation table cannot afford. */
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.reconcile__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--table-head-fg);
+}
+
+.reconcile__pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.reconcile__pill.is-pass {
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.reconcile__pill.is-fail {
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+.reconcile__pill.is-not-measured {
+  background: var(--amber-100);
+  color: var(--amber-600);
+}
+
+/* At 767 and below the headline collapses to two columns and the table's
+   padding tightens. 767 is one of the five widths this repository allows, and
+   several stage tests fail on any other. */
+@media (max-width: 767px) {
+  .reconcile__headline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reconcile__table th,
+  .reconcile__table td {
+    padding: 8px 10px;
+  }
+
+  .reconcile__head {
+    flex-direction: column;
+  }
+}
