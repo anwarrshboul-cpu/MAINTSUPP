@@ -288,3 +288,49 @@ test("a note keeps the reader's own colour and carries no expiry badge", () => {
   assert.equal(legacy.colourToken, types.calendarItemType("Note").colour);
   assert.equal(legacy.timing, "due-today", "and it is still drawn");
 });
+
+test("every calendar surface gets the chooser, because there is only one of it", async () => {
+  /*
+   * PARITY BY CONSTRUCTION rather than by inspection.
+   *
+   * `ManualEventDialog` is mounted in exactly one place — inside
+   * `OperationsCalendarPanel` — and that panel is mounted in exactly two: the
+   * board's Calendar view tab, which every register including a custom
+   * workspace section and Store Documentation renders, and the Planned page.
+   * So the type chooser cannot be present on one calendar and missing from
+   * another, and a second mount appearing here is the thing that would break
+   * that. This is worth an assertion rather than a browser click precisely
+   * because it is the kind of parity that is expensive to check by hand and
+   * cheap to lose in a refactor.
+   */
+  const { readdir } = await import("node:fs/promises");
+  const dialogMounts = [];
+  const panelMounts = [];
+  async function walk(dir) {
+    for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
+      const next = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules") continue;
+        await walk(next);
+      } else if (entry.name.endsWith(".tsx")) {
+        const code = (await read(next))
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/^\s*\/\/.*$/gm, "");
+        if (/<ManualEventDialog/.test(code)) dialogMounts.push(next);
+        if (/<OperationsCalendarPanel/.test(code)) panelMounts.push(next);
+      }
+    }
+  }
+  await walk("app");
+
+  assert.deepEqual(
+    dialogMounts,
+    ["app/(app)/portal/calendar-surface.tsx"],
+    "the dialog must be mounted once, inside the shared panel",
+  );
+  assert.deepEqual(
+    panelMounts.sort(),
+    ["app/(app)/portal/board-view-pane.tsx", "app/(app)/portal/portal-app.tsx"],
+    "the panel is the board's Calendar tab and the Planned page — a third mount would be a second calendar",
+  );
+});
