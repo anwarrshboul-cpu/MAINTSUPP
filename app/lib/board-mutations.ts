@@ -15,7 +15,7 @@
  * resolved tenancy and nothing here may widen it.
  */
 
-import { and, asc, eq, inArray, isNull, max, sql, type AnyColumn } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, like, max } from "drizzle-orm";
 import { maintenanceGroups as maintenanceGroupSeeds } from "../../db/monday-board-spec";
 import type { getDb } from "../../db";
 import {
@@ -32,10 +32,7 @@ import { statusForStage } from "./stage-status";
 import { selectInChunks } from "./sql-batching";
 import { PRIMARY_ORGANISATION_ID } from "./tenant-access";
 import { unassignedSiteId } from "./site-reference";
-import {
-  JOB_REFERENCE_FLOOR,
-  nextJobReferenceNumber,
-} from "./job-reference";
+import { jobReferenceNumber, nextJobReferenceNumber } from "./job-reference";
 
 export type BoardDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -136,32 +133,86 @@ export function tenantSeedId(base: string, orgId: string) {
  * and board-view ids, and those share no numbering with `MN-…`.
  */
 async function nextItemNumber(db: BoardDatabase, orgId: string) {
-  const digits = (column: AnyColumn) =>
-    sql<number>`coalesce(max(cast(substr(${column}, 4) as integer)), ${JOB_REFERENCE_FLOOR})`;
+  /*
+   * THE MAX IS TAKEN IN JAVASCRIPT, AND THAT IS NOT A PREFERENCE.
+   *
+   * This was `max(cast(substr(id, 4) as integer))` in SQL, with `LIKE 'MN-%'`
+   * nowhere in it. A reference that is not `MN-<digits>` therefore reached the
+   * cast — and the two dialects disagree about what that means:
+   *
+   *   SQLite   cast('req_4ff2', 'integer') -> 0, silently
+   *   Postgres                             -> 22P02 invalid input syntax
+   *
+   * So a single malformed id could not fail locally and could not do anything
+   * BUT fail deployed, where it takes out the whole create path: the throw
+   * happens before any insert, so `create_item` answers a bare 503 and nobody
+   * can raise a job at all. `maintenance_requests.id` is application-generated
+   * text — this codebase's own migration notes give `req_4ff2c25d…` and
+   * `store-aldgate` as examples of the shape — and an imported estate is
+   * exactly where a non-`MN-` id turns up.
+   *
+   * Guarding it in SQL needs an all-digits test, and the obvious ones are not
+   * portable: `~` is Postgres-only, `GLOB` is SQLite-only, and two-argument
+   * `trim(x, chars)` means different things in each. Parsing in JS instead
+   * reuses `jobReferenceNumber`, which is already strict, already tested, and
+   * already the single definition of what a reference looks like.
+   *
+   * The cost is reading the ids rather than one number per table. They are
+   * filtered to `MN-%` and bounded by the jobs in one organisation, on a path
+   * that runs once per created job — which is the right trade against a
+   * dialect-dependent outage.
+   *
+   * `deleted_at` IS DELIBERATELY UNFILTERED, here as before. A job in the
+   * recycle bin still owns its reference: excluding binned rows would hand the
+   * same MN to a new job and collide the moment somebody restored the old one,
+   * which is the worst possible time to find out.
+   */
+  const highest = (values: Array<{ reference: string | null }>) => {
+    let top: number | null = null;
+    for (const row of values) {
+      const number = jobReferenceNumber(row.reference);
+      if (number !== null && (top === null || number > top)) top = number;
+    }
+    return top;
+  };
 
-  const [fromRequests] = await db
-    .select({ maxNumber: digits(maintenanceRequests.id) })
+  const requestRows = await db
+    .select({ reference: maintenanceRequests.id })
     .from(maintenanceRequests)
-    .where(eq(maintenanceRequests.organisationId, orgId));
+    .where(
+      and(
+        eq(maintenanceRequests.organisationId, orgId),
+        like(maintenanceRequests.id, "MN-%"),
+      ),
+    );
 
-  const [fromPlacements] = await db
-    .select({ maxNumber: digits(maintenanceGroupItems.requestId) })
+  const placementRows = await db
+    .select({ reference: maintenanceGroupItems.requestId })
     .from(maintenanceGroupItems)
-    .where(eq(maintenanceGroupItems.organisationId, orgId));
+    .where(
+      and(
+        eq(maintenanceGroupItems.organisationId, orgId),
+        like(maintenanceGroupItems.requestId, "MN-%"),
+      ),
+    );
 
-  const [fromBin] = await db
-    .select({ maxNumber: digits(recycleBin.entityId) })
+  const binRows = await db
+    .select({ reference: recycleBin.entityId })
     .from(recycleBin)
     .where(
-      and(eq(recycleBin.organisationId, orgId), eq(recycleBin.entityType, "job")),
+      and(
+        eq(recycleBin.organisationId, orgId),
+        eq(recycleBin.entityType, "job"),
+        like(recycleBin.entityId, "MN-%"),
+      ),
     );
 
   /* The arithmetic lives in ./job-reference.ts so a test can RUN it; this
      function is only the three reads that feed it. */
   return nextJobReferenceNumber([
-    fromRequests?.maxNumber,
-    fromPlacements?.maxNumber,
-    fromBin?.maxNumber,
+    highest(requestRows),
+    highest(placementRows),
+    highest(binRows),
   ]);
 }
 

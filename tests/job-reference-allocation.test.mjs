@@ -33,8 +33,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 
+/*
+ * NORMALISED, because line endings in this repo are PER FILE and there is no
+ * `.gitattributes` -- CLAUDE.md says so, and this file learned it the hard way.
+ * The slices below find their bounds with markers containing a newline; against
+ * a CRLF copy of the same source every one of those `indexOf` calls returns -1,
+ * the slice silently runs to the end of the file, and an assertion about one
+ * function starts reading the whole module. It fails loudly, but the failure
+ * names the assertion rather than the cause -- which cost real time once.
+ */
 const read = async (path) =>
-  readFile(new URL(`../${path}`, import.meta.url), "utf8");
+  (await readFile(new URL(`../${path}`, import.meta.url), "utf8")).split("\r\n").join("\n");
 
 const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const OWNER = { email: "owner@maintsupp.com", password: "Sunnamusk-Owner-2026" };
@@ -63,11 +72,29 @@ test("the allocator's floor is taken over every table that holds a reference", a
 
   /* The arithmetic itself moved to ./job-reference.ts so a test can run it —
      this function is only the three reads that feed it, and it must feed ALL
-     three rather than picking one. */
+     three rather than picking one.
+
+     RE-POINTED: the three maxima used to be computed in SQL and read off
+     `fromRequests?.maxNumber` and friends. That form cast every id it met, so
+     one malformed reference threw 22P02 on Postgres and took the whole create
+     path down, while SQLite quietly cast it to 0 — a fault that could only
+     ever appear deployed. The maxima are now parsed in JS through
+     `jobReferenceNumber`, which is strict and tested. The CONTRACT is
+     unchanged and is what this still pins: all three sources reach the
+     allocator, and none is dropped. */
   assert.match(
     fn,
-    /nextJobReferenceNumber\(\[\s*fromRequests\?\.maxNumber,\s*fromPlacements\?\.maxNumber,\s*fromBin\?\.maxNumber,?\s*\]\)/,
+    /nextJobReferenceNumber\(\[\s*highest\(requestRows\),\s*highest\(placementRows\),\s*highest\(binRows\),?\s*\]\)/,
     "all three maxima must reach the allocator",
+  );
+
+  /* AND EVERY READ IS NARROWED TO `MN-%` BEFORE IT IS PARSED. This is the half
+     that stops a non-MN id — `req_4ff2c25d…`, `store-aldgate`, anything an
+     import produced — from ever reaching the number parser at all. */
+  assert.equal(
+    (fn.match(/like\(/g) ?? []).length,
+    3,
+    "each of the three reads filters to MN-% rather than parsing every id",
   );
 
   /*
