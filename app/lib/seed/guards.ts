@@ -76,6 +76,22 @@ export type DatabaseIdentity = {
   readonly schema?: string | null;
   /** Which adapter answered. */
   readonly adapter?: "d1-sqlite" | "postgres" | null;
+  /**
+   * What the database SAYS it is — one row of `deployment_marker`.
+   *
+   * On Supabase the three fields above are useless for this purpose:
+   * `current_database()` is `postgres`, the schema is `portal`, and the project
+   * reference is opaque, so a Staging connection and a Production connection
+   * are indistinguishable over the wire. The marker table is the answer, and it
+   * is created EMPTY and never seeded — an unmarked database stays
+   * unidentifiable and is therefore refused.
+   *
+   * It is still a fact from the connection rather than a claim from a settings
+   * screen: somebody had to write it into THAT database. The production check
+   * below runs over the label too, so marking a `maintsupp_prod` host
+   * "staging" does not get past it.
+   */
+  readonly label?: string | null;
 };
 
 /**
@@ -273,7 +289,9 @@ function checkDatabase(identity: DatabaseIdentity | null | undefined): PurgeChec
   const name = normalise(identity.name);
   const host = normalise(identity.host);
   const schema = normalise(identity.schema);
-  const identityText = [name, host, schema].filter(Boolean).join(" ");
+  const label = normalise(identity.label);
+  /* The label is part of the identity, so the production check below sees it. */
+  const identityText = [label, name, host, schema].filter(Boolean).join(" ");
   const observed = identityText
     ? `${identityText}${adapter ? ` (${adapter})` : ""}`
     : adapter || "(empty)";

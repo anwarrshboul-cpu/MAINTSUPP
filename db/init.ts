@@ -4435,6 +4435,35 @@ async function ensurePreW14Foundation(d1: D1DatabaseLike) {
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS report_issue_waivers_invoice_idx ON report_issue_waivers(invoice_id)",
     ),
+
+    /*
+     * WHAT THIS DATABASE SAYS IT IS — and it is CREATED EMPTY, on purpose.
+     *
+     * The seed and purge guards need two independent facts: a deployment
+     * marker from the platform's variables, and an answer from the DATABASE
+     * itself. On Supabase the second one is unavailable — `current_database()`
+     * is `postgres`, the schema is `portal`, and the project reference is
+     * opaque — so a Staging connection and a Production connection are
+     * indistinguishable over the wire.
+     *
+     * This table is that missing answer. It carries no seed and no default:
+     * a database nobody has marked stays unidentifiable, and the guard treats
+     * unidentifiable as production and refuses. Marking one is a deliberate act
+     * performed against that database, which is what keeps it a genuinely
+     * second factor rather than a second reading of the same variable.
+     *
+     * NEVER seed this. A default here would mark Production as safe on its
+     * first boot, which is the one outcome the guard exists to prevent.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS deployment_marker (
+         id TEXT PRIMARY KEY,
+         environment TEXT NOT NULL,
+         note TEXT,
+         set_by TEXT,
+         set_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
   ]);
 
   /*

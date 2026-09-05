@@ -48,8 +48,24 @@ export function secretMatches(provided: string, expected: string): boolean {
  * 503 is told which endpoint is missing its variable rather than being handed a
  * sentence that could have come from either of them.
  */
-export function authoriseCron(request: Request, label: string): Response | null {
-  const expected = process.env.CRON_SECRET ?? "";
+export function authoriseCron(
+  request: Request,
+  label: string,
+  /*
+   * The secret, already resolved. Optional so the retention route and every
+   * existing caller keep working unchanged.
+   *
+   * It exists because `process.env` is not the whole story in every runtime the
+   * portal runs in. Vercel populates it, so the deployed cron reads its secret
+   * there; Miniflare does not, and a `.dev.vars` entry arrives as a WORKER
+   * BINDING instead — which is why the dispatcher reported "CRON_SECRET is
+   * unset" on a dev server that plainly had one. `resolveCronSecret` below
+   * reads both, the same way `platformVars` does for the seed guards, so
+   * configuration is found in one place rather than in two conventions.
+   */
+  resolved?: string | null,
+): Response | null {
+  const expected = resolved ?? process.env.CRON_SECRET ?? "";
   if (!expected) {
     /*
      * 503, not 401. There is nothing the caller can do — the deployment is
@@ -75,4 +91,31 @@ export function authoriseCron(request: Request, label: string): Response | null 
     return Response.json({ error: "Not authorised." }, { status: 401 });
   }
   return null;
+}
+
+/**
+ * The cron secret, from wherever this runtime keeps it.
+ *
+ * `process.env` first — a real process environment is what an operator set on
+ * the deployment — then the Workers binding, which is what a local `.dev.vars`
+ * becomes. Only `CRON_SECRET` is read: `env.DB` and `env.BUCKET` are getters
+ * that would open the database as a side effect of asking what the secret is.
+ *
+ * Returns "" rather than throwing when nothing is configured, so the caller's
+ * existing fail-closed branch still produces the 503 it always did.
+ */
+export async function resolveCronSecret(): Promise<string> {
+  const fromProcess =
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+      ?.CRON_SECRET;
+  if (fromProcess) return fromProcess;
+  try {
+    // @ts-expect-error — Workers runtime module, resolved at run time only.
+    const { env } = await import("cloudflare:workers");
+    const value = (env as unknown as Record<string, unknown>).CRON_SECRET;
+    return typeof value === "string" ? value : "";
+  } catch {
+    /* A plain Node process with nothing set. The caller refuses with 503. */
+    return "";
+  }
 }

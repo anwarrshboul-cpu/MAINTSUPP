@@ -89,6 +89,15 @@ const drizzleStub = asModule(`
   export const asc = (a) => a;
   export const desc = (a) => a;
   export const isNull = (a) => ({ isNull: a });
+  /*
+   * getTableColumns joined the stub when insertRows started measuring a table's
+   * real width instead of trusting a hand-typed number. It returns an empty
+   * object on purpose: the chunk size then falls back to the declared width,
+   * which is what every assertion below is written against, and a stub that
+   * invented columns would be sizing chunks for a table that does not exist.
+   * (No backticks in here — this block lives inside a template literal.)
+   */
+  export const getTableColumns = () => ({});
   export const lte = (a, b) => ({ lte: [a, b] });
 `);
 

@@ -57,7 +57,7 @@ import {
   RETENTION_DAYS,
   sweepRecycleBin,
 } from "../../../lib/recycle-bin";
-import { authoriseCron } from "../../../lib/cron-auth";
+import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
 import { purgeFor } from "../../trash/route";
 
 export const dynamic = "force-dynamic";
@@ -97,7 +97,7 @@ async function runSweep() {
 }
 
 export async function POST(request: Request) {
-  const refusal = authoriseCron(request, "retention");
+  const refusal = authoriseCron(request, "retention", await resolveCronSecret());
   if (refusal) return refusal;
 
   try {

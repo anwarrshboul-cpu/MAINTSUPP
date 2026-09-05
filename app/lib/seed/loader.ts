@@ -56,7 +56,7 @@
  * product — and the reminder counts are one of the numbers §4.1 reconciles.
  */
 
-import { and, eq, like, or, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, like, or, sql } from "drizzle-orm";
 import {
   attachments,
   calendarEvents,
@@ -244,8 +244,32 @@ export async function askDatabaseIdentity(db: Db): Promise<{
   host?: string | null;
   schema?: string | null;
   adapter?: "d1-sqlite" | "postgres" | null;
+  label?: string | null;
 }> {
   const vars = await platformVars();
+  /*
+   * What the database SAYS it is, from `deployment_marker`.
+   *
+   * On Supabase nothing else distinguishes Staging from Production over the
+   * wire: `current_database()` is `postgres` on both, the schema is `portal` on
+   * both, and the project reference is opaque. The marker table is the answer,
+   * and it is created empty — an unmarked database returns null here, the guard
+   * finds no identifying word, and it refuses. That is the intended behaviour
+   * on any database nobody has deliberately marked, Production included.
+   *
+   * Read in its own try/catch so a database that predates the table refuses
+   * rather than throwing on the way to refusing.
+   */
+  let label: string | null = null;
+  try {
+    const marked = await db.get(
+      sql`SELECT environment FROM deployment_marker ORDER BY set_at DESC LIMIT 1`,
+    );
+    const row = (marked ?? {}) as { environment?: string };
+    label = row.environment ?? null;
+  } catch {
+    label = null;
+  }
   try {
     const answer = await db.get(
       sql`SELECT current_database() AS name, current_schema() AS schema`,
@@ -265,6 +289,7 @@ export async function askDatabaseIdentity(db: Db): Promise<{
       host,
       schema: row.schema ?? null,
       adapter: "postgres",
+      label,
     };
   } catch {
     return {
@@ -273,6 +298,7 @@ export async function askDatabaseIdentity(db: Db): Promise<{
       host: null,
       schema: null,
       adapter: "d1-sqlite",
+      label,
     };
   }
 }
@@ -397,8 +423,52 @@ export function seedObjectKey(batchId: string, descriptor: SeedAttachment): stri
 
 /* ------------------------------------------------------------ the writing -- */
 
+/**
+ * Bulk insert, chunked by the number of BOUND VARIABLES rather than by rows.
+ *
+ * D1's limit counts one variable per COLUMN per row, so the safe row count
+ * depends on the table's width — `chunkRows` in `../sql-batching` already knows
+ * that. What it cannot know is the width, and the width was passed in as a
+ * hand-typed number per call site.
+ *
+ * That is what broke the first real seed run. `maintenance_requests` was
+ * declared as 26 columns and the loader actually writes more, so a chunk sized
+ * for 26 bound past 90 and D1 answered "too many SQL variables at offset 1763"
+ * — from `insertRows`, with nothing in the seed data at fault. A constant that
+ * has to be kept in step with an object literal three hundred lines away is a
+ * constant that will drift again.
+ *
+ * So the width is now MEASURED from the rows themselves, and the declared
+ * number is kept only as a floor. Taking the maximum across rows matters
+ * because drizzle omits undefined keys: a first row that happens to leave two
+ * optional columns unset would otherwise size every chunk for a narrower table
+ * than the widest row in it.
+ */
 async function insertRows(db: Db, table: unknown, rows: readonly unknown[], width: number) {
-  for (const chunk of chunkRows(rows, width)) {
+  /*
+   * The width that matters is the TABLE's, not the object literal's.
+   *
+   * Drizzle emits one consistent column list for a multi-row `INSERT … VALUES`,
+   * so it binds every column the table has for every row — including the ones a
+   * seed row leaves undefined, which arrive as NULL placeholders. Counting the
+   * keys present therefore still understates it, and by a lot:
+   * `maintenance_requests` has some fifty-five columns where the seed sets
+   * about twenty-six.
+   */
+  let measured = width;
+  try {
+    const columns = Object.keys(getTableColumns(table as never)).length;
+    if (columns > measured) measured = columns;
+  } catch {
+    /* Not a drizzle table — fall back to the declared width and the row keys. */
+  }
+  for (const row of rows) {
+    if (row && typeof row === "object") {
+      const keys = Object.keys(row as Record<string, unknown>).length;
+      if (keys > measured) measured = keys;
+    }
+  }
+  for (const chunk of chunkRows(rows, measured)) {
     await db.insert(table as never).values(chunk as never);
   }
   return rows.length;

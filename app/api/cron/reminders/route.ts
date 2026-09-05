@@ -53,7 +53,7 @@ import {
   sites,
   users,
 } from "../../../../db/schema";
-import { authoriseCron } from "../../../lib/cron-auth";
+import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
 import { sendNotification } from "../../../lib/notifications";
 import type { RecipientContext, RecipientPerson } from "../../../lib/reminders/recipients";
 import { resolveRecipients } from "../../../lib/reminders/recipients";
@@ -451,7 +451,7 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
 }
 
 export async function POST(request: Request) {
-  const refusal = authoriseCron(request, "reminders");
+  const refusal = authoriseCron(request, "reminders", await resolveCronSecret());
   if (refusal) return refusal;
   try {
     const outcome = await runDispatch(new Date().toISOString());
