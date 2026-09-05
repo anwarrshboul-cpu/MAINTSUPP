@@ -247,9 +247,12 @@ import {
 import {
   ReportTabNav,
   ReportTabPanel,
+  tabForDocumentKind,
   useReportTab,
 } from "./reports/reports-tabs";
-import { InvoiceReportGenerator } from "./reports/invoice-generator";
+import { useGeneratorDocument } from "./reports/invoice-generator";
+import { ReportTab } from "./reports/report-tab";
+import { InvoiceTab } from "./reports/invoice-tab";
 import { GeneratedDocuments } from "./reports/generated-documents";
 
 export type Section =
@@ -6403,7 +6406,7 @@ function ReportsView({
    */
   const [layoutSlot, setLayoutSlot] = useState<HTMLElement | null>(null);
   /*
-   * Which of the three internal tabs is showing.
+   * Which of the four internal tabs is showing.
    *
    * Remembered per section and carried in the hash — see the header of
    * ./reports/reports-tabs.tsx. It is held HERE rather than inside the tab
@@ -6413,10 +6416,25 @@ function ReportsView({
    */
   const [reportTab, setReportTab] = useReportTab(sectionKey);
   /*
-   * A document the Generated Documents tab asked the generator to open. Null
-   * for a fresh draft. Held here because it crosses two tabs.
+   * A document the Generated Documents tab asked to open. Null for a fresh
+   * draft. Held here because it crosses three tabs.
    */
   const [openDocumentId, setOpenDocumentId] = useState<string | null>(null);
+  /*
+   * ONE DOCUMENT BEHIND TWO TABS.
+   *
+   * `useGeneratorDocument` is mounted here rather than inside Report and
+   * Invoice because a `ReportTabPanel` unmounts when it is not selected: a
+   * hook per tab would mean saving a draft on Invoice, switching to Report and
+   * finding nothing saved, twice the preview traffic, and two documents that
+   * could disagree about the same period. `active` suspends the debounce while
+   * neither is on screen, so Spend Overview and Documents still cost nothing.
+   */
+  const generator = useGeneratorDocument({
+    now,
+    openDocumentId,
+    active: reportTab === "report" || reportTab === "invoice",
+  });
   const periodWindow = resolvePeriod(period, now);
   const scopedRequests = useMemo(
     () => requests.filter((request) =>
@@ -6789,15 +6807,22 @@ function ReportsView({
       </section>
       </ReportTabPanel>
 
-      <ReportTabPanel tab="generator" active={reportTab === "generator"}>
-        <InvoiceReportGenerator now={now} openDocumentId={openDocumentId} />
+      <ReportTabPanel tab="report" active={reportTab === "report"}>
+        <ReportTab generator={generator} />
+      </ReportTabPanel>
+
+      <ReportTabPanel tab="invoice" active={reportTab === "invoice"}>
+        <InvoiceTab generator={generator} />
       </ReportTabPanel>
 
       <ReportTabPanel tab="documents" active={reportTab === "documents"}>
         <GeneratedDocuments
-          onOpenGenerator={(invoiceId) => {
+          onOpenDocument={(invoiceId, kind) => {
             setOpenDocumentId(invoiceId);
-            setReportTab("generator");
+            // Where a document opens is a property of the document, not of this
+            // callback — see `tabForDocumentKind`, which also explains why every
+            // row in the register lands on Report today.
+            setReportTab(tabForDocumentKind(kind));
           }}
         />
       </ReportTabPanel>

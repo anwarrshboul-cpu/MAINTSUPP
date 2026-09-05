@@ -29,7 +29,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../../../components";
 import { useCapability } from "../../../lib/client-capabilities";
-import type { DocumentListRow, ExportFormat, InvoiceStatus } from "../../../lib/reporting/contract";
+import type {
+  DocumentKind,
+  DocumentListRow,
+  ExportFormat,
+  InvoiceStatus,
+} from "../../../lib/reporting/contract";
 import { EXPORT_FORMATS } from "../../../lib/reporting/contract";
 import { formatInstant, formatIsoDate, formatMoney } from "../../../lib/exports/format";
 import {
@@ -54,15 +59,19 @@ function statusTone(status: InvoiceStatus): string {
 }
 
 export function GeneratedDocuments({
-  onOpenGenerator,
+  onOpenDocument,
 }: {
   /**
-   * "View" hands the document back to the generator tab, which is where a
-   * document is read and worked on. A second read-only viewer would be a
-   * second place the preview is rendered, and the whole point of
+   * "View" hands the document back to the Report or Invoice tab, which is
+   * where a document is read and worked on. A second read-only viewer would be
+   * a second place the preview is rendered, and the whole point of
    * `document-model.ts` is that there is one.
+   *
+   * The row's `kind` goes with it so the CALLER can decide which of the two
+   * tabs to open. This component does not know what a tab is, and the mapping
+   * lives in `tabForDocumentKind` in reports-tabs.tsx.
    */
-  onOpenGenerator: (invoiceId: string) => void;
+  onOpenDocument: (invoiceId: string, kind: DocumentKind | null | undefined) => void;
 }) {
   const canEdit = useCapability("board.edit");
   const canSettle = useCapability("settings.edit");
@@ -125,7 +134,7 @@ export function GeneratedDocuments({
       return;
     }
     setNotice(
-      `A new draft was created from ${row.invoiceNumber ?? "this document"}. Open the Invoice & Report Generator to edit it.`,
+      `A new draft was created from ${row.invoiceNumber ?? "this document"}. Open the Report or Invoice tab to edit it.`,
     );
     await load();
   };
@@ -272,7 +281,7 @@ export function GeneratedDocuments({
                     <button
                       type="button"
                       className="reports-linkish"
-                      onClick={() => onOpenGenerator(row.invoiceId)}
+                      onClick={() => onOpenDocument(row.invoiceId, row.kind)}
                     >
                       View
                     </button>

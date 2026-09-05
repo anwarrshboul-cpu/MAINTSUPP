@@ -32,7 +32,7 @@
  * it, which is why the PDF writer obeys the same one without a second copy.
  */
 
-import type { CombinedReportPayload } from "../reporting/contract";
+import type { CombinedReportPayload, DocumentKind } from "../reporting/contract";
 import { buildReportDocument, keyValuesFor, sectionsFor } from "./document-model";
 import type { DocCell, DocSection, DocTable, ReportDocument } from "./document-model";
 import { ZipWriter } from "./zip";
@@ -355,8 +355,11 @@ const APP_PROPERTIES = `${XML_DECLARATION}
 
 /* ── The entry point ─────────────────────────────────────────────────────── */
 
-export function renderDocx(payload: CombinedReportPayload): Uint8Array {
-  const document = buildReportDocument(payload);
+export function renderDocx(
+  payload: CombinedReportPayload,
+  kind: DocumentKind = "combined",
+): Uint8Array {
+  const document = buildReportDocument(payload, kind);
   const sections = sectionsFor(document, "all");
 
   const cover: string[] = [
@@ -376,24 +379,36 @@ export function renderDocx(payload: CombinedReportPayload): Uint8Array {
     emptyParagraph(),
   ];
 
-  const partOne = sections.filter((section) => section.part === 1);
-  const partTwo = sections.filter((section) => section.part === 2);
-
+  /*
+   * The parts, in the order the document declares them.
+   *
+   * Written as a loop over `document.parts` rather than as `parts[0]` and
+   * `parts[1]`, because a Report has no part 1 and an Invoice has no part 2 —
+   * indexing would have printed the Invoice heading over the maintenance
+   * sections of a report-only file. Orientation follows the PART: part 1 is
+   * portrait (an invoice is a page of figures), part 2 is landscape (its tables
+   * run to sixteen columns), and the trailing body-level `sectPr` takes the
+   * orientation of whichever part ended the document.
+   */
   const body: string[] = [...cover];
-  body.push(paragraph(run(document.parts[0]!.title), { style: "Heading1" }));
-  body.push(paragraph(run(document.parts[0]!.subtitle, { italic: true, color: "4E5F6F" })));
-  for (const section of partOne) body.push(renderSection(section, PORTRAIT_WIDTH));
+  const printed = document.parts.filter((part) =>
+    sections.some((section) => section.part === part.number),
+  );
+  printed.forEach((part, index) => {
+    // The paragraph that ENDS the previous section, carrying that section's own
+    // page properties. Without it every page would take the body-level ones.
+    if (index > 0) body.push(`<w:p><w:pPr>${sectionProperties(printed[index - 1]!.number === 2)}</w:pPr></w:p>`);
+    body.push(paragraph(run(part.title), { style: "Heading1" }));
+    body.push(paragraph(run(part.subtitle, { italic: true, color: "4E5F6F" })));
+    const width = part.number === 2 ? LANDSCAPE_WIDTH : PORTRAIT_WIDTH;
+    for (const section of sections.filter((entry) => entry.part === part.number)) {
+      body.push(renderSection(section, width));
+    }
+  });
 
-  // The paragraph that ENDS the portrait section. Everything above it is A4
-  // portrait; everything after it takes the body-level landscape properties.
-  body.push(`<w:p><w:pPr>${sectionProperties(false)}</w:pPr></w:p>`);
-
-  body.push(paragraph(run(document.parts[1]!.title), { style: "Heading1" }));
-  body.push(paragraph(run(document.parts[1]!.subtitle, { italic: true, color: "4E5F6F" })));
-  for (const section of partTwo) body.push(renderSection(section, LANDSCAPE_WIDTH));
-
+  const lastIsLandscape = printed.length ? printed[printed.length - 1]!.number === 2 : true;
   const documentXml = `${XML_DECLARATION}
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join("")}${sectionProperties(true)}</w:body></w:document>`;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join("")}${sectionProperties(lastIsLandscape)}</w:body></w:document>`;
 
   const zip = new ZipWriter();
   zip.addFile("[Content_Types].xml", CONTENT_TYPES);

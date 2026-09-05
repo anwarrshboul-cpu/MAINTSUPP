@@ -42,6 +42,7 @@
 import type {
   CombinedReportPayload,
   DataQualityFinding,
+  DocumentKind,
   ExecutiveCounts,
   InvoiceSection,
   MaintenanceSection,
@@ -136,8 +137,39 @@ export interface DocSection {
   audience: Audience;
 }
 
+/** Which part(s) a document kind is made of. `null` means both. */
+export type DocumentPart = 1 | 2;
+
+/**
+ * THE ONE PLACE A KIND BECOMES A PART.
+ *
+ * Every section already carried `part`, so the split of the screen into a
+ * Report tab and an Invoice tab needed no new content — only a rule saying
+ * which part each kind keeps. That rule is this table and nothing else reads
+ * `part` to decide inclusion, which is why a Report export cannot contain an
+ * invoice section by accident: the only way to get one is to ask for part 1.
+ */
+export const PART_FOR_KIND: Record<DocumentKind, DocumentPart | null> = {
+  invoice: 1,
+  report: 2,
+  combined: null,
+};
+
+/** The document's own name, per kind. See `buildReportDocument`. */
+export const TITLE_FOR_KIND: Record<DocumentKind, string> = {
+  combined: "Invoice and Maintenance Performance Report",
+  report: "MAINTSUPP Maintenance Report",
+  invoice: "MAINTSUPP Invoice",
+};
+
 export interface ReportDocument {
   title: string;
+  /**
+   * Which document this is. Carried so that `sectionsFor` can narrow without
+   * every renderer having to remember to pass the part — a renderer that
+   * forgets would silently print an invoice inside a maintenance report.
+   */
+  kind: DocumentKind;
   organisationName: string;
   clientName: string;
   periodLabel: string;
@@ -1025,8 +1057,21 @@ function slaRules(maintenance: MaintenanceSection): DocSection {
  * Pure, synchronous, and with no access to anything but its argument — which is
  * what lets a test assert that the Word total and the Excel total are the same
  * object rather than two computations that happen to agree today.
+ *
+ * ── WHY `sections` STAYS WHOLE WHILE `parts` NARROWS ──────────────────────
+ *
+ * `kind` selects a DOCUMENT, not a subset of the model. All thirteen sections
+ * are still built — they are cheap, they are pure, and a caller that wants to
+ * look up "sla-performance" on a Report should not have to know which part it
+ * is in. What narrows is `parts`, which is what every renderer walks, and
+ * `sectionsFor`, which is the gate the renderers actually pass their sections
+ * through. So an invoice section is unreachable from a Report export without
+ * anyone filtering by hand.
  */
-export function buildReportDocument(payload: CombinedReportPayload): ReportDocument {
+export function buildReportDocument(
+  payload: CombinedReportPayload,
+  kind: DocumentKind = "combined",
+): ReportDocument {
   const currency = payload.invoice.currency;
   const sections: DocSection[] = [
     invoiceSummary(payload),
@@ -1044,8 +1089,36 @@ export function buildReportDocument(payload: CombinedReportPayload): ReportDocum
     slaRules(payload.maintenance),
   ];
 
+  /*
+   * The part headings. "Part 1 — " and "Part 2 — " are dropped when the
+   * document has only one part: a file whose every page is Part 2, with no
+   * Part 1 anywhere in it, reads as an extract of something the reader has not
+   * been given rather than as a document in its own right.
+   */
+  const wanted = PART_FOR_KIND[kind];
+  const allParts: ReportDocument["parts"] =
+    wanted === null
+      ? [
+          { number: 1, title: "Part 1 — Invoice", subtitle: "MAINTSUPP service fee for the period" },
+          {
+            number: 2,
+            title: "Part 2 — Maintenance Performance Report",
+            subtitle: "What the portfolio did, and what it spent doing it",
+          },
+        ]
+      : wanted === 1
+        ? [{ number: 1, title: "Invoice", subtitle: "MAINTSUPP service fee for the period" }]
+        : [
+            {
+              number: 2,
+              title: "Maintenance Performance Report",
+              subtitle: "What the portfolio did, and what it spent doing it",
+            },
+          ];
+
   return {
-    title: "Invoice and Maintenance Performance Report",
+    title: TITLE_FOR_KIND[kind],
+    kind,
     organisationName: payload.organisationName,
     clientName: payload.invoice.clientName,
     periodLabel: payload.period.label,
@@ -1055,14 +1128,7 @@ export function buildReportDocument(payload: CombinedReportPayload): ReportDocum
     status: payload.invoice.status,
     generatedAt: formatInstant(payload.generatedAt),
     currency,
-    parts: [
-      { number: 1, title: "Part 1 — Invoice", subtitle: "MAINTSUPP service fee for the period" },
-      {
-        number: 2,
-        title: "Part 2 — Maintenance Performance Report",
-        subtitle: "What the portfolio did, and what it spent doing it",
-      },
-    ],
+    parts: allParts,
     sections,
   };
 }
@@ -1086,11 +1152,25 @@ export function buildReportDocument(payload: CombinedReportPayload): ReportDocum
  * incomplete". So the internal audience keeps all thirteen and the tab says in
  * words that no project ran.
  */
+/*
+ * ── THE PART FILTER ────────────────────────────────────────────────────────
+ *
+ * `part` defaults to the DOCUMENT'S OWN KIND rather than to "everything", and
+ * that default is the point of it. A renderer asks for the sections it should
+ * print and gets the sections that belong to the document it was handed; there
+ * is no argument for it to forget, so there is no way for a Report export to
+ * contain §1 Invoice Summary or an Invoice export to contain §7 Delays and
+ * Holds. Passing `part` explicitly overrides the kind, which is what the two
+ * on-screen tabs do when they render one part of a combined document.
+ */
 export function sectionsFor(
   document: ReportDocument,
   audience: Audience,
+  part?: DocumentPart | null,
 ): DocSection[] {
+  const wanted = part === undefined ? PART_FOR_KIND[document.kind] : part;
   return document.sections.filter((section) => {
+    if (wanted !== null && section.part !== wanted) return false;
     if (audience === "all" && section.audience === "internal") return false;
     if (
       audience === "all" &&

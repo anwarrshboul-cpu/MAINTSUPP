@@ -25,6 +25,7 @@
 
 import type {
   CombinedReportPayload,
+  DocumentKind,
   DocumentListRow,
   ExportFormat,
   FinalisationBlocker,
@@ -339,8 +340,18 @@ export function runDocumentAction(
  * mid-click (the link shows the sign-in page; the blob dance downloads a file
  * containing the sign-in page).
  */
-export function exportUrl(documentId: string, format: ExportFormat): string {
-  return `/api/reports/exports?documentId=${encodeURIComponent(documentId)}&format=${format}`;
+export function exportUrl(
+  documentId: string,
+  format: ExportFormat,
+  /**
+   * Which half of the document. Defaults to `combined`, which is what the
+   * Generated Documents table's download links still mean — a row there is one
+   * document, and a reader downloading it from the register is asking for all
+   * of it.
+   */
+  kind: DocumentKind = "combined",
+): string {
+  return `/api/reports/exports?documentId=${encodeURIComponent(documentId)}&format=${format}&kind=${kind}`;
 }
 
 /**
@@ -353,13 +364,14 @@ export function exportUrl(documentId: string, format: ExportFormat): string {
 export async function exportPreview(
   question: PreviewQuestion,
   format: ExportFormat,
+  kind: DocumentKind = "combined",
 ): Promise<ApiResult<{ blob: Blob; filename: string }>> {
   let response: Response;
   try {
     response = await fetch("/api/reports/exports", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...question, format }),
+      body: JSON.stringify({ ...question, format, kind }),
     });
   } catch {
     return { ok: false, status: 0, error: "The workspace could not be reached." };

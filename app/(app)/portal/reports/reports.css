@@ -834,11 +834,197 @@ body[data-theme="dark"] {
   color: var(--red-600);
 }
 
-.reports-actions__row {
+/* ── The sticky action bar ─────────────────────────────────────────────── */
+
+/*
+ * The bar that used to be the last card on the page and is now the first.
+ *
+ * `position: sticky` with `top: 0` rather than a fixed bar: a fixed element
+ * would need a matching body padding, would sit over the tablist on a short
+ * viewport, and would have to be undone for print. Sticky keeps it in flow, so
+ * the page below it starts exactly where it did.
+ *
+ * It is the only surface in this sheet that paints a SOLID ground rather than
+ * the card gradient — content scrolls underneath it, and a gradient with a
+ * transparent stop would show that content through. `--surface-card-hi` is the
+ * top of the same gradient, so the bar is the card's own colour, opaque.
+ */
+.reports-actions--sticky {
+  position: sticky;
+  /*
+   * UNDER THE TOPBAR, NOT BEHIND IT.
+   *
+   * The page scroller here is the document — `.portal-main` sets no overflow —
+   * and `.portal-topbar` is itself `position: sticky; top: 0` at 71px tall. A
+   * bar pinned to `top: 0` would therefore slide underneath it and disappear.
+   * `--mobile-topbar-height` is the product's own measurement of that bar and
+   * is redeclared at the narrow widths where it shrinks to 64px; outside those
+   * it is undeclared, so the fallback is the same 71px `.live-board-toolbar`
+   * already pins itself below.
+   */
+  top: var(--mobile-topbar-height, 71px);
+  /* `--z-sticky` is the product's layer for exactly this: above the cards it
+     scrolls over, far below `--z-topbar` (300) it must never cover. */
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card-hi);
+  color: var(--ink);
+}
+
+.reports-actions__state {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 14px 18px 0;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.reports-actions__full {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The phone row. Hidden until the width where the full set stops fitting on
+   two lines; see the 640px block at the foot of this sheet. */
+.reports-actions__compact {
+  display: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.reports-actions__note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--amber-600);
+  font-size: 12.5px;
+}
+
+/*
+ * An unavailable control, which is NOT a `disabled` one.
+ *
+ * `aria-disabled` keeps the button focusable and clickable so it can answer
+ * "why not" on hover, on focus and on tap — a `disabled` button receives no
+ * events at all and its `title` is unreachable on a phone. So the styling has
+ * to do what the attribute no longer does: say plainly that pressing it will
+ * not do the thing. The ground and the ink are left to the base rule, which is
+ * why no `color` is declared here and no `--control-own-fg` is needed.
+ */
+.reports-button.is-unavailable {
+  opacity: 0.5;
+  cursor: help;
+}
+
+.reports-button.is-unavailable:hover {
+  opacity: 0.75;
+  border-color: var(--line-strong);
+  background: var(--surface-card-lo);
+}
+
+/* Two labels per button: the sentence on a wide screen, the word on a phone.
+   Only one is ever in the accessibility tree, because the other is display:none
+   rather than merely invisible. */
+.reports-button__short {
+  display: none;
+}
+
+/* ── The overflow menu ─────────────────────────────────────────────────── */
+
+.reports-more {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.reports-more__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(300px, calc(100vw - 40px));
+  max-height: 60vh;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-card-hi);
+  /* `--shadow-md` is redefined per theme in globals.css, which is what stops a
+     light-theme drop shadow being the dark theme's near-black one. */
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+}
+
+.reports-more__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 9px;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  --control-own-fg: var(--ink);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reports-more__item:hover {
+  background: var(--surface-hover);
+}
+
+.reports-more__item:focus-visible {
+  outline: 2px solid var(--brand-bright);
+  outline-offset: -2px;
+}
+
+/* The reason, under the label, spanning the two columns after the icon. It is
+   the whole point of the menu item being two lines tall. */
+.reports-more__item small {
+  grid-column: 2 / -1;
+  color: var(--muted-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.reports-more__item.is-unavailable {
+  opacity: 0.72;
+  cursor: help;
+}
+
+/*
+ * Announced but not drawn. `clip-path` rather than `display: none`, because a
+ * `display: none` element is not read out — and this span exists only to be
+ * read out, as the `aria-describedby` reason on an unavailable control.
+ */
+.reports-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .reports-status {
@@ -1276,10 +1462,30 @@ td.reports-empty {
 
   .reports-table-scroll,
   .reports-form,
-  .reports-kpis,
-  .reports-actions__row {
+  .reports-kpis {
     padding-left: 14px;
     padding-right: 14px;
+  }
+
+  /*
+   * The bar loses its sentences and keeps its words.
+   *
+   * Every action carries two labels — "Submit for review" and "Submit" — and
+   * this is where the second one takes over, because at tablet width eleven
+   * full sentences wrap to four rows and push the page's first card below the
+   * fold. Only one label is ever in the accessibility tree: the other is
+   * `display: none`, not merely invisible.
+   */
+  .reports-actions--sticky {
+    padding: 10px 14px;
+  }
+
+  .reports-button__label {
+    display: none;
+  }
+
+  .reports-button__short {
+    display: inline;
   }
 
   .reports-facts,
@@ -1395,8 +1601,39 @@ td.reports-empty {
 }
 
 @media (max-width: 640px) {
-  .reports-actions__row .reports-button {
-    flex: 1 1 100%;
+  /*
+   * THE PHONE BAR. Eleven controls do not fit on a 380px row at any font size,
+   * and a row that scrolls sideways would be the second horizontally scrolling
+   * surface on this screen — which this sheet does not allow. So the full set
+   * is replaced by four icon buttons and a "More" menu carrying the rest.
+   *
+   * They are the SAME action objects with the same availability reasons; the
+   * menu prints each reason under its item, so the phone actually explains an
+   * unavailable action better than the desktop tooltip does.
+   *
+   * Icon-only, and each button keeps `aria-label` and `title`, so the name is
+   * announced and is one long-press away. 5 x 40px plus four 6px gaps is 224px,
+   * which leaves room at 380px for the "More" label to stay a word.
+   */
+  .reports-actions__full {
+    display: none;
+  }
+
+  .reports-actions__compact {
+    display: flex;
+  }
+
+  .reports-actions__compact .reports-button {
+    flex: 0 0 auto;
+    padding: 0 11px;
+  }
+
+  .reports-actions__compact .reports-button__short {
+    display: none;
+  }
+
+  .reports-more {
+    margin-left: auto;
   }
 
   .reports-doc__cover h2 {

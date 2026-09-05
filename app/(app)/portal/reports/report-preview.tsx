@@ -26,7 +26,7 @@
 
 import { Fragment } from "react";
 import { Icon } from "../../../components";
-import type { CombinedReportPayload } from "../../../lib/reporting/contract";
+import type { CombinedReportPayload, DocumentKind } from "../../../lib/reporting/contract";
 import {
   buildReportDocument,
   keyValuesFor,
@@ -167,6 +167,7 @@ function PreviewSection({ section }: { section: DocSection }) {
 export function CombinedDocumentPreview({
   payload,
   snapshot = false,
+  kind = "combined",
 }: {
   payload: CombinedReportPayload;
   /**
@@ -176,12 +177,20 @@ export function CombinedDocumentPreview({
    * claims and a reader must not have to guess which they are reading.
    */
   snapshot?: boolean;
+  /**
+   * Which document to draw. The Report tab passes "report" and the Invoice tab
+   * "invoice", so the preview on each is the file that tab exports — the same
+   * `buildReportDocument` call with the same argument the exporter is given,
+   * which is what stops the screen and the download disagreeing about what is
+   * in the document.
+   */
+  kind?: DocumentKind;
 }) {
-  const document = buildReportDocument(payload);
+  const document = buildReportDocument(payload, kind);
   const sections = sectionsFor(document, "internal");
 
   return (
-    <article className="reports-doc" aria-label="Combined invoice and maintenance report preview">
+    <article className="reports-doc" aria-label={`${document.title} preview`}>
       <header className="reports-doc__cover">
         <p className="reports-doc__eyebrow">
           <Icon name="document" size={14} />

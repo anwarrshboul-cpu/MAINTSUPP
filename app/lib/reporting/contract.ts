@@ -420,9 +420,39 @@ export interface FinalisationBlocker {
   message: string;
 }
 
+/**
+ * WHICH OF THE TWO DOCUMENTS IS BEING ASKED FOR.
+ *
+ * One stored row still produces both halves — the payload is unchanged and its
+ * `schemaVersion` stays 1 — but the reader now chooses which half they are
+ * looking at and which half they are downloading. `combined` is what every
+ * caller that predates the split means, so it is the default everywhere and the
+ * old behaviour is reachable without saying anything.
+ *
+ * The mapping onto `DocSection.part` is in `document-model.ts`, which is the
+ * module that owns what a part contains. This type is here because
+ * `exportFilename` needs it and the filename is the contract's.
+ */
+export const DOCUMENT_KINDS = ["report", "invoice", "combined"] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+export function isDocumentKind(value: unknown): value is DocumentKind {
+  return typeof value === "string" && (DOCUMENT_KINDS as readonly string[]).includes(value);
+}
+
 export interface DocumentListRow {
   invoiceId: string;
   invoiceNumber: string | null;
+  /**
+   * Which document this row IS, once the register learns to record it.
+   *
+   * Optional and unpopulated today: every stored row predates the split and
+   * carries both parts, so the list route returns nothing here and the
+   * Documents tab treats `undefined` as "open the Report". Declared now so the
+   * screen reads a field rather than a cast, and so the day the column exists
+   * nothing but the query has to change.
+   */
+  kind?: DocumentKind | null;
   clientName: string;
   period: ReportPeriod;
   invoiceDate: IsoDate | null;
@@ -442,14 +472,31 @@ export const EXPORT_FORMATS = ["docx", "pdf", "xlsx"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 /**
- * `MAINTSUPP_[ClientName]_[StartDate]_[EndDate]_[InvoiceNumber]` with the
- * extension appended. Shared so that the three exporters, the download route
- * and the Generated Documents table cannot drift from one another.
+ * The download name, per document kind. Shared so that the three exporters, the
+ * download route and the Generated Documents table cannot drift from one
+ * another.
  *
- * Sanitising is deliberately aggressive: anything outside the allowed set
- * becomes a single hyphen. A client legitimately called "Smith & Co. (UK)/EU"
- * must not be able to produce a path separator, a leading dot, or a Windows
- * reserved character in a filename the owner will download.
+ *   combined  MAINTSUPP_[ClientName]_[StartDate]_[EndDate]_[InvoiceNumber]
+ *   report    MAINTSUPP_Report_[ClientName]_[YYYY-MM]_v[n]
+ *   invoice   MAINTSUPP_Invoice_[ClientName]_[InvoiceNumber or DRAFT-YYYY-MM]
+ *
+ * ── WHY THE KIND IS IN THE NAME AND NOT ONLY IN THE FILE ──────────────────
+ *
+ * Before the split there was one document per client per period, so its period
+ * identified it. There are now two, and both are downloaded into the same
+ * folder from the same screen on the same afternoon. A name that omitted the
+ * kind would have the Report and the Invoice for March collide — the second
+ * download silently becoming `…(1).docx`, or overwriting the first — and the
+ * reader would have no way to tell from the folder which file is which. The
+ * word is therefore in the name, second, where it sorts the two apart.
+ *
+ * `combined` keeps the old shape byte for byte. It is the default, so a caller
+ * that predates the split is named exactly as it was.
+ *
+ * Sanitising is deliberately aggressive and unchanged: anything outside the
+ * allowed set becomes a single hyphen. A client legitimately called
+ * "Smith & Co. (UK)/EU" must not be able to produce a path separator, a leading
+ * dot, or a Windows reserved character in a filename the owner will download.
  */
 export function exportFilename(input: {
   clientName: string;
@@ -457,6 +504,10 @@ export function exportFilename(input: {
   periodEnd: IsoDate;
   invoiceNumber: string | null;
   format: ExportFormat;
+  /** Defaults to `combined`, which is the name this function always produced. */
+  kind?: DocumentKind;
+  /** The report's revision. Defaults to 1 until the register stores one. */
+  version?: number | null;
 }): string {
   const safe = (value: string) =>
     value
@@ -464,12 +515,32 @@ export function exportFilename(input: {
       .replace(/[^A-Za-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 60) || "unknown";
-  const parts = [
-    "MAINTSUPP",
-    safe(input.clientName),
-    safe(input.periodStart),
-    safe(input.periodEnd),
-    safe(input.invoiceNumber ?? "DRAFT"),
-  ];
+  // The month the period starts in. A report is a month even when its range is
+  // a fortnight, and `YYYY-MM` is what the owner's spec names.
+  const yearMonth = /^(\d{4})-(\d{2})/.exec(input.periodStart);
+  const month = yearMonth ? `${yearMonth[1]}-${yearMonth[2]}` : input.periodStart;
+  const version = Number.isFinite(input.version) && (input.version ?? 0) > 0
+    ? Math.floor(input.version as number)
+    : 1;
+
+  const parts =
+    input.kind === "report"
+      ? ["MAINTSUPP", "Report", safe(input.clientName), safe(month), `v${version}`]
+      : input.kind === "invoice"
+        ? [
+            "MAINTSUPP",
+            "Invoice",
+            safe(input.clientName),
+            // A draft invoice has no number, and two drafts for two months must
+            // still be two files, so the month stands in for the reference.
+            safe(input.invoiceNumber ?? `DRAFT-${month}`),
+          ]
+        : [
+            "MAINTSUPP",
+            safe(input.clientName),
+            safe(input.periodStart),
+            safe(input.periodEnd),
+            safe(input.invoiceNumber ?? "DRAFT"),
+          ];
   return `${parts.join("_")}.${input.format}`;
 }

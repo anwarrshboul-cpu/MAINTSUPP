@@ -1,21 +1,38 @@
 "use client";
 
 /**
- * The Invoice & Report Generator tab.
+ * THE SHARED ENGINE BEHIND THE REPORT TAB AND THE INVOICE TAB.
  *
- * WHAT DECIDES THE ORDER OF THIS SCREEN
+ * This file used to be the combined "Invoice & Report Generator": one screen
+ * that drew part 1 and part 2 of one document, with its action block at the
+ * bottom. The screen is now two tabs — `report-tab.tsx` and `invoice-tab.tsx` —
+ * and there is deliberately NO combined component left behind. A hidden legacy
+ * generator would be a third rendering of the same figures that nobody opens
+ * and nobody notices going stale.
  *
- * It is the order the owner listed, and the order is the argument: controls,
- * then what the figures are built from, then the invoice figures, then the
- * lines behind them, then the maintenance figures, then what is wrong with the
- * data, then the document, then the actions. A reader arrives at Finalise
- * having already been shown every reason not to press it.
+ * What stayed is everything the two tabs must not each have a copy of: the
+ * document state machine, the debounce, save, the lifecycle actions, the
+ * inclusion changes, the export call, the setup fields and the data-issues
+ * panel. Both tabs mount ONE `useGeneratorDocument` — held above them in
+ * `ReportsView` — so switching between Report and Invoice does not abandon a
+ * saved draft or refetch the period.
+ *
+ * ── THE ACTION BLOCK IS NO LONGER HERE, AND IS NO LONGER AT THE BOTTOM ────
+ *
+ * This header used to argue for the bottom position, on the grounds that a
+ * reader "arrives at Finalise having already been shown every reason not to
+ * press it". That argument assumed one screen the length of a document, and it
+ * stopped holding when the Report tab became a full maintenance report. The bar
+ * is now a sticky one at the TOP of both tabs, it lives in
+ * `./generator-actions.tsx`, and that file's header carries the reasoning —
+ * including why every unavailable control states its own reason and why none of
+ * them is a `disabled` button.
  *
  * THE FIGURES COME FROM THE SERVER AND ARE NEVER TOUCHED
  *
- * Every number on this screen comes out of a `CombinedReportPayload` that
- * `/api/reports/preview` computed. This component does not add, subtract, round
- * or re-derive one of them — `invoiceKpiRows`, `maintenanceKpiRows` and
+ * Every number on these screens comes out of a `CombinedReportPayload` that
+ * `/api/reports/preview` computed. Nothing here adds, subtracts, rounds or
+ * re-derives one — `invoiceKpiRows`, `maintenanceKpiRows` and
  * `buildReportDocument` in `app/lib/exports/document-model.ts` are the same
  * functions the three exporters call. That is why the preview and the files
  * cannot disagree: they are not two implementations that agree, they are one.
@@ -40,23 +57,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../../components";
-import { AnalyticsMetricCard } from "../dashboard-analytics";
 import { useCapability } from "../../../lib/client-capabilities";
 import type {
   BillableSiteLine,
   CombinedReportPayload,
+  DocumentKind,
   ExportFormat,
   FinalisationBlocker,
   InvoiceStatus,
 } from "../../../lib/reporting/contract";
-import {
-  buildReportDocument,
-  invoiceKpiRows,
-  maintenanceKpiRows,
-  SPEND_LABELS,
-} from "../../../lib/exports/document-model";
-import { formatBasisPoints, formatMoney } from "../../../lib/exports/format";
-import { CombinedDocumentPreview } from "./report-preview";
 import {
   BillingConfigurationSummary,
   emptyDraft,
@@ -82,10 +91,17 @@ import type { BillingSettings, DocumentAction } from "./reports-client";
 
 /* ── Small shared pieces ─────────────────────────────────────────────────── */
 
-const JOBS_ITEM_HREF = (requestId: string) =>
+export const JOBS_ITEM_HREF = (requestId: string) =>
   `/dashboard/jobs?item=${encodeURIComponent(requestId)}`;
 
-function StatusChip({ status }: { status: InvoiceStatus }) {
+/** DD/MM/YYYY, through the export formatter so one screen cannot drift. */
+export function formatDate(value: string | null): string {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
+
+export function StatusChip({ status }: { status: InvoiceStatus }) {
   const tone =
     status === "Finalised"
       ? "good"
@@ -99,6 +115,13 @@ function StatusChip({ status }: { status: InvoiceStatus }) {
   return <span className={`reports-status reports-status--${tone}`}>{status}</span>;
 }
 
+export interface GeneratorIssue {
+  severity: "blocking" | "warning" | "info";
+  code: string;
+  message: string;
+  href?: string | null;
+}
+
 /**
  * The three severities, visually distinct, with the distinction spelled out.
  *
@@ -107,7 +130,7 @@ function StatusChip({ status }: { status: InvoiceStatus }) {
  * can be issued. Each carries its word as well as its hue, and blockers carry
  * the sentence "this stops finalisation" rather than leaving it implied.
  */
-function IssueList({
+export function IssueList({
   title,
   severity,
   items,
@@ -149,166 +172,147 @@ function IssueList({
   );
 }
 
-/* ── The billable-sites table ────────────────────────────────────────────── */
-
-function BillableSitesTable({
-  payload,
-  canEdit,
-  onExclude,
-  onInclude,
-  busyLine,
+/**
+ * The data-issues card, scoped to whichever tab drew it.
+ *
+ * The Report tab passes the maintenance data-quality findings; the Invoice tab
+ * passes the per-line validation. Both pass the finalisation blockers, because
+ * both tabs carry a Finalise control and a reason it cannot be pressed is not
+ * content a reader should have to change tab to read.
+ */
+export function DataIssuesPanel({
+  id,
+  lead,
+  issues,
+  blockers,
+  advisories,
 }: {
-  payload: CombinedReportPayload;
-  canEdit: boolean;
-  onExclude: (line: BillableSiteLine) => void;
-  onInclude: (line: BillableSiteLine) => void;
-  busyLine: number | null;
+  id: string;
+  lead: string;
+  issues: GeneratorIssue[];
+  blockers: FinalisationBlocker[];
+  advisories: FinalisationBlocker[];
 }) {
-  const currency = payload.invoice.currency;
-  const totals = payload.invoice.totals;
+  const blocking = issues.filter((issue) => issue.severity === "blocking");
+  const warning = issues.filter((issue) => issue.severity === "warning");
+  const info = issues.filter((issue) => issue.severity === "info");
   return (
-    <section className="reports-card" aria-labelledby="generator-sites-heading">
+    <section className="reports-card" id={id} aria-labelledby={`${id}-heading`}>
       <header className="reports-card__head">
-        <h2 id="generator-sites-heading">
-          <Icon name="store" size={17} />
-          Billable active sites
+        <h2 id={`${id}-heading`}>
+          <Icon name="shield" size={17} />
+          Data issues
         </h2>
         <p>
-          One line per site considered for this period. An excluded line keeps its row so the
-          exclusion stays visible, and is not counted in the totals.
+          {issues.length
+            ? `${blocking.length} blocking, ${warning.length} warning, ${info.length} informational. ${lead}`
+            : `Nothing was found wrong with the data behind this document. ${lead}`}
         </p>
       </header>
-      <div className="reports-table-scroll" tabIndex={0} role="region" aria-label="Billable sites">
-        <table className="reports-table reports-table--sites">
-          <thead>
-            <tr>
-              <th scope="col">Site name</th>
-              <th scope="col">Site reference</th>
-              <th scope="col">Active status</th>
-              <th scope="col">Active from</th>
-              <th scope="col">Active to</th>
-              <th scope="col">Billable</th>
-              <th scope="col" className="is-right">Applied fee</th>
-              <th scope="col">Fee source</th>
-              <th scope="col" className="is-right">VAT rate</th>
-              <th scope="col" className="is-right">Line subtotal</th>
-              <th scope="col">Inclusion</th>
-              <th scope="col">Validation</th>
-              {canEdit && <th scope="col">Action</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {payload.invoice.lines.map((line) => {
-              const worst = line.validation.find((entry) => entry.severity === "blocking")
-                ?? line.validation.find((entry) => entry.severity === "warning")
-                ?? line.validation[0];
-              return (
-                <tr key={line.lineNo} className={line.included ? undefined : "is-excluded"}>
-                  <td data-label="Site name"><strong>{line.siteName}</strong></td>
-                  <td data-label="Site reference">{line.siteReference ?? "—"}</td>
-                  <td data-label="Active status">{line.activeStatus}</td>
-                  <td data-label="Active from">{formatDate(line.activeFrom)}</td>
-                  <td data-label="Active to">{formatDate(line.activeTo)}</td>
-                  <td data-label="Billable">{line.billable ? "Yes" : "No"}</td>
-                  <td data-label="Applied fee" className="is-right">
-                    {formatMoney(line.feePence, currency)}
-                  </td>
-                  <td data-label="Fee source">
-                    {line.feeSource ?? (
-                      <span className="reports-cell reports-cell--blocking">No fee found</span>
-                    )}
-                  </td>
-                  <td data-label="VAT rate" className="is-right">
-                    {formatBasisPoints(line.vatRateBasisPoints)}
-                  </td>
-                  <td data-label="Line subtotal" className="is-right">
-                    {formatMoney(line.lineSubtotalPence, currency)}
-                  </td>
-                  <td data-label="Inclusion">
-                    {line.included ? (
-                      "Included"
-                    ) : (
-                      <span className="reports-exclusion">
-                        Excluded
-                        {line.excludedByEmail && <small>by {line.excludedByEmail}</small>}
-                        {line.exclusionReason && <small>{line.exclusionReason}</small>}
-                      </span>
-                    )}
-                  </td>
-                  <td data-label="Validation">
-                    {worst ? (
-                      <span className={`reports-cell reports-cell--${worst.severity}`}>
-                        {worst.message}
-                      </span>
-                    ) : (
-                      <span className="reports-cell reports-cell--good">Clear</span>
-                    )}
-                  </td>
-                  {canEdit && (
-                    <td data-label="Action">
-                      <button
-                        type="button"
-                        className="reports-linkish"
-                        disabled={busyLine === line.lineNo}
-                        onClick={() => (line.included ? onExclude(line) : onInclude(line))}
-                      >
-                        {line.included ? "Exclude…" : "Include"}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-            {!payload.invoice.lines.length && (
-              <tr>
-                <td colSpan={canEdit ? 13 : 12} className="reports-empty">
-                  No site was billable in this period, so the invoice carries no lines.
-                </td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td data-label="Total sites"><strong>{totals.totalSites} sites</strong></td>
-              <td data-label="Included"><strong>{totals.includedSites} included</strong></td>
-              <td data-label="Excluded"><strong>{totals.excludedSites} excluded</strong></td>
-              <td colSpan={6} />
-              <td data-label="Subtotal" className="is-right">
-                <strong>{formatMoney(totals.subtotalPence, currency)}</strong>
-              </td>
-              <td data-label="VAT"><strong>VAT {formatMoney(totals.vatPence, currency)}</strong></td>
-              <td data-label="Total" colSpan={canEdit ? 2 : 1}>
-                <strong>Total {formatMoney(totals.totalPence, currency)}</strong>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+      <IssueList title="Blocking" severity="blocking" items={blocking} />
+      <IssueList title="Warnings" severity="warning" items={warning} />
+      <IssueList title="Information" severity="info" items={info} />
+      {blockers.length > 0 && (
+        <IssueList
+          title="Finalisation blockers"
+          severity="blocking"
+          items={blockers.map((blocker) => ({ code: blocker.code, message: blocker.message }))}
+        />
+      )}
+      {advisories.length > 0 && (
+        <IssueList
+          title="Advisories"
+          severity="warning"
+          items={advisories.map((entry) => ({ code: entry.code, message: entry.message }))}
+        />
+      )}
     </section>
   );
 }
 
-/** DD/MM/YYYY, through the export formatter so one screen cannot drift. */
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+/* ── The setup block, drawn identically above both tabs ──────────────────── */
+
+export function GeneratorSetupCards({ generator }: { generator: GeneratorController }) {
+  return (
+    <>
+      <GeneratorSetup
+        draft={generator.draft}
+        onChange={generator.onDraftChange}
+        clients={
+          generator.clients.length
+            ? generator.clients
+            : [{ id: generator.draft.clientId || "current", name: "This workspace" }]
+        }
+        settings={generator.settings}
+        now={generator.now}
+        disabled={!generator.editable || generator.canEdit === false}
+      />
+      <BillingConfigurationSummary
+        settings={generator.settings}
+        draft={generator.draft}
+        loading={generator.settingsLoading}
+        error={generator.settingsError}
+      />
+    </>
+  );
 }
 
-/* ── The generator ───────────────────────────────────────────────────────── */
+/* ── The document state, shared by both tabs ─────────────────────────────── */
 
-export function InvoiceReportGenerator({
+export interface GeneratorController {
+  now: number;
+  canEdit: boolean | null;
+  canSettle: boolean | null;
+  canExport: boolean | null;
+  clients: Array<{ id: string; name: string }>;
+  draft: GeneratorDraft;
+  onDraftChange: (patch: Partial<GeneratorDraft>, touched: DraftField[]) => void;
+  settings: BillingSettings | null;
+  settingsError: string | null;
+  settingsLoading: boolean;
+  payload: CombinedReportPayload | null;
+  blockers: FinalisationBlocker[];
+  warnings: FinalisationBlocker[];
+  documentId: string | null;
+  snapshot: boolean;
+  computing: boolean;
+  busy: string | null;
+  busyLine: number | null;
+  message: { tone: "ok" | "bad"; text: string } | null;
+  setMessage: (message: { tone: "ok" | "bad"; text: string } | null) => void;
+  status: InvoiceStatus;
+  currency: string;
+  editable: boolean;
+  compute: () => Promise<void>;
+  runSave: () => Promise<void>;
+  runAction: (action: DocumentAction, prompt?: string) => Promise<void>;
+  changeInclusion: (line: BillableSiteLine, include: boolean) => Promise<void>;
+  runExport: (format: ExportFormat, kind: DocumentKind) => Promise<void>;
+}
+
+export function useGeneratorDocument({
   now,
   openDocumentId = null,
+  active = true,
 }: {
   now: number;
   /**
-   * A document the Generated Documents tab asked to open. Read once on mount
-   * and whenever it changes, which is what makes "View" on that table land on
-   * this screen showing that document rather than on a fresh draft.
+   * A document the Documents tab asked to open. Read once on mount and whenever
+   * it changes, which is what makes "View" on that table land on the right tab
+   * showing that document rather than on a fresh draft.
    */
   openDocumentId?: string | null;
-}) {
+  /**
+   * Whether either document tab is on screen.
+   *
+   * This hook is mounted by `ReportsView` so that the Report tab and the
+   * Invoice tab share one document — but `ReportsView` also draws Spend
+   * Overview and Documents, and neither of those should cost a preview
+   * computation. False suspends the debounce and nothing else: an already
+   * loaded document stays loaded, so switching to Documents and back is free.
+   */
+  active?: boolean;
+}): GeneratorController {
   const canEdit = useCapability("board.edit");
   const canSettle = useCapability("settings.edit");
   const canExport = useCapability("data.export");
@@ -329,8 +333,6 @@ export function InvoiceReportGenerator({
   const [busy, setBusy] = useState<string | null>(null);
   const [busyLine, setBusyLine] = useState<number | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const [drill, setDrill] = useState<string | null>(null);
 
   const applyPatch = useCallback((patch: Partial<GeneratorDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -424,10 +426,10 @@ export function InvoiceReportGenerator({
    * data, and it goes through the document's own action endpoint.
    */
   useEffect(() => {
-    if (documentId) return;
+    if (documentId || !active) return;
     const timer = window.setTimeout(() => void compute(), 500);
     return () => window.clearTimeout(timer);
-  }, [compute, documentId]);
+  }, [active, compute, documentId]);
 
   /* `.then` rather than `await` — see the note on `load` in generated-documents.tsx. */
   const reloadDocument = useCallback(
@@ -451,8 +453,7 @@ export function InvoiceReportGenerator({
    * `documentId` being set makes every subsequent action go through the
    * document endpoints, and the preview refetch only runs when the QUESTION
    * changes, which opening a document does not do.
-   */
-  /*
+   *
    * The id is adopted DURING RENDER rather than in the effect, which is React's
    * documented way to adjust state when a prop changes and is what stops the
    * debounce below firing one recomputation against a period the reader never
@@ -476,7 +477,7 @@ export function InvoiceReportGenerator({
 
   /* ── Actions ───────────────────────────────────────────────────────────── */
 
-  const runSave = async () => {
+  const runSave = useCallback(async () => {
     setBusy("save");
     const input = {
       clientId: draft.clientId,
@@ -514,529 +515,164 @@ export function InvoiceReportGenerator({
       await reloadDocument(id);
     }
     setMessage({ tone: "ok", text: documentId ? "Draft updated." : "Draft saved." });
-  };
+  }, [documentId, draft, reloadDocument]);
 
-  const runAction = async (action: DocumentAction, prompt?: string) => {
-    if (!documentId) {
-      setMessage({ tone: "bad", text: "Save the draft before using this control." });
-      return;
-    }
-    let reason: string | undefined;
-    if (prompt) {
-      const typed = window.prompt(prompt);
-      if (typed === null) return;
-      if (!typed.trim()) {
-        setMessage({ tone: "bad", text: "A reason is required." });
+/**
+ * What to say once an action has landed.
+ *
+ * This was `` `Document ${action}d.` `` — a suffix bolted onto the verb, which
+ * gave "Document submitd." and "Document voidd." to anybody who used either
+ * control, and carried a `.replace("finalised", "finalised")` that had never
+ * replaced anything. Two of the five states this product's whole approval
+ * chain runs on announced themselves in broken English.
+ *
+ * A table, not a rule, because these are not five spellings of one sentence:
+ * each one says what changed and what may be done next, which is the thing a
+ * reader actually needs after pressing a lifecycle button.
+ */
+const ACTION_DONE: Record<DocumentAction, string> = {
+  recalculate: "Figures recalculated.",
+  submit: "Submitted for review.",
+  approve: "Approved. It can be finalised or exported.",
+  finalise: "Finalised. It is now immutable, and any change needs a new version.",
+  void: "Voided. It is kept, and its number is never reused.",
+};
+
+  const runAction = useCallback(
+    async (action: DocumentAction, prompt?: string) => {
+      if (!documentId) {
+        setMessage({ tone: "bad", text: "Save the draft before using this control." });
         return;
       }
-      reason = typed.trim();
-    }
-    setBusy(action);
-    const result = await runDocumentAction(documentId, action, reason);
-    setBusy(null);
-    if (!result.ok) {
-      setMessage({ tone: "bad", text: result.error });
-      return;
-    }
-    await reloadDocument(documentId);
-    setMessage({ tone: "ok", text: `Document ${action}d.`.replace("finalised", "finalised") });
-  };
-
-  const changeInclusion = async (line: BillableSiteLine, include: boolean) => {
-    if (!documentId) {
-      setMessage({
-        tone: "bad",
-        text: "Save the draft before including or excluding a site — an exclusion is an audited change and needs a document to attach to.",
-      });
-      return;
-    }
-    let reason: string | undefined;
-    if (!include) {
-      const typed = window.prompt(
-        `Exclude ${line.siteName} from this invoice.\n\nWhy? This is recorded against your name and shown on the document.`,
-      );
-      if (typed === null) return;
-      if (!typed.trim()) {
-        setMessage({ tone: "bad", text: "An exclusion needs a reason." });
-        return;
+      let reason: string | undefined;
+      if (prompt) {
+        const typed = window.prompt(prompt);
+        if (typed === null) return;
+        if (!typed.trim()) {
+          setMessage({ tone: "bad", text: "A reason is required." });
+          return;
+        }
+        reason = typed.trim();
       }
-      reason = typed.trim();
-    }
-    setBusyLine(line.lineNo);
-    const result = await setLineInclusion(documentId, {
-      lineNo: line.lineNo,
-      siteId: line.siteId,
-      included: include,
-      reason,
-    });
-    setBusyLine(null);
-    if (!result.ok) {
-      setMessage({ tone: "bad", text: result.error });
-      return;
-    }
-    await reloadDocument(documentId);
-  };
-
-  const runExport = async (format: ExportFormat) => {
-    setBusy(`export-${format}`);
-    if (documentId) {
-      // A plain navigation for a saved document — see `exportUrl`.
-      window.location.assign(exportUrl(documentId, format));
+      setBusy(action);
+      const result = await runDocumentAction(documentId, action, reason);
       setBusy(null);
-      return;
-    }
-    const result = await exportPreview(question, format);
-    setBusy(null);
-    if (!result.ok) {
-      setMessage({ tone: "bad", text: result.error });
-      return;
-    }
-    saveBlob(result.data.blob, result.data.filename);
+      if (!result.ok) {
+        setMessage({ tone: "bad", text: result.error });
+        return;
+      }
+      await reloadDocument(documentId);
+      setMessage({ tone: "ok", text: ACTION_DONE[action] });
+    },
+    [documentId, reloadDocument],
+  );
+
+  const changeInclusion = useCallback(
+    async (line: BillableSiteLine, include: boolean) => {
+      if (!documentId) {
+        setMessage({
+          tone: "bad",
+          text: "Save the draft before including or excluding a site — an exclusion is an audited change and needs a document to attach to.",
+        });
+        return;
+      }
+      let reason: string | undefined;
+      if (!include) {
+        const typed = window.prompt(
+          `Exclude ${line.siteName} from this invoice.\n\nWhy? This is recorded against your name and shown on the document.`,
+        );
+        if (typed === null) return;
+        if (!typed.trim()) {
+          setMessage({ tone: "bad", text: "An exclusion needs a reason." });
+          return;
+        }
+        reason = typed.trim();
+      }
+      setBusyLine(line.lineNo);
+      const result = await setLineInclusion(documentId, {
+        lineNo: line.lineNo,
+        siteId: line.siteId,
+        included: include,
+        reason,
+      });
+      setBusyLine(null);
+      if (!result.ok) {
+        setMessage({ tone: "bad", text: result.error });
+        return;
+      }
+      await reloadDocument(documentId);
+    },
+    [documentId, reloadDocument],
+  );
+
+  const runExport = useCallback(
+    async (format: ExportFormat, kind: DocumentKind) => {
+      setBusy(`export-${format}`);
+      if (documentId) {
+        // A plain navigation for a saved document — see `exportUrl`.
+        window.location.assign(exportUrl(documentId, format, kind));
+        setBusy(null);
+        return;
+      }
+      const result = await exportPreview(question, format, kind);
+      setBusy(null);
+      if (!result.ok) {
+        setMessage({ tone: "bad", text: result.error });
+        return;
+      }
+      saveBlob(result.data.blob, result.data.filename);
+    },
+    [documentId, question],
+  );
+
+  return {
+    now,
+    canEdit,
+    canSettle,
+    canExport,
+    clients,
+    draft,
+    onDraftChange,
+    settings,
+    settingsError,
+    settingsLoading,
+    payload,
+    blockers,
+    warnings,
+    documentId,
+    snapshot,
+    computing,
+    busy,
+    busyLine,
+    message,
+    setMessage,
+    status,
+    currency,
+    editable,
+    compute,
+    runSave,
+    runAction,
+    changeInclusion,
+    runExport,
   };
+}
 
-  /* ── Derived, from the payload and nothing else ────────────────────────── */
+/* ── The message banner ──────────────────────────────────────────────────── */
 
-  const invoiceCards = payload ? invoiceKpiRows(payload) : [];
-  const maintenanceCards = payload ? maintenanceKpiRows(payload) : [];
-  const lineIssues = payload
-    ? payload.invoice.lines.flatMap((line) =>
-        line.validation.map((entry) => ({
-          severity: entry.severity,
-          code: entry.code,
-          message: `${line.siteName}: ${entry.message}`,
-          href: null as string | null,
-        })),
-      )
-    : [];
-  const quality = payload?.maintenance.dataQuality ?? [];
-  const allIssues = [
-    ...quality.map((finding) => ({
-      severity: finding.severity,
-      code: finding.code,
-      message: finding.message,
-      href: finding.href,
-    })),
-    ...lineIssues,
-  ];
-  const blockingIssues = allIssues.filter((issue) => issue.severity === "blocking");
-  const warningIssues = allIssues.filter((issue) => issue.severity === "warning");
-  const infoIssues = allIssues.filter((issue) => issue.severity === "info");
-
-  const drillRows = useMemo(() => {
-    if (!payload || !drill) return [];
-    const log = payload.maintenance.jobLog.flatMap((group) =>
-      group.rows.map((row) => ({ ...row, group: group.group })),
-    );
-    switch (drill) {
-      case "completed":
-        return log.filter((row) => row.group === "Completed");
-      case "open":
-        return log.filter((row) => row.group !== "Completed" && row.group !== "Cancelled");
-      case "hold":
-        return log.filter((row) => row.group === "On Hold");
-      case "past-target":
-        return payload.maintenance.openPastTarget.map((row) => ({
-          requestId: row.requestId,
-          reference: row.reference,
-          siteName: row.siteName,
-          issue: row.issue,
-          group: row.status,
-          raisedOn: row.raisedOn,
-        }));
-      case "critical":
-        return payload.maintenance.criticalOpen.map((row) => ({
-          requestId: row.requestId,
-          reference: row.reference,
-          siteName: row.siteName,
-          issue: row.issue,
-          group: row.status,
-          raisedOn: row.raisedOn,
-        }));
-      case "sla":
-        return payload.maintenance.sla.map((row) => ({
-          requestId: row.requestId,
-          reference: row.reference,
-          siteName: row.siteName,
-          issue: row.description,
-          group: row.result,
-          raisedOn: null,
-        }));
-      default:
-        return log;
-    }
-  }, [drill, payload]);
-
-  const documentTitle = payload ? buildReportDocument(payload).title : "";
-
+export function GeneratorAlert({ generator }: { generator: GeneratorController }) {
+  const { message, setMessage } = generator;
+  if (!message) return null;
   return (
-    <div className="reports-generator">
-      {message && (
-        <p
-          className={`reports-alert reports-alert--${message.tone === "ok" ? "ok" : "blocking"}`}
-          role="status"
-        >
-          <Icon name={message.tone === "ok" ? "check" : "alert"} size={15} />
-          {message.text}
-          <button type="button" onClick={() => setMessage(null)} aria-label="Dismiss">
-            <Icon name="close" size={14} />
-          </button>
-        </p>
-      )}
-
-      <GeneratorSetup
-        draft={draft}
-        onChange={onDraftChange}
-        clients={clients.length ? clients : [{ id: draft.clientId || "current", name: "This workspace" }]}
-        settings={settings}
-        now={now}
-        disabled={!editable || canEdit === false}
-      />
-
-      <BillingConfigurationSummary
-        settings={settings}
-        draft={draft}
-        loading={settingsLoading}
-        error={settingsError}
-      />
-
-      {/* ── Invoice KPI cards ──────────────────────────────────────────── */}
-      <section className="reports-card" aria-labelledby="generator-invoice-heading">
-        <header className="reports-card__head">
-          <h2 id="generator-invoice-heading">
-            <Icon name="chart" size={17} />
-            Invoice
-            <StatusChip status={status} />
-            {computing && <span className="reports-computing">Recalculating…</span>}
-          </h2>
-          <p>
-            The MAINTSUPP service fee for this period. This is what the client is invoiced and is
-            never presented as maintenance expenditure.
-          </p>
-        </header>
-        {payload ? (
-          <div className="reports-kpis" aria-label="Invoice figures">
-            {invoiceCards.map((card) => (
-              <article className="reports-kpi" key={card.key}>
-                <small>{card.label}</small>
-                <strong>{card.value}</strong>
-                {card.note && <span>{card.note}</span>}
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="reports-empty">
-            {computing ? "Computing the invoice for this period…" : "Choose a period to compute the invoice."}
-          </p>
-        )}
-      </section>
-
-      {payload && (
-        <BillableSitesTable
-          payload={payload}
-          canEdit={Boolean(canEdit) && editable}
-          busyLine={busyLine}
-          onExclude={(line) => void changeInclusion(line, false)}
-          onInclude={(line) => void changeInclusion(line, true)}
-        />
-      )}
-
-      {/* ── Maintenance KPI cards ──────────────────────────────────────── */}
-      {payload && (
-        <section className="reports-card" aria-labelledby="generator-maintenance-heading">
-          <header className="reports-card__head">
-            <h2 id="generator-maintenance-heading">
-              <Icon name="tool" size={17} />
-              Maintenance performance
-            </h2>
-            <p>What the portfolio did in this period. Select a figure to list the jobs behind it.</p>
-          </header>
-          <div className="reports-kpis reports-kpis--wide" aria-label="Maintenance figures">
-            {maintenanceCards.map((card) => (
-              <AnalyticsMetricCard
-                key={card.key}
-                label={card.label}
-                value={card.value}
-                icon="chart"
-                tone={card.key === "criticalOpenJobs" ? "red" : card.key === "slaPerformance" ? "blue" : "teal"}
-                onClick={() => setDrill((current) => (current === card.drill ? null : card.drill))}
-              />
-            ))}
-          </div>
-
-          {drill && (
-            <div className="reports-drill">
-              <header>
-                <h3>{drillRows.length} job{drillRows.length === 1 ? "" : "s"} behind this figure</h3>
-                <button type="button" onClick={() => setDrill(null)}>
-                  Close <Icon name="close" size={13} />
-                </button>
-              </header>
-              <div className="reports-table-scroll" tabIndex={0} role="region" aria-label="Jobs behind this figure">
-                <table className="reports-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Reference</th>
-                      <th scope="col">Site</th>
-                      <th scope="col">Job</th>
-                      <th scope="col">State</th>
-                      <th scope="col">Open</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drillRows.map((row) => (
-                      <tr key={row.requestId}>
-                        <td data-label="Reference">{row.reference ?? row.requestId}</td>
-                        <td data-label="Site">{row.siteName}</td>
-                        <td data-label="Job">{row.issue}</td>
-                        <td data-label="State">{row.group}</td>
-                        <td data-label="Open">
-                          <a href={JOBS_ITEM_HREF(row.requestId)}>
-                            Open on the board <Icon name="chevron" size={13} />
-                          </a>
-                        </td>
-                      </tr>
-                    ))}
-                    {!drillRows.length && (
-                      <tr>
-                        <td colSpan={5} className="reports-empty">
-                          No job in this period matches that figure.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* THE FIVE FIGURES, SEPARATELY LABELLED. The owner's instruction was
-              that the invoice total must never read as maintenance
-              expenditure, so the service fee is first, is labelled as the
-              invoice, and the panel says in words that these do not add up. */}
-          <div className="reports-spend">
-            <h3>Expenditure, reported separately</h3>
-            <p>
-              These five figures are <strong>not additive</strong>. The service fee is what
-              MAINTSUPP invoices; the others are what the portfolio spent on maintenance.
-            </p>
-            <dl>
-              <div className="reports-spend__row is-fee">
-                <dt>{SPEND_LABELS.serviceFee}</dt>
-                <dd>{formatMoney(payload.maintenance.spend.serviceFeePence, currency)}</dd>
-              </div>
-              <div className="reports-spend__row">
-                <dt>{SPEND_LABELS.completed}</dt>
-                <dd>{formatMoney(payload.maintenance.spend.completedMaintenancePence, currency)}</dd>
-              </div>
-              <div className="reports-spend__row">
-                <dt>{SPEND_LABELS.openCommitted}</dt>
-                <dd>{formatMoney(payload.maintenance.spend.openCommittedPence, currency)}</dd>
-              </div>
-              <div className="reports-spend__row">
-                <dt>{SPEND_LABELS.project}</dt>
-                <dd>{formatMoney(payload.maintenance.spend.projectPence, currency)}</dd>
-              </div>
-              <div className="reports-spend__row">
-                <dt>{SPEND_LABELS.routine}</dt>
-                <dd>{formatMoney(payload.maintenance.spend.routinePence, currency)}</dd>
-              </div>
-            </dl>
-          </div>
-        </section>
-      )}
-
-      {/* ── Data quality ───────────────────────────────────────────────── */}
-      {payload && (
-        <section className="reports-card" id="generator-issues" aria-labelledby="generator-issues-heading">
-          <header className="reports-card__head">
-            <h2 id="generator-issues-heading">
-              <Icon name="shield" size={17} />
-              Data issues
-            </h2>
-            <p>
-              {allIssues.length
-                ? `${blockingIssues.length} blocking, ${warningIssues.length} warning, ${infoIssues.length} informational.`
-                : "Nothing was found wrong with the data behind this document."}
-            </p>
-          </header>
-          <IssueList title="Blocking" severity="blocking" items={blockingIssues} />
-          <IssueList title="Warnings" severity="warning" items={warningIssues} />
-          <IssueList title="Information" severity="info" items={infoIssues} />
-          {blockers.length > 0 && (
-            <IssueList
-              title="Finalisation blockers"
-              severity="blocking"
-              items={blockers.map((blocker) => ({ code: blocker.code, message: blocker.message }))}
-            />
-          )}
-          {warnings.length > 0 && (
-            <IssueList
-              title="Advisories"
-              severity="warning"
-              items={warnings.map((warning) => ({ code: warning.code, message: warning.message }))}
-            />
-          )}
-        </section>
-      )}
-
-      {/* ── Combined document preview ──────────────────────────────────── */}
-      {payload && (
-        <section className="reports-card" aria-labelledby="generator-preview-heading">
-          <header className="reports-card__head">
-            <h2 id="generator-preview-heading">
-              <Icon name="document" size={17} />
-              Combined document
-            </h2>
-            <p>
-              Part 1 invoice, then Part 2 maintenance performance report. The Word, PDF and Excel
-              files are made from this same value, so their totals cannot differ from what is on
-              screen.
-            </p>
-            <button
-              type="button"
-              className="reports-button"
-              onClick={() => setShowPreview((current) => !current)}
-              aria-expanded={showPreview}
-            >
-              {showPreview ? "Hide preview" : "Generate Preview"}
-              <Icon name="chevron" size={14} />
-            </button>
-          </header>
-          {showPreview && <CombinedDocumentPreview payload={payload} snapshot={snapshot} />}
-          {!showPreview && (
-            <p className="reports-empty">
-              {documentTitle} is ready to preview. Previewing changes nothing and never finalises.
-            </p>
-          )}
-        </section>
-      )}
-
-      {/* ── Controls ───────────────────────────────────────────────────── */}
-      <section className="reports-card reports-actions" aria-labelledby="generator-actions-heading">
-        <header className="reports-card__head">
-          <h2 id="generator-actions-heading">
-            <Icon name="check" size={17} />
-            Generate, save and export
-          </h2>
-          <p>
-            {documentId
-              ? "This draft is saved. Exports come from the saved document, and a finalised one exports its stored snapshot."
-              : "Nothing is saved yet. Save a draft to exclude a site, approve, finalise or record an export."}
-          </p>
-        </header>
-
-        <div className="reports-actions__row">
-          <button
-            type="button"
-            className="reports-button reports-button--primary"
-            disabled={!payload || computing || canEdit === false}
-            onClick={() => {
-              setShowPreview(true);
-              void compute();
-            }}
-          >
-            <Icon name="document" size={15} />
-            Generate Invoice &amp; Report
-          </button>
-          <button
-            type="button"
-            className="reports-button"
-            disabled={busy !== null || canEdit === false || !editable}
-            onClick={() => void runSave()}
-          >
-            <Icon name="check" size={15} />
-            {documentId ? "Save changes" : "Save Draft"}
-          </button>
-          <button
-            type="button"
-            className="reports-button"
-            disabled={computing || canEdit === false}
-            onClick={() => void (documentId ? runAction("recalculate") : compute())}
-          >
-            <Icon name="refresh" size={15} />
-            Recalculate
-          </button>
-          <a className="reports-button" href="#generator-issues">
-            <Icon name="shield" size={15} />
-            Review Data Issues
-            {blockingIssues.length > 0 && (
-              <span className="reports-badge reports-badge--blocking">{blockingIssues.length}</span>
-            )}
-          </a>
-        </div>
-
-        <div className="reports-actions__row">
-          <button
-            type="button"
-            className="reports-button"
-            disabled={!documentId || busy !== null || canEdit === false || status !== "Draft"}
-            onClick={() => void runAction("submit")}
-          >
-            Submit for review
-          </button>
-          <button
-            type="button"
-            className="reports-button"
-            disabled={!documentId || busy !== null || canSettle === false || status === "Finalised" || status === "Voided"}
-            onClick={() => void runAction("approve")}
-          >
-            <Icon name="thumb" size={15} />
-            Approve
-          </button>
-          <button
-            type="button"
-            className="reports-button reports-button--commit"
-            disabled={
-              !documentId ||
-              busy !== null ||
-              canSettle === false ||
-              blockers.length > 0 ||
-              status === "Finalised" ||
-              status === "Voided"
-            }
-            title={
-              blockers.length
-                ? `${blockers.length} blocking issue${blockers.length === 1 ? "" : "s"} must be cleared first.`
-                : "Issue the invoice number and store the snapshot."
-            }
-            onClick={() => void runAction("finalise")}
-          >
-            <Icon name="shield" size={15} />
-            Finalise
-          </button>
-          <button
-            type="button"
-            className="reports-button reports-button--danger"
-            disabled={!documentId || busy !== null || canSettle === false || status === "Voided"}
-            onClick={() => void runAction("void", "Void this document. Why?")}
-          >
-            <Icon name="close" size={15} />
-            Void
-          </button>
-        </div>
-
-        <div className="reports-actions__row">
-          {(["docx", "pdf", "xlsx"] as ExportFormat[]).map((format) => (
-            <button
-              key={format}
-              type="button"
-              className="reports-button"
-              disabled={!payload || busy !== null || canExport === false}
-              onClick={() => void runExport(format)}
-            >
-              <Icon name="download" size={15} />
-              Export {format === "docx" ? "Word" : format === "pdf" ? "PDF" : "Excel"}
-            </button>
-          ))}
-        </div>
-
-        {canExport === false && (
-          <p className="reports-alert reports-alert--warning">
-            <Icon name="alert" size={15} />
-            Your role does not include Export data, so the download controls are unavailable.
-          </p>
-        )}
-      </section>
-    </div>
+    <p
+      className={`reports-alert reports-alert--${message.tone === "ok" ? "ok" : "blocking"}`}
+      role="status"
+    >
+      <Icon name={message.tone === "ok" ? "check" : "alert"} size={15} />
+      {message.text}
+      <button type="button" onClick={() => setMessage(null)} aria-label="Dismiss">
+        <Icon name="close" size={14} />
+      </button>
+    </p>
   );
 }
+

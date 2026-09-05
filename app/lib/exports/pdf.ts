@@ -36,7 +36,7 @@
  * same trade.
  */
 
-import type { CombinedReportPayload } from "../reporting/contract";
+import type { CombinedReportPayload, DocumentKind } from "../reporting/contract";
 import { buildReportDocument, keyValuesFor, sectionsFor } from "./document-model";
 import type { DocCell, DocSection, DocTable, ReportDocument } from "./document-model";
 import { encodeWinAnsi, measure, truncateToWidth, wrapToWidth } from "./pdf-font";
@@ -599,8 +599,11 @@ function pdfDate(iso: string): string {
 
 /* ── The entry point ─────────────────────────────────────────────────────── */
 
-export function renderPdf(payload: CombinedReportPayload): Uint8Array {
-  const document = buildReportDocument(payload);
+export function renderPdf(
+  payload: CombinedReportPayload,
+  kind: DocumentKind = "combined",
+): Uint8Array {
+  const document = buildReportDocument(payload, kind);
   const sections = sectionsFor(document, "all");
   const layout = new Layout(document);
 

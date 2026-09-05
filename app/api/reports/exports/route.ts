@@ -40,8 +40,12 @@
  * for it, and that is the whole of it.
  */
 
-import { EXPORT_FORMATS, exportFilename } from "../../../lib/reporting/contract";
-import type { CombinedReportPayload, ExportFormat } from "../../../lib/reporting/contract";
+import { EXPORT_FORMATS, exportFilename, isDocumentKind } from "../../../lib/reporting/contract";
+import type {
+  CombinedReportPayload,
+  DocumentKind,
+  ExportFormat,
+} from "../../../lib/reporting/contract";
 import { auditActor, recordAudit } from "../../../lib/audit";
 import { IDENTITY_HEADER } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
@@ -82,19 +86,43 @@ function text(value: unknown, max = 120): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+/**
+ * Which document is being downloaded.
+ *
+ * BACKWARD-TOLERANT ON PURPOSE. A caller that says nothing gets `combined`,
+ * which is byte-for-byte the file this route produced before the Report and
+ * Invoice tabs existed — including its filename. An unrecognised value is
+ * treated the same way rather than refused: the kind selects sections from a
+ * payload the SERVER computed, so a bad one can only ever ask for a document
+ * this workspace was already entitled to, and answering 400 would break every
+ * bookmarked download link the moment the vocabulary grows.
+ */
+function documentKind(value: unknown): DocumentKind {
+  return isDocumentKind(value) ? value : "combined";
+}
+
 /* ── Renderers ───────────────────────────────────────────────────────────── */
 
 /**
  * The one place a format maps to a writer.
  *
- * All three take the same `CombinedReportPayload` and none of them is passed
- * anything else — not the request, not the scope, not a database handle. That
- * is the contract's central rule expressed as a function signature: a renderer
- * physically cannot ask a different question than the other two.
+ * All three take the same `CombinedReportPayload` and the same `DocumentKind`,
+ * and none of them is passed anything else — not the request, not the scope,
+ * not a database handle. That is the contract's central rule expressed as a
+ * function signature: a renderer physically cannot ask a different question
+ * than the other two.
+ *
+ * The kind joined the signature when the screen split into a Report tab and an
+ * Invoice tab. It is not a second question — it selects sections from the one
+ * payload, through `sectionsFor` in `document-model.ts`, which is the same gate
+ * all three walk. A renderer still cannot compute a figure of its own.
  */
 const RENDERERS: Record<
   ExportFormat,
-  { render: (payload: CombinedReportPayload) => Uint8Array; contentType: string }
+  {
+    render: (payload: CombinedReportPayload, kind: DocumentKind) => Uint8Array;
+    contentType: string;
+  }
 > = {
   docx: { render: renderDocx, contentType: DOCX_CONTENT_TYPE },
   pdf: { render: renderPdf, contentType: PDF_CONTENT_TYPE },
@@ -202,6 +230,7 @@ async function produce(
   scope: ScopedDatabase,
   source: PayloadSource,
   format: ExportFormat,
+  kind: DocumentKind,
 ): Promise<Response> {
   const { payload, invoiceId } = source;
   const renderer = RENDERERS[format];
@@ -211,8 +240,9 @@ async function produce(
     periodEnd: payload.period.end,
     invoiceNumber: payload.invoice.invoiceNumber,
     format,
+    kind,
   });
-  const bytes = renderer.render(payload);
+  const bytes = renderer.render(payload, kind);
 
   // The audit event first, and unconditionally — it is the record that somebody
   // took a copy of this invoice. See the header of `./history`.
@@ -224,9 +254,10 @@ async function produce(
     action: "report.exported",
     entityType: "invoice",
     entityId: invoiceId,
-    summary: `Exported ${payload.invoice.invoiceNumber ?? "a draft invoice"} for ${payload.invoice.clientName} as ${format.toUpperCase()}.`,
+    summary: `Exported the ${kind} document ${payload.invoice.invoiceNumber ?? "(draft)"} for ${payload.invoice.clientName} as ${format.toUpperCase()}.`,
     detail: {
       format,
+      kind,
       filename,
       byteSize: bytes.length,
       periodStart: payload.period.start,
@@ -258,6 +289,7 @@ async function produce(
       // different document the moment a line is excluded.
       "cache-control": "no-store",
       "x-maintsupp-export-format": format,
+      "x-maintsupp-export-kind": kind,
     },
   });
 }
@@ -281,7 +313,7 @@ export async function GET(request: Request): Promise<Response> {
 
     const source = await readDocumentPayload(request, documentId);
     if (source instanceof Response) return source;
-    return await produce(request, scope, source, format);
+    return await produce(request, scope, source, format, documentKind(url.searchParams.get("kind")));
   } catch (error) {
     return unavailable(error);
   }
@@ -313,7 +345,7 @@ export async function POST(request: Request): Promise<Response> {
           clientId: text(body["clientId"], 64),
         });
     if (source instanceof Response) return source;
-    return await produce(request, scope, source, format);
+    return await produce(request, scope, source, format, documentKind(body["kind"]));
   } catch (error) {
     return unavailable(error);
   }

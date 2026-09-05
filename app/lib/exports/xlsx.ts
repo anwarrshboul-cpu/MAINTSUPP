@@ -39,7 +39,7 @@
  * it would disappear the moment a filter is applied.
  */
 
-import type { CombinedReportPayload } from "../reporting/contract";
+import type { CombinedReportPayload, DocumentKind } from "../reporting/contract";
 import { buildReportDocument, keyValuesFor, sectionsFor } from "./document-model";
 import type { DocCell, DocSection } from "./document-model";
 import { currencyNumberFormat } from "./format";
@@ -380,9 +380,14 @@ export function safeSheetName(name: string, taken: Set<string>): string {
 
 /* ── The package ─────────────────────────────────────────────────────────── */
 
-export function renderXlsx(payload: CombinedReportPayload): Uint8Array {
-  const document = buildReportDocument(payload);
-  // "internal" — the workbook is the owner's copy. See `buildSheet`.
+export function renderXlsx(
+  payload: CombinedReportPayload,
+  kind: DocumentKind = "combined",
+): Uint8Array {
+  const document = buildReportDocument(payload, kind);
+  // "internal" — the workbook is the owner's copy. See `buildSheet`. The PART
+  // still narrows: a Report workbook has no Site Charges tab, because a tab is
+  // a section and the kind decides which sections exist.
   const sections = sectionsFor(document, "internal");
 
   const taken = new Set<string>();
