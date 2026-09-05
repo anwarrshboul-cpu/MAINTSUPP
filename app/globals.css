@@ -15805,6 +15805,150 @@ body.is-dragging-board-column {
   grid-column: 2;
 }
 
+/*
+ * PLACED HERE, NOT AT THE END OF THE FILE, AND THAT MATTERS.
+ *
+ * `tests/workstream-six-register-geometry.test.mjs` reads this stylesheet
+ * from the register-grid marker below TO THE END OF THE FILE, and requires
+ * every media query it finds to be one of the register's agreed widths —
+ * 640, 767, 768, 1024, 1280. The phone board's boundary is 760: the width
+ * `live-board.tsx` matches in `matchMedia`, and the width the eight board
+ * blocks above already use. It is correct here and wrong down there.
+ * Appending to the end of the file put a 760 inside the register's slice and
+ * turned a real contract red over a rule that has nothing to do with the
+ * register.
+ *
+ * So it sits immediately before that marker: after every board rule it has
+ * to out-order, and outside the span the register's own test owns.
+ */
+
+/* ===================================================================
+   ONE COLUMN HEADER ROW ON A PHONE
+   ===================================================================
+
+   The board draws one `<table>` per group, each with its own `<thead>`. On a
+   desktop that is invisible, because a group is tall and its header row is
+   pinned while you read it. On a phone it is 38px of column headings repeated
+   for every group, under a 42px group bar, on a grid viewport about 400px
+   tall. Four groups and the same eight words have cost 320px.
+
+   So on a phone the per-group header rows go to the accessibility tree only,
+   and `MobileBoardStickyHeader` draws ONE row above the whole canvas whose
+   frozen left-hand cell carries the name of the group currently under it.
+   Column widths come from the `<colgroup>` that `BoardColumnWidths` now puts
+   on every table, which is why hiding a header row no longer collapses a
+   `table-layout: fixed` grid.
+
+   NOTHING HERE PAINTS A COLOUR IT DOES NOT HAVE TO. The row's table carries
+   `.live-sheet`, so every themed rule for `.live-sheet th` — in globals and in
+   brand-overrides, light and dark — already applies to it. An earlier draft of
+   this block set `background: #f7f9fa` and `color: #43535e` on these cells and
+   got away with it only because brand-overrides happened to win on equal
+   specificity in dark mode. That is luck, not theming. Layout is stated here;
+   colour is inherited, except the one value that is data rather than theme:
+   the group's own colour, which must survive both themes and is therefore put
+   somewhere nothing else is fighting for it.
+
+   This block sits at the end of the file on purpose: the mobile board rules
+   from line ~13743 onward are written with `!important`, and anything earlier
+   would lose to them.
+   =================================================================== */
+
+@media (max-width: 760px) {
+  /*
+   * The per-group header rows: still announced, no longer drawn.
+   *
+   * Not `display: none` — that takes the `<th>` cells out of the accessibility
+   * tree with them, and a screen reader navigating this grid would lose every
+   * column name. This is the same visually-hidden pattern the reports tables
+   * use when they fold into cards.
+   *
+   * Scoped under `.sheet-group` so it cannot reach the sticky row's own table,
+   * which lives outside every group.
+   */
+  .sheet-group .live-sheet > thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /*
+   * The row itself. `top` only: it pins vertically and travels sideways with
+   * the grid, so a heading stays over its own column through a horizontal
+   * scroll. `width: max-content` matches the canvas so the row is as wide as
+   * the table rather than as wide as the viewport; the background is the
+   * canvas's own token, for the sliver visible when a narrow board leaves the
+   * `min-width: 100%` showing past the table's edge.
+   */
+  .board-mobile-head {
+    position: sticky;
+    top: 0;
+    z-index: calc(var(--z-sticky) + 9);
+    width: max-content;
+    min-width: 100%;
+    background: var(--surface-sunken, #fbfcfd);
+  }
+
+  .board-mobile-head__grid {
+    min-width: 0;
+  }
+
+  /*
+   * The gutter. `.sheet-check` is deliberately NOT used: on a phone that class
+   * is un-frozen so the checkbox column scrolls away, and this cell only has
+   * to hold the same 38px of space the body rows start with. The trailing
+   * spacer stands in for the "+" cell, which has no business on a phone — the
+   * column picker is how a column is added there — but whose width the last
+   * real column still needs in order to scroll fully into view.
+   */
+  .board-mobile-head__gutter {
+    width: 38px;
+    min-width: 38px;
+    max-width: 38px;
+  }
+
+  .board-mobile-head th > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /*
+   * The group name, in the one cell that is always on screen.
+   *
+   * Left-aligned, because it is the heading of the rows beneath rather than
+   * one more column title. It carries `.sheet-column--name` as well, which is
+   * what freezes it to the left edge — and which also hands it the group-colour
+   * spine and the frozen-column shadow already written at
+   * `.live-sheet thead .sheet-column--name` above, painted from the same
+   * `--group-color` this row sets inline. So the spine needs no rule here, and
+   * the one that was here drew nothing: it lost to that selector by two
+   * classes. Inheriting it is better than winning it, because the phone board's
+   * frozen column then looks like one column from the header down.
+   */
+  .board-mobile-head__group {
+    text-align: left;
+  }
+
+  /*
+   * The colour goes on the span for the same reason. The `<th>`'s own `color`
+   * is claimed by `body[data-theme="dark"] :is(.live-sheet th, …)` at (0,3,2);
+   * this span is claimed by nothing, so the group's colour lands in both
+   * themes without a specificity race or an `!important`.
+   */
+  .board-mobile-head__group > span {
+    color: var(--group-color, inherit);
+    font-size: 12.5px;
+    font-weight: 700;
+  }
+}
+
+
+
 /* ---- The configurable register grid ------------------------------------ */
 
 /*
@@ -16327,129 +16471,4 @@ body[data-theme="dark"] .contractor-register {
   .contractor-register__resize {
     display: none;
   }
-}
-
-/* ===================================================================
-   ONE COLUMN HEADER ROW ON A PHONE
-   ===================================================================
-
-   The board draws one `<table>` per group, each with its own `<thead>`. On a
-   desktop that is invisible, because a group is tall and its header row is
-   pinned while you read it. On a phone it is 38px of column headings repeated
-   for every group, under a 42px group bar, on a grid viewport about 400px
-   tall. Four groups and the same eight words have cost 320px.
-
-   So on a phone the per-group header rows go to the accessibility tree only,
-   and `MobileBoardStickyHeader` draws ONE row above the whole canvas whose
-   frozen left-hand cell carries the name of the group currently under it.
-   Column widths come from the `<colgroup>` that `BoardColumnWidths` now puts
-   on every table, which is why hiding a header row no longer collapses a
-   `table-layout: fixed` grid.
-
-   NOTHING HERE PAINTS A COLOUR IT DOES NOT HAVE TO. The row's table carries
-   `.live-sheet`, so every themed rule for `.live-sheet th` — in globals and in
-   brand-overrides, light and dark — already applies to it. An earlier draft of
-   this block set `background: #f7f9fa` and `color: #43535e` on these cells and
-   got away with it only because brand-overrides happened to win on equal
-   specificity in dark mode. That is luck, not theming. Layout is stated here;
-   colour is inherited, except the one value that is data rather than theme:
-   the group's own colour, which must survive both themes and is therefore put
-   somewhere nothing else is fighting for it.
-
-   This block sits at the end of the file on purpose: the mobile board rules
-   from line ~13743 onward are written with `!important`, and anything earlier
-   would lose to them.
-   =================================================================== */
-
-@media (max-width: 760px) {
-  /*
-   * The per-group header rows: still announced, no longer drawn.
-   *
-   * Not `display: none` — that takes the `<th>` cells out of the accessibility
-   * tree with them, and a screen reader navigating this grid would lose every
-   * column name. This is the same visually-hidden pattern the reports tables
-   * use when they fold into cards.
-   *
-   * Scoped under `.sheet-group` so it cannot reach the sticky row's own table,
-   * which lives outside every group.
-   */
-  .sheet-group .live-sheet > thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  /*
-   * The row itself. `top` only: it pins vertically and travels sideways with
-   * the grid, so a heading stays over its own column through a horizontal
-   * scroll. `width: max-content` matches the canvas so the row is as wide as
-   * the table rather than as wide as the viewport; the background is the
-   * canvas's own token, for the sliver visible when a narrow board leaves the
-   * `min-width: 100%` showing past the table's edge.
-   */
-  .board-mobile-head {
-    position: sticky;
-    top: 0;
-    z-index: calc(var(--z-sticky) + 9);
-    width: max-content;
-    min-width: 100%;
-    background: var(--surface-sunken, #fbfcfd);
-  }
-
-  .board-mobile-head__grid {
-    min-width: 0;
-  }
-
-  /*
-   * The gutter. `.sheet-check` is deliberately NOT used: on a phone that class
-   * is un-frozen so the checkbox column scrolls away, and this cell only has
-   * to hold the same 38px of space the body rows start with. The trailing
-   * spacer stands in for the "+" cell, which has no business on a phone — the
-   * column picker is how a column is added there — but whose width the last
-   * real column still needs in order to scroll fully into view.
-   */
-  .board-mobile-head__gutter {
-    width: 38px;
-    min-width: 38px;
-    max-width: 38px;
-  }
-
-  .board-mobile-head th > span {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /*
-   * The group name, in the one cell that is always on screen.
-   *
-   * Left-aligned, because it is the heading of the rows beneath rather than
-   * one more column title. It carries `.sheet-column--name` as well, which is
-   * what freezes it to the left edge — and which also hands it the group-colour
-   * spine and the frozen-column shadow already written at
-   * `.live-sheet thead .sheet-column--name` above, painted from the same
-   * `--group-color` this row sets inline. So the spine needs no rule here, and
-   * the one that was here drew nothing: it lost to that selector by two
-   * classes. Inheriting it is better than winning it, because the phone board's
-   * frozen column then looks like one column from the header down.
-   */
-  .board-mobile-head__group {
-    text-align: left;
-  }
-
-  /*
-   * The colour goes on the span for the same reason. The `<th>`'s own `color`
-   * is claimed by `body[data-theme="dark"] :is(.live-sheet th, …)` at (0,3,2);
-   * this span is claimed by nothing, so the group's colour lands in both
-   * themes without a specificity race or an `!important`.
-   */
-  .board-mobile-head__group > span {
-    color: var(--group-color, inherit);
-    font-size: 12.5px;
-    font-weight: 700;
-  }
-}
+}

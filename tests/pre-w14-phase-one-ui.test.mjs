@@ -23,6 +23,24 @@ const read = (file) => readFile(path.join(root, file), "utf8");
 const codeOnly = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
+/*
+ * The phone-board block, BOUNDED at both ends.
+ *
+ * It used to be the tail of globals.css and slicing to EOF was enough. It is
+ * not at the end any more — it was moved above the register-grid marker,
+ * because `workstream-six-register-geometry.test.mjs` reads from that marker to
+ * EOF and requires the register's own agreed widths, so a 760 sitting after it
+ * failed a contract about a different component. Reading to EOF here would
+ * now swallow the register's rules and assert this block's promises about
+ * somebody else's CSS.
+ */
+const phoneBoardBlock = (css) => {
+  const start = css.indexOf("ONE COLUMN HEADER ROW ON A PHONE");
+  assert.notEqual(start, -1, "globals.css must carry the phone board block");
+  const end = css.indexOf("---- The configurable register grid", start);
+  return css.slice(start, end === -1 ? undefined : end);
+};
+
 /* ------------------------------------------------------------------ 1A */
 
 test("1A: a submitted photo on the public job link opens in the page, not away from it", async () => {
@@ -107,7 +125,7 @@ test("1B: the phone board draws one column header row, not one per group", async
   );
 
   const css = await read("app/globals.css");
-  const block = css.slice(css.indexOf("ONE COLUMN HEADER ROW ON A PHONE"));
+  const block = phoneBoardBlock(css);
   assert.match(
     block,
     /\.sheet-group \.live-sheet > thead \{[^}]*clip-path: inset\(50%\)/,
@@ -167,7 +185,7 @@ test("1B: the sticky row names the group under it, in the frozen cell", async ()
 
 test("1B: the phone header borrows the board's theming instead of restating it", async () => {
   const css = await read("app/globals.css");
-  const block = css.slice(css.indexOf("ONE COLUMN HEADER ROW ON A PHONE"));
+  const block = phoneBoardBlock(css);
   /* The row's table carries `.live-sheet`, so the themed rules for
      `.live-sheet th` already paint it in both themes. Restating a literal here
      is how the dark phone board ends up with a near-white header row. */
@@ -188,7 +206,7 @@ test("1B: the phone header borrows the board's theming instead of restating it",
 
 test("1B: the phone board keeps to the agreed breakpoints", async () => {
   const css = await read("app/globals.css");
-  const block = css.slice(css.indexOf("ONE COLUMN HEADER ROW ON A PHONE"));
+  const block = phoneBoardBlock(css);
   for (const query of block.match(/@media[^{]+/g) ?? []) {
     const width = Number(query.match(/(\d+)px/)?.[1]);
     assert.ok(

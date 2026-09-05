@@ -115,13 +115,21 @@ function useGroupUnderHeader(
    */
   const idsRef = useRef(groupIds);
   /*
-   * Kept current in an effect rather than during render, for the same reason
-   * as the viewer's `onCloseRef`: a ref written while rendering is a side
-   * effect in a function React may call more than once. `measure` only ever
-   * runs from a scroll handler or an effect — after paint — so it never reads
-   * a list one render out of date.
+   * Kept current in a LAYOUT effect, and declared BEFORE every effect that
+   * reads it. Both halves of that sentence are load-bearing.
+   *
+   * A ref written during render is a side effect in a function React may call
+   * more than once, which the compiler lint rejects — hence an effect. But the
+   * first attempt used `useEffect`, and layout effects run before passive
+   * ones: on the render where the groups first arrive, the measuring layout
+   * effect below ran while this ref still held the PREVIOUS list, so the row
+   * named whichever group had been first a render ago. On a board whose first
+   * group had changed, it named the wrong one until the reader scrolled.
+   *
+   * `useLayoutEffect` here, declared first, means it is current before
+   * anything measures. React runs layout effects in declaration order.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     idsRef.current = groupIds;
   });
 
