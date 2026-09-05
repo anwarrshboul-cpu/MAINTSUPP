@@ -37,6 +37,7 @@ import { maintenanceKpiRows, SPEND_LABELS } from "../../../lib/exports/document-
 import { formatMoney } from "../../../lib/exports/format";
 import { CombinedDocumentPreview } from "./report-preview";
 import { GeneratorActionBar } from "./generator-actions";
+import { HoldsPanel } from "./holds-panel";
 import {
   DataIssuesPanel,
   GeneratorAlert,
@@ -52,6 +53,15 @@ export function ReportTab({ generator }: { generator: GeneratorController }) {
   const { payload, currency, status, snapshot, computing } = generator;
   const [showPreview, setShowPreview] = useState(false);
   const [drill, setDrill] = useState<string | null>(null);
+  /*
+   * Which job's holds are open, if any.
+   *
+   * A hold is the only thing on this screen that CHANGES a published number —
+   * approved hold days are subtracted from the elapsed time a client is judged
+   * by — so it is reachable from the drill-down, beside the job it belongs to,
+   * rather than from a settings page somebody has to know exists.
+   */
+  const [holdsFor, setHoldsFor] = useState<{ requestId: string; reference: string | null } | null>(null);
 
   const maintenanceCards = payload ? maintenanceKpiRows(payload) : [];
 
@@ -181,6 +191,7 @@ export function ReportTab({ generator }: { generator: GeneratorController }) {
                         <th scope="col">Site</th>
                         <th scope="col">Job</th>
                         <th scope="col">State</th>
+                        <th scope="col">Holds</th>
                         <th scope="col">Open</th>
                       </tr>
                     </thead>
@@ -191,6 +202,21 @@ export function ReportTab({ generator }: { generator: GeneratorController }) {
                           <td data-label="Site">{row.siteName}</td>
                           <td data-label="Job">{row.issue}</td>
                           <td data-label="State">{row.group}</td>
+                          <td data-label="Holds">
+                            <button
+                              type="button"
+                              className="reports-drill__holds"
+                              onClick={() =>
+                                setHoldsFor((current) =>
+                                  current?.requestId === row.requestId
+                                    ? null
+                                    : { requestId: row.requestId, reference: row.reference ?? null },
+                                )
+                              }
+                            >
+                              {holdsFor?.requestId === row.requestId ? "Hide holds" : "Holds"}
+                            </button>
+                          </td>
                           <td data-label="Open">
                             <a href={JOBS_ITEM_HREF(row.requestId)}>
                               Open on the board <Icon name="chevron" size={13} />
@@ -200,7 +226,7 @@ export function ReportTab({ generator }: { generator: GeneratorController }) {
                       ))}
                       {!drillRows.length && (
                         <tr>
-                          <td colSpan={5} className="reports-empty">
+                          <td colSpan={6} className="reports-empty">
                             No job in this period matches that figure.
                           </td>
                         </tr>
@@ -208,6 +234,21 @@ export function ReportTab({ generator }: { generator: GeneratorController }) {
                     </tbody>
                   </table>
                 </div>
+                {holdsFor ? (
+                  <HoldsPanel
+                    requestId={holdsFor.requestId}
+                    reference={holdsFor.reference}
+                    /*
+                     * `holds.approve` maps to `settings.edit` in
+                     * REPORT_CAPABILITIES, which is exactly what `canSettle`
+                     * already resolves — so the button follows the same
+                     * capability the route enforces rather than a second idea
+                     * of who may approve. This only decides whether to DRAW it;
+                     * a client that lied here would still be refused.
+                     */
+                    canApprove={generator.canSettle === true}
+                  />
+                ) : null}
               </div>
             )}
 
