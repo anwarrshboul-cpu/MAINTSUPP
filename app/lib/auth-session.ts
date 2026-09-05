@@ -814,6 +814,31 @@ export async function ensureOwnerAccount(d1: D1DatabaseLike) {
   // burn 210,000 iterations on a path that runs on every visit to /login, and
   // would overwrite a password the owner had deliberately changed.
   const credential = await findCredential(d1, OWNER_EMAIL);
+
+  /*
+   * THE PRECONDITION FOR RECOVERING A LOCKED-OUT OWNER, reported before it is
+   * needed rather than after.
+   *
+   * The only supported way back into a workspace whose owner password is lost
+   * is to clear that one hash and let the seed below write a new one. That is a
+   * deliberate operator action on a live credential, and it has exactly one
+   * failure mode: the secret is not actually reaching this runtime, so clearing
+   * the hash trades an unknown password for no password at all.
+   *
+   * Nothing could observe that in advance, because every other message here
+   * only fires once the hash is ALREADY null — after the irreversible half. So
+   * this says so while the hash is still intact and the decision is still open.
+   * No value is logged, and no behaviour changes: it is a statement about
+   * configuration, not about the account.
+   */
+  if (credential?.password_hash && !ownerSeedPassword()) {
+    console.warn(
+      "[auth] owner already has a password, and MAINTSUPP_OWNER_PASSWORD is " +
+        "NOT available to this runtime. No action taken — but owner recovery " +
+        "by clearing the hash would fail, because there is no seed to replace it.",
+    );
+  }
+
   if (credential && !credential.password_hash) {
     const seed = ownerSeedPassword();
     // No seed in production without a secret. The row stays password-less and
