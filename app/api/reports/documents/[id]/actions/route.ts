@@ -149,7 +149,7 @@ export async function POST(
       return Response.json({
         status,
         payload,
-        blockers: finalisationBlockers({ waivedIssueKeys, payload, confirmedPartialPeriod: false, requireApproval: true }),
+        blockers: finalisationBlockers({ payload, waivedIssueKeys, confirmedPartialPeriod: false, requireApproval: true }),
         warnings: draftWarnings(payload),
       });
     }
@@ -198,8 +198,8 @@ export async function POST(
         status: to,
         payload: settled,
         blockers: finalisationBlockers({
-          waivedIssueKeys,
           payload: settled,
+          waivedIssueKeys,
           confirmedPartialPeriod: false,
           requireApproval: true,
         }),
@@ -209,8 +209,8 @@ export async function POST(
 
     /* finalise */
     const blockers = finalisationBlockers({
-          waivedIssueKeys,
       payload,
+      waivedIssueKeys,
       confirmedPartialPeriod: Boolean(body.confirmPartialPeriod),
       requireApproval: true,
     });

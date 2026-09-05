@@ -1,25 +1,73 @@
 /*
- * The reminder confirmation page.
+ * The reminder confirmation page — what somebody sees when they open the
+ * Acknowledge, Snooze or Mark-renewed link out of a reminder email.
  *
- * Deliberately plain. This page is opened from an email by somebody who may
- * have no portal account and may be on a phone in a car park, so it is one
- * column, one button, and no layout that can break at a width nobody tested.
+ * SELF-CONTAINED, for the same reason `(public)/f/[token]/public-form.css` is.
+ * `app/(public)/layout.tsx` deliberately loads no shared stylesheet — this
+ * route is opened by people with no account, on a phone, often on mobile data,
+ * and inheriting the dashboard's 254KB would be absurd. So the portal's theme
+ * tokens (`--ink`, `--line`, `--surface-card`) DO NOT EXIST here, and reaching
+ * for them renders an unstyled page rather than a themed one.
  *
- * Colours come from the theme tokens rather than literals, so the page follows
- * light and dark like every other surface. No media query: a single column that
- * is already capped by `max-width` needs none, and the repository restricts
- * breakpoints to 640/767/768/1024/1280 precisely so that unnecessary ones do
- * not accumulate.
+ * The palette is therefore defined below on `.reminder-action`, in BOTH
+ * themes, because a visitor's device decides the theme and there is no
+ * `data-theme` attribute out here to switch on. The `--ra-*` prefix keeps it
+ * from colliding with the form page's `--pf-*` should both ever load.
+ *
+ * Deliberately plain otherwise: one column, one button, no layout that can
+ * break at a width nobody tested. No media query — a single column already
+ * capped by `max-width` needs none, and the repository restricts breakpoints
+ * to 640/767/768/1024/1280 precisely so unnecessary ones do not accumulate.
  */
 
+/*
+ * This route loads no shared stylesheet, so the user-agent defaults still
+ * apply. Reset the two that bite: the 8px body margin, and `content-box`,
+ * which is a standing hazard for any padded percentage box.
+ */
+.reminder-action,
+.reminder-action *,
+.reminder-action *::before,
+.reminder-action *::after {
+  box-sizing: border-box;
+}
+
+body:has(.reminder-action) {
+  margin: 0;
+}
+
 .reminder-action {
+  --ra-canvas: #f4f7f8;
+  --ra-card: #ffffff;
+  --ra-ink: #10231f;
+  --ra-muted: #4a5f5b;
+  --ra-line: #d5e0dd;
+  --ra-accent: #0b7a72;
+  --ra-accent-fg: #ffffff;
+  --ra-danger: #b3261e;
+
   max-width: 34rem;
   margin: 0 auto;
   padding: 3rem 1.25rem 4rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  color: var(--text, #1a1a1a);
+  color: var(--ra-ink);
+  background: var(--ra-canvas);
+  min-height: 100vh;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-action {
+    --ra-canvas: #0e1b1e;
+    --ra-card: #12212a;
+    --ra-ink: #eef5f3;
+    --ra-muted: #a9bcb8;
+    --ra-line: #24363c;
+    --ra-accent: #14b8a6;
+    --ra-accent-fg: #04201d;
+    --ra-danger: #ff8a80;
+  }
 }
 
 .reminder-action h1 {
@@ -31,7 +79,7 @@
 .reminder-action p {
   margin: 0;
   line-height: 1.55;
-  color: var(--text-muted, #4b5563);
+  color: var(--ra-muted);
 }
 
 .reminder-action__field {
@@ -45,11 +93,16 @@
   /* 44px, the minimum comfortable touch target on a phone. */
   min-height: 44px;
   padding: 0 0.75rem;
-  border: 1px solid var(--border, #d1d5db);
+  border: 1px solid var(--ra-line);
   border-radius: 0.5rem;
-  background: var(--surface, #fff);
+  background: var(--ra-card);
   color: inherit;
+  /*
+   * 16px. Anything smaller and iOS Safari zooms the page on focus, which on a
+   * one-field form leaves the reader looking at a magnified corner of it.
+   */
   font: inherit;
+  font-size: 16px;
 }
 
 .reminder-action__confirm {
@@ -57,8 +110,8 @@
   padding: 0 1.25rem;
   border: 0;
   border-radius: 0.5rem;
-  background: var(--accent, #0b7a72);
-  color: #fff;
+  background: var(--ra-accent);
+  color: var(--ra-accent-fg);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -70,5 +123,5 @@
 }
 
 .reminder-action__error {
-  color: var(--danger, #b91c1c);
+  color: var(--ra-danger);
 }

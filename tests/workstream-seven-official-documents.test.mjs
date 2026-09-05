@@ -123,7 +123,17 @@ test("is_current is registered with the dialect translator", async () => {
    * is of type integer" — surfacing as a 503 on upload, not as a schema error.
    */
   const translator = await source("db/sqlite-to-postgres.ts");
-  assert.match(translator, /attachments:\s*\["pending",\s*"is_current"\]/);
+  /*
+   * RE-POINTED from the exact two-element literal, which broke when Pre-W14
+   * added `is_seed` to the same table. The contract is that `is_current` is
+   * REGISTERED — not that it is the last entry, and not that `attachments`
+   * carries exactly two flags. Pinning the whole array meant any later boolean
+   * on this table failed a test about a different column.
+   */
+  const entry = translator.match(/attachments:\s*\[([^\]]*)\]/);
+  assert.ok(entry, "the attachments entry must still exist");
+  assert.match(entry[1], /"is_current"/, "is_current must be registered");
+  assert.match(entry[1], /"pending"/, "and so must pending, which shares the table");
 });
 
 /* ------------------------------------------------------------------ */

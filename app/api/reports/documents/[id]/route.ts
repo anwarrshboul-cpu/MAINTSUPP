@@ -88,8 +88,8 @@ export async function GET(
       payload: result.payload,
       fromSnapshot: result.fromSnapshot,
       blockers: finalisationBlockers({
-          waivedIssueKeys,
         payload: result.payload,
+        waivedIssueKeys,
         confirmedPartialPeriod: false,
         requireApproval: true,
       }),
@@ -194,8 +194,8 @@ export async function PATCH(
       document: updated,
       payload: result.payload,
       blockers: finalisationBlockers({
-          waivedIssueKeys,
         payload: result.payload,
+        waivedIssueKeys,
         confirmedPartialPeriod: false,
         requireApproval: true,
       }),

@@ -15,10 +15,10 @@
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
-  border: 1px solid var(--border, #d1d5db);
+  border: 1px solid var(--line);
   border-radius: 0.75rem;
-  background: var(--surface, #fff);
-  color: var(--text, #1a1a1a);
+  background: var(--surface-card);
+  color: var(--ink);
 }
 
 .holds-panel__head h3 {
@@ -30,12 +30,12 @@
 .holds-panel__note {
   margin: 0;
   font-size: 0.8125rem;
-  color: var(--text-muted, #6b7280);
+  color: var(--muted);
 }
 
 .holds-panel__error {
   margin: 0;
-  color: var(--danger, #b91c1c);
+  color: var(--red-600);
   font-size: 0.875rem;
 }
 
@@ -50,7 +50,7 @@
 
 .holds-panel__item {
   padding: 0.75rem;
-  border: 1px solid var(--border, #d1d5db);
+  border: 1px solid var(--line);
   border-radius: 0.5rem;
   /*
    * A LEFT BORDER carries the approved/not-approved distinction as well as the
@@ -58,11 +58,11 @@
    * below says it in words regardless — colour is never the only signal.
    */
   border-left-width: 4px;
-  border-left-color: var(--text-muted, #6b7280);
+  border-left-color: var(--muted);
 }
 
 .holds-panel__item--approved {
-  border-left-color: var(--positive, #1b7a3d);
+  border-left-color: var(--teal-600);
 }
 
 .holds-panel__dates {
@@ -78,8 +78,8 @@
   font-size: 0.75rem;
   padding: 0.125rem 0.5rem;
   border-radius: 999px;
-  background: var(--surface-muted, #f3f4f6);
-  color: var(--text-muted, #6b7280);
+  background: var(--surface-sunken);
+  color: var(--muted);
 }
 
 .holds-panel__reason,
@@ -93,15 +93,15 @@
   display: inline-block;
   padding: 0.0625rem 0.375rem;
   border-radius: 0.25rem;
-  background: var(--surface-muted, #f3f4f6);
-  color: var(--text, #1a1a1a);
+  background: var(--surface-sunken);
+  color: var(--ink);
   font-weight: 600;
   font-size: 0.75rem;
 }
 
 .holds-panel__badge--approved {
-  background: var(--positive, #1b7a3d);
-  color: #fff;
+  background: var(--teal-600);
+  color: var(--accent-fg);
 }
 
 .holds-panel__approve,
@@ -112,8 +112,8 @@
   padding: 0 1rem;
   border: 0;
   border-radius: 0.5rem;
-  background: var(--accent, #0b7a72);
-  color: #fff;
+  background: var(--brand-bright);
+  color: var(--accent-fg);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -130,7 +130,7 @@
   flex-direction: column;
   gap: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--border, #d1d5db);
+  border-top: 1px solid var(--line);
 }
 
 .holds-panel__form h4 {
@@ -163,9 +163,9 @@
 .holds-panel__reason-field textarea {
   min-height: 44px;
   padding: 0 0.625rem;
-  border: 1px solid var(--border, #d1d5db);
+  border: 1px solid var(--line);
   border-radius: 0.375rem;
-  background: var(--surface, #fff);
+  background: var(--surface-card);
   color: inherit;
   font: inherit;
 }
@@ -180,8 +180,8 @@
   margin: 0;
   padding: 0.5rem 0.625rem;
   border-radius: 0.375rem;
-  background: var(--surface-muted, #f3f4f6);
-  border-left: 3px solid var(--warning, #a8620a);
+  background: var(--surface-sunken);
+  border-left: 3px solid var(--amber-600);
   font-size: 0.8125rem;
   line-height: 1.45;
 }

@@ -64,8 +64,8 @@ export async function POST(request: Request) {
          the caller is asking "what would stop this being finalised", and
          "it has not been approved yet" is not a fault in the data. */
       blockers: finalisationBlockers({
-          waivedIssueKeys,
         payload,
+        waivedIssueKeys,
         confirmedPartialPeriod: Boolean(body.confirmPartialPeriod),
         requireApproval: false,
       }),

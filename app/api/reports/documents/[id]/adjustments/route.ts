@@ -101,8 +101,8 @@ export async function POST(
         adjustments: await listAdjustments(scope.db, scope.orgId, id),
         payload: result.payload,
         blockers: finalisationBlockers({
-          waivedIssueKeys,
           payload: result.payload,
+          waivedIssueKeys,
           confirmedPartialPeriod: false,
           requireApproval: true,
         }),
@@ -166,8 +166,8 @@ export async function DELETE(
       adjustments: await listAdjustments(scope.db, scope.orgId, id),
       payload: result.payload,
       blockers: finalisationBlockers({
-          waivedIssueKeys,
         payload: result.payload,
+        waivedIssueKeys,
         confirmedPartialPeriod: false,
         requireApproval: true,
       }),

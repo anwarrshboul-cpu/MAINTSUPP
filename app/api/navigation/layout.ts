@@ -103,6 +103,14 @@ export const BUILT_IN_ORDER: ReadonlyArray<{ key: string; group: string }> = [
    */
   { key: "audit", group: "group:workspace" },
   /*
+   * The reconciliation harness, between the two for the same reason both are
+   * there: it is opened when a number looks wrong. Listed here so the server
+   * knows the section exists; whether a person is OFFERED it is a capability
+   * question the browser answers with `settings.edit`, since the screen reports
+   * across the whole workspace and offers a purge.
+   */
+  { key: "reconcile", group: "group:workspace" },
+  /*
    * The recycle bin, beside the audit trail and for the same reason: both are
    * what somebody opens when something has gone wrong. Listed here so the
    * server knows the section exists and where it sits; whether a particular

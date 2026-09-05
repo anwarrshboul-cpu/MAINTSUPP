@@ -104,8 +104,8 @@ export async function POST(request: Request) {
         invoiceId,
         payload,
         blockers: finalisationBlockers({
-          waivedIssueKeys,
           payload,
+          waivedIssueKeys,
           confirmedPartialPeriod: false,
           requireApproval: true,
         }),
