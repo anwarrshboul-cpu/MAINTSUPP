@@ -1,5 +1,33 @@
 # Production bootstrap — state, blockers, and the exact remaining steps
 
+> **UPDATE 2026-09-05, later the same day.** The Production Supabase project has
+> been **restored** — `wghfhtdzxttfhofuljyy.supabase.co` now resolves and its
+> REST endpoint answers `401 No API key found`, the same healthy signature as
+> Staging. §1 below is kept as the record of why the first attempt halted; it is
+> **no longer the current blocker**.
+>
+> Seven of the ten Production environment variables are now set on
+> `maintsupp-portal`, target Production only: `PG_D1`, `PUBLIC_APP_ORIGIN`,
+> `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `CRON_SECRET` (generated) and
+> `MAINTSUPP_OWNER_PASSWORD` (generated; written to
+> `C:\Users\omary\maintsupp-PRODUCTION-OWNER-LOGIN.txt`, outside the repo).
+>
+> **Three remain, and every one of them exists only inside the Supabase
+> dashboard.** They cannot be derived, and Vercel does not return existing
+> encrypted values over its API, so Preview's cannot be copied either — nor
+> should they be:
+>
+> | Variable | Where to get it |
+> | --- | --- |
+> | `DATABASE_URL` | Settings → Database → Connection string → **Session pooler**. Copy it verbatim: **port 5432, not 6543** — the transaction pooler deadlocks this app. |
+> | `S3_ACCESS_KEY_ID` | Storage → S3 Access Keys → *New access key* |
+> | `S3_SECRET_ACCESS_KEY` | Shown once, at creation, beside the key id |
+>
+> Until all three are set, **do not deploy to Production**: `PG_D1=1` with no
+> `DATABASE_URL` throws on the first query, and a partial `S3_*` set falls back
+> to per-instance `/tmp` in silence (§4). No Production deployment exists yet —
+> `targets.production` is still `NONE` — and that is deliberate.
+
 Written 2026-09-05 against `main` = `6418d29`. Companion to
 `docs/DEPLOYMENT-PORTAL.md`, which remains the authority on how the Portal is
 built and shipped. This file answers one narrower question: **what stands
@@ -11,10 +39,11 @@ and where something could not be verified it says so instead of guessing.
 
 ---
 
-## 1. The blocker, stated plainly
+## 1. The original blocker (RESOLVED — kept as the record)
 
-**The Production Supabase project `wghfhtdzxttfhofuljyy` is paused and cannot
-be reached or resumed from a developer session.**
+**The Production Supabase project `wghfhtdzxttfhofuljyy` was paused and could
+not be reached or resumed from a developer session.** It has since been restored
+by the owner; see the update at the top.
 
 Evidence, not inference:
 
