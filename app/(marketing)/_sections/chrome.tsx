@@ -102,6 +102,16 @@ export function UtilityBar() {
     <div className="utility">
       <div className="wrap utility__inner">
         <div className="utility__group utility__contact">
+          {/*
+            "Contact Us" is drawn only on a phone — see `.utility__label` in
+            marketing.css. On a wide screen the two links sit alone at the top
+            left and read as contact details without being told; on a phone
+            they arrive stacked under the fold of a 38px bar, and the label is
+            what makes the row scannable in the half-second someone spends
+            looking for a number. Rendered always, gated in CSS, so there is no
+            hydration branch on a static marketing page.
+          */}
+          <span className="utility__label">Contact Us</span>
           <a href="tel:+447852224644">
             <Ic d={PHONE} size="ic--xs" />
             <span>+44 7852 224644</span>

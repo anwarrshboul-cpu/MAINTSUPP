@@ -1,18 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SignaturePad } from "./signature-pad";
 import { ArrivalPack, type ArrivalPack as ArrivalPackData } from "./arrival-pack";
 import { uploadEvidenceFile } from "../../../lib/client-upload";
 import type { AttachmentKind } from "../../../lib/types";
+/*
+ * THE SAME VIEWER THE PORTAL OPENS, on a page nobody signs in to.
+ *
+ * A thumbnail here used to be an `<a href={photo.url} target="_blank">`, which
+ * is the one thing this page must not do: it hands the reader the raw file
+ * route and takes them off the job. On a phone that is a lost tab, and every
+ * unsaved field on the form below it — the note, the name, the signature — is
+ * gone with it, because a public link has no draft to come back to.
+ *
+ * `MediaViewer` is a leaf: `Icon`, `formatShortDateTime` and `documentName`,
+ * no session, no tenant, no portal context. Importing it across the route
+ * group is deliberate and cheaper than a second implementation that would
+ * drift — the brief asks for the SAME behaviour wherever submitted evidence
+ * is shown, and this is literally the same component the Fix Tracker uses.
+ */
+import { MediaViewer, type MediaViewerFile } from "../../../(app)/portal/media-viewer";
 
 type Photo = {
   id: string;
   name: string;
+  /** The register's display name when one was set. See `documentName`. */
+  title?: string | null;
   kind: string;
   contentType: string;
   url: string;
   thumbUrl: string;
+  downloadUrl: string;
+  byteSize: number;
+  createdAt: string;
 };
 
 /**
@@ -137,6 +158,36 @@ function PhotoCard({
    */
   empty?: string;
 }) {
+  /*
+   * Which picture is open, or null for none. Held per card rather than per
+   * page so that "next" walks the gallery the reader actually tapped: the
+   * problem photographs and the completed-work photographs are two different
+   * sets of evidence, and swiping out of one into the other would say they
+   * are one sequence when they are not.
+   */
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  /*
+   * `MediaViewer` wants the shape the portal's attachment rows already have.
+   * Mapping here rather than server-side keeps the public payload as small as
+   * it was — the extra fields are the two the viewer captions with, nothing
+   * else — and keeps `Photo` the thing this page reasons about.
+   */
+  const viewable = useMemo<MediaViewerFile[]>(
+    () =>
+      photos.map((photo) => ({
+        id: photo.id,
+        originalName: photo.name,
+        title: photo.title,
+        contentType: photo.contentType,
+        byteSize: photo.byteSize,
+        createdAt: photo.createdAt,
+        inlineUrl: photo.url,
+        downloadUrl: photo.downloadUrl,
+      })),
+    [photos],
+  );
+
   if (!photos.length) {
     if (!empty) return null;
     return (
@@ -152,17 +203,43 @@ function PhotoCard({
       <ul className="job-link__photos">
         {photos.map((photo) => (
           <li key={photo.id}>
-            <a href={photo.url} target="_blank" rel="noreferrer" title={photo.name}>
+            {/*
+              A button, not a link. There is no destination — the picture opens
+              over this page and the reader stays on the job. Keeping it a
+              <button> is also what gives it Enter/Space and a focus ring for
+              free, which the anchor was only borrowing.
+            */}
+            <button
+              type="button"
+              onClick={() => setOpenId(photo.id)}
+              title={photo.title || photo.name}
+              aria-label={`Open ${photo.title || photo.name}`}
+            >
               {photo.contentType.startsWith("image/") ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={photo.thumbUrl} alt={photo.name} loading="lazy" />
               ) : (
                 <span className="job-link__photo-file">{photo.name}</span>
               )}
-            </a>
+            </button>
           </li>
         ))}
       </ul>
+      {/*
+        No `onDelete`: the viewer does not draw the button when the caller
+        cannot delete, and nobody holding a job link can. Download stays —
+        these bytes are already served to this token, and a contractor asked
+        to re-send a photo should be able to get it back off the page.
+      */}
+      {openId && (
+        <MediaViewer
+          files={viewable}
+          currentId={openId}
+          contextLabel={title}
+          onNavigate={setOpenId}
+          onClose={() => setOpenId(null)}
+        />
+      )}
     </section>
   );
 }

@@ -282,6 +282,15 @@ export function MediaViewer({
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  /*
+   * The latest `onClose`, readable from an effect that must run once.
+   *
+   * See the history effect below: it has to mount exactly once per opened
+   * picture, so it cannot depend on a prop that most callers pass as a fresh
+   * arrow function every render.
+   */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const mediaRef = useRef<HTMLElement | null>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef({
@@ -340,6 +349,46 @@ export function MediaViewer({
     return () => {
       document.body.style.overflow = previous;
     };
+  }, []);
+
+  /*
+   * BACK CLOSES THE PICTURE, it does not leave the page.
+   *
+   * On a phone the system Back gesture is how a full-screen thing gets shut,
+   * and until now it was the one control that did something else: the viewer
+   * has no history entry of its own, so Back went wherever the page came from
+   * — off a job link entirely, taking an unsaved note and signature with it.
+   *
+   * So opening pushes one entry at the SAME url. Nothing about the address
+   * changes, which is what makes this safe next to the portal's own
+   * `popstate` listeners: they re-read `location.pathname`, find it identical,
+   * and do nothing. Closing any other way (Esc, the button, a swipe down)
+   * spends that entry with `history.back()` so Back does not later need two
+   * presses to leave a page the reader is looking at.
+   *
+   * `closedByPop` is what stops the two paths fighting: when the pop is what
+   * closed us, the entry is already gone and calling `back()` again would
+   * navigate off the page — the exact bug this effect exists to prevent.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let closedByPop = false;
+    window.history.pushState(
+      { ...(window.history.state as object | null), mediaViewer: true },
+      "",
+    );
+    const onPop = () => {
+      closedByPop = true;
+      onCloseRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (!closedByPop) window.history.back();
+    };
+    // Mount and unmount only. `onClose` is read through a ref so that a caller
+    // passing an inline arrow does not tear this down and push a second entry
+    // on every render — which would take one Back press per render to unwind.
   }, []);
 
   /*

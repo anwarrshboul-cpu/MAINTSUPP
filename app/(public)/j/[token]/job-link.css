@@ -261,15 +261,38 @@ body {
   font-size: 14px;
 }
 
-.job-link__photos a {
+/*
+ * A button, because tapping one opens the picture over this page rather than
+ * navigating to the file. The reset is the price of that: a <button> arrives
+ * with a border, a background, centred text and the platform font, none of
+ * which a thumbnail wants. `width: 100%` matters as well — a button does not
+ * fill its grid cell the way the block-level anchor did.
+ */
+.job-link__photos button {
   display: block;
+  width: 100%;
   /* 44px is the tap target floor; these are comfortably above it. */
   min-height: 88px;
+  padding: 0;
+  border: 0;
   border-radius: 10px;
   overflow: hidden;
   background: #eef2f4;
   color: #101820;
+  font: inherit;
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
+}
+
+/*
+ * Keyboard focus has to be visible on a control that is otherwise just a
+ * photograph. `:focus-visible` rather than `:focus` so a tap does not leave a
+ * ring behind on a phone.
+ */
+.job-link__photos button:focus-visible {
+  outline: 3px solid #0f766e;
+  outline-offset: 2px;
 }
 
 .job-link__photos img {

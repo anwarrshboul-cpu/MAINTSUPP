@@ -112,6 +112,7 @@ import {
   shouldCenterBoardCell,
   displayedBoardColumnWidth,
 } from "./board-format";
+import { BoardColumnWidths, MobileBoardStickyHeader } from "./board-mobile-header";
 import { AnchoredPopover } from "./overlay/anchored";
 import { GroupActionMenu } from "./overlay/group-action-menu";
 import {
@@ -3880,6 +3881,12 @@ export function LiveMaintenanceBoard({
           hidden={(isMobile && mobileLayout === "cards") || gridReplaced}
         >
           <div className="live-board-canvas">
+            {/* The phone's one column-header row. Draws nothing on a desktop. */}
+            <MobileBoardStickyHeader
+              active={isMobile}
+              columns={visibleBoardColumns}
+              groups={displayGroups.map((entry) => entry.group)}
+            />
             {displayGroups.map(({ group, synthetic }) => {
               const rows = groupRows(group.id);
               const isCollapsed = collapsed.has(group.id);
@@ -4048,6 +4055,8 @@ export function LiveMaintenanceBoard({
 
                   {!isCollapsed && (
                     <table className={`live-sheet${loadingBoard ? " is-syncing" : ""}`}>
+                      {/* Widths, so a hidden header row cannot collapse the grid. */}
+                      <BoardColumnWidths columns={visibleBoardColumns} mobile={isMobile} />
                       <thead>
                         <tr>
                           <th className="sheet-check">

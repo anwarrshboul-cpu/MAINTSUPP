@@ -579,7 +579,30 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .utility a{display:inline-flex;align-items:center;gap:7px;color:inherit;text-decoration:none;padding:6px 0}
 .utility a:hover{color:var(--teal-bright)}
 .utility__group{display:flex;gap:20px}
-@media(max-width:680px){.utility__contact{display:none}}
+/* Desktop reads two contact links at the top left as contact details without
+   a label. The phone needs telling — see the 680 block. */
+.utility__label{display:none}
+/* CONTACT DETAILS AT THE TOP OF A PHONE.
+   This block used to be `.utility__contact{display:none}`: the bar could not
+   fit four links across 320px, so the number and the address were dropped and
+   the only way to reach either was to scroll the whole landing page to the
+   footer. They are the two things a prospect is actually looking for, so the
+   bar wraps to two rows instead of hiding half of itself. `flex:1 1 100%`
+   gives contact its own row and pushes Portal Login / Report a Job to the
+   next; the inner wrap lets the email drop below the number at 320px, where
+   both together do not fit. 680px is the width this rule already used — the
+   marketing breakpoint set is capped and must not grow. */
+@media(max-width:680px){
+  .utility__inner{align-items:flex-start;gap:0;min-height:0;padding-block:3px}
+  /* `.utility__group` first: it and `.utility__contact` have equal specificity,
+     so whichever is written last wins. With the contact rule above this one,
+     the group's shorthand `gap` reinstated a 16px ROW gap and the email sat a
+     line and a half below the number it belongs with. */
+  .utility__group{gap:14px}
+  .utility__contact{flex:1 1 100%;flex-wrap:wrap;gap:0 10px;font-size:.78rem}
+  .utility a{padding:3px 0}
+  .utility__label{display:inline-flex;align-items:center;padding:3px 0;font-weight:700;color:#E7F1F4;letter-spacing:.01em}
+}
 
 /* ---------------------------------------------------------------- header */
 .hdr{position:sticky;top:0;z-index:var(--z-sticky);background:#fff;border-bottom:1px solid var(--border);transition:box-shadow var(--t-base) var(--ease)}

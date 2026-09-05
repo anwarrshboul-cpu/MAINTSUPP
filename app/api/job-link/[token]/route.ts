@@ -441,8 +441,23 @@ export async function GET(
       .select({
         id: attachments.id,
         name: attachments.originalName,
+        /*
+         * The register's display name, carried so the public viewer can obey
+         * the one rule about what a document is called — `documentName()`:
+         * the title somebody set, the stored filename otherwise. Without it
+         * the in-page viewer would caption a renamed photograph with the name
+         * the phone gave it while the portal calls it something else.
+         */
+        title: attachments.title,
         kind: attachments.kind,
         contentType: attachments.contentType,
+        /*
+         * Size and date are the viewer's caption line. They are facts about a
+         * file whose bytes this token already serves, so they disclose nothing
+         * the holder cannot already read off the download.
+         */
+        byteSize: attachments.byteSize,
+        createdAt: attachments.createdAt,
       })
       .from(attachments)
       .where(
@@ -468,8 +483,11 @@ export async function GET(
       .select({
         id: attachments.id,
         name: attachments.originalName,
+        title: attachments.title,
         kind: attachments.kind,
         contentType: attachments.contentType,
+        byteSize: attachments.byteSize,
+        createdAt: attachments.createdAt,
       })
       .from(attachments)
       .where(
@@ -498,6 +516,16 @@ export async function GET(
         ...photo,
         url: `/api/files/${photo.id}?token=${carried}`,
         thumbUrl: `/api/files/${photo.id}?thumb=1&token=${carried}`,
+        /*
+         * The same bytes with `Content-Disposition: attachment`.
+         *
+         * The viewer's Save button needs a URL that downloads rather than one
+         * that renders, and `?download=1` is the flag `/api/files/[id]` already
+         * reads for exactly that. Serving it here rather than composing it on
+         * the client keeps the token-carrying convention in one place — this
+         * function — instead of spreading `?token=` through the page.
+         */
+        downloadUrl: `/api/files/${photo.id}?download=1&token=${carried}`,
       }));
 
     // Z13 — tell the coordinator the first time a link is opened, so an
