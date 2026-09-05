@@ -42,6 +42,7 @@ export const BLOCKER = {
   invoiceNumberUnavailable: "invoice.number_unavailable",
   negativeTotal: "totals.negative",
   dataQualityErrors: "data.quality_errors",
+  narrativeUnreviewed: "narrative.unreviewed",
 } as const;
 
 export interface BlockerInput {
@@ -69,6 +70,23 @@ export interface BlockerInput {
    * blocks more, never less.
    */
   waivedIssueKeys?: ReadonlySet<string>;
+  /**
+   * The narrative gate's answer, already computed.
+   *
+   * Module 4 §4.3: "Finalising is blocked while any narrative block still
+   * carries an unreviewed badge." `narrativeReviewBlocker` in
+   * `./narrative-blocks.ts` decides that and returns the sentence; this field
+   * carries the result rather than the blocks, for the same reason
+   * `waivedIssueKeys` carries a set of keys rather than the waivers:
+   * `tests/w9-report-engine.test.mjs` stages this module and a FIXED list of
+   * its neighbours into a temp directory, so a value import of
+   * `./narrative-blocks` — which itself imports `./figure-validator` — would
+   * resolve to files that suite does not stage.
+   *
+   * Omitted means nothing is awaiting review, which is the safe direction on a
+   * document that has no narrative at all.
+   */
+  narrativeBlocker?: { code: string; message: string } | null;
 }
 
 export function finalisationBlockers(input: BlockerInput): FinalisationBlocker[] {
@@ -88,6 +106,15 @@ export function finalisationBlockers(input: BlockerInput): FinalisationBlocker[]
    *
    * `waivedIssueKeys` is supplied by the caller — see the field's own note.
    */
+  /*
+   * The narrative gate, first, because it is the cheapest and because a
+   * document whose prose is still an unreviewed AI draft should say so before
+   * it starts listing data issues.
+   */
+  if (input.narrativeBlocker) {
+    add(input.narrativeBlocker.code, input.narrativeBlocker.message);
+  }
+
   const waived = input.waivedIssueKeys ?? new Set<string>();
   const unwaived = payload.maintenance.dataQuality.filter(
     (finding: DataQualityFinding) =>

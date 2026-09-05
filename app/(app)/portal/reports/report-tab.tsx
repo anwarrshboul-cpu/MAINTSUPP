@@ -38,6 +38,7 @@ import { formatMoney } from "../../../lib/exports/format";
 import { CombinedDocumentPreview } from "./report-preview";
 import { GeneratorActionBar } from "./generator-actions";
 import { HoldsPanel } from "./holds-panel";
+import { NarrativePanel } from "./narrative-panel";
 import {
   DataIssuesPanel,
   GeneratorAlert,
@@ -148,6 +149,17 @@ export function ReportTab({ generator }: { generator: GeneratorController }) {
       <GeneratorAlert generator={generator} />
 
       <GeneratorSetupCards generator={generator} />
+
+      {/*
+        THE NARRATIVE, above the figures it describes.
+        Module 4 §4.3 requires every AI-drafted block to carry a visible
+        "not yet reviewed" badge and to block finalisation until a human has
+        edited or accepted it. The panel owns that; `blockers.ts` enforces it.
+      */}
+      <NarrativePanel
+        documentId={generator.documentId}
+        canEdit={generator.canEdit === true}
+      />
 
       {/* ── Maintenance KPI cards ──────────────────────────────────────── */}
       <section className="reports-card" aria-labelledby="report-maintenance-heading">

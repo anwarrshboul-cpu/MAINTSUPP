@@ -93,6 +93,18 @@
  *     every reference in the payload had to be added to the numeric set, and
  *     that set would then license those digits as quantities anywhere in the
  *     prose — a far bigger hole than the one it closed.
+ *  8. CLASSIFICATION LABELS — `Tier 1`, `Priority 2`, `Band 3`. The same kind
+ *     of token as `Q1` and excluded for the same reason the owner excluded
+ *     that one: the digit names a service level, not a quantity. This is not
+ *     hypothetical tidying — `narrative.ts` has written "urgent or Tier 1" as
+ *     a fixed phrase since long before this file existed, and treating its 1
+ *     as a count made the computed summary fail its own validator against real
+ *     data. HOLE: prose could name the wrong tier. The tier of any individual
+ *     job is rendered from the payload in the SLA and job-log tables, not from
+ *     a sentence, so a reader has the authoritative value beside the prose.
+ *     `P1`-style labels are NOT covered here: they are identifier-shaped, so
+ *     they go through the identifier rule and ARE checked against the
+ *     classifications the payload carries.
  *
  * ── PURE, AND IMPORTING NOTHING ────────────────────────────────────────────
  *
@@ -321,6 +333,11 @@ const PATTERNS: Pattern[] = [
     source: String.raw`\b(?:${MONTH_ALTERNATION})\s+\d{4}\b`,
   },
   { name: "quarter", kind: "excluded", source: String.raw`\bQ[1-4]\b` },
+  {
+    name: "classLabel",
+    kind: "excluded",
+    source: String.raw`\b(?:tier|priority|band|level|phase|category|class)\s+\d{1,2}\b`,
+  },
   {
     name: "money",
     kind: "money",

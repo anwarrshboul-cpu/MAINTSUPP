@@ -1,0 +1,288 @@
+/*
+ * The narrative panel.
+ *
+ * TOKENS ONLY. Not one colour literal in a declaration anywhere in this file —
+ * the same rule `tests/w2-reports-tabs.test.mjs` enforces on `reports.css`,
+ * applied here for the same reason it was applied there: a previous pass broke
+ * dark mode by writing hex values into a new stylesheet, and a screen that
+ * paints its own colours is a screen that cannot follow the theme out of them.
+ *
+ * `--control-own-fg` on every rule that lands on a <button> AND sets `color`.
+ * `body[data-theme="dark"] { .portal-main button { color: var(--control-own-fg,
+ * var(--ink)) } }` in globals.css outranks every selector here, so a button
+ * that paints its own label and does not declare the opt-out is repainted
+ * `--ink` in dark and loses the distinction it was drawn to carry.
+ *
+ * 44px minimum on every control. Breakpoint 640 only — the repository restricts
+ * media queries to 640/767/768/1024/1280 and several stage tests fail on any
+ * other width. Below that everything is a single column, which is what makes
+ * the panel usable at 380px: no horizontal scroll, no two-up action row, and a
+ * textarea that is the full width of the card.
+ */
+
+.narrative-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface-card);
+  color: var(--ink);
+}
+
+.narrative-panel__head h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.narrative-panel__summary,
+.narrative-panel__rule,
+.narrative-panel__meta {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.narrative-panel__rule {
+  margin-top: 0.375rem;
+}
+
+.narrative-panel__error {
+  margin: 0;
+  color: var(--red-600);
+  font-size: 0.875rem;
+}
+
+/*
+ * The provider line. It is a statement of fact about the deployment, so it is
+ * quiet when a provider is configured and carries a left edge when one is not —
+ * an operator who wonders why Regenerate is disabled should find the answer on
+ * the screen rather than in a tooltip they have to hover to see.
+ */
+.narrative-panel__provider {
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  background: var(--surface-sunken);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.narrative-panel__provider--off {
+  border-left: 3px solid var(--amber-600);
+  color: var(--ink);
+}
+
+.narrative-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.narrative-panel__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  /*
+   * A LEFT BORDER carries the review state as well as the badge does, so it
+   * survives greyscale and colour-blindness. The badge says it in words
+   * regardless — colour is never the only signal here.
+   */
+  border-left-width: 4px;
+  border-left-color: var(--line);
+}
+
+/*
+ * The state is stamped on the <li> as a data attribute rather than read off the
+ * badge with `:has()`. Both work; an attribute selector is the one that cannot
+ * be broken by moving the badge, and `:has()` in this codebase carries a
+ * documented restriction about nesting that there is no reason to go near for a
+ * border colour.
+ */
+.narrative-panel__item[data-state="ai-draft"] {
+  border-left-color: var(--amber-600);
+}
+
+.narrative-panel__item[data-state="reviewed"] {
+  border-left-color: var(--teal-600);
+}
+
+.narrative-panel__item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.narrative-panel__title {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+/*
+ * The badge. It is TEXT — "AI draft — not yet reviewed" — and the colour is a
+ * second signal on top of the words rather than the signal itself.
+ */
+.narrative-panel__badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/*
+ * The tint tokens rather than the solid ones, with `--ink` on top. `--amber-600`
+ * and `--teal-600` are mid-tones in BOTH themes, so white-on-them fails in one
+ * and ink-on-them fails in the other; `--amber-100` / `--teal-100` flip with the
+ * theme and keep the same relationship to `--ink` on either side of it.
+ */
+.narrative-panel__badge--ai-draft {
+  background: var(--amber-100);
+  color: var(--ink);
+}
+
+.narrative-panel__badge--reviewed {
+  background: var(--teal-100);
+  color: var(--ink);
+}
+
+.narrative-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.narrative-panel__field-label {
+  color: var(--muted);
+}
+
+.narrative-panel__field textarea {
+  min-height: 5.5rem;
+  padding: 0.5rem 0.625rem;
+  /* Preflight zeroes border-width; the field rules in the product set only the
+     colour, so the width and style have to be restated or the edge vanishes. */
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--line);
+  border-radius: 0.375rem;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.narrative-panel__notice {
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  background: var(--surface-sunken);
+  border-left: 3px solid var(--line);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.narrative-panel__notice p {
+  margin: 0;
+}
+
+.narrative-panel__notice--error {
+  border-left-color: var(--red-600);
+}
+
+.narrative-panel__notice--warning {
+  border-left-color: var(--amber-600);
+}
+
+.narrative-panel__notice--ok {
+  border-left-color: var(--teal-600);
+}
+
+.narrative-panel__tokens {
+  list-style: none;
+  margin: 0.375rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.narrative-panel__tokens code {
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.25rem;
+  background: var(--surface-active);
+  font-size: 0.8125rem;
+}
+
+/*
+ * One column below 640px so the action row never forces a horizontal scroll at
+ * 380px. Wrapping alone is not enough: five 44px controls side by side overflow
+ * a 380px card before they wrap, because each one has a text label on it.
+ */
+.narrative-panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (min-width: 640px) {
+  .narrative-panel__actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+}
+
+.narrative-panel__button {
+  /* 44px — the minimum comfortable touch target on a phone. */
+  min-height: 44px;
+  padding: 0 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface-sunken);
+  --control-own-fg: var(--ink);
+  color: var(--control-own-fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.narrative-panel__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.narrative-panel__button--primary {
+  border-color: var(--brand-bright);
+  background: var(--brand-bright);
+  /* The token globals.css itself pairs with `--brand-bright` — see the primary
+     control rule there. `--accent-fg` is a mid teal and would sit on it at
+     about 1.3:1. */
+  --control-own-fg: var(--on-brand-bright);
+  color: var(--control-own-fg);
+}
+
+.narrative-panel__button--accept {
+  border-color: var(--teal-600);
+  background: var(--teal-100);
+  --control-own-fg: var(--ink);
+  color: var(--control-own-fg);
+}
+
+.narrative-panel__button--quiet {
+  background: transparent;
+  --control-own-fg: var(--muted);
+  color: var(--control-own-fg);
+}
