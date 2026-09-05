@@ -39,10 +39,6 @@ import {
   reminderTokens,
 } from "../../../db/schema";
 
-type Database = {
-  select: (...args: never[]) => unknown;
-} & Record<string, unknown>;
-
 /* eslint-disable @typescript-eslint/no-explicit-any -- the drizzle db type is
    assembled per-driver and importing it here drags the D1 binding into a module
    the tests load on its own. Every call below is shaped by the schema imports,

@@ -42,6 +42,19 @@ const read = async (path) =>
 const BIN = "app/lib/recycle-bin.ts";
 const CRON = "app/api/cron/retention/route.ts";
 const BUILD = "vercel/build-output.mjs";
+/*
+ * RE-POINTED, not weakened. `secretMatches` and `authorise` lived inside the
+ * retention route until a second scheduled endpoint arrived — the reminder
+ * dispatcher at `app/api/cron/reminders` — at which point the choice was one
+ * shared gate or two hand-written constant-time comparisons. A second
+ * hand-written one is a second chance to write one that is not constant-time,
+ * so the pair moved here and both routes import them.
+ *
+ * The contract these two tests protect is unchanged: the unset-secret branch
+ * still comes first, and the comparison still folds the length in rather than
+ * returning on it. Only the file they live in moved.
+ */
+const GATE = "app/lib/cron-auth.ts";
 const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 
 /* ── 1. The boundary ──────────────────────────────────────────────────────── */
@@ -190,8 +203,8 @@ test("the sweep is bounded, and says so rather than looping until empty", async 
 /* ── 3. It fails closed ───────────────────────────────────────────────────── */
 
 test("a missing CRON_SECRET disables the endpoint instead of opening it", async () => {
-  const cron = await read(CRON);
-  const authorise = cron.slice(cron.indexOf("function authorise"));
+  const gate = await read(GATE);
+  const authorise = gate.slice(gate.indexOf("export function authoriseCron"));
   assert.match(
     authorise,
     /if \(!expected\) \{/,
@@ -210,10 +223,10 @@ test("a missing CRON_SECRET disables the endpoint instead of opening it", async 
 });
 
 test("the secret comparison is constant-time and folds in the length", async () => {
-  const cron = await read(CRON);
-  const fn = cron.slice(
-    cron.indexOf("function secretMatches"),
-    cron.indexOf("function authorise"),
+  const gate = await read(GATE);
+  const fn = gate.slice(
+    gate.indexOf("export function secretMatches"),
+    gate.indexOf("export function authoriseCron"),
   );
   assert.ok(fn.length > 0, "secretMatches must exist");
   assert.match(

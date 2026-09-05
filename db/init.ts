@@ -4527,8 +4527,15 @@ async function ensurePreW14Foundation(d1: D1DatabaseLike) {
     await addColumn(d1, "compliance_documents", column, definition);
   }
 
-  /* Seed markers on the remaining tables a seed run writes. */
-  for (const table of ["sites", "contractors", "users", "calendar_events"]) {
+  /*
+   * Seed markers on the remaining tables a seed run writes.
+   *
+   * `attachments` is in the list because a seeded certificate has a seeded PDF
+   * behind it, and a purge that could not find those files would leave the
+   * objects in storage with nothing pointing at them — the exact orphan the
+   * `is_seed` marker exists to make findable.
+   */
+  for (const table of ["sites", "contractors", "users", "calendar_events", "attachments"]) {
     await addColumn(d1, table, "is_seed", "INTEGER NOT NULL DEFAULT 0");
     await addColumn(d1, table, "seed_batch_id", "TEXT");
   }

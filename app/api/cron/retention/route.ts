@@ -57,68 +57,11 @@ import {
   RETENTION_DAYS,
   sweepRecycleBin,
 } from "../../../lib/recycle-bin";
+import { authoriseCron } from "../../../lib/cron-auth";
 import { purgeFor } from "../../trash/route";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Constant-time string comparison.
- *
- * `a === b` returns as soon as two bytes differ, so the time it takes reveals
- * how much of the secret was right. This always walks the whole of the longer
- * string. The length is compared into the accumulator rather than short-
- * circuiting on it for the same reason.
- */
-function secretMatches(provided: string, expected: string): boolean {
-  // Folded in rather than returned on, so a wrong LENGTH costs the same as a
-  // wrong byte. Out-of-range indices read as 0 instead of NaN — `NaN ^ x` is
-  // `x` in JS, which would have made the accumulator lie for short inputs.
-  let difference = provided.length ^ expected.length;
-  const length = Math.max(provided.length, expected.length);
-  for (let index = 0; index < length; index += 1) {
-    const left = index < provided.length ? provided.charCodeAt(index) : 0;
-    const right = index < expected.length ? expected.charCodeAt(index) : 0;
-    difference |= left ^ right;
-  }
-  return difference === 0;
-}
-
-/**
- * The bearer token Vercel Cron sends, or an explicit refusal.
- *
- * Vercel sends `Authorization: Bearer $CRON_SECRET`. A plain `x-cron-secret`
- * header is accepted too so the endpoint can be driven by Railway's scheduler
- * or by an operator's curl without pretending to be an OAuth client.
- */
-function authorise(request: Request): Response | null {
-  const expected = process.env.CRON_SECRET ?? "";
-  if (!expected) {
-    /*
-     * 503, not 401. There is nothing the caller can do — the deployment is
-     * missing a variable — and answering 401 would invite a credential hunt
-     * for a credential that does not exist.
-     */
-    return Response.json(
-      {
-        error:
-          "Scheduled retention is not configured on this deployment: CRON_SECRET is unset.",
-      },
-      { status: 503 },
-    );
-  }
-
-  const header = request.headers.get("authorization") ?? "";
-  const bearer = header.toLowerCase().startsWith("bearer ")
-    ? header.slice(7).trim()
-    : "";
-  const provided = bearer || (request.headers.get("x-cron-secret") ?? "");
-
-  if (!provided || !secretMatches(provided, expected)) {
-    // Deliberately says nothing about which half was wrong.
-    return Response.json({ error: "Not authorised." }, { status: 401 });
-  }
-  return null;
-}
 
 async function runSweep() {
   await ensureDatabase();
@@ -154,7 +97,7 @@ async function runSweep() {
 }
 
 export async function POST(request: Request) {
-  const refusal = authorise(request);
+  const refusal = authoriseCron(request, "retention");
   if (refusal) return refusal;
 
   try {

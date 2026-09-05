@@ -1,0 +1,74 @@
+/*
+ * The reminder confirmation page.
+ *
+ * Deliberately plain. This page is opened from an email by somebody who may
+ * have no portal account and may be on a phone in a car park, so it is one
+ * column, one button, and no layout that can break at a width nobody tested.
+ *
+ * Colours come from the theme tokens rather than literals, so the page follows
+ * light and dark like every other surface. No media query: a single column that
+ * is already capped by `max-width` needs none, and the repository restricts
+ * breakpoints to 640/767/768/1024/1280 precisely so that unnecessary ones do
+ * not accumulate.
+ */
+
+.reminder-action {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  color: var(--text, #1a1a1a);
+}
+
+.reminder-action h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.reminder-action p {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--text-muted, #4b5563);
+}
+
+.reminder-action__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+}
+
+.reminder-action__field input {
+  /* 44px, the minimum comfortable touch target on a phone. */
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 0.5rem;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.reminder-action__confirm {
+  min-height: 44px;
+  padding: 0 1.25rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--accent, #0b7a72);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reminder-action__confirm:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.reminder-action__error {
+  color: var(--danger, #b91c1c);
+}

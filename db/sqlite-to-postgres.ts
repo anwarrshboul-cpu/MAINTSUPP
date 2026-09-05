@@ -245,7 +245,7 @@ export const BOOLEAN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
    * comment prescribes: `is_current` exists on exactly one table in `portal` and
    * is boolean there.
    */
-  attachments: ["pending", "is_current"],
+  attachments: ["pending", "is_current", "is_seed"],
   billing_settings: ["vat_enabled", "pro_rata_enabled"],
   board_views: ["is_default", "system"],
   boards: ["archived"],

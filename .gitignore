@@ -88,11 +88,14 @@ apps/web/next-env.d.ts
 # Import report — contains real client location strings
 import-d1-report.txt
 
+# ROOT-ANCHORED (`/seed/`, not `seed/`). A bare `seed/` matches a directory of
+# that name at ANY depth, which silently hid `app/lib/seed/` — source that git
+# then refused to track and that `git status` never mentioned.
 # Database snapshot used to seed a fresh Railway volume on first boot. It is a
 # copy of the live portal database — every client, job and user — and this
 # repository is public. It reaches the deployment through `railway up`, which
 # uploads from a developer's machine to the builder without passing through git.
-seed/
+/seed/
 
 # Phase 2 audit — names real client sites, and inventories the unfixed
 # security gaps of a deployed product. The repository is public.
