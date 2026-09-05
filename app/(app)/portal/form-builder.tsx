@@ -21,30 +21,39 @@ import "./form-builder.css";
  * the "view" and "preview" modes, so the questions a coordinator fills in are
  * the same component the product has always used.
  *
- * DESKTOP ONLY, AND ENFORCED IN CSS RATHER THAN IN JAVASCRIPT
+ * EDITING IS NO LONGER DESKTOP ONLY — AND IT IS THE SAME CONFIGURATION
  *
- * The brief is that editing and sharing are desktop-only while the public link
- * works everywhere. That is done with a single `display: none` below 768px on
- * `.form-builder__bar`, NOT with a `matchMedia` check, for two reasons:
+ * It was, and the reasoning was sound at the time: editing a form on a 360px
+ * screen is a bad idea, so `.form-builder__bar` carried a single
+ * `display: none` below 768px. The owner has since asked for the opposite, on
+ * the grounds that the people holding a phone are the ones standing in a store
+ * when a question turns out to be wrong.
+ *
+ * So the toolbar is drawn at every width. What has NOT changed is where the
+ * settings live: there is one configuration and one way to save it. Every
+ * control in every panel still writes straight through to
+ * `PATCH /api/board/form` and still replaces its state from that response, so
+ * a change made on a phone and a change made on a desktop are the same write
+ * to the same row, visible in the public form immediately. There is no mobile
+ * form model, no second draft, and nothing to reconcile — which is the whole
+ * reason this was a CSS change rather than a new screen.
+ *
+ * The CSS-not-JavaScript rule still holds for anything width-dependent here:
  *
  *  1. This is a server-rendered app. A width-dependent render is a hydration
  *     mismatch — the server has no viewport — and React would either warn or,
- *     worse, flash the toolbar in before removing it.
+ *     worse, flash a control in before removing it.
  *  2. `display: none` removes an element from the accessibility tree as well as
- *     from the page, so a phone screen reader does not announce controls that
- *     are not there. A JS check that merely skipped the render would be no
- *     better and a CSS `visibility: hidden` would be worse.
+ *     from the page, so a screen reader does not announce controls that are not
+ *     there. A JS check that merely skipped the render would be no better and a
+ *     CSS `visibility: hidden` would be worse.
  *
- * The mode is reset to `view` at the same breakpoint by the effect below, so a
- * narrow window cannot strand somebody inside a panel with no way back.
+ * SHARING ON A PHONE IS STILL ITS OWN CONTROL, and it is the SAME link
  *
- * SHARING IS THE ONE THING A PHONE GETS BACK, and it is the SAME link
- *
- * "Editing and sharing are desktop-only" was one sentence covering two very
- * different acts. Editing a form on a 360px screen is a bad idea; handing
- * somebody the link is the thing a person on site actually wants to do, and
- * they are the ones holding the phone. So a single Share link control is drawn
- * below the (hidden) toolbar on phones only.
+ * The phone share strip predates this and stays. Handing somebody the link is
+ * the thing a person on site does most, and a one-tap field beats opening the
+ * Share dialog to reach the same string — so on a phone the toolbar's Share
+ * pair steps aside for it rather than drawing the same action twice.
  *
  * It mints NOTHING. It shares `form.presentedUrl` — the exact string the
  * desktop Share dialog displays and its Copy button copies, produced by
@@ -148,21 +157,22 @@ export default function FormBuilder({
   }, [boardId]);
 
   /*
-   * Leaving a builder panel open and then narrowing the window would hide the
-   * toolbar — the only way out — while the panel stayed on screen. Watching the
-   * same 768px boundary the stylesheet uses keeps the two in step.
+   * THE MODE RESET IS GONE, and its absence is the change.
+   *
+   * There used to be a `matchMedia("(max-width: 767px)")` effect here that
+   * forced `mode` back to `"view"` on every crossing of the phone boundary. It
+   * was correct for the rule it served: the toolbar was `display: none` below
+   * 768px, so narrowing the window while a panel was open would hide the only
+   * way out and strand somebody inside it.
+   *
+   * The toolbar is on a phone now, so there is no stranding to prevent — and
+   * the effect had become the thing standing between a phone and the panels.
+   * It ran on mount as well as on change, so any mobile route into Edit would
+   * have been snapped straight back to `view` before a finger left the screen.
+   *
+   * Nothing replaces it. `Back to view` is drawn in the toolbar in every
+   * editing mode, at every width, which is the way out it was substituting for.
    */
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const query = window.matchMedia("(max-width: 767px)");
-    function sync(narrow: boolean) {
-      if (narrow) setMode((current) => (current === "view" ? current : "view"));
-    }
-    sync(query.matches);
-    const onChange = (event: MediaQueryListEvent) => sync(event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
 
   useEffect(() => {
     if (!copied) return;

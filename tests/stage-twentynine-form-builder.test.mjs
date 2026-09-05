@@ -35,44 +35,141 @@ const PUBLIC_CSS = "app/(public)/f/[token]/public-form.css";
 const CONFIG_LIB = "app/lib/form-config.ts";
 const PROJECTION_LIB = "app/lib/form-projection.ts";
 
-/* ── Desktop only ────────────────────────────────────────────────────────── */
+/* ── Editing on a phone ──────────────────────────────────────────────────── */
 
-test("the builder toolbar is hidden on a phone, and hidden by display", async () => {
+/*
+ * THIS SECTION REVERSED. It used to be headed "Desktop only" and it pinned the
+ * opposite contract: `.form-builder__bar { display: none }` below 768px, plus a
+ * `matchMedia` effect that forced the mode back to `view`. Both were correct
+ * for the rule they served — the owner has since asked for form editing to be
+ * reachable from a phone, so the assertions are re-pointed at the new contract
+ * rather than deleted. What they were really protecting survives underneath:
+ * the toolbar's presence is still a CSS decision and not a render-time one, and
+ * a phone still cannot be stranded inside a panel with no way out.
+ */
+
+test("the builder toolbar is reachable on a phone", async () => {
   const css = await read(BUILDER_CSS);
   const narrow = css.slice(css.indexOf("@media (max-width: 767px)"));
   assert.ok(narrow, "the stylesheet must have a phone block");
 
-  /*
-   * `display: none` and not `visibility: hidden`: the second leaves the buttons
-   * focusable and announced, which is the failure this is guarding — a phone
-   * user tabbing into an Edit control that is not on screen.
-   */
   const bar = narrow.slice(narrow.indexOf(".form-builder__bar"));
-  assert.match(
-    bar.slice(0, 120),
+  assert.doesNotMatch(
+    bar.slice(0, 200),
     /display:\s*none/,
-    "the toolbar must be removed, not merely made invisible",
+    "hiding the toolbar below 768px IS the defect — it was the whole of the old no-editing-on-mobile rule",
   );
-  assert.doesNotMatch(bar.slice(0, 120), /visibility:\s*hidden/);
+  assert.doesNotMatch(
+    bar.slice(0, 200),
+    /visibility:\s*hidden/,
+    "and never the worse version of it, which leaves the buttons focusable but off screen",
+  );
+  /* Wrapping, not sideways scrolling: a strip that scrolls hides the control
+     somebody has not thought to look for. */
+  assert.match(bar.slice(0, 200), /flex-wrap:\s*wrap/);
 });
 
-test("the toolbar is not hidden by a width check in JavaScript", async () => {
-  const builder = await read("app/(app)/portal/form-builder.tsx");
+test("phone editing controls clear the 44px touch floor", async () => {
+  const css = await read(BUILDER_CSS);
+  const narrow = css.slice(css.indexOf("@media (max-width: 767px)"));
+  for (const selector of [
+    ".form-builder__back,",
+    ".form-builder__modes button {",
+    ".form-edit__cardtools button,",
+  ]) {
+    const at = narrow.indexOf(selector);
+    assert.notEqual(at, -1, `${selector} must be sized for a finger in the phone block`);
+    assert.match(
+      narrow.slice(at, at + 260),
+      /min-height:\s*44px/,
+      `${selector} must clear the 44px floor the rest of the phone chrome is held to`,
+    );
+  }
+});
+
+/* Comments explain the rule that was removed and name the media query it used.
+   Every assertion about the CODE therefore runs against the source stripped of
+   them, or the explanation reads as the thing it is explaining. */
+const codeOnly = (source) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+test("the toolbar is not shown or hidden by a width check in JavaScript", async () => {
+  const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
   /*
-   * A server-rendered app has no viewport, so deciding what to render from one
-   * is a hydration mismatch. The matchMedia that IS here only resets the mode
-   * so a narrowed window cannot strand somebody inside a panel — it must never
-   * be what decides whether the bar exists.
+   * Unchanged, and the reason is unchanged: a server-rendered app has no
+   * viewport, so deciding what to render from one is a hydration mismatch.
    */
   assert.doesNotMatch(
     builder,
     /\{\s*!?\s*(isMobile|isDesktop|narrow)\s*&&\s*<div className="form-builder__bar"/,
     "the toolbar's presence must be a CSS decision, not a render-time one",
   );
-  assert.match(
+  /*
+   * The mode reset is gone with the rule that needed it. It ran on mount as
+   * well as on change, so leaving it in place would snap any phone route into
+   * Edit straight back to `view`.
+   */
+  assert.doesNotMatch(
     builder,
     /matchMedia\("\(max-width: 767px\)"\)/,
-    "the mode reset must watch the same boundary the stylesheet uses",
+    "the mode must not be force-reset at the phone boundary any more — that is what would make the new toolbar unusable",
+  );
+});
+
+test("a phone cannot be stranded inside a builder panel", async () => {
+  const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
+  /* What the deleted mode reset was really guaranteeing: a way out, drawn at
+     every width, whenever a panel is open. */
+  assert.match(
+    builder,
+    /editing \|\| mode === "preview" \? \([\s\S]{0,320}?onClick=\{\(\) => setMode\("view"\)\}/,
+    "every editing mode must draw Back to view, and the toolbar holding it is now on a phone too",
+  );
+});
+
+test("a phone edits the same configuration a desktop does", async () => {
+  const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
+  const panels = codeOnly(await read("app/(app)/portal/form-builder-panels.tsx"));
+  /* One write path. There must be no mobile-only form model, no second draft
+     and nothing to reconcile — every panel control calls the same `patch`. */
+  assert.match(
+    builder,
+    /api\/board\/form\?board=\$\{encodeURIComponent\(boardId\)\}`, \{\s*method: "PATCH"/,
+    "settings are saved by one request to one endpoint",
+  );
+  assert.equal(
+    (panels.match(/fetch\(/g) ?? []).length,
+    0,
+    "no panel may reach the network on its own; they all go through the builder's patch",
+  );
+});
+
+test("the Design panel's colour pickers are not read-only fields", async () => {
+  const panels = codeOnly(await read("app/(app)/portal/form-builder-panels.tsx"));
+  /*
+   * Both swatches were `value={…}` with only `onBlur`. React calls that a
+   * controlled input with no way to update it — it warns "this will render a
+   * read-only field" and holds the DOM value back to the prop on every render.
+   * They appeared to work only because nothing re-rendered mid-drag.
+   *
+   * The commit-on-blur intent is right and unchanged: `onChange` on a colour
+   * picker is one PATCH per pixel of mouse travel. Uncontrolled is how that
+   * intent is actually spelled.
+   */
+  for (const match of panels.match(/<input[\s\S]{0,400}?type="color"[\s\S]{0,400?}?\/>/g) ?? []) {
+    assert.doesNotMatch(match, /\svalue=\{/, "a colour picker must not be controlled without an onChange");
+  }
+  const colourInputs = (panels.match(/type="color"/g) ?? []).length;
+  assert.equal(colourInputs, 2, "the accent and the background swatch");
+  assert.equal(
+    (panels.match(/defaultValue=\{appearance\./g) ?? []).length,
+    2,
+    "both swatches must be uncontrolled, so the native picker owns the live value and blur commits it once",
+  );
+  assert.equal(
+    (panels.match(/key=\{appearance\.(primaryColor|background\.value)/g) ?? []).length,
+    2,
+    "each needs a key, or a defaultValue read once at mount never re-seeds when Reset changes the stored colour",
   );
 });
 

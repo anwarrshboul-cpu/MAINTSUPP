@@ -511,10 +511,26 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
           <span>Accent colour</span>
           <input
             type="color"
-            value={appearance.primaryColor ?? "#0b7a72"}
+            /*
+             * `defaultValue`, NOT `value`. The intent below is right and
+             * unchanged — commit on blur, because a colour picker fires per
+             * drag tick and `onChange` here was one PATCH per pixel of mouse
+             * travel. But `value` with no `onChange` is a CONTROLLED input
+             * React cannot update: it warns "you provided a `value` prop to a
+             * form field without an `onChange` handler … this will render a
+             * read-only field", and holds the DOM value back to the prop on
+             * every render. The swatch only moved because nothing re-rendered
+             * mid-drag, which is luck, not design.
+             *
+             * Uncontrolled is what "the native picker owns the live value and
+             * we take it once at the end" actually means. The `key` re-seeds it
+             * when the stored colour changes from somewhere else — Reset to the
+             * workspace accent, just below — since a `defaultValue` alone is
+             * only read at mount.
+             */
+            key={appearance.primaryColor ?? "accent-default"}
+            defaultValue={appearance.primaryColor ?? "#0b7a72"}
             aria-busy={busy || undefined}
-            /* onBlur, not onChange: a colour picker fires per drag tick, which
-               was one PATCH per pixel of mouse travel. */
             onBlur={(event) => setAppearance({ primaryColor: event.target.value })}
           />
         </label>
@@ -553,7 +569,9 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
             <span>Background colour</span>
             <input
               type="color"
-              value={appearance.background.value ?? "#f4f7f8"}
+              /* Uncontrolled for the same reason as the accent above. */
+              key={appearance.background.value ?? "background-default"}
+              defaultValue={appearance.background.value ?? "#f4f7f8"}
               aria-busy={busy || undefined}
               onBlur={(event) =>
                 setAppearance({ background: { type: "Color", value: event.target.value } })

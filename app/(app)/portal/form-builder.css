@@ -1318,7 +1318,62 @@
  * with it, so the canvas is a single column and nothing scrolls sideways.
  */
 @media (max-width: 767px) {
+  /*
+   * THE TOOLBAR IS ON A PHONE NOW. It used to be `display: none` here, which
+   * was the entire "no editing on mobile" rule; the owner asked for the
+   * reverse. It is the same toolbar driving the same modes and the same
+   * `PATCH /api/board/form` — only its shape changes.
+   *
+   * It wraps rather than scrolls sideways: a strip that scrolls hides the
+   * control you have not thought to look for, and there are only four things
+   * here. Every target is held to the 44px the rest of the phone chrome uses.
+   */
   .form-builder__bar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+  }
+
+  /* The form's name is a caption, not a control; it takes its own row so the
+     three modes can share one. Truncated because a register's name can be
+     long and this row must not be the thing that scrolls the page sideways. */
+  .form-builder__title {
+    flex: 1 1 100%;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .form-builder__back,
+  .form-builder__preview {
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+
+  /*
+   * `margin-inline-start: auto` is what pushes the segmented control to the
+   * right of a desktop bar. On a wrapped bar it would push it onto a row of
+   * its own away from Preview, so it is released and the group simply takes
+   * the space it needs beside it.
+   */
+  .form-builder__modes {
+    margin-inline-start: 0;
+    flex: 1 1 auto;
+  }
+
+  .form-builder__modes button {
+    min-height: 44px;
+    flex: 1 1 0;
+    padding: 6px 8px;
+  }
+
+  /*
+   * Share steps aside on a phone rather than being drawn twice: the strip
+   * below this bar already offers the same link as a one-tap copyable field,
+   * which is the better shape for the action people actually perform here.
+   */
+  .form-builder__share {
     display: none;
   }
 
@@ -1376,8 +1431,36 @@
     padding: 12px;
   }
 
+  /*
+   * The Content rail stays hidden, and now that editing is reachable here that
+   * is a considered choice rather than a consequence of the panel being gone.
+   * It is an OUTLINE — a glyph, the question's name, a marker when it is
+   * hidden — and carries no control the canvas does not. Every one of them,
+   * rename, reorder, show/hide, required and the per-type settings, is on the
+   * question's own card. So the rail costs a column and returns navigation
+   * that a single-column canvas does not need.
+   */
   .form-edit__content {
     display: none;
+  }
+
+  /*
+   * Touch targets inside the panels. The canvas's per-question controls are
+   * 14px icon buttons on a desktop, which is a mis-tap on a phone; the panels'
+   * inputs and selects are held to the same 44px floor the board's chrome is.
+   */
+  .form-edit__cardtools button,
+  .form-panel button,
+  .form-panel select,
+  .form-panel input[type="text"],
+  .form-panel input[type="url"],
+  .form-panel input[type="number"],
+  .form-panel input[type="date"] {
+    min-height: 44px;
+  }
+
+  .form-edit__cardtools button {
+    min-width: 44px;
   }
 
   .form-panel {
