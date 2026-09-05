@@ -644,3 +644,46 @@ test("the reason is printed in the report, not merely stored", () => {
   assert.match(notes[1], /unrecorded/);
   assert.equal(notes.some((note) => /duplicate\.invoice_line/.test(note)), false);
 });
+
+/* ─────────────────────────────────── the waiver reaches the document ─── */
+
+test("a waived issue is PRINTED in the report, not merely stored", async () => {
+  /*
+   * §6 requires the waiver, its reason, its author and its timestamp to appear
+   * in the report's data-quality notes, and §10 makes it an acceptance
+   * criterion. `waiverNotesForReport` existed and nothing called it, which
+   * meant the reason lived in a table and never on the document a client and an
+   * auditor actually read — most of the reason the waiver mechanism was
+   * allowed to exist at all.
+   */
+  const engine = await read("app/lib/reporting/engine.ts");
+  assert.match(engine, /import \{ waiverNotesForReport \} from "\.\/waivers"/);
+  assert.match(
+    engine,
+    /const waiverNotes = waiverNotesForReport\(/,
+    "the engine must build the notes",
+  );
+  assert.match(
+    engine,
+    /dataQuality\.push\(\{\s*severity: "info",\s*code: "data\.issue_waived"/,
+    "and append them to the findings every renderer already draws",
+  );
+  /*
+   * `info`, deliberately. A recorded waiver is a note rather than a fault, and
+   * a `blocking` severity here would re-block the very finalisation the waiver
+   * was granted for — a loop with no way out.
+   */
+  assert.ok(
+    !/code: "data\.issue_waived"[\s\S]{0,120}severity: "blocking"/.test(engine),
+    "a waiver note must never be blocking",
+  );
+});
+
+test("the waiver note carries who, when and why", async () => {
+  const waivers = await read("app/lib/reporting/waivers.ts");
+  const fn = waivers.slice(waivers.indexOf("export function waiverNotesForReport"));
+  for (const part of ["waiver.issueCode", "reason", "waivedByEmail", "waivedAt"]) {
+    assert.ok(fn.includes(part), `the printed note must carry ${part}`);
+  }
+  assert.match(fn, /filter\(isLiveWaiver\)/, "a revoked waiver is not printed as live");
+});

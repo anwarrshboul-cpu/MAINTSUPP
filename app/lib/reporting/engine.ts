@@ -72,6 +72,8 @@ import type {
   ReportPeriod,
 } from "./contract";
 import { computeDataQuality } from "./data-quality";
+import { listWaivers } from "./waiver-repository";
+import { waiverNotesForReport } from "./waivers";
 import type {
   ExistingCharge,
   LineDecision,
@@ -442,6 +444,43 @@ export async function computeReport(
     vatRateBasisPoints: config.vatRateBasisPoints,
     defaultSiteFeePence: config.defaultSiteFeePence,
   });
+
+  /*
+   * WAIVED ISSUES ARE PRINTED, NOT MERELY STORED.
+   *
+   * Module 4 §6 requires the waiver, its reason, its author and its timestamp
+   * to appear "in the report's data quality notes", and §10 makes it an
+   * acceptance criterion. A waiver that lives only in a table is an override
+   * with no trace on the document a client and an auditor actually read —
+   * which is most of the reason the waiver mechanism was allowed to exist at
+   * all.
+   *
+   * They are appended as `info` findings rather than given a section of their
+   * own, so every renderer already carries them: the live preview, the Word
+   * export, the PDF and the workbook all draw `dataQuality` and none of them
+   * needed changing. An `info` severity is right — a recorded waiver is a note,
+   * not a fault, and it must not re-block the finalisation it was granted for.
+   */
+  const waiverNotes = waiverNotesForReport(
+    (await listWaivers(db, organisationId, input.invoiceId ?? "")).map((waiver) => ({
+      issueCode: waiver.issueCode,
+      subjectId: waiver.subjectId,
+      reason: waiver.reason,
+      waivedByEmail: waiver.waivedByEmail,
+      waivedAt: waiver.waivedAt,
+      revokedAt: null,
+    })),
+  );
+  for (const note of waiverNotes) {
+    dataQuality.push({
+      severity: "info",
+      code: "data.issue_waived",
+      message: note,
+      entityType: "invoice",
+      entityId: input.invoiceId ?? null,
+      href: null,
+    });
+  }
 
   const maintenance = computeMaintenanceSection({
     period,
