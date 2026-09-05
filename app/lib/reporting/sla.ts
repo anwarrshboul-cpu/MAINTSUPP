@@ -46,8 +46,27 @@
  * than applied. That asymmetry is the point: a hold is a discount on a number
  * a client is judged by, so it has to be somebody's decision, recorded with
  * their name against it, and not merely something typed into a box.
+ *
+ * ── THE BANK-HOLIDAY CALENDAR IS PASSED IN, NEVER FETCHED ──────────────────
+ *
+ * Module 4 §4.2 requires working days to exclude England & Wales bank holidays,
+ * and the owner agreed that calendar on 5 September 2026. Every function below
+ * takes it as a trailing OPTIONAL argument and hands it straight to
+ * `workingDaysInclusive`; none of them reads the `bank_holidays` table, because
+ * this module is pure and the whole engine's testability depends on it staying
+ * so.
+ *
+ * Optional, and not defaulted to a calendar of this module's own, for one
+ * reason: elapsed, held and adjusted have to be measured against the SAME set
+ * of days. A caller that passes the calendar to `computeSlaOutcome` gets it
+ * applied to the elapsed count and to the hold subtraction together, because
+ * this file threads the one it was given down to both. A caller that passes
+ * nothing gets weekdays for both. What must never happen is a job whose elapsed
+ * time knows about Christmas and whose holds do not — the adjusted figure would
+ * be arithmetic between two different calendars, and it would look fine.
  */
 
+import type { BankHolidayCalendar } from "./bank-holidays";
 import type { IsoDate, SlaOutcomeRow, SlaResult } from "./contract";
 import type { ReportHold, ReportJob, ReportSlaRule } from "./inputs";
 import { isCompletedJob, isProjectJob } from "./job-classification";
@@ -108,12 +127,13 @@ export function holdWorkingDays(
   hold: ReportHold,
   jobStart: IsoDate,
   jobEnd: IsoDate,
+  holidays?: BankHolidayCalendar | null,
 ): number {
   if (!hold.approved) return 0;
   const start = hold.startAt && hold.startAt > jobStart ? hold.startAt : jobStart;
   const end = hold.endAt && hold.endAt < jobEnd ? hold.endAt : jobEnd;
   if (!start || !end || start > end) return 0;
-  return workingDaysInclusive(start, end);
+  return workingDaysInclusive(start, end, holidays);
 }
 
 /**
@@ -130,6 +150,7 @@ export function approvedHoldDays(
   holds: readonly ReportHold[],
   jobStart: IsoDate,
   jobEnd: IsoDate,
+  holidays?: BankHolidayCalendar | null,
 ): number {
   const windows = holds
     .filter((hold) => hold.approved && !isAuthorisedExclusion(hold))
@@ -153,12 +174,12 @@ export function approvedHoldDays(
       if (window.end > openEnd) openEnd = window.end;
       continue;
     }
-    total += workingDaysInclusive(openStart, openEnd);
+    total += workingDaysInclusive(openStart, openEnd, holidays);
     openStart = window.start;
     openEnd = window.end;
   }
   if (openStart !== null && openEnd !== null) {
-    total += workingDaysInclusive(openStart, openEnd);
+    total += workingDaysInclusive(openStart, openEnd, holidays);
   }
   return total;
 }
@@ -191,6 +212,7 @@ export function computeSlaOutcome(
   job: ReportJob,
   holds: readonly ReportHold[],
   rules: readonly ReportSlaRule[],
+  holidays?: BankHolidayCalendar | null,
 ): SlaOutcomeRow {
   const rule = ruleFor(rules, job.classification);
   const base: SlaOutcomeRow = {
@@ -220,8 +242,9 @@ export function computeSlaOutcome(
   if (!job.completedOn) return excluded(SLA_EXCLUSION.completedWithoutDate);
   if (job.completedOn < job.requestedOn) return excluded(SLA_EXCLUSION.invalidSequence);
 
-  const elapsed = workingDaysInclusive(job.requestedOn, job.completedOn);
-  const held = approvedHoldDays(holds, job.requestedOn, job.completedOn);
+  // One calendar for both halves of the subtraction — see the header.
+  const elapsed = workingDaysInclusive(job.requestedOn, job.completedOn, holidays);
+  const held = approvedHoldDays(holds, job.requestedOn, job.completedOn, holidays);
   // Never below zero. A hold cannot make a job take negative time, and a
   // clamped hold that still overshoots is a data-quality finding, not a
   // measurement to be published.
@@ -266,11 +289,12 @@ export function openJobDaysPastTarget(
   holds: readonly ReportHold[],
   rules: readonly ReportSlaRule[],
   asOf: IsoDate,
+  holidays?: BankHolidayCalendar | null,
 ): { workingDaysOpen: number | null; daysPastTarget: number | null; targetOn: IsoDate | null } {
   if (!job.requestedOn) return { workingDaysOpen: null, daysPastTarget: null, targetOn: job.targetOn };
   const end = asOf > job.requestedOn ? asOf : job.requestedOn;
-  const elapsed = workingDaysInclusive(job.requestedOn, end);
-  const held = approvedHoldDays(holds, job.requestedOn, end);
+  const elapsed = workingDaysInclusive(job.requestedOn, end, holidays);
+  const held = approvedHoldDays(holds, job.requestedOn, end, holidays);
   const open = Math.max(0, elapsed - held);
   const rule = ruleFor(rules, job.classification);
   if (!rule) return { workingDaysOpen: open, daysPastTarget: null, targetOn: job.targetOn };

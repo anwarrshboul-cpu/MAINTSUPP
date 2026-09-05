@@ -105,6 +105,22 @@ export interface MaintenanceComputeInput {
   invoiceLines: readonly BillableSiteLine[];
   dataQuality: readonly DataQualityFinding[];
   currency: string;
+  /*
+   * England & Wales bank holidays, as a set of `YYYY-MM-DD`.
+   *
+   * PASSED IN AS DATA rather than imported, and the distinction is not
+   * stylistic. `tests/w9-report-engine.test.mjs` stages this module and a fixed
+   * list of its neighbours into a temp directory and rewrites relative
+   * specifiers; a value import of `./bank-holidays` here would resolve to a
+   * file that suite does not stage, and the failure would look like a broken
+   * report engine rather than a missing line in a test's module list. The set
+   * arrives from the route, which reads the `bank_holidays` table.
+   *
+   * Optional, and omitting it counts weekdays only — which is exactly what this
+   * engine did before the calendar was agreed, so an older caller keeps its
+   * numbers instead of silently gaining a day.
+   */
+  bankHolidays?: ReadonlySet<IsoDate>;
 }
 
 function holdsFor(holds: readonly ReportHold[], requestId: string): ReportHold[] {
@@ -119,10 +135,11 @@ export function computeMaintenanceSection(
   input: MaintenanceComputeInput,
 ): MaintenanceSection {
   const { jobs, holds, slaRules, period } = input;
+  const holidays = input.bankHolidays;
 
   /* ── SLA, first, because five other sections quote it ─────────────────── */
   const sla: SlaOutcomeRow[] = jobs.map((job) =>
-    computeSlaOutcome(job, holdsFor(holds, job.id), slaRules),
+    computeSlaOutcome(job, holdsFor(holds, job.id), slaRules, holidays),
   );
   const slaById = new Map(sla.map((row) => [row.requestId, row]));
 
@@ -136,7 +153,7 @@ export function computeMaintenanceSection(
   const pastTarget = open
     .map((job) => ({
       job,
-      measure: openJobDaysPastTarget(job, holdsFor(holds, job.id), slaRules, input.asOf),
+      measure: openJobDaysPastTarget(job, holdsFor(holds, job.id), slaRules, input.asOf, holidays),
     }))
     .filter((entry) => (entry.measure.daysPastTarget ?? 0) > 0);
   const pastTargetIds = new Set(pastTarget.map((entry) => entry.job.id));
@@ -263,7 +280,7 @@ export function computeMaintenanceSection(
 
   /* ── Open past target, and the critical subset ────────────────────────── */
   const openRow = (job: ReportJob): OpenPastTargetRow => {
-    const measure = openJobDaysPastTarget(job, holdsFor(holds, job.id), slaRules, input.asOf);
+    const measure = openJobDaysPastTarget(job, holdsFor(holds, job.id), slaRules, input.asOf, holidays);
     return {
       requestId: job.id,
       reference: job.reference,
@@ -359,7 +376,7 @@ export function computeMaintenanceSection(
       quotedCostPence: job.approvedQuotePence,
       holdDays:
         job.requestedOn && (job.completedOn ?? input.asOf)
-          ? approvedHoldDays(holdsFor(holds, job.id), job.requestedOn, job.completedOn ?? input.asOf)
+          ? approvedHoldDays(holdsFor(holds, job.id), job.requestedOn, job.completedOn ?? input.asOf, holidays)
           : 0,
       notes: job.notes,
     };

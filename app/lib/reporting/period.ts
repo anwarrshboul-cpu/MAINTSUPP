@@ -34,13 +34,33 @@
  * names, because the stamp names one and only one, and no timezone is
  * consulted to find out which.
  *
- * ── WORKING DAYS ARE MONDAY TO FRIDAY, AND NOTHING ELSE ───────────────────
+ * ── WORKING DAYS: WEEKDAYS, MINUS AN AGREED HOLIDAY CALENDAR ──────────────
  *
- * There is no bank-holiday calendar anywhere in this product, and inventing one
- * would put a number on a client's SLA report that no agreement supports.
- * `workingDaysInclusive` therefore counts weekdays, the SLA appendix says so in
- * as many words, and a holiday calendar is a change to this file made against a
- * calendar somebody has actually agreed.
+ * This section used to say that there was no bank-holiday calendar anywhere in
+ * this product, that inventing one would put a number on a client's SLA report
+ * that no agreement supports, and that a holiday calendar would be a change
+ * made against a calendar somebody had actually agreed. That reasoning is kept
+ * here rather than deleted, because it was not overruled — it was MET. It
+ * stated the condition, and the condition has now been satisfied.
+ *
+ * WHAT CHANGED — 5 SEPTEMBER 2026. The owner agreed the calendar. Module 4 §4.2
+ * requires it in terms: working days "excluding weekends and England & Wales
+ * bank holidays", and "maintain a `bank_holidays` table; do not compute them in
+ * code". `db/init.ts` now creates that table and seeds it from the GOV.UK
+ * England & Wales dates for 2024–2028, substitute days included and named as
+ * substitutes. So the number has an agreement behind it, which is precisely and
+ * only what was missing before.
+ *
+ * `workingDaysInclusive` therefore still counts Monday to Friday, and now also
+ * subtracts any date in a holiday set it is HANDED. The third parameter is
+ * optional and an omitted one means no holidays. That default is silence rather
+ * than a fallback: a caller that has not read the table gets exactly the
+ * weekday figure this function has always returned — reconcilable, and the same
+ * as every number already printed — instead of a half-invented calendar of this
+ * file's own. Not one holiday date is written here and none is derived here;
+ * Easter and the substitute days are data, and an algorithm that computes them
+ * is wrong in exactly the years a reader remembers. `bank-holidays.ts` builds
+ * the set from the table's rows.
  */
 
 import type { IsoDate, ReportPeriod, ReportPeriodPreset } from "./contract";
@@ -155,17 +175,34 @@ export function daysInclusive(start: IsoDate, end: IsoDate): number {
 }
 
 /**
- * Weekdays between two dates, inclusive of both. Monday to Friday only — see
- * the header for why there is no holiday calendar.
+ * Weekdays between two dates, inclusive of both, less any agreed bank holiday.
+ *
+ * `holidays` is a set of `YYYY-MM-DD` strings — `bank-holidays.ts` builds one
+ * from the `bank_holidays` table, and nothing in this file knows a single
+ * holiday date. Omitting it counts weekdays alone, which is what every caller
+ * written before the calendar was agreed still gets; see the header for why
+ * that default is silence rather than a guess.
+ *
+ * The set is checked only when it has something in it, and the date string is
+ * derived from the `Date` the weekday test already needed. An SLA table is a
+ * per-job loop over a per-day loop, so an empty calendar must cost nothing.
  */
-export function workingDaysInclusive(start: IsoDate, end: IsoDate): number {
+export function workingDaysInclusive(
+  start: IsoDate,
+  end: IsoDate,
+  holidays?: ReadonlySet<string> | null,
+): number {
   const from = toUtcMs(start);
   const to = toUtcMs(end);
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 0;
+  const excluded = holidays && holidays.size > 0 ? holidays : null;
   let count = 0;
   for (let ms = from; ms <= to; ms += DAY_MS) {
-    const day = new Date(ms).getUTCDay();
-    if (day !== 0 && day !== 6) count += 1;
+    const date = new Date(ms);
+    const day = date.getUTCDay();
+    if (day === 0 || day === 6) continue;
+    if (excluded && excluded.has(date.toISOString().slice(0, 10))) continue;
+    count += 1;
   }
   return count;
 }

@@ -45,6 +45,7 @@
 import { and, asc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import type { getDb } from "../../../db";
 import {
+  bankHolidays as bankHolidaysTable,
   contractors,
   maintenanceRequests,
   quotations,
@@ -52,6 +53,7 @@ import {
   serviceInvoices,
   sites as sitesTable,
 } from "../../../db/schema";
+import { bankHolidayCalendar, DEFAULT_JURISDICTION } from "./bank-holidays";
 import {
   CANONICAL_REGISTER,
   registerScopeFilter,
@@ -361,16 +363,35 @@ export async function computeReport(
   const contractorNames = new Map(contractorRows.map((row) => [row.id, row.name]));
 
   const jobIds = jobRows.map((row) => row.id);
-  const [quotes, previousQuotes, holds, slaRules, clientFees, siteOverrides, existingCharges] =
-    await Promise.all([
-      loadApprovedQuotes(db, organisationId, jobIds),
-      loadApprovedQuotes(db, organisationId, previousJobRows.map((row) => row.id)),
-      listHolds(db, organisationId, jobIds),
-      listSlaRules(db, organisationId),
-      listClientFees(db, organisationId),
-      listSiteOverrides(db, organisationId),
-      loadExistingCharges(db, organisationId, input.invoiceId ?? null),
-    ]);
+  const [
+    quotes,
+    previousQuotes,
+    holds,
+    slaRules,
+    clientFees,
+    siteOverrides,
+    existingCharges,
+    holidayRows,
+  ] = await Promise.all([
+    loadApprovedQuotes(db, organisationId, jobIds),
+    loadApprovedQuotes(db, organisationId, previousJobRows.map((row) => row.id)),
+    listHolds(db, organisationId, jobIds),
+    listSlaRules(db, organisationId),
+    listClientFees(db, organisationId),
+    listSiteOverrides(db, organisationId),
+    loadExistingCharges(db, organisationId, input.invoiceId ?? null),
+    /*
+     * The holiday calendar, read WHOLE rather than filtered to the period.
+     *
+     * A hold, an open job's age and the previous period's comparison all reach
+     * outside the reporting window, so a set trimmed to the period would give a
+     * different answer depending on which of those was asking. Forty rows is
+     * cheaper than being subtly wrong at the edges. Not organisation-scoped: a
+     * bank holiday is a fact about the country, not about a tenant.
+     */
+    db.select().from(bankHolidaysTable).where(eq(bankHolidaysTable.jurisdiction, DEFAULT_JURISDICTION)),
+  ]);
+  const holidayCalendar = bankHolidayCalendar(holidayRows, DEFAULT_JURISDICTION);
 
   const jobs = jobRows.map((row) => toReportJob(row, siteNames, contractorNames, quotes));
   const previousJobs = previousJobRows.map((row) =>
@@ -435,6 +456,7 @@ export async function computeReport(
     holds,
     slaRules,
     invoiceTotals: invoice.totals,
+    bankHolidays: holidayCalendar,
     invoiceLines: invoice.lines,
     dataQuality,
     currency: config.currency,
