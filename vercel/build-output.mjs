@@ -277,7 +277,39 @@ await fsp.writeFile(
        *    deployment that forgets the variable gets a sweep that does nothing
        *    rather than a hole.
        */
-      crons: [{ path: "/api/cron/retention", schedule: "20 3 * * *" }],
+      crons: [
+        { path: "/api/cron/retention", schedule: "20 3 * * *" },
+        /*
+         * THE REMINDER DISPATCHER IS DELIBERATELY NOT DECLARED HERE, AND THIS
+         * IS THE REASON.
+         *
+         * `/api/cron/reminders` needs to run HOURLY. That is a requirement
+         * rather than a preference: every reminder row carries its own send
+         * time, so a daily run would deliver an 08:00 reminder and a 17:00 one
+         * at whatever single moment the schedule fired, and the per-row time —
+         * which the specification makes a headline feature — would be
+         * decorative.
+         *
+         * Vercel refuses it. Measured, not assumed: deploying with
+         * `schedule: "0 * * * *"` fails outright with
+         *
+         *   "Hobby accounts are limited to daily cron jobs. This cron
+         *    expression (0 * * * *) would run more than once per day."
+         *
+         * So there are three options and only one of them is honest. Declaring
+         * it DAILY would deploy and would quietly break the feature, which is
+         * worse than not running it at all — a cascade that fires at the wrong
+         * hour looks like it works. Leaving it undeclared costs nothing on
+         * Preview, because Vercel runs crons on PRODUCTION deployments only and
+         * the portal is deployed to Preview.
+         *
+         * The endpoint is finished and reachable. Driving it needs either a
+         * Vercel Pro plan, or any external scheduler — the route accepts a
+         * plain `x-cron-secret` header precisely so that a GitHub Action, a
+         * Railway schedule or an operator's curl can call it without
+         * pretending to be an OAuth client.
+         */
+      ],
     },
     null,
     2,
@@ -292,3 +324,4 @@ console.log(`  static/                    ${mb(await dirSize(staticDir))}`);
 console.log(`  functions/${FUNCTION_NAME}.func/   ${mb(await dirSize(funcDir))}`);
 console.log(`  routes: /assets → immutable cache, filesystem, catch-all → /${FUNCTION_NAME}`);
 console.log("  crons:  /api/cron/retention daily at 03:20 UTC (PRODUCTION deployments only)");
+console.log("  note:   /api/cron/reminders needs an HOURLY schedule, which the Hobby plan refuses — see build-output.mjs");
