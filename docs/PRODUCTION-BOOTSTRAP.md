@@ -70,6 +70,52 @@ is worse than having no Production deployment at all, because it looks finished.
 
 ---
 
+## 1b. CORRECTION: Production was PAUSED, not new
+
+Two earlier sections of this file were written on the assumption that Production
+was an empty database being stood up for the first time. **It is not.** Measured
+2026-09-05:
+
+| | Production `wghfhtdzxttfhofuljyy` | Staging `ajslebfjwgkvhlntrdmw` |
+| --- | --- | --- |
+| jobs | **776** | 20 |
+| sites | **10** | 32 (31 live) |
+| contractors | 6 | 6 |
+| attachments | **2,968** | 25 |
+
+Its owner account was created 2026-08-07, had its password set 2026-08-15, and
+**signed in successfully on 2026-08-20**. This is a live estate that was paused,
+and everything below has to be read that way.
+
+**What that corrects:**
+
+1. **§4's "if Production is effectively empty, leave it clean" does not apply.**
+   There is real client data. Nothing may be seeded, reset or cloned into it.
+2. **`batch_1b_canonical_site_estate` moves from "owner decision" to DO NOT
+   APPLY.** §3's table rates it as a judgement call about seeding the canonical
+   estate into a blank register. Production already holds 10 real sites, and
+   that migration is 7.7 KB of `UPDATE`/`INSERT` against `portal.sites` — on a
+   populated register it is a collision, not a seed. Same for
+   `batch_1b_canonical_site_aliases`, which depends on it.
+3. **The boolean repair was still right, and safer than it looked.**
+   `USING (col <> 0)` converted in place, so all 776 jobs kept their flags. A
+   drop-and-recreate — which an "it's empty anyway" reading would have made
+   tempting — would have destroyed the estate.
+
+**The owner credential is the owner's own, from August.** `ensureOwnerAccount`
+seeds `MAINTSUPP_OWNER_PASSWORD` into a NULL hash only, so it never applied here
+and never will while a hash exists. That variable is set on the Production
+environment and is harmless, but do NOT "make it take effect" by clearing
+`password_hash`: that discards a working credential on a live estate. The
+supported recovery for a genuinely lost owner password is a reset link issued by
+another account holding `users.edit` through
+`POST /api/admin/users/password-reset`, which returns the link in its own
+response because there is no mail server. If clearing the hash is ever
+unavoidable, copy it to a row-keyed backup table first so the step is
+reversible.
+
+---
+
 ## 2. What the owner has to do (the whole list, in order)
 
 Each step is a dashboard action. Nothing here can be delegated to a session that
@@ -178,8 +224,8 @@ blindly; three of them must not go anywhere near Production.
 | --- | --- | --- |
 | `20260827060942 batch_1b_rollback_capture` | CTAS snapshots of **Staging rows** into `batch1b_rollback` | **Skip.** Rollback net for a Staging data change. |
 | `20260827061150 batch_1b_site_id_nullable` | `ALTER … site_id DROP NOT NULL` | **Not needed.** A fresh DB is born nullable (§3). |
-| `20260827064531 batch_1b_canonical_site_estate` | ~7.7 KB of `UPDATE`/`INSERT` on `portal.sites` — the client's canonical store estate | **Owner decision.** Real client reference data, not QA. Apply only if Production is meant to start with the estate. |
-| `20260827064549 batch_1b_canonical_site_aliases` | Four aliases for the rows above | **Only if the row above is applied.** Meaningless without it. |
+| `20260827064531 batch_1b_canonical_site_estate` | ~7.7 KB of `UPDATE`/`INSERT` on `portal.sites` — the client's canonical store estate | **DO NOT APPLY** — see §1b. Production already holds 10 real sites; on a populated register this collides rather than seeds. |
+| `20260827064549 batch_1b_canonical_site_aliases` | Four aliases for the rows above | **DO NOT APPLY** — depends on the row above, which is now do-not-apply. |
 | `20260831225955 w7_rollback_snapshot_attachments` | Snapshot of **Staging** attachments | **Skip.** |
 | `20260831231456 w7_official_documents_metadata_versioning` | `ADD COLUMN` / `CREATE INDEX` for document lineage | **Not needed.** `ensureDatabase()` produces all of it (§3). |
 | `20260831234625 w7_expiry_date_must_be_a_real_calendar_date` | Replaces the shape-only `CHECK` with one that casts to `date` | **Optional, recommended.** The only genuine gap; API enforces it regardless. |
