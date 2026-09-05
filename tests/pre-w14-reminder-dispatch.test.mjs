@@ -252,3 +252,49 @@ test("a test send consumes no dispatch row and issues no working token", async (
   );
   assert.match(source, /\[TEST\]/, "and it must be labelled");
 });
+
+/* ────────────────────────── the ledger tells the truth about delivery ─── */
+
+test("a suppressed send is recorded as suppressed, never as sent", async () => {
+  const cron = await read(CRON);
+  /*
+   * The defect this pins: the loop collapsed sent / suppressed / skipped into
+   * one boolean and wrote "sent". On a deployment with no provider — which is
+   * every Preview — that produced dispatch rows claiming a delivery beside log
+   * rows recording suppression. The dispatch ledger is what somebody reads to
+   * answer "did the 14-day warning go out", so it was the wrong one to lie.
+   */
+  assert.match(
+    cron,
+    /const status = failed > 0 \? "failed" : delivered > 0 \? "sent" : "suppressed";/,
+    "the three outcomes must be counted apart and the row must record which",
+  );
+  assert.ok(
+    !/providerId = providerId \?\? null/.test(cron),
+    "the no-op that made providerMessageId permanently null must not come back",
+  );
+  assert.match(
+    cron,
+    /if \(result\.logId\) logIds\.push\(result\.logId\)/,
+    "§9 wants the provider message id; notification_log holds it on the row logId names",
+  );
+});
+
+test("a partial failure is a failure, not a partial success", async () => {
+  const cron = await read(CRON);
+  assert.match(
+    cron,
+    /failed > 0 \? "failed"/,
+    "one refused recipient out of eight still means somebody was not warned",
+  );
+});
+
+test("the run reports suppression separately from delivery", async () => {
+  const cron = await read(CRON);
+  assert.match(cron, /suppressed: number;/, "the outcome must carry its own counter");
+  assert.match(
+    cron,
+    /else if \(status === "suppressed"\) outcome\.suppressed \+= 1;/,
+    "a run that reports 'sent 15' on a deployment that mailed nobody will be believed",
+  );
+});

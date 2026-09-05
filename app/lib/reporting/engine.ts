@@ -462,7 +462,12 @@ export async function computeReport(
    * not a fault, and it must not re-block the finalisation it was granted for.
    */
   const waiverNotes = waiverNotesForReport(
-    (await listWaivers(db, organisationId, input.invoiceId ?? "")).map((waiver) => ({
+    /*
+     * No document, no waivers — and no query. A preview that has not been saved
+     * has nothing to have waived, and asking with an empty id is a round trip
+     * that can never match. `loadWaivedIssueKeys` short-circuits the same way.
+     */
+    (input.invoiceId ? await listWaivers(db, organisationId, input.invoiceId) : []).map((waiver) => ({
       issueCode: waiver.issueCode,
       subjectId: waiver.subjectId,
       reason: waiver.reason,

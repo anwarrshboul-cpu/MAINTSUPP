@@ -218,6 +218,13 @@ export type DispatchOutcome = {
   failed: number;
   /** Moved to the next permitted slot by quiet hours. Not sent, not lost. */
   deferred: number;
+  /*
+   * Handled, but nothing left the building — sink or log mode, or no provider
+   * configured. Counted apart from `sent` for the same reason the dispatch row
+   * records it apart: a run that reports "sent 15" on a deployment that mailed
+   * nobody is a run that will be believed.
+   */
+  suppressed: number;
   more: boolean;
 };
 
@@ -255,6 +262,7 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
     skipped: 0,
     failed: 0,
     deferred: 0,
+    suppressed: 0,
     more: due.length === BATCH,
   };
   if (due.length === 0) return outcome;
@@ -360,8 +368,32 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
           tokens,
         });
 
-        let anyFailed = false;
-        let providerId: string | null = null;
+        /*
+         * THE LEDGER MUST NOT SAY "sent" WHEN NOTHING LEFT THE BUILDING.
+         *
+         * `sendNotification` answers `suppressed` in sink/log mode and
+         * `skipped` when no provider is configured, and an earlier version of
+         * this loop collapsed all three into a boolean and wrote "sent". On
+         * Preview that produced fifteen dispatch rows marked sent beside a
+         * hundred and seventeen log rows marked suppressed — two ledgers
+         * disagreeing about the same event, with the one an operator reads to
+         * answer "did the 14-day warning go out" giving the wrong answer.
+         *
+         * The three outcomes are counted separately and the row records what
+         * actually happened.
+         */
+        let delivered = 0;
+        let suppressed = 0;
+        let failed = 0;
+        /*
+         * The log rows this dispatch produced — one per recipient.
+         *
+         * `SendResult` carries no provider message id, but `notification_log`
+         * stores `provider_id` on the row `logId` names, so keeping the ids is
+         * what makes a dispatch traceable back to what Resend was told. §9 asks
+         * for the provider message id to be logged; this is the join to it.
+         */
+        const logIds: string[] = [];
         for (const address of addresses) {
           const result = await sendNotification(db, {
             organisationId,
@@ -379,19 +411,29 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
             body: message.html,
             text: message.text,
           });
-          if (!result.ok && result.status !== "suppressed" && result.status !== "skipped") {
-            anyFailed = true;
-          }
-          providerId = providerId ?? null;
+          if (result.logId) logIds.push(result.logId);
+          if (result.status === "sent") delivered += 1;
+          else if (result.status === "suppressed" || result.status === "skipped") suppressed += 1;
+          else failed += 1;
         }
 
+        /*
+         * A partial failure is a failure. One recipient refused out of eight
+         * still means somebody who should have been warned was not, and
+         * recording that as "sent" would hide exactly the case worth chasing.
+         */
+        const status = failed > 0 ? "failed" : delivered > 0 ? "sent" : "suppressed";
         await recordDispatchResult(db, dispatchId, {
-          status: anyFailed ? "failed" : "sent",
-          providerMessageId: providerId,
+          status,
+          providerMessageId: logIds.length > 0 ? logIds.join(",") : null,
           recipients: addresses,
-          error: anyFailed ? "At least one recipient could not be sent to." : null,
+          error:
+            failed > 0
+              ? `${failed} of ${addresses.length} recipients could not be sent to.`
+              : null,
         });
-        if (anyFailed) outcome.failed += 1;
+        if (status === "failed") outcome.failed += 1;
+        else if (status === "suppressed") outcome.suppressed += 1;
         else outcome.sent += 1;
       }
     } catch (error) {
