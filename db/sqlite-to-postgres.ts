@@ -392,6 +392,7 @@ export function translateSql(sql: string, options: TranslateOptions = {}): strin
   text = rewriteDatetime(text);
   text = rewriteAutoincrement(text);
   text = rewriteTextTimestampDefaults(text);
+  text = rewriteBooleanColumnTypes(text);
   text = rewriteInsertConflictClause(text, options);
   text = rewriteConflictTargetQualifiers(text);
   text = rewriteBooleanInserts(text);
@@ -930,6 +931,85 @@ function rewriteTextTimestampDefaults(sql: string): string {
  * from `EXCLUDED`. There are zero occurrences in this codebase, so that path is
  * covered by tests and by nothing else.
  */
+/**
+ * 7b. A DDL column that this file treats as BOOLEAN is DECLARED as one.
+ *
+ * `db/init.ts` is dialect-shared, so it declares every flag the only way SQLite
+ * understands: `INTEGER NOT NULL DEFAULT 0`. `BOOLEAN_COLUMNS` then makes rule
+ * 10 rewrite every comparison against those columns to `= true` / `= false`.
+ * On a database whose columns really are boolean the two halves agree. On one
+ * where the column was created from that INTEGER declaration they do not, and
+ * Postgres answers:
+ *
+ *   operator does not exist: integer = boolean          (42883)
+ *
+ * WHY THIS WENT UNSEEN UNTIL A SECOND POSTGRES EXISTED. `portal` on Staging was
+ * not built by `init.ts` at all — it came from
+ * `migration/legacy-to-postgres/migrations/001_schema.sql`, which declares real
+ * `boolean` columns. Every `CREATE TABLE IF NOT EXISTS` from the boot path then
+ * skipped, so the declarations here were never the ones that ran. Rule 7 says
+ * as much in its own note: "in practice every table init.ts declares already
+ * exists in `portal`". That stopped being true the day a FRESH Postgres was
+ * created — MAINTSUPP Production, 2026-09-05 — where `init.ts` was the only
+ * thing that had ever built the schema and produced all 35 flags as `integer`.
+ *
+ * The failure is quiet in the worst way. `ensureOwnerAccount` is called as
+ * `ensureOwnerAccount(d1).catch(() => {})` so sign-in survives a seeding fault;
+ * with `users.active` an integer the INSERT threw, was swallowed, and the owner
+ * account was never created. The deployment answered "That email and password
+ * do not match an account" — a credential message for a schema fault.
+ *
+ * So the declaration is translated to match the comparison, rather than the
+ * comparison being weakened to match the declaration. `= true` against a real
+ * boolean is the shape the rest of this file, the live Staging schema and the
+ * legacy migration all already agree on; making rule 10 emit `= 1` instead
+ * would break every one of them.
+ *
+ * ONLY DDL, and only the columns `BOOLEAN_COLUMNS` names for THAT table. A
+ * `DEFAULT 0` or `DEFAULT 1` on the same declaration moves with the type,
+ * because Postgres will not take an integer default on a boolean column.
+ */
+function rewriteBooleanColumnTypes(sql: string): string {
+  const mask = maskNonCode(sql);
+  /* Column types are only ever declared by these two statements. Anything else
+     reaching this rule cannot contain a declaration to correct. */
+  const table = (
+    /\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?/i.exec(mask)?.[1] ??
+    /\bALTER\s+TABLE\s+"?([A-Za-z_][A-Za-z0-9_]*)"?\s+ADD\s+(?:COLUMN\s+)?/i.exec(mask)?.[1] ??
+    ""
+  ).toLowerCase();
+  if (!table) return sql;
+
+  const booleans = BOOLEAN_COLUMNS[table];
+  if (!booleans || booleans.length === 0) return sql;
+
+  const edits: Edit[] = [];
+  for (const column of booleans) {
+    /* Anchored on what STARTS a column declaration — the open paren or a comma
+       inside `CREATE TABLE`, or `ADD COLUMN` — so a mention of the same name
+       anywhere else in the statement is not mistaken for one. `[^,)]*` stops at
+       the end of this column's own clause. */
+    const declaration = new RegExp(
+      "([(,]\\s*|\\bADD\\s+(?:COLUMN\\s+)?)\"?" + column + "\"?\\s+INTEGER\\b[^,)]*",
+      "gi",
+    );
+    for (const match of mask.matchAll(declaration)) {
+      /* Rebuilt from the ORIGINAL text: the mask blanks string literals, and a
+         DEFAULT that lives inside one must come back as it was written. */
+      const original = sql.slice(match.index, match.index + match[0].length);
+      const replaced = original
+        .replace(/\bINTEGER\b/i, "BOOLEAN")
+        .replace(/\bDEFAULT\s+1\b/i, "DEFAULT true")
+        .replace(/\bDEFAULT\s+0\b/i, "DEFAULT false");
+      if (replaced !== original) {
+        edits.push({ start: match.index, end: match.index + match[0].length, text: replaced });
+      }
+    }
+  }
+
+  return applyEdits(sql, edits);
+}
+
 function rewriteInsertConflictClause(
   sql: string,
   options: TranslateOptions,

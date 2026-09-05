@@ -743,3 +743,86 @@ test("max inside a string literal is not rewritten", () => {
     "select greatest(a, b) from t where note = 'max(a, b) is fine'",
   );
 });
+
+/* ── A boolean column is DECLARED boolean, not only compared as one ─────── */
+
+/*
+ * THE PRODUCTION FAULT THESE COVER, so nobody re-derives it.
+ *
+ * `db/init.ts` is dialect-shared and declares every flag the only way SQLite
+ * understands, `INTEGER NOT NULL DEFAULT 0`. `BOOLEAN_COLUMNS` then makes the
+ * comparison rule rewrite reads of those columns to `= true` / `= false`. The
+ * two halves only agree if the column really is boolean.
+ *
+ * On Staging it always was: that schema came from
+ * `migration/legacy-to-postgres/migrations/001_schema.sql`, so every
+ * `CREATE TABLE IF NOT EXISTS` from the boot path skipped and these
+ * declarations never ran. MAINTSUPP Production, created fresh on 2026-09-05,
+ * was the first Postgres `init.ts` had ever built alone -- and it produced all
+ * 35 flags as `integer`, so the boot path answered
+ * `operator does not exist: integer = boolean` (42883) and, because
+ * `ensureOwnerAccount` is called with `.catch(() => {})`, sign-in reported
+ * "That email and password do not match an account" for a schema fault.
+ */
+
+test("a boolean column added by the boot path is declared BOOLEAN", () => {
+  assert.equal(
+    translateSql("ALTER TABLE attachments ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1"),
+    "ALTER TABLE attachments ADD COLUMN is_current BOOLEAN NOT NULL DEFAULT true",
+  );
+  assert.equal(
+    translateSql("ALTER TABLE attachments ADD COLUMN pending INTEGER NOT NULL DEFAULT 0"),
+    "ALTER TABLE attachments ADD COLUMN pending BOOLEAN NOT NULL DEFAULT false",
+  );
+});
+
+test("the default moves with the type, because Postgres will not take an integer one", () => {
+  const sql = squash(
+    translateSql(
+      `CREATE TABLE IF NOT EXISTS option_values (
+         id TEXT PRIMARY KEY NOT NULL,
+         active INTEGER NOT NULL DEFAULT 1,
+         is_default INTEGER NOT NULL DEFAULT 0
+       )`,
+    ),
+  );
+  assert.match(sql, /active BOOLEAN NOT NULL DEFAULT true/);
+  assert.match(sql, /is_default BOOLEAN NOT NULL DEFAULT false/);
+  assert.doesNotMatch(sql, /DEFAULT [01]\b/, "no integer default survives on a boolean column");
+});
+
+test("only the columns BOOLEAN_COLUMNS names for that table are retyped", () => {
+  /* `login_count` is an ordinary counter that happens to be an INTEGER in the
+     same table as a flag. Retyping it would silently destroy a count. */
+  const sql = squash(
+    translateSql(
+      `CREATE TABLE IF NOT EXISTS users (
+         id TEXT PRIMARY KEY NOT NULL,
+         login_count INTEGER NOT NULL DEFAULT 0,
+         active INTEGER NOT NULL DEFAULT 1
+       )`,
+    ),
+  );
+  assert.match(sql, /login_count INTEGER NOT NULL DEFAULT 0/);
+  assert.match(sql, /active BOOLEAN NOT NULL DEFAULT true/);
+});
+
+test("a table with no boolean columns is passed through untouched", () => {
+  const sql =
+    "CREATE TABLE IF NOT EXISTS units (id TEXT PRIMARY KEY NOT NULL, qty INTEGER NOT NULL DEFAULT 0)";
+  assert.equal(translateSql(sql), sql);
+});
+
+test("DML naming a boolean column is not mistaken for a declaration", () => {
+  /* The rule is anchored on what STARTS a column declaration. An UPDATE that
+     merely mentions the column must keep going through the comparison rule
+     instead, which is the half that was always correct. */
+  assert.equal(
+    translateSql("UPDATE attachments SET is_current = 0 WHERE id = ?"),
+    "UPDATE attachments SET is_current = false WHERE id = $1",
+  );
+  assert.equal(
+    translateSql("SELECT id FROM attachments WHERE is_current = 1"),
+    "SELECT id FROM attachments WHERE is_current = true",
+  );
+});

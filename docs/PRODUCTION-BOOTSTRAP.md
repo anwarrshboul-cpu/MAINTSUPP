@@ -97,10 +97,49 @@ holds no management credential.
 
 ---
 
-## 3. Schema: `ensureDatabase()` is sufficient on a fresh Production database
+## 3. Schema: `ensureDatabase()` is ALMOST sufficient — one correction
 
-This was the open question and it has a verified answer, so nobody needs to
-hand-apply migrations to bring Production up.
+> **CORRECTION, 2026-09-05.** An earlier revision of this section said
+> `ensureDatabase()` was sufficient on a fresh Production Postgres. **That was
+> wrong**, and the first Production deployment proved it. The section below is
+> still right about tables, columns and indexes; it was wrong about COLUMN
+> TYPES, and the gap is described here because it is the one thing that stops a
+> fresh Postgres working at all.
+>
+> `db/init.ts` is dialect-shared, so it declares every flag the only way SQLite
+> understands — `INTEGER NOT NULL DEFAULT 0`. `BOOLEAN_COLUMNS` in
+> `db/sqlite-to-postgres.ts` then rewrites every comparison against those 37
+> columns to `= true` / `= false`. The two halves agree only when the column
+> really is boolean.
+>
+> Staging never exposed this: its `portal` schema came from
+> `migration/legacy-to-postgres/migrations/001_schema.sql`, which declares real
+> `boolean` columns, so every `CREATE TABLE IF NOT EXISTS` on the boot path
+> skipped and these declarations never ran. Production was the first Postgres
+> `init.ts` had ever built alone, and it produced all 35 of the flags it
+> declares as `integer`. Postgres then answered every rewritten predicate with
+> `operator does not exist: integer = boolean` (42883).
+>
+> **How it presents, which is nothing like a type error.**
+> `ensureOwnerAccount` is called as `ensureOwnerAccount(d1).catch(() => {})` so
+> that a seeding fault cannot take sign-in down. With `users.active` an integer
+> the INSERT threw, was swallowed, and the owner account was never created — so
+> a correct password returned *"That email and password do not match an
+> account"*. The document-version index also failed to build, logged as
+> "the one-current-head invariant is NOT enforced on this database".
+>
+> **Fixed in two places, both needed.**
+> 1. `sqlite-to-postgres.ts` now translates the DDL type as well as the
+>    comparison, so a database created from here on is correct at birth.
+>    Covered by five tests in `tests/sqlite-to-postgres.test.mjs`.
+> 2. `scripts/repair-postgres-boolean-columns.sql` retypes the columns of a
+>    database that already has the integer shape. It converts in place with
+>    `USING (col <> 0)` — **no data is lost**, it is idempotent, and it skips
+>    anything already boolean. Run it once in the Supabase SQL editor, then
+>    redeploy.
+
+The rest of this section is unchanged and still holds:
+
 
 `ensureDatabase()` in `db/init.ts` runs on the boot path of every request and
 replays `CREATE TABLE IF NOT EXISTS`, guarded `addColumn` and `INSERT OR IGNORE`
