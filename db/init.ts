@@ -4645,6 +4645,33 @@ const JOB_STATUS_MAP_SEED: ReadonlyArray<{
   { label: "No access", colour: "#EAB308", style: "outline", icon: "lock", open: 1, overdue: 1 },
   { label: "Completed", colour: "#22C55E", style: "solid", icon: "check", open: 0, overdue: 0 },
   { label: "Cancelled", colour: "#475569", style: "strikethrough", icon: "cross", open: 0, overdue: 0 },
+
+  /*
+   * THE LABELS THIS ESTATE ACTUALLY USES.
+   *
+   * The twelve above are Module 2 §4.2's own list. Reading the live board
+   * afterwards showed seven more in use on 86 jobs — "Pending Approval" alone on
+   * 59 — none of which match the spec's wording: the data says "Job Scheduled"
+   * where the spec says "Scheduled", and "Pending Approval" where it says
+   * "Awaiting approval".
+   *
+   * Left unmapped they would all render grey with an admin notice, which is the
+   * correct FAILURE behaviour and a poor default. So the real labels are seeded
+   * too. They are additions, not replacements: `INSERT OR IGNORE` means an
+   * operator who has already recoloured one keeps their colour.
+   *
+   * Three of them are deliberately NOT overdue-eligible. A job held for a third
+   * party, for a decision or for payment is waiting on somebody outside the
+   * team, and a red "overdue" badge against it accuses the wrong party — the
+   * distinction `counts_as_overdue_eligible` exists to express.
+   */
+  { label: "Job Scheduled", colour: "#14B8A6", style: "solid", icon: "calendar", open: 1, overdue: 1 },
+  { label: "Job In Progress", colour: "#06B6D4", style: "solid", icon: "wrench", open: 1, overdue: 1 },
+  { label: "Job Completed", colour: "#22C55E", style: "solid", icon: "check", open: 0, overdue: 0 },
+  { label: "Pending Approval", colour: "#F59E0B", style: "hatched", icon: "clock", open: 1, overdue: 1 },
+  { label: "Third Party Delay", colour: "#F97316", style: "hatched", icon: "pause", open: 1, overdue: 0 },
+  { label: "Waiting for decisions", colour: "#EAB308", style: "hatched", icon: "clock", open: 1, overdue: 0 },
+  { label: "Waiting for payment", colour: "#64748B", style: "hatched", icon: "pause", open: 1, overdue: 0 },
 ];
 
 async function seedJobStatusMap(d1: D1DatabaseLike) {
