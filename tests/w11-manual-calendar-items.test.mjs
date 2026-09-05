@@ -44,6 +44,16 @@ const expiryUrl = asModule(
     `from "${formatDateUrl}"`,
   ),
 );
+/*
+ * The record-type vocabulary — Note / Planned visit / Certificate — which
+ * `calendar-model.ts` reads to colour a manual chip and to decide that an
+ * expired certificate is overdue while a note in the past is merely past. Pure
+ * and importing nothing itself, so it transpiles on its own like the rest.
+ */
+const itemTypesUrl = asModule(
+  transpile(await read("app/(app)/portal/calendar-item-types.ts")),
+);
+
 const metersUrl = asModule(
   transpile(await read("app/(app)/portal/dashboard-meters.ts")),
 );
@@ -53,7 +63,8 @@ const calendar = await import(
     transpile(await read("app/(app)/portal/calendar-model.ts"))
       .replace(/from ["']\.\.\/\.\.\/lib\/format-date["']/g, `from "${formatDateUrl}"`)
       .replace(/from ["']\.\.\/\.\.\/lib\/expiry-status["']/g, `from "${expiryUrl}"`)
-      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`),
+      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`)
+      .replace(/from ["']\.\/calendar-item-types["']/g, `from "${itemTypesUrl}"`),
   )
 );
 
@@ -340,10 +351,28 @@ test("W11 the reader is told which kind it is, in words and in shape", async () 
   );
 
   const panel = codeOnly(await read("app/(app)/portal/calendar-surface.tsx"));
+  /*
+   * RE-POINTED, not weakened. This used to pin the literal `"Manual"`, and the
+   * contract it was protecting is the one in this test's name: a manual item
+   * announces itself IN WORDS, so it is never told apart by colour alone.
+   *
+   * That contract now holds more strongly than the literal did. Since the
+   * record-type vocabulary arrived, a manual chip says which kind it is —
+   * "Note", "Planned visit", "Certificate / compliance" — because "Manual" had
+   * become the one word on this calendar describing how a row got here rather
+   * than what it says. `calendarItemType` is what supplies the word, and its
+   * documented default means an item saved before types existed still gets
+   * one rather than falling through to an empty label.
+   */
   assert.match(
     panel,
-    /event\.kind === "manual"\s*\?\s*"Manual"/,
-    "and every chip and agenda row is labelled out loud",
+    /event\.kind === "manual"\s*\?\s*calendarItemType\(event\.manual\?\.category\)\.label/,
+    "and every chip and agenda row is labelled out loud, now with its own type",
+  );
+  assert.match(
+    panel,
+    /import \{ calendarItemType \} from "\.\/calendar-item-types"/,
+    "from the one module that decides what a category means",
   );
 });
 

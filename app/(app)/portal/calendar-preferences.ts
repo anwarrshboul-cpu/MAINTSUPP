@@ -206,9 +206,19 @@ export function calendarChipStyle(
   event: CalendarEvent,
   colours: CalendarColours,
 ): CSSProperties {
-  /* One lookup per entity, keyed rather than nested ternaries: a fourth kind
-     would otherwise be a third condition in two places that must agree. */
-  const chosen = colours[event.kind] ?? colours.job;
+  /*
+   * THE RECORD'S OWN COLOUR WINS, then the reader's setting for its kind.
+   *
+   * `colourToken` is set only where the RECORD decides — a manual item's type,
+   * or the expiry band a certificate falls in. Those are facts about that row,
+   * not a preference, and a Planned visit that took the reader's "manual"
+   * colour would be indistinguishable from the note beside it, which is the
+   * whole thing the type vocabulary exists to fix.
+   *
+   * The fallback is unchanged, so an item saved before types existed still
+   * honours whatever the reader chose for "manual".
+   */
+  const chosen = event.colourToken || colours[event.kind] || colours.job;
   const fallback = DEFAULT_CALENDAR_COLOURS[event.kind] ?? DEFAULT_CALENDAR_COLOURS.job;
   const { background, color } = chipStyle(colourOrFallback(chosen, fallback));
   const urgent = event.timing === "overdue" || event.timing === "due-today";

@@ -196,3 +196,110 @@
   min-height: 36px;
   white-space: nowrap;
 }
+
+/* ── Step one: which kind of record is this ──────────────────────────────────
+ *
+ * The chooser is the same dialog before a type has been picked, so it inherits
+ * the scrim, the width, the radius and the Escape handling above and adds only
+ * the list. Still no `@media`: three stacked rows are already the phone layout,
+ * and `min(520px, 100%)` was doing the responsive work before this arrived.
+ */
+
+.manual-event-dialog__types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.manual-event-dialog__types button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  /* 44px is the phone touch floor; two lines of text clear it comfortably,
+     and the padding keeps a one-line label from falling under it. */
+  min-height: 44px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.manual-event-dialog__types button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.manual-event-dialog__types button:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.manual-event-dialog__types strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.manual-event-dialog__types em {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-style: normal;
+}
+
+/*
+ * The swatch is the type's own colour, so the choice made here is the colour
+ * the chip will carry on the grid — the chooser is a preview of the answer,
+ * not a menu of words. `flex: 0 0 auto` because a long description must not
+ * squeeze the icon into an ellipse.
+ */
+.manual-event-dialog__typeicon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #ffffff;
+}
+
+/*
+ * "Change type", offered only while nothing has been typed into the form yet
+ * — see the note at its markup. Aligned with the heading rather than in the
+ * action row, because it goes BACK rather than doing something to the record.
+ */
+.manual-event-dialog__back {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm, 8px);
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.manual-event-dialog__back svg {
+  transform: rotate(180deg);
+}
+
+.manual-event-dialog__back:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}

@@ -74,6 +74,7 @@ import {
   type ManualEventDraft,
 } from "./manual-event-client";
 import { ManualEventDialog } from "./manual-event-dialog";
+import { calendarItemType } from "./calendar-item-types";
 import {
   CalendarNav,
   CalendarSurface,
@@ -644,14 +645,22 @@ export function OperationsCalendarPanel({
           today={todayDay}
           eventsByDay={eventsByDay}
           chipStyle={(event) => calendarChipStyle(event, colours)}
-          /* Three kinds, three words. Read out on every chip and every agenda
-             row, so a manual item announces itself as one rather than being
-             told apart by colour alone. */
+          /*
+           * Read out on every chip and every agenda row, so a record announces
+           * what it is rather than being told apart by colour alone.
+           *
+           * A manual item now says WHICH KIND it is — "Note", "Planned visit",
+           * "Certificate / compliance" — because since the type vocabulary
+           * arrived "Manual" is the one word on this calendar that describes
+           * how a row got here rather than what it says. An item saved before
+           * types existed reads as a Note, which is `calendarItemType`'s
+           * documented default and the honest one.
+           */
           typeLabel={(event) =>
             event.kind === "compliance"
               ? "Compliance"
               : event.kind === "manual"
-                ? "Manual"
+                ? calendarItemType(event.manual?.category).label
                 : "Job"
           }
           onOpen={openEvent}
@@ -709,6 +718,25 @@ export function OperationsCalendarPanel({
             setSelectedDay(day);
             setAnchor(day);
           }}
+          /*
+           * Gated on the same capability as the Add item button. Passing the
+           * handler when the reader cannot write would open a dialog that the
+           * route then refuses — an offer the product cannot keep.
+           *
+           * It selects the day first so the dialog opens on the cell that was
+           * clicked rather than on whatever was selected before: `defaultDay`
+           * reads `selectedDay`, and these two set-states are batched into one
+           * render, so the dialog never sees the stale one.
+           */
+          onCreateOnDay={
+            mayEditBoard === false
+              ? null
+              : (day) => {
+                  setSelectedDay(day);
+                  setAnchor(day);
+                  setManualEditing("new");
+                }
+          }
           emptyState={emptyState}
         />
       </section>

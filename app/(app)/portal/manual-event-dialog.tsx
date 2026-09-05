@@ -35,6 +35,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../../components";
 import type { ManualCalendarItem } from "./calendar-model";
 import type { ManualEventDraft } from "./manual-event-client";
+import {
+  CALENDAR_ITEM_TYPES,
+  calendarItemType,
+  isKnownCalendarItemType,
+  type CalendarItemType,
+} from "./calendar-item-types";
 import "./manual-event-dialog.css";
 
 export type ManualEventSite = { id: string; name: string };
@@ -59,6 +65,28 @@ export function ManualEventDialog({
   onDelete: () => Promise<void>;
 }) {
   const titleId = useId();
+  /*
+   * STEP ONE IS THE TYPE, and it is a step inside this dialog rather than a
+   * popover of its own.
+   *
+   * The brief asks for a chooser offering Note / Planned visit / Certificate,
+   * with "a back arrow to change type before any data is entered". Both of
+   * those are what a two-step dialog IS, and building them as a separate
+   * anchored surface would have meant a second modal vocabulary, a second
+   * focus trap, and an anchor element that the empty-cell trigger does not
+   * have. Here the chooser inherits this dialog's Escape handling, its focus
+   * management and its keyboard order for nothing.
+   *
+   * An EXISTING item skips the step: its type is already decided, and being
+   * asked to re-pick it before every edit would be a question with one answer.
+   * A row saved before this existed carries `'Manual'`, which
+   * `isKnownCalendarItemType` reports as unknown — those open on the chooser
+   * so the first edit is where they acquire a real type, rather than being
+   * silently relabelled behind the reader's back.
+   */
+  const [chosenType, setChosenType] = useState<CalendarItemType | null>(() =>
+    item && isKnownCalendarItemType(item.category) ? calendarItemType(item.category) : null,
+  );
   const [title, setTitle] = useState(item?.title ?? "");
   const [startsOn, setStartsOn] = useState(item?.startsOn ?? defaultDay);
   /*
@@ -73,15 +101,28 @@ export function ManualEventDialog({
   const [error, setError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
+  const firstChoiceRef = useRef<HTMLButtonElement | null>(null);
 
   /*
-   * Focus lands on the title, not on the dialog. A modal that focuses its own
-   * container makes a screen reader announce the heading and then say nothing
-   * about what to do; the first field is the answer to "what now".
+   * Focus lands on the first thing worth doing, and it does so on EVERY STEP.
+   *
+   * A modal that focuses its own container makes a screen reader announce the
+   * heading and then say nothing about what to do; the first control is the
+   * answer to "what now" — the first type on the chooser, the title field on
+   * the form.
+   *
+   * `[chosenType]`, NOT `[]`, and that dependency is the whole bug it fixes.
+   * With an empty array this ran once at mount, while the chooser was on
+   * screen and `firstFieldRef` was still null. Picking a type then unmounted
+   * the button holding focus without moving it anywhere, so focus fell to
+   * `document.body` — outside the scrim, which is where the Escape handler
+   * lives. The dialog became uncloseable by keyboard the moment a type was
+   * chosen, and stayed that way until something inside it was clicked.
    */
   useEffect(() => {
-    firstFieldRef.current?.focus();
-  }, []);
+    const target = chosenType ? firstFieldRef.current : firstChoiceRef.current;
+    target?.focus();
+  }, [chosenType]);
 
   const run = async (key: string, work: () => Promise<void>) => {
     setBusy(key);
@@ -121,8 +162,85 @@ export function ManualEventDialog({
         endsOn: endsOn || null,
         siteId: siteId || null,
         notes: notes.trim() || null,
+        /*
+         * The type, written to the column that has always been there.
+         *
+         * `type.colour` goes with it as the DEFAULT swatch rather than a
+         * chosen one: it is what makes a visit read as a visit on a grid full
+         * of teal, and the person can still change it later without this
+         * overwriting them, because an edit that does not touch the type
+         * sends the value already on the row.
+         */
+        category: type.key,
+        colour: item?.colour ?? type.colour,
       });
     });
+
+  /*
+   * THE TYPE CHOOSER — step one, and the whole dialog until a type is picked.
+   *
+   * Returned early rather than rendered above the form, so that a reader on a
+   * screen reader or a phone is not handed a form and a question about the
+   * form at the same time. Three buttons, in the order the vocabulary lists
+   * them, each saying what it is for in one line.
+   */
+  if (!chosenType) {
+    return (
+      <div
+        className="manual-event-dialog__scrim"
+        role="presentation"
+        onKeyDown={(pressed) => {
+          if (pressed.key === "Escape") onCancel();
+        }}
+      >
+        <div
+          className="manual-event-dialog manual-event-dialog--chooser"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+        >
+          <h2 id={titleId}>What are you adding?</h2>
+          <p className="manual-event-dialog__lede">
+            On {defaultDay}. None of these is a job, and nothing counts one as
+            work.
+          </p>
+          <ul className="manual-event-dialog__types">
+            {CALENDAR_ITEM_TYPES.map((option, index) => (
+              <li key={option.key}>
+                <button
+                  type="button"
+                  /* Held rather than focused inline: a callback ref that
+                     called `.focus()` would re-steal focus on every render,
+                     including one caused by the reader tabbing away. */
+                  ref={index === 0 ? firstChoiceRef : undefined}
+                  onClick={() => setChosenType(option)}
+                >
+                  <span
+                    className="manual-event-dialog__typeicon"
+                    style={{ background: option.colour }}
+                    aria-hidden="true"
+                  >
+                    <Icon name={option.icon} size={16} />
+                  </span>
+                  <span>
+                    <strong>{option.label}</strong>
+                    <em>{option.description}</em>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="manual-event-dialog__actions">
+            <button type="button" onClick={onCancel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const type = chosenType;
 
   return (
     <div
@@ -138,14 +256,31 @@ export function ManualEventDialog({
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <h2 id={titleId}>{item ? "Edit calendar item" : "Add a calendar item"}</h2>
+        <h2 id={titleId}>
+          {item ? `Edit ${type.label.toLowerCase()}` : `Add a ${type.label.toLowerCase()}`}
+        </h2>
+        {/*
+          THE BACK ARROW, and only while the type is still free to change.
+          A saved item's type is not re-picked here: changing what an existing
+          record IS is a different act from editing it, and offering it beside
+          the title would make it look like a field.
+        */}
+        {!item && (
+          <button
+            type="button"
+            className="manual-event-dialog__back"
+            onClick={() => setChosenType(null)}
+          >
+            <Icon name="arrow" size={14} />
+            Change type
+          </button>
+        )}
         <p className="manual-event-dialog__lede">
           {/*
             The sentence says what this record IS, because the one confusion
             worth pre-empting is that this creates work. It does not.
           */}
-          A note on the operations calendar. It is not a job, and nothing counts
-          it as one.
+          {type.description} It is not a job, and nothing counts it as one.
         </p>
 
         <label className="manual-event-dialog__field">
@@ -162,22 +297,28 @@ export function ManualEventDialog({
 
         <div className="manual-event-dialog__dates">
           <label className="manual-event-dialog__field">
-            <span>Date</span>
+            {/* The date's MEANING differs by type — a visit happens on it, a
+                certificate expires on it — so the label is the type's. */}
+            <span>{type.dateLabel}</span>
             <input
               type="date"
               value={startsOn}
               onChange={(changed) => setStartsOn(changed.target.value)}
             />
           </label>
-          <label className="manual-event-dialog__field">
-            <span>Ends (optional)</span>
-            <input
-              type="date"
-              value={endsOn}
-              min={startsOn || undefined}
-              onChange={(changed) => setEndsOn(changed.target.value)}
-            />
-          </label>
+          {/* A certificate has one date. Offering "ends on" beside an expiry
+              date invites somebody to record a range that means nothing. */}
+          {type.endDateLabel && (
+            <label className="manual-event-dialog__field">
+              <span>{type.endDateLabel} (optional)</span>
+              <input
+                type="date"
+                value={endsOn}
+                min={startsOn || undefined}
+                onChange={(changed) => setEndsOn(changed.target.value)}
+              />
+            </label>
+          )}
         </div>
 
         <label className="manual-event-dialog__field">
@@ -195,11 +336,20 @@ export function ManualEventDialog({
         </label>
 
         <label className="manual-event-dialog__field">
-          <span>Notes (optional)</span>
+          {/*
+            One column, three meanings. `calendar_events.notes` is free text
+            and each type has a different thing worth writing in it — a memo, a
+            scope of works and access, a certificate reference and its
+            remedials. The label and the placeholder say which, rather than
+            three columns saying it in the schema for a form that would then
+            have to hide two of them.
+          */}
+          <span>{type.notesLabel} (optional)</span>
           <textarea
             rows={3}
             maxLength={2000}
             value={notes}
+            placeholder={type.notesHint}
             onChange={(changed) => setNotes(changed.target.value)}
           />
         </label>

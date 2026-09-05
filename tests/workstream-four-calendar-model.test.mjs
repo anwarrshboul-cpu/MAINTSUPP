@@ -66,6 +66,16 @@ const expiryUrl = asModule(
   ),
 );
 
+/*
+ * The record-type vocabulary — Note / Planned visit / Certificate — which
+ * `calendar-model.ts` reads to colour a manual chip and to decide that an
+ * expired certificate is overdue while a note in the past is merely past. Pure
+ * and importing nothing itself, so it transpiles on its own like the rest.
+ */
+const itemTypesUrl = asModule(
+  transpile(await read("app/(app)/portal/calendar-item-types.ts")),
+);
+
 const metersUrl = asModule(
   transpile(await read("app/(app)/portal/dashboard-meters.ts")),
 );
@@ -90,7 +100,8 @@ const calendar = await import(
     transpile(modelSource)
       .replace(/from ["']\.\.\/\.\.\/lib\/format-date["']/g, `from "${formatDateUrl}"`)
       .replace(/from ["']\.\.\/\.\.\/lib\/expiry-status["']/g, `from "${expiryUrl}"`)
-      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`),
+      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`)
+      .replace(/from ["']\.\/calendar-item-types["']/g, `from "${itemTypesUrl}"`),
   )
 );
 
@@ -957,11 +968,19 @@ test("every day answer is identical with the clock set to Los Angeles", async ()
     transpile(await read("app/(app)/portal/dashboard-meters.ts")),
   );
   write(
+    "calendar-item-types.mjs",
+    transpile(await read("app/(app)/portal/calendar-item-types.ts")),
+  );
+  write(
     "calendar-model.mjs",
     transpile(modelSource)
       .replace(/from ["']\.\.\/\.\.\/lib\/format-date["']/g, 'from "./format-date.mjs"')
       .replace(/from ["']\.\.\/\.\.\/lib\/expiry-status["']/g, 'from "./expiry-status.mjs"')
-      .replace(/from ["']\.\/dashboard-meters["']/g, 'from "./dashboard-meters.mjs"'),
+      .replace(/from ["']\.\/dashboard-meters["']/g, 'from "./dashboard-meters.mjs"')
+      .replace(
+        /from ["']\.\/calendar-item-types["']/g,
+        'from "./calendar-item-types.mjs"',
+      ),
   );
   const probe = path.join(dir, "probe.mjs");
   writeFileSync(

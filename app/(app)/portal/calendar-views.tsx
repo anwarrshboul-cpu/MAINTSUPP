@@ -360,6 +360,15 @@ export type CalendarSurfaceProps = {
   /** Month/Week: which day the mobile agenda is showing. */
   selectedDay: CalendarDay;
   onSelectDay: (day: CalendarDay) => void;
+  /**
+   * "Add something on THIS day" — the empty area of a month cell.
+   *
+   * `null` when the reader cannot edit the board, which is the same
+   * capability that decides whether the Add item button is drawn at all. A
+   * surface that opens a creation dialog and then refuses the save is worse
+   * than one that never offered.
+   */
+  onCreateOnDay: ((day: CalendarDay) => void) | null;
   /** Rendered when the whole surface has nothing to show. */
   emptyState: ReactNode;
 };
@@ -428,6 +437,7 @@ function MonthView({
   onEditDate,
   selectedDay,
   onSelectDay,
+  onCreateOnDay,
   emptyState,
 }: CalendarSurfaceProps): React.JSX.Element {
   const days = useMemo(() => calendarMonthGrid(anchor), [anchor]);
@@ -532,6 +542,7 @@ function MonthView({
                     onOpen={onOpen}
                     selected={day === selectedDay}
                     onSelectDay={onSelectDay}
+                    onCreateOnDay={onCreateOnDay}
                     expanded={day === expandedDay}
                     onExpand={() => {
                       onSelectDay(day);
@@ -595,6 +606,7 @@ function MonthCell({
   onOpen,
   selected,
   onSelectDay,
+  onCreateOnDay,
   expanded,
   onExpand,
   onCollapse,
@@ -609,6 +621,7 @@ function MonthCell({
   onOpen: (event: CalendarEvent) => void;
   selected: boolean;
   onSelectDay: (day: CalendarDay) => void;
+  onCreateOnDay: ((day: CalendarDay) => void) | null;
   expanded: boolean;
   onExpand: () => void;
   onCollapse: () => void;
@@ -658,7 +671,36 @@ function MonthCell({
       {...(outside ? { "data-outside": "" } : {})}
     >
       {/* ---- Desktop: the day number, the chips, the expander ---- */}
-      <div className="calendar-month__desk">
+      {/*
+        CLICKING THE EMPTY PART OF A CELL ADDS SOMETHING TO THAT DAY.
+        
+        `target === currentTarget` is the whole of "empty": a click that landed
+        on a chip, on the day number or on "+2 more" has a different target and
+        falls straight through to whatever that control does. So this cannot
+        intercept opening an event, cannot swallow the start of a drag — a drag
+        begins on a chip — and needs no new element layered behind the content
+        that would have done both.
+        
+        NOT keyboard-reachable, deliberately, and not an accessibility gap: a
+        `div` given a key handler here would put a second tab stop in every one
+        of 42 cells, ahead of the day buttons that are the grid's actual
+        keyboard model. The accessible route to the same dialog is the Add item
+        button in the toolbar, which is a real button, is in the tab order once,
+        and opens on the selected day. This is the mouse and thumb shortcut
+        beside it — the same relationship drag-to-move already has with the
+        "Change date" dialog.
+      */}
+      <div
+        className="calendar-month__desk"
+        {...(onCreateOnDay
+          ? {
+              onClick: (clicked: React.MouseEvent<HTMLDivElement>) => {
+                if (clicked.target !== clicked.currentTarget) return;
+                onCreateOnDay(day);
+              },
+            }
+          : {})}
+      >
         {/*
          * The day number is a BUTTON on desktop as well as on the phone.
          *

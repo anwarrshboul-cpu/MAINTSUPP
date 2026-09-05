@@ -31,7 +31,7 @@ export type NotificationRequest = {
 export type SendResult = {
   ok: boolean;
   logId: string;
-  status: "sent" | "failed" | "skipped";
+  status: "sent" | "failed" | "skipped" | "suppressed";
   error?: string;
 };
 
@@ -53,7 +53,56 @@ function providerConfig() {
   const opsInbox = source.NOTIFY_OPS ?? salesInbox;
   const smsFrom = source.SMS_FROM;
   const smsKey = source.SMS_API_KEY;
-  return { apiKey, from, salesInbox, opsInbox, smsFrom, smsKey };
+  return {
+    apiKey,
+    from,
+    salesInbox,
+    opsInbox,
+    smsFrom,
+    smsKey,
+    mode: emailMode(source),
+    sink: source.EMAIL_SINK ?? opsInbox,
+  };
+}
+
+/**
+ * THE OUTBOUND KILL SWITCH.
+ *
+ * Every send in this product goes through `sendNotification`, so this is the
+ * one place a deployment can be stopped from mailing a real person. It exists
+ * because the reminder work ahead of it generates mail from SEEDED compliance
+ * data, and a preview environment that inherits a live API key would post that
+ * to whoever the seed happened to name.
+ *
+ *   live  — send to the real recipient. Production only.
+ *   sink  — send, but to ONE internal address, with the intended recipients
+ *           named in the body so a test still proves the addressing worked.
+ *   log   — send nothing; write the row as `suppressed` with everything the
+ *           send would have carried.
+ *
+ * WHY THE DEFAULT IS `sink` AND NOT `live`. Module 3 asks for a build that
+ * refuses to start when `EMAIL_MODE` is unset. Failing to boot is the wrong
+ * shape here — `sendNotification` is called on the path that saves a lead and
+ * is documented never to throw, and a missing variable would turn "nobody was
+ * emailed" into "the lead was lost", which is the exact trade this module was
+ * written to avoid. Defaulting to the SAFE mode achieves what that requirement
+ * is for: an unset variable can never mean `live`, so a misconfigured
+ * deployment quietly stops mailing strangers instead of quietly starting to.
+ * Production opts IN by setting `EMAIL_MODE=live`, and
+ * `/api/account/platform` reports the mode so the state is visible rather than
+ * assumed.
+ */
+export type EmailMode = "live" | "sink" | "log";
+
+function emailMode(source: Record<string, string | undefined>): EmailMode {
+  const raw = (source.EMAIL_MODE ?? "").trim().toLowerCase();
+  if (raw === "live" || raw === "sink" || raw === "log") return raw;
+  return "sink";
+}
+
+/** The mode this deployment is in, for the platform panel and for tests. */
+export function outboundEmailMode(): EmailMode {
+  return providerConfig().mode;
 }
 
 export function notificationTargets() {
@@ -79,6 +128,22 @@ async function deliverEmail(
   config: ReturnType<typeof providerConfig>,
   request: NotificationRequest,
 ): Promise<{ ok: boolean; providerId?: string; error?: string }> {
+  /*
+   * In `sink` the address is replaced and the real one is written into the
+   * message, not dropped. A redirected test that hides who it was for proves
+   * the provider works and nothing about whether the addressing was right,
+   * which is most of what these tests are checking.
+   */
+  const sinking = config.mode === "sink";
+  const to = sinking ? config.sink : request.to;
+  const subject = sinking ? `[SINK] ${request.subject}` : request.subject;
+  const body = sinking
+    ? `<p style="margin:0 0 12px;padding:8px 10px;border:1px solid #a8620a;border-radius:6px;` +
+      `background:#fff7ed;color:#7c2d12;font:600 13px system-ui">` +
+      `TEST ENVIRONMENT — not sent to the real recipient.<br>Intended for: ` +
+      `${escapeHtml(request.to)}</p>${request.body}`
+    : request.body;
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -87,10 +152,10 @@ async function deliverEmail(
     },
     body: JSON.stringify({
       from: config.from,
-      to: [request.to],
-      subject: request.subject,
-      html: request.body,
-      text: request.text ?? stripTags(request.body),
+      to: [to],
+      subject,
+      html: body,
+      text: request.text ?? stripTags(body),
     }),
   });
 
@@ -136,6 +201,28 @@ export async function sendNotification(
       error: "No usable recipient address.",
     });
     return { ok: false, logId, status: "failed", error: "No usable recipient address." };
+  }
+
+  /*
+   * `log` — nothing leaves the building. Recorded with everything the send
+   * would have carried so `/api/notifications/replay` can post it for real
+   * once a deployment is meant to, and so a test can assert on what WOULD
+   * have gone out. `suppressed` rather than `skipped`: skipped means the
+   * provider was missing, this means the provider was told not to.
+   */
+  if (config.mode === "log" && request.channel === "email") {
+    await db.insert(notificationLog).values({
+      ...base,
+      status: "suppressed",
+      attempts: 0,
+      error: "EMAIL_MODE=log — nothing was sent.",
+    });
+    return {
+      ok: false,
+      logId,
+      status: "suppressed",
+      error: "EMAIL_MODE=log — nothing was sent.",
+    };
   }
 
   // Unconfigured provider — record it and carry on. The message can be replayed.

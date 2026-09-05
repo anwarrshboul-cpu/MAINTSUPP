@@ -198,6 +198,29 @@ export function calendarTimeOfDay(value: string | null | undefined): string {
   return "";
 }
 
+/**
+ * Whole days from `from` to `to`. Negative when `to` is in the past.
+ *
+ * Through `dayEpoch`, like every other sum in this file: both operands are UTC
+ * midnight, so the division is exact and no clock change can make a difference
+ * of one day come out as 0.958333. That matters more here than anywhere else
+ * on the calendar — this is the number the 90 / 60 / 30 / 14 expiry bands are
+ * cut on, and a fractional day would move every one of those boundaries by
+ * one.
+ *
+ * `NaN` in gives `null` out rather than a number, because "we could not read
+ * that date" and "it expires today" must not be the same answer.
+ */
+export function calendarDaysBetween(
+  from: CalendarDay,
+  to: CalendarDay,
+): number | null {
+  const start = dayEpoch(from);
+  const end = dayEpoch(to);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.round((end - start) / 86_400_000);
+}
+
 export function shiftCalendarDay(day: CalendarDay, days: number): CalendarDay {
   const epoch = dayEpoch(day);
   if (!Number.isFinite(epoch)) return "";
@@ -583,6 +606,12 @@ export type CalendarTiming =
  * The route's `ManualCalendarEventPayload` is the same shape; a test pins that
  * the two agree.
  */
+import {
+  calendarItemType,
+  calendarItemTypeColour,
+  certificateExpiryBand,
+} from "./calendar-item-types";
+
 export type ManualCalendarItem = {
   id: string;
   title: string;
@@ -600,6 +629,22 @@ export type ManualCalendarItem = {
 };
 
 export type CalendarEvent = {
+  /**
+   * The chip's colour when the RECORD decides it rather than its kind.
+   *
+   * Set only for manual items, which since the type vocabulary arrived carry
+   * a colour of their own: a Planned visit is navy, a Note is teal, and a
+   * Certificate takes the band its expiry falls in. `calendarChipStyle`
+   * prefers this and falls back to the reader's per-kind colour setting, so an
+   * older item with no colour still honours whatever they chose for "manual".
+   */
+  colourToken?: string | null;
+  /**
+   * A short word or count printed on the chip beside the icon — "90d", "14d",
+   * "EXPIRED". Present so an expiry state is readable in greyscale and by a
+   * colour-blind reader, which the band colour alone cannot do.
+   */
+  badge?: string | null;
   /**
    * `${sourceId}::${recordId}`.
    *
@@ -1252,6 +1297,15 @@ export function buildCalendarEvents(input: {
       if (!manualPasses(item, filters)) continue;
       const days = manualItemDays(item);
       const last = days.length > 0 ? days[days.length - 1] : "";
+      /*
+       * Computed once per item rather than per day. `startsOn` IS the expiry
+       * date for this type — see the note on `dateLabel` in the vocabulary —
+       * and the distance is measured from `today` in whole days so the bands
+       * land exactly on 90, 60, 30 and 14 rather than on a fraction either
+       * side of them.
+       */
+      const certificate = calendarItemType(item.category).key === "Certificate";
+      const daysToExpiry = certificate ? calendarDaysBetween(today, item.startsOn) : null;
       for (const [offset, day] of days.entries()) {
         events.push({
           /* The DAY is in the key, because one item legitimately appears on
@@ -1275,12 +1329,37 @@ export function buildCalendarEvents(input: {
               ? `${calendarDayLabel(days[0])} — ${calendarDayLabel(last)}`
               : (item.notes ?? "").trim().slice(0, 120),
           /*
-           * A manual item is a note, not work anybody is late on. It is never
-           * `overdue`: nothing is chasing it and painting it red would put a
-           * reader's own annotation in the same visual class as a lapsed fire
+           * A NOTE IS NEVER OVERDUE. A CERTIFICATE CAN BE.
+           *
+           * The first half of that sentence is the original rule and it still
+           * holds: nothing is chasing a reader's own annotation, and painting
+           * it red would put it in the same visual class as a lapsed fire
            * alarm certificate.
+           *
+           * The second half is what the type vocabulary changed. A manual item
+           * whose category is `Certificate` records a date something EXPIRES
+           * on, and one of those in the past is exactly the lapsed certificate
+           * the old rule was protecting notes from being confused with. Saying
+           * "past" about it would be the calendar quietly agreeing that an
+           * expired certificate is settled.
            */
-          timing: day < today ? "past" : day === today ? "due-today" : "upcoming",
+          timing:
+            certificate && day < today
+              ? "overdue"
+              : day < today
+                ? "past"
+                : day === today
+                  ? "due-today"
+                  : "upcoming",
+          /*
+           * The record's own colour, and for a certificate the band its expiry
+           * falls in — 90 / 60 / 30 / 14, the same ladder the compliance
+           * reminders already fire on.
+           */
+          colourToken: calendarItemTypeColour(item.category, item.colour, daysToExpiry),
+          badge: certificate && daysToExpiry !== null
+            ? certificateExpiryBand(daysToExpiry).badge
+            : null,
           editable: manualSource.editable,
           manual: item,
           spanOffset: offset,
