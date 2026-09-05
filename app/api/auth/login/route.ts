@@ -48,9 +48,19 @@ export async function POST(request: Request) {
 
   // Provisions the owner account if it is missing. Here as well as on the
   // sign-in page so a fresh database can be signed into through the API alone.
-  await ensureOwnerAccount(d1).catch(() => {
+  await ensureOwnerAccount(d1).catch((error: unknown) => {
     // A seeding failure must not take down sign-in for accounts that already
     // exist — those are the ones that matter once the workspace is in use.
+    //
+    // BUT IT IS LOGGED, and it did not used to be. Swallowed silently, a
+    // failure here is indistinguishable from a wrong password: the owner row
+    // is never written and the route answers "That email and password do not
+    // match an account" for what is actually a schema or seeding fault. That
+    // is exactly how the first MAINTSUPP Production bootstrap presented
+    // (2026-09-05) — the INSERT was failing on a column type and nothing
+    // anywhere said so. Keeping the sign-in path alive is worth a swallowed
+    // error; keeping it a secret is not.
+    console.error("[auth] owner bootstrap failed", error);
   });
 
   let payload: Record<string, unknown>;
