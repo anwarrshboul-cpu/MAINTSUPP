@@ -168,3 +168,108 @@ description; access window is explicitly optional.
 **One test record was created and is deliberately still there:** `MN-1076` in
 the client's own organisation, description prefixed `W14TEST-`. It is the
 evidence for this check. It should be binned once the checklist is signed off.
+
+---
+
+## W14-15 — every landing-page image against the approved file
+
+| What | Result |
+| --- | --- |
+| Image URLs referenced on the landing page | 114 |
+| Returning 200 | **114** — none missing, none empty |
+| Broken (`naturalWidth === 0`) at 1440 / 768 / 390 px | **0** |
+| Distorted (rendered ratio ≠ intrinsic, excluding `object-fit`) | **0** |
+| Originals vs modern variants | 20 originals 11.7 MB · 94 WebP/AVIF 3.7 MB |
+
+Five approved originals were compared **byte for byte** against the supplied
+`MAINTSUPP-image-assets-v3` pack by SHA-256 — `who-we-help-retail-chains`,
+`-clinics-wellness`, `-gyms-studios`, `-commercial-offices`,
+`-shopping-centre-kiosks`. Every one is IDENTICAL to the file supplied, at the
+site path the pack's own README gives. "Use the original-quality image files"
+and "do not compress" are satisfied literally: the original is the `src`, and
+the AVIF/WebP variants are offered above it, so a browser takes ~110 KB instead
+of 2.2 MB without the original ever being replaced.
+
+The pack supplies six audience photographs and the page uses five.
+`who-we-help-franchise-groups.png` still ships and still serves 200, and
+`who-we-help.tsx` says why in its header: **"WHY FIVE AND NOT SIX: 'Franchise
+groups' was withdrawn."** A decision, not a missing image.
+
+## W14-16 — desktop, tablet and mobile
+
+Nine portal surfaces (Overview, Jobs, Planned, Sites, Contractors, Compliance,
+Documents, Reports, Settings) plus the public landing page, at 1440 / 768 /
+390 px — **thirty renders**.
+
+**No horizontal overflow anywhere, and no surface rendered empty.** The portal
+screenshots at each width are in this pass's evidence set.
+
+## W14-18 — random, placeholder and demonstration data
+
+**The demo estate is properly isolated.** Not one seeded row and not one
+`zzdemo-` id appears in the client's organisation, across all eight tables that
+carry them — jobs, sites, contractors, users, attachments, compliance documents,
+calendar events and reminder rules. That is the boundary the whole seed
+architecture exists to hold, and it holds.
+
+**What is in the client's organisation is another matter.** Of 21 jobs, eight
+are not operational records:
+
+| Record | Title | Created |
+| --- | --- | --- |
+| MN-1075 | "Test test test" | 2026-09-04 |
+| MN-1074 | "New store" | 2026-09-04 |
+| MN-1073 | "New job" | 2026-09-04 |
+| MN-1067 | "New store" | 2026-08-20 |
+| MN-1066 | "New store" | 2026-08-20 |
+| MN-1071 | "R1 QA job D for contractor-link parity spec" | 2026-08-29 |
+| MN-1070 | "R1 QA job C for contractor-link parity spec" | 2026-08-29 |
+| MN-1076 | this pass's own W14-14 evidence, `W14TEST-` prefixed | 2026-09-06 |
+
+And **five of the six contractors are test records**: "test", "Test a", "test",
+"test new section", "tester". One is real.
+
+Five `*.test.maintsupp.com` user accounts also sit in that organisation. Those
+are platform test identities and are a different question from operational
+clutter.
+
+**Two things must be said plainly about this result.** First, this is the
+STAGING database, and a staging estate is expected to carry test rows — the
+check's real subject is Production, which this pass is forbidden to touch and
+which holds 776 jobs. Second, it still matters: `maintsupp-preview` is the link
+the client is shown, and this is what they see on it.
+
+**OWNER DECISION REQUIRED.** Removing them is a data write in the client's
+organisation. The safe route is the product's own recycle bin rather than SQL,
+which keeps the deletion auditable and reversible for thirty days.
+
+## W14-05 addendum — a capacity failure found while testing, not a code defect
+
+Partway through the responsive sweep the deployed Preview began answering
+**500 on `/api/files/…` and 503 on `/api/navigation`, `/api/notifications`,
+`/api/context` and `/api/sites`**, reproducibly, and did not recover. The
+runtime log gives one cause for all of them:
+
+```
+D1_ERROR: (EMAXCONNSESSION) max clients reached in session mode
+          — max clients are limited to pool_size: 30
+```
+
+`pg_stat_activity` shows Supavisor holding 30 connections. This is the
+documented tension of the architecture, not a new bug: the session pooler is
+mandatory (the transaction pooler has a documented deadlock), each warm
+serverless instance holds up to two clients, and enough instances saturate a
+pool capped at 30.
+
+**The mitigation is already in the deployed build.** `db/node-pg-d1.ts` names
+this exact error in its header and answers it with `idle_timeout: 20` and
+`max_lifetime: 1800`, and the deployment carries them — verified at the deployed
+commit, with neither `PG_D1_IDLE_TIMEOUT` nor `PG_D1_POOL` overridden on
+Preview. What this pass demonstrates is that the mitigation is not sufficient
+under sustained concurrent load: thirty renders across three widths, plus seeds,
+plus three concurrent cron dispatches, exhausted it.
+
+Raising `pool_size`, lowering `max` per instance, or moving off session mode are
+all capacity decisions — and one of them is explicitly forbidden. **Recorded as
+a capacity finding for the Performance phase, which this pass is instructed not
+to begin.**
