@@ -1,0 +1,148 @@
+# PROVING THAT A REMINDER CANNOT BE SENT TWICE, AGAINST THE REAL DATABASE.
+#
+# Manual only. This never runs on a schedule and is not part of the hourly
+# dispatch; `reminders-preview.yml` is the scheduler and this is a probe.
+#
+# WHAT IT PROVES, AND WHY IT NEEDS TO EXIST SEPARATELY.
+#
+# `reminder_dispatch` carries `CREATE UNIQUE INDEX reminder_dispatch_once_idx
+# ON (reminder_id, occurrence_date)`, and `claimDispatch` INSERTS into it and
+# reads the violation as the answer rather than throwing. That ordering — claim,
+# then send — is the difference between a fourteen-day certificate cascade
+# reaching a client once and reaching them nine times.
+#
+# The index can be read off the deployed database and the ordering is pinned by
+# `tests/pre-w14-reminder-dispatch.test.mjs`, but neither of those is the
+# refusal actually happening on Postgres. It cannot be reached by dispatching
+# twice in sequence: the first run advances every rule it handled, so the second
+# selects nothing and never reaches the claim. It needs two dispatches IN
+# FLIGHT AT ONCE, both selecting the same due rules and racing for the same
+# rows — which is also the real-world case, a scheduler firing twice.
+#
+# So both calls go out from one step with `&`, and the run is judged on the sum
+# of what they report:
+#
+#   * exactly as many occurrences are HANDLED (sent + suppressed + failed) as
+#     were due — never twice as many;
+#   * the loser reports its refusals as `skipped`, which is what `claimDispatch`
+#     returning null is counted as.
+#
+# INCONCLUSIVE IS NOT PASS. If the calls do not actually overlap, or nothing was
+# due, the job says so and fails. A probe that quietly reports success when it
+# proved nothing is worse than no probe.
+#
+# Preview-only on the same terms as the scheduler: the URL is a literal, the
+# credential is `PREVIEW_CRON_SECRET`, no production URL or credential is
+# referenced, and Preview runs EMAIL_MODE=sink with no provider key so a
+# delivery is impossible either way. Run `npm run seed` first — the probe needs
+# reminders that are due, and the seed is what creates them.
+
+name: Reminder idempotence probe (Preview)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'anwarrshboul-cpu/MAINTSUPP'
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_URL: https://maintsupp-preview.vercel.app
+
+    steps:
+      - name: Refuse any host but the Preview alias
+        run: |
+          set -euo pipefail
+          if [ "$PREVIEW_URL" != "https://maintsupp-preview.vercel.app" ]; then
+            echo "::error::This probe is Preview-only. Refusing $PREVIEW_URL."
+            exit 1
+          fi
+          echo "Target: $PREVIEW_URL"
+
+      - name: Two dispatches in flight at once
+        env:
+          CRON_SECRET: ${{ secrets.PREVIEW_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::PREVIEW_CRON_SECRET is not set on this repository."
+            exit 1
+          fi
+
+          call() {
+            curl --silent --show-error \
+              --request POST "$PREVIEW_URL/api/cron/reminders" \
+              --header "x-cron-secret: $CRON_SECRET" \
+              --output "$1" --write-out '%{http_code}' > "$1.status"
+          }
+
+          # Backgrounded together, so both are selecting while both are claiming.
+          call a.json & call b.json &
+          wait
+
+          echo "A: HTTP $(cat a.json.status)"; cat a.json; echo
+          echo "B: HTTP $(cat b.json.status)"; cat b.json; echo
+
+          for f in a b; do
+            case "$(cat $f.json.status)" in
+              2??) ;;
+              *) echo "::error::call $f answered $(cat $f.json.status)."; exit 1 ;;
+            esac
+          done
+
+      - name: The ledger must have refused the second claim
+        run: |
+          set -euo pipefail
+          n() { jq -r ".$2 // 0" "$1.json"; }
+
+          for f in a b; do
+            echo "$f: considered=$(n $f considered) sent=$(n $f sent) suppressed=$(n $f suppressed) failed=$(n $f failed) skipped=$(n $f skipped) deferred=$(n $f deferred)"
+          done
+
+          considered=$(( $(n a considered) + $(n b considered) ))
+          handled=$(( $(n a sent) + $(n a suppressed) + $(n a failed) + $(n b sent) + $(n b suppressed) + $(n b failed) ))
+          refused=$(( $(n a skipped) + $(n b skipped) ))
+          sent=$(( $(n a sent) + $(n b sent) ))
+
+          echo "considered(total)=$considered handled=$handled refused=$refused sent=$sent"
+
+          # Nothing due means nothing was proved. Seed first.
+          if [ "$considered" -eq 0 ]; then
+            echo "::error::Nothing was due, so the claim was never exercised. Run npm run seed first."
+            exit 1
+          fi
+
+          # No overlap means both calls saw different work, or one ran alone.
+          if [ "$refused" -eq 0 ]; then
+            echo "::error::Neither call was refused a claim, so the two did not overlap. Inconclusive, not a pass."
+            exit 1
+          fi
+
+          # THE ASSERTION. Every occurrence is handled exactly once between them.
+          if [ "$handled" -ne "$(n a considered)" ] && [ "$handled" -ne "$(n b considered)" ]; then
+            echo "::error::$handled occurrences were handled across two runs; the larger selection was $(n a considered)/$(n b considered). A duplicate got through."
+            exit 1
+          fi
+
+          # And on Preview nothing may actually leave, whatever the ledger says.
+          if [ "$sent" -ne 0 ]; then
+            echo "::error::$sent reminder(s) were DELIVERED from Preview."
+            exit 1
+          fi
+
+          {
+            echo "### Idempotence probe — Preview"
+            echo
+            echo "Two dispatches in flight at once, against \`reminder_dispatch_once_idx\`."
+            echo
+            echo "| | A | B |"
+            echo "| --- | ---: | ---: |"
+            echo "| considered | $(n a considered) | $(n b considered) |"
+            echo "| handled (sent+suppressed+failed) | $(( $(n a sent) + $(n a suppressed) + $(n a failed) )) | $(( $(n b sent) + $(n b suppressed) + $(n b failed) )) |"
+            echo "| refused by the claim (skipped) | $(n a skipped) | $(n b skipped) |"
+            echo
+            echo "**$handled occurrence(s) handled once, $refused duplicate claim(s) refused by the database, $sent delivered.**"
+          } >> "$GITHUB_STEP_SUMMARY"
