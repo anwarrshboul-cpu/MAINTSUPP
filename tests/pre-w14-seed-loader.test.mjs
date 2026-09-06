@@ -101,24 +101,38 @@ const drizzleStub = asModule(`
   export const lte = (a, b) => ({ lte: [a, b] });
 `);
 
+/*
+ * THE STAGED SCHEMA, DERIVED FROM WHAT `loader.ts` ACTUALLY IMPORTS.
+ *
+ * This list used to be typed out here, and it drifted twice in one afternoon. A
+ * name missing from it is not a failed assertion: the staged module throws on
+ * LOAD and the runner reports the whole file as one anonymous failure, which is
+ * the least useful shape a test result can take.
+ *
+ * So it is read off the import statement instead. Add a table to `loader.ts`
+ * and the stub grows with it, and these tests go on testing the loader rather
+ * than testing whether somebody remembered to edit a list.
+ */
+const stagedTables = [
+  ...new Set(
+    (
+      await Promise.all(
+        ["loader", "reconcile", "dataset", "expected", "guards"].map((name) =>
+          read(`app/lib/seed/${name}.ts`).catch(() => ""),
+        ),
+      )
+    ).flatMap((source) => {
+      const at = source.indexOf('} from "../../../db/schema";');
+      if (at < 0) return [];
+      const block = source.slice(source.lastIndexOf("import {", at), at);
+      return [...block.matchAll(/^ {2}(\w+),$/gm)].map((m) => m[1]);
+    }),
+  ),
+].sort();
+assert.ok(stagedTables.length > 10, "the db/schema imports under app/lib/seed have moved");
+
 const schemaStub = asModule(
-  [
-    "attachments",
-    "calendarEvents",
-    "complianceDocuments",
-    "contractors",
-    "jobStatusMap",
-    "maintenanceGroupItems",
-    "maintenanceGroups",
-    "maintenanceRequests",
-    "reminderDefaults",
-    "reminderDispatch",
-    "reminderRecipients",
-    "reminderRules",
-    "reminderTokens",
-    "sites",
-    "users",
-  ]
+  stagedTables
     .map(
       (name) =>
         `export const ${name} = new Proxy({ __table: "${name}" }, { get: (t, k) => t[k] ?? { column: String(k) } });`,
@@ -366,9 +380,23 @@ test("the purge deletes children before parents, or Postgres refuses it", async 
       "compliance_documents",
       "calendar_events",
       "attachments",
+      "maintenance_board_cells",
+      "quotations",
+      "invoices",
       "maintenance_requests",
+      "unit_service_records",
+      "planned_maintenance",
+      "units",
+      "site_aliases",
+      "site_group_members",
+      "contractor_sites",
       "sites",
+      "contractor_certifications",
       "contractors",
+      "sessions",
+      "password_resets",
+      "team_members",
+      "memberships",
       "users",
     ],
     "the delete order is a dependency order, not a list somebody tidied alphabetically",
@@ -380,6 +408,68 @@ test("the purge deletes children before parents, or Postgres refuses it", async 
   assert.ok(
     order.indexOf("compliance_documents") < order.indexOf("attachments"),
     "compliance_documents.attachment_id references attachments",
+  );
+
+  /*
+   * AND NOW THE PART THAT WOULD HAVE CAUGHT IT.
+   *
+   * The list above is a snapshot, and a snapshot only ever agrees with itself.
+   * It sat here while `memberships` was missing, and on 2026-09-06 a seed run
+   * against Postgres stopped halfway with
+   *
+   *   update or delete on table "users" violates foreign key constraint
+   *   "memberships_user_id_fkey"
+   *
+   * having already deleted the sites, the jobs and the certificates. Locally it
+   * had always passed, because Miniflare does not enforce these keys.
+   *
+   * So the dependency graph is now READ OUT OF `db/schema.ts` rather than
+   * restated here: every table that references something the purge deletes must
+   * itself be deleted, and deleted first. Add a child table to the schema and
+   * forget the purge, and this fails on a laptop instead of on Postgres.
+   */
+  const schema = await read("db/schema.ts");
+  const tables = [...schema.matchAll(/export const (\w+) = sqliteTable\(\s*"(\w+)"/g)];
+  const snakeOf = new Map(tables.map((m) => [m[1], m[2]]));
+
+  /** child snake name -> the snake names it points at, self-references aside. */
+  const parentsOf = new Map();
+  for (let i = 0; i < tables.length; i += 1) {
+    const block = schema.slice(tables[i].index, tables[i + 1]?.index ?? schema.length);
+    const child = tables[i][2];
+    const parents = new Set();
+    for (const ref of block.matchAll(/\.references\(\(\) => (\w+)\.\w+(,\s*\{[^}]*\})?\)/g)) {
+      /* ON DELETE SET NULL needs no help from us — Postgres clears it. */
+      if (ref[2] && /set null/i.test(ref[2])) continue;
+      const parent = snakeOf.get(ref[1]);
+      if (parent && parent !== child) parents.add(parent);
+    }
+    parentsOf.set(child, parents);
+  }
+  assert.ok(parentsOf.get("memberships")?.has("users"), "the graph must see the key that broke");
+
+  const purged = new Set(order);
+  const missing = [];
+  const wrongOrder = [];
+  for (const [child, parents] of parentsOf) {
+    for (const parent of parents) {
+      /* `organisations` is never purged: the demo org outlives every seed. */
+      if (parent === "organisations" || !purged.has(parent)) continue;
+      if (!purged.has(child)) missing.push(`${child} -> ${parent}`);
+      else if (order.indexOf(child) > order.indexOf(parent)) {
+        wrongOrder.push(`${child} after ${parent}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `these reference a purged table and are never deleted: ${missing.join(", ")}`,
+  );
+  assert.deepEqual(
+    wrongOrder,
+    [],
+    `these are deleted after their parent: ${wrongOrder.join(", ")}`,
   );
 });
 

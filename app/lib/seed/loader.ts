@@ -61,15 +61,29 @@ import {
   attachments,
   calendarEvents,
   complianceDocuments,
+  contractorCertifications,
+  contractorSites,
   contractors,
+  invoices,
+  maintenanceBoardCells,
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
+  memberships,
+  passwordResets,
+  plannedMaintenance,
+  quotations,
   reminderDispatch,
   reminderRecipients,
   reminderRules,
   reminderTokens,
+  sessions,
+  siteAliases,
+  siteGroupMembers,
   sites,
+  teamMembers,
+  unitServiceRecords,
+  units,
   users,
 } from "../../../db/schema";
 import { chunkRows } from "../sql-batching";
@@ -526,6 +540,23 @@ async function stampSeedColumns(
 async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
   const prefix = `${SEED_ID_PREFIX}%`;
   const deleted: SeedTableCount[] = [];
+
+  /*
+   * THE SEEDED PARENT SETS, AS SUBQUERIES.
+   *
+   * Every child delete below is scoped through one of these, so a child row can
+   * only go when the parent it hangs off is going in the same operation. Being
+   * looser here would reach a real row: `memberships` is how a person belongs
+   * to an organisation, `contractor_sites` is somebody's actual coverage list,
+   * and `sessions` is who is signed in right now.
+   *
+   * The predicate is written exactly as the parent's own delete writes it —
+   * `is_seed = 1 OR id LIKE 'zzdemo-%'` — rather than being paraphrased, so the
+   * two cannot drift into disagreeing about what "seeded" means.
+   */
+  const seededUsers = sql`(select id from users where is_seed = ${1} or id like ${prefix})`;
+  const seededSites = sql`(select id from sites where is_seed = ${1} or id like ${prefix})`;
+  const seededContractors = sql`(select id from contractors where is_seed = ${1} or id like ${prefix})`;
   /*
    * Both spellings, because the row count is reported by two layers.
    *
@@ -576,6 +607,33 @@ async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
   await record("attachments", () =>
     db.delete(attachments).where(or(sql`is_seed = ${1}`, like(attachments.id, prefix))),
   );
+  /*
+   * The three that hang off a seeded JOB, and off nothing the purge keeps.
+   *
+   * Postgres does not currently enforce these — `db/init.ts` builds the tables
+   * with its own DDL and does not declare every key `db/schema.ts` does — so
+   * they were not in the catalogue the block below was derived from. They are
+   * here anyway, for the other half of what a purge is for: a
+   * `maintenance_board_cells` row keyed to a demo job that survives the purge is
+   * demo data left in the client's database, which is the thing the whole
+   * isolation layer exists to prevent. The day one of those keys IS enforced,
+   * this is also what stops the purge breaking.
+   */
+  const seededRequests = sql`(select id from maintenance_requests where is_seed = ${1} or id like ${prefix})`;
+  await record("maintenance_board_cells", () =>
+    db.delete(maintenanceBoardCells).where(sql`request_id in ${seededRequests}`),
+  );
+  await record("quotations", () =>
+    db
+      .delete(quotations)
+      .where(sql`request_id in ${seededRequests} or contractor_id in ${seededContractors}`),
+  );
+  await record("invoices", () =>
+    db
+      .delete(invoices)
+      .where(sql`request_id in ${seededRequests} or contractor_id in ${seededContractors}`),
+  );
+
   await record("maintenance_requests", () =>
     db
       .delete(maintenanceRequests)
@@ -583,11 +641,75 @@ async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
         or(eq(maintenanceRequests.isSeed, true), like(maintenanceRequests.id, prefix)),
       ),
   );
+  /*
+   * EVERYTHING THAT HANGS OFF A SEEDED SITE, CONTRACTOR OR USER.
+   *
+   * Added 2026-09-06, after a seed run against Postgres stopped halfway with
+   *
+   *   update or delete on table "users" violates foreign key constraint
+   *   "memberships_user_id_fkey" on table "memberships"
+   *
+   * which is the failure this function's own header describes and had not been
+   * defended against. It had never fired locally and never would: Miniflare
+   * SQLite does not enforce these keys, so the wrong order is silent there and
+   * a constraint violation on the deployed database. `memberships` was the one
+   * that bit, because every seeded user acquires one; the other ten are the
+   * same latent fault and are closed here rather than one funeral at a time.
+   *
+   * The full set was read off the deployed database's own catalogue rather than
+   * guessed — `pg_constraint` for every foreign key pointing at `users`,
+   * `sites` or `contractors`. `maintenance_requests.contractor_id` is absent on
+   * purpose: it is ON DELETE SET NULL and needs no help. `attachments` already
+   * goes before `contractors` above.
+   *
+   * Order inside this block matters too: `unit_service_records` and
+   * `planned_maintenance` both point at `units`, so they go before it. The
+   * second of those was in the wrong place when this was first written, and the
+   * schema-derived check below is what said so.
+   */
+  await record("unit_service_records", () =>
+    db
+      .delete(unitServiceRecords)
+      .where(
+        sql`site_id in ${seededSites} or unit_id in (select id from units where site_id in ${seededSites})`,
+      ),
+  );
+  await record("planned_maintenance", () =>
+    db.delete(plannedMaintenance).where(sql`site_id in ${seededSites}`),
+  );
+  await record("units", () => db.delete(units).where(sql`site_id in ${seededSites}`));
+  await record("site_aliases", () =>
+    db.delete(siteAliases).where(sql`site_id in ${seededSites}`),
+  );
+  await record("site_group_members", () =>
+    db.delete(siteGroupMembers).where(sql`site_id in ${seededSites}`),
+  );
+  await record("contractor_sites", () =>
+    db
+      .delete(contractorSites)
+      .where(sql`site_id in ${seededSites} or contractor_id in ${seededContractors}`),
+  );
+
   await record("sites", () =>
     db.delete(sites).where(or(sql`is_seed = ${1}`, like(sites.id, prefix))),
   );
+
+  await record("contractor_certifications", () =>
+    db.delete(contractorCertifications).where(sql`contractor_id in ${seededContractors}`),
+  );
   await record("contractors", () =>
     db.delete(contractors).where(or(sql`is_seed = ${1}`, like(contractors.id, prefix))),
+  );
+
+  await record("sessions", () => db.delete(sessions).where(sql`user_id in ${seededUsers}`));
+  await record("password_resets", () =>
+    db.delete(passwordResets).where(sql`user_id in ${seededUsers}`),
+  );
+  await record("team_members", () =>
+    db.delete(teamMembers).where(sql`user_id in ${seededUsers}`),
+  );
+  await record("memberships", () =>
+    db.delete(memberships).where(sql`user_id in ${seededUsers}`),
   );
   await record("users", () =>
     db.delete(users).where(or(sql`is_seed = ${1}`, like(users.id, prefix))),
