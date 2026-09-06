@@ -301,11 +301,18 @@ await fsp.writeFile(
       * Preview, because Vercel runs crons on PRODUCTION deployments only and
       * the portal is deployed to Preview.
       *
-      * The endpoint is finished and reachable. Driving it needs either a
-      * Vercel Pro plan, or any external scheduler — the route accepts a
-      * plain `x-cron-secret` header precisely so that a GitHub Action, a
-      * Railway schedule or an operator's curl can call it without
-      * pretending to be an OAuth client.
+      * The endpoint is finished and reachable, and since 2026-09-06 it IS
+      * driven — from `.github/workflows/reminders-preview.yml`, hourly, at
+      * the Preview alias. That is why `authoriseCron` accepts a plain
+      * `x-cron-secret` header alongside Vercel's `Authorization: Bearer`:
+      * so a GitHub Action, a Railway schedule or an operator's curl can
+      * call it without pretending to be an OAuth client.
+      *
+      * If this ever moves onto a Vercel Pro plan, add it to the `crons`
+      * array below and DELETE the workflow in the same commit. Two
+      * schedulers on one endpoint is survivable — the claim is a UNIQUE
+      * insert — but it is two things to keep in step and one of them will
+      * be forgotten.
       */
       crons: [{ path: "/api/cron/retention", schedule: "20 3 * * *" }],
     },
@@ -322,4 +329,4 @@ console.log(`  static/                    ${mb(await dirSize(staticDir))}`);
 console.log(`  functions/${FUNCTION_NAME}.func/   ${mb(await dirSize(funcDir))}`);
 console.log(`  routes: /assets → immutable cache, filesystem, catch-all → /${FUNCTION_NAME}`);
 console.log("  crons:  /api/cron/retention daily at 03:20 UTC (PRODUCTION deployments only)");
-console.log("  note:   /api/cron/reminders needs an HOURLY schedule, which the Hobby plan refuses — see build-output.mjs");
+console.log("  note:   /api/cron/reminders runs HOURLY from .github/workflows/reminders-preview.yml — the Hobby plan refuses an hourly cron");

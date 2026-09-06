@@ -1,0 +1,142 @@
+# THE HOURLY REMINDER DISPATCHER, DRIVEN FROM OUTSIDE VERCEL.
+#
+# WHY THIS FILE EXISTS. `/api/cron/reminders` has to run HOURLY: every reminder
+# row carries its own send time, so a daily run would deliver an 08:00 reminder
+# and a 17:00 one at whatever single moment the schedule fired, and the per-row
+# time — a headline feature of the specification — would be decorative.
+#
+# Vercel refuses it on this plan. Measured, not assumed: a deploy declaring
+# `schedule: "0 * * * *"` fails with
+#
+#   "Hobby accounts are limited to daily cron jobs. This cron expression
+#    (0 * * * *) would run more than once per day."
+#
+# Declaring it daily instead would deploy and quietly break the feature, which
+# is worse than not running it, so `vercel/build-output.mjs` deliberately does
+# not declare it. This workflow is the external scheduler that comment names.
+# `authoriseCron` accepts a plain `x-cron-secret` header precisely so that a
+# GitHub Action can drive the endpoint without pretending to be an OAuth client.
+#
+# PREVIEW ONLY, AND STRUCTURALLY SO.
+#
+#   * The URL is a LITERAL below, not a secret and not an input. Preview's
+#     hostname is public, and committing it means "Preview only" is a property
+#     of this file rather than of what somebody typed into a settings page.
+#     The first step refuses to continue if it is ever edited to anything else.
+#   * The credential is `PREVIEW_CRON_SECRET`, a GitHub Actions secret. No
+#     secret is committed here, and no production credential is referenced.
+#   * Preview runs with `EMAIL_MODE=sink` and no `RESEND_API_KEY`, so every
+#     send is recorded in `notification_log` as `skipped` and nothing reaches
+#     an address. That is an environment setting, so this workflow does not
+#     assume it — it CHECKS it, by failing when the run reports a delivery.
+#
+# TWO THINGS TO KNOW BEFORE TRUSTING THE SCHEDULE.
+#
+#   1. GitHub disables scheduled workflows in a repository with no activity for
+#      60 days, and re-enabling is a manual click. A silent stop is therefore
+#      possible; `workflow_dispatch` below is how it gets restarted, and how a
+#      run is proved on demand without waiting for the hour.
+#   2. GitHub's scheduler is best-effort and runs late under load. The
+#      dispatcher is built for that: `occurrence_date` is the local calendar
+#      day and the claim is a UNIQUE insert, so a late run still sends and a
+#      double run sends once.
+
+name: Reminder dispatcher (Preview)
+
+on:
+  schedule:
+    # Hourly, on the hour. The requirement, not a preference — see the header.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Overlapping runs are harmless (the claim is a UNIQUE insert) but pointless.
+  group: reminders-preview
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # A fork inherits this file but not the secret, so its scheduled run would
+    # fail every hour on somebody else's account. Pinned to this repository.
+    if: github.repository == 'anwarrshboul-cpu/MAINTSUPP'
+    runs-on: ubuntu-latest
+    env:
+      # The Preview alias, and nothing else, ever. See the header.
+      PREVIEW_URL: https://maintsupp-preview.vercel.app
+
+    steps:
+      - name: Refuse any host but the Preview alias
+        run: |
+          set -euo pipefail
+          if [ "$PREVIEW_URL" != "https://maintsupp-preview.vercel.app" ]; then
+            echo "::error::This scheduler is Preview-only. Refusing $PREVIEW_URL."
+            exit 1
+          fi
+          echo "Target: $PREVIEW_URL"
+
+      - name: Dispatch the reminders that are due
+        env:
+          # Preview's secret. Never echoed, never written to the log.
+          CRON_SECRET: ${{ secrets.PREVIEW_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::PREVIEW_CRON_SECRET is not set on this repository."
+            echo "::error::Set it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+          status=$(curl --silent --show-error \
+            --request POST "$PREVIEW_URL/api/cron/reminders" \
+            --header "x-cron-secret: $CRON_SECRET" \
+            --output response.json \
+            --write-out '%{http_code}')
+
+          echo "HTTP $status"
+          cat response.json
+          echo
+
+          # A non-2xx is a failed run, loudly. 401 means the secret is wrong,
+          # 503 means the deployment has none, and both are worth a red cross
+          # rather than a green tick over a reminder that never went out.
+          case "$status" in
+            2??) ;;
+            *) echo "::error::/api/cron/reminders answered $status."; exit 1 ;;
+          esac
+
+      - name: Refuse to pass if any mail actually left the building
+        run: |
+          set -euo pipefail
+          sent=$(jq -r '.sent // 0' response.json)
+          considered=$(jq -r '.considered // 0' response.json)
+          suppressed=$(jq -r '.suppressed // 0' response.json)
+          failed=$(jq -r '.failed // 0' response.json)
+          deferred=$(jq -r '.deferred // 0' response.json)
+          skipped=$(jq -r '.skipped // 0' response.json)
+          echo "considered=$considered sent=$sent suppressed=$suppressed failed=$failed deferred=$deferred skipped=$skipped"
+
+          # On Preview, EMAIL_MODE=sink and no provider key means every send is
+          # recorded as skipped and counted as suppressed. A non-zero `sent` is
+          # therefore not a statistic — it is mail that reached an address from
+          # a test environment, and this job exists partly to catch that.
+          if [ "$sent" != "0" ]; then
+            echo "::error::$sent reminder(s) were DELIVERED from Preview. EMAIL_MODE is not sink, or a provider key is configured."
+            exit 1
+          fi
+
+          if [ "$failed" != "0" ]; then
+            echo "::warning::$failed reminder(s) could not be sent. Check notification_log."
+          fi
+
+          {
+            echo "### Reminder dispatch — Preview"
+            echo
+            echo "| considered | sent | suppressed | failed | deferred | skipped |"
+            echo "| ---: | ---: | ---: | ---: | ---: | ---: |"
+            echo "| $considered | $sent | $suppressed | $failed | $deferred | $skipped |"
+            echo
+            echo "\`sent\` is expected to be 0: Preview runs EMAIL_MODE=sink with no provider key."
+          } >> "$GITHUB_STEP_SUMMARY"
