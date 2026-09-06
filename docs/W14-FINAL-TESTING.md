@@ -269,6 +269,17 @@ Preview. What this pass demonstrates is that the mitigation is not sufficient
 under sustained concurrent load: thirty renders across three widths, plus seeds,
 plus three concurrent cron dispatches, exhausted it.
 
+**It recovers, and that matters to the classification.** After roughly three
+minutes with no traffic at all, `/api/context` and `/api/sites` both answered
+200 again. Earlier probes had reported it stuck only because each retry woke
+another instance — the retries were feeding the thing they were measuring. So
+this is saturation under sustained concurrent load, which drains on its own,
+and **not** a connection leak: `idle_timeout` does give the sockets back once
+the load stops.
+
+The practical consequence for the rest of this pass is that deployed testing has
+to be paced — sequential, with pauses — rather than fanned out.
+
 Raising `pool_size`, lowering `max` per instance, or moving off session mode are
 all capacity decisions — and one of them is explicitly forbidden. **Recorded as
 a capacity finding for the Performance phase, which this pass is instructed not
