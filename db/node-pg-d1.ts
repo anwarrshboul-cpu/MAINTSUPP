@@ -72,18 +72,26 @@
  * The `.ts` on this specifier is not a typo and not a style choice. Node
  * resolves ESM specifiers literally, so `tests/node-pg-d1.test.mjs` — which
  * imports this module directly, the way `tests/node-r2.test.mjs` imports
- * `node-r2.ts` — cannot load a translator imported without its extension. The
- * cost is one `tsc --noEmit` complaint (TS5097, "enable
- * allowImportingTsExtensions"), which this repo's tsconfig does not enable and
- * which is not part of any build, lint or test script; the same tsconfig
- * already records that the other half of this repository runs on Node's native
- * TypeScript with explicit `.ts` specifiers. Vite resolves it either way.
+ * `node-r2.ts` — cannot load a translator imported without its extension.
+ *
+ * IT WENT MISSING, AND TOOK THIRTY-EIGHT TESTS WITH IT. This paragraph outlived
+ * the extension it describes: the specifier read `./sqlite-to-postgres` from at
+ * least `67e02f3` until 2026-09-06, and both `node-pg-d1` suites died on load
+ * with ERR_MODULE_NOT_FOUND — reported by the runner as a single anonymous
+ * file failure, which is why nobody chased it. Thirty-eight tests over the one
+ * piece of code where a query can pass locally and fail deployed had not run
+ * for weeks. Restoring the extension brought all thirty-eight back.
+ *
+ * The cost this paragraph used to name — one TS5097, "enable
+ * allowImportingTsExtensions" — is no longer paid: `tsconfig.json` now enables
+ * it, which is legal because the same file sets `noEmit`. Vite resolves the
+ * specifier either way.
  */
 import {
   BOOLEAN_COLUMNS,
   translateSql,
   type TranslateOptions,
-} from "./sqlite-to-postgres";
+} from "./sqlite-to-postgres.ts";
 
 /* ----------------------------------------------------------------- node -- */
 
