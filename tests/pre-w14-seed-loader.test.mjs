@@ -874,7 +874,15 @@ test("package.json carries the five commands §5 names, and nothing else moved",
 
 test("seed:verify exits non-zero on a mismatch, because CI branches on that", async () => {
   const source = await read("scripts/seed.mjs");
-  assert.match(source, /process\.exit\(body\.report\.failed > 0 \? 1 : 0\)/);
+  /*
+   * Re-pointed 2026-09-06, not weakened. This was `process.exit(...)` until
+   * that call was found to ABORT on Windows — a libuv assertion after a fetch,
+   * reported to the shell as 127, so a 97/97 pass reached CI as a failure. The
+   * contract being protected here is unchanged and is the reason this test
+   * exists: a failing reconciliation must leave a non-zero code. `stop()` is
+   * where that decision now lives; see its header in `scripts/seed.mjs`.
+   */
+  assert.match(source, /stop\(body\.report\.failed > 0 \? 1 : 0\)/);
   /* And the script itself enforces nothing: the gates live on the route, where
      they cannot be skipped by running a different script. */
   assert.doesNotMatch(
@@ -1029,4 +1037,31 @@ test("an unknown action is refused before anything is read", async (t) => {
   assert.equal(response.status, 400);
   const body = await response.json();
   assert.match(body.error, /action must be one of/);
+});
+
+/* ─────────────────────────────── the CI exit code ── */
+
+test("the script stops with a code and never aborts the process", async () => {
+  const source = await readFile(new URL("../scripts/seed.mjs", import.meta.url), "utf8");
+  /*
+   * Module 3 §5 wires this script into CI, so the exit code IS the contract.
+   * On Windows with Node 22, `process.exit()` called straight after a fetch
+   * aborts with a libuv assertion and the shell reads 127 — a 97/97 pass
+   * reported to CI as a failure. Reproduced in isolation before this was
+   * changed; the fix is to record the code and unwind.
+   */
+  /* stop()'s own header DISCUSSES process.exit(); what is forbidden is CALLING it. */
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.ok(
+    !/process\.exit\(/.test(code),
+    "process.exit() after a fetch aborts on Windows; stop() sets process.exitCode instead",
+  );
+  assert.match(source, /process\.exitCode = code;/, "stop() must record the code");
+  assert.match(
+    source,
+    /if \(!\(error instanceof Stop\)\) throw error;/,
+    "the dispatcher swallows the sentinel and nothing else",
+  );
+  /* The non-zero-on-mismatch half is owned by "seed:verify exits non-zero on a
+     mismatch" above, which is where it has always lived. */
 });

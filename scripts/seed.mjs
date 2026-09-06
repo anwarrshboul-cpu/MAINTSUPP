@@ -58,6 +58,31 @@ const BASE = (process.env.SEED_BASE_URL ?? "http://localhost:5173").replace(/\/$
  */
 const COOKIE = process.env.SEED_COOKIE ?? "maintsupp_demo_role=super_admin";
 
+/**
+ * STOPPING WITH A CODE, WITHOUT ABORTING.
+ *
+ * Module 3 SS5 wires this script into CI, so the exit code is the whole
+ * contract. On Windows with Node 22, calling process.exit() immediately after
+ * a fetch aborts the process instead:
+ *
+ *   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), win/async.c:76
+ *
+ * and the shell reads 127 - a passing reconciliation reported as a failure, or
+ * a refusal reported as the wrong kind of failure. Reproduced in isolation: a
+ * process.exit() after one fetch aborts, while setting process.exitCode and
+ * unwinding exits with the intended code.
+ *
+ * So stop() records the code and throws a private sentinel that the dispatcher
+ * at the foot of this file swallows. Every call site keeps its meaning - stop
+ * now, with this code - and the socket finishes closing first.
+ */
+class Stop extends Error {}
+
+function stop(code) {
+  process.exitCode = code;
+  throw new Stop();
+}
+
 function flag(name) {
   const prefixed = `--${name}=`;
   const hit = process.argv.find((argument) => argument.startsWith(prefixed));
@@ -79,7 +104,7 @@ async function call(pathname, init = {}) {
     console.error(`\nCould not reach ${BASE}${pathname}.`);
     console.error("Start the portal first (npm run dev), or set SEED_BASE_URL.");
     console.error(String(error?.message ?? error));
-    process.exit(2);
+    stop(2);
   }
   const text = await response.text();
   let body = null;
@@ -169,7 +194,7 @@ async function runSeed({ days } = {}) {
 
   if (status !== 200) {
     reportRefusal(body);
-    process.exit(1);
+    stop(1);
   }
 
   const result = body.result;
@@ -209,7 +234,7 @@ async function runPurge() {
   });
   if (status !== 200) {
     reportRefusal(body);
-    process.exit(1);
+    stop(1);
   }
   console.log(`\n  Purged ${body.result.totalRows} rows from ${body.result.organisationId}.`);
   for (const entry of body.result.deleted) {
@@ -235,18 +260,18 @@ async function runVerify() {
 
   if (status !== 200 && status !== 409) {
     reportRefusal(body);
-    process.exit(1);
+    stop(1);
   }
 
   printReport(body.report);
 
   if (!body.report.seeded) {
     console.error("  Nothing is seeded. Run `npm run seed` first.\n");
-    process.exit(1);
+    stop(1);
   }
 
   /* §5 wires this into CI, so the exit code is the whole contract. */
-  process.exit(body.report.failed > 0 ? 1 : 0);
+  stop(body.report.failed > 0 ? 1 : 0);
 }
 
 /**
@@ -264,7 +289,7 @@ async function runCron() {
       "\n  CRON_SECRET is unset, and /api/cron/reminders will answer 503 without it." +
         "\n  Set it in the environment this script runs in, matching the server's.\n",
     );
-    process.exit(1);
+    stop(1);
   }
   const { status, body } = await call("/api/cron/reminders", {
     method: "POST",
@@ -272,7 +297,7 @@ async function runCron() {
   });
   if (status !== 200) {
     reportRefusal(body);
-    process.exit(1);
+    stop(1);
   }
   console.log(`\n  ${JSON.stringify(body, null, 2)}\n`);
   console.log(
@@ -295,7 +320,7 @@ async function runTravel() {
   const days = Number(raw);
   if (raw === null || !Number.isFinite(days)) {
     console.error("\n  Usage: npm run seed:travel -- --days=+30\n");
-    process.exit(1);
+    stop(1);
   }
   console.log(`\n  Rebuilding the seeded estate as it would be ${days} days from today.`);
   await runSeed({ days });
@@ -307,23 +332,28 @@ async function runTravel() {
 
 const command = (process.argv[2] ?? "seed").replace(/^--/, "");
 
-switch (command) {
-  case "seed":
-    await runSeed(has("days") ? { days: Number(flag("days")) } : {});
-    break;
-  case "purge":
-    await runPurge();
-    break;
-  case "verify":
-    await runVerify();
-    break;
-  case "cron":
-    await runCron();
-    break;
-  case "travel":
-    await runTravel();
-    break;
-  default:
-    console.error(`\n  Unknown command "${command}". One of: seed, purge, verify, cron, travel.\n`);
-    process.exit(1);
+try {
+  switch (command) {
+    case "seed":
+      await runSeed(has("days") ? { days: Number(flag("days")) } : {});
+      break;
+    case "purge":
+      await runPurge();
+      break;
+    case "verify":
+      await runVerify();
+      break;
+    case "cron":
+      await runCron();
+      break;
+    case "travel":
+      await runTravel();
+      break;
+    default:
+      console.error(`\n  Unknown command "${command}". One of: seed, purge, verify, cron, travel.\n`);
+      stop(1);
+  }
+} catch (error) {
+  /* A stop() is the intended end of the run; anything else is a real crash. */
+  if (!(error instanceof Stop)) throw error;
 }
