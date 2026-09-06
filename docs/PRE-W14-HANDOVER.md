@@ -149,6 +149,56 @@ Two things about this suite are worth knowing before reading a failure count:
 
 ---
 
+## The one thing still open, 2026-09-06
+
+**The reminder end-to-end proof is six-ninths done, and the missing three need a
+credential this session cannot obtain.**
+
+Proved on the deployed Preview, without any credential:
+
+- **Sink mode prevents external delivery.** `POST /api/reminders/test-send`
+  answers `status: "skipped"`, `"No RESEND_API_KEY configured."` Preview runs
+  `EMAIL_MODE=sink` AND has no provider key, so nothing can leave by either
+  route.
+- **The log records the test-safe status.** Both sends appear in
+  `notification_log` as `skipped`, subject prefixed `[TEST]`.
+- **A recipient parameter is ignored.** A request carrying `to`, `email` and
+  `recipient` all pointed at an outside address was still addressed to the
+  session's own account, and no row exists for the address that was passed.
+- **A bad or missing cron secret is rejected.** 401 for no header, 401 for a
+  wrong one — never 503, which would invite a credential hunt.
+- Independently, `notification_log` holds **169 rows and every one is
+  `skipped`**. No mail has ever left this deployment.
+
+Not yet proved on the deployed Preview: due-reminder selection, recipient
+resolution, a valid cron invocation, duplicate-occurrence refusal, a later
+repeat occurrence, and the tenant boundary under a real dispatch. All six were
+proved locally against Miniflare during the pass; what is missing is the same
+run against Postgres.
+
+**Why.** All six need one authenticated call to `/api/cron/reminders` on
+Preview, and Preview stores `CRON_SECRET` as a Vercel *Secret*, which is
+write-only and cannot be read back. Two routes to a value were attempted and
+both were refused by this session's permission layer — rotating it with
+`vercel env`, and reading the local `.dev.vars` copy to send it. Neither was
+worked around.
+
+**What unblocks it, in one action.** Set `CRON_SECRET` for Preview in the Vercel
+dashboard to a value of your choosing, put the same value in GitHub →
+Settings → Secrets and variables → Actions as `PREVIEW_CRON_SECRET`, then
+redeploy Preview — env vars are snapshotted at deploy time, so the order
+matters. `gh workflow run "Reminder dispatcher (Preview)"` then completes the
+remaining six points in about ten seconds.
+
+Until that secret exists the hourly workflow **fails every hour, by design.** A
+manual run on 2026-09-06 (run 34048377387) failed in 10 seconds with
+`::error::PREVIEW_CRON_SECRET is not set on this repository.` — which is the
+behaviour asked for: a scheduler that cannot authenticate is broken, and a green
+tick over a reminder that never went out is the failure this whole layer exists
+to prevent.
+
+---
+
 ## Not touched
 
 Production deployment, Production Supabase, Production Storage, Production auth,
