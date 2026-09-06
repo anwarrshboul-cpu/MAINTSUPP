@@ -81,3 +81,90 @@ when a section goes, and re-homing it is a data write this pass was not
 authorised to make. The repair is one `UPDATE` setting `board_id` to the
 canonical register — exactly what `rehomeRegisterRows` does — and it wants to be
 made deliberately, by someone who has decided that is the right home for it.
+
+---
+
+## W14-07 — every calendar event against its original Job or Compliance record
+
+The Operations calendar draws from three places, and each was compared against
+Postgres by **per-day fingerprint** rather than by row count, because a count
+survives a timezone shift and a per-day hash does not.
+
+| Source | Rows | Days | API (deployed) | Postgres | |
+| --- | ---: | ---: | --- | --- | --- |
+| `calendar_events` | 55 | 47 | `8ed9d42b…` | `8ed9d42b…` | ✅ |
+| Jobs with a `scheduled_date` | 172 | 106 | `01dc0d2e…` | `01dc0d2e…` | ✅ |
+| Certificate expiries | 50 | 19 | `ce02c7b1…` | `ce02c7b1…` | ✅ |
+
+Identical on every one. No date lands on a different day in the deployed API
+than it occupies in the database — which is the failure this check exists to
+catch, and the one a row count would have missed.
+
+**The hybrid planned-visit invariant holds, though trivially.** All 57 calendar
+events across both organisations are standalone (`request_id` null), so no row
+carries both a job link and its own schedule. `plannedVisitIntegrityIssue` has
+nothing to flag because nothing yet exercises the linked case.
+
+Rendered at 1440 / 768 / 380 px with no horizontal overflow, no console error
+and no response at or above 400. The calendar independently reproduces two
+figures from `expected-values.json`: the Unscheduled tray shows **8**, and the
+banner names **3** unmapped statuses.
+
+## W14-13 — the landing-page pricing section
+
+Compared line by line against the supplied `maintsupp-form-pricing-v2.html`.
+Every figure in the approved source is present and correct on the deployed page:
+
+| | Approved | Deployed |
+| --- | --- | --- |
+| Maintenance Coordination | £65 /store/month + VAT · ≈ £520 at 8 stores | same |
+| Compliance Administration | £55 /store/month + VAT · ≈ £440 at 8 stores | same |
+| Total Care | £100 /store/month + VAT · ≈ £800 at 8 stores | same |
+| Most popular / bundle saving | save £20 per store | same |
+| One-off setup | from £25 /store + VAT | same |
+| Portfolio minimum | £295 /month + VAT | same |
+| Additional jobs · P1 escalation | from £65 each · £125 per incident | same |
+
+The deployed section also carries a store-count selector (1–10 / 11–25 / 26+), a
+live total for the chosen count, and a three-plan comparison table — the
+"updated" part of the requirement.
+
+> A false alarm worth recording so nobody repeats it. A first pass reported the
+> three headline prices missing, because the markup renders the symbol and the
+> number as separate nodes (`£` then `65`) and a `£[0-9]+` search cannot see
+> them. The page was right and the search was wrong.
+
+`content.ts` still exports a four-tier `packages` array (£45/£85/£115/£165). It
+is rendered nowhere, and `app/(marketing)/page.tsx` already says why: "packages
+— four tiers with no prices, replaced by Pricing". Dead by decision, not drift.
+
+## W14-14 — the opening form, submitted end to end
+
+Section 10's form is Report-a-Job — the one with the file inputs and the
+reference number. Nine fields carry a required marker in their label: site,
+contact name, phone, email, address, postcode, fault category, urgency,
+description; access window is explicitly optional.
+
+| Criterion | Result |
+| --- | --- |
+| Required fields and labels | ✅ nine marked, one optional, all labelled |
+| Validation and helpful errors | ✅ an empty submit is refused with "Check the highlighted fields and submit again." plus per-field messages |
+| Connected to the right system | ✅ `201 /api/report-job` |
+| Files stored against the submission | ✅ `201 /api/files`, and the row has exactly 1 attachment |
+| Confirmation and reference | ✅ "Request MN-1076 received. The operations team can now begin triage." |
+
+**Two things that look like defects and are not**, both chased to the bottom:
+
+1. With every field filled the browser reported the form completely valid, yet
+   nothing submitted. The cause is deliberate and documented in
+   `report-job.tsx`: at least one photo or video is required, and the files live
+   in component state rather than in a form field, so `checkValidity()` cannot
+   see them. With a file attached it submits first time. The upload error is
+   rendered and visible when it is the only thing missing.
+2. The row's `reference` column is NULL. So is every other row's — all 21 in
+   that organisation. The reference is the primary key: the row's `id` *is*
+   `MN-1076`. Nothing is lost.
+
+**One test record was created and is deliberately still there:** `MN-1076` in
+the client's own organisation, description prefixed `W14TEST-`. It is the
+evidence for this check. It should be binned once the checklist is signed off.
