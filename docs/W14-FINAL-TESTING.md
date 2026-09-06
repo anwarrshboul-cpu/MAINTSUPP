@@ -445,3 +445,156 @@ This document and the consolidated W14 final report are the deliverable for
 review and approval. **Approval remains the owner's**, and nothing here is a
 sign-off: the items in the final report marked OWNER DECISION REQUIRED need an
 answer before this checklist can be called complete.
+
+---
+
+# W14 sign-off pass — the three owner decisions
+
+Executed 2026-09-06/07 against Supabase Staging (`ajslebfjwgkvhlntrdmw`) and the
+deployed Preview only. Production (`wghfhtdzxttfhofuljyy`) was not touched.
+
+## Decision 1 — the orphaned site, REPAIRED
+
+**And it was not the record everybody thought it was.** Before writing anything,
+the row was read in full, and the two "Sunnamusk Oxford Street" rows are not a
+real site and its duplicate:
+
+| | `…-36yf5e` | `…-tm9aq6` (the orphan) |
+| --- | --- | --- |
+| `board_id` | `null` — canonical | `sec-731cdb10a3ba` — **section gone** |
+| address | 128 Oxford Street, London, W1D 1LT | **"13 , food street", cairo**, no postcode |
+| jobs / units / certs | 2 / 0 / 0 | **0 / 0 / 0** |
+| created | 2026-08-20, with the estate import | **2026-09-04 04:58** |
+| active | false, Closed | true |
+
+The orphan is a **test record** from the 2026-09-04 session that also produced
+"New job", "New store" and "Test test test" — not an operational site that lost
+its register.
+
+Two more orphans were found that nobody had listed: contractors `test` and
+`test new section`, both pointing at a second dead section `sec-75ae0103d9eb`,
+both created 04:48–04:49 the same morning. Three orphans, one origin.
+
+**Both dead sections were confirmed absent** from `workspace_sections` and from
+`boards` before any write, and every row was confirmed to be in the client
+organisation.
+
+The repair is exactly `rehomeRegisterRows`: `board_id → NULL`, which is the
+value of `CANONICAL_REGISTER`. Each statement was additionally guarded with
+`not exists (select 1 from workspace_sections where id = board_id)`, so it could
+only ever touch a row whose section is genuinely gone.
+
+```
+BEFORE  sites        site-sunnamusk-oxford-street-tm9aq6   board_id sec-731cdb10a3ba
+BEFORE  contractors  contractor-test-223bd7fa              board_id sec-75ae0103d9eb
+BEFORE  contractors  contractor-test-new-section-80bead63  board_id sec-75ae0103d9eb
+AFTER   all three                                          board_id NULL
+```
+
+**Re-homing was the prerequisite for cleaning them up, not an alternative to
+it.** An orphan is reachable by no register and therefore by no API, so nothing
+in the product could archive or remove it. Decision 1 is what made Decision 2
+possible.
+
+Verified immediately after: `/api/sites` went from 31 rows to **32**, matching
+the table exactly, and `registers=all` agreed. Orphan count across every
+organisation is now **0 sites, 0 contractors, 0 groups**.
+
+## Decision 2 — QA records in the client organisation, CLEANED
+
+Re-identified from live data first. Fourteen records, every one with zero linked
+jobs.
+
+**Eight jobs, moved to the recycle bin through the board's own `delete_items`
+action** — no SQL:
+
+```
+MN-1066  MN-1067  MN-1070  MN-1071  MN-1073  MN-1074  MN-1075  MN-1076
+7 items moved to the recycle bin. They can be restored for 30 days.
+```
+
+Seven moved; MN-1074 was already in the bin, which is why the API omitted it —
+correctly, as a no-op rather than an error.
+
+> **A correction to the original W14-18 finding.** It reported "8 of 21 jobs"
+> without excluding rows already in the bin. The true figure was 7 test records
+> among 20 live jobs. The client organisation now holds **13 live jobs, and not
+> one of them is test-shaped.**
+
+**Five contractors and one site, archived through the product API** — `DELETE`
+on `/api/workspace` and `/api/sites`, all 200. They are left in the recycle-bin
+lifecycle rather than destroyed, because Decision 2 forbids SQL deletes in the
+client organisation and the product has no permanent-removal path for either.
+
+## Decision 3 — the ZZ-W14 demo fixture, CLEANED
+
+The product archives a site rather than deleting it, so the fixture would have
+remained. Decision 3 covers QA data in the demo organisation and says to use the
+normal path *where possible*; where it is not, the two rows were removed
+directly, each guarded on organisation, `is_seed = false`, `active = false` and
+the absence of any dependent row:
+
+```
+deleted  sites        site-zz-w14-site-1788732036-4zr2lz
+deleted  contractors  contractor-zz-w14-contractor-1788733129-72095870
+```
+
+The demo organisation is back to exactly its seeded shape: **12 sites, 0
+non-seeded, 6 contractors, 180 jobs.**
+
+## W14-06 retest — PASS, fully reconciled
+
+Every figure read off the rendered dashboard, then computed again from Postgres:
+
+| Figure | Dashboard | Database | |
+| --- | ---: | ---: | --- |
+| **Active sites** | **24** | **24** | ✅ *was 24 vs 25* |
+| Sites, all | 32 | 32 | ✅ *API saw 31 before* |
+| Open jobs | 11 | 11 | ✅ |
+| Completed | 2 | 2 | ✅ |
+| Jobs total | 13 | 13 | ✅ |
+| Tier 1 / 2 / 3 | 3 / 6 / 4 | 3 / 6 / 4 | ✅ |
+| Urgent / Medium / Low | 3 / 6 / 4 | 3 / 6 / 4 | ✅ |
+
+The discrepancy that failed the original W14-06 is gone, and it is gone for the
+right reason: the platform can now see every row the table holds.
+
+## W14-18 retest — PARTIAL, and the reason is a product limit
+
+| Estate | Result |
+| --- | --- |
+| Demo isolation | ✅ **0 seeded rows and 0 `zzdemo-` ids** in the client organisation, across all eight tables |
+| Demo organisation | ✅ back to its seeded shape, 0 non-seeded rows |
+| Client jobs | ✅ 13 live, **0 test-shaped** |
+| Client sites | ⚠️ the test site is archived, and still listed as "Closed" |
+| Client contractors | ⚠️ five test contractors archived, and still listed with an "Archived" badge |
+
+**Nothing test-shaped remains in any live or operational set.** What remains is
+visible in the registers, correctly badged as archived — because the registers
+show archived rows by design, and because **nothing in the product permanently
+removes a site or a contractor**. Two `DELETE`s leave the row present with
+`active = false`; it does not enter the recycle bin either.
+
+Decision 2 forbids SQL deletes in the client organisation, and that instruction
+is respected. So this cannot reach a clean pass by any approved means, and the
+remaining step is the owner's:
+
+**OWNER DECISION** — either accept archived-and-badged as "removed", or
+authorise a guarded delete of the five contractors and one site (all have zero
+linked jobs), which would take the client's Contractors register to one real
+contractor and its Sites register to 31.
+
+## A finding that only a live scheduler could have produced
+
+`seed:verify` was run again at the end and came back **83 passing, 14 failing**.
+Every one of the fourteen was a reminder metric, with one signature: *Due today*
+15 → **0** at every step, *Already sent* 125 → **134**.
+
+That is not drift or damage. It is **the hourly scheduler working**: two runs
+fired on schedule at 20:00 and 22:41, both succeeded, and both consumed the
+reminders that were due. Re-seeding restored **97 passing, 0 failing, 100%**.
+
+Worth writing down, because the next person to run `seed:verify` some hours
+after seeding will see fourteen red rows and reasonably conclude something
+broke: **the reminder metrics are a snapshot taken at seed time, and a working
+cron necessarily moves them.**
