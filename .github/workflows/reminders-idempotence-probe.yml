@@ -19,7 +19,7 @@
 # FLIGHT AT ONCE, both selecting the same due rules and racing for the same
 # rows — which is also the real-world case, a scheduler firing twice.
 #
-# So both calls go out from one step with `&`, and the run is judged on the sum
+# So the calls go out from one step with `&`, and the run is judged on the sum
 # of what they report:
 #
 #   * exactly as many occurrences are HANDLED (sent + suppressed + failed) as
@@ -62,7 +62,7 @@ jobs:
           fi
           echo "Target: $PREVIEW_URL"
 
-      - name: Two dispatches in flight at once
+      - name: Three dispatches in flight at once
         env:
           CRON_SECRET: ${{ secrets.PREVIEW_CRON_SECRET }}
         run: |
@@ -79,14 +79,26 @@ jobs:
               --output "$1" --write-out '%{http_code}' > "$1.status"
           }
 
-          # Backgrounded together, so both are selecting while both are claiming.
-          call a.json & call b.json &
+          # WARM THE FUNCTION FIRST, or this proves nothing.
+          #
+          # The first attempt at this probe came back inconclusive and said so:
+          # call A began at 19:31:29 and call B at 19:31:31, because A paid a
+          # cold start and B did not. By the time B selected, A had advanced
+          # every rule it handled, so B saw nothing due and the two never
+          # raced. An unauthenticated POST answers 401 without touching the
+          # database and leaves the instance warm.
+          curl --silent --output /dev/null             --request POST "$PREVIEW_URL/api/cron/reminders" || true
+
+          # Three, not two. The window where both are selecting is a few
+          # hundred milliseconds wide, and a third caller costs nothing.
+          call a.json & call b.json & call c.json &
           wait
 
-          echo "A: HTTP $(cat a.json.status)"; cat a.json; echo
-          echo "B: HTTP $(cat b.json.status)"; cat b.json; echo
+          for f in a b c; do
+            echo "$f: HTTP $(cat $f.json.status)"; cat "$f.json"; echo
+          done
 
-          for f in a b; do
+          for f in a b c; do
             case "$(cat $f.json.status)" in
               2??) ;;
               *) echo "::error::call $f answered $(cat $f.json.status)."; exit 1 ;;
@@ -98,14 +110,14 @@ jobs:
           set -euo pipefail
           n() { jq -r ".$2 // 0" "$1.json"; }
 
-          for f in a b; do
+          for f in a b c; do
             echo "$f: considered=$(n $f considered) sent=$(n $f sent) suppressed=$(n $f suppressed) failed=$(n $f failed) skipped=$(n $f skipped) deferred=$(n $f deferred)"
           done
 
-          considered=$(( $(n a considered) + $(n b considered) ))
-          handled=$(( $(n a sent) + $(n a suppressed) + $(n a failed) + $(n b sent) + $(n b suppressed) + $(n b failed) ))
-          refused=$(( $(n a skipped) + $(n b skipped) ))
-          sent=$(( $(n a sent) + $(n b sent) ))
+          considered=$(( $(n a considered) + $(n b considered) + $(n c considered) ))
+          handled=$(( $(n a sent) + $(n a suppressed) + $(n a failed) + $(n b sent) + $(n b suppressed) + $(n b failed) + $(n c sent) + $(n c suppressed) + $(n c failed) ))
+          refused=$(( $(n a skipped) + $(n b skipped) + $(n c skipped) ))
+          sent=$(( $(n a sent) + $(n b sent) + $(n c sent) ))
 
           echo "considered(total)=$considered handled=$handled refused=$refused sent=$sent"
 
@@ -122,8 +134,10 @@ jobs:
           fi
 
           # THE ASSERTION. Every occurrence is handled exactly once between them.
-          if [ "$handled" -ne "$(n a considered)" ] && [ "$handled" -ne "$(n b considered)" ]; then
-            echo "::error::$handled occurrences were handled across two runs; the larger selection was $(n a considered)/$(n b considered). A duplicate got through."
+          biggest=$(n a considered)
+          for f in b c; do [ "$(n $f considered)" -gt "$biggest" ] && biggest=$(n $f considered); done
+          if [ "$handled" -ne "$biggest" ]; then
+            echo "::error::$handled occurrences were handled across the concurrent runs; the largest single selection was $biggest. A duplicate got through."
             exit 1
           fi
 
@@ -136,13 +150,13 @@ jobs:
           {
             echo "### Idempotence probe — Preview"
             echo
-            echo "Two dispatches in flight at once, against \`reminder_dispatch_once_idx\`."
+            echo "Three dispatches in flight at once, against \`reminder_dispatch_once_idx\`."
             echo
-            echo "| | A | B |"
-            echo "| --- | ---: | ---: |"
-            echo "| considered | $(n a considered) | $(n b considered) |"
-            echo "| handled (sent+suppressed+failed) | $(( $(n a sent) + $(n a suppressed) + $(n a failed) )) | $(( $(n b sent) + $(n b suppressed) + $(n b failed) )) |"
-            echo "| refused by the claim (skipped) | $(n a skipped) | $(n b skipped) |"
+            echo "| | A | B | C |"
+            echo "| --- | ---: | ---: | ---: |"
+            echo "| considered | $(n a considered) | $(n b considered) | $(n c considered) |"
+            echo "| handled (sent+suppressed+failed) | $(( $(n a sent) + $(n a suppressed) + $(n a failed) )) | $(( $(n b sent) + $(n b suppressed) + $(n b failed) )) | $(( $(n c sent) + $(n c suppressed) + $(n c failed) )) |"
+            echo "| refused by the claim (skipped) | $(n a skipped) | $(n b skipped) | $(n c skipped) |"
             echo
             echo "**$handled occurrence(s) handled once, $refused duplicate claim(s) refused by the database, $sent delivered.**"
           } >> "$GITHUB_STEP_SUMMARY"
