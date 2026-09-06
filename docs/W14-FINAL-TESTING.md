@@ -598,3 +598,82 @@ Worth writing down, because the next person to run `seed:verify` some hours
 after seeding will see fourteen red rows and reasonably conclude something
 broke: **the reminder metrics are a snapshot taken at seed time, and a working
 cron necessarily moves them.**
+
+---
+
+# W14-18 guarded delete — executed 2026-09-07
+
+Staging only (`ajslebfjwgkvhlntrdmw`); Production (`wghfhtdzxttfhofuljyy`) was
+never connected to. The pre-delete manifest is at
+`docs/w14-audit/2026-09-07-w14-18-delete-manifest.md`.
+
+## What was deleted, and how
+
+Five of the six approved records, in **one transaction**, scoped to exact ids —
+no pattern, no wildcard, no organisation-wide purge — with every statement
+additionally guarded by `not exists` clauses over every foreign-key child, so a
+row could not be removed if any dependency had appeared between validation and
+execution:
+
+```
+contractor-test-223bd7fa              test
+contractor-test-a-a3db51df            Test a
+contractor-test-new-section-80bead63  test new section
+contractor-tester-87253bdd            tester
+site-sunnamusk-oxford-street-tm9aq6   Sunnamusk Oxford Street [cairo]
+```
+
+## What was HELD, and why
+
+`contractor-test-c6cfce01` was not deleted. It carries a dependency that was not
+identified when the delete was approved: one attachment,
+`136ef2ca-7491-4ba3-a30a-a4f27369eec4`, `test.jpg`, 700,587 bytes, `image/jpeg`,
+kind `general`, no title, no document type, no expiry, anchored to nothing but
+the contractor.
+
+The approval says to stop a record whose child dependency was not previously
+identified. Every marker says the file is test data — but it is a real 700 KB
+object, and deleting the row would also strand it in Storage. **One instruction
+would close it: delete the attachment row and the contractor together.**
+
+## A seventh test record the first pass missed
+
+`MN-1072` was classified "looks real" in the original W14-18 because its title is
+`[P3] Routine` — the urgency label the public form generates, the same shape as
+this pass's own `MN-1076`. Its description is `teststeetstsdtsd` and its site
+address `13 , food street, E14 5AA`, the same cairo address as the deleted test
+site.
+
+It was moved to the recycle bin through the board's own flow, restorable for 30
+days. The previous approval said its list was non-exhaustive and instructed that
+every record be re-identified from live data, which is what surfaced it.
+
+**The genuine live job count is therefore 12, not the 13 the target assumed** —
+the difference is this record.
+
+> The same sweep cleared two false alarms. `MN-1051`, "Two ceiling spotlights out
+> above the **tester** counter", is a genuine job — a perfume tester counter, in a
+> fragrance retailer's store. A `\btester\b` search flagged it and it is real.
+
+## Final state
+
+| | Client organisation | Demo organisation |
+| --- | ---: | ---: |
+| Sites | **31** | 12, all seeded |
+| Contractors | **2** — 1 genuine, 1 held | 6, all seeded |
+| Live jobs | **12**, none test-shaped | 180 |
+| Test sites | **0** | 0 non-seeded |
+| Seeded rows leaked in | **0** | — |
+| Orphans (dead `board_id`) | **0** | 0 |
+
+Verified through the product as well as the database: `/api/sites` returns 31
+with 24 active, `/api/maintenance` returns 12 with nothing test-shaped, the Sites
+register shows no test data, and no 4xx or 5xx appeared. No ghost-name conflict
+is possible any more, because no row is invisible to its register.
+
+## W14-18 verdict
+
+**PARTIAL, by one record.** Jobs, sites, orphans and tenant isolation are all
+clean. One contractor named `test` remains visible in the client's Contractors
+register, held deliberately for the reason above rather than deleted without a
+specific instruction.
