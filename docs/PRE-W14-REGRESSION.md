@@ -1,13 +1,26 @@
 # Pre-W14 — the remaining test failures, classified
 
-Measured 2026-09-05 at the head of `feat/owner-polish-pass`, against a quiet
-tree with one dev server and nothing else running.
+Measured 2026-09-05 at the head of `feat/owner-polish-pass`, and again on
+2026-09-06 on `main` after the blocker closure, both against a quiet tree with
+one dev server and nothing else running.
 
 ```
-full suite at HEAD, run 1   2720 tests   2444 pass   63 fail   213 skipped
-full suite at HEAD, run 2   2722 tests   2451 pass   75 fail   196 skipped
-the same 38 files at 67e02f3  576 tests    466 pass   64 fail    46 skipped
+2026-09-05  full suite, run 1   2720 tests   2444 pass   63 fail   213 skipped
+2026-09-05  full suite, run 2   2722 tests   2451 pass   75 fail   196 skipped
+2026-09-05  same 38 files at 67e02f3  576 tests  466 pass  64 fail   46 skipped
+
+2026-09-06  full suite, run 1   2723 tests   2435 pass   53 fail   235 skipped
+2026-09-06  seven files repaired between the runs
+2026-09-06  full suite, run 2   2716 tests   2454 pass   61 fail   201 skipped
 ```
+
+**The 2026-09-06 pair says the same thing the 2026-09-05 pair said, and says it
+about a tree that had just been repaired.** Fifty-three became sixty-one while
+the number of SKIPPED tests fell by thirty-four: more live tests ran, so more
+live tests failed. Thirty-seven names fail in both runs, sixteen in the first
+only and twenty-four in the second only. Every one of the seven files repaired
+between the runs is absent from the second — that part is not noise, and it is
+the only part of a count comparison that carries information.
 
 **THE COUNT IS NOT STABLE, AND THAT IS THE FINDING.** Two runs of the same
 commit, minutes apart on a quiet tree, differ by twelve — and the difference is
@@ -38,7 +51,9 @@ regression, and it is confirmed below rather than asserted.
 
 ## Class A — real application defect
 
-**None remaining.** Eight were found and fixed during this work:
+**None remaining.** Ten were found and fixed during this work, the last two on
+2026-09-06 by running the QA workflow the owner asked for rather than by
+reading it:
 
 | Defect | How it was found |
 | --- | --- |
@@ -50,6 +65,17 @@ regression, and it is confirmed below rather than asserted.
 | A colour literal in `reports.css` | `w2-reports-tabs` |
 | `is_current` translator pin too literal | `workstream-seven-official-documents` |
 | `narrative.ts`'s "Tier 1" read as an orphan figure | Running the validator against real data |
+| `scripts/seed.mjs` aborted with exit 127 on every `process.exit()` after a fetch | Running `npm run seed:verify` for real |
+| `/admin/reconcile`, the URL Module 3 §4 names, answered 404 | Opening it |
+
+The first of those two is worth stating plainly, because it was invisible from
+the code. On Windows with Node 22, `process.exit()` called straight after a
+`fetch` aborts the process with a libuv assertion
+(`!(handle->flags & UV_HANDLE_CLOSING)`) and the shell reads **127**. Module 3
+§5 wires this script into CI and branches on the exit code, so a 97-of-97 pass
+would have reached CI as a failure and a refusal as the wrong kind of failure.
+Reproduced in isolation before it was touched: `process.exit()` after one fetch
+aborts, `process.exitCode` and unwinding exits with the intended code.
 
 ## Class B — test/harness defect
 
@@ -62,6 +88,75 @@ Fixed where safe, each with the reason written into the test:
 - `pre-w14-seed-loader` — drizzle stub extended for `getTableColumns`.
 - `pre-w14-seed-reconcile` — status-map mirror relaxed from identity to
   subset-with-matching-semantics, after the estate's real labels were seeded.
+
+Seven more on 2026-09-06, and one of them is the most important line in this
+file:
+
+### `node-pg-d1` and `node-pg-d1-pool` had not run for weeks. Thirty-eight tests.
+
+`db/node-pg-d1.ts` imported the translator as `"./sqlite-to-postgres"`, without
+the extension. Node resolves ESM specifiers literally, so both suites died on
+LOAD with `ERR_MODULE_NOT_FOUND` — and the runner reports a load failure as a
+single anonymous entry naming the file, not the thirty-eight tests inside it.
+It read as one failure among sixty and nobody chased it.
+
+The module's own header had explained, at length, why the `.ts` had to be
+there — naming `tests/node-pg-d1.test.mjs` as the reason and TS5097 as the
+accepted cost. **The paragraph had outlived the extension it described.** The
+specifier read `./sqlite-to-postgres` at `67e02f3` too, so this is not a
+regression from the pre-W14 work; it is older than the baseline.
+
+Restoring it brings back **38 tests (7 pass, 31 skipped without a live
+Postgres, 0 fail)** over the one piece of code where, in this repository's own
+words, a query can pass locally and fail deployed. `allowImportingTsExtensions`
+is now enabled in `tsconfig.json` — legal because the same file sets `noEmit` —
+so the typecheck count is unchanged at 22 rather than the 23 the old comment
+was prepared to pay. `npm run build` was re-run and passes.
+
+### The other six
+
+- `pre-w14-seed-loader` — the exit-code pin re-pointed from `process.exit` to
+  `stop`, the contract unchanged. A second test now forbids `process.exit(` in
+  that script outright, comments stripped first so the explanation may keep
+  discussing it.
+- `sqlite-to-postgres` — `BOOLEAN_COLUMNS` counted 28 and holds 52. Re-pointed
+  with what the number now covers, plus the answer to the question it invites:
+  nine of the 52 are still `integer` in the deployed Postgres, and that is fine,
+  because `db/node-pg-d1.ts` picks its serialiser from the type Postgres
+  INFERRED at Bind time. Verified on Preview — calendar, sites and reports all
+  answer 200.
+- `stage-twentythree-session-expiry` — flagged four routes. Three have no
+  session to expire (two schedulers and the emailed token link), and belong on
+  the list of public routes that was never extended when the first cron
+  arrived: **`cron/retention` had been failing this test since the day it was
+  written.** The fourth, the narrative route, makes the check by delegating to
+  `reportUnavailable`, which the pin could not see. The delegation is now
+  asserted, so gutting it fails here rather than silently exempting every caller.
+- `stage-two-sites-units` — the configurability guard matched five
+  `type *Status* = "…" | "…"` declarations that are request-state machines
+  (`idle`/`loading`/`saving`/`error`) and reconciliation outcomes
+  (`pass`/`fail`/`not-measured`), not vocabularies anybody configures. Named
+  individually rather than the rule loosened, so it still fires on the next
+  `type JobStatus = "Open" | "In Progress"`.
+- `stage-twentyeight-relative-dates` — sliced the function body at `"
+}
+"`
+  against a CRLF file, so `indexOf` returned -1, the slice took two characters
+  and `new Function` compiled the fragment into `ReferenceError: fu is not
+  defined`. Four failures whose message named nothing that exists. The test now
+  normalises before matching, as CLAUDE.md asks.
+- `vercel/build-output.mjs` — its comment said an external scheduler *would* be
+  needed. One exists now; the comment names it, and says to delete it in the
+  same commit if this ever moves to a Vercel Pro plan.
+
+**One exemption is an admission, not a dismissal.** `PROJECT_STATUSES =
+["Major works"]` in `app/lib/reporting/job-classification.ts` is a
+classification rule rather than a configurable list — but the guard has a point
+about it. Rename that label in the admin screen and reports quietly stop
+excluding projects from the SLA denominator, with nothing red. `job_status_map`,
+built during this pass, is the right eventual home for the rule. That is a
+behavioural change to a shipped SLA figure, so it is recorded as owed rather
+than made inside a regression fix.
 
 ## Class C — environment-specific
 
@@ -111,7 +206,7 @@ the baseline commit** when the baseline worktree is given the same database.
 
 ### Lint — BASELINE DEBT, 13 errors
 
-`npx eslint app db worker` → **42 problems (13 errors, 29 warnings)**. Was 19
+`npx eslint app db worker` → **43 problems (13 errors, 30 warnings)**. Was 19
 errors; six were removed because they were not findings (a malformed
 `eslint-disable` comment parsed as three rule names, and React hook rules
 applied to `db/**`, which contains no React).
@@ -128,7 +223,14 @@ app/(app)/portal/portal-app.tsx                  1610:10, 9299:5, 9390:28  set-s
 app/(app)/portal/portal-app.tsx                  4975:31          impure call during render
 app/(app)/portal/portal-app.tsx                  5262:6           memoization not preserved
 app/(app)/portal/views/document-thumbnail.tsx    88:19            set-state-in-effect
+app/(public)/f/[token]/public-form.tsx           69:10, 111:5     set-state-in-effect
 ```
+
+> Two corrections to this block, made 2026-09-06 when it was re-measured. The
+> table listed eleven locations under a count of thirteen — `public-form.tsx`
+> was missing, and is now here. The warning count was 29 and is 30; re-measured
+> at HEAD with this pass's changes removed, it is 30 there too, so the earlier
+> figure was miscounted rather than something having regressed.
 
 Identical at `67e02f3`. Fixing them is a behavioural refactor, which the owner
 asked not be chased before W14.

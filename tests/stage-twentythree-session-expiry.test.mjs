@@ -56,7 +56,44 @@ const PUBLIC_ROUTES = new Set([
    */
   "app/api/forms/[token]/route.ts",
   "app/api/forms/[token]/submit/route.ts",
+  /*
+   * The two schedulers. Added 2026-09-06, and `retention` had been failing this
+   * test since the day it was written — the list was never extended when the
+   * first session-less route arrived, so this is a correction rather than an
+   * exemption granted to new code.
+   *
+   * A cron has no session and no organisation: `listDueReminders` spans tenants
+   * deliberately and every row carries its own `organisation_id`. Their 503s
+   * mean "CRON_SECRET is unset on this deployment" and "the dispatch could not
+   * complete", neither of which a sign-in would fix. Telling a scheduler its
+   * session expired would be advice about a session that cannot exist.
+   */
+  "app/api/cron/reminders/route.ts",
+  "app/api/cron/retention/route.ts",
+  /*
+   * The emailed Acknowledge / Snooze / Mark-renewed links. On the same footing
+   * as the contractor job link above: the single-use token IS the
+   * authorisation, and the holder is a store manager or a landlord with no
+   * account. The route reads no session at all.
+   */
+  "app/api/reminders/action/route.ts",
 ]);
+
+/*
+ * Routes that DELEGATE the branch rather than writing it out.
+ *
+ * `reportUnavailable` in `app/lib/reporting/route-helpers.ts` calls
+ * `anonymousRefusal` first and only then answers 503, which is exactly the
+ * behaviour this suite protects — so a reporting route that funnels its catch
+ * through it has the branch even though the identifier never appears in the
+ * file. Searching for the name alone reported the narrative route as missing a
+ * check it demonstrably makes.
+ *
+ * The delegation is asserted at the foot of the test rather than trusted, so
+ * that gutting `reportUnavailable` fails here instead of quietly exempting
+ * every one of its callers.
+ */
+const DELEGATES = ["reportUnavailable("];
 
 async function routeFiles(dir = "app/api", found = []) {
   const entries = await readdir(new URL(`../${dir}`, import.meta.url), {
@@ -94,13 +131,27 @@ test("every route that answers 503 asks first whether it is a sign-out", async (
     if (!source.includes("status: 503")) continue;
     // A 503 that is genuinely about storage, not about who is asking.
     if (path === "app/api/files/[id]/route.ts") continue;
-    if (!source.includes("anonymousRefusal(")) missing.push(path);
+    if (source.includes("anonymousRefusal(")) continue;
+    if (DELEGATES.some((helper) => source.includes(helper))) continue;
+    missing.push(path);
   }
 
   assert.deepEqual(
     missing,
     [],
     `these answer 503 without checking for an expired session:\n  ${missing.join("\n  ")}`,
+  );
+
+  /* The delegation the exemption above rests on, asserted rather than assumed. */
+  const helpers = await read("app/lib/reporting/route-helpers.ts");
+  const fn = helpers.slice(
+    helpers.indexOf("export function reportUnavailable"),
+    helpers.indexOf("export function badRequest"),
+  );
+  assert.match(fn, /const refusal = anonymousRefusal\(error\);/);
+  assert.ok(
+    fn.indexOf("anonymousRefusal(") < fn.indexOf("status: 503"),
+    "the sign-out branch must come first, or delegating to it proves nothing",
   );
 });
 

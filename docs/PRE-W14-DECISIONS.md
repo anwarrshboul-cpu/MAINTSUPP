@@ -145,8 +145,20 @@ insert into portal.deployment_marker (id, environment, note, set_by)
 values ('staging', 'staging', 'MAINTSUPP Staging — safe for seed and purge', 'owner');
 ```
 
-A direct write to Staging was attempted from this session and refused by the
-permission layer, so it remains an owner action.
+**Done, 2026-09-06.** The row was written to Supabase Staging
+(`ajslebfjwgkvhlntrdmw`) after the project URL and the row counts were checked
+against Production's — 20 jobs and 32 sites against Production's 776 — so that
+the target was confirmed before the insert rather than assumed. It is the only
+manual row this pass wrote. `set_at` reads `2026-09-06 16:15:36`, and the
+deployed guard now reports:
+
+```
+environment  passed  observed "preview"
+database     passed  observed "staging postgres aws-0-eu-west-2.pooler.supabase.com portal (postgres)"
+```
+
+The leading `staging` in the second line is the marker being read back. Before
+the row existed the same check refused with a 403, which is what §8 predicted.
 
 ## 9. Reducing lint debt without refactoring
 
@@ -162,6 +174,68 @@ The remaining 13 are recorded as BASELINE DEBT rather than fixed. They are
 React-compiler findings about setState inside effects, one impure call during
 render and one skipped memoization, across seven portal components — behavioural
 changes, and the owner asked that broad refactors not be chased before W14.
+
+## 10. The hourly schedule runs from GitHub, not from Vercel
+
+`/api/cron/reminders` has to run HOURLY, and that is a requirement rather than
+a preference: every reminder row carries its own send time, so a daily run
+would deliver an 08:00 reminder and a 17:00 one at whatever single moment the
+schedule fired, and the per-row time — a headline feature of Module 2 §8 —
+would be decorative.
+
+Vercel refuses it on this plan. Measured, not assumed: a deploy declaring
+`schedule: "0 * * * *"` fails with
+
+```
+Hobby accounts are limited to daily cron jobs. This cron expression
+(0 * * * *) would run more than once per day.
+```
+
+Three options, one of them honest. Declaring it DAILY would deploy and quietly
+break the feature, which is worse than not running it — a cascade that fires at
+the wrong hour looks like it works. Buying Pro is the owner's decision and not a
+code change. So the schedule moved outside Vercel, to
+`.github/workflows/reminders-preview.yml`, which is why `authoriseCron` accepts
+a plain `x-cron-secret` header alongside Vercel's `Authorization: Bearer`.
+
+**Preview-only is a property of the file, not of a settings page.** The URL is a
+literal in the workflow — Preview's hostname is public and is not a secret — and
+the first step refuses to continue if it is ever edited to point elsewhere. Only
+the credential is a GitHub Actions secret (`PREVIEW_CRON_SECRET`), no production
+URL or credential is referenced, and nothing secret is committed.
+
+The workflow does not TRUST Preview's mail settings, it CHECKS them: Preview
+runs `EMAIL_MODE=sink` with no `RESEND_API_KEY`, so every send is recorded as
+`skipped` and counted as `suppressed`, and the run fails loudly if `sent` is
+ever non-zero. A non-zero `sent` from a Preview scheduler is mail that reached
+an address, which is the one failure this whole layer exists to prevent.
+
+Two limitations, stated rather than discovered later:
+
+- GitHub disables scheduled workflows in a repository with no activity for 60
+  days, and re-enabling is a manual click. `workflow_dispatch` is how it is
+  restarted, and how a run is proved without waiting for the hour.
+- GitHub's scheduler is best-effort and runs late under load. The dispatcher is
+  built for that: `occurrence_date` is the local calendar day and the claim is a
+  UNIQUE insert, so a late run still sends and a double run sends once.
+
+**Vercel's own `crons` block is unchanged**, and still declares only the daily
+retention sweep. Nothing about Production was touched.
+
+## 11. `/admin/reconcile` is a redirect, and why it is not a page
+
+Module 3 §4 names the reconciliation page `/admin/reconcile`. This product has
+no top-level `/admin` namespace at all: every administration screen lives under
+`/dashboard`, including the nested ones (`/dashboard/admin/roles`,
+`/dashboard/admin/clients`), and the reconciler is a SECTION of the one portal
+shell rather than a page of its own. Building a second shell to own one URL
+would give it a second copy of the navigation, the session read and the theme.
+
+So `app/(app)/admin/reconcile/page.tsx` redirects to `/dashboard/reconcile` —
+the same shape as `app/(app)/portal/page.tsx`, which redirects the old portal
+address. The spec's URL works when typed or followed out of the module
+document; authorisation is unaffected, because it is enforced by
+`/api/admin/reconcile` (401 without a session) and not by the route.
 
 ---
 

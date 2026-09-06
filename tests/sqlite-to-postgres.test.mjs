@@ -418,13 +418,26 @@ test("a 0/1 inside a string literal is never a boolean", () => {
 test("the boolean name set and the per-table map agree", () => {
   const flat = Object.values(BOOLEAN_COLUMNS).flat();
   /*
-   * 28 since Workstream 7: `attachments.is_current` joined the set. This file
-   * is the only thing that turns drizzle's SQLite-shaped `1` into Postgres's
-   * `true`, so an unlisted boolean is not a translation gap anyone reads — it
-   * is a 503 on upload saying "column is_current is of type boolean but
-   * expression is of type integer".
+   * 52, across 26 tables. It was 28 at Workstream 7 and had not been re-pointed
+   * since; the pre-W14 foundation alone added fourteen (`is_seed` on seven
+   * tables, `job_status_map`'s three, `reminder_defaults`' two and
+   * `reminder_rules`' two), and earlier workstreams the rest.
+   *
+   * The count is a tripwire, not the contract: an entry added without thought
+   * is how a column that merely SOUNDS boolean — `position`, `sends_count` —
+   * gets rewritten to `true`. The contract is the loop below: every per-table
+   * entry is also in the bare-name set.
+   *
+   * Checked against the deployed Postgres on the day this was re-pointed: nine
+   * of the 52 are still `integer` there (`calendar_events.archived`,
+   * `sites.billable` and `job_holds.approved` among them), because the DDL
+   * rewrite fires only on CREATE and those tables predate their entry. That is
+   * not a defect and needs no repair: `db/node-pg-d1.ts` chooses its serialiser
+   * from the type POSTGRES INFERRED at Bind time, so an integer column is
+   * handed `1`/`0` and a boolean one `t`/`f`. Verified on the deployed Preview,
+   * where the calendar, sites and reports routes all answer 200.
    */
-  assert.equal(flat.length, 28, "the migration converted 28 columns");
+  assert.equal(flat.length, 52, "the migration converted 52 columns");
   for (const name of flat) assert.ok(BOOLEAN_COLUMN_NAMES.has(name));
 });
 

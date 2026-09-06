@@ -32,7 +32,17 @@ const read = (file) => readFile(path.join(root, file), "utf8");
  * throws loudly rather than testing a stale copy.
  */
 async function loadRelativeDayLabel() {
-  const source = await read("app/(app)/portal/board-format.ts");
+  /*
+   * Normalised before anything is matched against it, per CLAUDE.md. This file
+   * is CRLF on a checkout with `core.autocrlf=true`, and the slice below looks
+   * for a newline-brace-newline sequence, which is not in it. `indexOf` then
+   * returned -1, the slice took two characters, and `new Function` compiled
+   * the fragment into
+   * "ReferenceError: fu is not defined": four failures whose message named
+   * nothing that exists. The extraction was right; it was reading the file in
+   * the wrong shape.
+   */
+  const source = (await read("app/(app)/portal/board-format.ts")).split("\r\n").join("\n");
   const start = source.indexOf("export function relativeDayLabel");
   assert.ok(start > 0, "relativeDayLabel has moved; fix this test");
 
