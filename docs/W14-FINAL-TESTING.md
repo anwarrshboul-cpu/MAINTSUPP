@@ -677,3 +677,96 @@ is possible any more, because no row is invisible to its register.
 clean. One contractor named `test` remains visible in the client's Contractors
 register, held deliberately for the reason above rather than deleted without a
 specific instruction.
+
+---
+
+# W14-18 closed — the last record, 2026-09-07
+
+Staging only (`ajslebfjwgkvhlntrdmw`). Production was never connected to.
+
+## Re-read before deletion
+
+`contractor-test-c6cfce01`, re-read at the moment of deletion: organisation
+`org_…001` (the Staging client organisation), name `test`, `active = false`,
+`is_seed = false`, `board_id` null, and **zero** linked jobs, quotations,
+invoices, certifications and site links.
+
+Its one attachment, re-read in full:
+
+| field | value |
+| --- | --- |
+| id | `136ef2ca-7491-4ba3-a30a-a4f27369eec4` |
+| original name | `test.jpg`, 700,587 bytes, `image/jpeg` |
+| kind | `general`; title, document type and expiry all null |
+| anchors | `request_id`, `site_id`, `unit_id`, `update_id`, `board_column_id` — **all null** |
+| lineage | `root_document_id` null, **0 other versions** |
+| compliance references | **0** |
+| rows sharing its object key | **1** — itself, so nothing else needs the object |
+| object key | `org_…001/maintenance/contractor-test-c6cfce01/general/136ef2ca-…-test.jpg` |
+
+No new dependency appeared, so the record was not stopped a second time.
+
+## Deletion
+
+The attachment went through the **application's own path**, not SQL:
+`DELETE /api/files/136ef2ca-…` → `{"deleted": true, "versionsDeleted": 1}`.
+The file answered 200 with 700,587 bytes immediately before, and **404**
+immediately after.
+
+**The Storage claim is proved rather than assumed.** In
+`app/api/files/[id]/route.ts` the object delete runs BEFORE the metadata delete
+and is not wrapped in a catch:
+
+```ts
+for (const keys of chunkIds(objectKeys, 1000)) {
+  await storage.delete(keys);          // objectKey and objectKey.thumb
+}
+for (const chunk of chunkIds(doomedIds)) {
+  await db.delete(attachments)...      // only reached if the above resolved
+}
+```
+
+So a failed Storage delete would have thrown, the route would have answered 500,
+and the metadata row would still exist. It answered 200 and the row is gone —
+which means the object and its thumbnail were removed.
+
+The contractor then went in **one transaction scoped to its exact id**, guarded
+by `not exists` over every foreign-key child including the attachment that had
+just been removed.
+
+## Final Staging client estate
+
+| | Target | Actual | |
+| --- | ---: | ---: | --- |
+| Sites | 31 | **31** | ✅ |
+| Contractors | 1 | **1** | ✅ |
+| Live jobs | 12 | **12** | ✅ |
+| Test contractors | 0 | **0** | ✅ |
+| Test sites | 0 | **0** | ✅ |
+| Test jobs | 0 | **0** | ✅ |
+| Orphan attachment metadata | 0 | **0** | ✅ |
+| Rows referencing the deleted object | 0 | **0** | ✅ |
+| Attachments pointing at a missing contractor | 0 | **0** | ✅ |
+| Seeded rows leaked into the client org | 0 | **0** | ✅ |
+
+Through the product: `/api/sites` 31 with 24 active, `/api/maintenance` 12 with
+nothing test-shaped, `/api/workspace` one contractor — `PV Contractor l7jp5` —
+and 31 stores, `/api/context` 200. The Contractors register renders a single
+row and the Sites register none of the test data. No 4xx or 5xx anywhere.
+
+**Demo Client Ltd is untouched and isolated**: 12 sites all seeded, 6
+contractors all seeded, 180 jobs, zero non-seeded rows. `seed:verify` returns
+**97 passing, 0 failing, 100%**.
+
+> One string still matches a naive search of the Jobs board, and it is not a
+> defect: **MN-1051, "Two ceiling spotlights out above the tester counter"** — a
+> perfume tester counter, in a fragrance retailer's store. A `\btester\b` search
+> flags a genuine job. Recorded so the next reader does not delete it.
+
+## W14-18 — PASS
+
+No random, placeholder or demonstration data remains in the client
+organisation, in any state: not live, not archived, not orphaned, and not in
+Storage.
+
+**W14 is 20 / 20.**
