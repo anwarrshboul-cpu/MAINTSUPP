@@ -12,6 +12,8 @@ one dev server and nothing else running.
 2026-09-06  full suite, run 1   2723 tests   2435 pass   53 fail   235 skipped
 2026-09-06  seven files repaired between the runs
 2026-09-06  full suite, run 2   2716 tests   2454 pass   61 fail   201 skipped
+2026-09-06  the purge fixed, and one more file repaired
+2026-09-06  full suite, run 3   2752 tests   2427 pass   32 fail   293 skipped
 ```
 
 **The 2026-09-06 pair says the same thing the 2026-09-05 pair said, and says it
@@ -21,6 +23,13 @@ live tests failed. Thirty-seven names fail in both runs, sixteen in the first
 only and twenty-four in the second only. Every one of the seven files repaired
 between the runs is absent from the second — that part is not noise, and it is
 the only part of a count comparison that carries information.
+
+Run 3 says it a third time from the other direction: 61 became 32 while skips
+rose from 201 to 293. Ninety-two fewer tests ran. **Four names appear in run 3
+that were not in run 2, and every one of them passes when its file is run
+alone** — `pre-w14-seed-loader` 34/34, `stage-eleven-marketing` 18/18,
+`workstream-seven-official-compliance-contract` 10/10. That is the rotation this
+document is named for, checked rather than assumed.
 
 **THE COUNT IS NOT STABLE, AND THAT IS THE FINDING.** Two runs of the same
 commit, minutes apart on a quiet tree, differ by twelve — and the difference is
@@ -67,6 +76,7 @@ reading it:
 | `narrative.ts`'s "Tier 1" read as an orphan figure | Running the validator against real data |
 | `scripts/seed.mjs` aborted with exit 127 on every `process.exit()` after a fetch | Running `npm run seed:verify` for real |
 | `/admin/reconcile`, the URL Module 3 §4 names, answered 404 | Opening it |
+| The purge deleted `users` without their `memberships`, and stopped halfway on Postgres | Re-seeding the deployed Preview |
 
 The first of those two is worth stating plainly, because it was invisible from
 the code. On Windows with Node 22, `process.exit()` called straight after a
@@ -76,6 +86,33 @@ the code. On Windows with Node 22, `process.exit()` called straight after a
 would have reached CI as a failure and a refusal as the wrong kind of failure.
 Reproduced in isolation before it was touched: `process.exit()` after one fetch
 aborts, `process.exitCode` and unwinding exits with the intended code.
+
+### The purge, and the class of defect this whole architecture is about
+
+`deleteSeedRows` removed `users` and never removed their `memberships`. On
+Postgres that is `memberships_user_id_fkey` and the run stops — after it has
+already deleted the sites, the jobs, the certificates and the reminder cascade.
+It is the exact failure the function's own header describes, and it had never
+fired locally and never could: Miniflare does not enforce these keys, so on
+SQLite the order is silent and on Postgres it is fatal. CLAUDE.md's warning that
+"a query can pass locally and fail deployed" in its most literal form.
+
+`memberships` was the one that bit. It was not the only one missing. Read off
+the deployed database's own `pg_constraint`, **eleven** foreign-key children of
+a seeded site, contractor or user were being left to their parents' deletion,
+and three more (`maintenance_board_cells`, `quotations`, `invoices`) come from
+`db/schema.ts` but not from the catalogue, because `db/init.ts` builds its
+tables with its own DDL and does not declare every key drizzle does. Those three
+would not have stopped the purge today; they would have left demo rows keyed to
+deleted demo jobs in the client's database, which is the other half of what the
+isolation layer is for.
+
+**The test that should have caught it pinned the delete order against a
+hand-written copy of itself.** It now parses the dependency graph out of
+`db/schema.ts` — every table referencing something the purge deletes must itself
+be purged, and purged first. It immediately found a fourteenth problem inside
+the fix being written: `planned_maintenance` was ordered after `units`, which it
+references.
 
 ## Class B — test/harness defect
 

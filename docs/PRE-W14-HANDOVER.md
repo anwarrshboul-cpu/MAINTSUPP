@@ -149,53 +149,41 @@ Two things about this suite are worth knowing before reading a failure count:
 
 ---
 
-## The one thing still open, 2026-09-06
+## Reminder end-to-end: 9 of 9, on the deployed Preview
 
-**The reminder end-to-end proof is six-ninths done, and the missing three need a
-credential this session cannot obtain.**
+Closed 2026-09-06, after the owner set `CRON_SECRET` for Preview in Vercel and
+the matching `PREVIEW_CRON_SECRET` in GitHub Actions. The first dispatch after
+that still answered 401, because Vercel snapshots environment variables at
+DEPLOY time and the running Preview predated the change; a fresh Preview
+deployment from the existing workflow fixed it, with no Vercel setting touched.
 
-Proved on the deployed Preview, without any credential:
+| # | Point | Evidence |
+| --- | --- | --- |
+| 1 | due reminder selected | The run reported `considered: 15`, against 15 counted straight out of Postgres beforehand — three each at d90, d60, d30, d14 and expiry, all stamped `2026-09-06T07:00:00Z`. |
+| 2 | recipients resolved | All 15 dispatch rows carry a non-empty `recipients_json` and a `provider_message_id` joining them to `notification_log`. |
+| 3 | sink mode prevents external delivery | `sent: 0` on every run. Preview is `EMAIL_MODE=sink` AND has no `RESEND_API_KEY`, so neither route out is open. |
+| 4 | log records the right status | 147 new `notification_log` rows, every one `skipped`, reason `No RESEND_API_KEY configured.`; all 15 dispatch rows `suppressed`, none `sent`. |
+| 5 | bad/no cron secret rejected | 401 with no header and 401 with a wrong one — never 503, which would invite a credential hunt. The workflow's own first run failed visibly when the secret was unset. |
+| 6 | valid cron invocation accepted | `HTTP 200`, `{"ok":true,"considered":15,...}` from `workflow_dispatch`, targeting the Preview literal. |
+| 7 | duplicate occurrence refused | **Three dispatches in flight at once**: two both selected the same 15, so 30 selections produced 15 handled and **15 claims refused by the database** — A won 7 and lost 8, C won 8 and lost 7. The ledger holds exactly 15 rows and 15 distinct `(reminder_id, occurrence_date)` pairs. |
+| 8 | later repeat occurrence allowed | The nine non-repeating rules closed (`status='sent'`, `next_send_at` null). The six repeating ones stayed `pending` with `sends_count` 1 and `next_send_at` moved from `2026-09-06T07:00:00Z` to `2026-09-09T07:00:00Z` — a distinct occurrence day, which the unique index admits. |
+| 9 | tenant boundaries preserved | No dispatch row and no log row outside the demo organisation. The four addresses outside `@example.com` were checked one by one against `memberships`: all four are members of the demo org, and the two super-admins were selected as members of it. |
 
-- **Sink mode prevents external delivery.** `POST /api/reminders/test-send`
-  answers `status: "skipped"`, `"No RESEND_API_KEY configured."` Preview runs
-  `EMAIL_MODE=sink` AND has no provider key, so nothing can leave by either
-  route.
-- **The log records the test-safe status.** Both sends appear in
-  `notification_log` as `skipped`, subject prefixed `[TEST]`.
-- **A recipient parameter is ignored.** A request carrying `to`, `email` and
-  `recipient` all pointed at an outside address was still addressed to the
-  session's own account, and no row exists for the address that was passed.
-- **A bad or missing cron secret is rejected.** 401 for no header, 401 for a
-  wrong one — never 503, which would invite a credential hunt.
-- Independently, `notification_log` holds **169 rows and every one is
-  `skipped`**. No mail has ever left this deployment.
+Point 7 needed a probe of its own, `.github/workflows/reminders-idempotence-probe.yml`,
+because the refusal is unreachable in sequence: the first run advances every
+rule it handles, so a second selects nothing and never reaches the claim. Its
+first attempt reported ITSELF inconclusive and failed — one call had paid a cold
+start and the two never overlapped — which is the behaviour it was written for.
+Warming the instance with an unauthenticated 401 first, and using three callers,
+produced the race.
 
-Not yet proved on the deployed Preview: due-reminder selection, recipient
-resolution, a valid cron invocation, duplicate-occurrence refusal, a later
-repeat occurrence, and the tenant boundary under a real dispatch. All six were
-proved locally against Miniflare during the pass; what is missing is the same
-run against Postgres.
-
-**Why.** All six need one authenticated call to `/api/cron/reminders` on
-Preview, and Preview stores `CRON_SECRET` as a Vercel *Secret*, which is
-write-only and cannot be read back. Two routes to a value were attempted and
-both were refused by this session's permission layer — rotating it with
-`vercel env`, and reading the local `.dev.vars` copy to send it. Neither was
-worked around.
-
-**What unblocks it, in one action.** Set `CRON_SECRET` for Preview in the Vercel
-dashboard to a value of your choosing, put the same value in GitHub →
-Settings → Secrets and variables → Actions as `PREVIEW_CRON_SECRET`, then
-redeploy Preview — env vars are snapshotted at deploy time, so the order
-matters. `gh workflow run "Reminder dispatcher (Preview)"` then completes the
-remaining six points in about ten seconds.
-
-Until that secret exists the hourly workflow **fails every hour, by design.** A
-manual run on 2026-09-06 (run 34048377387) failed in 10 seconds with
-`::error::PREVIEW_CRON_SECRET is not set on this repository.` — which is the
-behaviour asked for: a scheduler that cannot authenticate is broken, and a green
-tick over a reminder that never went out is the failure this whole layer exists
-to prevent.
+One observation worth keeping. **Recipient resolution reaches real member
+accounts, not only seeded ones.** The demo organisation has four members that
+the seed did not create — including `owner@maintsupp.com` — and a reminder
+addressed to "the organisation's admins" resolves to them. Nothing was sent, and
+nothing crossed a tenant boundary, but the isolation is "inside the demo
+organisation", which is a weaker statement than "`@example.com` only" and is
+worth knowing before `EMAIL_MODE` is ever moved off `sink`.
 
 ---
 
