@@ -284,3 +284,164 @@ Raising `pool_size`, lowering `max` per instance, or moving off session mode are
 all capacity decisions — and one of them is explicitly forbidden. **Recorded as
 a capacity finding for the Performance phase, which this pass is instructed not
 to begin.**
+
+---
+
+## W14-01 — date fields and date-range controls
+
+Clicking a `Date Requested` cell on the Jobs board opens a real picker: focus
+lands on an `input[type=date]` and a calendar popover renders. A change was made
+and **persisted** — `PATCH 200 /api/maintenance`, and `zzdemo-job-001` moved to
+`2026-06-11` in Postgres.
+
+That edit changed seeded data the reconciliation harness depends on, so the
+estate was re-seeded immediately afterwards and re-verified at **97 passing, 0
+failing, 100%** — which incidentally demonstrates that the seed repairs drift
+rather than merely detecting it.
+
+## W14-02 — column editing, sorting and filtering
+
+Column management, through the register API:
+
+| Operation | Result |
+| --- | --- |
+| add | 201 |
+| rename | 200, new title confirmed in the response |
+| hide | 200 |
+| reorder | 200 |
+| remove | 200 — 32 columns became 31 and the key was gone |
+| delete a NATIVE column | **409 "Native columns cannot be deleted. Hide it instead."** |
+| add a nameless column | **400 "Give the column a name."** |
+
+**Sorting** is offered per column, not by clicking the header text: the board
+exposes `Sort Name ascending`, `Sort Location ascending`, `Sort Tier Level
+ascending` and `Sort Priority ascending`, alongside `Filter`, `Hide` and
+`Resize <column> column`. Clicking one flips the control to offer
+`Sort Name descending`, so both directions are reachable. Multi-column
+subsorting is an ordered rule list in `board-sort.ts` (`addSortRule`,
+`flipSortRule`, `moveSortRule`).
+
+> Stated honestly: the board's rows are virtualised and not plain `tbody tr`, so
+> the harness could not read them back to watch the order change. What is
+> evidenced is the control state flipping, not a reordering observed directly.
+
+**Filtering** was watched end to end on the Sites register: searching
+"Birmingham" took it from 8 rows to 1, the right one. **Editing a value directly
+from the table** is the same write proved in W14-01.
+
+## W14-03 — adding, renaming, reordering, archiving and removing sections
+
+Add 201 · rename 200 (label confirmed) · reorder 200 · archive 200 · restore 200.
+
+Removal is deliberately two-step, and that IS the confirmation the checklist
+asks for: `DELETE` archives and answers `{"archived": true}`; a second `DELETE`
+answers `{"alreadyArchived": true}` and changes nothing; only
+`DELETE ...?purge=1` destroys, answering:
+
+```json
+{"ok":true,"deleted":true,"discarded":{"arrangements":0,"views":0},
+ "rehomed":{"sites":0,"contractors":0,"groups":0,"total":0},"board":null}
+```
+
+That `rehomed` block is the safeguard written after the orphaned-site incident
+in W14-06, reporting that it had nothing to rescue. The mechanism that would
+have prevented that orphan is live and answering.
+
+## W14-04 — the default page a new section gets
+
+A section created with `template: "sites"` comes back `ownsBoard: true` with its
+own board key, and its page carries every element the checklist lists: the title
+in sidebar and header, a description, configurable columns (a Summary / All
+columns toggle), a search field, Status and Group filters, Export CSV / Import
+CSV / Add site, and an empty state that tells the reader what to do —
+**"No sites yet. Add your first one, or import a CSV."**
+
+A section created WITHOUT a template is handled just as carefully rather than
+left broken: it renders the canonical register and says **"This section has no
+register of its own. Remove it and add it again to give it one."**
+
+## W14-08 / W14-09 — Sites and Contractors
+
+Both full cycles pass. Contractor edits were read back from Postgres to confirm
+they landed: phone `07111 111111` and the note both persisted.
+
+| | Sites | Contractors |
+| --- | --- | --- |
+| add | 200 | 200 |
+| edit | 200 | 200, verified in the database |
+| archive | 200 | 200 |
+| remove | 200 | 200 |
+
+**"Remove" means archive, for both, and there is no permanent removal.** After
+two DELETEs a site is still present with `active = false`; it is not in the
+recycle bin either. That is consistent with the owner's instruction never to
+cascade-delete canonical entities — a site is real operational data whatever
+register it sits in — but it is worth knowing plainly: nothing in the product
+permanently removes a site or a contractor.
+
+## W14-10 — documents
+
+| Step | Result |
+| --- | --- |
+| upload with no anchor | **400 "A document must be filed against a work order, a site, a unit or a contractor."** |
+| upload against a site | 201 |
+| download | 200, **192 bytes — byte-identical to the original** |
+| download with no session | **401** |
+| replace | 201, `versionNo: 2`, `isCurrent: true`, `rootDocumentId` = the original |
+| download the new version | 200, 619 bytes |
+| remove | 200, **`versionsDeleted: 2`** |
+
+The lineage model behaves exactly as `CLAUDE.md` describes: a replacement is the
+same document at a new version, and deleting the current version takes the
+lineage with it.
+
+## W14-11 / W14-12 — every report and customised date range
+
+Four ranges through the real engine on the deployed Preview, each checked
+against Postgres independently:
+
+| Range | Report | Database | |
+| --- | ---: | ---: | --- |
+| August 2026 | 65 | 65 | ✅ |
+| September 2026 | 31 | 31 | ✅ |
+| Q3 (Jul-Sep) | 135 | 135 | ✅ |
+| 15 September only | 0 | 0 | ✅ |
+
+They are additive — 39 + 65 + 31 = 135 — and the labels are right: a whole
+calendar month is named "September 2026", a span is "Custom range". A reversed
+range is refused rather than silently swapped: **400 "The start date is after
+the end date."**
+
+## W14-17 — permissions for every user role
+
+Three roles, defined in `app/lib/permissions.ts` and enforced server-side:
+
+| Role | Capabilities |
+| --- | --- |
+| `super_admin` | all |
+| `admin` | 14 — and **`data.delete` is withheld**, along with `clients.view_all` and `billing.manage` |
+| `client` | two only: `board.view`, `data.export` |
+
+Ninety-one capability-guarded call sites across eight capabilities; only three
+routes demand `data.delete`. Every `/api/admin/*` route gates itself with
+`requireCapability`. Twelve protected endpoints were called with no session and
+**every one answered 401** — not 403, not 500, and nothing leaked.
+
+> The limit of this check, stated rather than glossed: role SEPARATION is
+> evidenced from the code and from unauthenticated refusals, not by signing in as
+> a client and being refused. The other accounts' passwords are not in this
+> checkout, and inventing one would have meant changing a credential.
+
+## W14-19 — evidence
+
+Thirty-five screenshots and fifty-nine captured data files, covering the landing
+page at three widths, nine portal surfaces at three widths, the calendar, the
+reconciliation page, the report-a-job form in four states, the board, the sort
+panel and a newly created section's default page.
+
+## W14-20 — the completed checklist
+
+This document and the consolidated W14 final report are the deliverable for
+review and approval. **Approval remains the owner's**, and nothing here is a
+sign-off: the items in the final report marked OWNER DECISION REQUIRED need an
+answer before this checklist can be called complete.
