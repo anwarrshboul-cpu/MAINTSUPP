@@ -31,8 +31,22 @@
 # `--prod` appears nowhere in this file, and there is nothing here to make it
 # appear: `vercel alias set` assigns a domain to a deployment and does not
 # change that deployment's target. Verified — the deployment behind this alias
-# still reports `target: preview`, and `maintsupp-portal` still reports no
-# production URL at all.
+# still reports `target: preview`.
+#
+# THE PROJECT NOW HAS A PRODUCTION URL, and that is not this script's doing.
+# Two production deployments were made by hand on 2026-09-05 and the project
+# reports the configured custom domain, https://maintsupp.com. The sentence
+# that used to sit here said the opposite, and the check at the foot of the
+# file was written to match it: any production URL at all was treated as a
+# fault, so every ordinary run printed a warning and exited 1 after
+# successfully moving the alias. A warning that always fires is one nobody
+# reads, and an exit code that always says failure is worse.
+#
+# What that check watches for now is a CHANGE. The production URL is read
+# before the assignment and again afterwards; the two must agree, and the value
+# must be either "--" or `EXPECTED_PRODUCTION`. The gates that do the real work
+# are earlier and are untouched: the deployment must belong to this project,
+# its target must be `preview`, and it must answer 200 twice.
 #
 # No token, project id or password is stored here. Authentication is whatever
 # `vercel whoami` already has.
@@ -48,9 +62,31 @@ set -euo pipefail
 
 PROJECT="maintsupp-portal"
 ALIAS="${ALIAS:-maintsupp-preview.vercel.app}"
+# The Production URL this project is EXPECTED to have. It is read, never
+# written: nothing in this file can create, promote or retarget a production
+# deployment. Override it on the day the domain legitimately changes, so that
+# the change is stated by whoever makes it rather than discovered later.
+EXPECTED_PRODUCTION="${EXPECTED_PRODUCTION:-https://maintsupp.com}"
 
 die() { printf '\n  REFUSED: %s\n\n' "$1" >&2; exit 1; }
 say() { printf '  %s\n' "$1"; }
+
+# The project's current Production URL, or "--" when it has none, or empty when
+# the table could not be read. Called once before the alias move and once after:
+# a CHANGE across those two is the thing worth stopping for.
+#
+# `|| true` because a failed pipe under `set -e` would kill the script after the
+# alias had already moved, which is the one place a spurious failure would be
+# actively misleading. The CLI colourises its table, so the escape sequences
+# have to come off before awk sees a column, and it prints that table to STDERR,
+# so 2>&1 rather than 2>/dev/null: discarding stderr discards the answer.
+production_url() {
+  npx vercel project ls 2>&1 |
+    sed -e 's/\x1b\[[0-9;]*m//g' |
+    awk -v p="$PROJECT" '$1 == p { print $2 }' |
+    head -1 || true
+}
+
 
 # The alias must never be one of these host names. Two different reasons, and
 # both still hold after the 2026-09-04 consolidation:
@@ -137,6 +173,10 @@ done
 PREVIOUS="$(npx vercel alias ls 2>/dev/null | grep -F "$ALIAS" | awk '{print $1}' | head -1 || true)"
 [[ -n "$PREVIOUS" ]] && say "Currently:  $PREVIOUS"
 
+# Read BEFORE the assignment, so the check below compares like with like.
+before="$(production_url)"
+say "Production: ${before:-could not read}"
+
 npx vercel alias set "$DEPLOYMENT" "$ALIAS" >/dev/null 2>&1 ||
   die "Vercel refused the alias assignment. Nothing changed."
 
@@ -150,26 +190,51 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://${ALIAS}/"
 # the escape sequences have to come off before awk sees a column.
 # 2>&1, not 2>/dev/null: the CLI prints this table to STDERR, so discarding
 # stderr discards the answer.
-after="$(
-  npx vercel project ls 2>&1 |
-    sed -e 's/\x1b\[[0-9;]*m//g' |
-    awk -v p="$PROJECT" '$1 == p { print $2 }' |
-    head -1 || true
-)"
+after="$(production_url)"
 
 printf '\n  Stable client URL: https://%s  (HTTP %s)\n' "$ALIAS" "$code"
 printf '  %s production URL after the change: %s\n' "$PROJECT" "${after:-could not read}"
-# "--" is Vercel's own way of saying "no production deployment", which is the
-# state this workflow keeps the project in. Anything that looks like a URL is
-# worth stopping for; an unreadable table is worth a note and no more, because a
-# warning that fires on its own parsing failure teaches people to ignore
-# warnings.
-if [[ "$after" == http* ]]; then
-  printf '\n  WARNING: %s now reports a production URL. That is not expected from an\n' "$PROJECT"
-  printf '  alias assignment — check the project before telling the client anything.\n\n'
-  exit 1
-fi
-if [[ "$after" != "--" ]]; then
-  printf '  (could not read the project table — confirm with: npx vercel project ls)\n'
-fi
+# WHAT THIS CHECK IS FOR, AND WHAT IT STOPPED BEING FOR.
+#
+# `vercel alias set` assigns a domain to a deployment and does not change that
+# deployment's target, so a production deployment must never appear because of
+# a run of this script. That is still the thing being checked.
+#
+# It used to be checked by asserting the project had NO production URL at all,
+# which was true when this was written and is not any more. The check fired on
+# every ordinary run and exited 1 after successfully moving the alias, so a
+# normal update reported failure — and a warning that always fires is one
+# nobody reads.
+#
+# What is suspicious is a CHANGE. Kept as a function of its three inputs and
+# nothing else, so it can be exercised without a network, a deployment or a
+# Vercel account: see tests/preview-alias-guard.test.mjs.
+production_verdict() {
+  local was="$1" now="$2" want="$3"
+
+  if [[ -z "$was" || -z "$now" ]]; then
+    printf '  (could not read the project table — confirm with: npx vercel project ls)\n'
+    return 0
+  fi
+
+  if [[ "$now" != "$was" ]]; then
+    printf '\n  WARNING: the production URL changed during this run:\n'
+    printf '           before: %s\n' "$was"
+    printf '           after:  %s\n' "$now"
+    printf '  An alias assignment must not do that. Check the project before telling\n'
+    printf '  the client anything.\n\n'
+    return 1
+  fi
+
+  if [[ "$now" != "--" && "$now" != "$want" ]]; then
+    printf '\n  WARNING: production URL is %s, which is neither "--" nor the expected\n' "$now"
+    printf '  %s. It did not change during this run, so this script did not cause\n' "$want"
+    printf '  it — but confirm the project is the one you meant.\n\n'
+    return 1
+  fi
+
+  return 0
+}
+
+production_verdict "$before" "$after" "$EXPECTED_PRODUCTION" || exit 1
 printf '\n  To roll back:  scripts/update-preview-alias.sh %s\n\n' "${PREVIOUS:-<previous-deployment-url>}"
