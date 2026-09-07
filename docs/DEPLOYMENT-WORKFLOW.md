@@ -52,6 +52,26 @@ reads **Supabase Production** (`wghfhtdzxttfhofuljyy`). They share no data.
 
 ---
 
+## Verified, 2026-09-07
+
+Both directions were proved by pushing, not by reading settings.
+
+| Push | Deployment | Target | Built from | Result |
+| --- | --- | --- | --- | --- |
+| `develop` @ `01f8945` | `2zxzukf2p` | preview | `githubCommitRef: develop` | READY, 46s |
+| `develop` @ `d0b3840` | `dguv9lf23` | preview | `githubCommitRef: develop` | READY, 44s |
+| `main` @ `6844e50` | `28thsavgt` | **production** | `githubCommitRef: main` | READY, 46s |
+
+The Production deployment took the live aliases with it — `maintsupp.com`,
+`www.maintsupp.com` and `maintsupp-portal-git-main-maintsupp.vercel.app` — with
+`aliasError: null`. It was the first time Vercel has built this portal from
+source rather than accepting a prebuilt upload, and it worked: the apex answers
+200, `/login` answers 200, five `/api/*` routes answer 401, and there were no
+5xx in the runtime logs.
+
+Neither develop push moved Production, and the branch cleanup that followed
+moved nothing at all.
+
 ## Development
 
 ```bash
