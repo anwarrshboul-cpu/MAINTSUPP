@@ -55,10 +55,24 @@ import { displayedBoardColumnWidth } from "./board-format";
 import type { BoardDisplayColumn } from "./board-model";
 import type { MaintenanceGroup } from "../../lib/types";
 
-/** The select-all gutter, `.sheet-check` in globals.css. */
-const GUTTER_WIDTH = 38;
-/** The trailing "+" cell, `.sheet-add-column` in globals.css. */
-const ADD_COLUMN_WIDTH = 146;
+/*
+ * THE TWO NON-DATA COLUMNS ARE MEASURED BY THE STYLESHEET, NOT HERE.
+ *
+ * These were `const GUTTER_WIDTH = 38` and `const ADD_COLUMN_WIDTH = 146`,
+ * which is the same pair of numbers `.sheet-check` and `.sheet-add-column`
+ * already carry in globals.css. Two copies of a width is one copy too many
+ * the moment a media query moves one of them, and one does: the phone widens
+ * the gutter to 42px so the checkbox is a touch target. This file went on
+ * writing 38 into the `<colgroup>`, the body cells took 42, and because the
+ * sticky header row is a SECOND table drawing the SAME columns, every heading
+ * on the phone board sat 4px to the left of the column it named.
+ *
+ * A `var()` in the inline style has the browser resolve it against the table
+ * these `<col>` elements are in, at the width the media query actually
+ * settled on. There is one number and the stylesheet owns it.
+ */
+const GUTTER_WIDTH = "var(--sheet-select-width)";
+const ADD_COLUMN_WIDTH = "var(--sheet-add-column-width)";
 
 /**
  * The widths, as a `<colgroup>`, for one board table.
@@ -230,6 +244,9 @@ export function MobileBoardStickyHeader({
   columns: BoardDisplayColumn[];
   groups: MaintenanceGroup[];
 }) {
+  /* This row exists only on a phone, so every width it asks for is a phone
+     width -- the same argument `<BoardColumnWidths … mobile />` passes below. */
+  const mobile = true;
   const rowRef = useRef<HTMLDivElement>(null);
   const currentId = useGroupUnderHeader(
     rowRef,
@@ -265,6 +282,21 @@ export function MobileBoardStickyHeader({
             {columns.map((entry, index) => {
               const naming = index === nameIndex && Boolean(current);
               const label = naming ? current.name : entry.column.title;
+              /*
+               * THE SAME THREE WIDTHS THE BODY CELL CARRIES, FROM THE SAME CALL.
+               *
+               * The `<colgroup>` alone is not enough. A fixed table stretched
+               * past the sum of its columns by `min-width: 100%` shares the
+               * slack out, and how it shares it depends on what the CELLS say:
+               * with the body's cells pinned by an inline trio and this row's
+               * cells saying nothing, the two tables spent the same slack in
+               * different places and the headings drifted right along the row.
+               * The naming cell is the one that showed it worst, because
+               * `.sheet-column--name` also floors it at 220px for the desktop
+               * header -- 220 over 168 of data, and every column after it
+               * carried the difference.
+               */
+              const width = displayedBoardColumnWidth(entry.column, mobile);
               return (
                 <th
                   key={entry.column.id}
@@ -274,9 +306,12 @@ export function MobileBoardStickyHeader({
                       : "board-mobile-head__col"
                   }
                   style={
-                    naming
-                      ? ({ "--group-color": current.color } as CSSProperties)
-                      : undefined
+                    {
+                      width,
+                      minWidth: width,
+                      maxWidth: width,
+                      ...(naming ? { "--group-color": current.color } : null),
+                    } as CSSProperties
                   }
                 >
                   <span title={label}>{label}</span>

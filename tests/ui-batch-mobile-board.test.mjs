@@ -19,7 +19,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const read = (file) => readFile(path.join(root, file), "utf8");
+/*
+ * Line endings are per file in this repo and globals.css is CRLF. Every
+ * pattern below is written with a bare newline, so a selector list broken
+ * across two lines matched nothing at all: these helpers returned null, or
+ * an empty slice, and the assertions on top of them had quietly stopped
+ * checking anything. Normalise on the way in. The contracts are unchanged.
+ */
+const read = async (file) =>
+  (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
 const BOARD = "app/(app)/portal/live-board.tsx";
 const PORTAL = "app/(app)/portal/portal-app.tsx";

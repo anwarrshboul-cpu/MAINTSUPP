@@ -4966,9 +4966,18 @@ label.live-board-tool {
   font-size: 7px;
 }
 
-.sheet-group__rename:hover {
-  background: #edf2f4;
-  color: var(--ink);
+/*
+ * The same audit that found the white square on the button below found this,
+ * twelve lines above it and worse: `#edf2f4` is a fixed near-white, `--ink` is
+ * near-WHITE in the dark theme, so hovering Rename on a dark board painted
+ * white text on a white pill. Same tokens, same fix, same `@media` guard so a
+ * tap does not leave it stuck on.
+ */
+@media (hover: hover) {
+  .sheet-group__rename:hover {
+    background: var(--surface-hover);
+    color: var(--control-fg-strong);
+  }
 }
 
 .sheet-group__menu-wrap {
@@ -4976,6 +4985,32 @@ label.live-board-tool {
   margin-left: 3px;
 }
 
+/*
+ * THE GROUP'S ACTIONS BUTTON, IN BOTH THEMES AND UNDER A FINGER.
+ *
+ * It painted `#687b86` on transparent and `#edf2f4` on hover, both literals,
+ * and neither had a dark counterpart anywhere in this file. On a phone that
+ * is the reported white square: a tap leaves `:hover` stuck on the button
+ * until the reader taps something else, which is exactly the whole time the
+ * menu is open, so a near-white tile sat on the dark group bar underneath an
+ * open dark menu. Three things were wrong and all three are here.
+ *
+ *   1. The colours are the themed control tokens `.icon-button` uses, so the
+ *      dark theme is not a second set of rules that can be forgotten again.
+ *      `--control-own-fg` opts the label out of the dark `.portal-main button`
+ *      blanket rather than fighting it; see the note on that rule below.
+ *   2. The hover sits behind `@media (hover: hover)`, so a device that cannot
+ *      truly hover never paints one. That is the state that stuck.
+ *   3. The open menu gets a state of its own, read from `aria-expanded` —
+ *      the attribute the button already sets for assistive technology, so
+ *      there is no second opinion about whether the menu is open.
+ *
+ * Two things deliberately absent. There is no `:focus-visible` rule: the
+ * global ring at the top of this file is already tuned for both themes, and a
+ * local one would be a worse copy of it. There is no
+ * `-webkit-tap-highlight-color` either — `button, a` already clears it
+ * globally, so the flash this button showed was never the platform's.
+ */
 .sheet-group__more {
   display: grid;
   place-items: center;
@@ -4985,12 +5020,27 @@ label.live-board-tool {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #687b86;
+  --control-own-fg: var(--control-fg);
+  color: var(--control-fg);
 }
 
-.sheet-group__more:hover {
-  background: #edf2f4;
-  color: var(--navy-950);
+@media (hover: hover) {
+  .sheet-group__more:hover {
+    background: var(--surface-hover);
+    color: var(--control-fg-strong);
+  }
+}
+
+/*
+ * Pressed, and open. Same paint for both: the button is the menu's handle, and
+ * while the menu is up the handle should read as held down rather than as
+ * hovered. On a touch device this is now the ONLY background the button ever
+ * takes, and it is a token, so it is dark on a dark board.
+ */
+.sheet-group__more:active,
+.sheet-group__more[aria-expanded="true"] {
+  background: var(--surface-active);
+  color: var(--control-fg-strong);
 }
 
 .sheet-group__menu,
@@ -5061,6 +5111,24 @@ label.live-board-tool {
 }
 
 .live-sheet {
+  /*
+   * THE TWO NON-DATA COLUMNS' WIDTHS, DECLARED ONCE.
+   *
+   * Every column between these two is data: its width is stored per column
+   * and written inline by `displayedBoardColumnWidth`. The select-all gutter
+   * and the trailing "+" cell are not data, so their widths were literals —
+   * and the literals were in four places. `board-mobile-header.tsx` repeated
+   * them as `GUTTER_WIDTH` / `ADD_COLUMN_WIDTH` to build the `<colgroup>`
+   * that a `table-layout: fixed` grid takes its columns from, while the phone
+   * block widens the select cell to 42px for a touch target. The colgroup
+   * went on saying 38, so on a phone the one sticky header row sat 4px to the
+   * left of the columns it named and every heading drifted off its data.
+   *
+   * As custom properties the colgroup reads whatever the media query settled
+   * on, because it is reading the same declaration the cells read.
+   */
+  --sheet-select-width: 38px;
+  --sheet-add-column-width: 146px;
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
@@ -5115,9 +5183,9 @@ label.live-board-tool {
   position: sticky;
   left: 0;
   z-index: calc(var(--z-sticky) + 3) !important;
-  width: 38px;
-  min-width: 38px;
-  max-width: 38px;
+  width: var(--sheet-select-width);
+  min-width: var(--sheet-select-width);
+  max-width: var(--sheet-select-width);
   border-left: 1px solid #cfd9df;
   text-align: center;
 }
@@ -5420,9 +5488,9 @@ th.sheet-column--name {
 .sheet-add-column,
 .sheet-add-column-spacer {
   position: relative;
-  width: 146px;
-  min-width: 146px;
-  max-width: 146px;
+  width: var(--sheet-add-column-width);
+  min-width: var(--sheet-add-column-width);
+  max-width: var(--sheet-add-column-width);
 }
 
 .sheet-add-column > button {
@@ -11607,10 +11675,14 @@ th.sheet-column--name {
     height: 42px;
   }
 
-  .sheet-check {
-    width: 42px;
-    min-width: 42px;
-    max-width: 42px;
+  /*
+   * 42px on a phone, because the checkbox inside it is a touch target. Said
+   * as the token rather than on `.sheet-check`, so the `<colgroup>` and the
+   * sticky header's own gutter cell widen with it. While this was three
+   * literals on the cell, they did not.
+   */
+  .live-sheet {
+    --sheet-select-width: 42px;
   }
 
   /*
@@ -15892,22 +15964,49 @@ body.is-dragging-board-column {
     background: var(--surface-sunken, #fbfcfd);
   }
 
+  /*
+   * THE SAME WIDTH MODEL AS THE TABLES IT IS HEADING, WHICH IS THE POINT.
+   *
+   * `.live-sheet` is `width: max-content; min-width: 100%`, so every group
+   * table stretches to the canvas whenever the board is narrower than the
+   * phone. This one was exempted with `min-width: 0` and did not stretch: a
+   * fixed layout shares the slack out across its columns, so the group tables
+   * widened, the header row did not, and the headings ended up left of their
+   * own data by a few pixels per column. Sharing the rule shares the
+   * arithmetic.
+   */
   .board-mobile-head__grid {
-    min-width: 0;
+    min-width: 100%;
   }
 
   /*
-   * The gutter. `.sheet-check` is deliberately NOT used: on a phone that class
-   * is un-frozen so the checkbox column scrolls away, and this cell only has
-   * to hold the same 38px of space the body rows start with. The trailing
-   * spacer stands in for the "+" cell, which has no business on a phone — the
-   * column picker is how a column is added there — but whose width the last
-   * real column still needs in order to scroll fully into view.
+   * THE HEADER ROW'S CELLS ARE CONSTRAINED EXACTLY AS THE BODY'S ARE.
+   *
+   * A fixed table takes its columns from the `<col>` elements, but when the
+   * table is wider than their sum — which it is whenever `min-width: 100%`
+   * stretches it — the browser shares the slack out, and it shares it
+   * differently depending on what the CELLS say. So the two tables agree only
+   * if their cells agree, not merely their colgroups. The data cells get the
+   * same inline trio the body's do, from the same function, in
+   * board-mobile-header.tsx. These two are the pair that is not data.
+   *
+   * `.sheet-check` is deliberately not used on the gutter — on a phone that
+   * class is un-frozen so the checkbox column scrolls away — but its WIDTH is
+   * that column's width, so it reads the same token. The spacer stands in for
+   * the "+" cell, which has no business on a phone (the column picker is how a
+   * column is added there) but whose width the last real column still needs in
+   * order to scroll fully into view.
    */
   .board-mobile-head__gutter {
-    width: 38px;
-    min-width: 38px;
-    max-width: 38px;
+    width: var(--sheet-select-width);
+    min-width: var(--sheet-select-width);
+    max-width: var(--sheet-select-width);
+  }
+
+  .board-mobile-head__spacer {
+    width: var(--sheet-add-column-width);
+    min-width: var(--sheet-add-column-width);
+    max-width: var(--sheet-add-column-width);
   }
 
   .board-mobile-head th > span {

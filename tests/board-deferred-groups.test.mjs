@@ -5,7 +5,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const read = (file) => readFile(path.join(root, file), "utf8");
+/*
+ * Line endings are per file in this repo and globals.css is CRLF. Every
+ * pattern below is written with a bare newline, so a selector list broken
+ * across two lines matched nothing at all: these helpers returned null, or
+ * an empty slice, and the assertions on top of them had quietly stopped
+ * checking anything. Normalise on the way in. The contracts are unchanged.
+ */
+const read = async (file) =>
+  (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
 const CSS = "app/(app)/portal/board-visibility.css";
 const MODULE = "app/(app)/portal/board-visibility.ts";
@@ -108,9 +116,18 @@ test("every popover that can escape its group cancels the containment", async ()
    * `sheet-row-more` sits in the 34px gutter the table's own margin leaves,
    * `sheet-check::before` and `sheet-custom-checkbox input` are cell
    * decorations, and `mobile-cell-sheet` is portalled to document.body.
+   *
+   * The per-group `<thead>` joined them when the phone board moved to one
+   * sticky header row: it is absolutely positioned because it is visually
+   * hidden -- 1px square, `overflow: hidden`, `clip-path: inset(50%)` -- so
+   * that its column names stay in the accessibility tree while only the one
+   * row is drawn. It paints nothing at all, which is a stronger guarantee
+   * than staying inside the box. (This test could not see it until the read
+   * above stopped splitting a CRLF file on a bare newline.)
    */
   const INSIDE_THE_GROUP = [
     "sheet-row-more",
+    "sheet-group .live-sheet > thead",
     "sheet-check::before",
     "sheet-custom-checkbox input",
     "column-resize-handle",

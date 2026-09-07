@@ -31,7 +31,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const read = (file) => readFile(path.join(root, file), "utf8");
+/*
+ * Line endings are per file in this repo and globals.css is CRLF. Every
+ * pattern below is written with a bare newline, so a selector list broken
+ * across two lines matched nothing at all: these helpers returned null, or
+ * an empty slice, and the assertions on top of them had quietly stopped
+ * checking anything. Normalise on the way in. The contracts are unchanged.
+ */
+const read = async (file) =>
+  (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
 const GLOBALS = "app/globals.css";
 const BOARD = "app/(app)/portal/live-board.tsx";
@@ -104,13 +112,26 @@ test("the add-column cell is wide enough for a label, and carries one", async ()
   const cell = rule(css, ".sheet-add-column,\n.sheet-add-column-spacer");
   assert.ok(cell, "the header cell and its body spacer are still sized together");
 
-  const width = Number.parseInt(px(cell, "width"), 10);
+  /*
+   * RE-POINTED, not relaxed. The cell's three widths are one custom property
+   * now: `board-mobile-header.tsx` was writing the same 146 into the
+   * `<colgroup>` that a fixed-layout table actually takes its columns from,
+   * and a second copy of a width is a copy that gets left behind -- the phone
+   * moved the gutter to 42px and the colgroup went on saying 38, which is why
+   * the sticky header row sat 4px left of its own columns. The contract here
+   * is unchanged: one number, wide enough for the label, identical on the body
+   * spacer. It is read from where it is DECLARED instead of where it is used.
+   */
+  assert.equal(px(cell, "width"), "var(--sheet-add-column-width)");
+  assert.equal(px(cell, "min-width"), px(cell, "width"));
+  assert.equal(px(cell, "max-width"), px(cell, "width"));
+
+  const declared = px(rule(css, ".live-sheet"), "--sheet-add-column-width");
+  const width = Number.parseInt(declared, 10);
   assert.ok(
     width >= 120,
     `the add-column cell is ${width}px. It was 48px — icon-only — which is why nobody found it.`,
   );
-  assert.equal(px(cell, "min-width"), px(cell, "width"));
-  assert.equal(px(cell, "max-width"), px(cell, "width"));
 
   const button = rule(css, ".sheet-add-column > button");
   assert.ok(button);
