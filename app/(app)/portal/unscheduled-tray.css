@@ -161,6 +161,13 @@
 .unscheduled-tray__body {
   min-height: 0;
   overflow-y: auto;
+  /*
+   * The tray is a fixed sheet over the calendar, so a scroll that runs off the
+   * end of this list must stop rather than carry on scrolling the month grid
+   * underneath it — that is how a drawer "scrolls the wrong thing" on a phone.
+   */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .unscheduled-tray__empty {
@@ -207,18 +214,42 @@
 }
 
 /*
- * A row that can be dragged says so before it is touched, and takes the
- * gesture away from the browser's own scrolling. Without `touch-action: none`
- * a finger on this row is a page scroll and the drag never starts — the same
- * decision `calendar-event-drag.ts` documents for its grip.
+ * A row that can be dragged says so before it is touched.
+ *
+ * IT NO LONGER TAKES THE WHOLE GESTURE. This rule used to be
+ * `touch-action: none` on the row, so that a finger anywhere on it started a
+ * drag instead of a scroll. On a phone the tray is a fixed sheet whose entire
+ * visible area is rows, which made the list of unscheduled jobs unscrollable —
+ * a thumb could not reach the eleventh job because every place it could land
+ * had opted out of panning.
+ *
+ * `pan-y` gives vertical panning back to the browser and keeps everything else,
+ * so the list scrolls and a horizontal drag still reaches the handlers. Touch
+ * drags now start from the grip below, which is what a grip is for;
+ * `unscheduled-tray.tsx` enforces the same rule in `onPointerDown`, so the CSS
+ * and the JavaScript cannot disagree about where a finger may drag from.
  */
 .unscheduled-tray__row[data-tray-draggable] {
-  touch-action: none;
+  touch-action: pan-y;
 }
 
+/*
+ * The one surface that still owns the gesture outright. It is small, so it is
+ * given the 44px touch target the rest of this sheet promises.
+ */
 .unscheduled-tray__grip {
   flex: 0 0 auto;
   color: var(--muted-2);
+}
+
+.unscheduled-tray__row[data-tray-draggable] .unscheduled-tray__grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  touch-action: none;
+  margin: -12px 0 -12px -12px;
 }
 
 /* SQUARE — a job, in §4.3's shape vocabulary, the same as its chip on the
@@ -429,12 +460,34 @@
     top: auto;
     z-index: var(--z-sticky);
     width: auto;
+    /*
+     * `dvh` FIRST, `vh` AS THE FALLBACK, and the order is the whole point.
+     *
+     * On iOS Safari `vh` resolves against the LARGE viewport — the one you get
+     * with the URL bar hidden — so `55vh` is more than 55% of what is actually
+     * on screen while the bar is showing, and the bottom of the sheet sits under
+     * the browser chrome with the last rows unreachable. `dvh` tracks the
+     * viewport that is really there. A browser that has never heard of `dvh`
+     * ignores the second declaration and keeps the first.
+     */
     max-height: 55vh;
+    max-height: 55dvh;
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
     border-radius: 14px 14px 0 0;
-    /* Clear of the phone's own home indicator. */
+  }
+
+  /*
+   * The home-indicator inset belongs to the SCROLLER, not to the sheet.
+   *
+   * With `box-sizing: border-box` set globally, padding on the sheet is taken
+   * out of the `max-height` — so putting the safe area there shortened the
+   * scrollable list by the height of the inset instead of clearing the
+   * indicator. Padding the list means the last row can scroll up past the
+   * indicator and be read.
+   */
+  .unscheduled-tray__body {
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
@@ -443,7 +496,9 @@
   }
 
   .schedule-undo {
-    /* Above the sheet, not behind it. */
-    bottom: calc(55vh + 12px);
+    /* Above the sheet, not behind it — on the same height model, and clear of
+       the home indicator the sheet no longer pads for itself. */
+    bottom: calc(55vh + 12px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(55dvh + 12px + env(safe-area-inset-bottom, 0px));
   }
 }

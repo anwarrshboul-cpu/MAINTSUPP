@@ -88,6 +88,13 @@ export const CALENDAR_DROP_CLASS = "is-calendar-drop";
 /** Below this a press is a click, not a drag — the calendar's own threshold. */
 const DRAG_THRESHOLD = 4;
 
+/*
+ * The grip is a DOM contract now, not just decoration: `onPointerDown` asks
+ * whether a touch started inside one, and `unscheduled-tray.css` gives it the
+ * only `touch-action: none` left in the tray.
+ */
+const GRIP_CLASS = "unscheduled-tray__grip";
+
 /* ── Which jobs are in the tray, and in what order ───────────────────────── */
 
 /**
@@ -182,59 +189,60 @@ export function jobScheduleTarget(job: CalendarJob): VisitScheduleTarget {
 
 /* ── The collapsed state, remembered ─────────────────────────────────────── */
 
-export const UNSCHEDULED_TRAY_KEY = "maintsupp:calendar:tray-collapsed";
-
 /*
- * The same mechanism `calendar-preferences.ts` uses, and the same tradeoff:
- * `localStorage` under a `maintsupp:` key read through `useSyncExternalStore`,
- * which makes this PER PERSON PER BROWSER rather than per account. There is no
- * server store for arbitrary view preferences, and widening one for a single
- * boolean would be an API route, a migration and a serialiser for a choice
- * about whether a drawer is open.
+ * THE TRAY OPENS COLLAPSED. EVERY TIME, FOR EVERYBODY.
  *
- * It is written here rather than added to `calendar-preferences.ts` only
- * because the tray owns it; if a third caller ever needs it, that module is
- * where it belongs and this is the code to move.
+ * It used to remember the choice in `localStorage` under
+ * `maintsupp:calendar:tray-collapsed`, defaulting to OPEN. On the calendar the
+ * mobile tray is a fixed sheet over the bottom 55% of the screen, so "open" is
+ * not a drawer sitting quietly in a sidebar — it is half the month grid covered
+ * before the page has been read. The owner's rule is that opening the calendar
+ * shows the calendar.
+ *
+ * So the initial value is a constant, and nothing computes it:
+ *
+ *   - not the count, not `urgent`, not an overdue job, not a P1, not a breached
+ *     SLA. A tray that opens itself because the news is bad is a tray that opens
+ *     itself on exactly the days somebody wanted to look at the schedule.
+ *   - not a stored preference either. A value remembered from before this rule
+ *     would reopen it for precisely the people who had used it most.
+ *
+ * THE STORE IS DELIBERATELY IN MEMORY AND NOT IN `localStorage`. Persisting a
+ * value that can no longer affect the first render would leave a key that reads
+ * like a setting and changes nothing — the kind of dead configuration somebody
+ * later spends an afternoon on. The choice lasts the life of the page, which is
+ * the span the owner asked for: "the user can manually open it during the
+ * current interaction/session".
+ *
+ * `getSnapshot` and `getServerSnapshot` must agree on the first paint or React
+ * renders the server's answer and then swaps it, which is the flash of an open
+ * tray this change exists to remove. Both start `true`.
  */
 const listeners = new Set<() => void>();
-let chosen: boolean | undefined;
+
+/** Collapsed until somebody says otherwise, and reset by a page load. */
+let chosen = true;
 
 function subscribe(onChange: () => void) {
   listeners.add(onChange);
-  window.addEventListener("storage", onChange);
   return () => {
     listeners.delete(onChange);
-    window.removeEventListener("storage", onChange);
   };
 }
 
-/** Anything that is not the literal `true` is open — the honest default. */
 function readCollapsed(): boolean {
-  if (chosen !== undefined) return chosen;
-  try {
-    return window.localStorage.getItem(UNSCHEDULED_TRAY_KEY) === "true";
-  } catch {
-    /* Private browsing, or a storage policy. An open tray still works, which is
-       the only thing this has to guarantee. */
-    return false;
-  }
+  return chosen;
+}
+
+/** The server has no session either, and it agrees: collapsed. */
+function readCollapsedOnServer(): boolean {
+  return true;
 }
 
 export function useTrayCollapsed(): [boolean, (next: boolean) => void] {
-  const value = useSyncExternalStore(
-    subscribe,
-    readCollapsed,
-    /* The server has no storage, so it renders the tray open and the first
-       client render agrees with it. Nothing to hydrate around. */
-    () => false,
-  );
+  const value = useSyncExternalStore(subscribe, readCollapsed, readCollapsedOnServer);
   const set = useCallback((next: boolean) => {
     chosen = next;
-    try {
-      window.localStorage.setItem(UNSCHEDULED_TRAY_KEY, String(next));
-    } catch {
-      /* Held in `chosen` above, so the control still works this session. */
-    }
     for (const listener of listeners) listener();
   }, []);
   return [value, set];
@@ -354,6 +362,25 @@ export function UnscheduledTray({
   const onPointerDown = (job: CalendarJob) => (pressed: ReactPointerEvent) => {
     if (!canSchedule) return;
     if (pressed.button !== 0 && pressed.pointerType === "mouse") return;
+    /*
+     * A FINGER DRAGS FROM THE GRIP; ANYWHERE ELSE ON THE ROW IT SCROLLS.
+     *
+     * The row used to carry `touch-action: none` so the drag owned the gesture.
+     * On a phone the tray is a fixed sheet whose whole visible area is rows, so
+     * that setting told the browser not to pan anywhere a thumb could land —
+     * and the list of unscheduled jobs could not be scrolled at all. The list is
+     * the point of the tray; dragging out of it is the convenience.
+     *
+     * So touch arms the drag only from the grip, which is what a grip is for and
+     * what every other draggable list does. A mouse or pen still drags from
+     * anywhere on the row: neither one is trying to scroll with the same
+     * gesture, and taking the whole row away from them would be a loss for
+     * nothing. The keyboard route (Enter/Space on the row) is untouched.
+     */
+    if (pressed.pointerType === "touch") {
+      const from = pressed.target as HTMLElement | null;
+      if (!from?.closest?.(`.${GRIP_CLASS}`)) return;
+    }
     gesture.current = {
       pointerId: pressed.pointerId,
       job,
@@ -500,7 +527,7 @@ export function UnscheduledTray({
                       {...(canSchedule ? { "data-tray-draggable": "" } : {})}
                     >
                       {canSchedule && (
-                        <span className="unscheduled-tray__grip" aria-hidden="true">
+                        <span className={GRIP_CLASS} aria-hidden="true">
                           <Icon name="grid" size={12} />
                         </span>
                       )}

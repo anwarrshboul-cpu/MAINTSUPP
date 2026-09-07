@@ -239,6 +239,41 @@ document; authorisation is unaffected, because it is enforced by
 
 ---
 
+## 12. The calendar's Unscheduled tray is not remembered
+
+**Decided by the owner during the post-W14 mobile polish pass, 2026-09-07.
+Implemented in `app/(app)/portal/unscheduled-tray.tsx`.**
+
+The tray opens **collapsed, every time, for everybody**. There is no stored
+preference and there is no condition that can open it.
+
+It used to remember the choice in `localStorage` under
+`maintsupp:calendar:tray-collapsed`, defaulting to open. On a phone the tray is
+a fixed sheet over the bottom 55% of the screen, so "open" is not a drawer
+sitting quietly in a sidebar — it is half the month grid covered before the page
+has been read.
+
+Three things were considered and rejected as the initial value:
+
+| Candidate | Why not |
+| --- | --- |
+| A stored preference | It reopens the tray for exactly the people who had used it most, which is the opposite of the fix. A key kept but ignored is worse still: dead configuration that reads like a setting. |
+| The count, or `urgent` | A tray that opens itself because the news is bad opens itself on precisely the days somebody wanted to look at the schedule. |
+| Overdue / P1 / breached SLA | Same objection, and each adds a second definition of "important" that has to be kept in step with the one the board already uses. |
+
+**What persists instead: nothing beyond the page.** The store is a module-level
+boolean read through `useSyncExternalStore`, so a reader who opens the tray keeps
+it open while they work — across view switches within the SPA — and a reload
+starts collapsed again. That is the span the owner asked for: "the user can
+manually open it during the current interaction/session".
+
+The count stays on the collapsed header, so nothing is hidden by the change —
+only deferred until it is asked for. `getSnapshot` and `getServerSnapshot` both
+return `true`, because a disagreement between them is a flash of an open tray on
+the first paint, which is the thing being removed.
+
+---
+
 ## Open questions for the owner
 
 ### A. Working days — DECIDED 2026-09-05, and implemented

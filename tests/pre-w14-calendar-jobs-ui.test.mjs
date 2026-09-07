@@ -708,14 +708,119 @@ test("every control a thumb has to hit is at least 44px", async () => {
     assert.match(css, /min-height: 44px/, `${sheet} must state the touch minimum`);
   }
   const css = await read("app/(app)/portal/unscheduled-tray.css");
+  /*
+   * RE-POINTED, AND THE OLD ASSERTION WAS PINNING THE BUG.
+   *
+   * It required `touch-action: none` on the ROW, reasoning that otherwise "a
+   * finger on it is a scroll". On a phone the tray is a fixed sheet whose whole
+   * visible area is rows, so that setting opted every reachable pixel out of
+   * panning and the list of unscheduled jobs could not be scrolled at all — the
+   * eleventh job was unreachable. The scroll it was written to prevent is the
+   * one the list needs.
+   *
+   * The gesture still belongs to the drag, but from the GRIP, which is what a
+   * grip is for. The row keeps `pan-y` so vertical panning goes to the browser
+   * and everything else still reaches the handlers.
+   */
   assert.match(
     css,
-    /\.unscheduled-tray__row\[data-tray-draggable\] \{[^}]*touch-action: none/,
-    "and a draggable row takes the gesture off the browser, or a finger on it is a scroll",
+    /\.unscheduled-tray__row\[data-tray-draggable\] \{[^}]*touch-action: pan-y/,
+    "the row must give vertical panning back, or the list cannot be scrolled",
+  );
+  assert.match(
+    css,
+    /\.unscheduled-tray__grip \{[^}]*touch-action: none/,
+    "and the grip must still take the gesture, or a touch drag can never start",
   );
   assert.match(
     css,
     /\.unscheduled-tray__ghost \{[^}]*pointer-events: none/,
     "the ghost must not be the element `elementFromPoint` finds, or nothing is ever a drop target",
   );
+});
+
+
+/* ─────────────────────────── the tray opens collapsed ─────────────────── */
+
+test("the tray's collapsed state starts collapsed and is not computed", async () => {
+  const source = await read("app/(app)/portal/unscheduled-tray.tsx");
+  const store = source.slice(
+    source.indexOf("const listeners = new Set"),
+    source.indexOf("/* ── The tray ──"),
+  );
+  assert.ok(store.length > 0, "the collapsed store must exist");
+  assert.match(store, /let chosen = true;/, "collapsed is where a page load starts");
+  assert.match(
+    store,
+    /function readCollapsedOnServer\(\): boolean \{\s*return true;/,
+    "the server must agree, or React paints an open tray and then swaps it",
+  );
+  /*
+   * The point of the rule: nothing about the DATA may open it. A tray that
+   * opens itself when the news is bad opens itself on exactly the days somebody
+   * wanted to look at the schedule.
+   */
+  assert.ok(
+    !/waiting\.length|urgent|overdue|breach/i.test(store),
+    "no count, no urgency and no SLA may reach the initial collapsed state",
+  );
+});
+
+test("no stored preference can reopen the tray on load", async () => {
+  const source = await read("app/(app)/portal/unscheduled-tray.tsx");
+  /*
+   * The tray used to remember the choice under
+   * `maintsupp:calendar:tray-collapsed`, defaulting to open. A value remembered
+   * from before this rule would have reopened it for precisely the people who
+   * had used it most, so the store is in memory and the key is gone.
+   */
+  /* The header EXPLAINS what was removed, which is worth keeping; what is
+     forbidden is USING it. Comments are stripped before the check. */
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.ok(
+    !/localStorage/.test(code),
+    "the tray must not read or write storage; a remembered 'open' is what this rule removes",
+  );
+  assert.ok(
+    !/tray-collapsed/.test(code),
+    "and the old key must not linger as dead configuration",
+  );
+});
+
+test("the count survives collapse, and the toggle still works both ways", async () => {
+  const source = await read("app/(app)/portal/unscheduled-tray.tsx");
+  const head = source.slice(source.indexOf("unscheduled-tray__head"), source.indexOf("unscheduled-tray__alert"));
+  assert.match(head, /aria-expanded=\{!collapsed\}/, "the toggle must state which way it is");
+  assert.match(head, /setCollapsed\(!collapsed\)/, "and it must go both ways");
+  assert.match(head, /unscheduled-tray__count/, "the count lives in the header, outside the collapse guard");
+  assert.match(head, /\{waiting\.length\}/, "so a collapsed tray still says how many are waiting");
+});
+
+test("a touch drag starts at the grip, so the list can still be scrolled", async () => {
+  const source = await read("app/(app)/portal/unscheduled-tray.tsx");
+  const down = source.slice(source.indexOf("const onPointerDown"), source.indexOf("const onPointerMove"));
+  assert.match(
+    down,
+    /pressed\.pointerType === "touch"/,
+    "touch is the case that has to be narrowed; a mouse is not trying to scroll",
+  );
+  assert.match(down, /closest\?\.\(`\.\$\{GRIP_CLASS\}`\)/, "and it must arm only from the grip");
+  assert.match(source, /const GRIP_CLASS = "unscheduled-tray__grip";/, "named once, so the CSS and the check agree");
+});
+
+test("the mobile sheet is bounded by the viewport that is actually there", async () => {
+  const css = await read("app/(app)/portal/unscheduled-tray.css");
+  const mobile = css.slice(css.indexOf("@media (max-width: 640px)"));
+  assert.match(
+    mobile,
+    /max-height: 55vh;[\s\S]{0,40}?max-height: 55dvh;/,
+    "dvh must follow vh, so it wins where it is understood",
+  );
+  assert.match(
+    mobile,
+    /\.unscheduled-tray__body \{[^}]*padding-bottom: env\(safe-area-inset-bottom/,
+    "the home-indicator inset belongs to the scroller; on the sheet it shortens the list instead",
+  );
+  assert.match(css, /\.unscheduled-tray__body \{[^}]*overscroll-behavior: contain/,
+    "and a scroll that runs out must not carry on scrolling the calendar underneath");
 });
