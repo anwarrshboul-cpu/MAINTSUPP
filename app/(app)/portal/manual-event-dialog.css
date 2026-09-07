@@ -343,9 +343,27 @@
   .manual-event-dialog,
   .manual-event-dialog--form {
     width: 100%;
+    /*
+     * `dvh` SECOND, SO IT WINS WHERE IT EXISTS.
+     *
+     * On iOS Safari `vh` resolves against the LARGE viewport — the one you
+     * get with the URL bar hidden — so `92vh` is more than 92% of what is
+     * actually on screen while the bar is showing, and the bottom of a sheet
+     * anchored to the bottom edge goes under the browser chrome. On this
+     * dialog the thing down there is Save. `dvh` tracks the viewport that is
+     * really present, including while the keyboard is up; a browser that has
+     * never heard of it ignores the second declaration and keeps the first.
+     */
     max-height: 92vh;
+    max-height: 92dvh;
     border-radius: 16px 16px 0 0;
     overflow-y: auto;
+    /* The home indicator sits over the last few pixels of a bottom-anchored
+       sheet. Padding rather than margin: the sheet keeps its full width and
+       the inset lands inside the scroller, so Save can always be scrolled
+       clear of it. */
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: contain;
   }
 
   /*

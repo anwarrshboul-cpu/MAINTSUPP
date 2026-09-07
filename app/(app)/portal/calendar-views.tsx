@@ -769,14 +769,37 @@ function MonthCell({
        * twice — on the phone, where this button IS the cell, that is the only
        * place it would be heard. The word goes in the label instead.
        */}
+      {/*
+       * TAP TO SELECT, TAP THE SELECTED DAY AGAIN TO ADD TO IT.
+       *
+       * The desktop shortcut is a click on the EMPTY part of a cell, which a
+       * phone does not have: here the whole cell is this one button, and its
+       * tap is also the only way to point the agenda below the grid at a day.
+       * Opening the dialog on every tap would take that away — looking at
+       * what is already booked on the 15th would throw a create form over it,
+       * and the agenda is the phone's only route to an existing job, because
+       * these cells draw shape markers rather than tappable chips.
+       *
+       * So the first tap selects and the second acts, which is the same two
+       * steps the desktop makes in one gesture and needs no long press, no
+       * double-tap timer and no second target. It runs `onCreateOnDay`, the
+       * handler the desktop cell already calls, so both surfaces open the
+       * same dialog on the same day through the same code.
+       */}
       <button
         type="button"
         className="calendar-month__pick"
         aria-pressed={selected}
         aria-label={`${calendarDayLabel(day)}${isToday ? ", today" : ""}${
           tally.length > 0 ? `, ${tally.join(", ")}` : ", nothing scheduled"
-        }`}
-        onClick={() => onSelectDay(day)}
+        }${selected && onCreateOnDay ? ", selected. Activate again to add an item" : ""}`}
+        onClick={() => {
+          if (selected && onCreateOnDay) {
+            onCreateOnDay(day);
+            return;
+          }
+          onSelectDay(day);
+        }}
       >
         <span className="calendar-month__picknum" aria-hidden="true">
           {dayOfMonth(day)}
