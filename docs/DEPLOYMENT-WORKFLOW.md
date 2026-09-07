@@ -16,35 +16,39 @@ Production.
 
 ---
 
-## Read this first: the automatic half is not wired yet
+## What runs by itself, and what does not
 
-The table above describes the **target**. Half of it does not happen on its own
-today, and the reason is not the repository's configuration.
+`develop` → Preview is **automatic and verified**. Pushing `01f8945` to
+`origin/develop` produced deployment `2zxzukf2p` seventeen seconds later, built
+by Vercel's GitHub integration: `source: git`, `githubCommitRef: develop`,
+`githubCommitSha: 01f8945`, `target: preview`, READY in 46 seconds. It also
+carries a permanent per-branch alias,
+`maintsupp-portal-git-develop-maintsupp.vercel.app`, alongside the stable client
+link.
 
-**The Vercel project `maintsupp-portal` is not connected to the GitHub
-repository.** `vercel project inspect` prints no Git section, and
-`repos/anwarrshboul-cpu/MAINTSUPP/hooks` is empty. The GitHub-linked projects
-that used to exist were deleted on 2026-09-04 (see `CLAUDE.md`), and the portal
-has shipped by manual prebuilt upload ever since.
+`main` → Production is gated by this repository, in the root `vercel.json`:
 
-Two consequences follow, and both are easy to trip over:
+```json
+"git": { "deploymentEnabled": { "main": true } }
+```
 
-1. **Pushing to `develop` creates no Preview deployment.** Pushing to `main`
-   creates no Production deployment. Nothing is listening.
-2. **`git.deploymentEnabled` in the root `vercel.json` does nothing.** That key
-   only takes effect when a Git integration exists. Setting `"main": true`
-   today would change no behaviour while advertising that it had — which is
-   worse than leaving it alone, so it is deliberately still `false`.
+While that read `false`, pushes to `main` built nothing and every Production
+release was a manual prebuilt upload. It is `true` now, which is what makes the
+release half of this document real.
 
-Connecting the repository is a dashboard action that needs the account owner:
-Vercel → `maintsupp-portal` → Settings → Git → **Connect Git Repository** →
-`anwarrshboul-cpu/MAINTSUPP`, with the Production Branch set to `main`. It
-requires the GitHub OAuth/App authorisation, which is why it cannot be done from
-a CLI session.
+> **A correction worth keeping, because the next reader will be tempted the same
+> way.** This file first claimed the project had no Git integration at all. Two
+> checks appeared to say so: `vercel project inspect` prints no Git section for
+> this project, and `repos/anwarrshboul-cpu/MAINTSUPP/hooks` is empty. Both are
+> worthless as evidence. Vercel's GitHub App does not install a repository
+> webhook — it receives App-level events — so an empty hook list is expected on a
+> perfectly connected repo, and the CLI's inspect output simply omits the link.
+> The only check that answers the question is the one that costs a push: send a
+> commit and see what Vercel does. It built a Preview immediately.
 
-Until that is done, releases stay manual — the procedure in
-`docs/DEPLOYMENT-PORTAL.md`, which is known to work and produced the deployment
-currently serving `maintsupp.com`.
+The two environments stay apart by target, configured in Vercel rather than
+here: Preview reads **Supabase Staging** (`ajslebfjwgkvhlntrdmw`), Production
+reads **Supabase Production** (`wghfhtdzxttfhofuljyy`). They share no data.
 
 ---
 
@@ -58,17 +62,13 @@ git pull origin develop
 git push origin develop
 ```
 
-Once the repository is connected, that push builds a Preview. Point the stable
-client link at it with the existing script, which refuses anything that is not a
-READY Preview belonging to this project:
+That push builds a Preview. Point the stable client link at it with the existing
+script, which refuses anything that is not a READY Preview belonging to this
+project:
 
 ```bash
 bash scripts/update-preview-alias.sh <deployment-url>
 ```
-
-The Preview reads **Supabase Staging** (`ajslebfjwgkvhlntrdmw`). Production reads
-**Supabase Production** (`wghfhtdzxttfhofuljyy`). They share no data and the
-environments are mapped per target in Vercel, not in this repository.
 
 ## Release
 
