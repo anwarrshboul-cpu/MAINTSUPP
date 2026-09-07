@@ -2,7 +2,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+/*
+ * Line endings are per file in this repo and portal-app.tsx is CRLF. The widget
+ * check below matches `key: "…",` followed by a newline and `label:`, written
+ * with a bare newline, so against `,\r\n` it found nothing and reported "expected
+ * the Reports widget list, got " — a red test pointing at a widget list that was
+ * correct all along. Normalise on the way in; the contracts are unchanged.
+ */
+const read = async (path) =>
+  (await readFile(new URL(`../${path}`, import.meta.url), "utf8")).replace(
+    /\r\n/g,
+    "\n",
+  );
 
 /**
  * The six gaps a full completion audit against the brief turned up.
