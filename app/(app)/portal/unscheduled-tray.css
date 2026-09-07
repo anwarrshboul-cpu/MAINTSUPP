@@ -496,8 +496,26 @@
   }
 
   .schedule-undo {
-    /* Above the sheet, not behind it — on the same height model, and clear of
-       the home indicator the sheet no longer pads for itself. */
+    /*
+     * Above the sheet, not behind it, and clear of the home indicator the sheet
+     * no longer pads for itself.
+     *
+     * IT CLEARS THE SHEET'S MAXIMUM, NOT ITS HEIGHT, and the difference is
+     * worth knowing. `55dvh` is the tray's `max-height`; the tray is shorter
+     * whenever the list is short, and much shorter when it is collapsed. In
+     * those cases the toast floats higher than it needs to. It is never
+     * BEHIND the sheet, which is the failure that would matter.
+     *
+     * Left alone deliberately. The tray's collapsed height is its header's
+     * content height and no constant for it exists, so keying off
+     * `.is-collapsed` would mean inventing a second height literal to be kept
+     * in step with the first — the class of duplication that produced the
+     * header-alignment defect this pass began with. A numberless fix means
+     * putting the toast and the tray in one bottom-anchored flex stack, which
+     * is a layout change to calendar-surface.tsx for a cosmetic offset on a
+     * path that needs the reader to collapse the tray inside the eight seconds
+     * the offer lasts. Recorded as low priority instead.
+     */
     bottom: calc(55vh + 12px + env(safe-area-inset-bottom, 0px));
     bottom: calc(55dvh + 12px + env(safe-area-inset-bottom, 0px));
   }
