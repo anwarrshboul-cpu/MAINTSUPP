@@ -4,7 +4,7 @@
   "buildCommand": "npm run build && node vercel/build-output.mjs --out .vercel/output",
   "git": {
     "deploymentEnabled": {
-      "main": false
+      "main": true
     }
   }
 }
