@@ -5217,13 +5217,33 @@ label.live-board-tool {
 }
 
 .live-sheet tbody tr:hover .sheet-row-more,
-.sheet-row-more:focus {
+.sheet-row-more:focus,
+.sheet-row-more[aria-expanded="true"] {
   opacity: 1;
 }
 
+/*
+ * The row menu's trigger had no open state either — while its menu was up it
+ * painted whatever the row hover happened to be giving it, and nothing at all
+ * once the pointer moved to the menu. It sets `aria-expanded` already, so the
+ * same rule the group and column triggers use applies here and the three menus
+ * agree.
+ *
+ * Its HOVER is deliberately left as it is. `white` with a shadow is a raised
+ * chip on a tinted hovered row and reads correctly in light; the dark block
+ * below already repaints it, so unlike the column header this control has no
+ * missing half. It is also never rendered on a phone — live-board.tsx guards
+ * it with `!mobile` — so a stuck touch hover has no route to the surface the
+ * defect was reported on.
+ */
 .sheet-row-more:hover {
   background: white;
   box-shadow: 0 1px 4px rgba(7, 24, 38, 0.15);
+}
+
+.sheet-row-more[aria-expanded="true"] {
+  background: var(--surface-active);
+  color: var(--control-fg-strong);
 }
 
 .sheet-row-menu {
@@ -11033,6 +11053,33 @@ th.sheet-column--name {
   text-align: center;
 }
 
+/*
+ * THE COLUMN'S ACTIONS TRIGGER — same state model as `.sheet-group__more`.
+ *
+ * Three faults, all measured in Chrome at 1280px in both themes before the
+ * change, none of them the one that was first suspected.
+ *
+ *   1. THE OPEN STATE COULD NEVER PAINT. It was written as
+ *      `.custom-column-header:has(.custom-column-menu)`, and `AnchoredPopover`
+ *      portals the menu into `#maintsupp-layers` — so it is not a descendant
+ *      of the header, `:has()` matched nothing, and opening the menu left the
+ *      trigger looking exactly as it does at rest. Measured: `aria-expanded`
+ *      true, background `rgba(0, 0, 0, 0)`, opacity 0.45, in both themes.
+ *      `aria-expanded` is already on the button for assistive technology and
+ *      moves with the real state, so the CSS reads that instead.
+ *   2. The hover was not behind `@media (hover: hover)`. A device that reports
+ *      hover falsely — and several touch laptops do — keeps it painted after a
+ *      tap, for as long as the menu is open and beyond.
+ *   3. `:focus` painted for a mouse press as well as a keyboard one, so a
+ *      click left a block behind. `:focus-visible` is the half a keyboard user
+ *      needs; the global ring at the top of this file supplies the outline.
+ *
+ * The colours were a literal pair per theme — `#dcecff`/`#235b8f` here and
+ * `#243641`/`#79bfff` in the dark block — which is one idea implemented twice
+ * and kept in step by hand. They are the themed control tokens now, the same
+ * ones `.sheet-group__more` uses, so the two menus agree and the dark block has
+ * nothing left to say about this control.
+ */
 .custom-column-header > .custom-column-header__more {
   flex: 0 0 25px;
   width: 25px;
@@ -11040,12 +11087,30 @@ th.sheet-column--name {
   opacity: 0.45;
 }
 
-.custom-column-header:hover > .custom-column-header__more,
-.custom-column-header > .custom-column-header__more:focus,
-.custom-column-header:has(.custom-column-menu)
-  > .custom-column-header__more {
-  background: #dcecff;
-  color: #235b8f;
+@media (hover: hover) {
+  .custom-column-header:hover > .custom-column-header__more {
+    background: var(--surface-hover);
+    color: var(--control-fg-strong);
+    opacity: 1;
+  }
+}
+
+/*
+ * A finger has no hover, and this trigger is the only route to sort direction,
+ * wrap and rename on a tablet. Shown at the same weight the sort arrow gets
+ * twenty lines below, for the reason written there.
+ */
+@media (hover: none) {
+  .custom-column-header > .custom-column-header__more {
+    opacity: 0.55;
+  }
+}
+
+.custom-column-header > .custom-column-header__more:focus-visible,
+.custom-column-header > .custom-column-header__more:active,
+.custom-column-header > .custom-column-header__more[aria-expanded="true"] {
+  background: var(--surface-active);
+  color: var(--control-fg-strong);
   opacity: 1;
 }
 
@@ -13698,10 +13763,14 @@ body[data-theme="dark"] {
     color: #f0f5f7;
   }
 
+  /*
+   * `.custom-column-header__more` used to be here too, in a pair with the
+   * light literals beside its base rule. It paints from `--surface-hover` /
+   * `--surface-active` now, which are already per-theme, so a dark rule for it
+   * would be a third opinion about one colour.
+   */
   .sheet-row-more:hover,
-  .sheet-open-item:hover,
-  .custom-column-header:hover > .custom-column-header__more,
-  .custom-column-header > .custom-column-header__more:focus {
+  .sheet-open-item:hover {
     background: #243641;
     color: #79bfff;
   }
