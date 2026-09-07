@@ -96,14 +96,57 @@ bash scripts/update-preview-alias.sh <deployment-url>
 Preview approved  →  PR: develop → main  →  merge  →  Production
 ```
 
-No automatic merging, and no routine commits straight to `main`. A release is an
-explicit act by a person.
+```bash
+gh pr create --base main --head develop --title "Release: <what>"
+# then merge it, from the PR page or:
+gh pr merge --merge
+```
+
+**Do not deploy Production by hand any more.** The prebuilt-upload procedure in
+`docs/DEPLOYMENT-PORTAL.md` still works and is still the emergency path, but a
+normal release is a merge and nothing else. Deploying manually on top of an
+auto-deployed branch is how `maintsupp.com` ends up serving something that is
+not what `main` says it is.
 
 `develop` is **not** deleted after a release; it is the permanent development
-branch.
+branch. Immediately after a release, `main` is an ancestor of `develop` again
 
-If a hotfix ever has to be made on `main` directly, merge `main` back into
-`develop` immediately afterwards, or the next release silently reverts it.
+## `main` is protected
+
+Every commit that lands on `main` deploys to the public site, so `main` no
+longer accepts a direct push — from anyone, including the owner.
+
+| Rule | Setting | Why that value |
+| --- | --- | --- |
+| Pull request required | yes | a release is a deliberate act with a diff to read |
+| Approving reviews required | **0** | one maintainer; requiring a second person would make releasing impossible |
+| Required status checks | **none** | the repository carries measured baseline debt (22 `tsc` errors, a standing set of failing tests). Gating on them would block every release for faults the release did not cause. The gate below is a checklist a person applies. |
+| Force pushes | blocked | |
+| Branch deletion | blocked | |
+| Applies to admins | **yes** | otherwise the only person who can push is exempt from the rule, and the rule protects nothing |
+| Signed commits | not required | not in use here |
+
+`develop` is deliberately **unprotected**. Push to it freely; that is what it
+is for.
+
+### The emergency path
+
+Because admins are included, there is no quiet override. A genuine emergency
+that cannot wait for a PR needs the rule lifted and put back, deliberately:
+
+```bash
+gh api -X DELETE repos/anwarrshboul-cpu/MAINTSUPP/branches/main/protection
+# ... push the fix ...
+gh api -X PUT repos/anwarrshboul-cpu/MAINTSUPP/branches/main/protection --input <saved-json>
+```
+
+Prefer a PR even then — it takes about a minute and leaves a record. And
+whichever route a hotfix takes, **merge `main` back into `develop` immediately
+afterwards** or the next release silently reverts it:
+
+```bash
+git checkout develop && git merge origin/main && git push origin develop
+```
 
 ## After a release
 
