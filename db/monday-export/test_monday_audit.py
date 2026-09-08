@@ -369,6 +369,89 @@ class Contractors(unittest.TestCase):
         self.assertEqual(rows[0]["total_cost"], 1250.50)
 
 
+class FileExportVerification(unittest.TestCase):
+    """The manifest is a claim; this opens the directory and checks it."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="monday-verify-test-")
+        os.makedirs(os.path.join(self.root, "files"), exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _file(self, name, content=b"hello"):
+        path = os.path.join(self.root, "files", name)
+        with open(path, "wb") as handle:
+            handle.write(content)
+        return os.path.join("files", name)
+
+    def _row(self, **kw):
+        row = {"board": "maintenance", "item_id": "1", "asset_id": "9",
+               "path": "files/a.pdf", "downloaded_size": "5", "sha256": "abc",
+               "size_match": "True", "reported_size": "5"}
+        row.update(kw)
+        return row
+
+    def test_a_clean_export_passes_every_check(self):
+        path = self._file("a.pdf")
+        problems, total = ma.verify_file_export(
+            self.root, [self._row(path=path)],
+            {"maintenance": [{"assets": [{"id": 9}], "updates": []}]})
+        self.assertEqual(dict(problems), {})
+        self.assertEqual(total, 5)
+
+    def test_a_manifest_row_with_no_file_is_caught(self):
+        problems, _ = ma.verify_file_export(
+            self.root, [self._row(path="files/missing.pdf")], {})
+        self.assertIn("manifest row with no file on disk", problems)
+
+    def test_a_file_shorter_than_the_manifest_claims_is_caught(self):
+        path = self._file("a.pdf", b"hi")
+        problems, _ = ma.verify_file_export(self.root, [self._row(path=path)], {})
+        self.assertIn("file size differs from the manifest", problems)
+
+    def test_a_missing_checksum_is_caught(self):
+        path = self._file("a.pdf")
+        problems, _ = ma.verify_file_export(self.root, [self._row(path=path, sha256="")], {})
+        self.assertIn("no checksum recorded", problems)
+
+    def test_a_size_mismatch_verdict_is_caught(self):
+        path = self._file("a.pdf")
+        problems, _ = ma.verify_file_export(
+            self.root, [self._row(path=path, size_match="False")], {})
+        self.assertIn("monday's size disagrees with the download", problems)
+
+    def test_an_asset_the_board_reported_but_the_manifest_missed_is_caught(self):
+        # The failure a per-row check cannot see, because there is no row.
+        path = self._file("a.pdf")
+        problems, _ = ma.verify_file_export(
+            self.root, [self._row(path=path)],
+            {"maintenance": [{"assets": [{"id": 9}, {"id": 10}], "updates": []}]})
+        self.assertIn("asset on the board with no manifest row", problems)
+        self.assertEqual(problems["asset on the board with no manifest row"],
+                         ["maintenance/10"])
+
+    def test_a_reply_asset_counts_as_claimed_by_the_board(self):
+        path = self._file("a.pdf")
+        problems, _ = ma.verify_file_export(
+            self.root, [self._row(path=path)],
+            {"maintenance": [{"assets": [], "updates": [
+                {"assets": [], "replies": [{"assets": [{"id": 9}]}]}]}]})
+        self.assertNotIn("asset on the board with no manifest row", problems)
+
+    def test_a_leftover_part_file_is_caught(self):
+        self._file("a.pdf")
+        self._file("b.pdf.part")
+        problems, _ = ma.verify_file_export(self.root, [self._row(path="files/a.pdf")], {})
+        self.assertIn("incomplete .part file left on disk", problems)
+
+    def test_duplicate_manifest_rows_are_caught(self):
+        path = self._file("a.pdf")
+        row = self._row(path=path)
+        problems, _ = ma.verify_file_export(self.root, [row, dict(row)], {})
+        self.assertIn("duplicate manifest rows", problems)
+
+
 class EndToEnd(unittest.TestCase):
     """Build a small export on disk and run the audit over it."""
 

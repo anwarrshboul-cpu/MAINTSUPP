@@ -789,6 +789,70 @@ def compliance_matrix_diff(matrix_rows, store_doc_items):
 # --------------------------------------------------------------------------
 
 
+def verify_file_export(export_root, manifest_rows, items_by_board):
+    """Every check §11 of the migration brief asks for, over the real bytes.
+
+    The manifest is not evidence on its own — it is a claim that files were
+    downloaded. This opens the directory and asks whether each row's file is
+    actually there and actually that size, which is the difference between a
+    checksum column and a checksummed archive.
+    """
+    problems = defaultdict(list)
+    seen_rows = set()
+    total_bytes = 0
+
+    for row in manifest_rows:
+        key = (row["board"], row["item_id"], row["asset_id"])
+        if key in seen_rows:
+            problems["duplicate manifest rows"].append(f"{key}")
+        seen_rows.add(key)
+
+        path = os.path.join(export_root, row["path"])
+        if not os.path.exists(path):
+            problems["manifest row with no file on disk"].append(row["path"])
+            continue
+
+        on_disk = os.path.getsize(path)
+        total_bytes += on_disk
+        claimed = int(row["downloaded_size"] or 0)
+        if on_disk != claimed:
+            problems["file size differs from the manifest"].append(
+                f"{row['path']}: manifest {claimed}, disk {on_disk}")
+        if on_disk == 0:
+            problems["zero-byte file"].append(row["path"])
+        if not (row.get("sha256") or "").strip():
+            problems["no checksum recorded"].append(row["path"])
+        if row["size_match"] == "False":
+            problems["monday's size disagrees with the download"].append(
+                f"{row['path']}: monday {row['reported_size']}, got {row['downloaded_size']}")
+
+    # An asset the board reported but the manifest never mentions is the one a
+    # per-row check cannot find, because there is no row to check.
+    for board, items in items_by_board.items():
+        claimed = set()
+        for item in items:
+            for asset in item.get("assets") or []:
+                claimed.add(str(asset["id"]))
+            for update in item.get("updates") or []:
+                for asset in update.get("assets") or []:
+                    claimed.add(str(asset["id"]))
+                for reply in update.get("replies") or []:
+                    for asset in reply.get("assets") or []:
+                        claimed.add(str(asset["id"]))
+        got = {r["asset_id"] for r in manifest_rows if r["board"] == board}
+        for missing in sorted(claimed - got):
+            problems["asset on the board with no manifest row"].append(f"{board}/{missing}")
+
+    # A .part is a download that was interrupted and never completed.
+    for directory, _dirs, names in os.walk(export_root):
+        for name in names:
+            if name.endswith(".part"):
+                problems["incomplete .part file left on disk"].append(
+                    os.path.relpath(os.path.join(directory, name), export_root))
+
+    return problems, total_bytes
+
+
 def write_csv(path, rows, fields=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fields = fields or (list(rows[0].keys()) if rows else ["(no rows)"])
@@ -1088,6 +1152,61 @@ def main():
         for key in ("EXACT CANONICAL MATCH", "KNOWN ALIAS MATCH", "FUZZY CANDIDATE",
                     "AMBIGUOUS", "UNRESOLVED"):
             print(f"  {key:<24} {counts.get(key, 0)}")
+
+    # -- full file export verification ---------------------------------------
+    manifest_path = os.path.join(export, "file-manifest.csv")
+    manifest_all = []
+    if os.path.exists(manifest_path):
+        with open(manifest_path, encoding="utf-8-sig", newline="") as handle:
+            manifest_all = list(csv.DictReader(handle))
+    if manifest_all:
+        problems, total_bytes = verify_file_export(export, manifest_all, {
+            "maintenance": maintenance,
+            "store-documentation-uk": store_doc,
+            "subitems-of-maintenance": subitems,
+        })
+        by_verdict = Counter(r["size_match"] for r in manifest_all)
+        checksummed = sum(1 for r in manifest_all if (r.get("sha256") or "").strip())
+        body = [
+            "# FULL FILE EXPORT — VERIFICATION", "",
+            f"- manifest rows: **{len(manifest_all)}**",
+            f"- bytes on disk: **{total_bytes:,}** ({total_bytes / 1e9:.2f} GB)",
+            f"- checksum coverage: **{checksummed}/{len(manifest_all)}**",
+            f"- size verdicts: " + ", ".join(f"{k}={v}" for k, v in sorted(by_verdict.items())),
+            f"- failures recorded by the exporter: {summary.get('failures', '?')}",
+            "",
+            "## Checks", "",
+            "| check | result |",
+            "| --- | --- |",
+        ]
+        checks = [
+            ("every manifest row has a file on disk", "manifest row with no file on disk"),
+            ("no file is zero bytes", "zero-byte file"),
+            ("file size on disk matches the manifest", "file size differs from the manifest"),
+            ("every file has a SHA-256", "no checksum recorded"),
+            ("monday's reported size matches the download",
+             "monday's size disagrees with the download"),
+            ("no duplicate manifest rows", "duplicate manifest rows"),
+            ("every asset on the board has a manifest row",
+             "asset on the board with no manifest row"),
+            ("no interrupted .part files left behind", "incomplete .part file left on disk"),
+        ]
+        for label, key in checks:
+            hits = problems.get(key) or []
+            body.append(f"| {label} | {'PASS' if not hits else f'**FAIL — {len(hits)}**'} |")
+        for label, key in checks:
+            hits = problems.get(key) or []
+            if hits:
+                body += ["", f"### {label} — {len(hits)}", ""] + [f"- {h}" for h in hits[:200]]
+                if len(hits) > 200:
+                    body.append(f"- ...and {len(hits) - 200} more")
+        clean = not any(problems.get(k) for _l, k in checks)
+        body += ["", f"**VERDICT: {'PASS' if clean else 'FAIL'}**"]
+        written.append(write_text(os.path.join(args.out, "file-export-verification.md"),
+                                  "\n".join(body) + "\n"))
+        print(f"\nFile export verification: {'PASS' if clean else 'FAIL'} — "
+              f"{len(manifest_all)} files, {total_bytes / 1e9:.2f} GB, "
+              f"checksums {checksummed}/{len(manifest_all)}")
 
     print("\nWritten:")
     for path in written:
