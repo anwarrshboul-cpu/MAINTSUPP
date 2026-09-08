@@ -72,6 +72,26 @@ export function dashboardFailure(error: unknown): Response {
   const refusal = anonymousRefusal(error);
   if (refusal) return refusal;
   const message = error instanceof Error ? error.message : "Unexpected error";
+  /*
+   * LOGGED, BECAUSE THE READER OF THIS RESPONSE CANNOT BE TOLD.
+   *
+   * The message below is deliberately generic — a database error can name a
+   * column, a table or a constraint, and none of that belongs in a browser. But
+   * the version of this function that only returned that sentence made the
+   * Production outage of 2026-09-08 undiagnosable: two cards said "temporarily
+   * unavailable" for hours and the runtime logs held nothing at all, because
+   * this was the only place the error ever reached.
+   *
+   * `cause` is printed separately and matters more than `message`. Drizzle
+   * wraps a driver failure as `Failed query: <sql> params: <params>` and hangs
+   * the real error — the missing column, the pooler refusal, the constraint —
+   * off `cause`, so a log line that prints only `message` prints the SQL and
+   * omits the reason it failed.
+   */
+  console.error("[dashboard] request failed:", error);
+  if (error instanceof Error && error.cause) {
+    console.error("[dashboard] cause:", error.cause);
+  }
   return Response.json(
     {
       error:
