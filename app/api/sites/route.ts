@@ -10,7 +10,13 @@ import {
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
-import { readSiteComplianceRecords } from "../../lib/compliance-register";
+import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
+import {
+  isPlaceholderManager,
+  loadSiteMetrics,
+  realManagerName,
+  siteCompleteness,
+} from "../../lib/site-metrics";
 import {
   cleanAddress,
   codeConflict,
@@ -852,11 +858,58 @@ export async function GET(request: Request) {
       else aliasesBySite.set(alias.siteId, [alias.alias]);
     }
 
+    /*
+     * ── THE OPERATIONAL HALF, ADDED ALONGSIDE THE REGISTRY ────────────────
+     *
+     * `metrics` and `completeness` are NEW FIELDS on rows that already existed,
+     * so every existing caller of this endpoint — the pickers, the CSV export,
+     * the public form — is untouched, and the Sites list stops being a page
+     * about Code and Town.
+     *
+     * Both are counted here rather than in the browser. Ten meters used to mean
+     * fetching every job and every compliance record and filtering them on the
+     * client; this is one `GROUP BY site_id` and one register read, and the
+     * numbers come from the SAME shared modules the Overview and the Compliance
+     * register use, so the three cannot disagree about one store.
+     */
+    const siteIds = rows.map((row) => row.id);
+    const register = await readComplianceRegister(db, orgId, { today: new Date() });
+    const metrics = await loadSiteMetrics(db, orgId, siteIds, register.bySite);
+
     return Response.json({
-      sites: rows.map((row) => ({ ...row, aliases: aliasesBySite.get(row.id) ?? [] })),
+      sites: rows.map((row) => ({
+        ...row,
+        aliases: aliasesBySite.get(row.id) ?? [],
+        metrics: metrics.get(row.id) ?? null,
+        completeness: siteCompleteness(row),
+        /* The placeholder is reported as ABSENT, not printed as a name. See
+           `isPlaceholderManager` — a manager nobody can phone is worse than a
+           blank, because a blank prompts somebody to fill it in. */
+        managerDisplay: realManagerName(row.managerName, row.manager),
+        managerPlaceholder: isPlaceholderManager(row.managerName ?? row.manager),
+      })),
       groups,
       siteTypes,
       statuses,
+      /*
+       * Estate-wide coverage, so the page header can say "X of 10 sites have
+       * incomplete details" and link to them. A field that is empty everywhere
+       * should prompt for completion, not render a dash for ever.
+       */
+      coverage: {
+        total: rows.length,
+        incomplete: rows.filter((row) => !siteCompleteness(row).complete).length,
+        placeholderManagers: rows.filter((row) =>
+          isPlaceholderManager(row.managerName ?? row.manager),
+        ).length,
+        withCoordinates: rows.filter(
+          (row) => row.latitude !== null && row.longitude !== null,
+        ).length,
+        withTown: rows.filter((row) => Boolean((row.city ?? "").trim())).length,
+        withPostcode: rows.filter((row) => Boolean((row.postcode ?? "").trim())).length,
+        withCode: rows.filter((row) => Boolean((row.code ?? "").trim())).length,
+        withBudget: rows.filter((row) => row.annualBudgetPence !== null).length,
+      },
     });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.

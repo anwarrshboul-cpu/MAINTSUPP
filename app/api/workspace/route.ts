@@ -97,6 +97,8 @@ import {
   requireCapability,
   resolvePermissions,
 } from "../../lib/permissions";
+import { linkedContractorIds } from "../../lib/contractor-linking";
+import { isUnreachableEmail } from "../../lib/site-metrics";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
 
 function text(value: unknown, max = 240) {
@@ -872,6 +874,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
    * and fixable — the operator links the jobs, or renames one of the pair.
    * Double-counting is neither: it inflates a spend figure somebody bills from.
    */
+  const linkedContractors = await linkedContractorIds(db, orgId);
+
   const contractorsPerName = new Map<string, number>();
   for (const row of contractorRows) {
     contractorsPerName.set(row.name, (contractorsPerName.get(row.name) ?? 0) + 1);
@@ -1109,6 +1113,25 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       spend: Number(byId?.spend ?? 0) + Number(byName?.spend ?? 0),
       /* Zero is a real answer here, not an absent one — see the type. */
       documentCount: documentsByContractor.get(contractor.id) ?? 0,
+      /*
+       * WHETHER THE FOUR FIGURES ABOVE ARE FACTS OR ABSENCES.
+       *
+       * `assignedJobs: 0` asserts that this contractor has done no work. Where
+       * nothing joins them to the jobs they did — no `contractor_id`, no alias
+       * mapping, and no unique register name a job uses — that assertion is
+       * FALSE, and it is the kind of false that gets somebody paid late. The
+       * register prints `Not linked` on an unlinked row instead of a zero,
+       * which is a statement about the DATA rather than about the contractor.
+       */
+      linked: linkedContractors.has(contractor.id),
+      /*
+       * `.example`, `.test`, `.invalid` and `.localhost` are reserved by
+       * RFC 2606 and RFC 6761 and can never receive mail. Seven records on this
+       * estate carry one. The address is still sent — removing stored data is
+       * not this route's job — and the flag is what lets a screen render
+       * `No contact set` with an edit link rather than a mailto that bounces.
+       */
+      contactUnreachable: isUnreachableEmail(contractor.email),
     };
   });
 
@@ -1385,7 +1408,7 @@ export async function POST(request: Request) {
        */
       const badActive = contractorActiveRefusal(data);
       if (badActive) return badActive;
-      const badEmail = contractorEmailRefusal(data);
+      const badEmail = contractorEmailRefusal(data, "create");
       if (badEmail) return badEmail;
       const badRate = contractorRateRefusal(data);
       if (badRate) return badRate;
@@ -1814,20 +1837,61 @@ const CONTRACTOR_EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
  * Nothing junk is stored either way, and making email the one field that
  * refuses a number would be a rule the rest of the record does not follow.
  */
-function contractorEmailRefusal(data: Record<string, unknown>): Response | null {
+function contractorEmailRefusal(
+  data: Record<string, unknown>,
+  intent: "create" | "edit" = "edit",
+): Response | null {
   if (!("email" in data)) return null;
   const raw = data.email;
   if (typeof raw !== "string" || raw === "") return null;
   const value = text(raw, 160);
   const usable =
     value !== "" && CONTRACTOR_EMAIL_SHAPE.test(value) && !INVISIBLE_CHARACTERS.test(value);
-  return usable
-    ? null
-    : Response.json(
-        { error: "A contractor's email must be a working address, or left blank." },
-        { status: 400 },
-      );
+  if (!usable) {
+    return Response.json(
+      { error: "A contractor's email must be a working address, or left blank." },
+      { status: 400 },
+    );
+  }
+  /*
+   * A RESERVED TLD IS REFUSED ON CREATE, AND ONLY ON CREATE.
+   *
+   * `.example`, `.test`, `.invalid` and `.localhost` are reserved by RFC 2606
+   * and RFC 6761 so that they can never resolve. Seven records on this estate
+   * carry one — `ops@climate-response.example` and its siblings — which is seed
+   * data that reached production, and a register whose contact details cannot
+   * receive mail is worse than one with blanks: a blank prompts somebody to
+   * fill it in.
+   *
+   * NOT on the edit path, deliberately, and this is the one place in these
+   * guards where the create is allowed to be stricter than the edit. Refusing
+   * it on edit would make those seven rows unsavable — somebody correcting a
+   * day rate would be stopped by an address they had not touched. The screens
+   * render an unreachable address as "No contact set" with the edit beside it
+   * (see `isUnreachableEmail`), so the existing rows are visible and fixable
+   * while this stops any more being created.
+   */
+  if (intent === "create" && RESERVED_EMAIL_TLD.test(value)) {
+    return Response.json(
+      {
+        error:
+          "That address is on a reserved domain and can never receive mail. Use a working address, or leave it blank.",
+      },
+      { status: 400 },
+    );
+  }
+  return null;
 }
+
+/**
+ * The domains that are guaranteed never to resolve.
+ *
+ * RFC 2606 reserves `.test`, `.example`, `.invalid` and `.localhost`; RFC 6761
+ * restates them as special-use. Mail to any of them is undeliverable by
+ * definition, which is why they are the right thing for a seeder to use and
+ * the wrong thing to have in a contractor register.
+ */
+const RESERVED_EMAIL_TLD = /\.(example|test|invalid|localhost)$/i;
 
 /*
  * What `day_rate_pence` can actually hold.

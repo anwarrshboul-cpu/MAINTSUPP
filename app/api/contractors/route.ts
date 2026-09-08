@@ -52,6 +52,11 @@ import {
   maintenanceRequests,
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import {
+  aliasesByContractor,
+  linkedContractorIds,
+} from "../../lib/contractor-linking";
+import { isUnreachableEmail } from "../../lib/site-metrics";
 import { expiryStatus } from "../../lib/expiry-status";
 import { listContractorsInRegisters } from "../../lib/contractor-repository";
 import {
@@ -256,7 +261,30 @@ export async function GET(request: Request) {
       certificationsById.set(row.contractorId, list);
     }
 
-    const payload: Array<WorkspaceContractor & { register: RecordProvenance }> = rows
+    /*
+     * ── WHETHER A ZERO IS A FACT OR AN ABSENCE ────────────────────────────
+     *
+     * `assignedJobs: 0` asserts that this contractor has done no work. Where
+     * nothing joins them to the jobs they did — no `contractor_id` on a job, no
+     * alias mapping, and no unique name match — that assertion is FALSE, and it
+     * is the kind of false that gets somebody paid late. `linked` is what lets
+     * the screen print `Not linked` instead: a statement about the data rather
+     * than about the contractor.
+     *
+     * One set for the whole payload rather than a per-row query, because this
+     * register draws every contractor at once.
+     */
+    const linked = await linkedContractorIds(db, orgId);
+    const aliases = await aliasesByContractor(db, orgId, ids);
+
+    const payload: Array<
+      WorkspaceContractor & {
+        register: RecordProvenance;
+        linked: boolean;
+        aliases: string[];
+        contactUnreachable: boolean;
+      }
+    > = rows
       .filter((row) => includeInactive || row.active)
       .map((contractor) => {
         const jobs = jobsById.get(contractor.id);
@@ -311,6 +339,17 @@ export async function GET(request: Request) {
            * and never becomes the boundary.
            */
           register: provenance(contractor.id, contractor.boardId),
+          linked: linked.has(contractor.id),
+          aliases: aliases.get(contractor.id) ?? [],
+          /*
+           * `.example`, `.test`, `.invalid` and `.localhost` are reserved by
+           * RFC 2606 and RFC 6761 precisely so that they never resolve. Seven
+           * records on this estate carry one. The address is still returned —
+           * removing data is not this route's job — and the flag is what lets
+           * the screen render `No contact set` with an edit link rather than a
+           * mailto that is guaranteed to bounce.
+           */
+          contactUnreachable: isUnreachableEmail(contractor.email),
         };
       });
 
