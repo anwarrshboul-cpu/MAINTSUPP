@@ -341,9 +341,418 @@ export function siteIdIsNullable(): boolean {
  * not: those provisioned between 0000 and 0003.
  */
 async function ensureBaseSchema(d1: D1DatabaseLike) {
+  /*
+   * THREE STEPS, AND THE ORDER IS THE WHOLE POINT.
+   *
+   * These used to be one `batch()` — every CREATE TABLE and every CREATE INDEX
+   * together — with `ensureLegacyColumns` called after it. On a fresh database
+   * that works. On an estate old enough to predate a column, it cannot:
+   * `CREATE INDEX IF NOT EXISTS` guards the INDEX, not the COLUMN, so
+   * `sites_lifecycle_idx ON sites (lifecycle)` throws `no such column:
+   * lifecycle` against a `sites` table that `CREATE TABLE IF NOT EXISTS`
+   * declined to touch. Inside a batch that rolls the transaction back, so
+   * `initialize()` threw at its FIRST stage and every later stage — including
+   * `ensureLegacyColumns`, the shim written to add exactly those columns —
+   * never ran.
+   *
+   * That is what took `Performance over time` and `Cost` off the Production
+   * Overview on 2026-09-08 while the four cards beside them loaded: the two
+   * that read `target_completion_date` and `annual_budget_pence`, columns whose
+   * `addColumn` guards sit in stages that the boot never reached. It presented
+   * as a dashboard fault and was a boot-ordering fault.
+   *
+   * So: create the tables, bring an existing table up to the column set the
+   * CREATE body declares, and only then build the indexes that depend on those
+   * columns.
+   */
   await d1.batch([
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS organisations (
+    d1.prepare(`CREATE TABLE IF NOT EXISTS organisations (
+         id TEXT PRIMARY KEY NOT NULL,
+         name TEXT NOT NULL,
+         slug TEXT NOT NULL,
+         logo_url TEXT,
+         primary_colour TEXT NOT NULL DEFAULT '#12B4A8',
+         plan_tier TEXT NOT NULL DEFAULT 'development',
+         status TEXT NOT NULL DEFAULT 'active',
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS users (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT REFERENCES organisations(id),
+         email TEXT NOT NULL,
+         full_name TEXT,
+         role TEXT NOT NULL DEFAULT 'client_user',
+         active INTEGER NOT NULL DEFAULT 1,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS memberships (
+         id TEXT PRIMARY KEY NOT NULL,
+         user_id TEXT NOT NULL REFERENCES users(id),
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         role TEXT NOT NULL,
+         site_scope TEXT,
+         approval_limit_pence INTEGER,
+         status TEXT NOT NULL DEFAULT 'active',
+         invited_by TEXT,
+         accepted_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS option_sets (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         key TEXT NOT NULL,
+         name TEXT NOT NULL,
+         description TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS option_values (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         option_set_id TEXT NOT NULL REFERENCES option_sets(id),
+         value TEXT NOT NULL,
+         label TEXT NOT NULL,
+         colour_hex TEXT NOT NULL,
+         text_colour TEXT NOT NULL DEFAULT '#ffffff',
+         position INTEGER NOT NULL DEFAULT 0,
+         is_done INTEGER NOT NULL DEFAULT 0,
+         is_default INTEGER NOT NULL DEFAULT 0,
+         active INTEGER NOT NULL DEFAULT 1,
+         system INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS sites (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         name TEXT NOT NULL,
+         type TEXT NOT NULL,
+         region TEXT NOT NULL DEFAULT 'UK',
+         lifecycle TEXT NOT NULL DEFAULT 'Current',
+         address TEXT NOT NULL,
+         manager TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS units (
+         id TEXT PRIMARY KEY NOT NULL,
+         site_id TEXT NOT NULL REFERENCES sites(id),
+         name TEXT NOT NULL,
+         category TEXT NOT NULL,
+         manufacturer TEXT,
+         model TEXT,
+         serial_number TEXT,
+         status TEXT NOT NULL DEFAULT 'Active',
+         notes TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS contractors (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT REFERENCES organisations(id),
+         name TEXT NOT NULL,
+         email TEXT,
+         phone TEXT,
+         service_categories TEXT NOT NULL DEFAULT '[]',
+         coverage_areas TEXT NOT NULL DEFAULT '[]',
+         certifications TEXT NOT NULL DEFAULT '[]',
+         insurance_expiry TEXT,
+         availability TEXT NOT NULL DEFAULT 'Available',
+         rating REAL,
+         active INTEGER NOT NULL DEFAULT 1,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS maintenance_requests (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         site_id TEXT,
+         source TEXT NOT NULL DEFAULT 'Portal form',
+         title TEXT NOT NULL,
+         description TEXT NOT NULL,
+         location TEXT NOT NULL,
+         requester TEXT NOT NULL,
+         contact TEXT NOT NULL,
+         category TEXT NOT NULL,
+         engineer TEXT NOT NULL,
+         tier INTEGER NOT NULL DEFAULT 2,
+         priority TEXT NOT NULL DEFAULT 'Medium',
+         stage TEXT NOT NULL DEFAULT 'Incoming',
+         -- 0000's default was a status the board has since retired and holds
+         -- no option row for. This follows schema.ts instead, so a row
+         -- inserted without one still renders as a chip.
+         status TEXT NOT NULL DEFAULT 'Pending Approval',
+         contractor TEXT,
+         assignee TEXT,
+         approved_by TEXT,
+         invoice TEXT,
+         form_url TEXT,
+         requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         due_at TEXT,
+         completed_at TEXT,
+         next_update_at TEXT,
+         cost REAL,
+         attachment_count INTEGER NOT NULL DEFAULT 0,
+         issue_attachment_count INTEGER NOT NULL DEFAULT 0,
+         completed_attachment_count INTEGER NOT NULL DEFAULT 0,
+         general_attachment_count INTEGER NOT NULL DEFAULT 0,
+         comment_count INTEGER NOT NULL DEFAULT 0,
+         public_upload_token_hash TEXT,
+         public_upload_token_expires_at TEXT,
+         created_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS maintenance_groups (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         name TEXT NOT NULL,
+         color TEXT NOT NULL DEFAULT '#579bfc',
+         stage_key TEXT,
+         position INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS maintenance_group_items (
+         request_id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         group_id TEXT NOT NULL,
+         position INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS maintenance_board_columns (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         column_key TEXT NOT NULL,
+         title TEXT NOT NULL,
+         type TEXT NOT NULL,
+         position INTEGER NOT NULL DEFAULT 0,
+         width INTEGER NOT NULL DEFAULT 160,
+         settings TEXT NOT NULL DEFAULT '{}',
+         system INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS maintenance_board_options (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         column_key TEXT NOT NULL,
+         value TEXT NOT NULL,
+         label TEXT NOT NULL,
+         color TEXT NOT NULL DEFAULT '#579bfc',
+         text_color TEXT NOT NULL DEFAULT '#ffffff',
+         active INTEGER NOT NULL DEFAULT 1,
+         system INTEGER NOT NULL DEFAULT 0,
+         position INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS maintenance_board_cells (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         board_id TEXT NOT NULL DEFAULT 'maintenance',
+         request_id TEXT NOT NULL,
+         column_id TEXT NOT NULL,
+         value TEXT NOT NULL DEFAULT '',
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS attachments (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         request_id TEXT,
+         site_id TEXT,
+         board_column_id TEXT,
+         object_key TEXT NOT NULL,
+         original_name TEXT NOT NULL,
+         content_type TEXT NOT NULL,
+         byte_size INTEGER NOT NULL,
+         kind TEXT NOT NULL DEFAULT 'issue',
+         uploaded_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS compliance_documents (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         site_id TEXT NOT NULL,
+         kind TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'Missing',
+         expiry_date TEXT,
+         attachment_id TEXT,
+         not_required INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS planned_maintenance (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         site_id TEXT NOT NULL REFERENCES sites(id),
+         unit_id TEXT,
+         contractor_id TEXT,
+         title TEXT NOT NULL,
+         category TEXT NOT NULL,
+         frequency TEXT NOT NULL,
+         next_due_at TEXT NOT NULL,
+         last_completed_at TEXT,
+         status TEXT NOT NULL DEFAULT 'Scheduled',
+         reminder_days INTEGER NOT NULL DEFAULT 30,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS quotations (
+         id TEXT PRIMARY KEY NOT NULL,
+         request_id TEXT NOT NULL,
+         contractor_id TEXT,
+         amount REAL NOT NULL,
+         status TEXT NOT NULL DEFAULT 'Awaiting approval',
+         attachment_id TEXT,
+         submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         approved_at TEXT
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS invoices (
+         id TEXT PRIMARY KEY NOT NULL,
+         request_id TEXT NOT NULL,
+         contractor_id TEXT,
+         invoice_number TEXT,
+         amount REAL NOT NULL,
+         status TEXT NOT NULL DEFAULT 'Awaiting payment',
+         due_at TEXT,
+         paid_at TEXT,
+         attachment_id TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS system_notifications (
+         id TEXT PRIMARY KEY NOT NULL,
+         user_email TEXT NOT NULL,
+         entity_type TEXT NOT NULL,
+         entity_id TEXT NOT NULL,
+         event TEXT NOT NULL,
+         title TEXT NOT NULL,
+         body TEXT,
+         read_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS leads (
+         id TEXT PRIMARY KEY NOT NULL,
+         name TEXT NOT NULL,
+         company TEXT NOT NULL,
+         email TEXT NOT NULL,
+         phone TEXT,
+         site_range TEXT NOT NULL,
+         services TEXT NOT NULL,
+         regions TEXT NOT NULL,
+         challenge TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'New',
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS contractor_applications (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL,
+         company TEXT NOT NULL,
+         contact_name TEXT NOT NULL,
+         email TEXT NOT NULL,
+         phone TEXT NOT NULL,
+         trades TEXT NOT NULL,
+         regions TEXT NOT NULL,
+         insured TEXT NOT NULL,
+         years_trading TEXT,
+         certifications TEXT,
+         notes TEXT,
+         consent INTEGER NOT NULL DEFAULT 0,
+         status TEXT NOT NULL DEFAULT 'New',
+         notified_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS activity_log (
+         id TEXT PRIMARY KEY NOT NULL,
+         client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
+         entity_type TEXT NOT NULL,
+         entity_id TEXT NOT NULL,
+         action TEXT NOT NULL,
+         actor_email TEXT,
+         detail TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_settings (
+         client_id TEXT PRIMARY KEY NOT NULL DEFAULT 'sunnamusk-uk',
+         settings TEXT NOT NULL DEFAULT '{}',
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`),
+  ]);
+
+  /* An existing table is not touched by CREATE TABLE IF NOT EXISTS, so the
+     columns are reconciled from the same declarations, and cannot drift. */
+  await reconcileDeclaredColumns(d1, BASE_TABLE_DECLARATIONS);
+  await ensureLegacyColumns(d1);
+
+  /*
+   * EACH INDEX IN ITS OWN STATEMENT AND ITS OWN CATCH, NOT IN A `batch()` —
+   * the same rule `ensureAttachmentVersionIndexes` states below, for the same
+   * reason, and this is the stage that did not follow it.
+   *
+   * A batch fails as a unit, so one index that cannot be created discards every
+   * other index beside it AND aborts the stage, which aborts `initialize()`,
+   * which takes down every guard in every stage after it. The reconciliation
+   * above should mean no column is missing by the time these run; catching is
+   * what makes that a belief rather than a bet. An index that could not be
+   * created is a slower query and a loud log line. An index that throws inside
+   * a batch was a dead boot path on every request.
+   */
+  const baseIndexes = [
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS organisations_slug_unique ON organisations (slug)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS memberships_user_organisation_idx ON memberships (user_id, organisation_id)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS option_sets_organisation_key_idx ON option_sets (organisation_id, key)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS option_values_set_value_idx ON option_values (organisation_id, option_set_id, value)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS option_values_set_position_idx ON option_values (organisation_id, option_set_id, position)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS sites_lifecycle_idx ON sites (lifecycle)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS units_site_idx ON units (site_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS contractors_organisation_idx ON contractors (organisation_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS maintenance_site_idx ON maintenance_requests (site_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS maintenance_priority_idx ON maintenance_requests (priority)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS maintenance_board_cells_request_idx ON maintenance_board_cells (board_id, request_id)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS attachments_object_key_unique ON attachments (object_key)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS attachments_request_idx ON attachments (request_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS attachments_site_idx ON attachments (site_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS attachments_board_column_idx ON attachments (board_column_id, request_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS compliance_site_kind_idx ON compliance_documents (site_id, kind)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS compliance_expiry_idx ON compliance_documents (expiry_date)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS planned_maintenance_due_idx ON planned_maintenance (next_due_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS quotations_request_idx ON quotations (request_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS invoices_request_idx ON invoices (request_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS system_notifications_user_idx ON system_notifications (user_email, read_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS contractor_applications_created_idx ON contractor_applications (organisation_id, created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS activity_entity_idx ON activity_log (entity_type, entity_id)"),
+  ];
+  for (const statement of baseIndexes) {
+    try {
+      await statement.run();
+    } catch (error) {
+      console.error(
+        "[init] could not create a base-schema index; the query it supports will be slower, but the application still starts",
+        error,
+      );
+    }
+  }
+}
+
+/**
+ * The CREATE bodies above, as text, so the reconciliation reads the same
+ * declarations the batch executes rather than a second list somebody has to
+ * remember to update.
+ */
+const BASE_TABLE_DECLARATIONS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS organisations (
          id TEXT PRIMARY KEY NOT NULL,
          name TEXT NOT NULL,
          slug TEXT NOT NULL,
@@ -354,12 +763,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS organisations_slug_unique ON organisations (slug)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS users (
+  `CREATE TABLE IF NOT EXISTS users (
          id TEXT PRIMARY KEY NOT NULL,
          organisation_id TEXT REFERENCES organisations(id),
          email TEXT NOT NULL,
@@ -369,12 +773,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS memberships (
+  `CREATE TABLE IF NOT EXISTS memberships (
          id TEXT PRIMARY KEY NOT NULL,
          user_id TEXT NOT NULL REFERENCES users(id),
          organisation_id TEXT NOT NULL REFERENCES organisations(id),
@@ -387,12 +786,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS memberships_user_organisation_idx ON memberships (user_id, organisation_id)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS option_sets (
+  `CREATE TABLE IF NOT EXISTS option_sets (
          id TEXT PRIMARY KEY NOT NULL,
          organisation_id TEXT NOT NULL REFERENCES organisations(id),
          key TEXT NOT NULL,
@@ -401,12 +795,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS option_sets_organisation_key_idx ON option_sets (organisation_id, key)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS option_values (
+  `CREATE TABLE IF NOT EXISTS option_values (
          id TEXT PRIMARY KEY NOT NULL,
          organisation_id TEXT NOT NULL REFERENCES organisations(id),
          option_set_id TEXT NOT NULL REFERENCES option_sets(id),
@@ -422,15 +811,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS option_values_set_value_idx ON option_values (organisation_id, option_set_id, value)",
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS option_values_set_position_idx ON option_values (organisation_id, option_set_id, position)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS sites (
+  `CREATE TABLE IF NOT EXISTS sites (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          name TEXT NOT NULL,
@@ -442,12 +823,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS sites_lifecycle_idx ON sites (lifecycle)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS units (
+  `CREATE TABLE IF NOT EXISTS units (
          id TEXT PRIMARY KEY NOT NULL,
          site_id TEXT NOT NULL REFERENCES sites(id),
          name TEXT NOT NULL,
@@ -460,10 +836,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare("CREATE INDEX IF NOT EXISTS units_site_idx ON units (site_id)"),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS contractors (
+  `CREATE TABLE IF NOT EXISTS contractors (
          id TEXT PRIMARY KEY NOT NULL,
          organisation_id TEXT REFERENCES organisations(id),
          name TEXT NOT NULL,
@@ -479,32 +852,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    // Kept in step with db/schema.ts, which declares this index but does not
-    // provision anything: drizzle-kit is configured for sqlite and writes to
-    // `drizzle/`, which nothing on the boot path reads, so an index declared
-    // only there exists on no database. Every contractor read is scoped
-    // `WHERE organisation_id = ?`, and without this they were sequential scans.
-    // `CREATE INDEX IF NOT EXISTS` matches on NAME, so the name here must stay
-    // byte-identical to the declaration or this creates a duplicate instead.
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS contractors_organisation_idx ON contractors (organisation_id)",
-    ),
-    // Held in the post-0003 shape: the seven columns 0001–0003 added are
-    // declared here and back-filled onto older databases by
-    // `ensureLegacyColumns`.
-    /*
-     * `site_id` is nullable here: a job whose site is unknown has no site, and
-     * the sentinel that stood in for one referenced a row in no table. Only
-     * FRESH databases start that way — `ensureCanonicalSiteLink` explains why
-     * an existing SQLite one cannot be relaxed in place.
-     *
-     * The note lives out here rather than in the statement because D1 rejects
-     * a `--` comment inside a prepared one, and a failure in this batch takes
-     * the whole bootstrap down with it.
-     */
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS maintenance_requests (
+  `CREATE TABLE IF NOT EXISTS maintenance_requests (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          site_id TEXT,
@@ -544,15 +892,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS maintenance_site_idx ON maintenance_requests (site_id)",
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS maintenance_priority_idx ON maintenance_requests (priority)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS maintenance_groups (
+  `CREATE TABLE IF NOT EXISTS maintenance_groups (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          board_id TEXT NOT NULL DEFAULT 'maintenance',
@@ -563,9 +903,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS maintenance_group_items (
+  `CREATE TABLE IF NOT EXISTS maintenance_group_items (
          request_id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          board_id TEXT NOT NULL DEFAULT 'maintenance',
@@ -574,9 +912,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS maintenance_board_columns (
+  `CREATE TABLE IF NOT EXISTS maintenance_board_columns (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          board_id TEXT NOT NULL DEFAULT 'maintenance',
@@ -590,9 +926,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS maintenance_board_options (
+  `CREATE TABLE IF NOT EXISTS maintenance_board_options (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          board_id TEXT NOT NULL DEFAULT 'maintenance',
@@ -607,9 +941,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS maintenance_board_cells (
+  `CREATE TABLE IF NOT EXISTS maintenance_board_cells (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          board_id TEXT NOT NULL DEFAULT 'maintenance',
@@ -619,12 +951,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS maintenance_board_cells_request_idx ON maintenance_board_cells (board_id, request_id)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS attachments (
+  `CREATE TABLE IF NOT EXISTS attachments (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          request_id TEXT,
@@ -638,21 +965,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          uploaded_by_email TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS attachments_object_key_unique ON attachments (object_key)",
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS attachments_request_idx ON attachments (request_id)",
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS attachments_site_idx ON attachments (site_id)",
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS attachments_board_column_idx ON attachments (board_column_id, request_id)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS compliance_documents (
+  `CREATE TABLE IF NOT EXISTS compliance_documents (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          site_id TEXT NOT NULL,
@@ -664,15 +977,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS compliance_site_kind_idx ON compliance_documents (site_id, kind)",
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS compliance_expiry_idx ON compliance_documents (expiry_date)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS planned_maintenance (
+  `CREATE TABLE IF NOT EXISTS planned_maintenance (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          site_id TEXT NOT NULL REFERENCES sites(id),
@@ -688,12 +993,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS planned_maintenance_due_idx ON planned_maintenance (next_due_at)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS quotations (
+  `CREATE TABLE IF NOT EXISTS quotations (
          id TEXT PRIMARY KEY NOT NULL,
          request_id TEXT NOT NULL,
          contractor_id TEXT,
@@ -703,12 +1003,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
          approved_at TEXT
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS quotations_request_idx ON quotations (request_id)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS invoices (
+  `CREATE TABLE IF NOT EXISTS invoices (
          id TEXT PRIMARY KEY NOT NULL,
          request_id TEXT NOT NULL,
          contractor_id TEXT,
@@ -720,12 +1015,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          attachment_id TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS invoices_request_idx ON invoices (request_id)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS system_notifications (
+  `CREATE TABLE IF NOT EXISTS system_notifications (
          id TEXT PRIMARY KEY NOT NULL,
          user_email TEXT NOT NULL,
          entity_type TEXT NOT NULL,
@@ -736,12 +1026,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          read_at TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS system_notifications_user_idx ON system_notifications (user_email, read_at)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS leads (
+  `CREATE TABLE IF NOT EXISTS leads (
          id TEXT PRIMARY KEY NOT NULL,
          name TEXT NOT NULL,
          company TEXT NOT NULL,
@@ -754,23 +1039,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          status TEXT NOT NULL DEFAULT 'New',
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at)",
-    ),
-    /*
-     * Contractor applications from the public /contractors page.
-     *
-     * A separate table from `leads` rather than a flag on it. A lead is a
-     * prospective client and an application is a prospective supplier: they are
-     * read by different people, answered differently, and carry different
-     * fields — insurance, years trading, certifications and a recorded consent,
-     * none of which a lead has. Folding them together would have meant packing
-     * four structured answers into the `challenge` free-text column and then
-     * teaching every reader of that column to unpack them.
-     */
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS contractor_applications (
+  `CREATE TABLE IF NOT EXISTS contractor_applications (
          id TEXT PRIMARY KEY NOT NULL,
          organisation_id TEXT NOT NULL,
          company TEXT NOT NULL,
@@ -788,12 +1057,7 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          notified_at TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS contractor_applications_created_idx ON contractor_applications (organisation_id, created_at)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS activity_log (
+  `CREATE TABLE IF NOT EXISTS activity_log (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
          entity_type TEXT NOT NULL,
@@ -803,21 +1067,114 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
          detail TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-    d1.prepare(
-      "CREATE INDEX IF NOT EXISTS activity_entity_idx ON activity_log (entity_type, entity_id)",
-    ),
-    d1.prepare(
-      `CREATE TABLE IF NOT EXISTS workspace_settings (
+  `CREATE TABLE IF NOT EXISTS workspace_settings (
          client_id TEXT PRIMARY KEY NOT NULL DEFAULT 'sunnamusk-uk',
          settings TEXT NOT NULL DEFAULT '{}',
          updated_by_email TEXT,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
-    ),
-  ]);
+];
 
-  await ensureLegacyColumns(d1);
+/**
+ * Bring an EXISTING table up to the column set its declaration names.
+ *
+ * `CREATE TABLE IF NOT EXISTS` sees a table with that name and returns, so a
+ * column added to a declaration years after the table was first created reaches
+ * a fresh database and never reaches an old one. This closes that gap for every
+ * column in every declaration it is handed, rather than one column at a time in
+ * a list that only grows when somebody remembers.
+ *
+ * WHAT IT WILL NOT DO. A `NOT NULL` column with no default cannot be added to a
+ * table that already has rows — there is no value to give them — so the NOT
+ * NULL is dropped and the column arrives nullable. That is the honest outcome:
+ * the alternative is a boot that throws, and the application already treats
+ * every one of these as optional when reading an old row. Primary keys and
+ * UNIQUE constraints are skipped for the same reason SQLite refuses them in
+ * ALTER TABLE ADD COLUMN; a table missing its own primary key is not a case
+ * this can repair, and pretending otherwise would hide it.
+ */
+async function reconcileDeclaredColumns(
+  d1: D1DatabaseLike,
+  declarations: readonly string[],
+) {
+  for (const declaration of declarations) {
+    const match = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)\s*\(([\s\S]*)\)\s*$/i.exec(
+      declaration.trim(),
+    );
+    if (!match) continue;
+    const table = match[1];
+
+    /*
+     * ONE catalogue read per table, not one per column.
+     *
+     * `addColumn` asks `PRAGMA table_info` itself, so calling it for every
+     * declared column would put roughly two hundred catalogue queries on the
+     * boot path — which every API route awaits, on the first request of every
+     * serverless instance, over a connection budget of fifteen. Reading the
+     * table once and only calling `addColumn` for a column that is genuinely
+     * absent makes the common case — an up-to-date database — twenty-four
+     * reads and no writes.
+     */
+    const info = await d1.prepare(`PRAGMA table_info(${table})`).all();
+    const existing = new Set(
+      ((info.results ?? []) as Array<{ name?: string }>).map((row) => row.name),
+    );
+    /* No columns means no table; a later stage creates it. */
+    if (existing.size === 0) continue;
+
+    for (const line of splitColumnDefinitions(match[2])) {
+      const [name, ...rest] = line.split(/\s+/);
+      if (!name || !/^\w+$/.test(name)) continue;
+      const upper = line.toUpperCase();
+      if (upper.startsWith("PRIMARY") || upper.startsWith("UNIQUE") || upper.startsWith("FOREIGN")) continue;
+      if (upper.startsWith("CHECK") || upper.startsWith("CONSTRAINT")) continue;
+      let definition = rest.join(" ").trim();
+      if (!definition) continue;
+      if (/PRIMARY\s+KEY|\bUNIQUE\b/i.test(definition)) continue;
+      if (/NOT\s+NULL/i.test(definition) && !/DEFAULT/i.test(definition)) {
+        definition = definition.replace(/NOT\s+NULL/i, "").replace(/\s+/g, " ").trim();
+      }
+      if (existing.has(name)) continue;
+      await addColumn(d1, table, name, definition);
+      existing.add(name);
+    }
+  }
+}
+
+/**
+ * The top-level comma-separated parts of a CREATE body.
+ *
+ * Split by hand rather than on `,` because a default can contain one —
+ * `DEFAULT '{}'` does not, but `CHECK (x IN ('a','b'))` does, and a naive split
+ * would turn one constraint into two nonsense columns.
+ */
+function splitColumnDefinitions(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  let quote: string | null = null;
+  for (const char of body) {
+    if (quote) {
+      current += char;
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts.filter(Boolean);
 }
 
 /**
