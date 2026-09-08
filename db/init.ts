@@ -694,7 +694,20 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
   await reconcileDeclaredColumns(d1, BASE_TABLE_DECLARATIONS);
   await ensureLegacyColumns(d1);
 
-  await d1.batch([
+  /*
+   * EACH INDEX IN ITS OWN STATEMENT AND ITS OWN CATCH, NOT IN A `batch()` —
+   * the same rule `ensureAttachmentVersionIndexes` states below, for the same
+   * reason, and this is the stage that did not follow it.
+   *
+   * A batch fails as a unit, so one index that cannot be created discards every
+   * other index beside it AND aborts the stage, which aborts `initialize()`,
+   * which takes down every guard in every stage after it. The reconciliation
+   * above should mean no column is missing by the time these run; catching is
+   * what makes that a belief rather than a bet. An index that could not be
+   * created is a slower query and a loud log line. An index that throws inside
+   * a batch was a dead boot path on every request.
+   */
+  const baseIndexes = [
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS organisations_slug_unique ON organisations (slug)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS memberships_user_organisation_idx ON memberships (user_id, organisation_id)"),
@@ -720,7 +733,17 @@ async function ensureBaseSchema(d1: D1DatabaseLike) {
     d1.prepare("CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS contractor_applications_created_idx ON contractor_applications (organisation_id, created_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS activity_entity_idx ON activity_log (entity_type, entity_id)"),
-  ]);
+  ];
+  for (const statement of baseIndexes) {
+    try {
+      await statement.run();
+    } catch (error) {
+      console.error(
+        "[init] could not create a base-schema index; the query it supports will be slower, but the application still starts",
+        error,
+      );
+    }
+  }
 }
 
 /**
