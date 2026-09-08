@@ -16,7 +16,7 @@
  */
 
 import { Icon } from "../../components";
-import { telHref, whatsappHref } from "../../lib/contact-links";
+import { mailtoHref, telHref, whatsappHref } from "../../lib/contact-links";
 
 /**
  * The WhatsApp mark, filled rather than stroked.
@@ -96,6 +96,7 @@ export function ContractorContact({
 
   const dial = telHref(phone);
   const chat = whatsappHref(whatsapp);
+  const post = mailtoHref(email);
 
   if (!phone && !email && !person && !whatsapp) {
     return <span className="contractor-contact__none">No contact details</span>;
@@ -162,16 +163,36 @@ export function ContractorContact({
             </span>
           </span>
         ))}
-      {email && (
-        <a
-          className="contractor-contact__link"
-          href={`mailto:${email}`}
-          aria-label={`Email ${contractor.name} at ${email}`}
-        >
-          <Icon name="inbox" size={14} />
-          {email}
-        </a>
-      )}
+      {email &&
+        (post ? (
+          <a
+            className="contractor-contact__link"
+            href={post}
+            aria-label={`Email ${contractor.name} at ${email}`}
+          >
+            <Icon name="inbox" size={14} />
+            {email}
+          </a>
+        ) : (
+          /*
+           * A reserved-TLD address — `.example`, `.test`, `.invalid`,
+           * `.localhost` — which is registered to nobody and bounces by
+           * design. Treated exactly as the undiallable phone above it: the
+           * words the register uses lead, and the value is kept beside them
+           * because it is what somebody has to go and correct. A mailto here
+           * would look like a working contact and fail silently after the
+           * message was written.
+           */
+          <span className="contractor-contact__plain">
+            <Icon name="inbox" size={14} />
+            No contact set
+            <span className="contractor-contact__unreachable"> ({email})</span>
+            <span className="visually-hidden">
+              {" "}
+              — {email} is a placeholder address and cannot receive mail
+            </span>
+          </span>
+        ))}
     </span>
   );
 }

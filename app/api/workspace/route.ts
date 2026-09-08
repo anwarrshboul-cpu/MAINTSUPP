@@ -98,6 +98,7 @@ import {
   resolvePermissions,
 } from "../../lib/permissions";
 import { linkedContractorIds } from "../../lib/contractor-linking";
+import { RESERVED_EMAIL_TLD } from "../../lib/contact-links";
 import { isUnreachableEmail } from "../../lib/site-metrics";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
 
@@ -1871,7 +1872,7 @@ function contractorEmailRefusal(
    * (see `isUnreachableEmail`), so the existing rows are visible and fixable
    * while this stops any more being created.
    */
-  if (intent === "create" && RESERVED_EMAIL_TLD.test(value)) {
+  if (intent === "create" && RESERVED_EMAIL_TLD.test(value.toLowerCase())) {
     return Response.json(
       {
         error:
@@ -1883,15 +1884,6 @@ function contractorEmailRefusal(
   return null;
 }
 
-/**
- * The domains that are guaranteed never to resolve.
- *
- * RFC 2606 reserves `.test`, `.example`, `.invalid` and `.localhost`; RFC 6761
- * restates them as special-use. Mail to any of them is undeliverable by
- * definition, which is why they are the right thing for a seeder to use and
- * the wrong thing to have in a contractor register.
- */
-const RESERVED_EMAIL_TLD = /\.(example|test|invalid|localhost)$/i;
 
 /*
  * What `day_rate_pence` can actually hold.

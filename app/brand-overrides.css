@@ -8542,6 +8542,21 @@ label.live-board-tool {
   margin: 0 1px;
 }
 
+/*
+ * The placeholder address itself, beside the words that replaced it.
+ *
+ * `No contact set` is what the row and the drawer both say, because it is the
+ * true statement — a `.example` address is registered to nobody and bounces by
+ * definition. But the drawer is where somebody goes to FIX it, so the value is
+ * kept in view, one step quieter than the words, in brackets. Dropping it
+ * entirely would leave an operator with nothing to search the register for.
+ */
+.contractor-contact__unreachable {
+  color: var(--muted);
+  opacity: 0.75;
+  font-size: 12px;
+}
+
 /* ===========================================================================
    SITES REGISTER — Workstream 5. Two measured defects.
 

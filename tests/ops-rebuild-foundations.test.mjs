@@ -573,40 +573,85 @@ test("one job-side name maps to at most one contractor", async () => {
 
 test("reserved-TLD contacts are reported rather than rendered as reachable", async () => {
   /*
-   * `site-metrics.ts` reaches drizzle and the schema, so the two predicates are
-   * transpiled out of it and evaluated on their own rather than importing the
-   * module. They are pure and self-contained, which is why that works and why
-   * they were written that way.
+   * RE-POINTED. The predicate used to live in `site-metrics.ts` and was sliced
+   * out of it by braces, because that module reaches drizzle and cannot be
+   * imported. It has moved to `contact-links.ts` — the module that owns the
+   * question "may this value become something a user can act on?", beside
+   * `telHref` and `whatsappHref` — because the drawer needed the same answer in
+   * the browser and could not reach a module that imports the schema.
+   *
+   * The slice is still a slice rather than an import: `contact-links.ts` is
+   * loaded by suites that transpile it to a `data:` URL, and a `.ts` specifier
+   * on it would break their rewrite. What the test asserts is unchanged, and
+   * one assertion is added — that `site-metrics` DELEGATES, because two copies
+   * of the pattern could accept an address the browser refuses to link.
    */
+  const contact = await read("app/lib/contact-links.ts");
+  const mailtoHref = new Function(
+    `${contact.match(/export const RESERVED_EMAIL_TLD = [^;]+;/)[0].replace("export ", "")}
+     ${
+       /* `fnBody` strips a parameter type and a `: boolean` return type, which
+          is all it has ever needed to. This one returns `string | null`, so the
+          return annotation comes off here rather than by widening a helper
+          eleven other tests depend on. */
+       fnBody(contact, "mailtoHref").replace("): string | null {", ") {")
+     }
+     return mailtoHref;`,
+  )();
+  assert.equal(mailtoHref("ops@climate-response.example"), null);
+  assert.equal(mailtoHref("ops@climate-response.test"), null);
+  assert.equal(mailtoHref("ops@climate-response.INVALID"), null, "case must not smuggle one past");
+  assert.equal(mailtoHref("ops@climate-response.co.uk"), "mailto:ops@climate-response.co.uk");
+  assert.equal(mailtoHref(""), null);
+
   const source = await read("app/lib/site-metrics.ts");
+  assert.match(
+    source,
+    /return mailtoHref\(email\) === null;/,
+    "the server asks the same function the browser asks, not a second copy of the pattern",
+  );
   const isPlaceholderManager = new Function(
     `${fnBody(source, "isPlaceholderManager")}; return isPlaceholderManager;`,
   )();
-  const isUnreachableEmail = new Function(
-    `${fnBody(source, "isUnreachableEmail")}; return isUnreachableEmail;`,
-  )();
-  assert.equal(isUnreachableEmail("ops@climate-response.example"), true);
-  assert.equal(isUnreachableEmail("ops@climate-response.test"), true);
-  assert.equal(isUnreachableEmail("ops@climate-response.co.uk"), false);
-  assert.equal(isUnreachableEmail(""), false);
   assert.equal(isPlaceholderManager("Sample Manager F"), true);
   assert.equal(isPlaceholderManager("Samantha Manning"), false);
   assert.equal(isPlaceholderManager(null), false);
+
+  // Both surfaces say the same words: the dense row, and the drawer somebody
+  // opens to fix it.
   const list = codeOnly(await read("app/(app)/portal/ops/contractors-list.tsx"));
   assert.match(list, /No contact set/);
+  const drawer = codeOnly(await read("app/(app)/portal/contractor-contact.tsx"));
+  assert.match(drawer, /No contact set/);
+  assert.doesNotMatch(
+    drawer,
+    /href=\{`mailto:\$\{email\}`\}/,
+    "a placeholder address must never be offered as a mailto that bounces",
+  );
 });
 
 test("a reserved-TLD contact is refused on create, and only on create", async () => {
   const route = codeOnly(await read("app/api/workspace/route.ts"));
+  /*
+   * RE-POINTED. The route declared its own `RESERVED_EMAIL_TLD` and this line
+   * pinned that literal. It now imports the one in `contact-links.ts`, so the
+   * address a create is refused for is exactly the address no screen will
+   * render as a link. What is pinned is the same contract, at its new home.
+   */
   assert.match(
     route,
-    /const RESERVED_EMAIL_TLD = \/\\.\(example\|test\|invalid\|localhost\)\$\/i;/,
-    "RFC 2606 and RFC 6761 reserve these so they can never resolve",
+    /import \{ RESERVED_EMAIL_TLD \} from "\.\.\/\.\.\/lib\/contact-links";/,
+    "RFC 2606 and RFC 6761 reserve these, and one module says so",
+  );
+  assert.doesNotMatch(
+    route,
+    /const RESERVED_EMAIL_TLD = /,
+    "a second declaration here could drift from the one the browser applies",
   );
   assert.match(
     route,
-    /if \(intent === "create" && RESERVED_EMAIL_TLD\.test\(value\)\)/,
-    "a new record may not be given an address that cannot receive mail",
+    /if \(intent === "create" && RESERVED_EMAIL_TLD\.test\(value\.toLowerCase\(\)\)\)/,
+    "a new record may not be given an address that cannot receive mail, in any case",
   );
   assert.match(
     route,

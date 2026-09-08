@@ -30,6 +30,7 @@ import type { getDb } from "../../db";
 import { maintenanceRequests } from "../../db/schema";
 import { closedJobSql } from "./dashboard-aggregates";
 import { complianceCompletion, type ComplianceCompletion } from "./compliance-status";
+import { mailtoHref } from "./contact-links";
 import type { ComplianceState } from "./types";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -59,9 +60,16 @@ export function isPlaceholderManager(value: string | null | undefined): boolean 
  * mail into nothing.
  */
 export function isUnreachableEmail(value: string | null | undefined): boolean {
-  const email = (value ?? "").trim().toLowerCase();
+  const email = (value ?? "").trim();
   if (!email.includes("@")) return false;
-  return /\.(example|test|invalid|localhost)$/.test(email);
+  /*
+   * Delegated, not re-tested. `contact-links` decides whether a value may
+   * become something a user can act on, and this is the same question asked
+   * from the server: a second copy of the pattern here could accept an address
+   * the browser refuses to link, and the row would then report a contact that
+   * the drawer beside it refuses to offer.
+   */
+  return mailtoHref(email) === null;
 }
 
 /** The real manager name, or null when the register only holds a placeholder. */
