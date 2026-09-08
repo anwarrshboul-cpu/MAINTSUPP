@@ -50,14 +50,19 @@ from difflib import SequenceMatcher
 # which is a verbatim capture of the live boards taken 06 August 2026 and pinned
 # by tests/stage-nineteen-maintenance-parity.test.mjs.
 #
-# Where the two disagree the capture wins and the disagreement is a finding:
+# Where they disagree, the LIVE BOARD wins — not the capture, which is a
+# photograph of 6 August 2026 and was already a month stale when this ran.
+# Measured live on 2026-09-09:
 #
 #  - the brief writes the Westfield Stratford group as "Westfield Stratford
 #    completed"; the live board has two spaces. Whitespace is normalised before
 #    matching, so this resolves — but a literal string comparison would not.
 #  - the brief says "the 26 <Store> completed groups". There are 28.
-#  - the brief's reconciliation section says "items per group (all 39)". The
-#    capture has 38 groups.
+#  - the brief's reconciliation section says "items per group (all 39)", and the
+#    capture has 38. The live board has 39: `September  2026 Recently completed`
+#    was created after the capture was taken. The brief is right and the
+#    repository's own spec is the stale one, which is why nothing here is
+#    matched against a hardcoded list of group names.
 #
 # `store_doc` is the Store Documentation UK item name, `label` the Store Location
 # Name status label on Maintenance, `group` the Maintenance group title.
@@ -1007,6 +1012,18 @@ def main():
                                   "variant_group_size"]))
 
         titles = job_title_dry_run(maintenance, register)
+
+        # Items per canonical site, which §9's reconciliation table asks for and
+        # neither the group nor the Store Location Name breakdown answers: the
+        # label is set on a small minority of items, and several groups resolve
+        # to the same site as a label does.
+        per_site = Counter(t["site"] or "(unresolved)" for t in titles)
+        resolved_by = Counter(t["site_resolved_by"] or "(none)" for t in titles)
+        written.append(write_csv(
+            os.path.join(args.out, "items-per-site.csv"),
+            [{"canonical_site": site, "items": count} for site, count
+             in sorted(per_site.items(), key=lambda kv: (-kv[1], kv[0]))],
+            ["canonical_site", "items"]))
         written.append(write_csv(os.path.join(args.out, "job-titles.csv"), titles,
                                  ["item_id", "source_item_name", "rule", "generated_title",
                                   "site", "site_resolved_by", "label", "location_raw",
@@ -1025,6 +1042,13 @@ def main():
             "| --- | --- | --- | --- |",
         ] + [f"| {t['item_id']} | {t['source_item_name']} | {t['source_number']} | "
              f"{t['generated_title']} |" for t in rule_four]
+        summary_lines += ["", "## Site resolution — how each item found its site", "",
+                          "| resolved by | items |", "| --- | ---: |"] + [
+            f"| {how} | {count} |" for how, count in resolved_by.most_common()]
+        summary_lines += ["", "## Items per canonical site", "",
+                          "| site | items |", "| --- | ---: |"] + [
+            f"| {site} | {count} |" for site, count
+            in sorted(per_site.items(), key=lambda kv: (-kv[1], kv[0]))]
         summary_lines += ["", "# CONTRACTOR DRY RUN", "",
                           f"- distinct raw strings: **{len(contractors)}**",
                           f"- items with no contractor: **{blank_contractors}**",
