@@ -1080,6 +1080,25 @@ async function reconcileDeclaredColumns(
     );
     if (!match) continue;
     const table = match[1];
+
+    /*
+     * ONE catalogue read per table, not one per column.
+     *
+     * `addColumn` asks `PRAGMA table_info` itself, so calling it for every
+     * declared column would put roughly two hundred catalogue queries on the
+     * boot path — which every API route awaits, on the first request of every
+     * serverless instance, over a connection budget of fifteen. Reading the
+     * table once and only calling `addColumn` for a column that is genuinely
+     * absent makes the common case — an up-to-date database — twenty-four
+     * reads and no writes.
+     */
+    const info = await d1.prepare(`PRAGMA table_info(${table})`).all();
+    const existing = new Set(
+      ((info.results ?? []) as Array<{ name?: string }>).map((row) => row.name),
+    );
+    /* No columns means no table; a later stage creates it. */
+    if (existing.size === 0) continue;
+
     for (const line of splitColumnDefinitions(match[2])) {
       const [name, ...rest] = line.split(/\s+/);
       if (!name || !/^\w+$/.test(name)) continue;
@@ -1092,7 +1111,9 @@ async function reconcileDeclaredColumns(
       if (/NOT\s+NULL/i.test(definition) && !/DEFAULT/i.test(definition)) {
         definition = definition.replace(/NOT\s+NULL/i, "").replace(/\s+/g, " ").trim();
       }
+      if (existing.has(name)) continue;
       await addColumn(d1, table, name, definition);
+      existing.add(name);
     }
   }
 }
