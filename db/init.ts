@@ -2117,6 +2117,37 @@ async function ensureStageTwoFoundation(d1: D1DatabaseLike) {
       "CREATE INDEX IF NOT EXISTS contractor_certifications_owner_idx ON contractor_certifications (organisation_id, contractor_id, position)",
     ),
 
+    /*
+     * W-CONTRACTORS — the mapping between job-side names and register records.
+     *
+     * Additive and idempotent, like everything on this boot path: a workspace
+     * with no rows here behaves exactly as it did, and every attribution falls
+     * back to the id-then-unique-name rule in `app/lib/contractor-attribution.ts`.
+     *
+     * The unique index is on (organisation, normalised) and it is the point of
+     * the table: one job-side name may resolve to at most one contractor, ever.
+     * A name two records claimed would double-count money, and the attribution
+     * module refuses an ambiguous name for exactly that reason — this makes the
+     * ambiguity unrepresentable rather than merely handled.
+     */
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_name_aliases (
+         id TEXT PRIMARY KEY NOT NULL,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         contractor_id TEXT NOT NULL REFERENCES contractors(id),
+         alias TEXT NOT NULL,
+         normalised TEXT NOT NULL,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         created_by TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS contractor_name_aliases_unique_idx ON contractor_name_aliases (organisation_id, normalised)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_name_aliases_contractor_idx ON contractor_name_aliases (organisation_id, contractor_id)",
+    ),
+
     // X12/X13 — nothing an import corrects is corrected silently.
     d1.prepare(
       `CREATE TABLE IF NOT EXISTS import_anomalies (

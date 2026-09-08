@@ -2183,6 +2183,55 @@ export const contractorSites = sqliteTable(
  * else, so no certificate could have a date of its own. It is left in place and
  * still read; a contractor with no rows here behaves exactly as before.
  */
+/**
+ * THE FREE-TEXT CONTRACTOR NAMES A REGISTER ROW ANSWERS TO — the mapping table.
+ *
+ * Two disconnected sets of contractor identities exist on this estate and
+ * nothing joined them: names typed onto jobs (`maintenance_requests.contractor`)
+ * and proper records in the register. `contractor_id` closes the gap for a job
+ * somebody has linked, but there is no way to say "every job that says
+ * 'Saed Electrical' is this record" — so the register's Assigned, Completed and
+ * Spend columns read zero over contractors who had done the work, and the
+ * Overview reported most of its attributed spend as unlinked.
+ *
+ * A row here is that statement. `normalised` is what the lookup matches on —
+ * lower-cased, collapsed whitespace — because these strings have been through a
+ * spreadsheet, a form and a human; `alias` keeps what was actually typed, so a
+ * screen can show the operator the string they are mapping rather than a
+ * flattened copy of it.
+ *
+ * UNIQUE ON (organisation, normalised). One job-side name resolves to at most
+ * one record, ever. The alternative — a name claimed by two contractors —
+ * double-counts money, which is the one failure `contractor-attribution.ts`
+ * refuses to risk; it declines to attribute an ambiguous name for exactly this
+ * reason, and this index makes ambiguity unrepresentable rather than merely
+ * handled.
+ */
+export const contractorNameAliases = sqliteTable(
+  "contractor_name_aliases",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    contractorId: text("contractor_id").notNull().references(() => contractors.id),
+    /** The string as typed on the job. */
+    alias: text("alias").notNull(),
+    /** Lower-cased, whitespace-collapsed. The column the lookup matches on. */
+    normalised: text("normalised").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdBy: text("created_by"),
+  },
+  (table) => [
+    uniqueIndex("contractor_name_aliases_unique_idx").on(
+      table.organisationId,
+      table.normalised,
+    ),
+    index("contractor_name_aliases_contractor_idx").on(
+      table.organisationId,
+      table.contractorId,
+    ),
+  ],
+);
+
 export const contractorCertifications = sqliteTable(
   "contractor_certifications",
   {

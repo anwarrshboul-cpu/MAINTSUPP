@@ -35,6 +35,7 @@ import {
   attachments,
   complianceDocuments,
   contractorCertifications,
+  contractorNameAliases,
   contractorSites,
   contractors,
   invoices,
@@ -1019,6 +1020,27 @@ async function purgeInstanceRegisterRows(
         and(
           eq(contractorCertifications.organisationId, orgId),
           eq(contractorCertifications.contractorId, id),
+        ),
+      );
+    /*
+     * The name mappings, before the record they hang off.
+     *
+     * `contractor_name_aliases` references `contractors(id)`, so on Postgres a
+     * purge that left them behind is refused outright — the same class of
+     * failure the ordering in this whole block exists to prevent, and one
+     * SQLite would have hidden by not enforcing the constraint at all.
+     *
+     * Losing them with the record is right rather than merely necessary: an
+     * alias says "these job-side names mean THIS contractor", and it has no
+     * meaning once that contractor is gone. The jobs keep their typed name and
+     * reappear in the unlinked list, which is where they belong.
+     */
+    await db
+      .delete(contractorNameAliases)
+      .where(
+        and(
+          eq(contractorNameAliases.organisationId, orgId),
+          eq(contractorNameAliases.contractorId, id),
         ),
       );
     await db
