@@ -206,12 +206,25 @@ test("the Overview's overdue figure uses the rule, on the server", async () => {
    */
   const aggregates = await read("app/lib/dashboard-aggregates.ts");
   const sqlTwin = aggregates.slice(aggregates.indexOf("export function overdueOpenSql"));
+  /*
+   * RE-POINTED AGAIN on 2026-09-08, and stronger again. The two branches below
+   * used to read `trim(${due})`; `due` is now `dateText(raw)`, which trims as
+   * part of casting. That was not cosmetic: applying `trim` to the raw column
+   * is what answered `function pg_catalog.btrim(date) does not exist` on
+   * Production, whose `due_at` is a real Postgres `date` rather than the TEXT
+   * `db/init.ts` declares. The branches are the contract; the cast is now part
+   * of it, so both are pinned.
+   */
   assert.ok(
-    sqlTwin.includes("length(trim(${due})) <= 10 and substr(trim(${due}), 1, 10) < ${today}"),
+    sqlTwin.includes("const due = dateText(raw)"),
+    "the comparison runs over the cast expression, not the raw date column",
+  );
+  assert.ok(
+    sqlTwin.includes("length(${due}) <= 10 and substr(${due}, 1, 10) < ${today}"),
     "a bare date is late only once today has moved past it",
   );
   assert.ok(
-    sqlTwin.includes("length(trim(${due})) > 10 and trim(${due}) < ${instant}"),
+    sqlTwin.includes("length(${due}) > 10 and ${due} < ${instant}"),
     "a date with a time is late the moment the instant passes",
   );
   assert.match(

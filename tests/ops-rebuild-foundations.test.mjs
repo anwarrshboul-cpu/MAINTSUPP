@@ -256,8 +256,12 @@ test("finished work is never overdue", () => {
 test("the SQL twin of duePassed carries both branches", async () => {
   const aggregates = codeOnly(await read("app/lib/dashboard-aggregates.ts"));
   const fn = aggregates.slice(aggregates.indexOf("export function overdueOpenSql"));
-  assert.match(fn.slice(0, 900), /length\(trim\(\$\{due\}\)\) <= 10/, "the bare-date branch");
-  assert.match(fn.slice(0, 900), /length\(trim\(\$\{due\}\)\) > 10/, "and the instant branch");
+  /* `trim(${due})` became `${due}`: `due` is `dateText(raw)` now, because
+     trimming the raw column threw `btrim(date) does not exist` on Production.
+     The two branches are the contract and the cast is now part of it. */
+  assert.match(fn.slice(0, 1200), /const due = dateText\(raw\)/, "over the cast, not the raw column");
+  assert.match(fn.slice(0, 1200), /length\(\$\{due\}\) <= 10/, "the bare-date branch");
+  assert.match(fn.slice(0, 1200), /length\(\$\{due\}\) > 10/, "and the instant branch");
   assert.match(fn.slice(0, 900), /openJobSql/, "and only open work can be late");
 });
 
