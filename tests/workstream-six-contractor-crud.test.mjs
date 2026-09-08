@@ -569,7 +569,7 @@ test("a partial contractor PATCH preserves every field it did not mention", asyn
   const full = {
     name: `${RUN} Matrix`,
     contactName: "Dan Matrix",
-    email: "dan@zzqa-matrix.example",
+    email: "dan@zzqa-matrix.test.maintsupp.com",
     phone: "+44 7700 900100",
     whatsappNumber: "+44 7700 900101",
     address: "12 Matrix Way, Leeds",
@@ -592,7 +592,7 @@ test("a partial contractor PATCH preserves every field it did not mention", asyn
     ["name", `${RUN} Matrix renamed`, "name"],
     ["phone", "+44 7700 900222", "phone"],
     ["whatsappNumber", "+44 7700 900333", "whatsapp_number"],
-    ["email", "new@zzqa-matrix.example", "email"],
+    ["email", "new@zzqa-matrix.test.maintsupp.com", "email"],
     ["availability", "Limited", "availability"],
     ["active", false, "active"],
     ["insuranceExpiry", "2028-01-15", "insurance_expiry"],

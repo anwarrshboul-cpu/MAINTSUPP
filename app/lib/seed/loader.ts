@@ -62,6 +62,7 @@ import {
   calendarEvents,
   complianceDocuments,
   contractorCertifications,
+  contractorNameAliases,
   contractorSites,
   contractors,
   invoices,
@@ -696,6 +697,17 @@ async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
 
   await record("contractor_certifications", () =>
     db.delete(contractorCertifications).where(sql`contractor_id in ${seededContractors}`),
+  );
+  /*
+   * The job-side name mappings, before the record they hang off.
+   *
+   * `contractor_name_aliases.contractor_id` references `contractors(id)`, so
+   * on Postgres a purge that left them behind is a constraint violation and
+   * the run stops halfway — exactly the failure this whole ordering exists
+   * to prevent, and one SQLite hides by not enforcing the key at all.
+   */
+  await record("contractor_name_aliases", () =>
+    db.delete(contractorNameAliases).where(sql`contractor_id in ${seededContractors}`),
   );
   await record("contractors", () =>
     db.delete(contractors).where(or(sql`is_seed = ${1}`, like(contractors.id, prefix))),

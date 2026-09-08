@@ -574,21 +574,18 @@ test("W2C-QA the workspace option colours clear 4.5:1 in both states", async () 
  * removing it is the owner's call, not QA's. When it is decided, this test is
  * the one line to change.
  */
-/**
- * RE-POINTED. This test was written as a standing note that two placeholder
- * branches on the Sites register search box still read "…postcode or monday
- * name", on a REGISTER surface, and it said: "If this count changes the
- * decision was made — update this test to match it rather than deleting it."
- *
- * The decision was made. Both branches now read "…or board name", so the note
- * becomes the guard: the register's search box may not name the other product
- * again. The history is kept here because it is the only place that records
- * WHY the wording is what it is — the column really does hold the name the row
- * carries on the board, and "board name" is the same fact without the brand.
- */
 test("W2C-QA the Sites register search box does not name the brand", async () => {
+  /*
+   * RE-POINTED: the register's list, and therefore its search box, is
+   * `app/(app)/portal/ops/sites-list.tsx`. `sites-manager.tsx` still owns the
+   * form, the detail route and the CSV import, so both files are scanned —
+   * the rule is about the SURFACE, not about one file.
+   */
   const manager = codeOnly(await source(SITES_MANAGER));
-  const hits = [...manager.matchAll(/"[^"]*\bmonday\b[^"]*"/gi)].map((m) => m[0]);
+  const list = codeOnly(await source("app/(app)/portal/ops/sites-list.tsx"));
+  const scanned = `${manager}
+${list}`;
+  const hits = [...scanned.matchAll(/"[^"]*\bmonday\b[^"]*"/gi)].map((m) => m[0]);
   assert.deepEqual(
     hits,
     [],
@@ -600,9 +597,19 @@ test("W2C-QA the Sites register search box does not name the brand", async () =>
   /* The wording that replaced it, so a later edit cannot quietly drop the
      alias hint altogether and leave the box unsearchable by former name. */
   assert.match(
-    manager,
-    /Search name, former name, code, town, postcode or board name/,
+    list,
+    /Search name, former name, code, town or manager/,
     "The aliases branch must still tell a reader they can search a former name.",
+  );
+  /*
+   * And the branch is still conditional on the data, not on a flag: advertising
+   * a former-name search on a workspace that has never renamed anything is the
+   * same untruth the other way round.
+   */
+  assert.match(
+    list,
+    /sites\.some\(\(site\) => \(site\.aliases\?\.length \?\? 0\) > 0\)/,
+    "the placeholder must ask the data whether there are aliases to search",
   );
 });
 

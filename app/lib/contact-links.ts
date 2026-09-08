@@ -85,6 +85,30 @@ function withoutBracketedTrunk(value: string): string {
   return statesCountryCode ? value.replace(/\(\s*0\s*\)/, " ") : value;
 }
 
+/**
+ * THE ADDRESSES THAT MUST NEVER BECOME A `mailto:`.
+ *
+ * `.example`, `.test`, `.invalid` and `.localhost` are reserved by RFC 2606 and
+ * RFC 6761 precisely so that nobody can register them, which is why seed and
+ * demo data reaches for them — and why an address ending in one is guaranteed
+ * to bounce. This estate's contractors carry a number of them.
+ *
+ * It belongs in this module for the same reason `whatsappHref` does: this file
+ * owns the question "may this value become something a user can act on?", and
+ * the answer has to be one answer. `mailtoHref` returns null rather than a
+ * link, and every surface renders that null the way it renders an
+ * undiallable phone — shown, so the operator can see what to fix, never
+ * offered as an action that silently fails.
+ */
+export const RESERVED_EMAIL_TLD = /\.(example|test|invalid|localhost)$/;
+
+export function mailtoHref(raw: string | null | undefined): string | null {
+  const email = (raw ?? "").trim();
+  if (!email.includes("@")) return null;
+  if (RESERVED_EMAIL_TLD.test(email.toLowerCase())) return null;
+  return `mailto:${email}`;
+}
+
 export function telHref(raw: string | null | undefined): string | null {
   const value = withoutBracketedTrunk((raw ?? "").trim());
   if (!value) return null;

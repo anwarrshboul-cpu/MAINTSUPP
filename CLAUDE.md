@@ -20,7 +20,9 @@ node --test tests/workstream-seven-*.test.mjs               # one family
 node --test --test-name-pattern="the register counts" tests/*.test.mjs
 ```
 
-Deploying the portal is a manual, deliberate act — see `docs/DEPLOYMENT-PORTAL.md`:
+Deploying is now a branch push, not a command — see `docs/DEPLOYMENT-WORKFLOW.md`.
+The manual prebuilt upload below is the **emergency path**, and the way to put a
+specific build behind the client link without waiting for a release:
 
 ```bash
 npm run build
@@ -37,15 +39,31 @@ every portal route.
 
 | Target | Code | Deploys by |
 | --- | --- | --- |
-| **The portal** (the real product) | root `app/`, `worker/`, `db/` | Manual prebuilt upload only. **Not** wired to GitHub pushes. |
+| **The portal** (the real product) | root `app/`, `worker/`, `db/` | Vercel's GitHub integration. `develop` → Preview, `main` → **Production**, both automatic. Prebuilt upload is the emergency path. |
 | Phase 2 rewrite (not the current product) | `apps/web`, `apps/api`, `packages/db` | **Nothing.** Its two Vercel GitHub integrations were deleted 2026-09-04. |
 | Railway | the portal on a persistent Node box | `railway.json` + `scripts/railway-start.sh` |
 
-**PRs no longer carry a "Vercel" check**, because the GitHub-linked projects
-that produced it were deleted on 2026-09-04. While it existed it built
-`apps/web`, not the portal, and proved nothing about the product. The `pg:*`,
-`api:*` and `web:*` npm scripts all belong to Phase 2 and have no effect on the
-portal.
+**A push now deploys.** This section used to say the opposite — that the portal
+was not wired to GitHub pushes and that a PR check proved nothing about the
+product. That was true of the two *Phase 2* integrations deleted on 2026-09-04,
+and it stopped being true of the portal on 2026-09-06, when `6844e50` set
+`git.deploymentEnabled.main = true` in the root `vercel.json`. Measured again on
+2026-09-08: three pushes to `develop` produced source-built Preview deployments
+3, 4 and 13 seconds later.
+
+So, concretely:
+
+- **pushing `develop` builds a Preview automatically.** It does NOT move
+  `maintsupp-preview.vercel.app` — only `scripts/update-preview-alias.sh` does
+  that — so a git-built Preview sits on its own hash URL until the script runs;
+- **merging to `main` deploys the public site**, with no confirmation step. Treat
+  any merge or push to `main` as a production release and get explicit approval
+  first. `main` refuses a direct push, so the release is a PR.
+
+`docs/DEPLOYMENT-WORKFLOW.md` is the authority on which branch a change belongs
+on; `docs/DEPLOYMENT-PORTAL.md` remains the authority on how the portal is
+*built*. The `pg:*`, `api:*` and `web:*` npm scripts still belong to Phase 2 and
+have no effect on the portal.
 
 ## Architecture
 

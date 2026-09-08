@@ -152,7 +152,46 @@ export const awaitingApprovalStatuses = [
  * of them. The vocabulary therefore lives where it is already checkable in
  * isolation, and the SQL comes to it.
  */
-export const completedStatuses = ["Job Completed"] as const;
+export const mondayCompletedStatuses = ["Job Completed"] as const;
+
+/**
+ * The labels that close a job on an estate monday never touched.
+ *
+ * Two estates exist and they do not share a vocabulary. The client's board came
+ * from monday and says "Job Completed"; the seeded workspace — the one a Preview
+ * deployment and every fresh Postgres actually shows — writes "Completed" and
+ * "Cancelled", neither of which is a monday label and neither of which
+ * `completedStatuses` used to contain. So twenty-two finished jobs counted as
+ * OPEN on the demo estate, on every screen at once, and the SLA card measured
+ * closures it did not believe had closed.
+ *
+ * They are declared separately rather than appended to the monday list because
+ * the monday list has a checkable property that these two must not weaken:
+ * every label in it appears verbatim in
+ * `db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md`. Keeping the two lists
+ * apart lets `tests/stage-nineteen-meter-accuracy.test.mjs` go on asserting
+ * that property of the monday half while the union is what the product counts.
+ *
+ * CANCELLED IS CLOSED, NOT COMPLETED. It is in this list because open and
+ * closed are a partition of work somebody can still act on, and nobody can act
+ * on a cancelled job. Nothing here claims it was done — the status is still
+ * printed verbatim wherever a job's status is shown, and the family map in
+ * `app/lib/job-metrics.ts` is what a card reads when it wants to say more than
+ * open-or-closed.
+ */
+export const seededCompletedStatuses = ["Completed", "Cancelled"] as const;
+
+/**
+ * The union, and the list every predicate and every SQL `IN` is built from.
+ *
+ * `mondayCompletedStatuses` stays FIRST because `statusForStage` in
+ * `app/lib/stage-status.ts` maps the completed stage onto `completedStatuses[0]`
+ * and the board writes that string back onto the row.
+ */
+export const completedStatuses = [
+  ...mondayCompletedStatuses,
+  ...seededCompletedStatuses,
+] as const;
 
 /**
  * The lifecycle stage that means finished, named rather than typed out.

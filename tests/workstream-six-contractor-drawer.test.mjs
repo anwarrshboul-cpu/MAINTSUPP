@@ -586,7 +586,7 @@ test("a real contractor's id reaches the editor's lookup unchanged", async (t) =
     entity: "contractor",
     data: {
       name: `${RUN}-editable`,
-      email: "drawer@zzqa.example",
+      email: "drawer@zzqa.test.maintsupp.com",
       phone: "01204 555111",
       availability: "Available",
       dayRatePence: 45000,

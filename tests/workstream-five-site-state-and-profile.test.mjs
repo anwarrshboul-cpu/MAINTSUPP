@@ -467,10 +467,25 @@ test("W05-10 — the profile is deep-linkable and survives Back", async () => {
     /window\.history\.pushState\(null, "", siteHref\(null\)\)/,
     "and leaving it must take it out again",
   );
+  /*
+   * RE-POINTED: the row lives in `ops/sites-list.tsx` now, and the manager
+   * passes it the same function.
+   *
+   * The contract is what it always was — a row must not push history itself,
+   * because there are two writers (`openSite` and `leaveSite`) and a third
+   * caller doing it by hand is how the URL and the rendered view came apart.
+   */
   assert.match(
     manager,
-    /onClick=\{\(\) => openSite\(site\.id\)\}/,
+    /onOpenSite=\{openSite\}/,
     "the register row must go through the one function that owns both",
+  );
+  const list = code(await read("app/(app)/portal/ops/sites-list.tsx"));
+  assert.match(list, /onOpen=\{\(\) => onOpenSite\(site\.id\)\}/, "and the row calls it rather than routing itself");
+  assert.doesNotMatch(
+    list,
+    /window\.history\.pushState/,
+    "a row must not write history of its own",
   );
   /* The tab UX is untouched: the seven sections are still local state. */
   assert.match(

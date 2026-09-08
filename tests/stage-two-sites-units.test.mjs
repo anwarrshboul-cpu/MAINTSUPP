@@ -120,6 +120,28 @@ test("no configurable list has reappeared as a code constant", async () => {
      * is recorded here as owed rather than made in a regression fix.
      */
     ["app/lib/reporting/job-classification.ts", /export const PROJECT_STATUSES = \["Major works"\] as const;/],
+    /*
+     * THE THREE ANALYTIC FAMILIES a dashboard card may group by: is this work
+     * finished, is it moving, or is it stuck behind a person.
+     *
+     * Not a vocabulary an admin picks from and not an `option_values` row. The
+     * STATUSES themselves still come from the database — `job_status_map`,
+     * seeded in db/init.ts and editable in admin, owns per-status colour and
+     * `counts_as_open` — and this is a rule OVER them, the same shape as
+     * `PROJECT_STATUSES` above. Nobody will ever add a fourth family from a
+     * settings screen: a card that grouped by four would have to be redrawn.
+     *
+     * The guard’s real point still applies to the MAP that uses these three,
+     * and `app/lib/job-metrics.ts` answers it rather than dodging it: a status
+     * the map has never seen resolves to `in_progress`, is logged by name once
+     * per process, and is returned by every aggregate endpoint so the page can
+     * say which labels it could not place. An operator adding a label in monday
+     * gets a visible prompt, not a silent shift in what a chart means.
+     */
+    [
+      "app/lib/job-metrics.ts",
+      /export type JobStatusFamily = "completed" \| "in_progress" \| "attention";/,
+    ],
   ]);
 
   for (const path of files) {

@@ -136,176 +136,271 @@ test("month-sized merges keep month names — a month already names its span", (
 /* ── 2. The overdue rule ─────────────────────────────────────────────────── */
 
 /**
- * `duePassed` lives in portal-app.tsx, which cannot be imported wholesale
- * (JSX, client hooks). It is a pure function, so it is extracted by its
- * braces and evaluated with the two period-model helpers it closes over —
- * real shipped code, not a re-implementation.
+ * RE-POINTED. `duePassed` moved to `app/lib/job-metrics.ts`.
+ *
+ * It used to live in portal-app.tsx and had to be sliced out of the file by its
+ * braces and re-evaluated, because that file cannot be imported wholesale. The
+ * Overview stopped computing overdue in the browser when it moved to
+ * `/api/dashboard/*`, and the rule went with it to a module that CAN be
+ * imported — `job-metrics.ts` names an explicit `.ts` specifier for its one
+ * runtime import, so `node --test` loads it and strips the types.
+ *
+ * The four assertions below are unchanged. What changed is that they now call
+ * the shipped function directly instead of reconstructing it, which is
+ * strictly stronger.
  */
-async function loadDuePassed() {
-  const source = await read("app/(app)/portal/portal-app.tsx");
-  const start = source.indexOf("function duePassed(");
-  assert.ok(start > 0, "duePassed has moved; fix this test");
-  const body = source.slice(start);
-  const end = body.indexOf("\n}\n");
-  assert.ok(end > 0, "duePassed must end with a brace at column zero");
-  const fn = body
-    .slice(0, end + 3)
-    .replace("(dueAt: string, now: number)", "(dueAt, now)");
-  return new Function(
-    "endOfDay",
-    "parseStamp",
-    `${fn}; return duePassed;`,
-  )(period.endOfDay, period.parseStamp);
-}
+const metrics = await import("../app/lib/job-metrics.ts");
+const duePassed = metrics.duePassed;
 
-test("a bare due date is not overdue until its day is over", async () => {
-  const duePassed = await loadDuePassed();
+/**
+ * THE DAY IS THE BOARD'S DAY, AND THE BOARD'S DAY IS UTC.
+ *
+ * The instants below moved from local time to UTC when the rule moved out of
+ * portal-app.tsx, and the contract did not: a bare `YYYY-MM-DD` is a whole day
+ * and is not missed until that day is over. What changed is WHOSE day.
+ *
+ * The old rule read the READER's day, through `endOfDay(parseStamp(...))` in
+ * period-model.ts, which is local. That is the wrong calendar for two reasons.
+ * It disagrees with every other date-only value in this product —
+ * `expiryStatus` and `todayBoardDate()` both define "today" in UTC, and a
+ * certificate and a job due on the same date would otherwise expire on
+ * different days. And it cannot be computed on the SERVER at all: the count in
+ * the Performance card is SQL, and a server's local timezone is nobody's.
+ *
+ * So the same job is late at the same instant for every reader, which is the
+ * property "in every timezone" was reaching for.
+ */
+test("a bare due date is not overdue until its day is over", () => {
   const dueDay = "2026-08-25";
-  // All through the due day itself: still on time, in every timezone.
-  assert.equal(duePassed(dueDay, at(2026, 8, 25, 0, 30)), false);
-  assert.equal(duePassed(dueDay, at(2026, 8, 25, 12, 0)), false);
-  assert.equal(duePassed(dueDay, at(2026, 8, 25, 23, 59)), false);
+  const utc = (hour, minute) => Date.UTC(2026, 7, 25, hour, minute);
+  // All through the due day itself: still on time, wherever the reader is.
+  assert.equal(duePassed(dueDay, utc(0, 30)), false);
+  assert.equal(duePassed(dueDay, utc(12, 0)), false);
+  assert.equal(duePassed(dueDay, utc(23, 59)), false);
   // The moment the day is over, it is late.
-  assert.equal(duePassed(dueDay, at(2026, 8, 26, 0, 1)), true);
+  assert.equal(duePassed(dueDay, Date.UTC(2026, 7, 26, 0, 1)), true);
 });
 
-test("a due date with a time is an instant, late the moment it passes", async () => {
-  const duePassed = await loadDuePassed();
+test("a due date with a time is an instant, late the moment it passes", () => {
   const dueInstant = "2026-08-25T09:00:00.000Z";
   const instant = new Date(dueInstant).getTime();
   assert.equal(duePassed(dueInstant, instant - 60_000), false);
   assert.equal(duePassed(dueInstant, instant + 60_000), true);
 });
 
-test("an unreadable due date is never overdue", async () => {
-  const duePassed = await loadDuePassed();
+test("an unreadable due date is never overdue", () => {
   assert.equal(duePassed("not a date", NOW), false);
 });
 
-test("the Overview's overdue tile uses the rule", async () => {
-  const source = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(
-    source,
-    /request\.dueAt && duePassed\(request\.dueAt, now\)/,
-    "the overdue filter must go through duePassed",
+test("the Overview's overdue figure uses the rule, on the server", async () => {
+  /*
+   * RE-POINTED, and the contract is stronger than it was.
+   *
+   * The Overview had an "Overdue" TILE that filtered a downloaded job list in
+   * the browser. It now has a "Past target date" figure in the Performance
+   * card, counted in SQL — so the rule has two expressions and they must agree:
+   * `duePassed` above for anything the server marks per row, and
+   * `overdueOpenSql` for the count. Both carry the same two branches, and
+   * neither may reduce to the raw UTC-midnight comparison this section exists
+   * to keep out.
+   */
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  const sqlTwin = aggregates.slice(aggregates.indexOf("export function overdueOpenSql"));
+  assert.ok(
+    sqlTwin.includes("length(trim(${due})) <= 10 and substr(trim(${due}), 1, 10) < ${today}"),
+    "a bare date is late only once today has moved past it",
   );
   assert.ok(
-    !/request\.dueAt && new Date\(request\.dueAt\)\.getTime\(\) < now/.test(source),
+    sqlTwin.includes("length(trim(${due})) > 10 and trim(${due}) < ${instant}"),
+    "a date with a time is late the moment the instant passes",
+  );
+  assert.match(
+    aggregates,
+    /import \{[\s\S]{0,400}?duePassed,/,
+    "and the per-row marker is the shared function, not a second copy",
+  );
+
+  const portal = await read("app/(app)/portal/portal-app.tsx");
+  assert.ok(
+    !/request\.dueAt && new Date\(request\.dueAt\)\.getTime\(\) < now/.test(portal),
     "the raw UTC-midnight comparison must not come back",
   );
 });
 
 /* ── 3. Numbers, sparklines and siblings agree ───────────────────────────── */
 
-/** The OverviewView component only — same slice the stage-19 tests use. */
-async function overviewSource() {
-  const source = await read("app/(app)/portal/portal-app.tsx");
-  const start = source.indexOf("function OverviewView({");
-  const end = source.indexOf("\nexport function LegacyMaintenanceView", start);
-  assert.ok(start > 0 && end > start);
-  return source.slice(start, end);
-}
+/**
+ * RE-POINTED: the Overview page is `app/(app)/portal/ops/overview-page.tsx`.
+ *
+ * `OverviewView` in portal-app.tsx is a short adapter now. Everything these
+ * tests were protecting moved with the page, and each assertion below moved
+ * with the contract it was protecting rather than being deleted.
+ */
+const overviewPage = () => read("app/(app)/portal/ops/overview-page.tsx");
 
-test("the Requiring attention card's sparkline plots the card's own rows", async () => {
-  const overview = await overviewSource();
+test("the attention figure and the attention worklist are one predicate", async () => {
+  /*
+   * RE-POINTED from a sparkline to the thing the sparkline was standing in for.
+   *
+   * The old defect: the "Requiring attention" tile counted
+   * open-and-(Attention-or-Urgent) in its figure and `stage === "Attention"`
+   * alone in the trend beneath it — 8 printed over a line summing 2. Sparklines
+   * are gone, and the same class of drift is now impossible for a stronger
+   * reason: the tile's number and the rows the attention card lists are counted
+   * by ONE server-side predicate, built from `statusLabelsInFamily("attention")`
+   * and intersected with open. The browser has no job list to disagree with.
+   */
+  const summaryRoute = await read("app/api/dashboard/summary/route.ts");
   assert.match(
-    overview,
-    /label="Requiring attention"[^/]*trend=\{periodTrend\(attention, \(\) => true, period, now\)\}/,
-    "the trend must be built from the same rows as the number above it",
+    summaryRoute,
+    /statusLabelsInFamily\("attention"\)/,
+    "the attention count is the family map's own list",
   );
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  const fn = aggregates.slice(aggregates.indexOf("function attentionSql("));
   assert.ok(
-    !/periodTrend\(scopedRequests, \(request\) => request\.stage === "Attention"/.test(
-      overview,
-    ),
+    fn.slice(0, 600).includes("${openJobSql} and lower(trim(${maintenanceRequests.status})) in ${attentionKeys}"),
+    "attention is a subset of OPEN — a completed job carrying a blocked status is finished work",
+  );
+  const page = await overviewPage();
+  assert.ok(
+    !/stage === "Attention"/.test(page),
     "the drifted predicate — stage only, closed rows included — must not return",
   );
 });
 
-test("every Overview tile says what its sparkline plots", async () => {
-  const overview = await overviewSource();
-  const cards = overview.match(/<AnalyticsMetricCard /g) ?? [];
-  const labelled = overview.match(/trendLabel="/g) ?? [];
-  assert.equal(cards.length, 6, "the six tiles");
-  assert.equal(
-    labelled.length,
-    6,
-    "a sparkline under a live number reads as that number's history; each must carry its own sentence saying what it actually is",
+test("every Overview tile carries its own words and its own numbers", async () => {
+  /*
+   * RE-POINTED. There are no sparklines: the tiles carry meters, and a meter
+   * cannot be mistaken for a history the way a line under a live number could.
+   *
+   * The contract that survives is the one the sparkline rule was really about:
+   * a reader must never have to guess what a tile is measuring. Every tile has
+   * a label, an accessible sentence on its meter, and a row in the card's
+   * hidden data table — which is also what a screen reader gets.
+   */
+  const page = await overviewPage();
+  const tiles = page.slice(page.indexOf("const tiles = ["), page.indexOf('caption="At a glance"'));
+  const labels = tiles.match(/\n      label: "/g) ?? [];
+  assert.equal(labels.length, 5, "the five tiles the brief specifies");
+  const meterLabels = tiles.match(/\n          label=\{/g) ?? [];
+  assert.ok(
+    meterLabels.length >= 5,
+    "each tile's meter states its numbers in words, not only in colour",
+  );
+  assert.match(
+    page,
+    /<HiddenDataTable\s*\n?\s*caption="At a glance"/,
+    "and the same numbers are reachable as a table",
+  );
+  assert.match(
+    page,
+    /tile\.delta === null[\s\S]{0,240}Not comparable/,
+    "a delta with nothing to compare against is omitted, never printed as zero",
   );
 });
 
-test("open-job ages are floored everywhere, so one job has one age", async () => {
+test("open-job ages are floored, and computed once on the server", async () => {
+  /*
+   * RE-POINTED. The portal-app half of this used to pin `requestAgeDays`; the
+   * Overview no longer computes an age in the browser at all, so the flooring
+   * moved to the aggregate that does.
+   *
+   * The contract is unchanged and is now easier to keep: one job has one age
+   * because ONE function on the server computes it, from whole UTC days.
+   * `dashboard-insights.tsx` still draws the Reports ageing panel and still
+   * floors, which is the other half of the original pairing.
+   */
   const insights = await read("app/(app)/portal/dashboard-insights.tsx");
   const ageing = insights.slice(insights.indexOf("export function OpenJobAgeing"));
   assert.match(
     ageing.slice(0, 1600),
     /Math\.floor\(\(now - new Date\(request\.requestedAt\)\.getTime\(\)\) \/ 86_400_000\)/,
-    "the ageing panel must floor, as requestAgeDays in portal-app.tsx does",
+    "the Reports ageing panel floors",
   );
-  const portal = await read("app/(app)/portal/portal-app.tsx");
+  const filters = await read("app/lib/dashboard-filters.ts");
   assert.match(
-    portal,
-    /Math\.floor\(\(now - new Date\(request\.requestedAt\)\.getTime\(\)\) \/ 86_400_000\)/,
-    "requestAgeDays floors — the two lists sit on the same page",
+    filters,
+    /export function daysBetweenDays[\s\S]{0,400}Math\.round\(/,
+    "and the server counts whole days between two calendar dates",
   );
-});
-
-test("one compliance source on the Overview: the workspace register", async () => {
-  const overview = await overviewSource();
-  assert.match(
-    overview,
-    /<SiteAttention[^>]*\n?\s*requests=\{scopedRequests\}\n?\s*compliance=\{complianceItems\}/,
-    "Sites needing attention must read the register the tile reads",
-  );
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  const floored = aggregates.match(/Math\.max\(0, daysBetweenDays\(/g) ?? [];
   assert.ok(
-    !/store\.compliance\.map/.test(overview),
-    "the legacy stores[].compliance list must no longer feed a panel here",
+    floored.length >= 3,
+    "every age on the attention card comes through the same helper",
+  );
+  const page = await overviewPage();
+  assert.ok(
+    !/86_400_000/.test(page),
+    "the browser does no day arithmetic of its own — a device clock must not decide an age",
   );
 });
 
-/* ── 4. Loading is not empty ─────────────────────────────────────────────── */
-
-test("workspace figures say Loading, not a definitive empty claim, before the fetch lands", async () => {
-  const overview = await overviewSource();
+test("one compliance source on the Overview: the shared register", async () => {
   /*
-   * The two workspace-fed tiles show a dash and say they are loading.
+   * RE-POINTED to the server, where the join now happens.
    *
-   * The first of them was "Active units" and is now "Active sites" — the tile
-   * changed, the contract did not: a figure fed by /api/workspace must not
-   * print a definitive 0 over an account that has simply not loaded.
+   * The old defect: "Sites needing attention" read the legacy
+   * `stores[].compliance` list while the compliance tile read the workspace
+   * register, so two panels on one page disagreed about one store. The site
+   * rows are built in `/api/dashboard/sites-attention` now, and it reads
+   * `readComplianceRegister` — the same function the Compliance page reads —
+   * and counts it with the shared `complianceCompletion`.
    */
-  assert.match(overview, /workspaceReady \? String\(activeSiteCount\) : "—"/);
-  assert.match(overview, /workspaceReady \? `\$\{compliancePercent\}%` : "—"/);
-  const loadingCaptions = overview.match(/"Loading workspace…"/g) ?? [];
-  assert.ok(loadingCaptions.length >= 2, "both tiles need the loading caption");
-  // The honest empty captions survive for the truly-empty account.
-  assert.ok(overview.includes("No active sites in the register"));
-  assert.ok(overview.includes("No requirements recorded yet"));
-  /*
-   * And the two panels are told when they are still loading.
-   *
-   * Workstream 8 widened this. Both draw their bars from `requests`, which
-   * arrives on a SEPARATE fetch from the workspace — so waiting only on
-   * `workspaceReady` still let them announce that a site had spent nothing
-   * against its budget while the jobs were in flight. Pinned in the stronger
-   * form so it cannot quietly narrow back to one fetch.
-   */
-  assert.match(overview, /<SiteAttention[\s\S]{0,400}loading=\{!workspaceReady \|\| loading\}/);
-  assert.match(overview, /<SpendAgainstBudget[\s\S]{0,400}loading=\{!workspaceReady \|\| loading\}/);
-  assert.match(overview, /const loading = !jobsReady;/, "and the jobs fetch has a name");
-
-  const portal = await read("app/(app)/portal/portal-app.tsx");
+  const route = await read("app/api/dashboard/sites-attention/route.ts");
+  assert.match(route, /readComplianceRegister/, "the register, not a per-store list");
+  assert.match(route, /complianceCompletion/, "counted by the shared rule");
   assert.match(
-    portal,
-    /workspaceReady=\{workspace !== null\}/,
-    "the shell must say whether /api/workspace has answered",
+    route,
+    /register\.bySite/,
+    "and by the register's own per-site index, so nothing re-groups it",
+  );
+  const page = await overviewPage();
+  assert.ok(
+    !/store\.compliance/.test(page),
+    "the legacy stores[].compliance list must not feed a panel here",
+  );
+});
+
+/* ── 4. Loading is not empty ───────────────────────────────────────────── */
+
+test("a figure that has not loaded is never printed as a definitive zero", async () => {
+  /*
+   * RE-POINTED, contract intact and widened.
+   *
+   * The old form pinned two tiles reading `workspaceReady ? … : "—"` over a
+   * shared "Loading workspace…" caption. The page has one fetch per card now,
+   * so the rule is expressed per card: while a payload is in flight the card
+   * draws a SKELETON shaped like its answer, and an empty answer draws an
+   * explicit empty state. Loading and empty remain different states, which is
+   * the whole point — "Compliance 0%" over an account that had simply not
+   * loaded is the defect this test exists for.
+   */
+  const page = await overviewPage();
+  const skeletons = page.match(/<SkeletonRow/g) ?? [];
+  assert.ok(skeletons.length >= 5, "every card has a loading state of its own");
+  assert.ok(
+    !/String\(totals\.\w+\) : "0"/.test(page),
+    "no card falls back to a printed zero while it is loading",
+  );
+  assert.match(page, /<EmptyState>/, "and an empty answer says so in words");
+  assert.match(
+    page,
+    /No jobs in this period/,
+    "with an honest sentence rather than a blank axis",
   );
 
-  const insights = await read("app/(app)/portal/dashboard-insights.tsx");
-  assert.match(
-    insights,
-    /loading \? \(\s*<div className="insight-empty" aria-busy="true">/,
-    "InsightPanel must draw a loading state distinct from its empty state",
-  );
+  /*
+   * `scored` is the same distinction one level down: a site with no compliance
+   * requirements set up is NOT a site scoring zero, and rendering the first as
+   * the second is the more dangerous of the two.
+   */
+  assert.match(page, /site\.compliance\.scored/);
+  assert.match(page, /Not set up/);
+
+  const route = await read("app/api/dashboard/sites-attention/route.ts");
+  assert.match(route, /scored: false/, "and the server is what says so");
 });
 
 /* ── 5. The by-priority split cannot be captioned with wreckage ──────────── */

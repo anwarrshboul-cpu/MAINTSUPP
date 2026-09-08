@@ -144,6 +144,22 @@ export type WorkspaceContractor = {
    */
   documentCount?: number;
   /**
+   * Whether anything joins this record to work at all.
+   *
+   * Three ways to be linked: a job carries this `contractor_id`, an alias maps
+   * a job-side name to this record, or exactly one register row answers to a
+   * name jobs use. Where none holds, the four figures above are absences rather
+   * than facts and the register says `Not linked` instead of printing a zero
+   * that asserts this contractor has done nothing.
+   *
+   * Optional because `mock-data.ts` builds these records with no database
+   * behind them, and `undefined` means "not known" — which a screen renders as
+   * a figure rather than as an accusation either way.
+   */
+  linked?: boolean;
+  /** An address on a reserved TLD, which can never receive mail. */
+  contactUnreachable?: boolean;
+  /**
    * W06-06 — the postcode, as its own column.
    *
    * `address` is one free-text line, so nothing could sort, search or map on

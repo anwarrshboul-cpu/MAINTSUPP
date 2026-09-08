@@ -49,6 +49,7 @@
  */
 
 import type { ComplianceState } from "../../lib/types";
+import { complianceCompletion } from "../../lib/compliance-status";
 
 /**
  * The slice of a compliance record this module reads.
@@ -228,8 +229,19 @@ export function complianceCounts(records: readonly ComplianceRecordLike[]): Comp
  * coverage line beside it to say which of the two this is.
  */
 export function complianceScore(records: readonly ComplianceRecordLike[]): number {
-  if (records.length === 0) return 0;
-  return Math.round((complianceCounts(records).Compliant / records.length) * 100);
+  /*
+   * ONE RULE, and it is not written here any more.
+   *
+   * `complianceCompletion` in app/lib/compliance-status.ts is the single
+   * definition — Compliant over the APPLICABLE requirements, with "Not
+   * required" outside the fraction on both sides. This delegates to it so the
+   * Overview tile, the Compliance register, every site row and every
+   * contractor's document list read one number from one place. Callers
+   * normally pass `scorableComplianceRecords(...)`, which has already dropped
+   * the not-required rows, so the answer is identical either way — the
+   * delegation exists so the two can never come apart in a later edit.
+   */
+  return complianceCompletion(records).percent;
 }
 
 /* ── Coverage: how much of the estate Store Documentation speaks for ─────── */

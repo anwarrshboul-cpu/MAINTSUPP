@@ -144,7 +144,12 @@ esac
 
 # ---- 2. what Vercel says it is ---------------------------------------------
 
-INSPECT="$(npx vercel inspect "$DEPLOYMENT" 2>&1 || true)"
+# ANSI stripped for the same reason `production_url` strips it: the CLI
+# colourises this output, so `name` arrives wrapped in escape sequences and a
+# `^[[:space:]]*name` pattern never matches it. The symptom is the refusal
+# "That deployment belongs to 'unknown'" on a deployment that is perfectly
+# valid — a gate failing open-ended rather than the deployment failing.
+INSPECT="$(npx vercel inspect "$DEPLOYMENT" 2>&1 | sed -e 's/\x1b\[[0-9;]*m//g' || true)"
 
 NAME="$(printf '%s' "$INSPECT" | sed -n 's/^[[:space:]]*name[[:space:]]*//p' | head -1 | tr -d '[:space:]')"
 TARGET="$(printf '%s' "$INSPECT" | sed -n 's/^[[:space:]]*target[[:space:]]*//p' | head -1 | tr -d '[:space:]')"
