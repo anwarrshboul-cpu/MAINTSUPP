@@ -106,7 +106,8 @@ const unassignedSiteSql = (orgId: string) => unassignedSiteCondition(orgId);
  * exist to keep out.
  *
  * Both branches here, chosen by `length()`, which SQLite and Postgres spell the
- * same way. `due_at` is TEXT in both dialects, so no cast is involved:
+ * same way, over `dateText()` rather than the bare column — see there for why a
+ * cast is not optional:
  *
  *   - ten characters or fewer -> a day; late once TODAY has moved past it;
  *   - longer -> an ISO instant; late once it is before NOW.
@@ -114,11 +115,43 @@ const unassignedSiteSql = (orgId: string) => unassignedSiteCondition(orgId);
  * Only OPEN jobs can be overdue. Finished work is not late, whatever its dates
  * say, and `isOverdue` in the browser has the same guard.
  */
+/**
+ * A DATE-ISH COLUMN AS ISO-COMPARABLE TEXT, ON EITHER DIALECT.
+ *
+ * This exists because the comment that used to sit below it was wrong, and the
+ * wrongness was invisible until it reached the client. It said `due_at` is TEXT
+ * in both dialects so no cast is involved. That is true of a database
+ * `db/init.ts` created — it declares these columns TEXT, so Staging and every
+ * local Miniflare file have them as `text`. Production predates that: its
+ * `maintenance_requests.due_at` is a real Postgres `date`, and Postgres has no
+ * `trim(date)`. The Overview answered "temporarily unavailable" for a day with
+ * `function pg_catalog.btrim(date) does not exist` as the reason, and nothing
+ * on Staging could ever have shown it.
+ *
+ * So every text operation these date columns receive goes through here first:
+ *
+ *   - `cast(… as text)` is identity on a text column, so SQLite behaviour and
+ *     every existing pinned expectation are unchanged, and it is what turns a
+ *     Postgres `date` into `YYYY-MM-DD` and a `timestamp` into
+ *     `YYYY-MM-DD HH:MM:SS`;
+ *   - the space becomes `T`, because a cast timestamp is otherwise compared
+ *     against `toISOString()` output and ' ' sorts before 'T' — a job due later
+ *     today would read as overdue;
+ *   - `trim` still runs, because the importer wrote padded strings.
+ *
+ * `cast`, `trim` and `replace` are spelled identically by both dialects, so
+ * this is one expression rather than a branch on which database is answering.
+ */
+export function dateText(column: TextColumn): SQL {
+  return sql`replace(trim(cast(${column} as text)), ' ', 'T')`;
+}
+
 export function overdueOpenSql(now: Date): SQL {
   const today = dayString(now);
   const instant = now.toISOString();
-  const due = maintenanceRequests.dueAt;
-  return sql`(${openJobSql} and ${due} is not null and trim(${due}) <> '' and ((length(trim(${due})) <= 10 and substr(trim(${due}), 1, 10) < ${today}) or (length(trim(${due})) > 10 and trim(${due}) < ${instant})))`;
+  const raw = maintenanceRequests.dueAt;
+  const due = dateText(raw);
+  return sql`(${openJobSql} and ${raw} is not null and ${due} <> '' and ((length(${due}) <= 10 and substr(${due}, 1, 10) < ${today}) or (length(${due}) > 10 and ${due} < ${instant})))`;
 }
 
 /* ── Summary ──────────────────────────────────────────────────────────────── */
@@ -842,7 +875,9 @@ export async function loadSla(
   const fallback = maintenanceRequests.dueAt;
   const completed = maintenanceRequests.completedAt;
 
-  const has = (column: TextColumn) => sql`(${column} is not null and trim(${column}) <> '')`;
+  /* Through `dateText`: all three of these are dates, and two of the three are
+     a Postgres `date` on Production, where `trim(date)` does not exist. */
+  const has = (column: TextColumn) => sql`(${column} is not null and ${dateText(column)} <> '')`;
 
   const [row] = await db
     .select({
@@ -892,11 +927,13 @@ export async function loadSla(
    * closed at 09:00 on its due date wrong in one direction and a job closed at
    * 23:00 wrong in the other. An SLA is a day promise; substr(…,1,10) is what
    * makes both estates answer the same question. `substr` is the one string
-   * function the dialects spell identically, and both columns are TEXT in
-   * Postgres as well as in SQLite, so no cast is involved.
+   * function the dialects spell identically. Both go through `dateText` first:
+   * these columns are TEXT on a database `db/init.ts` created and a Postgres
+   * `date` on one that predates it, and `substr(date, ...)` no more exists
+   * than `trim(date)` does.
    */
   const measurable = and(where, has(targetColumn), has(completed))!;
-  const met = sql`substr(${completed}, 1, 10) <= substr(${targetColumn}, 1, 10)`;
+  const met = sql`substr(${dateText(completed)}, 1, 10) <= substr(${dateText(targetColumn)}, 1, 10)`;
 
   const [totals, byPriority] = await Promise.all([
     db
