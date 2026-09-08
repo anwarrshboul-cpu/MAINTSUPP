@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLoader } from "./use-loader";
 import { SiteDetail } from "./site-detail";
 import { SiteForm } from "./site-form";
@@ -21,10 +21,10 @@ import { confirmSiteClosure } from "./site-closure";
  * Contractors registers would come to disagree about what a column is.
  */
 import { RegisterGrid } from "../register/register-grid";
+import { SitesList, type SiteCoverage, type SiteListRow } from "../ops/sites-list";
 import {
   api,
   labelFor,
-  styleFor,
   type OptionChoice,
   type SiteGroupRecord,
   type SiteRecord,
@@ -36,6 +36,15 @@ type ListPayload = {
   groups: SiteGroupRecord[];
   siteTypes: OptionChoice[];
   statuses: OptionChoice[];
+  /*
+   * Estate-wide field coverage, added by `GET /api/sites` alongside the rows.
+   *
+   * Optional because it is a new field and an older cached response will not
+   * carry it; the header prints nothing rather than a zero when it is absent,
+   * which is the difference between "no sites are incomplete" and "we have not
+   * been told".
+   */
+  coverage?: SiteCoverage;
 };
 
 type ImportResult = {
@@ -83,35 +92,6 @@ function siteHref(siteId: string | null) {
   return `${window.location.pathname}${query ? `?${query}` : ""}`;
 }
 
-/**
- * Every string the register will match a search term against, lower-cased once.
- *
- * `site.aliases` is spread in here rather than being a separate branch so that
- * alias search is not a feature that has to be switched on later — it is simply
- * the case where the array is empty. `GET /api/sites` does not send the field
- * yet (see the note on `SiteRecord.aliases`); on a payload that lacks it this
- * spreads nothing and the behaviour is exactly what it was, and on a payload
- * that has it "Cardiff St Davids" finds "Grand Arcade - Cardiff" with no
- * further change here.
- *
- * `String()` rather than a cast: `code`, `city` and both monday names are
- * nullable, and `.filter(Boolean)` drops the nulls before they can become the
- * string "null" and match a search for "null".
- */
-function searchableText(site: SiteRecord): string[] {
-  return [
-    site.name,
-    site.code,
-    site.city,
-    site.postcode,
-    site.mondayMaintenanceName,
-    site.mondayComplianceName,
-    ...(site.aliases ?? []),
-  ]
-    .filter(Boolean)
-    .map((field) => String(field).toLowerCase());
-}
-
 export function SitesManager({
   sectionKey = null,
   onNotify,
@@ -130,9 +110,6 @@ export function SitesManager({
   onNotify: (message: string) => void;
 }) {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [groupFilter, setGroupFilter] = useState("");
   /*
    * W05-08 — WHICH OF THE TWO VIEWS OF ONE REGISTER IS OPEN.
    *
@@ -220,40 +197,6 @@ export function SitesManager({
     "Sites could not be loaded.",
   );
   const accessMethods = data?.accessMethods ?? [];
-
-  const visible = useMemo(() => {
-    if (!data) return [];
-    const term = search.trim().toLowerCase();
-    return data.sites.filter((site) => {
-      if (statusFilter && site.status !== statusFilter) return false;
-      if (groupFilter) {
-        const group = data.groups.find((entry) => entry.id === groupFilter);
-        if (!group?.siteIds.includes(site.id)) return false;
-      }
-      if (!term) return true;
-      return searchableText(site).some((field) => field.includes(term));
-    });
-  }, [data, search, statusFilter, groupFilter]);
-
-  /*
-   * The placeholder says what is SEARCHED, and it has to keep saying that.
-   *
-   * It read "Search name, code, postcode or monday name" while the filter also
-   * matched the town — a promise that was short of the truth, which is the
-   * cheapest kind of search bug to ship because nobody reports the results they
-   * did not know to expect.
-   *
-   * The "former name" half appears only once the payload actually carries
-   * aliases. `aliases` is optional on `SiteRecord` because `GET /api/sites`
-   * does not select it yet (see site-types.ts), so advertising it now would put
-   * the same untruth back the other way round. This asks the data instead of a
-   * flag: the moment the route attaches a non-empty `aliases`, the label grows
-   * to match, and a workspace that genuinely has no former names is still told
-   * the truth about itself.
-   */
-  const searchesAliases = Boolean(
-    data?.sites.some((site) => (site.aliases?.length ?? 0) > 0),
-  );
 
   async function archive(site: SiteRecord) {
     /*
@@ -354,46 +297,10 @@ export function SitesManager({
   }
 
   return (
-    <section className="section-stack">
-      <header className="section-header">
-        <div>
-          {/*
-            An `<h1>`, like every other register in this shell. It was an `<h2>`
-            and there was no `<h1>` anywhere on the page at any width, so with
-            the topbar title gone below 768px this screen would have had no
-            name at all. `.section-header h1` is the styled selector the other
-            registers use, so this reads as they do rather than as a heading
-            somebody made bigger.
-          */}
-          <h1>Sites</h1>
-          <p className="drawer-label">
-            One register shared by jobs, compliance and assets. There is no upper limit.
-          </p>
-        </div>
-        <div className="section-header__actions">
-          <a className="secondary-button" href={scopedUrl("/api/sites/csv", sectionKey)} download>
-            Export CSV
-          </a>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => fileInput.current?.click()}
-          >
-            Import CSV
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => setMode({ kind: "form", site: null, groupIds: [] })}
-          >
-            Add site
-          </button>
-        </div>
-      </header>
-
+    <>
       {/*
         NOT A TAB STOP. `.visually-hidden` clips this to a 1x1 rect but leaves
-        it focusable, and it is opened by the "Import CSV" button above rather
+        it focusable, and it is opened by the "Import CSV" button below rather
         than by a <label for>. So a keyboard user reached it one Tab after that
         button, landed on an invisible control, saw no focus ring anywhere on
         the page and had to Tab again — a WCAG 2.4.7 dead stop and a second,
@@ -417,81 +324,6 @@ export function SitesManager({
           event.target.value = "";
         }}
       />
-
-      <div className="workspace-toolbar">
-        <div className="search-field">
-          <label htmlFor="site-search" className="visually-hidden">
-            Search sites
-          </label>
-          <input
-            id="site-search"
-            type="search"
-            placeholder={
-              searchesAliases
-                ? "Search name, former name, code, town, postcode or board name"
-                : "Search name, code, town, postcode or board name"
-            }
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </div>
-        <label htmlFor="site-status-filter" className="visually-hidden">
-          Filter by status
-        </label>
-        <select
-          id="site-status-filter"
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
-        >
-          <option value="">All statuses</option>
-          {data?.statuses.map((status) => (
-            <option key={status.id} value={status.value}>
-              {status.label}
-            </option>
-          ))}
-        </select>
-        <label htmlFor="site-group-filter" className="visually-hidden">
-          Filter by group
-        </label>
-        <select
-          id="site-group-filter"
-          value={groupFilter}
-          onChange={(event) => setGroupFilter(event.target.value)}
-        >
-          <option value="">All groups</option>
-          {data?.groups.map((group) => (
-            <option key={group.id} value={group.id}>
-              {group.name}
-            </option>
-          ))}
-        </select>
-        {/*
-          W05-08 — the switch between the two views.
-
-          A radio group rather than two buttons, because that is what this is:
-          one setting with two values, exactly one of them chosen. `aria-label`
-          on the wrapper names the group; each control names its own value. A
-          pair of toggle buttons would announce as two unrelated controls and
-          leave a screen reader user with no way to tell which one is on.
-        */}
-        <div className="register-view-switch" role="radiogroup" aria-label="Register view">
-          {([
-            ["summary", "Summary"],
-            ["register", "All columns"],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="radio"
-              aria-checked={view === key}
-              className={view === key ? "is-active" : ""}
-              onClick={() => setView(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {error ? (
         <p className="form-error" role="alert">
@@ -547,132 +379,127 @@ export function SitesManager({
         </div>
       ) : null}
 
-      {!data ? (
-        <p className="analytics-empty">Loading sites…</p>
-      ) : visible.length === 0 ? (
-        <p className="analytics-empty">
-          {data.sites.length === 0
-            ? "No sites yet. Add your first one, or import a CSV."
-            : "No sites match these filters."}
-        </p>
-      ) : view === "register" ? (
+      {/*
+        ── THE LIST, AND THE REGISTER GRID BESIDE IT ─────────────────────────
+        `SitesList` is the operational view: one row per store carrying the two
+        meters this page exists for. "All columns" is unchanged — it is the
+        configurable register with all forty native fields plus whatever this
+        workspace has added, and both read the SAME rows, so a filter means the
+        same thing in either.
+      */}
+      <SitesList
+        sites={(data?.sites ?? []) as unknown as SiteListRow[]}
+        coverage={data?.coverage ?? null}
+        loading={!data}
+        statuses={(data?.statuses ?? []).map((status) => ({
+          value: status.value,
+          label: status.label,
+        }))}
+        types={(data?.siteTypes ?? []).map((type) => ({
+          value: type.value,
+          label: type.label,
+        }))}
+        statusLabel={(value) => labelFor(data?.statuses ?? [], value)}
+        onOpenSite={openSite}
+        onEditSite={(site) =>
+          setMode({
+            kind: "form",
+            site: (data?.sites ?? []).find((row) => row.id === site.id) ?? null,
+            groupIds: (data?.groups ?? [])
+              .filter((group) => group.siteIds.includes(site.id))
+              .map((group) => group.id),
+          })
+        }
+        onCloseSite={(site) => {
+          const record = (data?.sites ?? []).find((row) => row.id === site.id);
+          if (record) void archive(record);
+        }}
+        onAddSite={() => setMode({ kind: "form", site: null, groupIds: [] })}
+        registerView={view === "register"}
         /*
-          W05-08 — THE CONFIGURABLE REGISTER.
+          W05-08 — THE CONFIGURABLE REGISTER, over the SAME rows the list drew.
 
-          `visible` rather than `data.sites`, so the search box and the two
-          filters above mean the same thing in both views. The rows are the
-          site records themselves because that is where a NATIVE column's value
-          lives — `registerCellValue` inside the grid reads
+          `visible` rather than `data.sites`: the search box and the filters
+          above mean the same thing in either view, and a register that ignored
+          them would be a second, subtly different answer to one question. The
+          rows are the site records themselves because that is where a NATIVE
+          column's value lives — `registerCellValue` inside the grid reads
           `row[column.nativeField]` for those and `snapshot.values` for the
-          custom ones, and a grid that read one store for both would draw all
-          forty native columns blank.
+          custom ones, and a grid handed anything else draws all forty native
+          columns blank.
         */
-        <RegisterGrid
-          register="sites"
-          rows={visible as unknown as Array<Record<string, unknown> & { id: string }>}
-          caption="Site register, every configured column"
-          title="Site register columns"
-          emptyMessage="No sites match these filters."
-        />
-      ) : (
-        <div className="table-scroll">
-          <table className="analytics-table analytics-table--mobile-cards sites-table">
-            <caption className="visually-hidden">Site register</caption>
-            <thead>
-              <tr>
-                <th scope="col">Site</th>
-                <th scope="col">Code</th>
-                <th scope="col">Type</th>
-                <th scope="col">Status</th>
-                <th scope="col">Town</th>
-                <th scope="col">Manager</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((site) => (
-                <tr key={site.id}>
-                  <td data-label="Site">
-                    <button
-                      type="button"
-                      className="table-text-action"
-                      onClick={() => openSite(site.id)}
-                    >
-                      {site.name}
-                    </button>
-                  </td>
-                  <td data-label="Code">{site.code ?? "—"}</td>
-                  <td data-label="Type">
-                    {labelFor(data.siteTypes, site.siteTypeValue ?? site.type)}
-                  </td>
-                  <td data-label="Status">
-                    <span className="status-chip" style={styleFor(data.statuses, site.status)}>
-                      {labelFor(data.statuses, site.status)}
-                    </span>
-                  </td>
-                  <td data-label="Town">{site.city ?? "—"}</td>
-                  <td data-label="Manager">{site.managerName ?? "—"}</td>
-                  <td data-label="Actions">
-                    {/*
-                      W12 — "Raise a ticket" NO LONGER LIVES IN THIS CELL.
+        renderRegister={(visible) => (
+          <RegisterGrid
+            register="sites"
+            rows={visible as unknown as Array<Record<string, unknown> & { id: string }>}
+            caption="Site register, every configured column"
+            title="Site register columns"
+            emptyMessage="No sites match these filters."
+          />
+        )}
+        headerActions={
+          <>
+            <ViewSwitch view={view} onChange={setView} />
+            <a
+              className="secondary-button"
+              href={scopedUrl("/api/sites/csv", sectionKey)}
+              download
+            >
+              Export CSV
+            </a>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => fileInput.current?.click()}
+            >
+              Import CSV
+            </button>
+          </>
+        }
+      />
+    </>
+  );
+}
 
-                      It used to sit here on the reasoning that a fault is
-                      noticed while somebody is looking at the site. The owner
-                      review of /dashboard/sites asked for it out of the
-                      register TABLE: the Actions column is where a row is
-                      administered — opened, edited, closed — and a per-row
-                      ticket button turned a maintenance register into a
-                      reporting form, one copy per site, thirty-one buttons
-                      down the page.
-
-                      Raising against a site is UNCHANGED everywhere it still
-                      belongs: the site DETAIL header and its per-unit rows
-                      (units-manager.tsx), the compliance chase lines
-                      (views/store-compliance-tracker.tsx), the documentation
-                      board (views/store-documentation-board.tsx) and the
-                      portal-wide control. `RaiseTicketButton` itself is
-                      untouched — only this one mounting is gone, so the
-                      import above went with it.
-
-                      The flex row stays. Edit and Close are still two
-                      inline-flex boxes that would otherwise sit on the text
-                      baseline at different heights, and `.table-row-actions`
-                      is what wraps them onto a second line at 390px instead
-                      of pushing "Close" off a cell that does not scroll.
-                    */}
-                    <div className="table-row-actions">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() =>
-                        setMode({
-                          kind: "form",
-                          site,
-                          groupIds: data.groups
-                            .filter((group) => group.siteIds.includes(site.id))
-                            .map((group) => group.id),
-                        })
-                      }
-                    >
-                      Edit
-                    </button>
-                    {site.status !== "closed" ? (
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => archive(site)}
-                      >
-                        Close
-                      </button>
-                    ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+/**
+ * The switch between the operational list and the configurable register.
+ *
+ * A radio group rather than two buttons, because that is what this is: one
+ * setting with two values, exactly one of them chosen. A pair of toggle buttons
+ * would announce as two unrelated controls and leave a screen reader user with
+ * no way to tell which one is on.
+ *
+ * Deliberately NOT in the URL. `?site=` addresses the detail screen because a
+ * site profile is somewhere you send somebody; which of two renderings of the
+ * list you last looked at is not, and the column layout itself — the part that
+ * IS worth keeping — already persists server-side in `register_columns`.
+ */
+function ViewSwitch({
+  view,
+  onChange,
+}: {
+  view: "summary" | "register";
+  onChange: (next: "summary" | "register") => void;
+}) {
+  return (
+    <div className="register-view-switch" role="radiogroup" aria-label="Register view">
+      {(
+        [
+          ["summary", "Sites"],
+          ["register", "All columns"],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="radio"
+          aria-checked={view === key}
+          className={view === key ? "is-active" : ""}
+          onClick={() => onChange(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }

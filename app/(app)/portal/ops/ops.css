@@ -1,0 +1,1596 @@
+/*
+ * THE FOUR OPERATIONS PAGES — Overview, Compliance, Sites, Contractors.
+ *
+ * One stylesheet, because the four pages are one design and splitting it into
+ * four is how they drifted apart the first time: three of them independently
+ * grew a card whose surface was within a shade of the page behind it, so
+ * consecutive rows merged into a single block on all three.
+ *
+ * ── SEPARATION IS FOUR THINGS AT ONCE ──────────────────────────────────────
+ *
+ * Every brief asks for the same fix and every one of them lists four parts,
+ * because no single part is enough on a dark surface:
+ *
+ *   1. the row sits on `--surface-card` and the page behind it on `--canvas`,
+ *      which are a clearly different value rather than a near-match;
+ *   2. a real gap between rows, in the page colour;
+ *   3. a 1px `--line` border;
+ *   4. a 3px left edge, tinted by that row's worst state.
+ *
+ * The left edge does double duty: it separates the rows AND it ranks them, so
+ * the eye finds the urgent one before reading a word.
+ *
+ * ── BREAKPOINTS ────────────────────────────────────────────────────────────
+ *
+ * 640 / 767 / 768 / 1024 / 1280 and nothing else. Several stage tests fail on
+ * any other width; see CLAUDE.md. Mobile is the base case and every rule here
+ * widens from it, never the other way round.
+ */
+
+/* ── Page shell ───────────────────────────────────────────────────────────── */
+
+.ops-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 40px;
+  /* The page ground the gaps between rows are cut out of. Without it the rows
+     sit on whatever the shell happens to paint and the gap disappears. */
+  background: var(--canvas);
+}
+
+.ops-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ops-page__head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.ops-page__eyebrow {
+  display: block;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+
+.ops-card {
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ops-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ops-card__head h2 {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.25;
+}
+
+.ops-card__subtitle {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.ops-card__note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ops-section-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ── Meters ───────────────────────────────────────────────────────────────── */
+
+.ops-meter {
+  width: 100%;
+  min-width: 0;
+}
+
+.ops-meter__track {
+  display: flex;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line-soft, var(--line));
+}
+
+.ops-meter__fill {
+  display: block;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  min-width: 2px;
+  cursor: default;
+}
+
+button.ops-meter__fill {
+  cursor: pointer;
+}
+
+button.ops-meter__fill:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 1px;
+}
+
+/*
+ * The partial trailing period.
+ *
+ * Hatched rather than blank. A bar of zero height with no number at the right
+ * edge of a time series reads as a charting failure; a hatched bar reads as
+ * "this period has not finished", which is what it is.
+ */
+.ops-meter__fill.is-hatched {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.28) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.ops-meter__empty {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ops-radial {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ops-radial__centre {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+
+.ops-radial__centre strong {
+  font-size: 1.15rem;
+}
+
+.ops-radial__centre small {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* ── Chips ────────────────────────────────────────────────────────────────── */
+
+.ops-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ops-chip--small {
+  padding: 2px 7px;
+  font-size: 0.7rem;
+}
+
+.ops-chip__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.ops-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-fg);
+  background: var(--surface-hover);
+  font-size: 0.75rem;
+}
+
+.ops-filter-chip__label {
+  color: var(--muted);
+}
+
+.ops-filter-chip__value {
+  font-weight: 600;
+}
+
+.ops-filter-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ops-filter-chip button:hover {
+  background: var(--surface-active);
+  color: var(--ink);
+}
+
+/* ── Filter bar ───────────────────────────────────────────────────────────── */
+
+/*
+ * Sticky, and the period control never leaves it.
+ *
+ * On a phone every other control folds into one `Filters (3)` button that opens
+ * a bottom sheet, but the period does not: it is the control people change most
+ * and burying it behind a sheet costs two taps on the commonest action on the
+ * page.
+ */
+.ops-filterbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.ops-filterbar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ops-filterbar__row select,
+.ops-filterbar__row input[type="date"] {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
+  color: var(--ink);
+  font: inherit;
+  max-width: 100%;
+}
+
+.ops-filterbar__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ops-filterbar__more[aria-expanded="true"] {
+  border-color: var(--accent-fg);
+}
+
+.ops-filterbar__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ops-filterbar__clear {
+  border: 0;
+  background: transparent;
+  color: var(--accent-fg);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 4px;
+}
+
+/* The desktop expansion of the same controls, in place rather than in a sheet. */
+.ops-filterbar__panel {
+  display: none;
+}
+
+/* ── The mobile sheet ─────────────────────────────────────────────────────── */
+
+.ops-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.ops-sheet__panel {
+  background: var(--surface-card);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  border-top: 1px solid var(--line);
+  padding: 14px;
+  max-height: 86vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ops-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  position: sticky;
+  top: -14px;
+  padding: 6px 0;
+  margin: -6px 0 0;
+  background: var(--surface-card);
+}
+
+.ops-sheet__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.ops-sheet__group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ops-sheet__group > strong {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ops-sheet__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ops-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ops-option[aria-pressed="true"] {
+  border-color: var(--accent-fg);
+  background: var(--surface-active);
+}
+
+.ops-option small {
+  color: var(--muted);
+}
+
+.ops-option:focus-visible,
+.ops-filterbar__more:focus-visible,
+.ops-row:focus-visible,
+.ops-job-row:focus-visible,
+.ops-group__head:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+/* ── Rows: the shared separation rule ─────────────────────────────────────── */
+
+.ops-rows {
+  display: flex;
+  flex-direction: column;
+  /* The gap, in the page colour. Part 2 of the four-part separation. */
+  gap: 12px;
+}
+
+.ops-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px 10px 15px;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* Part 4: the state-tinted left edge, drawn as a pseudo-element so it follows
+   the radius instead of squaring the corners off. */
+.ops-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  background: var(--ops-edge, var(--line));
+}
+
+.ops-row:hover,
+.ops-row:active {
+  background: var(--surface-hover);
+}
+
+/*
+ * The unassigned bucket, and the only dashed border on any of these pages.
+ *
+ * It is not a site. Giving it the same solid treatment as a store would say the
+ * register knows about it, and the whole point of the row is that it does not.
+ */
+.ops-row--unassigned {
+  border-style: dashed;
+}
+
+.ops-row__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ops-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ops-row__secondary {
+  margin: 0;
+  font-size: 0.79rem;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * An inline link inside the secondary line does not get the 32px tap target.
+ *
+ * `.ops-link` carries one because it is normally a standalone control; inside a
+ * sentence it made a one-line paragraph 32px tall and pushed the whole row from
+ * 110px to 163px at 390px. The row itself is the tap target here — the whole of
+ * it opens the site — so the link only has to be readable and reachable, and it
+ * still is: it is a real button with its own focus ring.
+ */
+.ops-row__secondary .ops-link {
+  min-height: 0;
+  vertical-align: baseline;
+}
+
+.ops-row__missing {
+  color: var(--amber-600);
+}
+
+/*
+ * The contractor row's third line: figures, one inline meter, and the Details
+ * button, all on one baseline.
+ *
+ * One line rather than a block of meters, because six to eight contractors have
+ * to fit on a phone screen and three stacked meters took the row to 180px.
+ * `margin-left: auto` on the button pushes it to the end without a spacer
+ * element, so the figures keep their natural widths.
+ */
+.ops-row__metrics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ops-row__metrics-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 62px;
+  flex: 0 1 78px;
+}
+
+.ops-row__metrics strong {
+  color: var(--red-600);
+  font-weight: 600;
+}
+
+.ops-row__metrics .ops-details-button {
+  margin-left: auto;
+}
+
+.ops-row__metrics .ops-link {
+  min-height: 0;
+}
+
+.ops-row__meters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+/*
+ * TWO METERS SIDE BY SIDE AT 390px, and that is what the width is chosen for.
+ *
+ * `130px` was the original floor and it does not fit: two of them plus the gap
+ * and the row's own padding overflow a 390px viewport, so they wrapped and the
+ * row grew by half. 118px is the widest value that leaves both on one line at
+ * the narrowest width the product supports — and the brief is explicit that if
+ * they do not fit they stack rather than shrinking the labels below legibility,
+ * which `flex-basis` still allows below 320px.
+ */
+.ops-row__meter {
+  flex: 1 1 118px;
+  min-width: 118px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ops-row__meter-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ops-row__meter-label strong {
+  color: var(--ink);
+}
+
+/* ── Job rows ─────────────────────────────────────────────────────────────── */
+
+.ops-job-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.ops-job-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 2px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ops-job-row:hover {
+  background: var(--surface-hover);
+}
+
+.ops-job-row__priority {
+  flex: none;
+  display: inline-flex;
+}
+
+.ops-job-row__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.83rem;
+}
+
+.ops-job-row__title small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.ops-job-row__age {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Tiles ────────────────────────────────────────────────────────────────── */
+
+/*
+ * At a glance.
+ *
+ * Two columns on a phone with the first tile full width, which is the layout
+ * the brief asks for and the reason the card is shorter than the six-tile strip
+ * it replaces: the old strip scrolled sideways at 390px and hid three of its
+ * six numbers behind a gesture nobody knew was there.
+ */
+.ops-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ops-tiles > :first-child {
+  grid-column: 1 / -1;
+}
+
+.ops-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-hover);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ops-tile:hover {
+  background: var(--surface-active);
+}
+
+.ops-tile:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ops-tile__value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-tile__unit {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.ops-tile__label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ops-tile__delta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* ── Accordion groups (Compliance, Contractors by area) ───────────────────── */
+
+/*
+ * NO `overflow: hidden` HERE, AND THAT IS THE WHOLE REASON THE HEADER STICKS.
+ *
+ * `overflow: hidden` on an ancestor makes that ancestor the scroll container
+ * for anything `position: sticky` inside it — and a box that does not scroll
+ * can never engage a sticky child, so the group name would silently stop
+ * following the reader down its own records. The radius is kept on the left
+ * edge itself instead, which is the only thing that was being clipped.
+ */
+.ops-group {
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  position: relative;
+}
+
+.ops-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  background: var(--ops-edge, var(--accent-fg));
+}
+
+.ops-group__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 12px 12px 15px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+  /*
+   * Sticky within its own group's scroll range, so the store name stays on
+   * screen while its records are being read. `position: sticky` on a child of
+   * an `overflow: hidden` box does nothing, which is why the group itself is
+   * the scroll parent and the head is what sticks.
+   */
+  /*
+   * Sticky against the PAGE, not against the group.
+   *
+   * The store name stays on screen while its records are read, which is what
+   * makes a 37-record group navigable — and `top` clears the filter bar above
+   * it rather than sliding underneath it. The rounded corners come from the
+   * group, so the header carries its own on the top edge only.
+   */
+  position: sticky;
+  top: 64px;
+  z-index: 2;
+  background: var(--surface-card);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.ops-group__head:hover {
+  background: var(--surface-hover);
+}
+
+.ops-group__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The heading is a wrapper, not a box: it contributes the outline and nothing
+   to the layout, so the button inside it fills the group header as before. */
+.ops-group__heading {
+  margin: 0;
+  font: inherit;
+  font-weight: inherit;
+}
+
+.ops-group__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ops-group__count {
+  flex: none;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-group__body {
+  padding: 0 12px 10px 15px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Records are hairline-separated ROWS inside the group, never nested cards.
+   Nested cards inside cards is what produced the merged look in the first
+   place; a card containing a list of rows reads cleanly. */
+.ops-record {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  min-height: 44px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ops-record:hover {
+  background: var(--surface-hover);
+}
+
+.ops-record__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ops-record__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.87rem;
+  /* Wraps to two lines rather than clipping: a requirement name that is cut off
+     is a requirement nobody can identify. */
+  overflow-wrap: anywhere;
+}
+
+.ops-record__meta,
+.ops-record__who,
+.ops-record__due {
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * On a phone the four parts read as one muted line, so the separator is drawn
+ * by CSS rather than typed into the markup — a typed "·" would become its own
+ * grid cell at the wider layout below.
+ */
+.ops-record__who + .ops-record__due::before {
+  content: " · ";
+}
+
+.ops-record__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ops-record__lock {
+  flex: none;
+  color: var(--muted);
+  display: inline-flex;
+}
+
+/* ── Bars and legends ─────────────────────────────────────────────────────── */
+
+.ops-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * A bar and its drill button, side by side.
+ *
+ * Two controls rather than one, because they do two different things and the
+ * brief asks for both: tapping the bar CROSS-FILTERS the page, and the arrow
+ * DRILLS THROUGH to the job list. A hover-only affordance would be unreachable
+ * on a touchscreen, which is where this page is mostly read.
+ */
+.ops-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ops-bar-row .ops-bar {
+  flex: 1 1 auto;
+}
+
+.ops-bar__drill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ops-bar__drill:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.ops-bar__drill:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ops-bar {
+  display: grid;
+  grid-template-columns: minmax(84px, 38%) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 3px 0;
+  min-height: 32px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ops-bar:hover .ops-bar__label {
+  color: var(--ink);
+}
+
+.ops-bar:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ops-bar__label {
+  font-size: 0.79rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.ops-bar__value {
+  font-size: 0.79rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ops-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.ops-legend strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+
+/* ── Dots ─────────────────────────────────────────────────────────────────── */
+
+.ops-dots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.ops-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.ops-dots small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+/* ── Time series ──────────────────────────────────────────────────────────── */
+
+.ops-series {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  min-height: 96px;
+}
+
+.ops-series__bucket {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ops-series__stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  height: 74px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--line-soft, var(--line));
+}
+
+/*
+ * A SEGMENT IS A BUTTON NOW, not a coloured span.
+ *
+ * The reset is the whole of it — a button carries a border, a padding and a
+ * font by default, and any of the three would change the height, which IS the
+ * datum here. `min-height` is the other half: the height is a proportion of the
+ * tallest bucket, so a bucket of 1 against a bucket of 300 computes to less
+ * than a pixel. A floor of 6px keeps a real count visible and touchable; a zero
+ * renders no element at all, so nothing invisible is clickable.
+ */
+.ops-series__part {
+  display: block;
+  width: 100%;
+  min-height: 6px;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ops-series__part:hover {
+  filter: brightness(1.08);
+}
+
+.ops-series__part:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 1px;
+}
+
+.ops-series__part.is-hatched {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.28) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+/*
+ * The two controls under a bucket: the days, and the way out to the jobs list.
+ *
+ * Stacked below 768px and side by side above it. Five buckets across a 390px
+ * screen leave about 64px each, which cannot hold a label and a 30px button on
+ * one line without one of them becoming untappable — so the phone spends 22px
+ * of height instead, and the pointer widths keep the compact row.
+ */
+.ops-series__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ops-series__label {
+  font-size: 0.66rem;
+  color: var(--muted);
+  text-align: center;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  min-height: 24px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.ops-series__label:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.ops-series__label:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.ops-series__foot .ops-bar__drill {
+  width: 26px;
+  height: 26px;
+}
+
+@media (min-width: 768px) {
+  .ops-series__foot {
+    flex-direction: row;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .ops-series__label {
+    width: auto;
+  }
+}
+
+.ops-series__total {
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Coverage ─────────────────────────────────────────────────────────────── */
+
+/*
+ * A metric measured over less than 70% of its population is drawn in
+ * `--muted`, not in the headline style.
+ *
+ * "100% met target" over a third of the closed jobs is not wrong so much as
+ * unearned, and styling it like a result is what made it read as one.
+ */
+.ops-headline {
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-headline--unearned {
+  color: var(--muted);
+  font-size: 1.4rem;
+}
+
+.ops-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ops-coverage__text {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+/* ── States ───────────────────────────────────────────────────────────────── */
+
+.ops-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.ops-skeleton__line {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-hover) 0%,
+    var(--surface-active) 50%,
+    var(--surface-hover) 100%
+  );
+  background-size: 200% 100%;
+  animation: ops-shimmer 1.4s linear infinite;
+}
+
+.ops-skeleton__line:nth-child(2) {
+  width: 78%;
+}
+
+.ops-skeleton__line:nth-child(3) {
+  width: 54%;
+}
+
+@keyframes ops-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.ops-empty {
+  margin: 0;
+  padding: 14px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.ops-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--red-600);
+  border-radius: 10px;
+  background: var(--red-100);
+}
+
+.ops-error p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────────── */
+
+.ops-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-fg);
+  font: inherit;
+  font-size: 0.79rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ops-link:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ops-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.ops-actions--end {
+  justify-content: flex-end;
+}
+
+/*
+ * The explicit route into a contractor's detail.
+ *
+ * A small secondary button rather than a full-width one: the whole row is
+ * already tappable, and this is the affordance that says so. It still clears
+ * 36px, which with the row's own padding puts the touch target over 44.
+ */
+.ops-details-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-hover);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.79rem;
+  cursor: pointer;
+}
+
+.ops-details-button:hover {
+  background: var(--surface-active);
+}
+
+.ops-details-button:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ops-menu {
+  position: relative;
+}
+
+/*
+ * 32px, not 44.
+ *
+ * The row itself is the primary target and it is 115px tall, so the overflow
+ * menu is the secondary control beside it; sizing it at 44 made the name line
+ * the tallest thing in the row and pushed ten sites past two phone screens,
+ * which is the measurement the whole layout is chosen against. It still clears
+ * the 24px minimum for a control adjacent to a much larger one, and its hit
+ * area is padded by the row's own 10px.
+ */
+.ops-menu__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-hover);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ops-menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 180px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+
+.ops-menu__list button {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.83rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ops-menu__list button:hover {
+  background: var(--surface-hover);
+}
+
+.ops-menu__list button.is-destructive {
+  color: var(--red-600);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+
+.ops-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ops-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ops-field > label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.ops-field input,
+.ops-field textarea,
+.ops-field select {
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-hover);
+  color: var(--ink);
+  font: inherit;
+  width: 100%;
+}
+
+.ops-field textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.ops-field__error {
+  font-size: 0.78rem;
+  color: var(--red-600);
+}
+
+.ops-field__hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ops-field.is-invalid input,
+.ops-field.is-invalid select {
+  border-color: var(--red-600);
+}
+
+/* ── Tables (desktop only) ────────────────────────────────────────────────── */
+
+/*
+ * The flat table is a DESKTOP view, and its absence on a phone is announced.
+ *
+ * A 750-row six-column table that side-scrolls is the shape this rebuild
+ * exists to remove; hiding it silently would leave a reader on "All records"
+ * looking at an empty card, so the note takes its place and says which view to
+ * use instead.
+ */
+.ops-table-wrap {
+  display: none;
+}
+
+.ops-hide-desktop {
+  display: block;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 640px) {
+  .ops-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ops-tiles > :first-child {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 768px) {
+  .ops-page {
+    gap: 18px;
+  }
+
+  .ops-card {
+    padding: 16px;
+  }
+
+  .ops-page__head h1 {
+    font-size: 1.7rem;
+  }
+
+  /* The controls come out of the sheet and sit on the bar. */
+  .ops-filterbar__more {
+    display: none;
+  }
+
+  .ops-filterbar__more--group {
+    display: inline-flex;
+  }
+
+  .ops-filterbar__panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  /* The two meters move inline beside the secondary line, so the row is
+     shorter on a wide screen than on a narrow one. */
+  .ops-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 42%);
+    grid-template-areas:
+      "top meters"
+      "secondary meters";
+    align-items: center;
+    column-gap: 16px;
+  }
+
+  .ops-row__top {
+    grid-area: top;
+  }
+
+  .ops-row__secondary {
+    grid-area: secondary;
+  }
+
+  .ops-row__meters {
+    grid-area: meters;
+  }
+
+  /*
+   * The four-column grid: requirement, responsibility, due date, status.
+   *
+   * The parts are already four separate elements, so this is a template rather
+   * than a restructure — and the separator that joins them into one line on a
+   * phone is switched off, because at this width the columns do that job.
+   */
+  .ops-record {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ops-record__who + .ops-record__due::before {
+    content: none;
+  }
+
+  .ops-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    align-items: start;
+  }
+
+  .ops-span-2 {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ops-table-wrap {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .ops-hide-desktop {
+    display: none;
+  }
+
+  .ops-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    align-items: start;
+  }
+}
+
+@media (min-width: 1280px) {
+  .ops-tiles {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-skeleton__line {
+    animation: none;
+  }
+
+  .ops-row,
+  .ops-tile,
+  .ops-group__head {
+    transition: none;
+  }
+}

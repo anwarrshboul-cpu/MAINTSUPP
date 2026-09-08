@@ -25,7 +25,6 @@ import { Avatar, BrandMark, Icon, type IconName } from "../../components";
  */
 import type {
   BoardOptionColumn,
-  ComplianceState,
   AttachmentKind,
   FileRecord,
   MaintenanceBoardColumn,
@@ -58,11 +57,6 @@ import { isActiveSiteStatus } from "../../lib/site-state";
  * each written the same three lines.
  */
 import {
-  complianceCoverage,
-  complianceCoverageNotice,
-  complianceScore,
-  isRegisterEditable,
-  scorableComplianceRecords,
 } from "./compliance-links";
 import {
   activeFilterCount,
@@ -152,8 +146,6 @@ import type {
   CalendarWriteTarget,
 } from "./calendar-model";
 import {
-  awaitingApprovalStatuses,
-  awaitingPartsStatuses,
   isClosedRequest,
   isOpenRequest,
 } from "./dashboard-meters";
@@ -188,15 +180,20 @@ import {
   ContractorCostPanel,
   ContractorScorecard,
   CostByCategory,
-  OpenJobAgeing,
   ReactiveVsPlanned,
-  SiteAttention,
-  SlaPerformance,
   SpendAgainstBudget,
   SpendMatrix,
   JobVolumeTrend,
 } from "./dashboard-insights";
-import { storeDocumentationResponsibility } from "../../../db/monday-board-spec";
+import { OverviewPage } from "./ops/overview-page";
+import { CompliancePage } from "./ops/compliance-page";
+import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
+/*
+ * The one definition of "open", imported rather than re-derived. The sidebar
+ * badge and the Overview both read it, which is what stops the two disagreeing
+ * about the same workspace.
+ */
+import { openJobCount } from "../../lib/job-metrics";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AdminClientsView } from "./views/admin-clients";
@@ -206,9 +203,6 @@ import { AdminUsersView } from "./views/admin-users";
 import { AuditLog } from "./views/audit-log";
 import { ReconcilePanel } from "./views/reconcile-panel";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
-import { buildJobMeters, complianceTrend } from "./views/overview-series";
-import OverviewJobMeters from "./overview-job-meters";
-import { useJobMeterOptions } from "./use-job-meter-options";
 import { UnitsManager } from "./units/units-manager";
 import {
   defaultWorkspaceSettings,
@@ -225,12 +219,9 @@ import {
 import {
   AnalyticsMetricCard,
   AnalyticsToolbar,
-  DonutChart,
-  DonutLegend,
   HorizontalBars,
   TrendChart,
   withinAnalyticsPeriod,
-  type DonutSegment,
 } from "./dashboard-analytics";
 import {
   PeriodCaption,
@@ -240,7 +231,6 @@ import {
   useStoredSortDirection,
 } from "./period-picker";
 import {
-  endOfDay,
   parseStamp,
   periodSpendSeries,
   periodTrend,
@@ -908,12 +898,6 @@ function notificationCandidates(requests: MaintenanceRequest[]) {
   );
 }
 
-function complianceTone(state: ComplianceState) {
-  return `compliance-pill compliance-pill--${state
-    .toLowerCase()
-    .replaceAll(" ", "-")}`;
-}
-
 
 function downloadCsv(requests: MaintenanceRequest[]) {
   const columns: (keyof MaintenanceRequest)[] = [
@@ -947,25 +931,6 @@ function downloadCsv(requests: MaintenanceRequest[]) {
   URL.revokeObjectURL(link.href);
 }
 
-function downloadTableCsv(
-  filename: string,
-  headers: string[],
-  rows: Array<Array<string | number | null>>,
-) {
-  const escapeCell = (value: unknown) =>
-    `"${String(value ?? "").replaceAll('"', '""')}"`;
-  const csv = [headers, ...rows]
-    .map((row) => row.map(escapeCell).join(","))
-    .join("\n");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(
-    new Blob([csv], { type: "text/csv;charset=utf-8" }),
-  );
-  link.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
 function portfolioOptions(storeRows: StoreRecord[]) {
   return [
     { value: "all", label: "All portfolios" },
@@ -988,98 +953,6 @@ function portfolioOptions(storeRows: StoreRecord[]) {
  * `periodSpendSeries` and `periodTrend` in period-model.ts replace them and
  * take the period as an argument, so a caller cannot forget to pass it.
  */
-
-function requestAgeDays(request: MaintenanceRequest, now: number) {
-  return Math.max(
-    0,
-    Math.floor((now - new Date(request.requestedAt).getTime()) / 86_400_000),
-  );
-}
-
-/**
- * When a due date stops being a promise and starts being a breach.
- *
- * A due date with a time is an instant, and it is overdue the moment that
- * instant passes — a four-hour SLA due at 09:00 is late at 09:01. A BARE date
- * ("2026-08-25", which is what the monday import writes) means the whole day:
- * the job is not overdue until the day is over. The old test —
- * `new Date(dueAt) < now` — read a bare date as UTC midnight, which flagged a
- * job "overdue" during the very day it was due, at an hour that depended on
- * the reader's timezone. `parseStamp` reads the naive forms as local wall
- * clock, the same doctrine the whole period model follows.
- */
-function duePassed(dueAt: string, now: number) {
-  const bareDate = /^\d{4}-\d{2}-\d{2}$/.test(dueAt.trim());
-  const stamp = bareDate ? endOfDay(parseStamp(dueAt)) : parseStamp(dueAt);
-  return Number.isFinite(stamp) && stamp < now;
-}
-
-/**
- * The overview's open-jobs donut.
- *
- * Every arm of this used to sniff a substring, and `dashboard-meters.ts`
- * already documents at length why that cannot be made safe: `includes("part")`
- * matches "Third Par-t-y Delay", and on the live board that single false
- * positive WAS the whole "Awaiting parts" figure. The meters above the board
- * were fixed; this donut kept the old approach, so the same workspace answered
- * the same question two different ways on two screens.
- *
- * Measured on the live data before this change: "On hold" swallowed 54 of 59
- * open jobs — `includes("waiting")` matches "A-waiting Access" and four more —
- * while "Scheduled" and "In progress" both read 0 against true counts of 9
- * and 6.
- *
- * Labels are now named whole, from the same capture the meters use. The
- * `stage` fallbacks are kept: stage is the app's own lifecycle field and is
- * not a monday label, so it is not a guess.
- */
-function jobStatusSegments(requests: MaintenanceRequest[]): DonutSegment[] {
-  const open = requests.filter(isOpenRequest);
-  const normalise = (value: string) =>
-    value.trim().toLowerCase().replace(/\s+/g, " ");
-  const inSet = (labels: readonly string[]) => {
-    const wanted = new Set(labels.map(normalise));
-    return (status: string) => wanted.has(normalise(status));
-  };
-
-  // Named from db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md, the same source
-  // dashboard-meters.ts reads. Adding a label in monday must be a deliberate
-  // change here, not a silent shift in what a segment means.
-  const isAwaitingParts = inSet(awaitingPartsStatuses);
-  const isOnHold = inSet([
-    ...awaitingApprovalStatuses,
-    "Awaiting Landlord Approval",
-    "Health And Safety Hold",
-    "Waiting for payment",
-    "Waiting for decisions",
-    "Awaiting Access",
-    "Third Party Delay",
-    "Blocked - Awaiting Response",
-  ]);
-  const isScheduled = inSet(["Job Scheduled", "Pending Scheduling"]);
-  const isInProgress = inSet(["Job In Progress", "Escalated", "Major works"]);
-
-  const classify = (request: MaintenanceRequest) => {
-    const status = request.status ?? "";
-    if (isAwaitingParts(status)) return "Awaiting parts";
-    if (isOnHold(status)) return "On hold";
-    if (isScheduled(status) || request.stage === "Booked") return "Scheduled";
-    if (isInProgress(status) || request.stage === "Attention") return "In progress";
-    return "Open";
-  };
-  const palette: Record<string, string> = {
-    Open: "#12b4a8",
-    "In progress": "#f26a21",
-    "Awaiting parts": "#f0a91f",
-    "On hold": "#5c82af",
-    Scheduled: "#55b878",
-  };
-  return Object.keys(palette).map((label) => ({
-    label,
-    value: open.filter((request) => classify(request) === label).length,
-    color: palette[label],
-  }));
-}
 
 function downloadFileRegister(files: FileRecord[], now = new Date()) {
   /*
@@ -2535,10 +2408,24 @@ export default function PortalApp({
         eyebrow: activeCustom.description?.trim() || surfaceMeta.eyebrow,
       }
     : surfaceMeta;
-  const urgentCount = requests.filter(
-    (request) =>
-      request.priority === "Urgent" && isOpenRequest(request),
-  ).length;
+  /*
+   * THE JOBS BADGE COUNTS OPEN JOBS, AND IT COUNTS THEM THE WAY THE OVERVIEW
+   * DOES.
+   *
+   * It used to count urgent-and-open, which is a different question from the
+   * one the Overview's first tile answers, so the sidebar and the dashboard
+   * printed two numbers for one workspace and nothing on either screen said
+   * why. Both now go through `openJobCount` in `app/lib/job-metrics.ts` — the
+   * one place a job is decided to be open — and `countsAsWorkOrder` applies the
+   * same lifecycle scope the aggregates apply in SQL, so a subitem or an
+   * archived row cannot inflate the badge past what the page shows.
+   *
+   * The badge is deliberately NOT period-scoped. A sidebar count is a standing
+   * figure — "there are this many open jobs" — while the Overview answers for
+   * the window the reader chose; the two agree whenever that window is All
+   * time, and the tile carries the period in its own subtitle.
+   */
+  const openCount = openJobCount(requests.filter(countsAsWorkOrder));
   const notificationItems = useMemo(
     () =>
       notificationCandidates(requests).filter(
@@ -2697,8 +2584,8 @@ export default function PortalApp({
             catalogue={navCatalogue}
             activeSection={activeSection}
             onSelect={(key) => setSection(key)}
-            badges={{ maintenance: urgentCount }}
-            badgeDescriptions={{ maintenance: "urgent jobs open" }}
+            badges={{ maintenance: openCount }}
+            badgeDescriptions={{ maintenance: "open jobs" }}
             onNotify={setToast}
             onManageSections={() => setSectionManagerOpen(true)}
           />
@@ -3299,6 +3186,7 @@ export default function PortalApp({
               complianceRecords={workspace?.compliance ?? []}
               onManage={(id) => openWorkspaceManager("compliance", id)}
               onNotify={setToast}
+              onNavigate={setSection}
             />
           )}
           {activeSurface === "calendar" && dataMode === "unavailable" && (
@@ -3669,445 +3557,88 @@ function countsAsWorkOrder(request: MaintenanceRequest) {
   return !request.parentId && !request.archived;
 }
 
+/**
+ * THE OVERVIEW SURFACE — an adapter, since the page itself lives in ./ops.
+ *
+ * What used to be here was ~440 lines that computed every figure on the page in
+ * the browser: six tiles, two panels, five meters, a donut and six widgets, all
+ * `.filter()` over the whole job list and the 432 KB workspace snapshot. That is
+ * why the period control could only narrow what had already been downloaded,
+ * why three cards showed the same 57 jobs, and why "Jobs by status" drew a
+ * taxonomy — Open / In progress / Awaiting parts / On hold / Scheduled — that no
+ * job on this board uses, with three permanent zeros and four fifths of the work
+ * in a bucket labelled "On hold".
+ *
+ * `OverviewPage` replaces all of it. Every number now comes from
+ * `/api/dashboard/*`, counted with `GROUP BY` against the filter state in the
+ * URL. This function survives for two reasons and no others:
+ *
+ *   • the call site's `key={activeSection}` contract, which is what keeps two
+ *     sidebar destinations that resolve to one surface from sharing state;
+ *   • `onOpenRequest`, which takes a `MaintenanceRequest` rather than an id.
+ *     The page deals in ids — it never holds a job list — so the lookup happens
+ *     here, where `requests` is already in hand.
+ *
+ * `stores`, `compliance`, `contractors`, `workspaceReady` and `sectionKey` are
+ * no longer read. They stay in the signature because the call site passes them
+ * and because removing a prop from a component the shell composes is a change to
+ * the shell, not to this page.
+ */
 function OverviewView({
   requests,
-  stores: storeRows,
-  compliance: complianceRecords,
-  contractors: registeredContractors,
-  workspaceReady,
-  jobsReady,
-  sectionKey,
   onNavigate,
   onOpenRequest,
 }: {
   requests: MaintenanceRequest[];
   stores: StoreRecord[];
-  /**
-   * The workspace compliance register, derived from the Store Documentation
-   * board. The tile used to count `stores[].compliance`, which only covers
-   * sites that have a `sites` row, and counted a stored status string rather
-   * than a date — so it disagreed with /dashboard/compliance and with the
-   * Compliance Tracker about the same documents. One source, one verdict.
-   */
   compliance: WorkspaceSnapshot["compliance"];
-  /**
-   * The contractor register, so the Dashboard can put a cost against a
-   * contractor by REFERENCE rather than by the name typed on the job.
-   *
-   * W06-12 is worded "Reports and Dashboard", and the Dashboard half was unmet
-   * outright — the only contractor panel in the product was rendered once,
-   * inside the Reports widget list. `ContractorCostPanel` below is that half,
-   * and an id is meaningless without the register that names it.
-   */
   contractors: WorkspaceContractor[];
-  /**
-   * Whether `/api/workspace` has answered yet.
-   *
-   * The jobs fetch and the workspace fetch land separately, and this page
-   * derives half its figures from each. Before this flag, the seconds between
-   * the two paints showed "Active units 0 — Add units to the register" and
-   * "Compliance 0% — No requirements recorded yet": definitive claims about an
-   * account that had simply not loaded, and on a failed workspace fetch they
-   * stood there permanently. Loading and empty are different states, and a
-   * dashboard must not present one as the other.
-   */
   workspaceReady: boolean;
-  /**
-   * WHICH PAGE THIS IS, for the range it remembers.
-   *
-   * The section id the shell is actually on — a built-in one, or a
-   * workspace-defined section that draws this surface. It is the storage
-   * namespace for this page's date range and nothing else, which is what
-   * keeps one page's range out of another's. A display label would break the
-   * moment somebody renamed a menu item.
-   */
-  sectionKey: string;
-  /**
-   * Whether `/api/maintenance` has answered yet — the jobs half of this page.
-   *
-   * `workspaceReady` was added when "Active units 0" and "Compliance 0%" were
-   * found standing over an account that had not loaded. The job tiles have the
-   * same defect from the same cause and it was left in place: "Open jobs 0",
-   * "Overdue 0" and "Completed 0" are all printed from an array that starts
-   * empty. Two fetches, two flags.
-   */
   jobsReady: boolean;
+  sectionKey: string;
   onNavigate: (section: Section) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
 }) {
-  const now = useCurrentTime();
-  const [portfolio, setPortfolio] = useState("all");
-  const [overviewLayoutSlot, setOverviewLayoutSlot] = useState<HTMLElement | null>(null);
-  // Named once, so the tiles and the panels below cannot drift apart on what
-  // "not loaded yet" means.
-  const loading = !jobsReady;
-  /*
-   * Remembered for THIS page. Keying the sections stopped a range leaking
-   * between them and, by unmounting on the way out, also threw it away — so
-   * Overview came back on its default every time. The key stays and the value
-   * outlives the component; see `useStoredPeriod`.
-   */
-  const [period, setPeriod] = useStoredPeriod(sectionKey, "90");
-  const scopedStores = useMemo(
-    () => storeRows.filter((store) => store.lifecycle === "Current" && (portfolio === "all" || store.id === portfolio)),
-    [portfolio, storeRows],
-  );
-  const scopedRequests = useMemo(
-    () => requests.filter((request) =>
-      countsAsWorkOrder(request) &&
-      (portfolio === "all" || request.siteId === portfolio) &&
-      withinAnalyticsPeriod(request.requestedAt, period, now),
-    ),
-    [now, period, portfolio, requests],
-  );
-  /*
-   * ACTIVE SITES, NOT ACTIVE UNITS — the owner's first correction.
-   *
-   * The tile here counted the UNIT register: assets, not places. On this
-   * account the unit register is empty, so a workspace with 32 sites in it
-   * printed "Active units 0 — Add units to the register" as the first and
-   * largest number on the dashboard. Both halves of that were true and the
-   * impression was false, which is worse than a wrong number.
-   *
-   * It now counts SITES, from the canonical register, through the shared
-   * `isActiveSiteStatus` predicate — the same one the Sites screen and the
-   * billing engine use, so the three cannot drift. Note what is NOT the test:
-   * `lifecycle === "Current"`, which `scopedStores` below still uses for the
-   * panels, admits the 'other' rows the register cannot vouch for. Those are
-   * current records and they are not active sites.
-   *
-   * Nothing is derived from Jobs. A site with no work on it is still an active
-   * site, and a job at a closed site must not resurrect it.
-   */
-  const activeSiteCount = storeRows.filter(
-    (store) =>
-      isActiveSiteStatus(store.status) &&
-      (portfolio === "all" || store.id === portfolio),
-  ).length;
-  /*
-   * OPEN AND CLOSED COME FROM ONE PREDICATE, SHARED WITH THE BOARD'S METERS.
-   *
-   * This read `stage !== "Completed"` while the six meters above the job board
-   * read `stage === "Completed" || status === "Job Completed"`, and the two
-   * disagree on live data: the imported rows sit in monday's "… Recently
-   * completed" groups, which carry no lifecycle stage here, so 28 jobs whose own
-   * status says "Job Completed" counted as open on this page and as closed on
-   * the board. Two screens, one portfolio, different numbers.
-   *
-   * `isOpenRequest` and `isClosedRequest` in dashboard-meters.ts are that
-   * predicate, and they are a partition — every row is one or the other — which
-   * is what lets Overview, Reports and the board's meters be checked against
-   * each other rather than taken on trust.
-   */
-  const open = scopedRequests.filter(isOpenRequest);
-  const attention = open
-    .filter((request) => request.stage === "Attention" || request.priority === "Urgent")
-    .sort((left, right) => requestAgeDays(right, now) - requestAgeDays(left, now));
-  const completed = scopedRequests.filter(isClosedRequest);
-  const overdue = open.filter(
-    // Open work only, past its own target — see `duePassed` for why a bare
-    // date is not overdue until its day is over. Completed jobs cannot appear
-    // here: `open` is the canonical partition's other half.
-    (request) => request.dueAt && duePassed(request.dueAt, now),
-  );
-  // The same subset the Compliance page scores, so the tile cannot disagree
-  // with the screen it links to.
-  const complianceItems = scorableComplianceRecords(complianceRecords, portfolio);
-  const complianceCounts = {
-    compliant: complianceItems.filter((item) => item.state === "Compliant").length,
-    expiring: complianceItems.filter((item) => item.state === "Expiring soon").length,
-    expired: complianceItems.filter((item) => item.state === "Expired").length,
-    missing: complianceItems.filter((item) => item.state === "Missing").length,
-  };
-  const compliancePercent = complianceScore(complianceItems);
-  const statusSegments = jobStatusSegments(scopedRequests);
-  /*
-   * THE FIVE JOB METERS — Tier Level, Engineer Required, Priority, Label and
-   * Status, the columns the owner asked to be able to read without opening the
-   * board.
-   *
-   * The colours are the ones an administrator configured, fetched once; until
-   * they land the meters draw in a neutral palette rather than a guessed one.
-   * All the bucketing is in `buildJobMeters`, which guarantees every job lands
-   * in exactly one segment — see its note, and the tests that hold it.
-   *
-   * This panel replaced "Jobs by trade", which plotted `request.engineer` —
-   * the same field the Engineer Required meter now shows. Two panels over one
-   * column is the duplication the owner objected to on Reports, and it should
-   * not have been reproduced here.
-   */
-  const meterOptions = useJobMeterOptions();
-  const jobMeters = useMemo(
-    () => buildJobMeters(scopedRequests, meterOptions),
-    [meterOptions, scopedRequests],
-  );
-  const spendSeries = periodSpendSeries(scopedRequests, period, now);
-  const overviewWindow = resolvePeriod(period, now);
-  const complianceSegments: DonutSegment[] = [
-    { label: "Compliant", value: complianceCounts.compliant, color: "#12b4a8" },
-    { label: "Expiring soon", value: complianceCounts.expiring, color: "#f0a91f" },
-    { label: "Expired", value: complianceCounts.expired, color: "#e2445c" },
-    { label: "Missing", value: complianceCounts.missing, color: "#5c82af" },
-  ];
-
   return (
-    <div className="section-stack analytics-page">
-      <section className="analytics-page-heading">
-        <div><span>Live operations</span><h1>Dashboard Overview</h1></div>
-        <AnalyticsToolbar
-          portfolio={portfolio}
-          portfolios={portfolioOptions(storeRows)}
-          onPortfolioChange={setPortfolio}
-          period={period}
-          /*
-           * Overview's own range, with the same picker Reports uses: Today,
-           * Last 7 days, Month to date, Last 30/90 days, Year to date and a
-           * validated custom start/end — instead of the four rolling windows
-           * the plain select offered. It is this page's state and nobody
-           * else's, which is the point: a range chosen here does not follow
-           * the reader to Reports or Compliance.
-           *
-           * It changes the figures, not just the label — `period` is what
-           * `scopedRequests` filters on above, and every meter, chart and
-           * tile on this page reads from that.
-           */
-          periodControl={<PeriodPicker value={period} onChange={setPeriod} now={now} />}
-          onExport={() => downloadCsv(scopedRequests)}
-          /*
-           * "Edit layout" belongs with the other page controls, not floating
-           * above the panels it edits. Reports already portals its bar into
-           * this toolbar; Overview drew its own in place, which is why it sat
-           * alone in the top-left with nothing beside it. Same slot, same
-           * component, same state — only where the bar is drawn changes.
-           */
-          slotRef={setOverviewLayoutSlot}
-        />
-      </section>
-
-      {/* Focusable because it scrolls sideways at phone widths: without a tab
-          stop a keyboard user cannot reach the cards past the fold. */}
-      <section
-        className="analytics-metric-grid analytics-metric-grid--six"
-        aria-label="Portfolio metrics"
-        tabIndex={0}
-      >
-        {/*
-          Each sparkline names what it plots, because none of them is a history
-          — see the trend note in dashboard-meters.ts. And each trend is built
-          from the same rows as the number above it: "Requiring attention" used
-          to count open-and-urgent-or-escalated in the figure while its
-          sparkline counted `stage === "Attention"` only — the figure read 8
-          over a line that summed 2.
-        */}
-        <AnalyticsMetricCard label="Active sites" value={workspaceReady ? String(activeSiteCount) : "—"} detail={!workspaceReady ? "Loading workspace…" : activeSiteCount ? "Trading estate in this portfolio" : "No active sites in the register"} icon="building" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Maintenance requests raised across the selected period — not a history of the site count; the register keeps none." onClick={() => onNavigate("stores")} />
-        <AnalyticsMetricCard label="Requiring attention" value={jobsReady ? String(attention.length) : "—"} detail={jobsReady ? "Urgent or escalated" : "Loading jobs…"} icon="alert" tone="orange" trend={periodTrend(attention, () => true, period, now)} trendLabel="Jobs now urgent or escalated, by the week they were raised across the selected period. Not a history of the attention count." onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Open jobs" value={jobsReady ? String(open.length) : "—"} detail={jobsReady ? `${open.filter((request) => request.priority === "Urgent").length} urgent` : "Loading jobs…"} icon="inbox" tone="blue" trend={periodTrend(scopedRequests, isOpenRequest, period, now)} trendLabel="Open jobs by the week they were raised, across the selected period. Not a history of the open count — no status history is recorded." onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Overdue" value={jobsReady ? String(overdue.length) : "—"} detail={jobsReady ? "Target date passed" : "Loading jobs…"} icon="clock" tone="red" trend={periodTrend(overdue, () => true, period, now)} trendLabel="Jobs now overdue, by the week they were raised across the selected period. Not a history of the overdue count." onClick={() => onNavigate("maintenance")} />
-        {/*
-          "Raised in this period" is not padding. This tile counts the jobs
-          RAISED inside the window that are now closed — not the jobs closed
-          inside it. A job raised in June and closed in August is absent from
-          August, and one raised in August and closed in November is present.
-          The sparkline below has always said so; the number above it never
-          did, and that is the figure a reader takes away.
-        */}
-        <AnalyticsMetricCard label="Completed" value={jobsReady ? String(completed.length) : "—"} detail={jobsReady ? "Verified closures, raised in this period" : "Loading jobs…"} icon="check" tone="green" trend={periodTrend(completed, () => true, period, now)} trendLabel="Completed jobs by the week they were raised — not by the week they closed, and not a history of the completed count." onClick={() => onNavigate("maintenance")} />
-        <AnalyticsMetricCard label="Compliance" value={workspaceReady ? `${compliancePercent}%` : "—"} detail={!workspaceReady ? "Loading workspace…" : complianceItems.length ? `${complianceCounts.compliant} current records` : "No requirements recorded yet"} icon="shield" tone="teal" trend={complianceTrend(complianceItems, now)} trendLabel="Today's compliance score walked back through recorded certificate expiries, week by week. A view of expiry pressure, not an audit trail." onClick={() => onNavigate("compliance")} />
-      </section>
-
-      
-
-      <section className="analytics-bottom-grid">
-        <article className="analytics-panel analytics-spend-panel">
-          <header><h2>Spend trend</h2><span>{overviewWindow.label}</span></header>
-          {/*
-            Cost is optional on a job and most are still open, so a portfolio
-            can genuinely have no spend recorded. Plotting that as a line
-            pinned to the axis looks like a charting failure, and worse, it
-            invites the reader to conclude the work was free.
-          */}
-          {spendSeries.some((point) => point.value > 0)
-            ? <TrendChart items={spendSeries} valueFormatter={(value) => formatMoney(Math.round(value))} />
-            : <p className="analytics-empty">{jobsReady
-                ? "No costs recorded against jobs in this period. Spend appears here once jobs carry a cost."
-                : "Loading jobs…"}</p>}
-        </article>
-        <button className="analytics-panel analytics-score-panel" type="button" onClick={() => onNavigate("compliance")}>
-          <header><h2>Compliance score</h2></header>
-          <DonutChart segments={complianceSegments} value={complianceItems.length ? `${compliancePercent}%` : "—"} label="On track" size="medium" />
-          {/*
-            0% and "0 of 0" are different claims: one says the sites are failing
-            their requirements, the other says nobody has told us what the
-            requirements are. A new site has the second problem.
-          */}
-          <span>{!workspaceReady
-            ? "Loading the compliance register…"
-            : complianceItems.length
-              ? `${complianceCounts.compliant} of ${complianceItems.length} requirements on track`
-              : "No compliance requirements recorded for these sites yet"}</span>
-          <strong>View compliance <Icon name="chevron" size={15} /></strong>
-        </button>
-      </section>
-
-      {/*
-        The five job meters, full width.
-
-        Placed in a row of their own rather than squeezed into the three-column
-        grid above, and that is the dead-space fix as much as it is the feature:
-        the bottom row previously ran Spend trend | Compliance score | Jobs by
-        trade, where the donut is intrinsically short and left the tallest
-        column deciding the height of two mostly-empty cards beside it. Five
-        meters that reflow to the width available fill that band with something
-        a reader wants, instead of padding it.
-      */}
-      <section className="analytics-meter-row" aria-label="Job breakdown">
-        <OverviewJobMeters
-          meters={jobMeters}
-          loading={loading}
-          /*
-            Per-segment drill-through is not wired yet: the board takes no
-            filter from the URL — it reads only `item` — so a link carrying
-            "priority=Urgent" would land on an unfiltered list and quietly
-            misrepresent itself. Navigating to the job list is the honest
-            subset of the behaviour until live-board accepts a filter.
-          */
-          onSelect={() => onNavigate("maintenance")}
-        />
-      </section>
-
-      {/*
-        Deeper panels. Each is computed from the same organisation-scoped rows
-        the tiles above use, so two accounts see two different pictures from one
-        code path, and each carries its own empty state — a new workspace has no
-        data at all, and a blank axis reads as broken rather than empty.
-      */}
-      {/*
-        Arrangeable. The panels are unchanged — what each COMPUTES is exactly
-        what it computed before — but the order and which ones appear now come
-        from the person's saved layout rather than from this file.
-      */}
-      {/* Last on the overview, on the owner's instruction: it is a
-          follow-up list rather than a headline, and it was sitting above
-          the panels people actually open first. */}
-      <section className="analytics-overview-grid">
-        <article className="analytics-panel analytics-attention-panel">
-          <header><h2>Units requiring attention</h2><button type="button" onClick={() => onNavigate("maintenance")}>View all <Icon name="chevron" size={15} /></button></header>
-          <div className="table-scroll">
-            <table className="analytics-table analytics-table--mobile-cards">
-              <thead><tr><th>Priority</th><th>Unit / Site</th><th>Issue</th><th>Status</th><th>Days</th></tr></thead>
-              <tbody>
-                {attention.slice(0, 5).map((request) => (
-                  <tr className="analytics-row" key={request.id} role="button" aria-label={`Open ${request.id}`} onClick={() => onOpenRequest(request)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") onOpenRequest(request); }}>
-                    <td data-label="Priority"><span className={priorityClass(request.priority)}>{request.priority}</span></td>
-                    <td data-label="Unit / Site">{request.location}</td>
-                    <td data-label="Issue"><strong>{request.title}</strong></td>
-                    <td data-label="Status"><span className="analytics-status">{request.status}</span></td>
-                    <td data-label="Days open">{requestAgeDays(request, now)}</td>
-                  </tr>
-                ))}
-                {!attention.length && <tr><td colSpan={5} className="analytics-empty">No jobs currently require attention.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="analytics-panel analytics-donut-panel">
-          <header><h2>Jobs by status</h2></header>
-          <div className="analytics-donut-layout">
-            <DonutChart segments={statusSegments} value={String(open.length)} label="Open jobs" />
-            <DonutLegend segments={statusSegments} />
-          </div>
-        </article>
-      </section>
-
-      <DashboardWidgets
-        surface="overview"
-        barSlot={overviewLayoutSlot}
-        widgets={[
-          {
-            key: "sla",
-            label: "SLA performance",
-            render: () => <SlaPerformance requests={scopedRequests} />,
-          },
-          {
-            key: "ageing",
-            label: "Open job ageing",
-            render: () => (
-              <OpenJobAgeing requests={scopedRequests} now={now} onOpen={onOpenRequest} />
-            ),
-          },
-          {
-            key: "site-attention",
-            label: "Sites needing attention",
-            render: () => (
-              /*
-               * The WORKSPACE register, not `stores[].compliance`. This panel
-               * was still reading the per-store legacy list after the tile
-               * above was moved to the register (see the `compliance` prop
-               * note): two compliance sources on one page, and the legacy one
-               * only covers sites that have a `sites` row and judges a stored
-               * status string rather than a date. `complianceItems` is the
-               * same portfolio-scoped rows the tile counts, so the panel's
-               * gaps and the tile's score can no longer disagree.
-               */
-              <SiteAttention
-                requests={scopedRequests}
-                compliance={complianceItems}
-                stores={scopedStores}
-                loading={!workspaceReady || loading}
-              />
-            ),
-          },
-          {
-            key: "reactive-planned",
-            label: "Reactive vs planned",
-            render: () => (
-              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} loading={loading} />
-            ),
-          },
-          {
-            key: "spend-budget",
-            label: "Spend against budget",
-            render: () => (
-              <SpendAgainstBudget
-                requests={scopedRequests}
-                sites={storeRows}
-                period={period}
-                now={now}
-                loading={!workspaceReady || loading}
-              />
-            ),
-          },
-          {
-            /*
-             * THE DASHBOARD HALF OF W06-12.
-             *
-             * "Contractor costs on Reports and Dashboard" had one panel, on
-             * Reports, ranked by job volume. This is the money question on the
-             * screen people open first, over the same `scopedRequests` every
-             * other figure on this page uses — so it is scoped by
-             * `withinAnalyticsPeriod(request.requestedAt, …)` exactly like the
-             * spend tiles and the trend above it, and cannot print a different
-             * total for the same window on the same page.
-             *
-             * Both flags: the jobs supply the cost and the workspace supplies
-             * the register that says whose it is, and a panel that announced
-             * "no costed job names a contractor" while the register was still
-             * in flight would be stating a finding about data nobody had read.
-             */
-            key: "contractor-spend",
-            label: "Contractor spend",
-            render: () => (
-              <ContractorCostPanel
-                requests={scopedRequests}
-                contractors={registeredContractors}
-                loading={!workspaceReady || loading}
-              />
-            ),
-          },
-        ] satisfies DashboardWidget[]}
-      />
-    </div>
+    <OverviewPage
+      /*
+       * Drill-through carries the page's own filter state across to the job
+       * list, so a link built from a chart segment means the same thing there.
+       * The board does not yet read every one of these parameters; what it does
+       * read it reads from the URL, and the ones it does not are inert rather
+       * than misleading — they are visible in the address bar, which is where
+       * the reader can see exactly what was asked for.
+       */
+      onNavigateToJobs={(query) => {
+        /*
+         * The jobs route, derived from the SECTION ROUTE MAP rather than by
+         * trimming the current path.
+         *
+         * `pathname.replace(/\/[^/]*$/, "")` gives "" for a bare "/dashboard",
+         * which would push "/jobs" — outside the portal entirely. `sectionRoutes`
+         * is the one map that says what a section’s address is, and the server
+         * copy in `[[...section]]/page.tsx` reads the same slugs, so a reload of
+         * the link lands where the click did.
+         */
+        const target = `/dashboard/${sectionRoutes.maintenance}`;
+        window.history.pushState({}, "", `${target}${query ? `?${query}` : ""}`);
+        onNavigate("maintenance");
+      }}
+      onOpenJob={(id) => {
+        const request = requests.find((row) => row.id === id);
+        if (!request) return;
+        onOpenRequest(request);
+      }}
+      onNavigateToCompliance={() => onNavigate("compliance")}
+      onNavigateToSites={(query) => {
+        if (query) {
+          const params = new URLSearchParams(window.location.search);
+          for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
+          window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+        }
+        onNavigate("stores");
+      }}
+    />
   );
 }
 
@@ -4483,260 +4014,54 @@ function WorkspaceUnavailable({
   );
 }
 
-/*
- * COMPLIANCE'S HORIZON, AS ONE REMEMBERABLE VALUE.
+/**
+ * THE COMPLIANCE SURFACE — an adapter, since the page itself lives in ./ops.
  *
- * This page's control is not the reporting `PeriodPicker` — it is an EXPIRY
- * horizon ("what falls due in the next 90 days") with a two-date custom shape
- * beside it, and it is deliberately a different question. But it is a date
- * range the reader chose, so it has to survive leaving the page like the
- * others.
+ * What used to be here computed the whole register in the browser out of the
+ * workspace snapshot and drew it as a six-column table that
+ * `.analytics-table--mobile-cards` turned into 750 six-row label/value cards on
+ * a phone. The site name was repeated on all twelve records of every store, the
+ * cards merged into one another because their surface was within a shade of the
+ * page, and reading one store's position meant eleven screens of scrolling.
  *
- * Three pieces of state are stored as one token so the horizon and the two
- * dates can never come back out of storage disagreeing with each other:
- * a preset is itself, and a custom span is `custom:FROM..TO` with either end
- * allowed to be empty while it is being typed.
+ * `CompliancePage` replaces it with a site-grouped accordion fed by
+ * `/api/compliance/summary` and `/api/compliance/records`. The collapsed
+ * register costs one request and no records.
+ *
+ * `stores`, `complianceRecords` and `sectionKey` are no longer read. They stay
+ * in the signature because the shell passes them, and removing a prop from a
+ * component the shell composes is a change to the shell rather than to this
+ * page.
  */
-const EXPIRY_PRESETS = new Set(["all", "30", "90", "180", "custom"]);
-
-function isExpiryToken(value: string) {
-  if (EXPIRY_PRESETS.has(value)) return true;
-  if (!value.startsWith("custom:") || value.length > 64) return false;
-  const span = value.slice("custom:".length);
-  return span.includes("..") && /^[0-9.-]{0,21}$/.test(span);
-}
-
-const expiryToken = (window: string, from: string, to: string) =>
-  window === "custom" ? `custom:${from}..${to}` : window;
-
-function expiryParts(token: string) {
-  if (!token.startsWith("custom:")) return { window: token, from: "", to: "" };
-  const [from = "", to = ""] = token.slice("custom:".length).split("..");
-  return { window: "custom", from, to };
-}
-
 function ComplianceView({
-  stores: storeRows,
   complianceRecords,
-  sectionKey,
   onManage,
+  onNavigate,
   onNotify,
 }: {
   stores: StoreRecord[];
   complianceRecords: WorkspaceSnapshot["compliance"];
-  /**
-   * WHICH PAGE THIS IS, for the range it remembers.
-   *
-   * The section id the shell is actually on — a built-in one, or a
-   * workspace-defined section that draws this surface. It is the storage
-   * namespace for this page's date range and nothing else, which is what
-   * keeps one page's range out of another's. A display label would break the
-   * moment somebody renamed a menu item.
-   */
   sectionKey: string;
   onManage: (id?: string | null) => void;
   onNotify: (message: string) => void;
+  onNavigate: (section: Section) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"All" | ComplianceState>("All");
-  const [portfolio, setPortfolio] = useState("all");
-  /*
-   * One stored token, three values read back out of it. Every existing caller
-   * below still sets one thing at a time; each setter rewrites the token with
-   * the other two carried through, so choosing "Between two dates" cannot lose
-   * a date already typed and typing a date cannot lose the horizon.
-   */
-  const [storedExpiry, setStoredExpiry] = useStoredPeriod(
-    sectionKey ? `${sectionKey}:expiry` : "compliance:expiry",
-    "all",
-    isExpiryToken,
-  );
-  const {
-    window: expiryWindow,
-    from: expiryFrom,
-    to: expiryTo,
-  } = expiryParts(storedExpiry);
-  const setExpiryWindow = (next: string) =>
-    setStoredExpiry(expiryToken(next, expiryFrom, expiryTo));
-  const setExpiryFrom = (next: string) =>
-    setStoredExpiry(expiryToken("custom", next, expiryTo));
-  const setExpiryTo = (next: string) =>
-    setStoredExpiry(expiryToken("custom", expiryFrom, next));
-  /*
-   * A start and an end of the reader's own, for the expiry horizon.
-   *
-   * The preset horizons answer "what falls due in the next 90 days". They
-   * cannot answer "what falls due in the quarter I am about to be audited on",
-   * which is the question that gets asked in a compliance meeting — so
-   * "Between two dates" is a fourth shape alongside them. It stays an EXPIRY
-   * filter rather than becoming a reporting period: this page is about what is
-   * coming, not what happened.
-   */
-  const [showAll, setShowAll] = useState(false);
-  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const now = useCurrentTime();
-
-  /*
-   * The register is the workspace's compliance records, not the site table's.
-   *
-   * This screen used to read `stores[].compliance`, which meant it could only
-   * ever describe stores that have a row in `sites` — ten seeded, fictional
-   * ones. The Store Documentation board holds thirty-one real stores, and
-   * twenty-one of them appeared on no compliance surface at all, including six
-   * of the seven stores with an expired certificate. `/api/workspace` now
-   * derives `compliance` from that board, so reading it here is what puts the
-   * estate on the screen. Stores that are in `sites` still resolve to their
-   * site id, so the portfolio filter, the drawer and Manage register keep
-   * working exactly as before.
-   */
-  const scopedCompliance = useMemo(() => {
-    if (portfolio === "all") return complianceRecords;
-    return complianceRecords.filter((record) => record.siteId === portfolio);
-  }, [complianceRecords, portfolio]);
-
-  /*
-   * `scopedCompliance` above is kept: the expiry timeline further down still
-   * reads it, and it INCLUDES "Not required" on purpose. This is the scorable
-   * subset — the same filter the Overview tile applies, now from one place.
-   */
-  const records = useMemo(
-    () => scorableComplianceRecords(complianceRecords, portfolio),
-    [complianceRecords, portfolio],
-  );
-
-  /** Every store the register speaks for, whether or not it has a `sites` row. */
-  const registerPortfolios = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const record of complianceRecords) {
-      if (!byId.has(record.siteId)) byId.set(record.siteId, record.siteName);
-    }
-    return [
-      { value: "all", label: "All portfolios" },
-      ...[...byId]
-        .map(([value, label]) => ({ value, label }))
-        .sort((left, right) => left.label.localeCompare(right.label, "en-GB")),
-    ];
-  }, [complianceRecords]);
-
-  const counts = useMemo(() => ({
-    Compliant: records.filter((record) => record.state === "Compliant").length,
-    "Expiring soon": records.filter((record) => record.state === "Expiring soon").length,
-    Expired: records.filter((record) => record.state === "Expired").length,
-    Missing: records.filter((record) => record.state === "Missing").length,
-  }), [records]);
-  const compliantPercent = complianceScore(records);
-  /*
-   * Computed from the WHOLE register against the WHOLE site list, not the
-   * portfolio-filtered subset: the question it answers is "how much of the
-   * estate does this register speak for", which a filter would flatter.
-   */
-  const coverageNotice = useMemo(
-    () => complianceCoverageNotice(complianceCoverage(complianceRecords, storeRows.map((store) => store.id))),
-    [complianceRecords, storeRows],
-  );
-  const managerFor = (siteId: string) =>
-    storeRows.find((store) => store.id === siteId)?.manager ?? "";
-  const needle = query.trim().toLowerCase();
-  const filteredRecords = records.filter((record) => {
-    const matchesSearch = !needle ||
-      [record.siteName, managerFor(record.siteId), record.kind, record.state]
-        .some((value) => value.toLowerCase().includes(needle));
-    const matchesStatus = filter === "All" || record.state === filter;
-    const matchesWindow = (() => {
-      if (expiryWindow === "custom") {
-        // A half-open range is still useful: "everything after March" is a
-        // question, and so is "everything before the audit".
-        if (!record.expiry) return !expiryFrom && !expiryTo;
-        const at = new Date(record.expiry).getTime();
-        if (expiryFrom && at < new Date(`${expiryFrom}T00:00:00`).getTime()) return false;
-        if (expiryTo && at > new Date(`${expiryTo}T23:59:59`).getTime()) return false;
-        return true;
-      }
-      return (
-        expiryWindow === "all" ||
-        !record.expiry ||
-        new Date(record.expiry).getTime() <= now + Number(expiryWindow) * 86_400_000
-      );
-    })();
-    return matchesSearch && matchesStatus && matchesWindow;
-  });
-  const expiringTypes = Array.from(
-    records
-      .filter((record) => record.state === "Expired" || record.state === "Expiring soon" ||
-        Boolean(record.expiry && new Date(record.expiry).getTime() <= now + 90 * 86_400_000))
-      .reduce((map, record) => {
-        map.set(record.kind, (map.get(record.kind) ?? 0) + 1);
-        return map;
-      }, new Map<string, number>()),
-  )
-    .map(([label, value], index) => ({
-      label,
-      value,
-      color: ["#f05b22", "#f68b1f", "#f0a91f", "#5c82af", "#6f8793"][index % 5],
-    }))
-    .sort((left, right) => right.value - left.value);
-  const scoreSegments: DonutSegment[] = [
-    { label: "Compliant", value: counts.Compliant, color: "#12b4a8" },
-    { label: "Expiring soon", value: counts["Expiring soon"], color: "#f0a91f" },
-    { label: "Expired", value: counts.Expired, color: "#e2445c" },
-    { label: "Missing", value: counts.Missing, color: "#5c82af" },
-  ];
-  /**
-   * Who chases a certificate, from the Store Documentation capture.
-   *
-   * This used to substring-match the requirement name, which had no answer for
-   * RAMS, the PLI or the store drawing — they contain none of the keywords, so
-   * all three fell through to the store manager. Anything the board does not
-   * define still falls back to the manager, which is the right answer for a
-   * requirement an admin has added themselves.
-   */
-  const responsibilityFor = (kind: string, siteId: string) =>
-    storeDocumentationResponsibility.get(kind) ||
-    managerFor(siteId) ||
-    "Store manager";
-
-  /**
-   * The store behind the "View" button.
-   *
-   * Most of the estate has no `sites` row — the Store Documentation board is
-   * the only place twenty-one of these stores exist — so the drawer is built
-   * from the register itself, taking the site record where there is one. Store
-   * type and address come off the board row rather than being left blank or
-   * invented.
-   */
-  const selectedStore = useMemo<StoreRecord | null>(() => {
-    if (!selectedSiteId) return null;
-    const forSite = complianceRecords.filter((record) => record.siteId === selectedSiteId);
-    if (forSite.length === 0) return null;
-    const documents = forSite.map((record) => ({
-      kind: record.kind,
-      state: record.state,
-      expiry: record.expiry,
-      fileCount: record.fileCount,
-    }));
-    const known = storeRows.find((store) => store.id === selectedSiteId);
-    if (known) return { ...known, compliance: documents };
-    return {
-      id: selectedSiteId,
-      name: forSite[0].siteName,
-      type: forSite[0].siteType || "Store",
-      region: "",
-      lifecycle: "",
-      status: "",
-      address: forSite[0].siteAddress || "No address on the board",
-      manager: "",
-      openRequests: 0,
-      annualBudgetPence: null,
-      compliance: documents,
-    };
-  }, [complianceRecords, selectedSiteId, storeRows]);
-
   return (
-    <div className="section-stack analytics-page">
-      <section className="analytics-page-heading analytics-page-heading--wide-controls">
-        <div><span>Portfolio assurance</span><h1>Compliance overview</h1></div>
-        {/* A lapsed certificate is a job somebody has to do. Raised from the
-            screen that reports it rather than retyped into the board. */}
+    <>
+    <CompliancePage
+      /*
+       * A board-derived requirement is edited on its board, never here. Opening
+       * "Manage register" on one would write into a `compliance_documents` copy
+       * the next read recomputes away — and a row minted that way can go on to
+       * switch a real board slot off. The page decides which of the two a
+       * record is; this decides where each of them goes.
+       */
+      onOpenStoreDocumentation={() => onNavigate("store-documentation")}
+      onManageRecord={(id) => onManage(id)}
+      /* A lapsed certificate is a job somebody has to do. Raised from the screen
+         that reports it rather than retyped into the board. */
+      raiseAction={
         <RaiseTicketButton
           context={{ section: "Compliance" }}
           onRaised={(ticket) =>
@@ -4744,158 +4069,23 @@ function ComplianceView({
           }
           onNotify={onNotify}
         />
-        <AnalyticsToolbar
-          portfolio={portfolio}
-          portfolios={registerPortfolios}
-          onPortfolioChange={setPortfolio}
-          period={expiryWindow}
-          periods={[
-            { value: "all", label: "All expiry dates" },
-            { value: "30", label: "Next 30 days" },
-            { value: "90", label: "Next 90 days" },
-            { value: "180", label: "Next 180 days" },
-            { value: "custom", label: "Between two dates…" },
-          ]}
-          onPeriodChange={setExpiryWindow}
-          onExport={() => downloadTableCsv(
-            "maintsupp-compliance",
-            ["Site", "Requirement", "Responsibility", "Due date", "Status"],
-            filteredRecords.map((record) => [record.siteName, record.kind, responsibilityFor(record.kind, record.siteId), record.expiry, record.state]),
-          )}
-          exportLabel="Export register"
-        >
-          {/* Only when asked for, so the row is not two empty date boxes wide
-              for the four readers in five who want a preset. */}
-          {expiryWindow === "custom" && (
-            <>
-              <label className="analytics-period analytics-period--argument">
-                <span className="visually-hidden">Expiring from</span>
-                <input
-                  aria-label="Expiring from"
-                  type="date"
-                  value={expiryFrom}
-                  onChange={(event) => setExpiryFrom(event.target.value)}
-                />
-              </label>
-              <label className="analytics-period analytics-period--argument">
-                <span className="visually-hidden">Expiring until</span>
-                <input
-                  aria-label="Expiring until"
-                  type="date"
-                  value={expiryTo}
-                  onChange={(event) => setExpiryTo(event.target.value)}
-                />
-              </label>
-            </>
-          )}
-          <button className="analytics-toolbar__button" type="button" onClick={() => onManage(null)}>
-            <Icon name="plus" size={17} /> Manage register
-          </button>
-          <label className="analytics-toolbar__search">
-            <Icon name="search" size={17} />
-            <input aria-label="Search certificates" type="search" placeholder="Search certificates…" value={query} onChange={(event) => setQuery(event.target.value)} />
-          </label>
-          <label>
-            <Icon name="shield" size={17} />
-            <select aria-label="Certificate status" value={filter} onChange={(event) => setFilter(event.target.value as "All" | ComplianceState)}>
-              <option>All</option><option>Compliant</option><option>Expiring soon</option><option>Expired</option><option>Missing</option>
-            </select>
-          </label>
-        </AnalyticsToolbar>
-      </section>
+      }
+    />
+    {/*
+      THE TWELVE-MONTH FORWARD VIEW SURVIVES THE REBUILD.
 
-      <section className="analytics-compliance-grid">
-        <article className="analytics-panel analytics-compliance-score">
-          <header><h2>Compliance score</h2></header>
-          <div className="analytics-compliance-score__body">
-            <DonutChart segments={scoreSegments} value={`${compliantPercent}%`} label={compliantPercent >= 80 ? "On track" : "Action required"} />
-            <DonutLegend segments={scoreSegments} />
-          </div>
-          <p>{counts.Compliant} of {records.length} requirements on track</p>
-          {/*
-            WHY THE SCORE LOOKS LIKE THAT.
-
-            A compliance score is a fraction of the requirements the register
-            KNOWS about, and it knows about a store only if that store has a
-            Store Documentation row. On an estate where almost none do, "0 of 24
-            on track" is arithmetically correct and operationally meaningless —
-            and the screen said nothing about the gap, so the number read as a
-            failing estate rather than an unbuilt register. This says which it
-            is, and names the one action that changes it.
-          */}
-          {coverageNotice && <p className="analytics-compliance-score__coverage">{coverageNotice}</p>}
-        </article>
-
-        <article className="analytics-panel analytics-certificate-register">
-          <header><h2>Certificate register</h2><span>{filteredRecords.length} records</span></header>
-          <div className="table-scroll">
-            <table className="analytics-table analytics-table--mobile-cards">
-              <thead><tr><th>Site</th><th>Requirement</th><th>Responsibility</th><th>Due date</th><th>Status</th><th aria-label="Actions" /></tr></thead>
-              <tbody>
-                {filteredRecords.slice(0, showAll ? filteredRecords.length : 8).map((record) => (
-                  <tr key={record.id}>
-                    <td data-label="Site"><strong>{record.siteName}</strong></td>
-                    <td data-label="Requirement">{record.kind}</td>
-                    <td data-label="Responsibility">{responsibilityFor(record.kind, record.siteId)}</td>
-                    <td data-label="Due date">{record.expiry ? formatDate(record.expiry) : "—"}</td>
-                    <td data-label="Status"><span className={complianceTone(record.state)}><span />{record.state}</span></td>
-                    <td data-label="Actions"><div className="table-row-actions"><button className="table-text-action" type="button" onClick={() => setSelectedSiteId(record.siteId)}>View</button>{/*
-                      A board-derived requirement is NOT editable here. "Manage
-                      register" would open a blank compliance_documents form
-                      whose save the next read recomputes away — and a register
-                      row minted that way can go on to switch a real board slot
-                      off, because DELETE {entity:"compliance"} sets
-                      `not_required` and that maps back onto the slot. The row
-                      is read on Store Documentation instead.
-                    */}
-                    {isRegisterEditable(record) ? (
-                      <button className="table-text-action" type="button" onClick={() => onManage(record.id)}>Edit <Icon name="chevron" size={14} /></button>
-                    ) : (
-                      <button
-                        className="table-text-action"
-                        type="button"
-                        onClick={() =>
-                          onNotify(
-                            `${record.kind} at ${record.siteName} is read from the Store Documentation board. Open that board to change it — editing it here would write into a copy the next read discards.`,
-                          )
-                        }
-                      >
-                        Read-only <Icon name="chevron" size={14} /></button>
-                    )}</div></td>
-                  </tr>
-                ))}
-                {!filteredRecords.length && <tr><td className="analytics-empty" colSpan={6}>No certificate records match these filters.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-          {filteredRecords.length > 8 && (
-            <button className="analytics-panel-footer" type="button" onClick={() => setShowAll((current) => !current)}>
-              {showAll ? "Show summary" : "View all certificates"} <Icon name="chevron" size={15} />
-            </button>
-          )}
-        </article>
-      </section>
-
-      <section className="analytics-panel analytics-expiry-types">
-        <header><div><h2>Expiring certificate types</h2><span>Certificates expired or due in the next 90 days</span></div></header>
-        <HorizontalBars items={expiringTypes.length ? expiringTypes : [{ label: "No certificates due", value: 0, color: "#5c82af" }]} />
-        <button className="analytics-panel-footer" type="button" onClick={() => { setFilter("Expiring soon"); setExpiryWindow("90"); }}>
-          View all expiring <Icon name="chevron" size={15} />
-        </button>
-      </section>
-
-      {/* A twelve-month forward view, so renewals are planned rather than chased. */}
-      <section className="insight-grid">
-        <ComplianceExpiryTimeline compliance={scopedCompliance} now={now} />
-      </section>
-
-      {selectedStore && (
-        <StoreComplianceDrawer
-          store={selectedStore}
-          onClose={() => setSelectedSiteId(null)}
-        />
-      )}
-    </div>
+      The register answers "what is outstanding today"; this answers "what falls
+      due before the next audit", which is the question a compliance meeting
+      asks and the one no part of the new register can answer. It reads the
+      workspace snapshot the SHELL already holds for every other surface, so it
+      costs this page no fetch of its own — the register above it is still drawn
+      from the two aggregate endpoints and still downloads no records it is not
+      showing.
+    */}
+    <section className="insight-grid">
+      <ComplianceExpiryTimeline compliance={complianceRecords} now={now} />
+    </section>
+    </>
   );
 }
 
@@ -6119,182 +5309,115 @@ function ContractorsView({
     : null;
 
   return (
-    <div className="section-stack">
-      <section className="section-header"><div><span className="eyebrow-chip"><Icon name="users" size={15} />Managed network</span><h1>Contractors</h1><p>Qualifications, coverage, assigned work, completion performance and costs in one operational register.</p></div>
-        {/*
-          * Two controls, not three.
-          *
-          * "Raise a ticket" was here on the reasoning that somebody looking at
-          * a contractor is usually about to give them something to do. It is
-          * the wrong reading of this page: a ticket is raised against a SITE,
-          * and the control's own dialog says so — it opens with no site chosen
-          * and nothing on this screen to choose one from, because a contractor
-          * is not a location. Sites, Units and the compliance tracker keep it
-          * for exactly the reason it does not belong here: on those screens the
-          * row you are looking at IS the thing the ticket is about.
-          *
-          * Removing it also gives the row back to the two controls that are
-          * about this page — the period the figures are measured over, and the
-          * register itself — which is why the two are allowed to sit at their
-          * natural widths below rather than being squeezed to fit a third.
-          */}
-        <div className="section-header__actions section-header__actions--pair">
-          <PeriodPicker value={period} onChange={setPeriod} now={nowMs} />
-          <button className="primary-button" type="button" onClick={() => onManage(null)}><Icon name="plus" size={17} />Manage contractors</button>
-        </div></section>
-      <section className="site-stat-grid">
-        <div><span className="site-stat-icon"><Icon name="users" size={19} /></span><small>Contractors</small><strong>{contractors.filter((item) => item.name !== "Unassigned").length}</strong></div>
-        <div><span className="site-stat-icon site-stat-icon--teal"><Icon name="check" size={19} /></span><small>Completed jobs</small><strong>{contractors.reduce((sum, item) => sum + item.completedJobs, 0)}</strong></div>
-        <div><span className="site-stat-icon site-stat-icon--orange"><Icon name="alert" size={19} /></span><small>Urgent actions</small><strong>{contractors.reduce((sum, item) => sum + item.urgentJobs, 0)}</strong></div>
-        {/*
-          * "Tracked spend" says WHAT is tracked, on the tile and to a screen
-          * reader, because three things about this number are not obvious from
-          * four words and a currency symbol: it is recorded job cost and not an
-          * invoiced or paid amount; it is dated by when work was FINISHED,
-          * which is this page's basis and not Reports'; and the register's day
-          * rate, call-out charge and hourly rate are agreed TERMS that never
-          * enter it. The last of those became a live risk the moment those
-          * columns existed — summing a rate into a spend total does not
-          * summarise cost, it invents it.
-          */}
-        <div title="Recorded job cost on work completed in this period. Not invoiced or paid amounts, and never an agreed day, call-out or hourly rate."><span className="site-stat-icon site-stat-icon--green"><Icon name="chart" size={19} /></span><small>Tracked spend<span className="visually-hidden"> — recorded job cost on work completed in this period, not invoiced amounts and never an agreed rate</span></small><strong>{formatMoney(contractors.reduce((sum, item) => sum + item.spend, 0))}</strong></div>
-      </section>
-      {/*
-        W06-11 — THE REGISTER IS MOUNTED HERE, and the fixed table is gone.
+    <>
+      <ContractorsList
+        contractors={contractors as unknown as ContractorRow[]}
+        loading={false}
+        error={null}
+        /*
+          The shell's own refresh. This list is drawn from the workspace
+          snapshot the shell holds, so retrying means asking the shell to fetch
+          it again rather than re-running a fetch this component does not own.
+        */
+        onRetry={() => window.dispatchEvent(new Event("maintsupp:refresh-board"))}
+        onOpenDetail={(id) => setOpenProfile(id)}
+        onManage={(id) => onManage(id)}
+        onAdd={() => onManage(null)}
+        periodControl={<PeriodPicker value={period} onChange={setPeriod} now={nowMs} />}
+        /*
+         * THE TILE’S SENTENCE, KEPT AND MOVED TO THE CONTROL IT DESCRIBES.
+         *
+         * Three things about these figures are not obvious from a label and a
+         * currency symbol: the spend is recorded JOB COST and not an invoiced
+         * or paid amount; the window is dated by when work was FINISHED, which
+         * is this page’s basis and not Reports’; and the register’s day rate,
+         * call-out charge and hourly rate are agreed TERMS that never enter it.
+         * The last became a live risk the moment those columns existed — summing
+         * a rate into a spend total does not summarise cost, it invents it.
+         */
+        periodNote={`Assigned, completed and spend are measured over ${
+          periodWindow.recognised ? periodWindow.label : "the selected period"
+        }. Recorded job cost on work completed in this period. Not invoiced or paid amounts, and never an agreed day, call-out or hourly rate.`}
+        /*
+          THE REGISTER IS MOUNTED HERE, and the fixed table is gone.
 
-        WHAT WAS HERE. Eleven hard-coded columns, and a comment beside the
-        `<thead>` arguing against a twelfth: the table already scrolls sideways
-        inside `.table-scroll` from 1440 down, and a column blank on all but a
-        handful of rows buys that scroll for nothing. That reasoning was right
-        about a HARD-CODED column and it does not survive this change, so it has
-        been rewritten rather than left contradicting the code. The answer to
-        "the table is too wide" is that the READER decides which columns are on
-        it — which is exactly what W06-11 asks for, and what
-        `/api/registers?register=contractors` now provides: 25 native columns
-        of the contractor record, any of them renameable, reorderable, resizable
-        and hideable, plus columns somebody adds and fills in per contractor.
+          The 31-column configurable register is the desktop table view now
+          rather than the page itself. It is unchanged: the same grid, the same
+          column menu, the same `Add column`, and the same five computed work
+          figures passed as `extraColumns` because a measurement over a period is
+          not a field on a contractor. What changed is where it sits — behind a
+          view switch, at ≥1024px — because on a phone `9 shown, 22 hidden` was
+          the first thing on screen and never the thing anybody came for.
+        */
+        tableView={
+          contractors.length > 0 ? (
+            <ContractorRegister
+              rows={contractors}
+              onOpen={(id) => setOpenProfile(id)}
+              onManage={onManage}
+              badge={(contractor) =>
+                contractor.active ? null : (
+                  <span className="contractor-archived-chip">
+                    Archived
+                    <span className="visually-hidden">
+                      {" "}
+                      — off the register; this is not their availability
+                    </span>
+                  </span>
+                )
+              }
+              contact={(contractor) => <ContractorContact contractor={contractor} />}
+              extraColumns={[
+                {
+                  key: "assigned",
+                  title: "Assigned",
+                  render: (contractor) => contractor.assignedJobs,
+                },
+                {
+                  key: "completed",
+                  title: "Completed",
+                  render: (contractor) => contractor.completedJobs,
+                },
+                {
+                  key: "completion",
+                  title: "Completion rate",
+                  render: (contractor) =>
+                    `${Math.round(
+                      (contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100,
+                    )}%`,
+                },
+                {
+                  key: "urgent",
+                  title: "Open urgent",
+                  render: (contractor) => contractor.urgentJobs,
+                },
+                {
+                  key: "documents",
+                  title: "Documents",
+                  render: (contractor) =>
+                    contractor.documentCount === undefined ? "—" : contractor.documentCount,
+                },
+                {
+                  key: "spend",
+                  title: "Spend",
+                  render: (contractor) => formatMoney(contractor.spend),
+                },
+              ]}
+            />
+          ) : (
+            <p className="analytics-empty">
+              {periodWindow.recognised
+                ? "No contractors are registered yet, and no job in this period names one."
+                : periodWindow.reason}
+            </p>
+          )
+        }
+      />
 
-        The archived flag still rides with the name rather than taking a column,
-        for the half of the old argument that does survive: it is blank on all
-        but a handful of rows, and the reader is already at the name when they
-        need it. `badge` is how it gets there.
-
-        THE FIVE WORK FIGURES ARE NOT REGISTER COLUMNS and are passed as
-        `extraColumns`. They are counts over the jobs inside this page's
-        reporting period — they move when the picker above moves — and a
-        register column is a view onto a stored value. Seeding them as native
-        columns would put a measurement in a catalogue of facts and invite
-        `PATCH /api/registers/values` to write one.
-      */}
-      {contractors.length > 0 && (
-        <ContractorRegister
-          rows={contractors}
-          onOpen={(id) => setOpenProfile(id)}
-          onManage={onManage}
-          badge={(contractor) =>
-            contractor.active ? null : (
-              <span className="contractor-archived-chip">
-                Archived
-                <span className="visually-hidden">
-                  {" "}
-                  — off the register; this is not their availability
-                </span>
-              </span>
-            )
-          }
-          /*
-           * THE ACTIONABLE FORM of three columns the register also holds as
-           * text — Email, Phone and WhatsApp. Not a duplication to be tidied
-           * away: `wa.me` refuses a national number, so the WhatsApp link
-           * exists only where `whatsappHref` can build one, and the raw columns
-           * stay readable (and hideable) for every row where it cannot. A
-           * reader who wants one and not the other hides the others, which is
-           * what this register is for.
-           *
-           * IT WAS AN `extraColumn` TITLED "Reach them", and it moved. As an
-           * extra it was drawn after every register column, so on a
-           * twenty-four-column register the number you needed was four thousand
-           * pixels to the right of the name it belonged to — and when the
-           * operator hid the name column, "Reach them" became the first thing
-           * on the row with no indication of whose contact details it was. It
-           * is now the second half of the grid's pinned identity lane, beneath
-           * the name, where the question "who do I ring" is actually asked.
-           */
-          contact={(contractor) => <ContractorContact contractor={contractor} />}
-          extraColumns={[
-            {
-              key: "assigned",
-              title: "Assigned",
-              render: (contractor) => contractor.assignedJobs,
-            },
-            {
-              key: "completed",
-              title: "Completed",
-              render: (contractor) => contractor.completedJobs,
-            },
-            {
-              key: "completion",
-              title: "Completion rate",
-              render: (contractor) =>
-                `${Math.round(
-                  (contractor.completedJobs / Math.max(contractor.assignedJobs, 1)) * 100,
-                )}%`,
-            },
-            {
-              key: "urgent",
-              title: "Open urgent",
-              render: (contractor) => contractor.urgentJobs,
-            },
-            {
-              /*
-               * W06-08 — `documentCount`, RENDERED AT LAST.
-               *
-               * `/api/workspace` has computed it per contractor since W07-07,
-               * `WorkspaceContractor` names it and a unit test covers it, and
-               * no screen had ever read it — so "which of our contractors has
-               * no insurance on file" was a question the product could answer
-               * and never did. It is the one figure in this group that is NOT
-               * period-scoped: a certificate is held or it is not, whatever
-               * window the picker is on.
-               *
-               * An em dash where the count is ABSENT, and a zero where it is
-               * zero. The field is optional because `mock-data.ts` builds these
-               * records with no storage behind them, and absent means "not
-               * known" — printing 0 for it would be inventing an answer.
-               */
-              key: "documents",
-              title: "Documents",
-              render: (contractor) =>
-                contractor.documentCount === undefined ? "—" : contractor.documentCount,
-            },
-            {
-              key: "spend",
-              title: "Spend",
-              render: (contractor) => formatMoney(contractor.spend),
-            },
-          ]}
-        />
-      )}
-      {/*
-        The page says why it is empty, and names the two different reasons: no
-        contractors at all, or a window nobody could read. The register grid has
-        an empty row of its own, but it cannot know about this page's period —
-        so the page answers first and the grid is only drawn when there is
-        something to draw.
-      */}
-      {!contractors.length && (
-        <section className="panel sites-panel">
-          <p className="analytics-empty">
-            {periodWindow.recognised
-              ? "No contractors are registered yet, and no job in this period names one."
-              : periodWindow.reason}
-          </p>
-        </section>
-      )}
       {/*
         W06-10 — THE PROFILE. Which jobs are assigned, which sites are linked,
         which documents belong to them, and how they are performing, in one
-        place reachable from the row.
+        place reachable from the row's Details button.
       */}
       {openContractor && (
         <ContractorProfile
@@ -6311,17 +5434,15 @@ function ContractorsView({
           onNotify={onNotify}
           /*
            * THE PAGE'S OWN `onManage`, HANDED STRAIGHT ON — the same function
-           * object the register above is given. The drawer's Edit therefore
-           * opens the same `WorkspaceDataManager` on the same contractor tab
-           * with the same record selected; there is one editor in this product
-           * and one way in, which is what makes it safe for the table to have
-           * dropped its pinned pencil.
+           * object the register is given. The drawer's Edit therefore opens the
+           * same `WorkspaceDataManager` on the same contractor tab with the same
+           * record selected; there is one editor in this product and one way in.
            */
           onManage={onManage}
           onClose={() => setOpenProfile(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -9059,79 +8180,6 @@ function DetailItem({
         <strong>{value}</strong>
       </div>
     </div>
-  );
-}
-
-function StoreComplianceDrawer({
-  store,
-  onClose,
-}: {
-  store: StoreRecord;
-  onClose: () => void;
-}) {
-  return (
-    <>
-      <button
-        className="drawer-scrim"
-        type="button"
-        aria-label="Close site details"
-        onClick={onClose}
-      />
-      <aside className="detail-drawer">
-        <div className="detail-drawer__header">
-          <div>
-            <span>Compliance profile</span>
-            <h2>{store.name}</h2>
-          </div>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={onClose}
-            aria-label="Close details"
-          >
-            <Icon name="close" size={20} />
-          </button>
-        </div>
-        <div className="detail-drawer__body">
-          <div className="site-profile-banner">
-            <span>
-              <Icon name="store" size={21} />
-            </span>
-            <div>
-              <strong>{store.type}</strong>
-              <small>{store.address}</small>
-            </div>
-          </div>
-          <section className="drawer-section">
-            <div className="drawer-section__title">
-              <span className="drawer-label">Required documents</span>
-              <span>{store.compliance.length} types</span>
-            </div>
-            <div className="compliance-document-list">
-              {store.compliance.map((item) => (
-                <div key={item.kind}>
-                  <span className="compliance-doc-icon">
-                    <Icon name="document" size={18} />
-                  </span>
-                  <span>
-                    <strong>{item.kind}</strong>
-                    <small>
-                      {item.expiry
-                        ? `Expires ${formatDate(item.expiry)}`
-                        : item.state}
-                    </small>
-                  </span>
-                  <span className={complianceTone(item.state)}>
-                    <span />
-                    {item.state}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      </aside>
-    </>
   );
 }
 
