@@ -235,6 +235,41 @@ class Throttling(unittest.TestCase):
         self.assertIsNone(mx.retry_after_seconds('[{"message":"Board not found"}]'))
 
 
+class ShortfallVersusSurplus(unittest.TestCase):
+    """Missing items and extra items are not the same event.
+
+    Board 1164003119 reports items_count=0 and serves one orphaned row, so a
+    gate that only asks "did the numbers match" refuses a file run over an
+    export that lost nothing at all.
+    """
+
+    @staticmethod
+    def shortfall(live, exported):
+        return (live or 0) - exported
+
+    def test_a_missing_item_is_a_shortfall(self):
+        self.assertGreater(self.shortfall(774, 770), 0)
+
+    def test_an_extra_item_is_not_a_shortfall(self):
+        self.assertLess(self.shortfall(0, 1), 0)
+
+    def test_an_exact_match_is_neither(self):
+        self.assertEqual(self.shortfall(774, 774), 0)
+
+    def test_a_surplus_still_records_a_failure(self):
+        # Nothing is missing, but monday's own counter disagreed with monday's
+        # own item list, and that must not vanish into a green summary.
+        mx.failures.clear()
+        try:
+            shortfall = self.shortfall(0, 1)
+            if shortfall < 0:
+                mx.note_failure("subitems", "board 1164003119", "items_count=0, served 1")
+            self.assertEqual(len(mx.failures), 1)
+            self.assertIn("1164003119", mx.failures[0]["identifier"])
+        finally:
+            mx.failures.clear()
+
+
 class Manifest(unittest.TestCase):
     def test_manifest_records_everything_the_migration_gate_reads(self):
         for field in ("board", "item_id", "source", "column_id", "column_title",

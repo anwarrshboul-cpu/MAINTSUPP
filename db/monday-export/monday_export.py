@@ -85,7 +85,22 @@ import urllib.request
 from datetime import datetime, timezone
 
 API_URL = "https://api.monday.com/v2"
-API_VERSION = "2024-10"
+
+# 2025-07, not the 2024-10 the .mjs pullers use.
+#
+# `Reply.assets` does not exist before 2025-07. Introspected against this
+# account on 2026-09-09: 2024-10, 2025-01 and 2025-04 expose twelve Reply
+# fields and none of them is `assets`; 2025-07 and every version after it expose
+# thirteen, including it. On the older versions an attachment on a reply is not
+# merely unrequested, it is unreachable — which is why the supplied exporter
+# could not have captured one however it was written.
+#
+# The oldest version that answers, rather than the newest available: it is the
+# smallest step away from the shape the rest of this directory is proven
+# against. Verified on 2025-07 before the bump — items_page, next_items_page,
+# column_values{id type text value}, Item.state, Item.assets and the updates
+# block all behave as they do on 2024-10.
+API_VERSION = "2025-07"
 
 BOARDS = {
     "1139774521": "maintenance",
@@ -309,6 +324,13 @@ def item_selection(caps):
         block.append("creator { id name email }")
     if "group" in fields:
         block.append("group { id title }")
+    if "parent_item" in fields:
+        # Null on a normal board, and the whole answer on a subitem board: a
+        # row whose parent_item is null is not a subitem of anything. Board
+        # 1164003119 serves exactly one such row while reporting items_count=0,
+        # and without this the export cannot tell an orphaned template stub
+        # from a real subitem carrying job data.
+        block.append("parent_item { id name board { id name } }")
     block.append("column_values { id type text value }")
     assets = asset_selection(caps)
     if assets:
@@ -714,6 +736,27 @@ def export_metadata(token, board_id, out_root, caps):
                            for i in items for u in i.get("updates") or []
                            for r in u.get("replies") or [])
 
+    # A shortfall and a surplus are not the same event, and treating them alike
+    # is how a gate ends up refusing an export that lost nothing.
+    #
+    # exported < live means items are MISSING — a page was dropped, and no
+    # amount of downloading photographs afterwards makes that recoverable.
+    # exported > live means monday's own counter disagreed with monday's own
+    # item list. Nothing is missing; something is unexplained. Board 1164003119
+    # does exactly this: items_count reads 0 while items_page serves one
+    # orphaned row whose parent_item is null.
+    #
+    # So the shortfall blocks the file run and the surplus is recorded as a
+    # failure — visible in failures.csv, and enough to keep the export out of
+    # COMPLETE until a human has said what it is.
+    shortfall = (expected or 0) - len(items)
+    if shortfall < 0:
+        note_failure(slug, f"board {board_id}",
+                     f"monday reports items_count={expected} but items_page served "
+                     f"{len(items)}; {-shortfall} more item(s) exist than the board "
+                     f"counter claims. Nothing is missing — investigate what the "
+                     f"extra row(s) are before trusting the counter elsewhere.")
+
     summary = {
         "board_id": board_id,
         "board_slug": slug,
@@ -721,6 +764,7 @@ def export_metadata(token, board_id, out_root, caps):
         "live_items": expected,
         "exported_items": len(items),
         "reconciled": expected == len(items),
+        "shortfall": shortfall,
         "groups": len(schema["groups"]),
         "columns": len(schema["columns"]),
         "updates": len([r for r in update_rows if not r["is_reply"]]),
@@ -828,6 +872,8 @@ def download_asset(token, asset, dest, out_root, slug, item, source, column_id,
 
 
 def main():
+    global API_VERSION
+
     if hasattr(sys.stdout, "reconfigure"):
         # Board and site names carry en dashes; a Windows console defaults to a
         # codepage that cannot encode them and would abort the run on a print.
@@ -841,7 +887,11 @@ def main():
                         help="re-download files that are already on disk and verified")
     parser.add_argument("--force-files", action="store_true",
                         help="download files even if a board did not reconcile")
+    parser.add_argument("--api-version", default=API_VERSION,
+                        help=f"monday API version (default {API_VERSION}; "
+                             "anything before 2025-07 cannot see reply assets)")
     args = parser.parse_args()
+    API_VERSION = args.api_version
 
     token = os.environ.get("MONDAY_API_TOKEN")
     if not token:
@@ -876,14 +926,18 @@ def main():
         boards.append({"slug": slug, "items": items, "column_titles": column_titles})
 
     reconciled = all(s["reconciled"] for s in summaries)
+    short = [s for s in summaries if s["shortfall"] > 0]
     manifest = []
     files_run = False
     if not args.no_files:
-        if reconciled or args.force_files:
+        if not short or args.force_files:
             files_run = True
             manifest = export_files(token, boards, args.out, not args.no_resume)
         else:
-            print("\nItem counts did not reconcile — refusing to download files. "
+            for s in short:
+                print(f"\n{s['board_name']}: {s['shortfall']} item(s) MISSING "
+                      f"({s['exported_items']} of {s['live_items']}).")
+            print("Refusing to download files onto an incomplete item list. "
                   "Fix the metadata pass first, or pass --force-files deliberately.")
 
     write_csv(os.path.join(args.out, "file-manifest.csv"), MANIFEST_FIELDS, manifest)
@@ -912,7 +966,9 @@ def main():
 
     print("\n" + "=" * 64)
     for s in summaries:
-        verdict = "OK" if s["reconciled"] else "MISMATCH"
+        verdict = ("OK" if s["reconciled"]
+                   else f"MISSING {s['shortfall']}" if s["shortfall"] > 0
+                   else f"SURPLUS {-s['shortfall']}")
         print(f"{s['board_name']}: {s['exported_items']}/{s['live_items']} items  [{verdict}]")
         print(f"   groups {s['groups']}  columns {s['columns']}  "
               f"updates {s['updates']}  replies {s['replies']}  "

@@ -73,6 +73,34 @@ class Resolution(unittest.TestCase):
             _cl, canonical, _c, _r = self.register.resolve(group, "group")
             self.assertTrue(canonical, f"{group} did not resolve")
 
+    def test_one_word_of_a_longer_site_name_resolves(self):
+        # Real Location free text from the board. Whole-string similarity puts
+        # "Stratford" closer to "Watford – Atria" (0.75) than to the right shop,
+        # so the token test has to be what decides these.
+        for source, expected in (("Silverburn", "Glasgow – Silverburn"),
+                                 ("Stratford", "Westfield – Stratford"),
+                                 ("stratford", "Westfield – Stratford"),
+                                 ("Trafford", "Manchester – Trafford Centre")):
+            classification, canonical, _c, reason = self.register.resolve(source)
+            self.assertEqual(canonical, expected, f"{source!r}: {reason}")
+            self.assertEqual(classification, "FUZZY CANDIDATE")
+
+    def test_a_token_two_sites_share_still_does_not_resolve(self):
+        # "Bristol" is Cabot Circus and Cribbs Causeway; "Westfiled" is a typo
+        # for a word Stratford and White City both carry. Guessing either would
+        # attach one shop's job history to another.
+        for source in ("Bristol", "Westfiled"):
+            classification, canonical, _c, reason = self.register.resolve(source)
+            self.assertEqual(canonical, "", f"{source!r} resolved to {canonical!r}: {reason}")
+            self.assertEqual(classification, "UNRESOLVED")
+
+    def test_the_swedish_locations_do_not_resolve_to_a_uk_site(self):
+        # Mall of Scandinavia, Nacka, Solna and Taby are the International
+        # group. None of them is a UK site, and none may be forced into one.
+        for source in ("Mall of Scandinavia", "Nacka / Sweden", "Solna", "Taby/ Sweden"):
+            _cl, canonical, _c, reason = self.register.resolve(source)
+            self.assertEqual(canonical, "", f"{source!r} resolved to {canonical!r}: {reason}")
+
     def test_an_unrelated_string_is_unresolved_not_guessed(self):
         classification, canonical, _c, _r = self.register.resolve("Please call the landlord")
         self.assertEqual(classification, "UNRESOLVED")
@@ -164,6 +192,34 @@ class FilenameSiteMismatch(unittest.TestCase):
                  "column_title": "PAT Test Certificate", "asset_id": "11",
                  "filename": "PAT Aldgate 2026.pdf"}]
         self.assertEqual(ma.filename_site_mismatch(rows, self.register), [])
+
+    def test_a_bare_digit_is_not_evidence_of_a_warehouse(self):
+        # "Warehouse 1" and "Warehouse 2" share the token `warehouse`, so it is
+        # not distinctive, and each site's only remaining token is a digit. The
+        # first run of this check flagged eleven correctly-filed documents as
+        # misfiled because their names contained "(1)" or "2".
+        rows = [
+            {"item_id": "1", "store_name": "The Centre:MK", "column_id": "file_mm425qb4",
+             "column_title": "Fire Risk Assessment", "asset_id": "1",
+             "filename": "Fire Risk Assessment (1).docx"},
+            {"item_id": "2", "store_name": "Cabot Circus - Bristol", "column_id": "files4",
+             "column_title": "Electrical Wiring Certificate", "asset_id": "2",
+             "filename": "EICR 2.png"},
+            {"item_id": "3", "store_name": "Churchill Square - Brighton",
+             "column_id": "file_mm42pa4c", "column_title": "Sprinkler Report",
+             "asset_id": "3", "filename": "image2 (2).jpeg"},
+            {"item_id": "4", "store_name": "Grand Arcade - Cardiff", "column_id": "files0",
+             "column_title": "PAT Test Certificate", "asset_id": "4",
+             "filename": "Invoice-1057752 (1).pdf"},
+        ]
+        self.assertEqual(ma.filename_site_mismatch(rows, self.register), [])
+
+    def test_a_digit_only_token_is_never_distinctive(self):
+        self.assertNotIn("1", self.register.distinctive)
+        self.assertNotIn("2", self.register.distinctive)
+        self.assertNotIn("warehouse", self.register.distinctive)  # names two sites
+        self.assertIn("atria", self.register.distinctive)
+        self.assertIn("meadowhall", self.register.distinctive)
 
     def test_a_filename_naming_no_site_is_not_flagged(self):
         rows = [{"item_id": "4", "store_name": "Aldgate", "column_id": "files0",
@@ -265,6 +321,17 @@ class JobTitles(unittest.TestCase):
     def test_the_source_name_is_always_kept(self):
         rows = ma.job_title_dry_run([self.item("7", source_number="1")], self.register)
         self.assertEqual(rows[0]["source_item_name"], "Incoming form answer")
+
+    def test_the_new_monthly_group_is_not_read_as_a_site(self):
+        # "September  2026 Recently completed" appeared on the live board after
+        # the repository's August capture. A literal list of stage groups sent
+        # it to the site resolver as though September were a shop.
+        self.assertFalse(ma.is_site_group("September  2026 Recently completed"))
+        self.assertFalse(ma.is_site_group("August  2026 Recently completed"))
+        self.assertFalse(ma.is_site_group("January 2027 Recently completed"))
+        self.assertFalse(ma.is_site_group("Needs attention"))
+        self.assertTrue(ma.is_site_group("Bullring completed"))
+        self.assertTrue(ma.is_site_group("Nottingham complited"))
 
     def test_a_stage_group_is_not_read_as_a_site(self):
         rows = ma.job_title_dry_run(

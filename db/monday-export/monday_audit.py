@@ -107,9 +107,24 @@ SITES = [
 NON_SITE_GROUPS = {
     "Incoming requests", "recently", "Jobs Booked", "Needs attention",
     "On Hold", "Access Requests", "International",
-    "August  2026 Recently completed", "July 2026 Recently completed",
-    "June 2026 Recently completed",
 }
+
+# The monthly completed groups are a growing family, not a fixed list. Naming
+# them individually is what made the repository's August capture stale within a
+# month: `September  2026 Recently completed` appeared afterwards, and a literal
+# set would have sent it to the site resolver as if "September" were a shop.
+# The double space is monday's, and is reproduced in several of these titles.
+MONTHLY_GROUP = re.compile(
+    r"^\s*(january|february|march|april|may|june|july|august|september|october"
+    r"|november|december)\s+\d{4}\s+recently\s+completed\s*$", re.I)
+
+
+def is_site_group(title):
+    """Whether a group title names a place rather than a stage of work."""
+    text = (title or "").strip()
+    if not text or text in NON_SITE_GROUPS:
+        return False
+    return not MONTHLY_GROUP.match(re.sub(r"\s+", " ", text))
 
 SKIP_STORE_DOC_ROWS = {"Item 5"}
 
@@ -207,7 +222,21 @@ class SiteRegister:
             for form in forms:
                 for token in form.split():
                     owners[token].add(canonical)
-        self.distinctive = {t for t, sites in owners.items() if len(sites) == 1}
+
+        # Distinctive means "names exactly one site" AND "is a word".
+        #
+        # The word test is not tidiness. "Warehouse 1" and "Warehouse 2" share
+        # the token `warehouse`, so it names two sites and is not distinctive —
+        # which leaves each of them with a bare digit as its only evidence. Any
+        # filename containing "1" then matched Warehouse 1 at full confidence,
+        # and the first run of this check flagged eleven files as misfiled on
+        # the strength of "Fire Risk Assessment (1).docx" and "EICR 2.png".
+        # A digit is never evidence that a document belongs to a shop.
+        self.distinctive = {
+            token for token, sites in owners.items()
+            if len(sites) == 1 and len(token) >= 3 and not token.isdigit()
+        }
+        self.token_owner = {t: next(iter(owners[t])) for t in self.distinctive}
 
     def site_named_in(self, text):
         """(canonical, confidence) for a site named inside a longer string.
@@ -278,6 +307,42 @@ class SiteRegister:
         runner_up = next((s for s, c in scored if c != best), 0.0)
 
         if best_score < FUZZY_ACCEPT:
+            # Whole-string similarity is the wrong test for a source string that
+            # is one word of a longer canonical name. "Silverburn" scores 0.71
+            # against "Glasgow – Silverburn" and would be thrown away, while
+            # "Stratford" scores 0.75 against "Watford – Atria" — a higher score
+            # for the wrong shop than for the right one.
+            #
+            # So fall back to the token test, which asks whether a token that
+            # names exactly one site appears in the source. "Bristol" still does
+            # not resolve, because Cabot Circus and Cribbs Causeway both carry
+            # it; "Westfiled" still does not, because Stratford and White City
+            # both carry "westfield". Only the unambiguous ones come through.
+            named, confidence = self.site_named_in(candidate)
+            if named:
+                return ("FUZZY CANDIDATE", named, confidence,
+                        f"source names {named!r} by its distinctive tokens; whole-string "
+                        f"similarity was only {best_score:.2f}")
+
+            # The coverage test above wants most of a name form's distinctive
+            # tokens, which is right for a filename and wrong for a source
+            # string that is *only* the shop's name. "Silverburn" carries one of
+            # the two tokens in "Glasgow – Silverburn" and is rejected at 0.5
+            # coverage — while that coverage rule is exactly what stops "Mall of
+            # Scandinavia", a Swedish store, from being read as "Mall of
+            # Netherlands" on the strength of the shared word "Mall".
+            #
+            # So keep the coverage rule and add this one beside it: a source
+            # that is a single word, and that word names exactly one site.
+            # "Bristol" fails it because Cabot Circus and Cribbs Causeway both
+            # carry the token, which is the answer that keeps two shops apart.
+            tokens = key.split()
+            if len(tokens) == 1 and tokens[0] in self.token_owner:
+                owner = self.token_owner[tokens[0]]
+                return ("FUZZY CANDIDATE", owner, 0.9,
+                        f"the whole source is {tokens[0]!r}, a word that names only "
+                        f"{owner!r}")
+
             return ("UNRESOLVED", "", round(best_score, 3),
                     f"closest is {best!r} at {best_score:.2f}, below the {FUZZY_ACCEPT} floor")
         if best_score - runner_up < FUZZY_MARGIN:
@@ -558,12 +623,11 @@ def site_alias_dry_run(register, maintenance, store_doc, maintenance_schema):
     """Every distinct site-shaped string on either board, classified."""
     sources = []
     for title in {(i.get("group") or {}).get("title", "") for i in maintenance}:
-        if title and title not in NON_SITE_GROUPS:
+        if is_site_group(title):
             sources.append(("maintenance group", title))
     for group in maintenance_schema.get("groups") or []:
         title = group.get("title", "")
-        if title and title not in NON_SITE_GROUPS and \
-                not any(t == title for _, t in sources):
+        if is_site_group(title) and not any(t == title for _, t in sources):
             sources.append(("maintenance group (empty)", title))
     for value in {text_of(i, COL["store_location"]) for i in maintenance}:
         if value:
@@ -642,7 +706,7 @@ def job_title_dry_run(items, register):
             classification, canonical, _c, _r = register.resolve(store_label)
             if canonical:
                 site, how = canonical, "Store Location Name"
-        if not site and group_title and group_title not in NON_SITE_GROUPS:
+        if not site and is_site_group(group_title):
             classification, canonical, _c, _r = register.resolve(group_title, "group")
             if canonical:
                 site, how = canonical, "group"
@@ -805,13 +869,21 @@ def main():
 
     # -- reconciliation gate -------------------------------------------------
     lines = ["# MONDAY DRY-RUN RECONCILIATION", "",
-             "| board | live | exported | difference | verdict |",
+             "| board | live (items_count) | exported | difference | verdict |",
              "| --- | ---: | ---: | ---: | --- |"]
     gate_pass = True
     for board in summary.get("boards") or []:
         difference = (board["live_items"] or 0) - board["exported_items"]
-        verdict = "PASS" if board["reconciled"] else "FAIL"
-        gate_pass = gate_pass and board["reconciled"]
+        # A shortfall is data loss and closes the gate. A surplus means monday's
+        # own counter disagreed with monday's own item list — nothing is
+        # missing, so it is reported rather than treated as a missing page.
+        if difference > 0:
+            verdict = f"FAIL — {difference} item(s) missing"
+            gate_pass = False
+        elif difference < 0:
+            verdict = f"SURPLUS {-difference} — investigate, nothing missing"
+        else:
+            verdict = "PASS"
         lines += [f"| {board['board_name']} | {board['live_items']} | "
                   f"{board['exported_items']} | {difference} | {verdict} |"]
     lines += ["", f"- export status: **{summary.get('status', 'UNKNOWN')}**",
@@ -971,16 +1043,39 @@ def main():
                                      ["store_name", "monday_item_id", "difference", "detail"]))
 
     # -- subitems ------------------------------------------------------------
-    written.append(write_text(
-        os.path.join(args.out, "subitems.md"),
-        "# SUBITEMS OF MAINTENANCE (board 1164003119)\n\n"
-        f"- monday reports: **{subitems_schema.get('items_count', 'not exported')}** items\n"
-        f"- exported: **{len(subitems)}**\n\n"
-        + ("The board is empty. Recorded and skipped, as the brief allows.\n"
-           if not subitems else
-           "**The board is NOT empty.** The migration brief's assumption that subitems "
-           "can be skipped does not hold, and the subitem data is exported in full "
-           "alongside the two parent boards.\n")))
+    # "How many rows are on the board" and "how many jobs have a subitem" are
+    # different questions, and only the second one decides whether skipping the
+    # board loses anything. A row whose parent_item is null is a subitem of
+    # nothing.
+    parented = [i for i in subitems if (i.get("parent_item") or {}).get("id")]
+    orphans = [i for i in subitems if not (i.get("parent_item") or {}).get("id")]
+    lines = ["# SUBITEMS OF MAINTENANCE (board 1164003119)", "",
+             f"- monday reports `items_count`: **{subitems_schema.get('items_count', 'not exported')}**",
+             f"- rows actually served by `items_page`: **{len(subitems)}**",
+             f"- of those, rows with a parent item: **{len(parented)}**",
+             f"- of those, orphaned rows with no parent: **{len(orphans)}**", ""]
+    if not subitems:
+        lines.append("The board is empty. Recorded and skipped, as the brief allows.")
+    elif not parented:
+        lines += [
+            "**The board is not literally empty, but no job has a subitem.** Every row "
+            "it serves is an orphan whose `parent_item` is null, so nothing on the "
+            "Maintenance board would lose data by skipping this one. The brief's "
+            "conclusion holds; its count does not.", "",
+            "`items_count` reads 0 because monday counts subitems through their parent "
+            "linkage, and these rows have none. Reported rather than skipped, because a "
+            "board that serves rows it says it does not have is worth knowing about "
+            "before the same counter is trusted for Maintenance.", "",
+            "| row id | name | created | column values set |",
+            "| --- | --- | --- | --- |",
+        ] + [f"| {i['id']} | {i.get('name', '')} | {i.get('created_at', '')} | "
+             f"{sum(1 for cv in i.get('column_values') or [] if (cv.get('text') or '').strip())} |"
+             for i in orphans]
+    else:
+        lines.append(f"**{len(parented)} rows are real subitems of a Maintenance job.** "
+                     "The brief's assumption that subitems can be skipped does not hold; "
+                     "they are exported in full alongside the two parent boards.")
+    written.append(write_text(os.path.join(args.out, "subitems.md"), "\n".join(lines) + "\n"))
 
     # -- site alias dry run --------------------------------------------------
     if maintenance or store_doc:

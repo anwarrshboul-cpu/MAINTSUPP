@@ -10,7 +10,7 @@ checksummed archive** on a disk of your choosing for a migration to read.
 | --- | --- | --- |
 | `monday_export.py` | reads both boards plus the subitems board and downloads every attachment | the output directory only |
 | `monday_audit.py` | reads that output back and reports on it | the report directory only |
-| `test_monday_export.py`, `test_monday_audit.py` | 70 tests over the pure logic | nothing |
+| `test_monday_export.py`, `test_monday_audit.py` | 80 tests over the pure logic | nothing |
 
 Neither script writes to monday, and neither touches a MAINTSUPP database. Every
 monday query in `monday_export.py` is a read; `monday_audit.py` opens no socket
@@ -59,12 +59,14 @@ python3 db/monday-export/monday_audit.py \
     --out    D:/MAINTSUPP-Monday-Export/dry-run-2026-09-09/reports
 ```
 
-`reports/reconciliation.md` says PASS or FAIL. A FAIL means a page was missed,
+`reports/reconciliation.md` says PASS or FAIL. A FAIL means items are missing,
 and downloading several gigabytes of photographs on top of an incomplete item
 list only makes the incompleteness more expensive to discover.
 
-The exporter enforces this itself: a file run whose item counts do not reconcile
-refuses to download and says so. `--force-files` overrides it, deliberately.
+The exporter enforces this itself: a file run missing items refuses to download
+and says so. `--force-files` overrides it, deliberately. A *surplus* — more items
+served than the board counter claims — is reported but does not block; see
+**Counts** below for why the two are not the same event.
 
 **Phase two — the bytes.**
 
@@ -82,7 +84,9 @@ size agrees with monday's; only missing or disagreeing files are fetched again.
 the process exit code matches. **INCOMPLETE means the export is not a migration
 source**, whatever the counts look like. It is set by any of: a board whose
 exported count differs from monday's, a recorded failure, or a downloaded file
-whose size disagrees with the size monday reported.
+whose size disagrees with the size monday reported. A board that served more
+items than its counter claimed also lands here: nothing is missing, but nothing
+should be called COMPLETE until a human has said what the extra rows are.
 
 - `failures.csv` — every item, page or asset that did not export, with why.
 - `file-manifest.csv` — one row per file: board, item, source, source column id
@@ -94,6 +98,15 @@ whose size disagrees with the size monday reported.
 
 `size_match` has three values, not two: `True`, `False`, and `unknown` for an
 asset monday reported no size for. `unknown` is not a pass.
+
+## API version
+
+**2025-07**, set in `monday_export.py` and overridable with `--api-version`.
+Chosen as the oldest version that exposes `Reply.assets` — the smallest step
+away from the 2024-10 shape the rest of this directory is proven against.
+Verified before the bump: `items_page`, `next_items_page`,
+`column_values{id type text value}`, `Item.state`, `Item.assets` and the whole
+updates block behave identically.
 
 ## Page sizes
 
@@ -134,9 +147,13 @@ line and be wrong.
 7. **The subitems board was not in the script at all** — it could not confirm the
    brief's claim that it is empty. All three boards are exported, and a non-empty
    subitems board is exported in full rather than skipped.
-8. **Reply attachments were never requested.** Whether `Reply.assets` exists
-   depends on the API version, so the exporter introspects the schema, includes
-   the field when it is there, and records the answer in
+8. **Reply attachments were never requested — and could not have been.**
+   `Reply.assets` does not exist before API version **2025-07**. Introspected
+   against this account on 2026-09-09: 2024-10, 2025-01 and 2025-04 expose
+   twelve Reply fields and none is `assets`; 2025-07 onward expose thirteen,
+   including it. Both `.mjs` pullers in this directory pin 2024-10, so on the
+   live board **16 files attached to replies were unreachable**. The exporter
+   now runs on 2025-07, introspects the schema, and records the answer in
    `api-capabilities.json`.
 9. **The run always exited 0.** There is now a COMPLETE/INCOMPLETE verdict and a
    matching exit code.
@@ -145,24 +162,39 @@ Two smaller ones: duplicate column titles no longer collide in `items.csv`, and
 filenames are capped at 120 characters so the deepest path stays under Windows'
 260-character limit.
 
-## Counts
+## Counts, and why the gate has two kinds of failure
 
 **Do not trust a number in this file, or in any brief, as the live count.** The
-audit reads `items_count` from the board itself and reconciles against what was
-exported. The figures in circulation — 772 Maintenance, 31 Store Documentation,
-0 subitems — are from an audit dated 6–8 August 2026 and are the thing being
-verified, not the answer.
+figures in circulation — 772 Maintenance, 31 Store Documentation, 0 subitems —
+are from an audit dated 6–8 August 2026. Measured live on 2026-09-09:
 
-Two known discrepancies between the migration brief and
-`db/monday-board-spec.ts`, which is a verbatim capture pinned by
-`tests/stage-nineteen-maintenance-parity.test.mjs`:
+| board | brief / August capture | live |
+| --- | ---: | ---: |
+| Maintenance | 772 | **774** |
+| Store Documentation UK | 31 | 31 |
+| Subitems of Maintenance | 0 | `items_count` 0, one row served |
+| Maintenance groups | 38 | **39** — `September  2026 Recently completed` was added since |
+| `<Store> completed` groups | 26 (brief) | **28** |
 
-- the brief says "items per group (all 39)". The capture has **38** groups.
-- the brief says "the 26 `<Store> completed` groups". There are **28**.
+**A shortfall and a surplus are not the same event.** `exported < live` means
+items are missing and closes the gate: downloading several gigabytes of
+photographs on top of an incomplete item list only makes the incompleteness
+expensive to discover. `exported > live` means monday's own counter disagreed
+with monday's own item list — nothing is missing, so it is recorded as a failure
+and reported, but it does not block the file run.
+
+Board 1164003119 is exactly that case: `items_count` reads 0 while `items_page`
+serves one row. That row's `parent_item` is null — it is monday's stock template
+stub from 2023 with every column blank, not a subitem of any job, and no
+Maintenance item has a non-empty subitems column. The brief's conclusion (skip
+it) holds; its count does not. The exporter requests `parent_item` so the
+distinction is evidenced in the export rather than asserted in a report.
 
 The brief also writes the Westfield Stratford group as `Westfield Stratford
 completed`; the live title has two spaces. The audit normalises whitespace
-before matching, so it resolves — a literal comparison would not.
+before matching, so it resolves — a literal comparison would not. The monthly
+completed groups are matched as a family for the same reason: naming them
+individually is what made the August capture stale within a month.
 
 ## What the audit produces
 
@@ -208,3 +240,10 @@ and the audit's own judgement: that `Nottingham complited` resolves,
 that Arndale and the Trafford Centre do not collapse into one Manchester, that
 `RAMS Watfrod Atria .docx` filed against Bluewater is flagged despite the typo,
 and that `Item 5` refuses to become a site.
+
+Several of them exist because the first live run was wrong. `Warehouse 1` and
+`Warehouse 2` share the word "warehouse", which left each of them with a bare
+digit as its only distinguishing token — so eleven correctly-filed documents
+were flagged as misfiled on the strength of names like `EICR 2.png` and
+`Fire Risk Assessment (1).docx`. A digit is never evidence that a document
+belongs to a shop, and the tests now say so.
