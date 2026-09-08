@@ -84,12 +84,47 @@ test("every status a meter names is a real monday label", async () => {
     assert.ok(capture.includes(label), `${label} is not in the monday capture`);
   }
   const vocabulary = new Set(meters.maintenanceStatusLabels);
+  /*
+   * RE-POINTED, not weakened. This loop used to include `completedStatuses`,
+   * and the property it was protecting — "a meter may only name a label monday
+   * actually has" — is still asserted here, over the monday half.
+   *
+   * What changed underneath it: two estates exist. The seeded workspace a
+   * Preview deployment shows writes "Completed" and "Cancelled", which are not
+   * monday labels and were therefore counted as OPEN on every screen at once.
+   * `completedStatuses` is now the union of the monday list and those two, so
+   * the assertion moved down onto `mondayCompletedStatuses`, which is the
+   * constant that still carries the monday-only claim.
+   */
   for (const label of [
     ...meters.awaitingPartsStatuses,
     ...meters.awaitingApprovalStatuses,
-    ...meters.completedStatuses,
+    ...meters.mondayCompletedStatuses,
   ]) {
     assert.ok(vocabulary.has(label), `${label} is not a monday Status label`);
+  }
+
+  /*
+   * And the union is exactly the two halves, in that order. The order matters:
+   * `statusForStage` maps the completed STAGE onto `completedStatuses[0]` and
+   * writes it back onto the row, so a reordering would make the board stamp
+   * "Completed" on an estate whose vocabulary is "Job Completed".
+   */
+  assert.deepEqual(
+    [...meters.completedStatuses],
+    [...meters.mondayCompletedStatuses, ...meters.seededCompletedStatuses],
+    "the closure vocabulary is the monday list followed by the seeded one",
+  );
+  assert.deepEqual(
+    [...meters.seededCompletedStatuses],
+    ["Completed", "Cancelled"],
+    "the seeded half names the two labels the demo estate closes with",
+  );
+  for (const label of meters.seededCompletedStatuses) {
+    assert.ok(
+      !vocabulary.has(label),
+      `${label} is in the seeded list precisely because monday has no such label`,
+    );
   }
 });
 

@@ -153,20 +153,19 @@ const drawn = (order) =>
     return column && !column.hidden && key !== "name";
   });
 
-/* ── W12 — the Sites register table ─────────────────────────────────────── */
-
-test("W12 the Sites register table no longer mounts Raise a ticket, and nothing else lost it", async () => {
+test("W12 the Sites register no longer mounts Raise a ticket, and nothing else lost it", async () => {
   const manager = await read(SITES_MANAGER);
-  const code = codeOnly(manager);
+  const list = await read("app/(app)/portal/ops/sites-list.tsx");
+  const code = codeOnly(manager) + codeOnly(list);
 
   assert.doesNotMatch(
     code,
     /RaiseTicketButton/,
-    "the Sites register table must not mount the raise control — the owner boxed " +
+    "the Sites register must not mount the raise control — the owner boxed " +
       "that column on /dashboard/sites and asked for it off the table",
   );
   assert.doesNotMatch(
-    code,
+    codeOnly(manager),
     /from "\.\.\/raise-ticket"/,
     "and the import goes with the last usage rather than being left to lint",
   );
@@ -174,23 +173,43 @@ test("W12 the Sites register table no longer mounts Raise a ticket, and nothing 
   /*
    * THE ROW'S OTHER TWO ACTIONS SURVIVE. This is the half of the change that is
    * easy to overshoot: "take the raise button out of the Actions column" and
-   * "take the Actions column out" are one careless edit apart, and Edit and
-   * Close are the only way to amend or close a site from the register.
+   * "take the Actions column out" are one careless edit apart, and editing or
+   * closing a site from the register is the daily job.
+   *
+   * RE-POINTED. There is no Actions CELL any more, because there is no table:
+   * the register is one row per site, and the brief is explicit about why —
+   * ten sites meant twenty buttons competing with the data, and `Close` sitting
+   * beside `Edit` at the same visual weight put a state change next to a
+   * routine one. Both moved into a per-row overflow menu. The contract is what
+   * it always was: both actions are still reachable from every row, and closing
+   * still asks first.
    */
-  assert.match(code, /data-label="Actions"/, "the Actions cell is still drawn");
-  assert.match(code, /^\s*Edit\s*$/m, "Edit is still offered on every row");
-  assert.match(code, /^\s*Close\s*$/m, "and Close on every open one");
+  assert.match(list, /aria-label=\{`Actions for \$\{site\.name\}`\}/, "every row has an actions menu");
+  assert.match(list, /role="menu"/, "and it is a real menu");
+  assert.match(list, /Edit details/, "Edit is still offered on every row");
+  assert.match(list, /Close site/, "and Close on every open one");
+  assert.match(
+    list,
+    /\{active \? \(/,
+    "Close is offered only where there is something to close",
+  );
+  assert.match(
+    list,
+    /className="is-destructive"/,
+    "and it is not drawn at the same weight as the routine action beside it",
+  );
 
   /*
-   * AND THE FLEX ROW STAYS. It was introduced to stop the raise control
-   * overlapping Edit and Close, so removing the control looks like a reason to
-   * remove the wrapper — it is not. `.table-row-actions` is what WRAPS the two
-   * survivors onto a second line at 390px; without it the cell offers less
-   * width than the buttons need, nothing between it and the viewport scrolls,
-   * and "Close" is simply not on the screen. See the block carrying that class
-   * in `brand-overrides.css`, where the measurement is recorded.
+   * AND THE CONFIRMATION STAYS, from the one place that owns the words. Two
+   * doors reach this state — the register and the Manage-data drawer — and a
+   * confirmation that only guards one of them is not a confirmation.
    */
-  assert.match(code, /className="table-row-actions"/, "the wrapping action row stays");
+  assert.match(codeOnly(manager), /confirmSiteClosure\(site\.name\)/);
+  assert.match(
+    codeOnly(manager),
+    /if \(!confirmSiteClosure\(site\.name\)\) return;/,
+    "cancel must cost nothing: no request, no state change, no toast",
+  );
 });
 
 test("W12 the raise-ticket control itself and its four other homes are untouched", async () => {

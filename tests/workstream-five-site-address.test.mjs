@@ -251,31 +251,45 @@ test("both Sites screens use the shared tab component rather than hand-rolling t
 // ---------------------------------------------------------------------------
 
 test("every field the site search reads is a field the register API returns", async () => {
-  const manager = await read("app/(app)/portal/sites/sites-manager.tsx");
+  /*
+   * RE-POINTED to `ops/sites-list.tsx`, which is where the register's search
+   * lives now. The rule is unchanged and is the one that matters: a field the
+   * box searches but the API never sends is a search that silently matches
+   * nothing — exactly how aliases came to be advertised as searchable while
+   * `/api/sites` carried no alias data at all.
+   */
+  const list = await read("app/(app)/portal/ops/sites-list.tsx");
   /*
    * The search reads ONE array literal — the list of fields the typed term is
    * matched against. Taking the fields from that array rather than from the
-   * whole memo keeps the status and group FILTERS, which read other properties
-   * for other reasons, out of the answer.
+   * whole memo keeps the status, type and budget FILTERS, which read other
+   * properties for other reasons, out of the answer.
    */
-  const array = manager.match(/return \[\s*site\.[\s\S]{0,400}?\]\s*\.filter\(Boolean\)/);
+  const array = list.match(/const haystack = \[\s*site\.[\s\S]{0,500}?\]\s*\.filter\(Boolean\)/);
   assert.ok(array, "the site search should still match the typed term against a list of fields");
   const fields = [...new Set([...array[0].matchAll(/site\.([A-Za-z]+)/g)].map((m) => m[1]))];
   assert.ok(fields.length > 0, "the search should read at least one field");
   /*
-   * `SiteRecord` is the shape `/api/sites` returns. A field searched but never
-   * sent is a search box that silently matches nothing — which is exactly how
-   * aliases came to be advertised as searchable while `/api/sites` carried no
-   * alias data at all.
+   * `SiteListRow` in that file is the shape the register hands the list, and
+   * `SiteRecord` in site-types.ts is what `/api/sites` returns. A field must be
+   * declared in one of them.
    */
   const record = await read("app/(app)/portal/sites/site-types.ts");
-  const declared = record + manager;
+  const declared = record + list;
   for (const field of fields) {
     assert.ok(
       new RegExp(`\\b${field}\\??:`).test(declared),
       `the search reads site.${field}, which the register record does not declare`,
     );
   }
+  /*
+   * And the field the placeholder promises is among them. `managerDisplay` is
+   * the real manager name or null — a placeholder `Sample Manager F` is treated
+   * as unset — so searching "sample" must not find a manager who does not
+   * exist.
+   */
+  assert.ok(fields.includes("managerDisplay"), "the manager is searchable");
+  assert.ok(fields.includes("code") && fields.includes("city"), "so are code and town");
 });
 
 // ---------------------------------------------------------------------------

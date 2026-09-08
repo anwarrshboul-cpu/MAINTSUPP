@@ -663,7 +663,19 @@ test("W06-08 documentCount is rendered, not merely computed", async () => {
    * an answer.
    */
   const app = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(app, /key: "documents",\n\s*title: "Documents",/);
+  /*
+   * `\s*` across the line break, not `\n\s*`.
+   *
+   * portal-app.tsx is CRLF, so the character after the comma is a carriage
+   * return and `\n` never matched it — this assertion has been failing on a
+   * Windows checkout for as long as the file's endings have been consistent,
+   * which is the lesson the header of tests/audit-dashboard-overview.test.mjs
+   * already records for this suite family.
+   *
+   * The contract is what it always was: the two keys are adjacent, so the
+   * column carries the title it is rendered under.
+   */
+  assert.match(app, /key: "documents",\s*title: "Documents",/);
   assert.match(
     app,
     /contractor\.documentCount === undefined \? "—" : contractor\.documentCount/,

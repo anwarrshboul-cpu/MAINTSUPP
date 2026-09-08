@@ -104,12 +104,24 @@ test("every analytics page owns a date range with presets and a custom span", as
    * Two of the seven had the full picker. Compliance and the jobs board had a
    * preset-only select, and Planned, Contractors and Documents had nothing at
    * all — so "this quarter" was a question three pages could not be asked.
+   *
+   * RE-POINTED for the two pages whose range moved into the URL. The property
+   * is unchanged and is asserted in both of its forms: every analytical page
+   * offers presets AND a custom span, and every one of them FILTERS on it
+   * rather than merely displaying it. What differs is where the range is kept —
+   * `PeriodPicker` plus stored state for the pages that were not rebuilt, and
+   * the query string for the Overview and the Compliance register, because
+   * every rebuild brief asks for the same thing in the same words: bookmarkable
+   * and shareable, nothing in localStorage.
    */
   const portal = await read("app/(app)/portal/portal-app.tsx");
   const board = await read("app/(app)/portal/live-board.tsx");
 
   const pickers = [...portal.matchAll(/<PeriodPicker/g)].length;
-  assert.ok(pickers >= 5, `Overview, Reports, Planned, Contractors and Documents each need one — found ${pickers}`);
+  assert.ok(
+    pickers >= 4,
+    `Reports, Planned, Contractors and Documents each need one — found ${pickers}`,
+  );
   assert.match(board, /<PeriodPicker/, "and the jobs board needs one too");
 
   /* Each of the three that had nothing must FILTER, not just display. */
@@ -124,10 +136,47 @@ test("every analytics page owns a date range with presets and a custom span", as
   assert.match(surface, /if \(!withinPeriod\(request\.dueAt\)\) continue;/, "Planned filters what it draws");
   assert.match(portal, /periodWindow=\{/, "and the page supplies the window");
 
-  /* Compliance keeps its expiry-horizon semantics but gains a custom span. */
-  assert.match(portal, /\{ value: "custom", label: "Between two dates…" \}/);
-  assert.match(portal, /aria-label="Expiring from"/);
-  assert.match(portal, /aria-label="Expiring until"/);
+  /*
+   * The Overview: the same presets plus a custom span, in the URL, and the
+   * SERVER filters on it — which is a stronger form of "filters, not just
+   * displays" than the browser one it replaces.
+   */
+  const presets = await read("app/lib/dashboard-filters.ts");
+  for (const label of ["7 days", "30 days", "90 days", "This month", "Last month", "Year to date"]) {
+    assert.ok(presets.includes(label), `the Overview must offer ${label}`);
+  }
+  assert.match(presets, /\{ key: "custom", label: "Custom range" \}/, "and a custom span");
+  assert.match(
+    presets,
+    /case "custom": \{[\s\S]{0,600}DAY_PATTERN\.test\(from\)/,
+    "whose two dates are validated rather than trusted",
+  );
+  const overview = await read("app/(app)/portal/ops/overview-page.tsx");
+  assert.match(overview, /<PeriodControl/, "the page draws the control");
+  assert.match(
+    overview,
+    /useOpsQuery<SummaryPayload>\("\/api\/dashboard\/summary", search\)/,
+    "and every card refetches against the window rather than filtering a downloaded list",
+  );
+
+  /*
+   * Compliance keeps its expiry-horizon semantics — Overdue, next 30, next 90,
+   * no due date — which is a different question from a reporting period and is
+   * deliberately still asked as one.
+   */
+  const status = await read("app/lib/compliance-status.ts");
+  assert.match(status, /\{ key: "overdue", label: "Overdue" \}/);
+  assert.match(status, /\{ key: "30", label: "Next 30 days" \}/);
+  assert.match(status, /\{ key: "90", label: "Next 90 days" \}/);
+  assert.match(status, /\{ key: "none", label: "No due date" \}/);
+  const compliance = await read("app/(app)/portal/ops/compliance-page.tsx");
+  assert.match(compliance, /label: "Due window"/, "the register offers the horizon as a filter");
+  const view = await read("app/lib/compliance-view.ts");
+  assert.match(
+    view,
+    /filters\.due\.some\(\(window\) => withinDueWindow\(row, window, today\)\)/,
+    "and it filters on it rather than only displaying it",
+  );
 });
 
 test("the calendar draws the compliance renewals its own heading promises", async () => {

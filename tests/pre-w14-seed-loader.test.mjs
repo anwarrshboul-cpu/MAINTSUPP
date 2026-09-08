@@ -392,6 +392,8 @@ test("the purge deletes children before parents, or Postgres refuses it", async 
       "contractor_sites",
       "sites",
       "contractor_certifications",
+      /* `contractor_name_aliases.contractor_id` references `contractors(id)`. */
+      "contractor_name_aliases",
       "contractors",
       "sessions",
       "password_resets",

@@ -297,8 +297,6 @@ test("all records still means all records", () => {
   );
 });
 
-/* ── 3. Rows that are not work orders ────────────────────────────────────── */
-
 test("subitems and archived rows are not counted as work orders", async () => {
   const source = await read(PORTAL);
 
@@ -309,17 +307,46 @@ test("subitems and archived rows are not counted as work orders", async () => {
   );
 
   /*
-   * Both analytics surfaces apply it, and apply the SAME one rather than
-   * restating the condition — which is how the board and the dashboards came
-   * to disagree about a job in the first place.
+   * Both surfaces that still filter rows in the browser apply it, and apply
+   * the SAME one rather than restating the condition — which is how the board
+   * and the dashboards came to disagree about a job in the first place.
+   *
+   * RE-POINTED: OverviewView filters no rows any more. Its lifecycle scope is
+   * the SQL twin of the same rule, `liveWorkOrderCondition`, which every
+   * `/api/dashboard/*` aggregate goes through — and it applies one exclusion
+   * more than the browser rule does, because a binned job is not work either.
    */
-  for (const name of ["OverviewView", "ReportsView", "ContractorsView"]) {
+  for (const name of ["ReportsView", "ContractorsView"]) {
     assert.match(
       componentBody(source, name),
       /countsAsWorkOrder\(request\)/,
       `${name} still counts subitems and archived rows`,
     );
   }
+  assert.match(
+    source,
+    /openJobCount\(requests\.filter\(countsAsWorkOrder\)\)/,
+    "and the sidebar badge applies it too",
+  );
+
+  const filters = await read("app/lib/dashboard-filters.ts");
+  const scope = filters.slice(filters.indexOf("export function liveWorkOrderCondition"));
+  for (const clause of [
+    "isNull(maintenanceRequests.deletedAt)",
+    "eq(maintenanceRequests.archived, false)",
+    "isNull(maintenanceRequests.parentId)",
+  ]) {
+    assert.ok(
+      scope.slice(0, 500).includes(clause),
+      `the SQL twin must exclude ${clause}`,
+    );
+  }
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  assert.match(
+    aggregates,
+    /liveWorkOrderCondition/,
+    "and every dashboard aggregate must go through it",
+  );
 
   // And the column has to reach the browser for any of that to work.
   assert.match(
@@ -422,17 +449,39 @@ test("the caption tells the reader it is still counting", async () => {
 
 test("Overview's job tiles wait too", async () => {
   /*
-   * `workspaceReady` was added when "Active units 0" was found standing over
-   * an account that had not loaded. The four tiles fed by the OTHER fetch had
-   * the identical defect and were left printing a literal 0.
+   * RE-POINTED. The contract is unchanged: a tile fed by a fetch must not
+   * print a literal 0 over an account that has simply not loaded.
+   *
+   * `workspaceReady` and `jobsReady` were how the old page said so, because it
+   * had two fetches and eight tiles reading from them. The rebuilt page has one
+   * fetch per card, so the same distinction is drawn per card: while a payload
+   * is in flight the card renders a SKELETON in the shape of its answer, and it
+   * cannot render a figure because it has no payload to read one from.
    */
-  const body = componentBody(await read(PORTAL), "OverviewView");
-  for (const label of ["Requiring attention", "Open jobs", "Overdue", "Completed"]) {
-    const card = body.slice(body.indexOf(`label="${label}"`), body.indexOf(`label="${label}"`) + 400);
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  const glance = page.slice(page.indexOf("function AtAGlance("), page.indexOf("/* ── 2."));
+  assert.match(
+    glance,
+    /if \(!state\.data\) \{[\s\S]{0,300}<SkeletonRow/,
+    "the tile strip draws a skeleton before its payload lands",
+  );
+  assert.match(
+    glance,
+    /const \{ totals, previous, oldestOpenDays \} = state\.data;/,
+    "and reads its figures only after the guard",
+  );
+  assert.ok(
+    !/totals\?\./.test(glance),
+    "an optional read would let a tile print a fallback instead of waiting",
+  );
+
+  // Every other card takes the same shape.
+  for (const card of ["SitesNeedingAttention", "JobBreakdown", "PerformanceCard", "CostCard"]) {
+    const body = page.slice(page.indexOf(`function ${card}(`));
     assert.match(
-      card,
-      /value=\{jobsReady \?/,
-      `the ${label} tile still prints a count before the rows arrive`,
+      body.slice(0, 1400),
+      /if \(!state\.data\)[\s\S]{0,300}<SkeletonRow/,
+      `${card} prints a figure before its payload arrives`,
     );
   }
 });
@@ -496,26 +545,50 @@ test("each surface still owns a separate period, and remembers it", async () => 
    *
    * The key stays. Correctness here must not depend on a component happening
    * to remain mounted, so the range moved OUT of the component instead.
+   *
+   * RE-POINTED for the two surfaces whose range moved further out still. The
+   * Overview and the Compliance register keep their filter state in the URL
+   * now, because every rebuild brief asks for the same thing in the same words:
+   * bookmarkable and shareable, nothing in localStorage. A URL survives an
+   * unmount, a reload, a Back and a link sent to somebody else, so it satisfies
+   * the property this test was written for more completely than storage does —
+   * and it is a stricter answer, not a weaker one, because the range is now
+   * VISIBLE rather than remembered invisibly.
    */
   const portal = await read(PORTAL);
   const stored =
     portal.match(/const \[period, setPeriod\] = useStoredPeriod\(sectionKey, "[^"]+"\)/g) ?? [];
   assert.ok(
-    stored.length >= 5,
-    `expected a remembered period per analytical page, found ${stored.length}`,
+    stored.length >= 3,
+    `expected a remembered period on every analytical page that still owns one, found ${stored.length}`,
   );
   // No analytical surface may keep its range in state that dies with it.
   assert.doesNotMatch(
     portal,
     /const \[period, setPeriod\] = useState\(/,
-    "a page's range is back in state that its own unmount will discard",
+    "a range in plain state dies with the component",
   );
-  // The jobs board is a range-enabled surface too, and the owner named it.
+
+  // The two URL-driven surfaces read the address bar, and nothing else.
+  for (const file of [
+    "app/(app)/portal/ops/overview-page.tsx",
+    "app/(app)/portal/ops/compliance-page.tsx",
+  ]) {
+    const page = await read(file);
+    assert.match(page, /useQueryState\(\)/, `${file} must read its state from the URL`);
+    assert.doesNotMatch(
+      page,
+      /localStorage/,
+      `${file} must not keep filter state in storage`,
+    );
+  }
+  const url = await read("app/(app)/portal/ops/ops-url-state.ts");
   assert.match(
-    await read("app/(app)/portal/live-board.tsx"),
-    /const \[analyticsPeriod, setAnalyticsPeriod\] = useStoredPeriod\(/,
-    "the jobs board forgets its range",
+    url,
+    /window\.history\.replaceState/,
+    "a filter change replaces the history entry rather than pushing twenty of them",
   );
+  assert.match(url, /popstate/, "and Back moves the page, not only the address bar");
 });
 
 test("one key per section, and never one shared key", async () => {
@@ -631,20 +704,41 @@ test("reading is guarded, writing is trusted", async () => {
   assert.match(body, /useSyncExternalStore\(subscribeToRange, read, readOnServer\)/);
 });
 
-test("compliance remembers its horizon and both custom dates together", async () => {
+test("compliance keeps its horizon and both custom dates in the URL", async () => {
   /*
-   * Its control is an expiry horizon, not the reporting picker, and it carries
-   * three pieces of state. They are stored as ONE token so the horizon and the
-   * dates cannot come back disagreeing with each other.
+   * RE-POINTED, and the storage it names is gone on purpose.
+   *
+   * The contract was that the horizon and its two custom dates cannot come back
+   * disagreeing with each other — which is why they were stored as ONE token
+   * rather than three keys. The register keeps them in the query string now, so
+   * they travel together by construction: one address holds all three, and a
+   * link somebody sends reproduces the exact view rather than a set of
+   * instructions for rebuilding it.
+   *
+   * The brief is explicit and identical across all four rebuilds: all filter
+   * state in the URL, bookmarkable and shareable, nothing in localStorage.
    */
   const portal = await read(PORTAL);
-  assert.match(portal, /function isExpiryToken\(value: string\)/);
-  assert.match(portal, /const expiryToken = \(window: string, from: string, to: string\)/);
-  assert.match(portal, /useStoredPeriod\(\s*sectionKey \?/);
-  assert.ok(portal.includes(":expiry"), "compliance needs its own sub-key");
-  const view = componentBody(portal, "ComplianceView");
-  assert.doesNotMatch(view, /const \[expiryFrom, setExpiryFrom\] = useState\(/);
-  assert.doesNotMatch(view, /const \[expiryWindow, setExpiryWindow\] = useState\(/);
+  assert.doesNotMatch(
+    portal,
+    /function isExpiryToken\(/,
+    "the stored token is gone, not left beside the URL state",
+  );
+
+  const page = await read("app/(app)/portal/ops/compliance-page.tsx");
+  assert.match(page, /const \{ params, setParams, search \} = useQueryState\(\);/);
+  for (const key of ["state", "site", "kind", "who", "due", "q", "sort", "view", "open"]) {
+    assert.ok(
+      page.includes(`"${key}"`),
+      `${key} must be one of the register's URL parameters`,
+    );
+  }
+  assert.doesNotMatch(page, /localStorage/, "nothing in storage");
+
+  // And the server parses the same parameters the browser writes.
+  const view = await read("app/lib/compliance-view.ts");
+  assert.match(view, /export function parseComplianceFilters\(url: URL\)/);
+  assert.match(view, /params\.getAll\(key\)/, "repeated parameters, never comma-joined");
 });
 
 /* ── 7. The right clock, on every surface that filters ───────────────────── */
@@ -710,11 +804,20 @@ test("the two registers say why they are empty", async () => {
   assert.match(register, /Clear a filter to widen the register/);
   assert.match(register, /if \(!input\.windowRecognised\) return input\.windowReason;/);
 
-  assert.match(
-    componentBody(source, "ContractorsView"),
-    /!contractors\.length &&/,
-    "Contractors draws a header over nothing",
-  );
+  /*
+   * RE-POINTED: the contractor register's empty state moved into the rebuilt
+   * list, and it now distinguishes the two causes rather than one.
+   *
+   * "No contractors yet" is an invitation with the Add action beside it; "no
+   * contractor matches these filters" is a different problem with a different
+   * fix, and offering `Clear all` for the first would be nonsense. The old form
+   * — one sentence for both — is what this re-point improves on.
+   */
+  const contractors = await read("app/(app)/portal/ops/contractors-list.tsx");
+  assert.match(contractors, /contractors\.length === 0 \? \(/, "an empty register says so");
+  assert.match(contractors, /No contractors yet\./);
+  assert.match(contractors, /No contractors match these filters\./);
+  assert.match(contractors, /onClick=\{clearAll\}/, "with the control that fixes it");
 });
 
 test("the screens made of jobs get the failure state", async () => {

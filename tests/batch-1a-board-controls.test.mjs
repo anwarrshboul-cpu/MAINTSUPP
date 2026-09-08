@@ -678,17 +678,54 @@ test("open and closed are one predicate, and they partition the rows", () => {
 });
 
 test("the dashboard reads the same predicate as the board's meters", async () => {
+  /*
+   * RE-POINTED. The Overview stopped filtering rows in the browser.
+   *
+   * It used to hold `const open = scopedRequests.filter(isOpenRequest)`. Every
+   * figure now comes from `/api/dashboard/*`, so the predicate has to be held
+   * level across a LANGUAGE boundary rather than across two files — which is
+   * the same contract, asserted where it can actually break.
+   *
+   * `app/lib/job-metrics.ts` is the join: it imports `COMPLETED_STAGE` and
+   * `completedStatuses` from `dashboard-meters.ts` and folds them into the
+   * family map, and `closedJobSql` builds the SQL `IN` list from that same
+   * array. One vocabulary, three readers.
+   */
+  const metrics = await read("app/lib/job-metrics.ts");
+  assert.match(
+    metrics,
+    /import \{[\s\S]{0,200}completedStatuses,[\s\S]{0,80}\} from "\.\.\/\(app\)\/portal\/dashboard-meters\.ts"/,
+    "the family map must not re-derive what finished means",
+  );
+  assert.match(
+    metrics,
+    /completedStatuses\.map\(\(label\) => \[statusKey\(label\), "completed" as const\]\)/,
+    "the closure vocabulary is folded in, never typed out beside it",
+  );
+
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  assert.match(
+    aggregates,
+    /completedStatuses\.map\(\(label\) => statusKey\(label\)\)/,
+    "and the SQL IN list is built from the same array",
+  );
+  assert.match(
+    aggregates,
+    /eq\(maintenanceRequests\.stage, COMPLETED_STAGE\)/,
+    "with the stage arm naming the shared constant, not a literal",
+  );
+  assert.ok(
+    !/stage [!=]== "Completed"/.test(
+      aggregates.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""),
+    ),
+    "the stage-only test is what made the two screens disagree",
+  );
+
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(
     portal,
-    /import \{[\s\S]{0,200}isOpenRequest,[\s\S]{0,80}\} from "\.\/dashboard-meters"/,
-    "Overview must not re-derive what finished means",
-  );
-  assert.match(portal, /const open = scopedRequests\.filter\(isOpenRequest\);/);
-  assert.match(portal, /const completed = scopedRequests\.filter\(isClosedRequest\);/);
-  assert.ok(
-    !/scopedRequests\.filter\(\(request\) => request\.stage [!=]== "Completed"\)/.test(portal),
-    "the stage-only test is what made the two screens disagree",
+    /import \{ openJobCount \} from "\.\.\/\.\.\/lib\/job-metrics"/,
+    "and the shell's badge reads the same module",
   );
 });
 

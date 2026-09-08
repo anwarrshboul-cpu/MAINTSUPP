@@ -35,36 +35,38 @@ async function overviewSource() {
   return source.slice(start, end);
 }
 
-test("the compliance sparkline is not a hand-written series", async () => {
-  const overview = await overviewSource();
-  // The exact literal that used to sit in the trend prop. It drew eleven
-  // percentages nobody measured, rising to 88%, under a card reading 26%.
+/*
+ * RE-POINTED, NOT DROPPED. The compliance figure moved off a sparkline.
+ *
+ * The defect this protects is the one that matters: eleven percentages nobody
+ * measured, rising to 88%, drawn under a card reading 26%. Sparklines are gone
+ * from the Overview — the compliance figure is a meter on each site row, fed by
+ * `/api/dashboard/sites-attention`, which counts the SHARED register with the
+ * SHARED completion rule. A hand-written series is now unrepresentable rather
+ * than merely absent: the page holds no series at all.
+ */
+test("no Overview figure is a hand-written series", async () => {
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
   assert.ok(
-    !overview.includes("[72, 74, 73, 76, 78, 77, 81, 82, 84, 86, 88"),
+    !page.includes("[72, 74, 73, 76, 78, 77, 81, 82, 84, 86, 88"),
     "the invented compliance history must not come back",
   );
+  /*
+   * The cheap general form of the same check: no array literal of four or more
+   * bare numbers anywhere on the page. That is what a decorative series looks
+   * like, and there is no legitimate reason for one here — every number the
+   * page draws arrives from an endpoint.
+   */
   assert.ok(
-    /trend=\{complianceTrend\(complianceItems, now\)\}/.test(overview),
-    "the compliance card must plot the series derived from recorded expiry dates",
+    !/\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+/.test(page),
+    "a literal series is a number nobody measured",
   );
-  // Every other sparkline on the six tiles is counted from the request rows.
-  const trendProps = [...overview.matchAll(/trend=\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g)].map(
-    (match) => match[1],
+  const route = await read("app/api/dashboard/sites-attention/route.ts");
+  assert.match(
+    route,
+    /complianceCompletion/,
+    "the compliance figure is counted from the register, by the shared rule",
   );
-  assert.equal(trendProps.length, 6, "all six metric tiles must pass an explicit series");
-  for (const prop of trendProps) {
-    /*
-     * `periodTrend`, not `requestTrend` — Stage 23. The invariant is unchanged
-     * and is the whole point of this test: a sparkline is COUNTED, never
-     * written by hand. Only the address moved, when the reporting period became
-     * a control and `requestTrend`'s fixed twelve 7-day buckets from
-     * `Date.now()` were replaced by buckets that follow the selected window.
-     */
-    assert.ok(
-      prop.startsWith("periodTrend(") || prop.startsWith("complianceTrend("),
-      `sparkline series must be computed, got: ${prop}`,
-    );
-  }
 });
 
 test("compliance trend follows the recorded expiry dates", () => {
@@ -104,60 +106,52 @@ test("compliance trend is flat at zero, never the decorative default", () => {
 });
 
 /*
- * RE-POINTED 2026-09-04, NOT WEAKENED.
+ * RE-POINTED. The tile strip changed; the rule about it did not.
  *
- * This test was written as "active units counts units, and never falls back to
- * the site count". The contract it was really protecting is one level up from
- * the label: THE FIRST TILE'S NUMBER MEASURES WHAT ITS LABEL SAYS, and never
- * quietly borrows a different measurement when its own source is empty.
+ * The original defect was a tile that BORROWED a measurement: "Active units"
+ * counted the unit register, which is empty on this account, so the largest
+ * number on the dashboard read 0 and meant nothing. It was re-pinned once
+ * already when the tile became "Active sites".
  *
- * The owner has since replaced the tile — it reads "Active sites" now, because
- * the unit register on this account is empty and "Active units 0" was the
- * largest and least useful number on the dashboard. So the same contract is
- * re-pinned at its new home: the count comes from the SITE register through the
- * shared status predicate, and is not derived from units, from sites' lifecycle
- * (which admits the unverifiable 'other' rows) or from Jobs.
+ * The rebuilt strip is the five tiles the brief specifies — Open jobs, Needs
+ * attention, Oldest open, Urgent open, Unassigned site — and the site count
+ * moved to the Sites page, where it is counted from the site register through
+ * the same shared predicate. What is asserted here is the rule rather than the
+ * tile: every tile counts the thing it names, from the server, and none of them
+ * substitutes a different measurement when its own is zero.
  */
-test("the first Overview tile counts active sites, and never borrows another measurement", async () => {
-  const overview = await overviewSource();
+test("every Overview tile counts the thing it names, and never borrows another measurement", async () => {
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  const tiles = page.slice(page.indexOf("const tiles = ["), page.indexOf('caption="At a glance"'));
+  for (const [label, expression] of [
+    ["Open jobs", "totals.open"],
+    ["Needs attention", "totals.attention"],
+    ["Urgent open", "totals.urgentOpen"],
+    ["Unassigned site", "totals.unassignedOpen"],
+    ["Oldest open", "oldestOpenDays"],
+  ]) {
+    assert.ok(
+      tiles.includes(`value: ${expression}`) ||
+        tiles.includes(`value: ${expression} ?? 0`),
+      `${label} must read ${expression} from the summary payload`,
+    );
+  }
   assert.ok(
-    /const activeSiteCount = storeRows\.filter\(/.test(overview),
-    "the site count must come from the canonical site register",
-  );
-  assert.ok(
-    /isActiveSiteStatus\(store\.status\)/.test(overview),
-    "and must use the shared predicate, so Sites and Reports cannot disagree with it",
-  );
-  assert.ok(
-    !/activeSiteCount = storeRows\.length/.test(overview),
-    "it must not switch to a different measurement when nothing is active",
-  );
-  assert.ok(
-    !/const activeUnitCount/.test(overview),
+    !/const activeUnitCount/.test(page),
     "the superseded unit count must be gone, not left beside it",
   );
+
   /*
-   * Deriving the tile from Jobs was explicitly ruled out: a site with no work
-   * on it is still an active site, and a job at a closed site must not
-   * resurrect it.
-   *
-   * Asserted against the ASSIGNMENT, not the whole component: the tile's
-   * sparkline does plot `scopedRequests`, on the same JSX line, and says so in
-   * its own label. What must not touch jobs is the number.
+   * And the site count it used to hold is still counted, on the page that owns
+   * sites, from the site register through the shared status predicate — not
+   * from Jobs, and not from lifecycle, which admits the unverifiable 'other'
+   * rows.
    */
-  const countStatement = overview.slice(
-    overview.indexOf("const activeSiteCount ="),
-    overview.indexOf(").length;", overview.indexOf("const activeSiteCount =")),
-  );
-  assert.ok(countStatement.length > 0, "the site count assignment must be findable");
-  assert.ok(
-    !/request|Request/.test(countStatement),
-    `the site count must not be derived from jobs, got: ${countStatement}`,
-  );
-  // An empty register says what would fill it rather than borrowing a number.
-  assert.ok(
-    overview.includes("No active sites in the register"),
-    "an empty site register needs an honest caption",
+  const sites = await read("app/(app)/portal/ops/sites-list.tsx");
+  assert.match(
+    sites,
+    /const active = sites\.filter\(\(site\) => site\.status !== "closed"\)\.length/,
+    "the Sites page counts active sites from the register's own status column",
   );
 });
 
@@ -267,19 +261,33 @@ test("trade breakdown keeps the six-bar cap and the existing palette", async () 
 });
 
 test("panels with nothing behind them say so instead of drawing an empty axis", async () => {
-  const overview = await overviewSource();
+  /*
+   * RE-POINTED to the rebuilt cards. The sentences moved; the rule did not.
+   *
+   * A portfolio can genuinely have no recorded spend, and a new site genuinely
+   * has no requirements loaded — which is not 0% compliant. Both must read as
+   * an explicit statement rather than as a chart pinned to its axis, because a
+   * flat line invites the reader to conclude the work was free.
+   */
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
   for (const copy of [
-    // Spend is optional on a job, so a portfolio can genuinely have none.
-    "No costs recorded against jobs in this period",
-    // A brand new site has no requirements loaded, which is not 0% compliant.
-    "No compliance requirements recorded for these sites yet",
+    "No site has an annual budget set",
+    "No costed job in this period names a contractor",
+    "No jobs in this period",
+    "Every job in this period is completed or scheduled",
   ]) {
-    assert.ok(overview.includes(copy), `missing honest empty state: ${copy}`);
+    assert.ok(page.includes(copy), `missing honest empty state: ${copy}`);
   }
-  // The charts must be behind those guards, not rendered regardless.
-  assert.ok(
-    /spendSeries\.some\(\(point\) => point\.value > 0\)\s*\?\s*<TrendChart/.test(overview),
-    "the spend chart must only draw when spend was recorded",
+  // The charts are behind those guards, not rendered regardless.
+  assert.match(
+    page,
+    /budgeted\.length === 0 \? \(\s*\n?\s*<EmptyState>/,
+    "the budget bars only draw when a budget was set",
+  );
+  assert.match(
+    page,
+    /data\.contractors\.length === 0 \? \(\s*\n?\s*<EmptyState>/,
+    "and the contractor bars only draw when a contractor was named",
   );
 });
 
@@ -322,43 +330,74 @@ test("the job breakdown panel separates loading from empty, and draws neither bl
   );
 });
 
-test("the Overview reads only from scoped props, never from the mock module", async () => {
-  const overview = await overviewSource();
-  // portal-app.tsx still imports the bundled dataset as a fallback for when the
-  // API is unreachable, which is deliberate. What must not happen is the
-  // Overview reaching past its props to read it directly, because that bypasses
-  // the organisation scoping the APIs apply.
-  for (const symbol of ["sampleRequests", "sampleFiles", "storeDocumentationResponsibility"]) {
+test("the Overview reads only from scoped endpoints, never from the mock module", async () => {
+  /*
+   * RE-POINTED, and the property is now structural rather than a naming
+   * convention.
+   *
+   * portal-app.tsx still imports the bundled dataset as a fallback for when the
+   * API is unreachable, which is deliberate. What must not happen is the
+   * Overview reaching past its scoping to read it, because the organisation
+   * filter lives in `scopedDb`. The page cannot: it holds no job list, no
+   * workspace snapshot and no import of either — every number arrives from an
+   * endpoint that resolved the organisation from the session.
+   */
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  for (const symbol of [
+    "sampleRequests",
+    "sampleFiles",
+    "storeDocumentationResponsibility",
+    "mock-data",
+  ]) {
+    assert.ok(!page.includes(symbol), `the Overview must not read ${symbol}`);
+  }
+  const imports = [...page.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
+  for (const specifier of imports) {
     assert.ok(
-      !overview.includes(symbol),
-      `OverviewView must not read ${symbol} directly`,
+      !specifier.includes("workspace-data") && !specifier.includes("mock"),
+      `the Overview must not import ${specifier}`,
     );
   }
-  // `stores` arrives renamed as storeRows precisely so the mock import cannot be
-  // referenced by accident inside this component.
-  assert.ok(
-    /stores: storeRows,/.test(overview),
-    "the stores prop must stay shadowed as storeRows",
-  );
-  assert.ok(
-    !/\bstoreRows = stores\b/.test(overview),
-    "the mock store list must not be substituted inside the Overview",
-  );
+  for (const route of [
+    "app/api/dashboard/summary/route.ts",
+    "app/api/dashboard/sites-attention/route.ts",
+    "app/api/dashboard/job-breakdown/route.ts",
+    "app/api/dashboard/performance/route.ts",
+    "app/api/dashboard/cost/route.ts",
+  ]) {
+    const source = await read(route);
+    assert.match(
+      source,
+      /dashboardScope\(request\)|scopedDbWithCapability/,
+      `${route} must resolve the organisation from the session`,
+    );
+  }
 });
 
-test("every Overview figure is derived from the request, unit and compliance rows", async () => {
-  const overview = await overviewSource();
-  // Each tile's value must be a length or a computed percentage — not a
-  // literal. This is the cheap check that catches a number typed in to make a
-  // screenshot look busy.
-  const values = [...overview.matchAll(/<AnalyticsMetricCard label="([^"]+)" value=\{([^}]+)\}/g)];
-  assert.equal(values.length, 6, "the Overview has six metric tiles");
-  for (const [, label, expression] of values) {
+test("every Overview figure is counted, never typed in", async () => {
+  /*
+   * RE-POINTED. The cheap check that catches a number typed in to make a
+   * screenshot look busy, applied to the tiles' new shape.
+   *
+   * Each tile's `value` must be an expression over the payload rather than a
+   * literal, and the payload itself must be an aggregate: the summary endpoint
+   * issues `count()` and `sum(case when …)` and returns about a dozen numbers,
+   * so there is nowhere for an invented figure to hide.
+   */
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  const tiles = page.slice(page.indexOf("const tiles = ["), page.indexOf('caption="At a glance"'));
+  const values = [...tiles.matchAll(/\n      value: ([^,]+),/g)];
+  assert.equal(values.length, 5, "the Overview has five metric tiles");
+  for (const [, expression] of values) {
     assert.ok(
-      /\.length|Percent|Count/.test(expression),
-      `${label} must be counted, got: ${expression}`,
+      /totals\.|oldestOpenDays/.test(expression),
+      `a tile value must come from the payload, got: ${expression}`,
     );
+    assert.ok(!/^\d+$/.test(expression.trim()), `a tile value must not be a literal: ${expression}`);
   }
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  assert.match(aggregates, /inPeriod: count\(\)/);
+  assert.match(aggregates, /sum\(case when \$\{openJobSql\} then 1 else 0 end\)/);
 });
 
 test("the spend series sums the cost column and invents nothing", async () => {

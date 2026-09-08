@@ -178,22 +178,22 @@ test("the widget bar can be portalled, and tells a missing slot from no slot", a
   assert.match(source, /\{usesSlot \? barSlot && createPortal\(bar, barSlot\) : bar\}/);
 });
 
-test("both Reports and Overview ask for the header slot", async () => {
+test("Reports asks for the header slot, and the Overview no longer needs one", async () => {
   /*
-   * WHAT CHANGED, AND WHY THE ASSERTION FLIPPED.
+   * RE-POINTED. The Overview has no arrangeable widget list any more.
    *
-   * This used to require the opposite of Overview — that it ask for no slot at
-   * all and keep its widget bar under the charts. That was right while Reports
-   * was the only surface with a toolbar to portal into. Overview has one now,
-   * and leaving Edit Layout stranded below the fold while the identical control
-   * sat in the header one page over was the inconsistency a reader noticed
-   * first. Both surfaces portal into their own toolbar.
+   * `DashboardWidgets` exists so a reader can reorder and hide panels, and it
+   * portals its control bar into the page header rather than floating it above
+   * the panels it edits — that is the contract, and Reports still holds it.
    *
-   * `usesSlot` still tells `undefined` from `null`, so a surface with no
-   * toolbar is unaffected — see the test above.
+   * The Overview's six cards are a fixed, ordered set now: what is on fire,
+   * where it is, what the work is made of, how we are performing, what it
+   * costs. That order is the product decision the brief makes, and a control
+   * that let a reader put Cost first would undo it. So the surface has no slot
+   * to portal into, and asserting that it asks for one would be pinning a
+   * feature that was deliberately removed.
    */
   const source = await read(PORTAL);
-
   const reportsAt = source.indexOf("function ReportsView(");
   assert.ok(reportsAt > 0, "ReportsView must exist");
   const reports = source.slice(reportsAt, source.indexOf("\nfunction ", reportsAt + 10));
@@ -201,17 +201,11 @@ test("both Reports and Overview ask for the header slot", async () => {
   assert.match(reports, /slotRef=\{setLayoutSlot\}/);
   assert.match(reports, /surface="reports"\s*\n\s*barSlot=\{layoutSlot\}/);
 
-  const overviewAt = source.indexOf("function OverviewView(");
-  assert.ok(overviewAt > 0, "OverviewView must exist");
-  const overview = source.slice(overviewAt, source.indexOf("\nfunction ", overviewAt + 10));
-  assert.match(overview, /surface="overview"/);
-  assert.match(
-    overview,
-    /const \[overviewLayoutSlot, setOverviewLayoutSlot\] = useState<HTMLElement \| null>\(null\);/,
-    "Overview holds its own slot element",
+  const overview = await read("app/(app)/portal/ops/overview-page.tsx");
+  assert.ok(
+    !overview.includes("DashboardWidgets"),
+    "the Overview's card order is fixed by the brief, not by a saved layout",
   );
-  assert.match(overview, /slotRef=\{setOverviewLayoutSlot\}/, "the toolbar publishes the slot");
-  assert.match(overview, /barSlot=\{overviewLayoutSlot\}/, "and the widget bar portals into it");
 });
 
 test("the header control is styled by the toolbar's own rules, not by a copy of them", async () => {

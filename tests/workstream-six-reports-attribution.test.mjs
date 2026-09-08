@@ -445,24 +445,43 @@ test("W06-12: the Dashboard has a contractor cost panel of its own", async () =>
   /*
    * The Dashboard half of "Reports and Dashboard" was unmet outright: the only
    * contractor panel in the product was rendered once, inside the widget list
-   * guarded by `surface="reports"`. This asserts the OVERVIEW list, sliced from
-   * its own `surface="overview"` marker, so a panel on Reports alone can never
-   * satisfy it again.
+   * guarded by `surface="reports"`.
+   *
+   * RE-POINTED. The Overview has no widget list any more — its six cards are a
+   * fixed, ordered set — so the assertion moved to the card itself, which is
+   * stronger: the panel is no longer something a reader could hide.
+   *
+   * The three properties that mattered are all still asserted. The Overview
+   * carries a contractor cost panel; it leads with what it cannot see, which is
+   * the finding the original panel buried; and it is fed by the register, since
+   * an id means nothing without the record that names it.
    */
-  const overview = app.indexOf('surface="overview"');
-  assert.ok(overview > 0, "the Overview widget list was found");
-  const list = app.slice(overview, app.indexOf("export function LegacyMaintenanceView"));
-  assert.match(list, /key: "contractor-spend"/, "Overview declares a contractor spend widget");
-  assert.match(list, /<ContractorCostPanel/, "and renders the panel");
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  assert.match(page, /<p className="ops-section-title">Contractor spend<\/p>/,
+    "the Overview carries a contractor spend panel");
   assert.match(
-    list,
-    /contractors=\{registeredContractors\}/,
-    "with the register, without which an id means nothing",
+    page,
+    /money\(data\.contractorAttributed\)\} of \{money\(data\.totalSpend\)/,
+    "and it leads with the coverage, not with the attributed slice alone",
   );
   assert.match(
-    list,
-    /requests=\{scopedRequests\}/,
-    "over the same rows every other figure on the page uses",
+    page,
+    /data\.contractors\.slice\(0, 8\)\.map/,
+    "with the per-contractor bars beneath it",
+  );
+  assert.match(page, /row\.linked \?/, "each row saying whether it resolves to a record");
+
+  const cost = await read("app/lib/dashboard-aggregates.ts");
+  const fn = cost.slice(cost.indexOf("export async function loadCost"));
+  assert.match(
+    fn.slice(0, 3000),
+    /maintenanceRequests\.contractorId is not null|contractorId\} is not null/,
+    "linked spend is decided by the register id, never by the typed name alone",
+  );
+  assert.match(
+    fn.slice(0, 3000),
+    /groupBy\(maintenanceRequests\.contractorId, maintenanceRequests\.contractor\)/,
+    "and the rows are grouped in the database, not in the browser",
   );
 
   // Reports keeps both: the scorecard by volume, and the same cost panel.
@@ -516,8 +535,6 @@ test("W06-12: the replays above are still what the screens compute", async () =>
   );
 });
 
-/* ── One date basis, and it is stated where a reader will see it ───────────── */
-
 test("W06-12: contractor spend names its operational date basis on the screen", async () => {
   /*
    * NOT a claim that a cost date exists. There is none — `cost` carries no date
@@ -529,14 +546,16 @@ test("W06-12: contractor spend names its operational date basis on the screen", 
    * is told, on the panel, which operational date decided the window and that
    * the figure is recorded job cost rather than money that moved.
    *
-   * ONE BASIS FOR THE EQUIVALENT METRICS. Reports and the Dashboard both scope
-   * by `requestedAt`, which is what every other analytics figure on those two
-   * pages already uses — so the contractor panel cannot print a different total
-   * for the same window as the spend tiles beside it. The Contractors register
-   * keeps `completedAt ?? requestedAt` on purpose: its spend shares a window
-   * with its own "completed 38", and moving one without the other would make a
-   * single row measure two periods at once. The two agree exactly over "All
-   * records", which the reconciliation test above asserts.
+   * ONE BASIS FOR THE EQUIVALENT METRICS. Reports scopes by `requestedAt`,
+   * which is what every other analytics figure on that page already uses. The
+   * Contractors register keeps `completedAt ?? requestedAt` on purpose: its
+   * spend shares a window with its own "completed 38", and moving one without
+   * the other would make a single row measure two periods at once.
+   *
+   * RE-POINTED for the Overview, whose basis moved from a browser filter into
+   * SQL. It is the same date — `requested_at` — and the same claim about what
+   * the money is; what changed is that the window is now a bare `YYYY-MM-DD`
+   * comparison the server computes, and the caveat travels with the card.
    */
   assert.deepEqual(
     CONTRACTOR_SPEND_BASIS,
@@ -556,18 +575,31 @@ test("W06-12: contractor spend names its operational date basis on the screen", 
   assert.equal(uses.length, 2, "both the scorecard and the cost panel print it");
 
   const app = await read("app/(app)/portal/portal-app.tsx");
-  // Reports and Overview build their rows on the same basis, so the panel and
-  // the tiles above it cannot mean two different windows.
+  // Reports still builds its rows on the raised date.
   assert.equal(
     (app.match(/withinAnalyticsPeriod\(request\.requestedAt, period, now\)/g) ?? []).length,
-    2,
-    "Reports and Overview both scope by when the work was raised",
+    1,
+    "Reports scopes by when the work was raised",
   );
-  // And the register's own tile now says which basis it is on, out loud.
+  // And the register's own tile says which basis it is on, out loud.
   assert.match(
     app,
     /Recorded job cost on work completed in this period\. Not invoiced or paid amounts, and never an agreed day, call-out or hourly rate\./,
     "the Tracked spend tile states its basis where a reader can see it",
+  );
+
+  // The Overview's window is the same date, decided on the server.
+  const filters = await read("app/lib/dashboard-filters.ts");
+  assert.match(
+    filters,
+    /export function withinWindowCondition[\s\S]{0,600}maintenanceRequests\.requestedAt/,
+    "the dashboard window is the raised date too",
+  );
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  assert.match(
+    page,
+    /Spend is the cost recorded on each job, not an invoiced amount\./,
+    "and the card keeps the caveat about what kind of money this is",
   );
 });
 
