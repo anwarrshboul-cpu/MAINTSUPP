@@ -82,8 +82,33 @@ schema**, reached through two shims that absorb every difference:
 Because of that split, a query can pass locally and fail deployed. Anything
 touching raw SQL, booleans, or `RETURNING` deserves a check against both.
 
-Use the **session pooler (5432)**, never the transaction pooler (6543) — a
-documented deadlock. Supabase allows 15 clients; the app runs 2 per instance.
+Use the **session pooler (5432)** today. The app runs 2 connections per
+instance, and the pooler admits **30 client sessions** — measured, and measured
+again as the ceiling that matters: the portal starts returning `EMAXCONNSESSION`
+at about **6 concurrent users**, because one page load fans out to ~20 requests
+and each cold instance opens its own pool. Supavisor also RETAINS a session-mode
+backend after its client disconnects, and they drain over minutes, which is why
+a one-second burst produced a 5½-minute outage.
+
+**The blanket "never 6543" was over-broad and is corrected here.** DEPLOY.md's
+deadlock was measured against `packages/db/src/client.ts` — the Phase 2 API, a
+different application. Measured against *this* adapter on 2026-09-09:
+
+| | prepare: true | prepare: false |
+|---|---|---|
+| 8 concurrent aggregates on 6543 | **hangs (>25s)** | 667 ms |
+| 24 concurrent reads on 6543 | **hangs** | 1.4 s |
+| `batch()`, `sql.begin()`, `sql.reserve()`, DDL | fine | fine |
+
+So the deadlock is **named prepared statements on a transaction pooler**, not
+transaction pooling. `usePreparedStatements()` in `db/node-pg-d1.ts` already
+returns false for any URL containing `:6543/`, so the portal configures itself
+correctly for it automatically. Client ceiling measured on the same database:
+**25 on 5432, 120+ on 6543 with no refusal.**
+
+Moving request traffic to 6543 is therefore the fix for the concurrency ceiling,
+and it has NOT been done — it needs an owner's decision and an end-to-end
+deployed test. Keep 5432 for migrations and admin work, which want a session.
 
 **Migrations are automatic and additive.** `ensureDatabase()` in `db/init.ts`
 replays `CREATE TABLE IF NOT EXISTS`, guarded `addColumn` and `INSERT OR IGNORE`

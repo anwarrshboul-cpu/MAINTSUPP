@@ -175,12 +175,39 @@ for (const raw of byRaw.keys()) {
   normalisedGroups.set(key, [...(normalisedGroups.get(key) ?? []), raw]);
 }
 
+/*
+ * Which database supplies "does this contractor already exist".
+ *
+ *   --db-env PRODUCTION_DATABASE_URL
+ *
+ * Defaults to Staging, and Staging is the WRONG answer for cutover planning:
+ * the rehearsal tenant has no contractor register, so every row came back
+ * "(none)" and the column said nothing. The names a migrated job should link to
+ * are the ones the client already has, which live on Production.
+ *
+ * Whatever it is pointed at, the session is put into read-only mode and that is
+ * VERIFIED before the query runs. This is a reporting tool; it has no business
+ * being able to write to anything, least of all the database it is most useful
+ * against.
+ */
+const dbEnv = args["db-env"] ?? "STAGING_DATABASE_URL";
 let existing = [];
-if (process.env.STAGING_DATABASE_URL) {
+if (process.env[dbEnv]) {
   const { default: postgres } = await import("postgres");
-  const sql = postgres(process.env.STAGING_DATABASE_URL, { max: 1, connect_timeout: 20, onnotice: () => {} });
+  const sql = postgres(process.env[dbEnv], {
+    max: 1,
+    connect_timeout: 20,
+    onnotice: () => {},
+    connection: { search_path: "portal, pg_catalog" },
+  });
   try {
+    await sql.unsafe("set session characteristics as transaction read only");
+    const [mode] = await sql`select current_setting('transaction_read_only') ro`;
+    if (mode.ro !== "on") {
+      throw new Error(`refusing to read ${dbEnv} over a connection that can write`);
+    }
     existing = await sql`select id, name, organisation_id from portal.contractors`;
+    console.log(`contractor register read from ${dbEnv} (read-only): ${existing.length} records`);
   } finally {
     await sql.end({ timeout: 3 }).catch(() => {});
   }
@@ -197,11 +224,28 @@ const contractorRows = [...byRaw.entries()]
       ? [raw, ...variants].sort((a, b) => (byRaw.get(b).jobs - byRaw.get(a).jobs))[0]
       : raw;
 
+    /*
+     * A name that is CLOSE to an existing record is evidence for a person, not
+     * a link. "saed" against "Saed Electrical" is almost certainly the same
+     * firm and £9,413 of spend hangs on it — which is exactly why this reports
+     * it and refuses to apply it.
+     */
+    const near = match
+      ? null
+      : existing.find((c) => {
+          const other = T.normalise(c.name);
+          if (!other || !normalised) return false;
+          return other.startsWith(`${normalised} `) || normalised.startsWith(`${other} `);
+        });
+
     let classification;
     let recommendation;
     if (match) {
       classification = "EXISTING CONTRACTOR MATCH";
       recommendation = `link to existing contractor ${match.id}`;
+    } else if (near) {
+      classification = "LIKELY EXISTING MATCH — CONFIRM";
+      recommendation = `probably the existing contractor "${near.name}" (${near.id}); confirm before linking`;
     } else if (variants.length) {
       classification = "SAFE ALIAS";
       recommendation = `same contractor as ${variants.join(", ")}; canonical "${canonical}"`;
@@ -223,9 +267,19 @@ const contractorRows = [...byRaw.entries()]
       cost_pence: stats.pence,
       cost_gbp: (stats.pence / 100).toFixed(2),
       variants: variants.join(" | "),
-      existing_candidate: match ? `${match.name} (${match.id})` : "",
+      existing_candidate: match
+        ? `${match.name} (${match.id})`
+        : near
+          ? `${near.name} (${near.id}) — NOT AN EXACT MATCH`
+          : "",
       proposed_canonical: canonical,
-      confidence: match ? "exact (normalised)" : variants.length ? "exact (normalised variant)" : "none",
+      confidence: match
+        ? "exact (normalised)"
+        : near
+          ? "near — needs a person"
+          : variants.length
+            ? "exact (normalised variant)"
+            : "none",
       classification,
       recommendation,
     };

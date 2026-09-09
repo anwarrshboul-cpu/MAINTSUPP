@@ -33,9 +33,13 @@ separate act, and it always has been.
   The app keeps speaking SQLite-shaped SQL; `db/node-pg-d1.ts` +
   `db/sqlite-to-postgres.ts` translate on the wire into the **`portal`
   schema** (search_path is pinned, so the Phase 2 `public` schema is
-  untouchable). Never use the transaction pooler (6543): a measured deadlock,
-  documented in the adapter. The pool is 2 connections per instance on Vercel
-  against Supabase's 15-client session ceiling.
+  untouchable). The pool is 2 connections per instance on Vercel against a
+  session-mode ceiling of **30 clients**, which the portal exhausts at about six
+  concurrent users. The transaction pooler (6543) was recorded here as "a
+  measured deadlock"; that measurement was of the Phase 2 API in
+  `packages/db/src/client.ts`, and against THIS adapter 6543 hangs only with
+  named prepared statements — which `usePreparedStatements()` already disables
+  for `:6543/`. See CLAUDE.md for the measurements.
 - **Migrations**: automatic and additive at boot. `ensureDatabase()` replays
   `CREATE TABLE IF NOT EXISTS` + guarded `addColumn` + `INSERT OR IGNORE`
   seeds on first request per instance; there is no DROP TABLE, no column
