@@ -44,6 +44,12 @@ import {
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
 const MAX_PART_SIZE = 5 * 1024 * 1024;
+/*
+ * How long a presigned part URL lives. Long enough for a 5 MiB part on a poor
+ * connection, short enough that one captured from a proxy log has expired
+ * before it is useful.
+ */
+const PRESIGN_TTL_SECONDS = 15 * 60;
 const allowedKinds = new Set<AttachmentKind>([
   "issue",
   "completion",
@@ -657,6 +663,73 @@ export async function POST(request: Request) {
       );
     }
     const multipart = storage.resumeMultipartUpload(key, uploadId);
+
+    /*
+     * `presign` — the action that makes a file larger than 4.5 MB possible.
+     *
+     * Everything above this line has already run: the caller was authorised,
+     * the tenant resolved, and `validUploadKey` proved the key belongs to this
+     * organisation and this anchor. So the only thing left to decide is whether
+     * to hand back a URL, and the answer is the same one the PUT handler below
+     * would have reached — it is the identical request, minus the relay.
+     *
+     * WHY A RELAY WAS NEVER GOING TO WORK. S3 requires every multipart part but
+     * the last to be at least 5 MiB. Vercel refuses a function request body over
+     * 4.5 MB. A function that receives a part and forwards it cannot satisfy
+     * both, so files over ~4.5 MB were impossible: measured, a 6.74 MiB upload
+     * answers FUNCTION_PAYLOAD_TOO_LARGE, and 73 of the migration's 3,107 files
+     * — 18.3% of its bytes — had no code path at all.
+     *
+     * The PUT handler below is KEPT, not replaced. It still serves small parts
+     * and anything that cannot reach the storage host directly, and removing it
+     * would turn a working path into a second migration.
+     *
+     * WHAT A SIGNED URL GIVES AWAY, stated plainly because the bucket is
+     * private and this is the only thing guarding it: the signature authorises
+     * ONE method, on ONE key, within ONE upload id, until it expires. It grants
+     * no listing, no read, and no access to any other object. Fifteen minutes
+     * is long enough for a 5 MiB part on a poor connection and short enough that
+     * a URL captured from a log is not a lasting credential.
+     */
+    if (action === "presign") {
+      const requested = Array.isArray(payload.partNumbers)
+        ? payload.partNumbers
+        : [payload.partNumber];
+      const partNumbers = requested.map((value) => Number(value));
+      if (
+        partNumbers.length < 1 ||
+        // Bounded so one request cannot ask the server to sign ten thousand
+        // URLs; a client needing more simply asks again.
+        partNumbers.length > 100 ||
+        partNumbers.some(
+          (part) => !Number.isInteger(part) || part < 1 || part > 10000,
+        )
+      ) {
+        return Response.json(
+          { error: "Ask for between 1 and 100 valid part numbers." },
+          { status: 400 },
+        );
+      }
+      let parts;
+      try {
+        parts = partNumbers.map((partNumber) => ({
+          partNumber,
+          ...multipart.presignPart(partNumber, PRESIGN_TTL_SECONDS),
+        }));
+      } catch {
+        /*
+         * The filesystem driver used locally has no presignPart, and neither
+         * would any future non-S3 bucket. That is not an error the client
+         * should see as a failure — it means "upload the parts the old way",
+         * which `uploadEvidenceFile` already knows how to do.
+         */
+        return Response.json(
+          { supported: false, reason: "This storage backend cannot presign." },
+          { status: 200 },
+        );
+      }
+      return Response.json({ supported: true, parts });
+    }
 
     if (action === "abort") {
       await multipart.abort();

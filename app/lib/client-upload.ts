@@ -397,11 +397,82 @@ async function multipartUpload(
   const parts: Array<{ partNumber: number; etag: string }> = [];
   const partCount = Math.ceil(file.size / MULTIPART_CHUNK_SIZE);
 
+  /*
+   * ASK FOR SIGNED URLS FIRST, and fall back to relaying the bytes through the
+   * server if the storage backend cannot sign.
+   *
+   * The relay below cannot carry a part at all on Vercel: S3 requires parts of
+   * at least 5 MiB and Vercel refuses a function request body over 4.5 MB, so
+   * every file needing more than one part died on its first chunk with
+   * FUNCTION_PAYLOAD_TOO_LARGE. A signed URL sends the bytes straight to
+   * storage, so the ceiling stops applying.
+   *
+   * Failure here is deliberately not fatal. The local filesystem bucket cannot
+   * presign, and `{supported: false}` means "upload them the old way" — which
+   * is exactly right for a 200 KB file on a dev machine.
+   */
+  let signedParts: Map<number, string> | null = null;
+  if (partCount > 0) {
+    try {
+      const response = await fetch("/api/files/multipart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "presign",
+          requestId,
+          kind,
+          columnId,
+          key: start.key,
+          uploadId: start.uploadId,
+          partNumbers: Array.from({ length: partCount }, (_, index) => index + 1),
+          uploadToken,
+          ...keyBody,
+        }),
+      });
+      if (response.ok) {
+        const body = (await response.json()) as {
+          supported?: boolean;
+          parts?: Array<{ partNumber: number; url: string }>;
+        };
+        if (body.supported && Array.isArray(body.parts)) {
+          signedParts = new Map(body.parts.map((part) => [part.partNumber, part.url]));
+        }
+      }
+    } catch {
+      // A network failure asking for signatures is not a failure to upload.
+      signedParts = null;
+    }
+  }
+
   try {
     for (let index = 0; index < partCount; index += 1) {
       const startOffset = index * MULTIPART_CHUNK_SIZE;
       const endOffset = Math.min(startOffset + MULTIPART_CHUNK_SIZE, file.size);
       const chunk = file.slice(startOffset, endOffset);
+
+      const signedUrl = signedParts?.get(index + 1);
+      if (signedUrl) {
+        const direct = await fetch(signedUrl, { method: "PUT", body: chunk });
+        if (!direct.ok) {
+          throw new Error(
+            `Uploading part ${index + 1} failed (${direct.status}).`,
+          );
+        }
+        /*
+         * The ETag identifies the part at `complete`, and it is a CROSS-ORIGIN
+         * response header — readable only if the storage host lists it in
+         * Access-Control-Expose-Headers. If it does not, this falls through to
+         * the relay for that part rather than completing with a blank etag,
+         * which the server would refuse anyway.
+         */
+        const etag = direct.headers.get("etag");
+        if (etag) {
+          parts.push({ partNumber: index + 1, etag: etag.replace(/^"|"$/g, "") });
+          onProgress?.(Math.round(((index + 1) / partCount) * 92));
+          continue;
+        }
+      }
+
       const response = await fetch("/api/files/multipart", {
         method: "PUT",
         headers: {

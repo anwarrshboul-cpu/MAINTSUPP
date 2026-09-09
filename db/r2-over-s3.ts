@@ -176,6 +176,14 @@ export interface S3R2MultipartUpload {
   key: string;
   uploadId: string;
   uploadPart(partNumber: number, value: R2PutValue): Promise<R2UploadedPart>;
+  /**
+   * A URL the client can PUT this part to directly, so the bytes never pass
+   * through the server that authorised them. See `presignS3Url`.
+   */
+  presignPart(
+    partNumber: number,
+    expiresInSeconds: number,
+  ): { url: string; expiresAt: string };
   complete(parts: R2UploadedPart[]): Promise<S3R2Object>;
   abort(): Promise<void>;
 }
@@ -214,6 +222,15 @@ export interface S3R2Bucket {
     options?: R2PutOptions,
   ): Promise<S3R2MultipartUpload>;
   resumeMultipartUpload(key: string, uploadId: string): S3R2MultipartUpload;
+  /**
+   * A URL the caller can PUT bytes to, or GET bytes from, without this process
+   * ever touching them. See `presignS3Url` for why the application needs one.
+   */
+  presign(
+    method: "PUT" | "GET",
+    key: string,
+    expiresInSeconds: number,
+  ): { url: string; expiresAt: string };
   /** Which bucket at which endpoint. Diagnostics only; not part of the R2 API. */
   readonly describe: string;
 }
@@ -410,6 +427,96 @@ export function signS3Request(input: SignInput): SignedRequest {
     canonicalRequest,
     stringToSign,
     signature,
+  };
+}
+
+export interface PresignInput {
+  method: string;
+  /** Already AWS-encoded, slashes intact. e.g. `/storage/v1/s3/job-media/org_1/a%20b.jpg` */
+  canonicalPath: string;
+  host: string;
+  origin: string;
+  /** Extra query beyond the six X-Amz-* parameters this adds. */
+  query?: QueryPairs;
+  expiresInSeconds: number;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  service?: string;
+  now?: Date;
+}
+
+/**
+ * A URL that carries its own authorisation in the query string.
+ *
+ * WHY THIS EXISTS. Every byte this application stores currently travels through
+ * a Vercel function, and Vercel refuses a request body over 4.5 MB. S3 requires
+ * multipart parts of at least 5 MiB. Those two limits cannot both be satisfied
+ * by a function that relays the bytes, so files above ~4.5 MB were impossible —
+ * measured, not theorised: a 6.74 MiB upload answers FUNCTION_PAYLOAD_TOO_LARGE.
+ *
+ * A presigned URL removes the relay. The server signs a URL and returns it; the
+ * client PUTs the bytes straight to storage. The function handles a few hundred
+ * bytes of JSON and never sees the payload, so the ceiling stops applying and
+ * the bucket stays private — the signature IS the credential, it is scoped to
+ * one method and one key, and it expires.
+ *
+ * TWO DIFFERENCES FROM `signS3Request`, both required by the query-auth flavour
+ * rather than stylistic:
+ *
+ *  - the payload hash is the literal `UNSIGNED-PAYLOAD`. It has to be: the
+ *    signer does not have the bytes, and the whole point is that it never will.
+ *  - only `host` is signed. Every additional signed header becomes a header the
+ *    uploading client is then obliged to send byte-identically, and a client
+ *    that adds its own `Content-Type` would break a signature that covered it.
+ *
+ * `X-Amz-Signature` is appended AFTER signing and is deliberately not part of
+ * the canonical query — signing a parameter that does not exist yet is the
+ * classic way to produce a signature that can never verify.
+ */
+export function presignS3Url(input: PresignInput): { url: string; expiresAt: string } {
+  const now = input.now ?? new Date();
+  const service = input.service ?? "s3";
+  const { amzDate, dateStamp } = sigv4Stamps(now);
+  const scope = `${dateStamp}/${input.region}/${service}/aws4_request`;
+
+  const query: QueryPairs = [
+    ...(input.query ?? []),
+    ["X-Amz-Algorithm", "AWS4-HMAC-SHA256"],
+    ["X-Amz-Credential", `${input.accessKeyId}/${scope}`],
+    ["X-Amz-Date", amzDate],
+    ["X-Amz-Expires", String(Math.max(1, Math.floor(input.expiresInSeconds)))],
+    ["X-Amz-SignedHeaders", "host"],
+  ];
+
+  const canonicalRequest = [
+    input.method,
+    input.canonicalPath,
+    canonicalQueryString(query),
+    `host:${input.host}\n`,
+    "host",
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    sha256Hex(canonicalRequest),
+  ].join("\n");
+
+  const signature = hmac(
+    sigv4SigningKey(input.secretAccessKey, dateStamp, input.region, service),
+    stringToSign,
+  ).toString("hex");
+
+  const url =
+    `${input.origin}${input.canonicalPath}?${canonicalQueryString(query)}` +
+    `&X-Amz-Signature=${signature}`;
+
+  return {
+    url,
+    expiresAt: new Date(now.getTime() + input.expiresInSeconds * 1000).toISOString(),
   };
 }
 
@@ -1181,6 +1288,36 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
       key,
       uploadId,
 
+      presignPart(
+        partNumber: number,
+        expiresInSeconds: number,
+      ): { url: string; expiresAt: string } {
+        if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
+          throw new Error("Part number must be between 1 and 10000.");
+        }
+        /*
+         * The same method, path and query `uploadPart` would have sent. That
+         * correspondence is the whole contract: a presigned URL differing from
+         * the real request by one query parameter is a signature the server
+         * rejects, and it fails at the client with no useful message.
+         * `tests/presigned-upload.test.mjs` pins it.
+         */
+        return presignS3Url({
+          method: "PUT",
+          canonicalPath: objectPath(key),
+          host: base.host,
+          origin: base.origin,
+          query: [
+            ["partNumber", String(partNumber)],
+            ["uploadId", uploadId],
+          ],
+          expiresInSeconds,
+          region,
+          accessKeyId,
+          secretAccessKey,
+          now: clock(),
+        });
+      },
       async uploadPart(partNumber: number, value: R2PutValue): Promise<R2UploadedPart> {
         if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
           throw new Error("Part number must be between 1 and 10000.");
@@ -1296,6 +1433,24 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
     };
   }
 
+  function presign(
+    method: "PUT" | "GET",
+    key: string,
+    expiresInSeconds: number,
+  ): { url: string; expiresAt: string } {
+    return presignS3Url({
+      method,
+      canonicalPath: objectPath(assertKey(key)),
+      host: base.host,
+      origin: base.origin,
+      expiresInSeconds,
+      region,
+      accessKeyId,
+      secretAccessKey,
+      now: clock(),
+    });
+  }
+
   return {
     put,
     get,
@@ -1304,6 +1459,7 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
     list,
     createMultipartUpload,
     resumeMultipartUpload,
+    presign,
     get describe() {
       return `${endpoint}/${bucket} (${region})`;
     },
