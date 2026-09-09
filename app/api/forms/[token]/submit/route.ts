@@ -1,19 +1,10 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
-import {
-  CANONICAL_REGISTER,
-  registerScopeFilter,
-} from "../../../../lib/register-scope";
 import { getDb } from "../../../../../db";
 import {
-  activityLog,
   formConfigurations,
   maintenanceBoardCells,
-  maintenanceGroupItems,
-  maintenanceGroups,
   maintenanceBoardColumns,
-  maintenanceRequests,
-  sites,
 } from "../../../../../db/schema";
 import {
   LOCATION_QUESTION_ID,
@@ -22,9 +13,26 @@ import {
   loadFormByToken,
   unavailableMessage,
 } from "../../../../lib/form-config";
-import { canonicalOptionValue, priorityRule } from "../../../../lib/priority-rules";
-import { listOptionValues } from "../../../../lib/options-repository";
 import { getSession } from "../../../../lib/auth-session";
+import { dispatchAutomationEvents, itemCreatedEvent } from "../../../../lib/automations";
+/*
+ * THE WORK ORDER ITSELF IS BUILT SOMEWHERE ELSE NOW.
+ *
+ * The title, the id, the placement, the site lookup, the canonical priority and
+ * engineer values, the SLA clock, the tier and the status chip were this
+ * route's own copies of decisions four other doors were also making. See the
+ * header of `app/lib/submission-service.ts` for what each door had got wrong;
+ * this one's own faults were an allocator with no conflict retry and a status
+ * pinned to "Pending Approval" no matter which group's stage the answer was
+ * routed to.
+ *
+ * What stays here is what only this door has: the four availability gates, the
+ * question set, the mass-assignment filter, the response counter and the cells.
+ */
+import {
+  createSubmission,
+  resolveSubmissionSite,
+} from "../../../../lib/submission-service";
 
 export const dynamic = "force-dynamic";
 
@@ -49,16 +57,25 @@ export const dynamic = "force-dynamic";
  *     person, and `created_by_email` is left null rather than attributed to
  *     somebody who was not there.
  *
- * Six test files pattern-match `/api/maintenance/route.ts`, so extracting the
- * shared middle into a helper would mean editing a heavily asserted file to
- * serve a new caller. The duplication is the cheaper and safer trade, and this
- * comment is the marker for whoever changes one and needs to change the other.
+ * ── AND THE DUPLICATION IS GONE ──────────────────────────────────────────
  *
- * There is now a THIRD: app/api/report-job/route.ts, the website's own form.
- * It is public like this one but its questions are fixed in the page rather
- * than editable in the builder, so it pins its tenant instead of reading one
- * from a form record. Three routes create a job; changing the shape of one is
- * a reason to look at the other two.
+ * This comment used to end: "Six test files pattern-match
+ * `/api/maintenance/route.ts`, so extracting the shared middle into a helper
+ * would mean editing a heavily asserted file to serve a new caller. The
+ * duplication is the cheaper and safer trade." It also counted THREE routes
+ * that create a job.
+ *
+ * There were five, and the trade was not cheaper. Three copies of the title
+ * rule drifted apart — two splitting on `[.!?\n]` at 72 characters, this one on
+ * `\n` at 80. Three copies of the id allocator inserted on top of a raw SQL
+ * MAX with no conflict retry, so two people submitting in the same second
+ * raced for one primary key and the loser was answered a bare 503. Two doors
+ * wrote no placement at all. Two resolved a priority by VALUE while the form
+ * shows LABELS.
+ *
+ * The shared middle is `app/lib/submission-service.ts` and every door calls it.
+ * The heavily asserted files were edited, and the assertions were re-pointed at
+ * the contract's new home rather than deleted.
  */
 
 function failure(message: string, status = 400) {
@@ -90,20 +107,6 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-/**
- * The job title, from the first line of the description.
- *
- * Mirrors `requestTitle` in /api/maintenance. Monday names every form
- * submission "Incoming form answer", which is why matching imported jobs by
- * title folded 713 of them together — so this deliberately does NOT reproduce
- * that behaviour and gives each job a title from its own description.
- */
-function requestTitle(description: string) {
-  const firstLine = description.split("\n")[0]?.trim() ?? "";
-  const title = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
-  return title || "Maintenance request";
 }
 
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
@@ -243,31 +246,31 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     const requestedAnswer = answerFor("date", 32);
 
     /*
-     * Priority and Engineer are CANONICALISED against the option registry
-     * before anything is stored or computed from them.
+     * PRIORITY AND ENGINEER ARE CANONICALISED against the option registry
+     * before anything is stored or computed from them — by
+     * `createSubmission`, now, rather than here.
      *
      * The registry separates `value` (the stable key stored jobs carry, which
      * renaming never touches) from `label` (the display text an admin may
-     * edit). The form shows labels, so the answer arriving here is normally
-     * the current label; a form opened before a rename posts the old one,
-     * which for seeded rows equals the value — both resolve. Storing the VALUE
-     * is what lets an admin rename "Urgent" without splitting every dashboard
-     * grouping in two, and the SLA below reads the value, so a rename changes
-     * what people see and nothing about what the system does.
+     * edit). The form shows labels, so the answer arriving here is normally the
+     * current label; a form opened before a rename posts the old one, which for
+     * seeded rows equals the value — both resolve. Storing the VALUE is what
+     * lets an admin rename "Urgent" without splitting every dashboard grouping
+     * in two, and the SLA reads the value, so a rename changes what people see
+     * and nothing about what the system does.
+     *
+     * `engineer` is NOT NULL on the board, and an unanswered question falls
+     * back to "Other" — a real label in the Engineer Required option set rather
+     * than an empty chip the board cannot draw. That fallback is now the
+     * service's `engineerFallback`.
+     *
+     * The raw answers go through UNRESOLVED. That is deliberate: the two other
+     * doors used `configuredValue`, which matches the value and NOT the label,
+     * so a renamed priority silently bought them the default clock. One
+     * resolver for all five is the point.
      */
-    const priorityOptions = await listOptionValues(db, record.organisationId, "priority");
-    const priority = canonicalOptionValue(priorityOptions, answerFor("status", 80), "Medium");
-    const engineerOptions = await listOptionValues(
-      db,
-      record.organisationId,
-      "engineer_required",
-    );
-    /*
-     * `engineer` is NOT NULL on the board. An unanswered question falls back
-     * to "Other", which is a real label in the Engineer Required option set
-     * rather than an empty chip the board cannot draw.
-     */
-    const engineer = canonicalOptionValue(engineerOptions, answerFor("single_select", 80), "Other");
+    const priorityAnswer = answerFor("status", 80);
+    const engineerAnswer = answerFor("single_select", 80);
 
     /*
      * A floor on the description that `required` alone cannot express: a job
@@ -310,53 +313,63 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      */
     let matchedSiteId: string | null = null;
     if (location) {
-      const [matchedSite] = await db
-        .select({ id: sites.id })
-        .from(sites)
-        .where(
-          and(
-            eq(sites.name, location),
-            eq(sites.organisationId, record.organisationId),
-            /* CANONICAL ONLY. This endpoint is PUBLIC — a share link, no
-               session, no instance context — and the form offers the
-               workspace's own locations. Unscoped, a submitted name matching a
-               site inside somebody's custom Sites register attached the job to
-               it. An unmatched name is already refused below, which is the
-               state a person can see and correct. */
-            registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
-          ),
-        )
-        .limit(1);
+      /*
+       * ONE LADDER, the same one every door climbs: exact, then
+       * case-insensitive, then this organisation's own aliases — so a
+       * submitter naming the store by the name it carried before it was
+       * renamed still lands on the right row. This was an exact match and
+       * nothing else.
+       *
+       * The site must belong to the FORM's organisation. Without that a
+       * submitter could name any site string and have it matched against
+       * another tenant's estate — the token authorises writing to one
+       * workspace, not to whichever one happens to have a site by that name.
+       *
+       * CANONICAL REGISTER ONLY, which is `resolveSubmissionSite`'s default.
+       * This endpoint is PUBLIC — a share link, no session, no instance
+       * context — and the form offers the workspace's own locations. Unscoped,
+       * a submitted name matching a site inside somebody's custom Sites
+       * register attached the job to it.
+       *
+       * Only looked up when a location was actually asked for. `site_id` is
+       * nullable precisely because a job whose site is not yet known has no
+       * site, and a register that does not ask where the work is has none to
+       * record.
+       */
+      const matchedSite = await resolveSubmissionSite(db, {
+        organisationId: record.organisationId,
+        location,
+      });
       if (!matchedSite) return failure("Choose a location from the list.");
       matchedSiteId = matchedSite.id;
     }
 
-    const [latest] = await db
-      .select({
-        maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
-      })
-      .from(maintenanceRequests)
-      .where(
-        and(
-          eq(maintenanceRequests.organisationId, record.organisationId),
-          sql`${maintenanceRequests.id} like 'MN-%'`,
-        ),
-      );
-    const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
-
-    const parsedDate = requestedAnswer ? new Date(requestedAnswer) : null;
-    const requestedAt =
-      parsedDate && !Number.isNaN(parsedDate.getTime())
-        ? parsedDate.toISOString()
-        : new Date().toISOString();
-
     /*
-     * The SLA clock and the tier come from `priorityRule`, keyed on the
-     * canonical VALUE — see app/lib/priority-rules.ts for why label-string
-     * comparisons had to go before labels became editable.
+     * WHICH BOARD, AND WHICH OF ITS GROUPS. Both read from the form's own row.
+     *
+     * Nothing in the request decides either. There is no `?board=`, no header
+     * and no host to read: `record.boardId` and `record.organisationId` come
+     * from the `form_configurations` row the token resolved to, and that row is
+     * the only authority this endpoint has. A token is authorisation to write
+     * to ONE register in ONE workspace.
+     *
+     * The "Group for answers" setting is honoured — this route used to
+     * hard-code "Incoming" regardless of what the panel said, so an operator
+     * could pick a group, see it saved, and every submission would still arrive
+     * somewhere else. `resolveSubmissionGroup` inside the service resolves the
+     * configured id against THIS board's live groups, so a stale id from
+     * another board resolves to nothing and falls back to the board's own first
+     * lane. Deliberately its first lane rather than the literal "Incoming": a
+     * generic register has no group by that name and would have had nowhere to
+     * file.
+     *
+     * AND THE GROUP NOW DECIDES THE STATUS TOO. The stage was routed by the
+     * group and the status was then pinned to "Pending Approval" regardless, so
+     * a form configured to file into a Completed lane produced a job in that
+     * lane wearing the Pending Approval chip. `statusForStage` is one map, read
+     * once, in the service.
      */
-    const rule = priorityRule(priority);
-    const dueAt = new Date(Date.now() + rule.dueHours * 60 * 60 * 1000).toISOString();
+    const boardKey = record.boardId;
 
     /*
      * The single-use grant that lets an anonymous submitter attach the files
@@ -372,165 +385,75 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * Thirty minutes: long enough to push a few phone videos over a shop's
      * wifi, short enough that a token captured from a browser history is dead
      * before it is useful. Only the HASH is stored, so a dump of the table
-     * cannot be turned back into a working upload grant.
+     * cannot be turned back into a working upload grant, and the bucket itself
+     * stays private — every read goes through `/api/files`.
      */
-    /*
-     * WHERE THE ANSWER LANDS — the "Group for answers" setting, honoured.
-     *
-     * `stage` is what decides a job's group on this board, and this route used
-     * to hard-code "Incoming" regardless of what the panel said. So an operator
-     * could pick a group, see it saved, and every submission would still arrive
-     * somewhere else.
-     *
-     * The configured group is resolved to its `stage_key`, scoped to the form's
-     * own organisation so a stored id from another workspace resolves to
-     * nothing rather than to that workspace's group. Anything unresolvable —
-     * no setting, a deleted group, a group with no stage — falls back to
-     * "Incoming", which is the board's top group and the safe default: a job in
-     * the wrong group is recoverable, a job that failed to save is not.
-     */
-    /*
-     * WHICH BOARD, AND WHICH OF ITS GROUPS. Both read from the form's own row.
-     *
-     * Nothing in the request decides either. There is no `?board=`, no header
-     * and no host to read: `record.boardId` and `record.organisationId` come
-     * from the `form_configurations` row the token resolved to, and that row is
-     * the only authority this endpoint has. A token is authorisation to write
-     * to ONE register in ONE workspace.
-     */
-    const boardKey = record.boardId;
-    const boardGroups = (
-      await db
-        .select({
-          id: maintenanceGroups.id,
-          stageKey: maintenanceGroups.stageKey,
-          archived: maintenanceGroups.archived,
-        })
-        .from(maintenanceGroups)
-        .where(
-          and(
-            eq(maintenanceGroups.organisationId, record.organisationId),
-            eq(maintenanceGroups.boardId, boardKey),
-            isNull(maintenanceGroups.deletedAt),
-          ),
-        )
-        .orderBy(asc(maintenanceGroups.position))
-    ).filter((group) => !group.archived);
-
-    /*
-     * The configured group had to belong to this ORGANISATION and to nothing
-     * else — so a group id stored while the setting pointed at another board
-     * resolved, and its `stage_key` decided where a submission on THIS board
-     * landed. Scoped to the board as well, a stale id resolves to nothing and
-     * the fallback below applies, which is the whole point of having one.
-     */
-    const configuredGroupId = record.config.features.board?.itemGroupId;
-    const configured = configuredGroupId
-      ? boardGroups.find((group) => group.id === String(configuredGroupId))
-      : undefined;
-    /* The board's own first lane, not the literal "Incoming": a generic
-       register has no group by that name and would have had nowhere to file. */
-    const targetGroup = configured ?? boardGroups[0] ?? null;
-    const targetStage = targetGroup?.stageKey ?? "Incoming";
-
     const wantsFiles = asked.some((question) => question.type === "File");
     const uploadToken = wantsFiles ? crypto.randomUUID().replace(/-/g, "") : null;
-    const uploadTokenHash = uploadToken ? await sha256(uploadToken) : null;
-    const uploadTokenExpiresAt = uploadToken
-      ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
-      : null;
 
-    const [created] = await db
-      .insert(maintenanceRequests)
-      .values({
-        id,
-        organisationId: record.organisationId,
-        siteId: matchedSiteId,
-        /*
-         * Named so the board can tell a link submission from one raised inside
-         * the product. Both are form answers; only one came from outside.
-         */
-        source: "Shared form",
-        title: requestTitle(description),
-        description,
-        location,
-        requester,
-        contact,
-        category: "Other",
-        engineer,
-        tier: rule.tier,
-        priority,
-        status: "Pending Approval",
-        contractor: null,
-        assignee: null,
-        stage: targetStage,
-        requestedAt,
-        dueAt,
-        completedAt: null,
-        nextUpdateAt: dueAt,
-        cost: null,
-        attachmentCount: 0,
-        issueAttachmentCount: 0,
-        completedAttachmentCount: 0,
-        generalAttachmentCount: 0,
-        publicUploadTokenHash: uploadTokenHash,
-        publicUploadTokenExpiresAt: uploadTokenExpiresAt,
-        commentCount: 0,
-        /* Nobody signed in, so nobody is credited. */
-        createdByEmail: null,
-      })
-      .returning();
+    const submission = await createSubmission(db, {
+      organisationId: record.organisationId,
+      boardId: boardKey,
+      /* Nobody signed in, so nobody is credited. */
+      actor: null,
+      /*
+       * Named so the board can tell a link submission from one raised inside
+       * the product. Both are form answers; only one came from outside.
+       */
+      source: "Shared form",
+      /*
+       * THE FORM MAY NAME ITS OWN JOBS. `features.board.itemTitleTemplate` is
+       * `{placeholder}` text — see the note on it in db/monday-board-spec.ts —
+       * and null, which is the default, means what it has always meant: the
+       * first line of the description. Monday names every form submission
+       * "Incoming form answer", which is why matching imported jobs by title
+       * folded 713 of them together, so a form that sets no template still
+       * gives each job a title from its own answers.
+       */
+      titleTemplate: record.config.features.board?.itemTitleTemplate ?? null,
+      description,
+      location,
+      requester,
+      contact,
+      category: "Other",
+      priority: priorityAnswer,
+      engineer: engineerAnswer,
+      engineerFallback: "Other",
+      siteId: matchedSiteId,
+      requestedAt: requestedAnswer || null,
+      preferredGroupId: record.config.features.board?.itemGroupId
+        ? String(record.config.features.board.itemGroupId)
+        : null,
+      publicUploadTokenHash: uploadToken ? await sha256(uploadToken) : null,
+      publicUploadTokenExpiresAt: uploadToken
+        ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
+        : null,
+      /* WHICH form. Nothing else can know it, and it is the only way to answer
+         "where did these forty jobs come from" after a link is regenerated. */
+      activityDetail: { form: record.id },
+    });
+    const created = submission.request;
+    const id = created.id;
 
     /*
-     * THE PLACEMENT — what actually puts the answer on this register.
+     * THE PLACEMENT is written by `createSubmission`, inside the same retry
+     * loop that picks the id — not as a step afterwards.
      *
      * `maintenance_requests` carries no `board_id`; a row's board is decided by
      * its `maintenance_group_items` placement (see `boardKeyForRequest` in
-     * app/lib/board-registry.ts). This route wrote no placement at all, and the
-     * consequence was not that the row went nowhere: `ensureBoardState` in
-     * /api/board files every UNPLACED work order in the organisation onto
+     * app/lib/board-registry.ts). This route once wrote no placement at all,
+     * and the consequence was not that the row went nowhere: `ensureBoardState`
+     * in /api/board files every UNPLACED work order in the organisation onto
      * whichever board is being loaded, into `groups[0]`. So a submission
      * through a section's form landed on whichever register somebody opened
      * first — usually the job board, where 39 groups are named after real
-     * stores. Placing it here is what makes "submissions scoped to that
+     * stores. Placing it at creation is what makes "submissions scoped to that
      * instance" true, and it is also what makes it deterministic.
      *
-     * `onConflictDoNothing` because `request_id` is the primary key of that
-     * table: one work order holds one placement across the whole workspace, and
-     * a retry must not move a row that is already filed.
+     * The allocator pairs the two inserts and undoes the request row if the
+     * placement cannot be written, because a request left without one appears
+     * on the JOB BOARD belonging to nobody.
      */
-    if (targetGroup) {
-      const [tail] = await db
-        .select({ maxPosition: sql<number>`COALESCE(MAX(${maintenanceGroupItems.position}), -1)` })
-        .from(maintenanceGroupItems)
-        .where(
-          and(
-            eq(maintenanceGroupItems.organisationId, record.organisationId),
-            eq(maintenanceGroupItems.boardId, boardKey),
-            eq(maintenanceGroupItems.groupId, targetGroup.id),
-          ),
-        );
-      await db
-        .insert(maintenanceGroupItems)
-        .values({
-          requestId: id,
-          organisationId: record.organisationId,
-          boardId: boardKey,
-          groupId: targetGroup.id,
-          position: Number(tail?.maxPosition ?? -1) + 1,
-        })
-        .onConflictDoNothing();
-    }
-
-    await db.insert(activityLog).values({
-      id: crypto.randomUUID(),
-      organisationId: record.organisationId,
-      entityType: "maintenance_request",
-      entityId: id,
-      action: "request.created",
-      actorEmail: null,
-      detail: JSON.stringify({ source: "Shared form", form: record.id, priority, location }),
-    });
 
     /*
      * ANSWERS THAT ARE NOT FIRST-CLASS COLUMNS OF A WORK ORDER.
@@ -623,13 +546,43 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       .where(eq(formConfigurations.id, record.id));
 
     /*
+     * THE BOARD'S OWN RULES, which this route never ran.
+     *
+     * `item_created` was dispatched by `/api/maintenance`, `/api/board/items`
+     * and `createBoardItem`, and by neither public door. So a workspace whose
+     * owner had built "when an item is created in Incoming, notify the duty
+     * coordinator" got it for every job raised from inside the product and for
+     * none of the ones raised through the share link the coordinator had sent
+     * out — exactly inverted.
+     *
+     * Dispatched LAST, after the cells and the response counter, so a rule that
+     * reads a custom column sees the answer that was just filed into it. The
+     * actor is anonymous and stays anonymous: the engine records the run
+     * against nobody, which is the truth. A rule that fails cannot undo the job
+     * — see `dispatchAutomationEvent`.
+     */
+    await dispatchAutomationEvents(
+      /*
+       * The context is built by hand rather than through `automationContext`,
+       * which takes a resolved SCOPE — and this route deliberately has none: it
+       * holds a bare `getDb()` handle and a form record, because a share token
+       * is not a session. An anonymous actor is what the engine is given, so
+       * the run history records nobody rather than inventing a person.
+       */
+      {
+        db,
+        orgId: record.organisationId,
+        actor: { email: null, displayName: null },
+        request,
+      },
+      [itemCreatedEvent(boardKey, id, null, submission.group?.id ?? null)],
+    );
+
+    /*
      * The plaintext token is returned exactly once, here, and never stored or
      * logged. The browser uses it immediately for the uploads and then drops it.
      */
-    return Response.json(
-      { request: { id: created?.id ?? id }, uploadToken },
-      { status: 201 },
-    );
+    return Response.json({ request: { id }, uploadToken }, { status: 201 });
   } catch {
     return Response.json({ error: "Your request could not be submitted." }, { status: 503 });
   }

@@ -54,10 +54,11 @@
  *                               writes that can half-succeed.
  *
  * The one thing lost by choosing /api/maintenance is that it has no `title`
- * field: `requestTitle()` takes the first sentence of the description. That is
- * how every job raised through the portal today gets its title, so this matches
- * rather than diverges — and the dialog shows the derived title back before you
- * submit, so the rule is visible instead of surprising.
+ * field: the title is derived from the description by `submissionTitle()` in
+ * app/lib/submission-title.ts — the first non-empty line, cut at a sentence end
+ * only when it is too long to show whole. That is how every job raised through
+ * the portal gets its title, so this matches rather than diverges, and the
+ * dialog previews it by calling THE SAME FUNCTION rather than a copy of it.
  *
  * THE SITE PREFILL, AND THE DEFECT IT AVOIDS
  * ------------------------------------------
@@ -83,6 +84,7 @@
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { submissionTitle } from "../../lib/submission-title";
 import { Icon } from "../../components";
 import "./raise-ticket.css";
 
@@ -194,10 +196,13 @@ async function loadAccess(): Promise<RaiseTicketAccess> {
    * The group a new job will land in — read so the dialog can say it, not so it
    * can set it.
    *
-   * `/api/maintenance` writes no board placement. `ensureBoardState` does it on
-   * the next board read, filing the row into the group whose `stageKey` matches
-   * the job's stage — "Incoming" for a new job. That is the rule this repeats,
-   * so what the dialog promises and what the board does come from one source.
+   * `/api/maintenance` now writes the placement AS PART OF THE CREATE, into the
+   * group whose `stageKey` matches the job's stage — "Incoming" for a new job,
+   * falling back to the board's first lane. It used to write none and leave
+   * `ensureBoardState` to file the row on the next board read, which returns
+   * early for `store-documentation` and for every generated register before it
+   * reaches the filing loop. Same rule, same group; it is no longer conditional
+   * on somebody opening a board.
    * Best effort: a failure here only costs the group's name in one sentence,
    * which is not worth refusing a ticket over.
    */
@@ -395,18 +400,25 @@ export function composeDescription(
 }
 
 /**
- * The title the board will show, worked out by the server's own rule.
+ * The title the board will show — the SERVER'S OWN FUNCTION, not a copy of it.
  *
- * `requestTitle()` in app/api/maintenance/route.ts takes everything up to the
- * first `.`, `!`, `?` or newline and ellipsises past 72 characters. Restating
- * it here is duplication, and deliberate: the alternative is a person typing a
- * two-sentence summary and finding out after the fact that half of it is the
- * title. Shown, not assumed. If the server's rule changes, the Stage 22 test
- * pins the two together.
+ * This restated the rule by hand, and the comment here admitted it: "restating
+ * it here is duplication, and deliberate", with a Stage 22 test pinning the two
+ * copies together character for character. The duplication existed because
+ * `requestTitle()` lived inside `app/api/maintenance/route.ts`, which a client
+ * component cannot import — the route pulls in drizzle, the schema and the
+ * tenant guard, and none of that may reach the browser bundle.
+ *
+ * `app/lib/submission-title.ts` is the rule with nothing else in it, so both
+ * sides import the same function and the two cannot drift at all. The test that
+ * pinned the copies now pins the shared import instead.
+ *
+ * Shown, not assumed, for the reason it always was: the alternative is a person
+ * typing a two-sentence summary and finding out afterwards that half of it is
+ * the title.
  */
 export function boardTitleFor(summary: string) {
-  const firstLine = summary.split(/[.!?\n]/)[0]?.trim() || "Maintenance request";
-  return firstLine.length > 72 ? `${firstLine.slice(0, 69)}…` : firstLine;
+  return submissionTitle({ description: summary });
 }
 
 /* ------------------------------------------------------------------ */

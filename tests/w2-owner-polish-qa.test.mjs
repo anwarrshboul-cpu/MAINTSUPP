@@ -732,21 +732,43 @@ test("W2C-QA the tenant and account site counts exclude instance registers", asy
  * the three above are fixed. It passes either way and says which state it found.
  */
 test("W2C-QA report-job site resolution is recorded, scoped or not", async () => {
-  const report = codeOnly(await source(REPORT_JOB));
-  const resolve = report.slice(report.indexOf("async function resolveSite")).slice(0, 1600);
-  const scoped = /registerScopeFilter\(\s*sites\.boardId/.test(resolve);
+  /*
+   * RE-POINTED, AND THE OBSERVATION IT RECORDED IS NOW CLOSED.
+   *
+   * This was a REPORTING test: it did not assert the scope, it printed a note
+   * when the scope was missing, because closing the hole needed an owner
+   * decision about what an unmatched name should do. Both halves have since
+   * been answered — the resolver is scoped to `CANONICAL_REGISTER` by default,
+   * and an unmatched name falls through to no site with the typed words kept in
+   * `location`.
+   *
+   * `resolveSite` also moved: it is `resolveSubmissionSite` in
+   * app/lib/submission-service.ts, shared by all five intake doors. So the pin
+   * follows it and is now an ASSERTION rather than a note, because there is
+   * nothing left to decide.
+   */
+  const service = codeOnly(await source("app/lib/submission-service.ts"));
+  const resolve = service.slice(service.indexOf("export async function resolveSubmissionSite"));
   assert.ok(
     resolve.includes("from(sites)"),
-    "resolveSite has moved — re-point this pin.",
+    "resolveSubmissionSite has moved — re-point this pin.",
   );
-  if (!scoped) {
-    console.log(
-      "[W2C-QA] resolveSite() in app/api/report-job/route.ts still matches a site " +
-        "on (name, organisation_id) with no register predicate. An anonymous " +
-        "public submission naming an instance site by name is accepted and " +
-        "attached to it — reproduced at 055b436, MN-1157 landed on " +
-        "store-zzl5-…-site-one. Closing it needs an owner decision about whether " +
-        "an unmatched name falls through to unassignedSiteId().",
-    );
-  }
+  assert.match(
+    resolve,
+    /registerScopeFilter\(sites\.boardId, scope\)/,
+    "an anonymous submission naming an instance site by name must not reach it — " +
+      "reproduced at 055b436, MN-1157 landed on store-zzl5-…-site-one",
+  );
+  assert.match(
+    resolve,
+    /const scope = input\.scope === undefined \? CANONICAL_REGISTER : input\.scope;/,
+    "and a caller that names no register gets the canonical one, never everything",
+  );
+
+  const report = codeOnly(await source(REPORT_JOB));
+  assert.match(
+    report,
+    /resolveSubmissionSite\(db, \{ organisationId: orgId, location \}\)/,
+    "the public form must pass no scope, so it takes the canonical default",
+  );
 });

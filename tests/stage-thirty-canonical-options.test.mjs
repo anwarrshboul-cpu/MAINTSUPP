@@ -32,9 +32,26 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 /* ── 1. SLA and tier come from values, not labels ────────────────────────── */
 
 test("no submission route compares a priority label to compute anything", async () => {
+  /*
+   * RE-POINTED. `priorityRule(priority)` moved out of the individual routes
+   * into `createSubmission` in app/lib/submission-service.ts, which is the one
+   * place a work order is now built — so the SLA and the tier are computed once
+   * for all five intake doors instead of three times for three of them.
+   *
+   * The claim is UNCHANGED and now covers two doors it never reached:
+   * nothing on an intake path may derive a clock or a tier from a priority's
+   * display LABEL, because labels are editable and business logic hung off one
+   * silently changes meaning with a rename.
+   *
+   * The `doesNotMatch` half still runs against every route, because the failure
+   * being pinned is somebody re-introducing the ternary locally.
+   */
   for (const path of [
     "app/api/forms/[token]/submit/route.ts",
     "app/api/maintenance/route.ts",
+    "app/api/report-job/route.ts",
+    "app/api/board/items/route.ts",
+    "app/lib/board-mutations.ts",
   ]) {
     const route = await read(path);
     assert.doesNotMatch(
@@ -47,19 +64,59 @@ test("no submission route compares a priority label to compute anything", async 
       /priority === "Urgent" \? 1/,
       `${path} must read the tier from priority-rules, not a label ternary`,
     );
-    assert.match(route, /priorityRule\(priority\)/, `${path} must use the shared rule`);
   }
+
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(
+    service,
+    /priorityRule\(priority\)/,
+    "the shared rule must be read where the work order is built",
+  );
+  assert.match(
+    service,
+    /tier: rule\.tier/,
+    "and the tier must come from it too — /api/board/items used to set none at all",
+  );
 });
 
 test("the shared form submit canonicalises priority and engineer to registry values", async () => {
+  /*
+   * RE-POINTED. The two `listOptionValues` reads and the two
+   * `canonicalOptionValue` calls moved into `canonicalSubmissionOption` in
+   * app/lib/submission-service.ts, which is what every door now resolves an
+   * option through — including the two that used `configuredValue`, which
+   * matches a VALUE and not a LABEL and therefore silently defaulted every
+   * submission made after a priority was renamed.
+   *
+   * The claim is unchanged and now covers five doors: what reaches the column
+   * is the registry's stable value, resolved from either the value or the
+   * current label, never the raw string the browser sent.
+   */
   const submit = await read("app/api/forms/[token]/submit/route.ts");
-  assert.match(submit, /listOptionValues\(db, record\.organisationId, "priority"\)/);
   assert.match(
     submit,
-    /listOptionValues\(\s*db,\s*record\.organisationId,\s*"engineer_required",?\s*\)/,
+    /priority: priorityAnswer/,
+    "the raw answer must go to the service, never into a column",
   );
-  assert.match(submit, /canonicalOptionValue\(priorityOptions/);
-  assert.match(submit, /canonicalOptionValue\(engineerOptions/);
+  assert.match(submit, /engineer: engineerAnswer/);
+  assert.match(
+    submit,
+    /engineerFallback: "Other"/,
+    "engineer is NOT NULL on the board — an unanswered question needs a real label",
+  );
+
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(service, /listOptionValues\(db, organisationId, key\)/);
+  assert.match(service, /canonicalOptionValue\(options, text, fallback\)/);
+  assert.match(
+    service,
+    /"priority",\n\s*input\.priority,/,
+    "priority must be resolved through the registry before the SLA is computed from it",
+  );
+  assert.match(
+    service,
+    /"engineer_required",\n\s*input\.engineer,/,
+  );
 });
 
 test("the rules module keys on values and defaults rather than refusing", async () => {

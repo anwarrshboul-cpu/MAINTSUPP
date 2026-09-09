@@ -106,19 +106,53 @@ test("the required fields are exactly the ones the route demands", async () => {
 });
 
 test("the derived title is shown, not assumed", async () => {
-  const route = await read(ROUTE);
   const source = await read(CONTROL);
 
   /*
-   * /api/maintenance has no `title` field: `requestTitle()` takes the first
-   * sentence of the description. The dialog restates that rule so it can show
-   * the result before submission, which makes this pair the drift risk — if the
-   * server's rule changes and the preview does not, the preview lies.
+   * RE-POINTED, and the contract got STRONGER rather than weaker.
+   *
+   * This used to pin two hand-written copies of the same rule to each other,
+   * character for character: `requestTitle()` inside /api/maintenance/route.ts
+   * and `boardTitleFor()` in the dialog. The claim it was protecting is that
+   * the preview cannot lie — if the server's rule changes and the preview does
+   * not, a person is shown a title the board will not use.
+   *
+   * There is no longer a copy to drift. The rule lives in
+   * app/lib/submission-title.ts, which imports NOTHING, so the client component
+   * can hold the same function the five intake routes call; the route reaches
+   * it through app/lib/submission-service.ts and the dialog imports it
+   * directly. Pinning the shared import is what "the preview cannot lie" now
+   * means, and it is a stronger statement than two copies matching, because two
+   * copies can be edited apart and one function cannot.
+   *
+   * `tests/submission-title.test.mjs` RUNS the rule; this only fixes where it
+   * lives.
    */
-  assert.match(route, /split\(\/\[\.\!\?\\n\]\/\)\[0\]/, "the server's rule must still be a first-sentence split");
-  assert.match(route, /length > 72 \? `\$\{firstLine\.slice\(0, 69\)\}…`/);
-  assert.match(source, /split\(\/\[\.\!\?\\n\]\/\)\[0\]/, "the preview must use the same split");
-  assert.match(source, /length > 72 \? `\$\{firstLine\.slice\(0, 69\)\}…`/, "and the same truncation");
+  assert.match(
+    source,
+    /import \{ submissionTitle \} from "\.\.\/\.\.\/lib\/submission-title"/,
+    "the preview must import the server's own rule, never restate it",
+  );
+  assert.match(
+    source,
+    /return submissionTitle\(\{ description: summary \}\);/,
+    "and call it — a wrapper that reimplements it is the drift this pins shut",
+  );
+
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(
+    service,
+    /from "\.\/submission-title"/,
+    "and the server must reach the same module, so there is one rule and not two",
+  );
+
+  const rule = await read("app/lib/submission-title.ts");
+  assert.doesNotMatch(
+    rule,
+    /from "drizzle-orm"/,
+    "the rule must stay importable by a client component — that is why it is its own module",
+  );
+
   assert.match(source, /The board will show this as/, "and it must be shown to the person typing");
 });
 
@@ -148,11 +182,26 @@ test("the job's location is written from the chosen site's registered name", asy
     "the caller's free-text location must never be copied onto the new job",
   );
 
+  /*
+   * RE-POINTED. `eq(sites.name, location)` moved out of the route into
+   * `resolveSubmissionSite` in app/lib/submission-service.ts, which is now the
+   * one site ladder all five intake doors climb — exact, then
+   * case-insensitive, then this organisation's own aliases. The claim is
+   * unchanged: the route resolves the job's site FROM THE NAME it was sent, so
+   * `site_id` and `location` cannot be filled from different sources the way
+   * the 744 imported rows were.
+   */
   const route = await read(ROUTE);
   assert.match(
     route,
-    /eq\(sites\.name, location\)/,
+    /resolveSubmissionSite\(db, \{\s*\n\s*organisationId: orgId,\s*\n\s*location,/,
     "the route is expected to resolve the site from that name",
+  );
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(
+    service,
+    /eq\(sites\.name, location\)/,
+    "and the resolver's first rung is still an exact match on the registered name",
   );
 });
 

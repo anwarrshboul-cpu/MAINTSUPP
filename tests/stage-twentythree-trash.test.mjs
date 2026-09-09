@@ -178,26 +178,62 @@ test("ensureBoardState will not re-place a job that is in the bin", async () => 
  */
 test("the id generator and the import identity map still see binned rows", async () => {
   /*
-   * The two inline `MN-…` generators — one under create_item, one under
-   * duplicate_items — became ONE function, `nextItemNumber` in
-   * app/lib/board-mutations.ts, when the automation engine needed the same
-   * writes the route makes. Same query, same deliberate lack of a
-   * `deleted_at` filter, now written once and read from both.
+   * RE-POINTED TWICE, and this test was ALREADY RED before the second move —
+   * worth saying, because a re-pointed pin that was passing and a re-pointed
+   * pin that was not are different claims.
+   *
+   * (1) The two inline `MN-…` generators — one under create_item, one under
+   *     duplicate_items — became ONE function, `nextItemNumber` in
+   *     app/lib/board-mutations.ts, when the automation engine needed the same
+   *     writes the route makes.
+   * (2) That function then stopped taking its MAX in SQL. `cast(substr(id, 4)
+   *     as integer)` reached every id it met, and the dialects disagree —
+   *     SQLite yields 0 silently, Postgres raises 22P02 — so one imported
+   *     `req_4ff2…` id could not fail locally and could not do anything BUT
+   *     fail deployed. The maxima are parsed in JS through `jobReferenceNumber`
+   *     now, and this test kept looking for `coalesce(max(cast(substr(` and
+   *     finding none. It has been counting zero generators since.
+   * (3) The allocator then moved to app/lib/submission-service.ts so all five
+   *     intake doors share it — three of them were inserting on a raw SQL MAX
+   *     with no conflict retry at all.
+   *
+   * The CLAIM is unchanged through all three and is what is asserted below:
+   * there is ONE MN-… allocator, create and duplicate share it, and it
+   * deliberately does not filter binned rows.
    */
-  const mutations = await read("app/lib/board-mutations.ts");
-  const generators = [...mutations.matchAll(/coalesce\(max\(cast\(substr\(/g)];
+  const service = await read("app/lib/submission-service.ts");
+  const generators = [...service.matchAll(/export async function nextJobNumber\(/g)];
   assert.equal(generators.length, 1, "the one MN-… generator create and duplicate share");
   assert.match(
-    mutations,
+    service,
     /DELIBERATELY UNFILTERED/,
     "the reason must be written down where the query is",
   );
-  const board = await read(BOARD_API);
-  assert.doesNotMatch(
-    board,
-    /coalesce\(max\(cast\(substr\(/,
-    "the route must not grow a second generator beside the shared one",
+
+  const mutations = await read("app/lib/board-mutations.ts");
+  for (const caller of ["createBoardItem", "duplicateBoardItems"]) {
+    assert.ok(
+      mutations.includes(caller),
+      `${caller} must still be the thing reading the shared allocator`,
+    );
+  }
+  assert.match(
+    mutations,
+    /await nextJobNumber\(db, orgId\)/,
+    "duplicate walks the shared floor rather than a floor of its own",
   );
+
+  for (const [name, source] of [
+    ["the board route", await read(BOARD_API)],
+    ["board-mutations", mutations],
+    ["the submission service", service],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      /coalesce\(max\(cast\(substr\(/,
+      `${name} must not cast an id in SQL — SQLite yields 0 and Postgres raises 22P02`,
+    );
+  }
 
   const importer = await read("app/api/import/route.ts");
   const map = importer.slice(

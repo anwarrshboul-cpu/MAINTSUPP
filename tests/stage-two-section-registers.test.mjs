@@ -214,12 +214,36 @@ test("W02-06 a failed placement does not strand a row on the job board", async (
    * the row; it puts it on the JOB BOARD, belonging to nobody. Six appeared
    * that way while this was being built.
    */
-  const mutations = codeOnly(await source("app/lib/board-mutations.ts"));
-  const from = mutations.indexOf("insert(maintenanceGroupItems)");
-  const block = mutations.slice(from - 300, from + 900);
+  /*
+   * RE-POINTED. These three lines moved to `allocateSubmission` in
+   * app/lib/submission-service.ts, which is now the one allocator all five
+   * intake doors use — `createBoardItem` had the only correct one and nothing
+   * else could reach it, so three routes were inserting on a raw SQL MAX with
+   * no conflict handling at all. The claim is unchanged and now protects five
+   * doors instead of one.
+   */
+  const service = codeOnly(await source("app/lib/submission-service.ts"));
+  const from = service.indexOf("insert(maintenanceGroupItems)");
+  const block = service.slice(from - 300, from + 900);
   assert.match(block, /catch \(error\)/, "the placement must be attempted, not assumed");
   assert.match(block, /\.delete\(maintenanceRequests\)/, "and its failure must undo the row");
   assert.match(block, /throw error/, "while still surfacing the real failure");
+
+  /* And `createBoardItem` must still reach it, rather than growing a second
+     copy of the pairing beside the shared one. */
+  const mutations = codeOnly(await source("app/lib/board-mutations.ts"));
+  const create = mutations.slice(
+    mutations.indexOf("export async function createBoardItem"),
+    /* Bounded: `duplicateBoardItems` and `moveItemsToGroup` further down the
+       file write placements of their own, and legitimately. */
+    mutations.indexOf("export type MoveOutcome"),
+  );
+  assert.match(create, /await allocateSubmission\(db, \{/);
+  assert.doesNotMatch(
+    create,
+    /insert\(maintenanceGroupItems\)/,
+    "the placement belongs to the allocator, not to the caller",
+  );
 });
 
 /* ------------------------------------------------------------------ */

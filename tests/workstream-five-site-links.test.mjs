@@ -143,7 +143,25 @@ test("a job with no site records that, in the strongest form the database allows
 test("the public form does not mint a site for a name it cannot match", async () => {
   const route = await read("app/api/report-job/route.ts");
   assert.doesNotMatch(route, /insert\(sites\)/, "no site is created from a public submission");
-  assert.match(route, /unassignedSiteId\(\)|isUnassignedSite|canonicalSiteId/, "it records having no site instead");
+  /*
+   * RE-POINTED. The site lookup and the "no match means no site" answer moved
+   * into app/lib/submission-service.ts, which every intake door now uses — this
+   * route hands the resolver a name and passes on whatever it gets, including
+   * null. The claim is unchanged and now holds for all five doors rather than
+   * for this one.
+   */
+  assert.match(
+    route,
+    /siteId: site\?\.id \?\? null/,
+    "an unmatched name reaches the writer as an absence, not as an invention",
+  );
+  const service = await read("app/lib/submission-service.ts");
+  assert.doesNotMatch(service, /insert\(sites\)/, "nor by anything it calls");
+  assert.match(
+    service,
+    /unassignedSiteId\(\)|isUnassignedSite|canonicalSiteId/,
+    "it records having no site instead",
+  );
 });
 
 test("no board or import writer falls back to an arbitrary site", async () => {

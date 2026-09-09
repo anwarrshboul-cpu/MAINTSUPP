@@ -110,13 +110,33 @@ test("W2 B a public token yields the board from the stored row, never the reques
     /boardId: "maintenance"/,
     "a cell was written with the literal board key, filing an answer given on one register onto another",
   );
-  for (const scoped of [
-    /eq\(maintenanceGroups\.boardId, boardKey\)/,
-    /eq\(maintenanceBoardColumns\.boardId, boardKey\)/,
-    /eq\(maintenanceGroupItems\.boardId, boardKey\)/,
-  ]) {
-    assert.match(submit, scoped, `a submission must read and write only its own board: ${scoped}`);
-  }
+  /*
+   * RE-POINTED. The group read and the placement write moved into
+   * `resolveSubmissionGroup` and `allocateSubmission` in
+   * app/lib/submission-service.ts, which every intake door now calls — this
+   * route was one of two writing no placement at all, and the shared allocator
+   * is what makes placement part of creation everywhere.
+   *
+   * The claim is unchanged and is asserted in two halves: the board key this
+   * route hands over comes from the stored row and nothing else, and the shared
+   * code scopes every one of the three tables to the board it was given.
+   */
+  assert.match(submit, /eq\(maintenanceBoardColumns\.boardId, boardKey\)/);
+  assert.match(
+    submit,
+    /boardId: boardKey/,
+    "the cells and the placement both go to the form's own board",
+  );
+
+  const service = codeOnly(await source("app/lib/submission-service.ts"));
+  assert.match(service, /eq\(maintenanceGroups\.boardId, input\.boardId\)/);
+  assert.match(service, /boardId: input\.boardId,/);
+  assert.doesNotMatch(
+    service,
+    /boardId: "maintenance"/,
+    "nothing shared may hard-code a board key — that is the defect this whole test exists for",
+  );
+
   assert.match(
     submit,
     /organisationId: record\.organisationId/,
@@ -141,11 +161,22 @@ test("W2 B a submission is PLACED, so it cannot be claimed by whichever board lo
    * section's form therefore landed on whichever register somebody opened
    * first, usually the job board.
    */
+  /*
+   * RE-POINTED. The placement is now written by `allocateSubmission` in
+   * app/lib/submission-service.ts, INSIDE the loop that picks the id rather
+   * than as a step after it — so a create is only successful once the row and
+   * its placement are both down, and a lost placement undoes the row instead of
+   * stranding it. This route hands the shared allocator the board key from its
+   * own form row, which is the half that is still this route's to get right.
+   */
   const submit = codeOnly(await source("app/api/forms/[token]/submit/route.ts"));
-  assert.match(submit, /\.insert\(maintenanceGroupItems\)/, "the placement is what puts it on a board");
+  assert.match(submit, /await createSubmission\(db, \{/, "the row and its placement together");
   assert.match(submit, /boardId: boardKey/, "and it is placed on the form's own board");
+
+  const service = codeOnly(await source("app/lib/submission-service.ts"));
+  assert.match(service, /\.insert\(maintenanceGroupItems\)/, "the placement is what puts it on a board");
   assert.match(
-    submit,
+    service,
     /onConflictDoNothing\(\)/,
     "request_id is that table's primary key — a retry must not move a row already filed",
   );
@@ -334,13 +365,34 @@ test("W2 B a submission cannot choose its own group, board or reference", async 
   const submit = codeOnly(await source("app/api/forms/[token]/submit/route.ts"));
   /* The group comes from the STORED setting, resolved against this board. */
   assert.match(submit, /record\.config\.features\.board\?\.itemGroupId/);
+  /*
+   * RE-POINTED, and the resolution got stricter on the way.
+   *
+   * The board-local `boardGroups.find(...)` is `resolveSubmissionGroup` in
+   * app/lib/submission-service.ts, which reads the groups WITH the board in the
+   * predicate rather than filtering an organisation-wide list afterwards. A
+   * stored id from another board therefore never reaches the comparison at all.
+   * The claim — a submission cannot choose its own group — is unchanged.
+   */
+  const service = codeOnly(await source("app/lib/submission-service.ts"));
   assert.match(
-    submit,
-    /boardGroups\.find\(\(group\) => group\.id === String\(configuredGroupId\)\)/,
+    service,
+    /groups\.find\(\(group\) => group\.id === preferred\)/,
     "a stored group id from another board must resolve to nothing, not to that board's group",
   );
-  /* The id is minted from the organisation's own series, never taken. */
-  assert.match(submit, /const id = `MN-\$\{Number\(latest\.maxNumber \?\? 1048\) \+ 1\}`/);
+  assert.match(service, /eq\(maintenanceGroups\.boardId, input\.boardId\)/);
+
+  /*
+   * The id is minted from the organisation's own series, never taken.
+   *
+   * RE-POINTED: `MN-${Number(latest.maxNumber ?? 1048) + 1}` is gone from all
+   * three routes that carried it. It read a SQL MAX and inserted on top with no
+   * conflict retry, so two submissions in the same second raced for one primary
+   * key and the loser got a bare 503; the `cast(substr(id, 4) as integer)` in
+   * it also threw 22P02 on Postgres for any id that is not `MN-<digits>`.
+   * `allocateSubmission` walks consecutive ids with `onConflictDoNothing`.
+   */
+  assert.match(service, /const id = `MN-\$\{base \+ attempt\}`;/);
   assert.doesNotMatch(submit, /body\.id\b/);
   assert.doesNotMatch(submit, /body\.reference/);
   assert.doesNotMatch(submit, /body\.organisationId/);

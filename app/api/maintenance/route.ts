@@ -11,10 +11,6 @@ import {
 } from "../../lib/attachment-counts";
 import { ensureDatabase } from "../../../db/init";
 import {
-  CANONICAL_REGISTER,
-  registerScopeFilter,
-} from "../../lib/register-scope";
-import {
   jobAlertTemplate,
   notificationTargets,
   sendNotification,
@@ -27,8 +23,27 @@ import {
   sites,
   workspaceSettings,
 } from "../../../db/schema";
-import { configuredValue } from "../../lib/options-repository";
-import { priorityRule } from "../../lib/priority-rules";
+import { DEFAULT_BOARD_KEY } from "../../lib/board-registry";
+/*
+ * THE SUBMISSION ITSELF NO LONGER LIVES HERE.
+ *
+ * `requestTitle`, the `MAX(id)+1` allocator, the site lookup, the SLA clock and
+ * the option canonicalisation were this route's own copies of decisions four
+ * other doors were also making, and this route's copies were not the best of
+ * them: the title split at 72 where the share-link route split at 80, the
+ * allocator had no conflict retry at all, the site lookup refused a renamed
+ * store that the public form would have matched, and `configuredValue` matched
+ * an option by VALUE only while the dialog feeding this route shows LABELS.
+ *
+ * One implementation now, in `app/lib/submission-service.ts`, whose header sets
+ * out what each door had got wrong. What stays here is what is genuinely this
+ * route's: the `board.edit` guard, the field caps, the refusal, the operations
+ * email and the sample seeding.
+ */
+import {
+  createSubmission,
+  resolveSubmissionSite,
+} from "../../lib/submission-service";
 import { unassignedSiteId } from "../../lib/site-reference";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
@@ -58,11 +73,6 @@ function databaseError(error: unknown) {
 
 function trimString(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
-function requestTitle(description: string) {
-  const firstLine = description.split(/[.!?\n]/)[0]?.trim() || "Maintenance request";
-  return firstLine.length > 72 ? `${firstLine.slice(0, 69)}…` : firstLine;
 }
 
 function exposeActivity(
@@ -133,14 +143,6 @@ function optionalIsoDate(value: unknown) {
       : trimmed,
   );
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-}
-
-async function sha256(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 async function seedMaintenanceIfEmpty(
@@ -369,13 +371,6 @@ export async function POST(request: Request) {
     const contact = trimString(payload.contact, 80);
     const description = trimString(payload.description, 800);
     const category = trimString(payload.category, 80) || "Other";
-    const priority = await configuredValue(db, orgId, "priority", payload.priority);
-    const engineer = await configuredValue(
-      db,
-      orgId,
-      "engineer_required",
-      payload.engineer,
-    );
 
     if (!location || !requester || !contact || description.length < 10) {
       return Response.json(
@@ -388,137 +383,90 @@ export async function POST(request: Request) {
     }
 
     await seedMaintenanceIfEmpty(db, orgId);
+
     /*
-     * Only the `MN-1234` ids are numbered, and only they may be cast.
+     * THE SITE, RESOLVED THE WAY EVERY OTHER DOOR RESOLVES ONE.
      *
-     * Without the filter this casts the tail of EVERY id in the workspace. Two
-     * other shapes exist — `req_<uuid>` from the import and `sd-001` from the
-     * documentation board — and `cast('_6204b0…' as integer)` is not an error
-     * in SQLite, which quietly yields 0. Postgres refuses it outright with
-     * `invalid input syntax for type integer`, the route's catch answers "The
-     * maintenance database is being prepared", and raising a job becomes
-     * impossible with nothing naming the reason.
+     * This was `eq(sites.name, location)` and nothing else, so an operator
+     * typing the name a store carried before it was renamed got "Choose a site
+     * from this client workspace", while a member of the public typing the same
+     * string into the website form was matched by its alias ladder. The fuzzy
+     * matcher lived on the door that can least verify itself and the strict one
+     * on the door that could offer a picker. One ladder now, in
+     * `resolveSubmissionSite`: exact, then case-insensitive, then this
+     * organisation's own aliases.
      *
-     * So this was already wrong on SQLite — 776 rows contributing 0 to a MAX —
-     * and merely survived because the wrong answer and the right one agreed
-     * while no numbered id existed. `like` is one of the few predicates both
-     * dialects spell identically.
+     * The REFUSAL is deliberately kept. This route is authenticated and the
+     * dialog in front of it gates on a chosen site, so a name matching nothing
+     * is a mistake somebody is standing there to correct, not a report that
+     * would otherwise be lost.
+     *
+     * CANONICAL REGISTER ONLY, which is the resolver's default and the reason
+     * the public form gives: an inbound caller names a location as text and
+     * cannot name a register, so the only one they can mean is the workspace's
+     * own.
      */
-    const [latest] = await db
-      .select({
-        maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
-      })
-      .from(maintenanceRequests)
-      .where(
-        and(
-          eq(maintenanceRequests.organisationId, orgId),
-          sql`${maintenanceRequests.id} like 'MN-%'`,
-        ),
-      );
-    const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
-    // Monday's form asks for "Date Requested" and makes it mandatory, so an
-    // answer is honoured when given. Anything unparseable falls back to now
-    // rather than rejecting a job that is otherwise complete.
-    const submittedDate = trimString(payload.requestedAt, 32);
-    const parsedDate = submittedDate ? new Date(submittedDate) : null;
-    const requestedAt =
-      parsedDate && !Number.isNaN(parsedDate.getTime())
-        ? parsedDate.toISOString()
-        : new Date().toISOString();
-    // Monday's Priority column carries three labels — Urgent, Medium, Low.
-    // The "High" branch this used to have matched nothing on the board, so
-    // anything not Urgent silently fell through to the 120-hour Low target.
-    // The hours themselves live in app/lib/priority-rules.ts, keyed on the
-    // registry VALUE `configuredValue` resolved above — so renaming a
-    // priority's display label cannot change its SLA.
-    const slaRule = priorityRule(priority);
-    const dueAt = new Date(
-      Date.now() + slaRule.dueHours * 60 * 60 * 1000,
-    ).toISOString();
-    const [matchedSite] = await db
-      .select({ id: sites.id })
-      .from(sites)
-      .where(
-        and(
-          eq(sites.name, location),
-          eq(sites.organisationId, orgId),
-          /* CANONICAL ONLY, for the reason the public form gives: an inbound
-             caller names a location as text and cannot name a register, so the
-             only one they can mean is the workspace's own. */
-          registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
-        ),
-      )
-      .limit(1);
+    const matchedSite = await resolveSubmissionSite(db, {
+      organisationId: orgId,
+      location,
+    });
     if (!matchedSite) {
       return Response.json(
         { error: "Choose a site from this client workspace." },
         { status: 400 },
       );
     }
-    const siteId = matchedSite.id;
-    const uploadToken = null;
-    const uploadTokenHash = uploadToken ? await sha256(uploadToken) : null;
-    const uploadTokenExpiresAt = uploadToken
-      ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
-      : null;
 
-    const [created] = await db
-      .insert(maintenanceRequests)
-      .values({
-        id,
-        organisationId: orgId,
-        siteId,
-        source: "Portal form",
-        title: requestTitle(description),
-        description,
-        location,
-        requester,
-        contact,
-        category,
-        engineer,
-        tier: slaRule.tier,
-        priority,
-        stage: "Incoming",
-        // Monday's first status. "Triage in progress" was one of six statuses
-        // that existed only in this codebase, so every job raised through the
-        // form landed on a chip the board could not render.
-        status: "Pending Approval",
-        contractor: null,
-        assignee: null,
-        requestedAt,
-        dueAt,
-        completedAt: null,
-        nextUpdateAt: dueAt,
-        cost: null,
-        attachmentCount: 0,
-        issueAttachmentCount: 0,
-        completedAttachmentCount: 0,
-        generalAttachmentCount: 0,
-        publicUploadTokenHash: uploadTokenHash,
-        publicUploadTokenExpiresAt: uploadTokenExpiresAt,
-        commentCount: 0,
-        createdByEmail: actor.email,
-      })
-      .returning();
-
-    await db.insert(activityLog).values({
-      id: crypto.randomUUID(),
+    /*
+     * ONE CALL, and it owns the title, the id, the placement, the canonical
+     * priority and engineer values, the tier, the due date and the status chip.
+     *
+     * Monday's form asks for "Date Requested" and makes it mandatory, so an
+     * answer is honoured when given; anything unparseable falls back to now
+     * rather than rejecting a job that is otherwise complete. That rule moved
+     * into the service with everything else, so the raw string goes through.
+     *
+     * This route mints NO upload token, exactly as before: an authenticated
+     * caller uploads through its own session and `/api/files` brokers every
+     * read, so a public grant would be a second and weaker credential for
+     * something the session already covers.
+     */
+    const submission = await createSubmission(db, {
       organisationId: orgId,
-      entityType: "maintenance_request",
-      entityId: id,
-      action: "request.created",
-      actorEmail: actor.email,
-      detail: JSON.stringify({ source: "Portal form", priority, location }),
+      /* The canonical job board, named rather than assumed. This route wrote no
+         placement and left `ensureBoardState` to file the row onto whichever
+         board somebody opened next. */
+      boardId: DEFAULT_BOARD_KEY,
+      actor,
+      source: "Portal form",
+      description,
+      location,
+      requester,
+      contact,
+      category,
+      priority: payload.priority,
+      engineer: payload.engineer,
+      siteId: matchedSite.id,
+      requestedAt: trimString(payload.requestedAt, 32) || null,
     });
+    const created = submission.request;
+    const priority = submission.priority;
 
-    // J4 / J5 — tell the coordinator. Urgent work is flagged in the subject so
+    // J4 / J5 - tell the coordinator. Urgent work is flagged in the subject so
     // it is visible in a notification preview without opening the message.
     //
     // As with leads, a delivery failure never fails the request: the job is
     // saved and the failure is recorded for replay.
     const { opsInbox } = notificationTargets();
     const alert = jobAlertTemplate({
-      reference: created.reference,
+      /*
+       * `displayReference`, not `created.reference`. This route allocates no
+       * `reference` and never has, so the column is NULL and every alert it has
+       * ever sent carried the subject "New job - <site>" with no job named in
+       * it. Every screen in the product already renders `reference ?? id`; this
+       * is that rule, applied to the surfaces that are not screens.
+       */
+      reference: submission.displayReference,
       title: created.title,
       site: location,
       priority,
@@ -531,7 +479,7 @@ export async function POST(request: Request) {
       channel: "email",
       event: (priority ?? "").toLowerCase() === "urgent" ? "job.urgent" : "job.created",
       subjectType: "job",
-      subjectId: id,
+      subjectId: created.id,
       to: opsInbox,
       subject: alert.subject,
       body: alert.body,
@@ -543,20 +491,23 @@ export async function POST(request: Request) {
         notifiedAt: alertResult.ok ? sql`CURRENT_TIMESTAMP` : null,
         notifyAttempts: 1,
       })
-      .where(eq(maintenanceRequests.id, id));
+      .where(eq(maintenanceRequests.id, created.id));
 
     // The job exists and its alert is logged; now the board's rules may run.
-    // A rule that fails cannot undo either — see `dispatchAutomationEvent`.
+    // A rule that fails cannot undo either - see `dispatchAutomationEvent`.
+    //
+    // THE BOARD KEY AND THE GROUP BOTH COME FROM THE WRITE. This dispatched
+    // `itemCreatedEvent("maintenance", id, null)` - the key as a literal, and
+    // no group at all - so a rule scoped to "when an item is created in
+    // Incoming requests" could never match a job raised here, and a workspace
+    // whose jobs live on a section register saw the event attributed to a board
+    // the row is not on.
     await dispatchAutomationEvents(automationContext(guard.scope, request), [
-      itemCreatedEvent("maintenance", id, null),
+      itemCreatedEvent(DEFAULT_BOARD_KEY, created.id, null, submission.group?.id ?? null),
     ]);
 
     return Response.json(
-      {
-        request: exposeRequest(created),
-        notified: alertResult.ok,
-        ...(uploadToken ? { uploadToken } : {}),
-      },
+      { request: exposeRequest(created), notified: alertResult.ok },
       { status: 201 },
     );
   } catch (error) {

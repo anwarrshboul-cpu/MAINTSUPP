@@ -582,7 +582,29 @@ test("the form posts to a route a logged-out visitor may actually use", async ()
     /payload\.(organisationId|orgId|tenant)/,
     "no request may steer a job into another workspace",
   );
-  assert.match(route, /configuredValue\(db, orgId, "priority"/, "canonicalise, do not trust");
+  /*
+   * RE-POINTED, and the canonicalisation got STRICTER on the way.
+   *
+   * `configuredValue` matched a submitted string against an option's stable
+   * VALUE and nothing else, while this form shows LABELS — so renaming
+   * "Urgent" made every subsequent report fall back to the workspace default
+   * and buy itself the 120-hour clock. The route now hands the raw answer to
+   * `createSubmission`, which resolves it through `canonicalSubmissionOption`:
+   * value first, then the current label, then the default. The claim is
+   * unchanged — an arbitrary string may not invent a board value or a shorter
+   * SLA — and it is now true of a renamed label as well.
+   */
+  assert.match(
+    route,
+    /priority: payload\.priority/,
+    "the raw answer must go through the service, never straight into a column",
+  );
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(
+    service,
+    /canonicalOptionValue\(options, text, fallback\)/,
+    "canonicalise, do not trust",
+  );
   assert.match(route, /source: "Website form"/, "a coordinator must see where this came from");
   assert.match(route, /uploadToken/, "and the reporter must be able to attach the photographs");
 });

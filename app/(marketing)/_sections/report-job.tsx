@@ -112,6 +112,16 @@ const POSTCODE = /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/;
 const EMAIL = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
 
 /**
+ * Where the reporter's first sentence ends — the job's NAME, not its story.
+ *
+ * A sentence terminator followed by whitespace, or a line break. Kept beside
+ * the other patterns rather than inlined so it is one thing to read and one
+ * thing to change; `tests/submission-title.test.mjs` runs the server's half of
+ * the same rule.
+ */
+const SENTENCE_END = /(?<=[.!?])\s|\n/;
+
+/**
  * Every required field, in the order it appears on screen.
  *
  * The order matters twice: the first error is the one scrolled to, and it must
@@ -411,6 +421,30 @@ export function ReportJob() {
      */
     const detail = valueOf(form, "rjDesc").trim();
     const access = valueOf(form, "rjAccess").trim();
+    /*
+     * AND THE JOB'S NAME IS SENT SEPARATELY, because the blob below cannot
+     * supply one.
+     *
+     * `/api/report-job` derived the title from the first line of `description`,
+     * and the first line is the P-code band. So every report this page has ever
+     * filed arrived on the board called "[P1] Critical, site unsafe or cannot
+     * trade" — the same words on every P1 in the workspace, naming the urgency
+     * and never the fault. Nobody could scan the board and nobody could search
+     * for the thing that broke.
+     *
+     * The description is deliberately untouched: the P-code stays first because
+     * that is what triage reads first, and the postcode and the access window
+     * still have nowhere else to go. The title is the CATEGORY and the
+     * reporter's own first sentence, which is the pair a coordinator scans by.
+     *
+     * The server still caps it and still falls back to the description when it
+     * is absent, so a cached copy of this page keeps working.
+     */
+    const summary = detail.split(SENTENCE_END)[0]?.trim() ?? "";
+    const title = [category, summary || "fault reported from the website"]
+      .filter(Boolean)
+      .join(" — ")
+      .slice(0, 120);
     const description = [
       `[${urgency}] ${chosen?.label.replace(/^P\d — /, "") ?? ""}`.trim(),
       detail || `${category} fault reported from the website.`,
@@ -432,6 +466,7 @@ export function ReportJob() {
           location: valueOf(form, "rjSite"),
           requester: valueOf(form, "rjName"),
           contact: valueOf(form, "rjPhone"),
+          title,
           description,
           category,
           engineer,
