@@ -87,10 +87,11 @@ try {
      where organisation_id = ${ORG}`)).n);
   /*
    * Scoped to rows carrying a `source_asset_id`, which is what this import
-   * writes. The tenant also holds the six files uploaded by Phase 2's approved
-   * representative Storage sample; counting those as a shortfall or a surplus
-   * would be reporting a deliberate act as a discrepancy. They are reported
-   * separately below instead.
+   * writes. The tenant also holds files uploaded deliberately during the
+   * rehearsal — Phase 2's approved representative Storage sample, and Phase 3's
+   * octet-stream probe and upload benchmarks. Counting those as a surplus would
+   * be reporting a deliberate act as a discrepancy, so they are reported on
+   * their own line instead of inside the reconciliation.
    */
   const attachments = await one(sql`
     select count(*) filter (where source_asset_id is not null)::int imported,
@@ -126,7 +127,7 @@ try {
   ]);
   console.log(`
 attachments not from this import: ${attachments.other} ` +
-    `(Phase 2's approved representative Storage sample)`);
+    `(rehearsal uploads: the approved Storage sample, plus any QA probe)`);
 
   const mismatched = rows.filter((r) => r.difference !== 0);
   const moneyExact = Number(jobs.pence) === sourcePence;
