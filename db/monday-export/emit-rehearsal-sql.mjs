@@ -16,7 +16,7 @@
  * numbered and must run in order: jobs reference sites, cells and group
  * placements are derived from jobs, compliance references attachments.
  *
- * Chunked at ~40 KB so a single statement never exceeds what a SQL console or
+ * Chunked at ~150 KB so a single statement never exceeds what a SQL console or
  * an HTTP API will accept.
  */
 
@@ -26,7 +26,7 @@ import process from "node:process";
 import { buildPlan, summarise } from "./import-monday-rehearsal.mjs";
 import * as T from "./monday-transform.mjs";
 
-const CHUNK_BYTES = 40_000;
+const CHUNK_BYTES = 150_000;
 
 /** A SQL string literal. Single quotes doubled; nothing else is interpolated. */
 function q(value) {
