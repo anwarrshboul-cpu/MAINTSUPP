@@ -1,0 +1,15 @@
+# https://maintsupp.com
+
+User-agent: *
+Allow: /
+
+# The client portal and its API. Nothing here is public, and a crawler
+# following these only ever reaches a login wall.
+Disallow: /portal
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /login
+Disallow: /request
+Disallow: /api/
+
+Sitemap: https://maintsupp.com/sitemap.xml
