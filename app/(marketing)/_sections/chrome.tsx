@@ -687,7 +687,7 @@ export function ScrollFurniture() {
  * in an effect instead would mean a setState on every mount and a visible flash
  * of the banner for people who already answered.
  */
-const cookieStore = {
+export const cookieStore = {
   listeners: new Set<() => void>(),
   subscribe(listener: () => void) {
     cookieStore.listeners.add(listener);
