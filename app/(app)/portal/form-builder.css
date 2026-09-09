@@ -1360,6 +1360,550 @@
   cursor: not-allowed;
 }
 
+
+/* ── Pages, insertion, bindings and the intake report ──────────────── *
+ *
+ * Everything below belongs to the Edit surface's second life: a collapsed
+ * card, a page model, three ways to reorder, a shared field picker and a report
+ * on whether the form can actually file a job.
+ *
+ * TOKENS ONLY, no literals. `tests/stage-twentynine-form-builder.test.mjs`
+ * asserts there is not a single hex colour in this file, and the reason is
+ * worth restating: the palette in globals.css is tuned so every foreground
+ * clears AA against the surface it lands on IN BOTH THEMES, and the contrast
+ * test recomputes those ratios from that file. A literal here would be the one
+ * pairing nobody had measured.
+ *
+ * The only widths used anywhere in this stylesheet are the five agreed ones,
+ * and the phone block at the foot is the only one this section adds to.
+ */
+
+/* The Content rail — navigation, and nothing the canvas does not also carry. */
+.form-edit__railpage + .form-edit__railpage {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.form-edit__page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.form-edit__page em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
+/*
+ * The rail's rows became buttons when the rail became navigable. They keep the
+ * row's own layout — the `li` is still the flex container in the markup — so
+ * this only has to strip the button chrome and take the full width, or a long
+ * question title would centre itself inside a shrink-wrapped button.
+ */
+.form-edit__content li button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  padding: 0;
+  cursor: pointer;
+}
+
+.form-edit__content li:hover {
+  background: var(--surface-hover);
+}
+
+.form-edit__content li button:focus-visible {
+  outline: 2px solid var(--brand-solid);
+  outline-offset: 2px;
+}
+
+.form-edit__railempty {
+  font-size: 11px;
+  color: var(--muted-2);
+  padding: 4px 6px;
+}
+
+/* ── The intake report ──────────────────────────────────── */
+
+.form-edit__intake {
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--amber-600);
+  border-radius: var(--radius-sm);
+  background: var(--amber-100);
+  padding: 10px 12px;
+}
+
+.form-edit__intake[data-level="blocking"] {
+  border-inline-start-color: var(--red-600);
+  background: var(--red-100);
+}
+
+.form-edit__intake h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.form-edit__intake ul {
+  margin: 6px 0 0;
+  padding-inline-start: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.form-edit__intakecount {
+  color: var(--muted);
+}
+
+/* ── Pages on the canvas ────────────────────────────────── */
+
+.form-edit__pagegroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.form-edit__pagehead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-edit__pagename {
+  flex: 1 1 160px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 6px;
+}
+
+.form-edit__pagename:hover {
+  border-color: var(--line);
+  background: var(--surface-card);
+}
+
+.form-edit__pagename:focus-visible {
+  border-color: var(--brand-solid);
+  background: var(--surface-card);
+  outline: none;
+}
+
+.form-edit__pageremove,
+.form-edit__addpage,
+.form-edit__insertcancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--muted);
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-edit__pageremove:hover,
+.form-edit__addpage:hover,
+.form-edit__insertcancel:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-edit__addpage {
+  align-self: flex-start;
+}
+
+.form-edit__pagenote {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
+/* ── The insertion control ──────────────────────────────── */
+
+/*
+ * A hairline that becomes a button on hover or focus. It sits between every
+ * pair of cards, so at rest it must read as a gap and not as nineteen more
+ * controls; `opacity` rather than `display` keeps it in the tab order, which is
+ * the whole point of it being reachable by keyboard.
+ */
+.form-edit__insert {
+  display: flex;
+  min-height: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.form-edit__insertbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  justify-content: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-2);
+  padding: 2px 8px;
+  font-size: 11px;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.form-edit__insert:hover .form-edit__insertbtn,
+.form-edit__insertbtn:focus-visible {
+  opacity: 1;
+}
+
+.form-edit__insertbtn:focus-visible {
+  outline: 2px solid var(--brand-solid);
+  outline-offset: 1px;
+}
+
+.form-edit__insert.is-open {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  padding: 8px;
+}
+
+/* ── The shared field picker ────────────────────────────── */
+
+.form-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.form-picker__label {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.form-picker__select {
+  flex: 1 1 180px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.form-picker__select:focus-visible {
+  outline: 2px solid var(--brand-solid);
+  outline-offset: 1px;
+}
+
+/* ── A card, collapsed and open ───────────────────────────── */
+
+.form-edit__card.is-collapsed {
+  padding-block: 8px;
+}
+
+/*
+ * The card being dragged. `opacity` rather than `visibility`, so the pointer
+ * can still see where it came from — a gap that opens under the cursor reads
+ * as a deletion.
+ */
+.form-edit__card.is-dragging {
+  opacity: 0.45;
+}
+
+.form-edit__card.is-blocking {
+  border-inline-start: 3px solid var(--red-600);
+}
+
+.form-edit__handle {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted-2);
+  cursor: grab;
+}
+
+.form-edit__handle:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.form-edit__handle:focus-visible {
+  outline: 2px solid var(--brand-solid);
+  outline-offset: 1px;
+}
+
+.form-edit__handle:active {
+  cursor: grabbing;
+}
+
+/* The collapsed row's name is the disclosure control — see the card's header. */
+.form-edit__cardname {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: start;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.form-edit__cardname:focus-visible {
+  outline: 2px solid var(--brand-solid);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.form-edit__cardtype {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--muted-2);
+  flex: 0 0 auto;
+}
+
+/*
+ * The disclosure glyph must NOT inherit the reorder chevron's rotation. The
+ * rule further up rotates every icon inside `.form-edit__cardtools`, which is
+ * right for the two move buttons and wrong for a pencil; this is scoped tightly
+ * enough to win on specificity without loosening that one.
+ */
+.form-edit__cardtools button.form-edit__disclose svg {
+  transform: none;
+}
+
+.form-edit__cardtools button.form-edit__disclose.is-open svg {
+  transform: rotate(-90deg);
+}
+
+.form-edit__cardbody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.form-edit__cardwarn {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-edit__cardwarn li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-100);
+  color: var(--ink);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.form-edit__cardwarn li[data-level="blocking"] {
+  background: var(--red-100);
+}
+
+.form-edit__cardwarn svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.form-edit__binding {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.form-edit__bindnote {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--red-600);
+}
+
+.form-edit__remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.form-edit__remove:hover:not(:disabled) {
+  border-color: var(--red-600);
+  color: var(--red-600);
+}
+
+/* ── A paragraph field, for the welcome and confirmation messages ────── */
+
+.form-panel__field textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+}
+
+.form-panel__field textarea:focus-visible {
+  outline: 2px solid var(--brand-solid);
+  outline-offset: 1px;
+}
+
+/* ── The activity log ───────────────────────────────────── */
+
+.form-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.form-activity li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.form-activity li:last-child {
+  border-bottom: 0;
+}
+
+.form-activity__mark {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.form-activity li[data-kind="undo"] .form-activity__mark {
+  background: var(--amber-100);
+  color: var(--amber-600);
+}
+
+.form-activity__what {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.form-activity__when {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.form-activity__tip {
+  flex: 1 1 100%;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
+/* ── Preview: the page stepper ────────────────────────────── */
+
+.form-builder__preview-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-builder__preview-step button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--muted);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-builder__preview-step button svg {
+  transform: rotate(180deg);
+}
+
 /* ── Narrow ────────────────────────────────────────────────────────────────
  *
  * 767px is the app's phone boundary and is one of the five widths the parity
@@ -1512,6 +2056,60 @@
     min-width: 44px;
   }
 
+  /*
+   * THE NEW CONTROLS CLEAR THE SAME FLOOR. Everything added to the Edit surface
+   * — the drag handle, the insert row, the field picker, the page controls —
+   * is a tap target on a phone, and this editor is now expected to be usable at
+   * 375px. The rail is still `display: none` here and still costs nothing,
+   * because every one of these lives on the canvas.
+   */
+  .form-edit__handle,
+  .form-edit__cardname,
+  .form-edit__insertbtn,
+  .form-edit__insertcancel,
+  .form-edit__pageremove,
+  .form-edit__addpage,
+  .form-edit__remove,
+  .form-picker__select,
+  .form-edit__pagename {
+    min-height: 44px;
+  }
+
+  /*
+   * A 375px card head cannot hold a handle, a glyph, a name and four buttons on
+   * one line. The name takes the full width and the tools wrap beneath it,
+   * which keeps every target full size instead of shrinking all seven.
+   */
+  .form-edit__cardhead {
+    flex-wrap: wrap;
+  }
+
+  .form-edit__cardname,
+  .form-edit__titleinput {
+    flex: 1 1 100%;
+    order: 2;
+  }
+
+  .form-edit__cardtools {
+    order: 3;
+    margin-inline-start: 0;
+  }
+
+  /* Always visible on a phone: there is no hover to reveal it with. */
+  .form-edit__insertbtn {
+    opacity: 1;
+  }
+
+  .form-picker {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-picker__select {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
   .form-panel {
     padding: 12px;
   }
@@ -1533,6 +2131,7 @@
   .form-builder__copy,
   .form-panel__choices button,
   .form-edit__cardtools button,
+  .form-edit__insertbtn,
   .form-switch,
   .form-switch::after {
     transition: none;

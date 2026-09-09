@@ -156,11 +156,37 @@ test("a phone edits the same configuration a desktop does", async () => {
   /* And the component still owns which board it is editing — the prop the
      saver is handed, never a default. */
   assert.match(builder, /useFormSave\(\{ boardId, form, setForm \}\)/);
-  assert.equal(
-    (panels.match(/fetch\(/g) ?? []).length,
-    0,
-    "no panel may reach the network on its own; they all go through the builder's patch",
-  );
+  /*
+   * RE-POINTED ACROSS A SPLIT, AND WIDENED. The Edit panel left this file for
+   * `form-edit-panel.tsx` when it grew a page model, an insertion control, a
+   * shared field picker and an intake report; counting only what is left here
+   * would have quietly dropped the biggest panel out of a check whose whole
+   * subject is that a panel must not fetch. Every file that draws a builder
+   * surface is counted instead, so the guarantee is what it always was and now
+   * covers more.
+   *
+   * The rule matters more than it looks: these components re-render on every
+   * keystroke of a `DraftInput`, so a fetch inside one is a request per
+   * character against the connection pooler this product's saves already fail
+   * on. The board's columns are fetched ONCE, by the shell, and handed down.
+   */
+  const surfaces = {
+    "form-builder-panels.tsx": panels,
+    "form-edit-panel.tsx": codeOnly(await read("app/(app)/portal/form-edit-panel.tsx")),
+    "form-question-card.tsx": codeOnly(await read("app/(app)/portal/form-question-card.tsx")),
+    "form-field-picker.tsx": codeOnly(await read("app/(app)/portal/form-field-picker.tsx")),
+    "form-activity.tsx": codeOnly(await read("app/(app)/portal/form-activity.tsx")),
+    "form-builder-controls.tsx": codeOnly(
+      await read("app/(app)/portal/form-builder-controls.tsx"),
+    ),
+  };
+  for (const [name, source] of Object.entries(surfaces)) {
+    assert.equal(
+      (source.match(/fetch\(/g) ?? []).length,
+      0,
+      `${name}: no panel may reach the network on its own; they all go through the builder's patch`,
+    );
+  }
 });
 
 test("autosave cannot fail quietly", async () => {
@@ -224,16 +250,34 @@ test("the Design panel's colour pickers are not read-only fields", async () => {
   for (const match of panels.match(/<input[\s\S]{0,400}?type="color"[\s\S]{0,400?}?\/>/g) ?? []) {
     assert.doesNotMatch(match, /\svalue=\{/, "a colour picker must not be controlled without an onChange");
   }
+  /*
+   * RE-POINTED FROM A COUNT TO THE RULE, and widened rather than weakened.
+   *
+   * This asserted the number 2 — "the accent and the background swatch" — which
+   * was an inventory, not the contract. The Design panel now offers a THIRD
+   * swatch: `appearance.text.color`, which `Shell` in form-renderer.tsx has
+   * always applied as the `--pf-ink` custom property and which no control ever
+   * set, so a form with a dark Background had unreadable text and no remedy.
+   *
+   * A hard 2 would have failed on the day that gap was closed while saying
+   * nothing about whether the new swatch was correct. What actually matters is
+   * the property every colour input must have, and it is now asserted OF EACH
+   * ONE: uncontrolled (a `value` with no `onChange` is a React read-only field)
+   * and keyed (a `defaultValue` is read once at mount, so without a key it
+   * never re-seeds when Reset clears the stored colour). Three inputs, three
+   * `defaultValue`s, three keys — checked by equality with the count of inputs,
+   * so a fourth swatch added without either is caught too.
+   */
   const colourInputs = (panels.match(/type="color"/g) ?? []).length;
-  assert.equal(colourInputs, 2, "the accent and the background swatch");
+  assert.ok(colourInputs >= 2, "at least the accent and the background swatch");
   assert.equal(
     (panels.match(/defaultValue=\{appearance\./g) ?? []).length,
-    2,
-    "both swatches must be uncontrolled, so the native picker owns the live value and blur commits it once",
+    colourInputs,
+    "every swatch must be uncontrolled, so the native picker owns the live value and blur commits it once",
   );
   assert.equal(
-    (panels.match(/key=\{appearance\.(primaryColor|background\.value)/g) ?? []).length,
-    2,
+    (panels.match(/key=\{appearance\.[A-Za-z.]+ \?\? "/g) ?? []).length,
+    colourInputs,
     "each needs a key, or a defaultValue read once at mount never re-seeds when Reset changes the stored colour",
   );
 });
@@ -464,10 +508,21 @@ test("availability is checked on the read, not only on the submit", async () => 
 });
 
 test("a response is counted only once it exists", async () => {
+  /*
+   * RE-POINTED. The insert moved into `createSubmission`, so the ordering is
+   * now between the CALL and the counter rather than between two statements in
+   * one function. The claim is unchanged and is the reason it matters:
+   * incrementing first would let a rejected submission consume somebody else's
+   * place under a response limit.
+   */
   const submit = await read("app/api/forms/[token]/submit/route.ts");
-  const insert = submit.indexOf(".insert(maintenanceRequests)");
+  const insert = submit.indexOf("await createSubmission(db, {");
   const increment = submit.indexOf("responseCount} + 1");
   assert.ok(insert > 0 && increment > insert, "the counter must follow the insert, not precede it");
+  assert.ok(
+    !submit.includes(".insert(maintenanceRequests)"),
+    "and the row must be written by the shared service, not by a second copy here",
+  );
 });
 
 test("the submit route resolves the site inside the form's own organisation", async () => {
@@ -488,16 +543,37 @@ test("the submit route resolves the site inside the form's own organisation", as
    * and immune to the next reformat: the name, the organisation and the
    * canonical register must each be in the predicate.
    */
-  assert.match(submit, /eq\(sites\.name, location\)/, "matched by the submitted name");
+  /*
+   * RE-POINTED AGAIN, and the ladder grew a third rung. The lookup moved into
+   * `resolveSubmissionSite` in app/lib/submission-service.ts — one ladder for
+   * all five intake doors: exact, then case-insensitive, then this
+   * organisation's own aliases, so a submitter naming a store by the name it
+   * carried before a rename still lands on the right row. All three of the
+   * clauses this test names are still required, and each is asserted at the
+   * rung it belongs to.
+   */
   assert.match(
     submit,
-    /eq\(sites\.organisationId, record\.organisationId\)/,
+    /resolveSubmissionSite\(db, \{\s*\n\s*organisationId: record\.organisationId,/,
+    "the form's own organisation is what is passed, never one from the request",
+  );
+
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(service, /eq\(sites\.name, location\)/, "matched by the submitted name");
+  assert.match(
+    service,
+    /eq\(sites\.organisationId, input\.organisationId\)/,
     "inside the form's own organisation",
   );
   assert.match(
-    submit,
-    /registerScopeFilter\(sites\.boardId, CANONICAL_REGISTER\)/,
-    "and only the canonical register — a public submitter cannot name an instance",
+    service,
+    /registerScopeFilter\(sites\.boardId, scope\)/,
+    "and only the register the caller named — which DEFAULTS to canonical",
+  );
+  assert.match(
+    service,
+    /const scope = input\.scope === undefined \? CANONICAL_REGISTER : input\.scope;/,
+    "a public submitter who names no register cannot reach an instance",
   );
 });
 

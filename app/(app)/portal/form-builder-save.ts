@@ -137,6 +137,49 @@ export function sameFormDefinition(a: BuilderForm, b: BuilderForm): boolean {
   return JSON.stringify(formUndoBody(a)) === JSON.stringify(formUndoBody(b));
 }
 
+/**
+ * WHICH SECTIONS TWO SAVED DEFINITIONS DISAGREE ABOUT.
+ *
+ * Computed over `formUndoBody` for the same reason `sameFormDefinition` is: it
+ * is exactly the set of fields a person can change, so a key that differs here
+ * is a change somebody made and a key that does not is bookkeeping. Comparing
+ * whole forms would report `responseCount` — a submission arriving between two
+ * saves — as an edit, which would put a line in the activity log that names no
+ * editor and no change.
+ *
+ * Returned as the PATCH's own key names. The activity panel translates them
+ * for a reader; keeping the raw names here means the log and the request can be
+ * read against each other when something has gone wrong.
+ */
+export function changedSections(before: BuilderForm, after: BuilderForm): string[] {
+  const left = formUndoBody(before);
+  const right = formUndoBody(after);
+  return Object.keys(right).filter(
+    (key) => JSON.stringify(left[key]) !== JSON.stringify(right[key]),
+  );
+}
+
+/**
+ * One line of the form's activity log.
+ *
+ * A record of a state that ACTUALLY REACHED THE SERVER — entries are made at
+ * the same moment, and under the same condition, as a history step, so the log
+ * and Undo can never disagree about what happened. A change that failed, or one
+ * that changed nothing a person can see, is in neither.
+ */
+export type FormChange = {
+  id: string;
+  /** `Date.now()` at the moment the server's answer landed. */
+  at: number;
+  /** The PATCH sections that differ, from `changedSections`. */
+  sections: string[];
+  /** Set when the entry is itself an Undo, which is worth saying. */
+  undone?: boolean;
+};
+
+/** How many lines the log keeps. One per persisted change, newest last. */
+export const FORM_LOG_LIMIT = 60;
+
 export type FormSaveState = "saved" | "saving" | "unsaved" | "failed";
 
 export type FormSaveFailure = {
@@ -169,6 +212,8 @@ export type FormSave = {
   canUndo: boolean;
   /** Dismiss a failure without retrying it. The change stays in `pending`. */
   dismiss: () => void;
+  /** Every change this editor has persisted since it opened, newest first. */
+  log: FormChange[];
 };
 
 /**
@@ -212,6 +257,20 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
     depth: 0,
     board: null,
   });
+
+  /*
+   * THE ACTIVITY LOG, and it is state rather than a ref because it is rendered.
+   *
+   * Session-scoped on purpose, and the panel says so: nothing on the server
+   * records who changed a form or when — `PATCH /api/board/form` writes no
+   * audit event — so a log that claimed to be the form's whole history would be
+   * claiming something this build cannot know. What it CAN say truthfully is
+   * what has been saved from this editor since it was opened, which is the
+   * question somebody actually asks ("did that go through? what did I change?").
+   * Cleared with the history when the register changes, for the same reason:
+   * one board's changes must never be listed under another board's name.
+   */
+  const [log, setLog] = useState<FormChange[]>([]);
 
   /*
    * Refs rather than state for everything the timer touches. A debounced save
@@ -352,11 +411,22 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
         if (historyBoard.current !== boardId) {
           history.current = [];
           historyBoard.current = boardId;
+          /* The log belongs to the same register as the history it mirrors. */
+          setLog([]);
         }
         if (!restorePoint.boardKey || restorePoint.boardKey === boardId) {
           history.current = [...history.current, restorePoint].slice(-FORM_HISTORY_LIMIT);
         }
         setUndoable({ depth: history.current.length, board: boardId });
+        /* One line per persisted change, made under exactly the condition a
+           history step is made under — see `FormChange`. */
+        const sections = changedSections(restorePoint, settled);
+        setLog((current) =>
+          [
+            ...current,
+            { id: `${Date.now()}-${current.length}`, at: Date.now(), sections },
+          ].slice(-FORM_LOG_LIMIT),
+        );
       }
       /*
        * THE QUEUED BATCH'S RESTORE POINT IS THIS ANSWER, and this is the line
@@ -480,6 +550,14 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
      * which is why this can restore a definition without also overwriting the
      * password or the share token.
      */
+    /* Marked BEFORE the flush, because the flush's own success arm will add the
+       line describing what moved; this one says why it moved. */
+    setLog((current) =>
+      [
+        ...current,
+        { id: `undo-${Date.now()}-${current.length}`, at: Date.now(), sections: [], undone: true },
+      ].slice(-FORM_LOG_LIMIT),
+    );
     pending.current = formUndoBody(previous);
     void flush();
   }, [flush, boardId]);
@@ -558,7 +636,9 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
          `undoable`. */
       canUndo: undoable.depth > 0 && undoable.board === boardId,
       dismiss,
+      /* Newest first, which is the only order an activity log is read in. */
+      log: [...log].reverse(),
     }),
-    [save, state, failure, retry, undo, undoable, boardId, dismiss],
+    [save, state, failure, retry, undo, undoable, boardId, dismiss, log],
   );
 }

@@ -1,4 +1,5 @@
 import type { StoredFormConfig } from "../../lib/form-config";
+import { questionsOf } from "./form-pages";
 
 /**
  * The shape `/api/board/form` returns, shared by the builder shell, the three
@@ -47,8 +48,20 @@ export type BuilderForm = {
   optionOverrides?: Record<string, Array<{ label: string; value: string }>>;
 };
 
-/** Which builder surface is open. `view` is the live, fillable form. */
-export type BuilderMode = "view" | "edit" | "design" | "settings" | "preview";
+/**
+ * Which builder surface is open. `view` is the live, fillable form.
+ *
+ * `activity` is the fifth and is a READ: what this editor has saved since it
+ * was opened. It is a mode rather than a drawer because it has to be reachable
+ * on a phone, where a drawer over a 375px canvas is the whole screen anyway.
+ */
+export type BuilderMode =
+  | "view"
+  | "edit"
+  | "design"
+  | "settings"
+  | "preview"
+  | "activity";
 
 /**
  * The glyph beside a question in the Content list and on each canvas card.
@@ -82,21 +95,18 @@ export function questionGlyph(type: string) {
 /**
  * The questions in the order the form draws them.
  *
- * Mirrors `publicForm()` on the server — monday's `sortedQuestionsList` first,
- * then anything the order forgot, so a question that exists but is unordered is
- * shown at the end rather than vanishing from the builder. The page block is
- * dropped: it is a container, and monday does not list it as a question.
+ * DELEGATES rather than duplicating. This used to be its own walk of `order`
+ * and `questions`, and it was correct — but the Edit surface now needs the SAME
+ * walk with the page blocks left IN (they are what a page is), so the rule
+ * moved to `questionsOf`/`orderedEntries` in `form-pages.ts` where both
+ * readings come off one implementation. Two walks of the same array is how a
+ * question ends up on the canvas and not in the Content rail.
+ *
+ * The behaviour is unchanged: monday's `sortedQuestionsList` first, then
+ * anything the order forgot — so a question that exists but is unordered is
+ * shown at the end rather than vanishing — and the page block dropped, because
+ * it is a container and monday does not list it as a question.
  */
 export function orderedQuestions(config: StoredFormConfig) {
-  const byId = new Map(config.questions.map((question) => [question.id, question]));
-  const ordered: StoredFormConfig["questions"] = [];
-  for (const id of config.order) {
-    const question = byId.get(id);
-    if (question) {
-      ordered.push(question);
-      byId.delete(id);
-    }
-  }
-  for (const remaining of byId.values()) ordered.push(remaining);
-  return ordered.filter((question) => question.type !== "PAGE_BLOCK");
+  return questionsOf(config);
 }

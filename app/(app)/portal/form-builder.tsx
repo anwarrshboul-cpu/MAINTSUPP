@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components";
-import { FormDesignPanel, FormEditPanel, FormSettingsPanel } from "./form-builder-panels";
+import FormActivity from "./form-activity";
+import type { BuilderColumn } from "./form-bindings";
+import { FormDesignPanel, FormSettingsPanel } from "./form-builder-panels";
+import { FormEditPanel } from "./form-edit-panel";
 import FormPreview from "./form-preview";
 import FormShareDialog from "./form-share-dialog";
 import type { BuilderForm, BuilderMode } from "./form-builder-model";
@@ -15,6 +18,24 @@ import "./form-builder.css";
  * coalescing. See `patch` below for why the list is short rather than long.
  */
 const DEBOUNCED_SECTIONS = new Set(["title", "description", "appearance", "accessibility"]);
+
+/**
+ * The four editing surfaces, and their words, in one place.
+ *
+ * A tuple list rather than a string array with a ternary chain beside it: the
+ * chain was already two levels deep for three modes and would have been three
+ * for four, which is the shape that eventually labels a button wrong. `editing`
+ * below is derived from this same list, so a mode added here cannot be one the
+ * "Back to view" button has forgotten about — which would strand a phone inside
+ * a panel with no way out, the exact failure the removed `matchMedia` reset
+ * used to cause.
+ */
+const EDITING_MODES: ReadonlyArray<readonly [BuilderMode, string]> = [
+  ["edit", "Edit"],
+  ["design", "Design"],
+  ["settings", "Settings"],
+  ["activity", "Activity"],
+];
 
 /**
  * The Form tab: monday's form builder over our own live form.
@@ -97,6 +118,24 @@ export default function FormBuilder({
   const [form, setForm] = useState<BuilderForm | null>(null);
   const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
   /*
+   * EVERY COLUMN OF THIS BOARD, not the subset the form happens to ask about.
+   *
+   * The Content panel could only ever offer the questions already in the stored
+   * configuration, so a column added to the board after the form was created
+   * was simply unreachable from the builder: there was no control anywhere that
+   * could put it on the form. `/api/board/form` does not carry the column list
+   * (it sends the form and the board's groups), and it is not this batch's file
+   * to change — but `GET /api/board/columns` has always returned exactly this,
+   * live columns only, scoped to the organisation and the board, in the board's
+   * own order. So the builder asks it.
+   *
+   * FETCHED HERE, IN THE SHELL, and handed down. The panels must not reach the
+   * network on their own — `tests/stage-twentynine-form-builder.test.mjs` holds
+   * that, and it is right: a panel that fetches is a panel that re-fetches on
+   * every re-render of a canvas that re-renders on every keystroke.
+   */
+  const [columns, setColumns] = useState<BuilderColumn[]>([]);
+  /*
    * This register has no form YET, and one can be made for it — the server's
    * `canCreate` on the 404. Kept apart from `form === null`, which also covers
    * "the request failed": offering to mint a public link because a fetch timed
@@ -161,6 +200,33 @@ export default function FormBuilder({
          */
         if (active) setForm(null);
       });
+    return () => {
+      active = false;
+    };
+  }, [boardId]);
+
+  /*
+   * `[boardId]` for the same reason the form's own load has it: the column list
+   * belongs to one register, and offering another register's columns in the
+   * field picker would bind a question to a column this board does not have.
+   *
+   * A failure here is silent on purpose. The columns are what the picker and
+   * the "has nowhere to save its answer" check are built from; without them the
+   * picker says "Loading the board's columns…" and the binding check stands
+   * down (see `boundIds` in form-intake-warnings.ts) rather than accusing every
+   * question on the form of being unbound because a second request timed out.
+   */
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/board/columns?board=${encodeURIComponent(boardId)}`, {
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as { columns?: BuilderColumn[] };
+        if (active && Array.isArray(payload.columns)) setColumns(payload.columns);
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
@@ -376,7 +442,7 @@ export default function FormBuilder({
     );
   }
 
-  const editing = mode === "edit" || mode === "design" || mode === "settings";
+  const editing = EDITING_MODES.some(([value]) => value === mode);
 
   return (
     <div className="form-builder">
@@ -403,7 +469,7 @@ export default function FormBuilder({
         </button>
 
         <div className="form-builder__modes" role="group" aria-label="Form builder">
-          {(["edit", "design", "settings"] as const).map((value) => (
+          {EDITING_MODES.map(([value, label]) => (
             <button
               key={value}
               type="button"
@@ -411,7 +477,7 @@ export default function FormBuilder({
               aria-pressed={mode === value}
               onClick={() => setMode(mode === value ? "view" : value)}
             >
-              {value === "edit" ? "Edit" : value === "design" ? "Design" : "Settings"}
+              {label}
             </button>
           ))}
         </div>
@@ -565,11 +631,14 @@ export default function FormBuilder({
       )}
 
       <div className="form-builder__stage" data-mode={mode}>
-        {mode === "edit" && <FormEditPanel form={form} patch={patch} busy={busy} />}
+        {mode === "edit" && (
+          <FormEditPanel form={form} patch={patch} busy={busy} columns={columns} />
+        )}
         {mode === "design" && <FormDesignPanel form={form} patch={patch} busy={busy} />}
         {mode === "settings" && (
           <FormSettingsPanel form={form} patch={patch} busy={busy} groups={groups} />
         )}
+        {mode === "activity" && <FormActivity log={saver.log} canUndo={saver.canUndo} />}
         {/*
           THE LIVE FILLABLE FORM, ONLY WHERE IT WOULD FILE HERE.
 
