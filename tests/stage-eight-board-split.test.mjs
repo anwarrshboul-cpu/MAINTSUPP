@@ -107,6 +107,20 @@ test("no board file exceeds a reviewable size", async () => {
     // thing to be dropped without anyone noticing.
     "app/(app)/portal/board-view-writes.ts": 150,
     /*
+     * Split out of board-ordering when the account of what a row is CALLED grew
+     * longer than the code. That file's docstring says it is about "how rows
+     * sort, and where a dragged row lands", and naming was neither — it was
+     * simply where the rule happened to live while it was three lines and
+     * wrong in three places.
+     *
+     * Capped for the same reason as the two notes above, and one more: it has
+     * to stay a LEAF. Its only import is `import type`, which is what lets
+     * `tests/board-row-name.test.mjs` load and CALL it from a `data:` URL
+     * rather than assert its spelling. A runtime import here would take that
+     * away, so the ceiling is also a nudge to keep this module about one rule.
+     */
+    "app/(app)/portal/board-row-name.ts": 120,
+    /*
      * Split out of live-board when the ordered sort needed a comparator that
      * could be tested against rows rather than eyeballed, and grown again when
      * the option-order table followed it out — that extraction is what bought

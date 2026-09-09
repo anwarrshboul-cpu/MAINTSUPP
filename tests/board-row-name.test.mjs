@@ -51,17 +51,49 @@ const codeOnly = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 /*
- * `board-ordering.ts`'s only two imports are `import type`, which the
- * transpiler erases — so it loads from a `data:` URL with nothing to rewrite.
+ * RE-POINTED WITH THE SPLIT. These functions moved to `board-row-name.ts` when
+ * the account of why the rule was wrong pushed `board-ordering.ts` past its
+ * 200-line ceiling — the assertions follow the contract to its new home rather
+ * than being dropped, and `board-ordering.ts` re-exports both so no caller had
+ * to be renamed.
+ *
+ * Its only import is `import type`, which the transpiler erases, so it loads
+ * from a `data:` URL with nothing to rewrite — the reason the split had to put
+ * naming in a leaf and not, say, fold it into a module that reaches drizzle.
  * The rule is asserted by CALLING it rather than by matching its source, which
  * is what makes these assertions about behaviour instead of about spelling.
  */
 const ordering = await (async () => {
-  const source = await read("app/(app)/portal/board-ordering.ts");
+  const source = await read("app/(app)/portal/board-row-name.ts");
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   });
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+})();
+
+/*
+ * `board-ordering.ts` needs one specifier rewritten by exact string, because
+ * after the split it takes `displaySource` as a VALUE import and a relative
+ * specifier cannot resolve from a `data:` URL. The pattern ten other suites
+ * use; kept here rather than asserting the grouping rule from source text,
+ * because the point is what the two functions ANSWER, not how they are spelt.
+ */
+const sorting = await (async () => {
+  const leaf = await read("app/(app)/portal/board-row-name.ts");
+  const leafModule = `data:text/javascript;base64,${Buffer.from(
+    ts.transpileModule(leaf, {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+    }).outputText,
+  ).toString("base64")}`;
+  const source = await read("app/(app)/portal/board-ordering.ts");
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  });
+  return import(
+    `data:text/javascript;base64,${Buffer.from(
+      outputText.replace(/from ["']\.\/board-row-name["']/g, `from "${leafModule}"`),
+    ).toString("base64")}`
+  );
 })();
 
 const job = (over = {}) => ({
@@ -129,7 +161,7 @@ test("the Name cell still wins wherever one exists", () => {
 });
 
 test("the board key no longer decides what a row is called", async () => {
-  const source = await read("app/(app)/portal/board-ordering.ts");
+  const source = await read("app/(app)/portal/board-row-name.ts");
   const fn = source.slice(source.indexOf("export function boardItemName"));
   const body = fn.slice(0, fn.indexOf("\n}\n") + 3);
   assert.doesNotMatch(
@@ -147,8 +179,12 @@ test("grouping by Name still groups by provenance, on purpose", () => {
    * `boardItemName` first — but "Group by → Name" does, and grouping by a
    * free-text job title produces one group per row, which is not a grouping.
    */
-  assert.equal(ordering.systemColumnSortValue(job(), "name"), "Incoming form answer");
-  assert.equal(ordering.systemColumnSortValue(job({ source: "Manual" }), "name"), "Manual");
+  assert.equal(sorting.systemColumnSortValue(job(), "name"), "Incoming form answer");
+  assert.equal(sorting.systemColumnSortValue(job({ source: "Manual" }), "name"), "Manual");
+  /* And the re-export holds, so the six modules that take these off
+     board-ordering did not have to be renamed by the split. */
+  assert.equal(typeof sorting.boardItemName, "function");
+  assert.equal(typeof sorting.displaySource, "function");
 });
 
 test("nothing hand-writes the rule a second time", async () => {
@@ -175,7 +211,7 @@ test("nothing hand-writes the rule a second time", async () => {
      file's own docblock does it four times — and a rule against that is a rule
      against writing the explanation down. Every source check in this suite
      strips them first, for the same reason. */
-  const ordering = codeOnly(await read("app/(app)/portal/board-ordering.ts"));
+  const ordering = codeOnly(await read("app/(app)/portal/board-row-name.ts"));
   const occurrences = ordering.split('"Incoming form answer"').length - 1;
   assert.equal(occurrences, 1, "the string is written once, inside displaySource");
 });
