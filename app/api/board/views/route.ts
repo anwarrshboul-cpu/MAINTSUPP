@@ -5,7 +5,12 @@ import {
   formConfigurations,
   maintenanceBoardColumns,
 } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import {
+  anonymousRefusal,
+  busyRefusal,
+  scopedDb,
+  scopedDbWithCapability,
+} from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { RETENTION_DAYS, sendBoardViewToBin } from "../../../lib/recycle-bin";
 /* `DEFAULT_BOARD_KEY` is deliberately NOT imported any more. `seedViews` was
@@ -177,6 +182,28 @@ function unavailable(error?: unknown) {
       { status: 404 },
     );
   }
+  /*
+   * OUT OF CONNECTIONS IS NOT "UNAVAILABLE", IT IS "BUSY", AND THE TAB STRIP
+   * SHOULD SAY SO.
+   *
+   * This is the arm the banner in the screenshot came out of. `GET` here is a
+   * read that WRITES — `seedViews` — so it needs a live connection as much as
+   * any save does, and when the pooler is full both fail together. That is why
+   * "Views could not be loaded." and "The board change could not be saved."
+   * arrive on screen at the same moment: one cause, two blanket 503s.
+   */
+  const busy = busyRefusal(error, "Board views could not be loaded.");
+  if (busy) return busy;
+  /*
+   * EVERY OTHER FAILURE IS LOGGED BEFORE IT IS SWALLOWED.
+   *
+   * This route and `/api/board` were the only two board routes with no
+   * `console.error` in the catch, which is why neither of them appears in the
+   * deployment's error clusters while `/api/board/members`, `/api/board/
+   * settings` and `/api/automations` — same failure, same minute — all do. A
+   * 503 nobody can trace is a defect that cannot be found twice.
+   */
+  console.error("[/api/board/views]", error);
   return Response.json({ error: "Board views are temporarily unavailable." }, { status: 503 });
 }
 

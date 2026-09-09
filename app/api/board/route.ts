@@ -65,7 +65,13 @@ import {
   reconcileAttachmentCounts,
   withCountedAttachments,
 } from "../../lib/attachment-counts";
-import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
+import {
+  PRIMARY_ORGANISATION_ID,
+  anonymousRefusal,
+  busyRefusal,
+  scopedDb,
+  scopedDbWithCapability,
+} from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import { selectInChunks } from "../../lib/sql-batching";
 import {
@@ -2399,6 +2405,24 @@ export async function POST(request: Request) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
+    /*
+     * NEITHER IS A FULL CONNECTION POOL. See `busyRefusal`.
+     *
+     * This is the arm the "+ Add column" toast came out of. The write itself
+     * is sound — the same call succeeds against SQLite and against Postgres
+     * whenever a connection is free — so the useful thing to say is that the
+     * workspace ran out of connections, not that the board refused the change.
+     * The two read very differently to somebody deciding whether to try again
+     * or to go looking for a permission they have not got.
+     */
+    const busy = busyRefusal(error, "The board change was not saved.");
+    if (busy) return busy;
+    /*
+     * ANYTHING ELSE IS LOGGED BEFORE IT IS SWALLOWED — the same omission, and
+     * the same reasoning, as `/api/board/views`. Without this the only record
+     * of a board write failing is a toast on somebody's screen.
+     */
+    console.error("[/api/board]", error);
     return Response.json(
       { error: "The board change could not be saved." },
       { status: 503 },
@@ -3314,6 +3338,24 @@ export async function PATCH(request: Request) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
+    /*
+     * NEITHER IS A FULL CONNECTION POOL. See `busyRefusal`.
+     *
+     * This is the arm the "+ Add column" toast came out of. The write itself
+     * is sound — the same call succeeds against SQLite and against Postgres
+     * whenever a connection is free — so the useful thing to say is that the
+     * workspace ran out of connections, not that the board refused the change.
+     * The two read very differently to somebody deciding whether to try again
+     * or to go looking for a permission they have not got.
+     */
+    const busy = busyRefusal(error, "The board change was not saved.");
+    if (busy) return busy;
+    /*
+     * ANYTHING ELSE IS LOGGED BEFORE IT IS SWALLOWED — the same omission, and
+     * the same reasoning, as `/api/board/views`. Without this the only record
+     * of a board write failing is a toast on somebody's screen.
+     */
+    console.error("[/api/board]", error);
     return Response.json(
       { error: "The board change could not be saved." },
       { status: 503 },

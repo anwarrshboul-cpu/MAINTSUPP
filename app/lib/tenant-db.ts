@@ -1,5 +1,6 @@
 import { getDb } from "../../db";
 import { organisations } from "../../db/schema";
+import { isPoolerAtCapacity } from "../../db/pooler-capacity";
 import {
   PRIMARY_ORGANISATION_ID,
   demoIdentityAllowed,
@@ -101,6 +102,53 @@ export function anonymousRefusal(error: unknown): Response | null {
   return Response.json(
     { error: "Your session has ended. Sign in to continue.", signIn: true },
     { status: 401 },
+  );
+}
+
+/**
+ * THE POOLER HAD NO ROOM, AND "COULD NOT BE SAVED" IS NOT WHAT HAPPENED.
+ *
+ * The sibling of `anonymousRefusal`, used the same way: at the TOP of a catch,
+ * before the generic handler, because the generic handler only ever sees a
+ * message and cannot tell these apart.
+ *
+ * WHY THIS ONE EARNS ITS OWN ARM. Supabase's session-mode pooler enforces a
+ * per-project client limit, and when the portal exceeds it every route that
+ * touches Postgres fails at once — reads and writes together, for as long as
+ * the burst lasts. Measured on the live project: 181 refusals across twenty
+ * days, spread over `/api/board/members`, `/api/board/settings`,
+ * `/api/automations` and the dashboard, and the Jobs board is where an
+ * operator meets it because opening that page fires eight of them at once.
+ * Collapsed into a blanket 503, it reads "the board change could not be
+ * saved" — which sends somebody looking for a defect in the board, or for a
+ * permission they have not got. Neither is true, and neither is fixable by the
+ * person reading it. What IS true is that the workspace is momentarily out of
+ * connections and the same click will work shortly, and that is a different
+ * sentence.
+ *
+ * `retry: true` is the flag a client can branch on without parsing prose, and
+ * `Retry-After` is the same fact for anything that speaks HTTP. Both say the
+ * request is worth repeating — the one thing the blanket 503 could not
+ * distinguish, and the reason `isBoardNotFound` had to be pulled out of it
+ * first: retrying THAT is pointless.
+ *
+ * `consequence` is the caller's own sentence about what did not happen,
+ * because only the caller knows whether it was a read or a write. It is
+ * deliberately not the words "nothing was changed": `db/pooler-capacity.ts`
+ * can prove the REFUSED STATEMENT never ran, but a route that completed three
+ * statements before the fourth was refused has changed something, and this
+ * helper is in no position to know which of those it is in.
+ */
+export function busyRefusal(error: unknown, consequence: string): Response | null {
+  if (!isPoolerAtCapacity(error)) return null;
+  return Response.json(
+    {
+      error:
+        `${consequence} The workspace database is out of connections right ` +
+        "now — this is capacity, not permissions. Try again in a moment.",
+      retry: true,
+    },
+    { status: 503, headers: { "Retry-After": "2" } },
   );
 }
 

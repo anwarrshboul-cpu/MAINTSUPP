@@ -24,10 +24,18 @@
  * no second place to forget the board.
  */
 
-/** What the strip does with a write that failed: show the server's sentence. */
+/**
+ * What the strip does with a write that failed: show the server's sentence.
+ *
+ * `retryable` is the server's own `retry` flag, not a guess made from the
+ * status code. A 503 means both "the workspace is out of database connections,
+ * try that again" and "something threw and nobody knows what", and only the
+ * route can tell those apart — see `busyRefusal` in `app/lib/tenant-db.ts`.
+ * Offering Retry on the second would be a button that cannot work.
+ */
 export type BoardViewWrite =
   | { ok: true; payload: Record<string, unknown> }
-  | { ok: false; error: string };
+  | { ok: false; error: string; retryable: boolean };
 
 /**
  * One view write, scoped to `boardId`.
@@ -52,7 +60,11 @@ export async function writeBoardView(
   });
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {
-    return { ok: false, error: String(payload.error ?? "That did not work.") };
+    return {
+      ok: false,
+      error: String(payload.error ?? "That did not work."),
+      retryable: payload.retry === true,
+    };
   }
   return { ok: true, payload };
 }
