@@ -183,8 +183,8 @@ async function usage(db: Database, orgId: string) {
 }
 
 export async function GET(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const context = await scopedDb(request);
     const row = await readUser(context.db, context.identityEmail);
 
@@ -289,8 +289,8 @@ export async function GET(request: Request) {
  * absent: it belongs to `/api/auth/password`, which another route owns.
  */
 export async function PATCH(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const context = await scopedDb(request);
     const existing = await readUser(context.db, context.identityEmail);
     if (!existing) {

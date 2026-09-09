@@ -105,8 +105,8 @@ function unavailable(error: unknown) {
  * the same class of mistake this stage is undoing.
  */
 export async function GET(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
@@ -220,8 +220,8 @@ export async function GET(request: Request) {
  * would push people towards leaving the mistake in place.
  */
 export async function POST(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
@@ -286,8 +286,8 @@ const RESTORED_ENTITY_TYPES: Record<string, string> = {
  * one is reversible for thirty days.
  */
 export async function DELETE(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.delete");
     if (guard.denied) return guard.denied;
     const { db, orgId, actor, identityEmail, session } = guard.scope;

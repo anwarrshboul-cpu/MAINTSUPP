@@ -58,8 +58,8 @@ function describeAgent(agent: string | null) {
 }
 
 export async function GET(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const context = await scopedDb(request);
     const userId = await currentUserId(context.db, context.identityEmail);
     if (!userId) {
@@ -129,8 +129,8 @@ export async function GET(request: Request) {
  * still does the load-bearing half: every stored token stops resolving.
  */
 export async function POST(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const context = await scopedDb(request);
     const userId = await currentUserId(context.db, context.identityEmail);
     if (!userId) {
