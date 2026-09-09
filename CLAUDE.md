@@ -171,9 +171,26 @@ regression, and do not weaken them to get green.
 
 ## Editing notes
 
-Line endings are **per file** and there is no `.gitattributes` — `app/api/files/route.ts`
-is CRLF while `portal-app.tsx` and `globals.css` are LF. Normalise before matching
-and restore the file's own ending when writing, or diffs become unreadable.
+Line endings: **the committed blob is LF**, and `core.autocrlf=true` rewrites the
+working tree to CRLF on checkout — so a file git has touched is CRLF on disk,
+while one an editor rewrote keeps whatever the editor wrote. Read a file's actual
+bytes before matching, and restore what was there when writing, or diffs become
+unreadable. This paragraph used to say `app/api/files/route.ts` was CRLF while
+`portal-app.tsx` and `globals.css` were LF; measured, all three blobs are LF and
+the first two are CRLF on disk. The wrong specifics misdirected two people in one
+batch, so trust the measurement, not a remembered list.
+
+`app/globals.css` is the one real exception — **mixed in the blob itself**, 16,621
+CRLF against 20 LF. Normalising it and restoring the dominant ending silently
+flips those 20 lines, turning an 18-line addition into 38 insertions and 20
+deletions. Splice a mixed file at byte level; never normalise it.
+
+**Bash cannot measure any of this here.** Inside `$( )`, `$'\r'` expands to an
+empty string, so a `grep -c` for it becomes `grep -c ''` and matches every line —
+every file reads as entirely CRLF, including pure-LF ones. `file` mis-reports too,
+and `git show HEAD:path` may apply the smudge filter. Count bytes in Python
+instead: the CRLF count is `data.count(b"\r\n")`, and the bare-LF count is
+`data.count(b"\n")` minus that.
 
 Never commit `.mcp.json` (it carries a project ref), `.env*`, `.wrangler/`, or
 anything under `db/monday-export/` — that directory holds the client's live data
