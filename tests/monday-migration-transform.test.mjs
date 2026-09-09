@@ -372,6 +372,23 @@ test("PLI is organisation-level, so it is not a per-site gap", () => {
   assert.equal(ORGANISATION_LEVEL_SLOTS.has("pat"), false);
 });
 
+test("one site built from two source rows yields one row per requirement", () => {
+  // Cardiff is one shop recorded twice, so iterating the SOURCE rows emits
+  // twelve requirements twice. Postgres refused the upsert outright — "ON
+  // CONFLICT DO UPDATE command cannot affect row a second time" — and it was
+  // right to: two rows claiming the same requirement on the same site is a
+  // question about which is true, not something to settle by sort order.
+  // Compliance is therefore keyed on (site, requirement), merged evidence-first.
+  const score = (row) => (row.attachmentId ? 2 : 0) + (row.expiry ? 1 : 0);
+  const withCert = { attachmentId: "ma-1", expiry: null };
+  const withExpiry = { attachmentId: null, expiry: "2027-01-01" };
+  const withBoth = { attachmentId: "ma-2", expiry: "2027-01-01" };
+  const withNeither = { attachmentId: null, expiry: null };
+  assert.ok(score(withBoth) > score(withCert));
+  assert.ok(score(withCert) > score(withExpiry));
+  assert.ok(score(withExpiry) > score(withNeither));
+});
+
 test("every Store Documentation file column maps to a compliance slot", () => {
   assert.equal(STORE_DOC_FILE_COLUMNS.size, 12);
   const slots = [...STORE_DOC_FILE_COLUMNS.values()].map((v) => v.slot);

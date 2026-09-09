@@ -387,6 +387,22 @@ export function planAttachments({ maintenance, storeDoc }, manifestByAsset) {
  * about — plus the anomalies that say why a requirement is not evidenced.
  */
 export function planCompliance(storeDocItems, aliasIndex, attachments, today) {
+  /*
+   * Keyed on (site, requirement), not on (source row, requirement).
+   *
+   * Cardiff is one site built from two Store Documentation rows, so iterating
+   * the source rows emits twelve requirements twice and Postgres refuses the
+   * upsert outright — "ON CONFLICT DO UPDATE command cannot affect row a second
+   * time". It was right to: two rows claiming to be the same requirement on the
+   * same site is a question about which one is true, not something to resolve by
+   * whichever happened to sort last.
+   *
+   * The merge rule is evidence-first. A requirement with a usable certificate
+   * beats one without; an expiry beats no expiry. So Cardiff's PAT ends up
+   * carrying the certificate and date that actually exist, from whichever of the
+   * two source rows held them.
+   */
+  const merged = new Map();
   const rows = [];
   const anomalies = [];
   const bySite = new Map();
@@ -417,27 +433,21 @@ export function planCompliance(storeDocItems, aliasIndex, attachments, today) {
       const forSlot = files.filter((f) => f.slot === slot.slot);
       const usable = forSlot.filter((f) => f.verifiable);
       const expiry = slot.expiry ? T.dateValue(cellText(item, slot.expiry)) : null;
-      if (forSlot.length === 0 && !expiry) {
-        // Nothing at all. Still recorded, so the requirement enters the queue.
-        const state = T.complianceState({ slot: slot.slot, hasCertificate: false, expiry: null });
-        rows.push({ canonical, slot: slot.slot, label: slot.label, status: state.status,
-          expiry: null, attachmentId: null, organisationLevel: T.ORGANISATION_LEVEL_SLOTS.has(slot.slot) });
-        anomalies.push({ kind: state.flag, entityType: "compliance", entityId: `${canonical}:${slot.slot}`,
-          sourceName: name, detail: `${slot.label}: no certificate and no expiry on the source board` });
-        continue;
-      }
+      const key = `${canonical}::${slot.slot}`;
+      const previous = merged.get(key);
       const state = T.complianceState({
         slot: slot.slot, hasCertificate: usable.length > 0, expiry, today,
       });
-      rows.push({
+      const candidate = {
         canonical, slot: slot.slot, label: slot.label, status: state.status, expiry,
         attachmentId: usable.length ? usable[0].id : null,
         organisationLevel: T.ORGANISATION_LEVEL_SLOTS.has(slot.slot),
-      });
-      if (state.flag) {
-        anomalies.push({ kind: state.flag, entityType: "compliance", entityId: `${canonical}:${slot.slot}`,
-          sourceName: name, detail: `${slot.label}: ${state.flag}` });
-      }
+        flag: state.flag,
+        sourceName: name,
+      };
+      // Evidence-first: a certificate beats none, then an expiry beats none.
+      const score = (row) => (row.attachmentId ? 2 : 0) + (row.expiry ? 1 : 0);
+      if (!previous || score(candidate) > score(previous)) merged.set(key, candidate);
       for (const held of forSlot.filter((f) => !f.verifiable)) {
         const suspicion = T.SUSPICIOUS_ASSET_NAMES.get(held.originalName) ?? {};
         anomalies.push({
@@ -452,6 +462,17 @@ export function planCompliance(storeDocItems, aliasIndex, attachments, today) {
             "preserved with its bytes and checksum, but NOT accepted as evidence for this requirement",
         });
       }
+    }
+  }
+
+  for (const row of merged.values()) {
+    rows.push(row);
+    if (row.flag) {
+      anomalies.push({
+        kind: row.flag, entityType: "compliance",
+        entityId: `${row.canonical}:${row.slot}`, sourceName: row.sourceName,
+        detail: `${row.label}: ${row.flag}`,
+      });
     }
   }
   return { rows, anomalies };
