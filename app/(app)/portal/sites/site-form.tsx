@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import { FormField as Field } from "./form-field";
+/*
+ * 2H — the capture half of address handling. Geocoding is NOT configured in
+ * this product and nothing here pretends it is; what this gives the form is a
+ * canonical spelling and a sentence when the value cannot be one.
+ */
+import { checkPostcode } from "../../../lib/uk-postcode";
 import { SectionPanel, SectionTabs } from "./section-tabs";
 import {
   ApiError,
@@ -290,7 +296,36 @@ export function SiteForm({
         <Field id="addr1" label="Address line 1" value={form.addressLine1} onChange={set("addressLine1")} required />
         <Field id="addr2" label="Address line 2" value={form.addressLine2} onChange={set("addressLine2")} />
         <Field id="city" label="Town or city" value={form.city} onChange={set("city")} />
-        <Field id="postcode" label="Postcode" value={form.postcode} onChange={set("postcode")} />
+        {/*
+          * 2H — THE ONLY FIELD ON THIS FORM WITH A FORMAT THE SERVER WILL NOT
+          * REFUSE.
+          *
+          * `POST`/`PATCH /api/sites` canonicalises a postcode it recognises and
+          * stores anything else exactly as typed, because this product has
+          * sites outside the UK. That is the right storage rule and it leaves a
+          * gap: a UK typo is saved silently and is not discovered until
+          * somebody tries to use it. So the check is here, as an ADVISORY
+          * message rather than a block — see `FormField.problem`.
+          *
+          * `onBlur` canonicalises rather than `onChange`, and that is not a
+          * detail: rewriting the value on every keystroke fights the person
+          * typing it. "sw1a1aa" becomes "SW1A 1AA" when they leave the field,
+          * which is the same instant the message would appear.
+          *
+          * The hint is shown even when nothing is wrong, because a field that
+          * only states its rule after you break it teaches the rule by
+          * punishing you.
+          */}
+        <Field
+          id="postcode"
+          label="Postcode"
+          value={form.postcode}
+          onChange={set("postcode")}
+          onBlur={() => set("postcode")(checkPostcode(form.postcode).value)}
+          problem={checkPostcode(form.postcode).problem}
+          placeholder="SW1A 1AA"
+          hint="Tidied to the standard spelling when you leave the field. A postal code from outside the UK is kept exactly as typed."
+        />
         <Field id="country" label="Country" value={form.country} onChange={set("country")} />
         {/*
           * Free text rather than a select, because `region` is not one of the

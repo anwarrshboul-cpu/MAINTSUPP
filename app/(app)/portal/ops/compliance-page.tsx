@@ -62,6 +62,15 @@ import {
   ResponsibilityCoverageLine,
   type ResponsibilityCoverage,
 } from "./compliance-responsibility";
+/*
+ * 2B/2C/2D — the register's setup tools, in a file of their own.
+ *
+ * Reached as `?view=setup`, beside the four reading views, because the work is
+ * the same work: somebody looking at a register that does not describe their
+ * estate fixes it here. Kept out of this file because this one is already a
+ * thousand lines and the three tools have nothing to say to the accordion.
+ */
+import { ComplianceSetup } from "./compliance-setup";
 
 type Completion = {
   satisfied: number;
@@ -316,6 +325,9 @@ export function CompliancePage({
                  the same register read by one more question, and it shares the
                  filter bar, the chips and the URL state with the other three. */
               ["confirm", "Confirm responsibilities"],
+              /* Last, because it is the least often wanted and the only one
+                 that writes. */
+              ["setup", "Set up"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -384,6 +396,15 @@ export function CompliancePage({
           <SkeletonRow lines={3} height={96} />
           <SkeletonRow lines={3} height={96} />
         </div>
+      ) : view === "setup" ? (
+        /*
+          BEFORE the empty-state guards below, and this is the case that proves
+          why they have to be. "No compliance requirements are set up yet" is
+          precisely the state somebody comes here to fix, so letting that guard
+          short-circuit would make the fix unreachable from the screen that
+          reports the problem.
+        */
+        <ComplianceSetup onChanged={summary.reload} />
       ) : view === "confirm" ? (
         /*
           BEFORE the two empty-state guards below, deliberately. Those describe

@@ -12,6 +12,12 @@ import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/te
 import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
+/* 2F — one definition of "this store is not real"; see `demo-sites.ts` for why
+   it is a reserved group slug and a read-only fixture convention, not a column. */
+import { isDemoSite } from "../../lib/demo-sites";
+/* 2H — the capture half of address handling. There is no geocoding provider in
+   this product and this file does not invent one. */
+import { formatUkPostcode } from "../../lib/uk-postcode";
 import {
   isPlaceholderManager,
   loadSiteMetrics,
@@ -394,7 +400,24 @@ function sitePayload(data: Record<string, unknown>) {
     addressLine1: text(data.addressLine1 ?? data.address, 300),
     addressLine2: optionalText(data.addressLine2, 300),
     city: optionalText(data.city, 120),
-    postcode: optionalText(data.postcode, 20),
+    /*
+     * 2H — CANONICALISED HERE, on the one path POST and PATCH share, so the
+     * column cannot hold "m1 1ae" from one screen and "M1 1AE" from another.
+     * `formatUkPostcode` returns anything it cannot parse trimmed and unchanged
+     * rather than emptied: this product has sites outside the UK, and a
+     * normaliser that silently discarded an overseas postal code would be a
+     * data loss dressed as a tidy-up.
+     *
+     * Deliberately NOT refused when it is not a UK postcode. A postcode is a
+     * detail `siteCompleteness` chases, not a precondition for recording that a
+     * store exists — see `checkPostcode`, which is what the form shows.
+     */
+    postcode: optionalText(
+      data.postcode === undefined || data.postcode === null
+        ? data.postcode
+        : formatUkPostcode(String(data.postcode)),
+      20,
+    ),
     country: text(data.country, 80) || "United Kingdom",
     latitude: optionalNumber(data.latitude),
     longitude: optionalNumber(data.longitude),
@@ -928,6 +951,21 @@ export async function GET(request: Request) {
            blank, because a blank prompts somebody to fill it in. */
         managerDisplay: realManagerName(row.managerName, row.manager),
         managerPlaceholder: isPlaceholderManager(row.managerName ?? row.manager),
+        /*
+         * 2F — whether this row is a demonstration store.
+         *
+         * Carried as a FIELD rather than left for the browser to work out, so
+         * every consumer of this payload gets the same answer from the same
+         * predicate. Two screens disagreeing about which stores are real is a
+         * worse failure than either answer, because the disagreement is the
+         * part nobody notices.
+         *
+         * Group membership is not in scope for this row projection — groups are
+         * fetched separately and are per register — so this is the name and code
+         * convention only. That is the read-only half by design: it recognises
+         * the purpose-built fixtures and can never promote a client's store.
+         */
+        demo: isDemoSite({ name: row.name, code: row.code }),
       })),
       groups,
       siteTypes,
@@ -950,6 +988,9 @@ export async function GET(request: Request) {
         withPostcode: rows.filter((row) => Boolean((row.postcode ?? "").trim())).length,
         withCode: rows.filter((row) => Boolean((row.code ?? "").trim())).length,
         withBudget: rows.filter((row) => row.annualBudgetPence !== null).length,
+        /* 2F — so a list can offer to hide them and say how many it would hide.
+           Counted over the SAME rows as `total`, so the two never disagree. */
+        demo: rows.filter((row) => isDemoSite({ name: row.name, code: row.code })).length,
       },
     });
   } catch (error) {

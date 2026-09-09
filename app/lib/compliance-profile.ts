@@ -1,8 +1,16 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "../../db";
 import { complianceDocuments } from "../../db/schema";
 import { storeDocumentationKinds } from "../../db/monday-board-spec";
 import { DUTY_HOLDER_UNCONFIRMED } from "./compliance-duty-holder";
+/*
+ * 2C — the estate's own words for these certificates. `kind` was compared with
+ * `===`, and real estates do not write "Water Hygiene"; they write "Legionella
+ * risk assessment". See `compliance-vocabulary.ts` for the eight names this was
+ * measured against and why a resolver, not an editable list, is what the data
+ * asked for.
+ */
+import { buildKindResolver, type KindResolver } from "./compliance-vocabulary";
 import { chunkRows } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -84,14 +92,29 @@ export type ComplianceProfileResult = {
   /**
    * Kinds that already had a row and were left exactly as they were.
    *
-   * MATCHED, NEVER DUPLICATED — matched on `kind`, which is the register's own
-   * vocabulary and the same key `compliance_site_kind_idx` is built on. A
-   * second row for the same (site, kind) would be counted twice by both loops
-   * in `readComplianceRegister` and there is no unique constraint to stop it,
-   * so this check is the only thing standing between a repair and a double
-   * count.
+   * MATCHED, NEVER DUPLICATED. A second row for the same requirement would be
+   * counted twice by both loops in `readComplianceRegister` and there is no
+   * unique constraint to stop it, so this check is the only thing standing
+   * between a repair and a double count.
+   *
+   * MATCHED THROUGH THE RESOLVER, not with `===`, and that change is the whole
+   * of item 2C. The old comparison was against `kind` exactly, so a site
+   * already holding "Legionella risk assessment" was handed "Water Hygiene"
+   * beside it and a site holding "Fire risk assessment" was handed "Fire Risk
+   * Assessment" — a duplicate created by one capital letter. Measured on
+   * Staging: twelve stores holding 204 requirements where about 66 is the
+   * honest number, and a confirm queue asking about each certificate twice.
    */
   matched: string[];
+  /**
+   * Requirements matched under a name that is not the template's.
+   *
+   * `{ kind: "Water Hygiene", matchedAs: "Legionella risk assessment" }` — the
+   * requirement was NOT created and the operator's row was NOT renamed. It is
+   * reported so a backfill preview can show what a repair is about to leave
+   * alone, which is the part of a preview people actually check.
+   */
+  aliased: Array<{ kind: string; matchedAs: string }>;
 };
 
 /**
@@ -112,11 +135,29 @@ export async function ensureComplianceProfile(
   db: Database,
   orgId: string,
   siteId: string,
-  options: { kinds?: readonly string[] } = {},
+  options: { kinds?: readonly string[]; resolve?: KindResolver } = {},
 ): Promise<ComplianceProfileResult> {
   const kinds = options.kinds ?? storeDocumentationKinds;
-  if (!kinds.length) return { created: [], matched: [] };
+  /*
+   * The DEFAULT resolver knows the built-in synonyms and nothing organisation
+   * specific. A caller holding the organisation's template should pass its
+   * resolver — `readComplianceTemplate` then `buildKindResolver` — and the
+   * routes that create sites do. Defaulted rather than required so no existing
+   * caller had to change to stop duplicating, which was the point.
+   */
+  const resolve = options.resolve ?? buildKindResolver();
+  if (!kinds.length) return { created: [], matched: [], aliased: [] };
 
+  /*
+   * EVERY REQUIREMENT THIS SITE HOLDS, not just the ones about to be written.
+   *
+   * This used to be `inArray(kind, kinds)` with a note that reading the rest
+   * was "a wider query for no answer". That note was wrong, and the 144 surplus
+   * rows on Staging are what it cost: the rows this function most needed to see
+   * were precisely the ones whose names are NOT in `kinds`. A site's register is
+   * a couple of dozen rows on an index built on (organisation, site, kind), so
+   * the wider read is the cheaper mistake by a very long way.
+   */
   const existing = (await db
     .select({ kind: complianceDocuments.kind })
     .from(complianceDocuments)
@@ -124,17 +165,41 @@ export async function ensureComplianceProfile(
       and(
         eq(complianceDocuments.organisationId, orgId),
         eq(complianceDocuments.siteId, siteId),
-        /* Only the kinds we are about to write. A site may legitimately carry
-           register-only requirements outside the twelve — somebody added one by
-           hand — and reading them all back only to ignore them is a wider query
-           for no answer. */
-        inArray(complianceDocuments.kind, [...kinds]),
       ),
     )) as Array<{ kind: string }>;
 
-  const held = new Set(existing.map((row) => row.kind));
-  const missing = kinds.filter((kind) => !held.has(kind));
-  if (!missing.length) return { created: [], matched: [...held] };
+  /*
+   * `resolvedName -> the name the row is actually written under`.
+   *
+   * FIRST ROW WINS, so a site that already holds two spellings of one
+   * certificate — and the Demo Client holds several — reports a stable one
+   * rather than whichever came back last.
+   */
+  const heldBy = new Map<string, string>();
+  for (const row of existing) {
+    const canonical = resolve(row.kind) ?? row.kind;
+    if (!heldBy.has(canonical)) heldBy.set(canonical, row.kind);
+  }
+
+  const matched: string[] = [];
+  const aliased: Array<{ kind: string; matchedAs: string }> = [];
+  const missing: string[] = [];
+  for (const kind of kinds) {
+    /* The requirement is looked up under ITS OWN resolved name, so a template
+       whose entry is "Water Hygiene" finds a row written "Legionella risk
+       assessment" — and a template that renamed the requirement finds it too. */
+    const matchedAs = heldBy.get(resolve(kind) ?? kind);
+    if (matchedAs === undefined) {
+      missing.push(kind);
+      continue;
+    }
+    matched.push(kind);
+    /* Reported, and deliberately NOT renamed. The operator's word for their own
+       certificate is theirs; silently rewriting sixty rows to the machine's
+       vocabulary would be a data migration disguised as a read. */
+    if (matchedAs !== kind) aliased.push({ kind, matchedAs });
+  }
+  if (!missing.length) return { created: [], matched, aliased };
 
   /*
    * CHUNKED, BECAUSE A TWELVE-REQUIREMENT PROFILE IS A 144-VARIABLE INSERT.
@@ -182,7 +247,7 @@ export async function ensureComplianceProfile(
     await db.insert(complianceDocuments).values(chunk);
   }
 
-  return { created: missing, matched: [...held] };
+  return { created: missing, matched, aliased };
 }
 
 /**

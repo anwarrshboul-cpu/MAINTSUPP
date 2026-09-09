@@ -1,0 +1,129 @@
+/*
+ * THE REGISTER'S SETUP TOOLS — its own stylesheet, for the reason
+ * `compliance-responsibility.css` gives at length: `ops.css` is one file for
+ * the four operations PAGES, and this is a set of controls that appear inside
+ * one of them. `.compliance-template__*` composes with `.ops-*` on the same
+ * element rather than restating the card, the border or the focus ring.
+ *
+ * ── BREAKPOINTS ────────────────────────────────────────────────────────────
+ *
+ * 768 and nothing else. The agreed set is 640 / 767 / 768 / 1024 / 1280 and
+ * several stage tests fail on any other width (CLAUDE.md). 375px is the BASE
+ * case: every rule below describes the phone first and widens from it.
+ *
+ * ── WHY THE TEMPLATE ROWS ARE CARDS AND NOT A TABLE ────────────────────────
+ *
+ * Each row carries a checkbox, a name and a free-text list of other names, and
+ * the third of those is the widest thing on the screen. A table would either
+ * make the alias box unusable on a phone or make the row scroll sideways, and a
+ * horizontally scrolling FORM is a form whose submit button people cannot find.
+ * Stacked cards are the honest shape for a wide row on a narrow screen.
+ */
+
+.compliance-template {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.compliance-template__row {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line, #24303d);
+  border-radius: 10px;
+  /* A shade off the card behind it. The register's own rebuild note records
+     what happens when a surface is within a shade of its background: the cards
+     visually merge and a list of twelve reads as one block. */
+  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+}
+
+.compliance-template__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/*
+ * "On the board" — one of the twelve the Store Documentation board tracks.
+ *
+ * A quiet label rather than a status chip: it is not a state that changes, it
+ * is a fact about where the requirement comes from, and giving it chip styling
+ * would put it in the same visual family as Compliant / Expired a few pixels
+ * away.
+ */
+.compliance-template__badge {
+  font-size: 0.75rem;
+  line-height: 1.2;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line, #24303d);
+  color: var(--muted, #8aa0b4);
+  white-space: nowrap;
+}
+
+.compliance-template__row .form-field input[type="text"] {
+  width: 100%;
+  /*
+   * 16px, or iOS zooms the page on focus and does not zoom back. The same
+   * floor `compliance-responsibility.css` sets on its select, for the same
+   * reason and with the same consequence if it is lowered.
+   */
+  font-size: 1rem;
+  /* The 44px minimum target height this product holds itself to. */
+  min-height: 2.75rem;
+}
+
+/*
+ * A read-only name still looks like a field, because it IS the field — it is
+ * simply named by the board. Dimming it to look disabled would suggest the row
+ * itself is switched off, which is what the checkbox above it means.
+ */
+.compliance-template__row .form-field input[readonly] {
+  background: transparent;
+  color: var(--muted, #8aa0b4);
+}
+
+/* ── The backfill preview ─────────────────────────────────────────────────── */
+
+.compliance-template__plans {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/*
+ * "already held as Legionella risk assessment (Water Hygiene)".
+ *
+ * The most important line in the preview and the one the old repair had no
+ * concept of, so it is set apart from the "add X, Y, Z" beside it rather than
+ * running on from it in the same colour. Muted rather than coloured: this is
+ * reassurance that nothing will be duplicated, not a warning.
+ */
+.compliance-template__aliased {
+  color: var(--muted, #8aa0b4);
+}
+
+@media (min-width: 768px) {
+  /*
+   * Two columns once there is room, name beside other-names. Never below 768:
+   * the alias box holds a comma-separated list and halving its width on a
+   * phone is what makes people give up and type one name.
+   */
+  .compliance-template__row {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+
+  .compliance-template__head {
+    grid-column: 1 / -1;
+  }
+}

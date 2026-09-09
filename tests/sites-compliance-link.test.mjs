@@ -296,12 +296,60 @@ test("the profile insert is chunked, because twelve rows is 144 variables", asyn
 
 test("the profile matches on requirement kind and never duplicates", async () => {
   const source = await read("app/lib/compliance-profile.ts");
-  assert.match(source, /const missing = kinds\.filter\(\(kind\) => !held\.has\(kind\)\)/);
+  /*
+   * RE-POINTED, NOT WEAKENED. This asserted the literal line
+   * `const missing = kinds.filter((kind) => !held.has(kind))`, which was the
+   * implementation of an EXACT-STRING match. Item 2C replaced that match with a
+   * resolver, because exact matching is what produced the defect this test names:
+   * a site already holding "Legionella risk assessment" was handed "Water
+   * Hygiene" beside it, and one holding "Fire risk assessment" was handed "Fire
+   * Risk Assessment" — a duplicate created by a capital letter. Measured on
+   * Staging at 204 requirements across 12 sites where about 66 is honest.
+   *
+   * So the contract — match, never duplicate — is unchanged and now holds in
+   * cases it did not before. The pin follows it to `compliance-vocabulary.ts`,
+   * and three properties are pinned instead of one line.
+   */
+  assert.match(
+    source,
+    /import \{ buildKindResolver, type KindResolver \} from "\.\/compliance-vocabulary"/,
+    "the match goes through the resolver, not through ===",
+  );
+  assert.match(
+    source,
+    /const matchedAs = heldBy\.get\(resolve\(kind\) \?\? kind\)/,
+    "a requirement is looked up under its RESOLVED name",
+  );
+  assert.doesNotMatch(
+    /* Comments stripped: this file explains at length why the narrow read was
+       wrong, and an absence pin that reads the prose asserts nothing. */
+    source.replace(/\/\*[\s\S]*?\*\//g, " "),
+    /inArray\(complianceDocuments\.kind/,
+    "the read must cover every requirement the site holds — the rows that " +
+      "needed seeing were precisely the ones whose names are not in `kinds`",
+  );
   /* There is no unique index on (organisation, site, kind) — `db/init.ts` is
      additive only — so a deterministic primary key is what makes a racing
      second writer collide instead of quietly minting a thirteenth requirement. */
   assert.match(source, /export function complianceProfileId\(/);
   assert.match(source, /id: complianceProfileId\(siteId, kind\)/);
+});
+
+test("an aliased match is reported, and the operator's own wording is left alone", async () => {
+  /*
+   * Added with the re-point above, because "matched" and "matched under another
+   * name" are different facts and a backfill preview has to show the second.
+   * The row is NOT renamed: rewriting sixty rows to the machine's vocabulary
+   * would be a data migration disguised as a read.
+   */
+  const source = await read("app/lib/compliance-profile.ts");
+  assert.match(source, /aliased: Array<\{ kind: string; matchedAs: string \}>/);
+  assert.match(source, /if \(matchedAs !== kind\) aliased\.push\(\{ kind, matchedAs \}\)/);
+  assert.doesNotMatch(
+    source,
+    /db\s*\n?\s*\.update\(complianceDocuments\)/,
+    "this function creates and matches; it never rewrites an existing row",
+  );
 });
 
 test("the reader still does not write; the repair lives on the site's own read", async () => {
