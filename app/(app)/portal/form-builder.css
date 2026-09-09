@@ -125,6 +125,55 @@
   color: var(--ink);
 }
 
+/*
+ * THE SAVE STATE. Tokens only — no literal colours, so it follows the theme
+ * the portal is in rather than needing a dark variant of its own.
+ *
+ * The three states are distinguished by COLOUR AND BY WORDS AND BY ICON, not
+ * by colour alone: "All changes saved", "Saving…" and "Not saved" are
+ * different sentences before they are different greens and reds, which is what
+ * makes the control readable to somebody who cannot tell them apart.
+ */
+.form-builder__savestate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.form-builder__savestate[data-state="saved"] {
+  color: var(--ok-fg, var(--ink-muted));
+}
+
+.form-builder__savestate[data-state="unsaved"],
+.form-builder__savestate[data-state="failed"] {
+  color: var(--danger-fg, var(--ink));
+  font-weight: 600;
+}
+
+/* A link, not a button-shaped thing: it sits inside a sentence. 44px of tap
+   target is met by the padding rather than by a box, so the toolbar does not
+   grow a fourth control-looking element. */
+.form-builder__undo {
+  border: 0;
+  background: none;
+  padding: 11px 6px;
+  margin: -11px 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.form-builder__undo:hover {
+  color: var(--ink);
+}
+
 .form-builder__modes button.is-active {
   background: var(--surface-active);
   color: var(--accent-fg);

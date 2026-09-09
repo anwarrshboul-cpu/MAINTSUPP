@@ -130,17 +130,72 @@ test("a phone cannot be stranded inside a builder panel", async () => {
 test("a phone edits the same configuration a desktop does", async () => {
   const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
   const panels = codeOnly(await read("app/(app)/portal/form-builder-panels.tsx"));
-  /* One write path. There must be no mobile-only form model, no second draft
-     and nothing to reconcile — every panel control calls the same `patch`. */
+  /*
+   * One write path. There must be no mobile-only form model, no second draft
+   * and nothing to reconcile — every panel control calls the same `patch`.
+   *
+   * RE-POINTED, NOT WEAKENED. The PATCH itself moved out of `form-builder.tsx`
+   * into `form-builder-save.ts` when autosave grew a debounce, a history stack
+   * and a failure it can retry — that is a state machine, and it was not going
+   * to live legibly inside a component that also draws five modes. The
+   * contract this test protects is unchanged and is now asserted where the
+   * request actually is: still ONE request, still ONE endpoint, still carrying
+   * the board.
+   */
+  const saver = codeOnly(await read("app/(app)/portal/form-builder-save.ts"));
   assert.match(
-    builder,
+    saver,
     /api\/board\/form\?board=\$\{encodeURIComponent\(boardId\)\}`, \{\s*method: "PATCH"/,
     "settings are saved by one request to one endpoint",
   );
   assert.equal(
+    (saver.match(/fetch\(/g) ?? []).length,
+    1,
+    "one save path, not one per section",
+  );
+  /* And the component still owns which board it is editing — the prop the
+     saver is handed, never a default. */
+  assert.match(builder, /useFormSave\(\{ boardId, form, setForm \}\)/);
+  assert.equal(
     (panels.match(/fetch\(/g) ?? []).length,
     0,
     "no panel may reach the network on its own; they all go through the builder's patch",
+  );
+});
+
+test("autosave cannot fail quietly", async () => {
+  /*
+   * The reason this is worth a test rather than a comment: the board's
+   * configuration writes DO fail, and not rarely. Supabase's session-mode
+   * pooler refused connections 181 times in twenty days on the live project,
+   * and every route touching Postgres fails together while it lasts. An editor
+   * that autosaves and cannot say "not saved" loses somebody's afternoon on
+   * the day that happens.
+   */
+  const saver = codeOnly(await read("app/(app)/portal/form-builder-save.ts"));
+  const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
+
+  // The change survives its own failure, or Retry is a button with nothing
+  // behind it and the edit is gone.
+  assert.match(saver, /pending\.current = body;/, "a failed save keeps the change");
+  assert.match(saver, /retryable: payload\.retry === true/, "the server says whether to offer Retry");
+  assert.match(saver, /beforeunload/, "and the browser warns before it is lost");
+
+  // Three states, one vocabulary, so a toolbar and a screen reader cannot
+  // describe the same moment differently.
+  assert.match(saver, /All changes saved/);
+  assert.match(saver, /Saving…/);
+  assert.match(saver, /Not saved/);
+  assert.match(builder, /formSaveLabel\(saver\.state\)/, "the toolbar prints that vocabulary");
+  assert.match(builder, /data-state=\{saver\.state\}/);
+
+  // Undo is a real save, not a screen change the next reload corrects.
+  assert.match(saver, /FORM_HISTORY_LIMIT = 25/, "the brief asks for at least twenty");
+  assert.match(saver, /event\.key\.toLowerCase\(\) !== "z"/, "Ctrl/Cmd+Z");
+  assert.match(
+    saver,
+    /tag === "INPUT" \|\| tag === "TEXTAREA"/,
+    "but not while somebody is typing, where the browser's own undo is the right one",
   );
 });
 

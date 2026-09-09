@@ -6,8 +6,15 @@ import { FormDesignPanel, FormEditPanel, FormSettingsPanel } from "./form-builde
 import FormPreview from "./form-preview";
 import FormShareDialog from "./form-share-dialog";
 import type { BuilderForm, BuilderMode } from "./form-builder-model";
+import { formSaveLabel, useFormSave } from "./form-builder-save";
 import { FormView } from "./views/board-views";
 import "./form-builder.css";
+
+/**
+ * The four PATCH sections that can arrive in a burst, and are therefore worth
+ * coalescing. See `patch` below for why the list is short rather than long.
+ */
+const DEBOUNCED_SECTIONS = new Set(["title", "description", "appearance", "accessibility"]);
 
 /**
  * The Form tab: monday's form builder over our own live form.
@@ -99,7 +106,10 @@ export default function FormBuilder({
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<BuilderMode>("view");
   const [sharing, setSharing] = useState(false);
-  const [busy, setBusy] = useState(false);
+  /* `error` is now ONLY the load and create path. A failed SAVE is a different
+     thing with a different remedy and lives on `saver.failure`, which carries a
+     Retry — see `useFormSave`. Sharing one banner between them is how a
+     transient pooler refusal came to look like a broken form. */
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -187,24 +197,37 @@ export default function FormBuilder({
    * and it returns the whole saved form — so taking its answer rather than the
    * locally guessed one means the panel can never drift from what was stored.
    */
-  const patch = useCallback(async (body: Record<string, unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/board/form?board=${encodeURIComponent(boardId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = (await response.json()) as { form?: BuilderForm; error?: string };
-      if (!response.ok) throw new Error(payload.error || "That change could not be saved.");
-      if (payload.form) setForm(payload.form);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "That change could not be saved.");
-    } finally {
-      setBusy(false);
-    }
-  }, [boardId]);
+  const saver = useFormSave({ boardId, form, setForm });
+
+  /*
+   * WHICH CHANGES WAIT, AND WHICH DO NOT.
+   *
+   * The brief asks for a debounce on typing and none on a discrete action, and
+   * those are not the same request against this editor. Every existing call
+   * site is ALREADY a discrete commit — `DraftInput` holds a local draft and
+   * writes on blur or Enter, switches fire once — so a blanket 800ms delay
+   * would make toggling Required feel broken while buying nothing.
+   *
+   * These four are the sections that can arrive in a burst: the title and
+   * description as somebody edits and re-edits them, and `appearance` /
+   * `accessibility` because a colour input and a size slider emit while they
+   * are being dragged. Coalescing those is the difference between one save and
+   * forty, against a pooler that is already the bottleneck. Everything else —
+   * add, remove, reorder, every toggle — is one decision and goes at once,
+   * because a decision sitting in a timer is a decision that can be lost.
+   */
+  /* What the panels have always meant by `busy`: a write is in the air, so an
+     input should say so. Derived rather than tracked twice. */
+  const busy = saver.state === "saving";
+
+  const patch = useCallback(
+    (body: Record<string, unknown>) => {
+      const keys = Object.keys(body);
+      const bursty = keys.length > 0 && keys.every((key) => DEBOUNCED_SECTIONS.has(key));
+      saver.save(body, { immediate: !bursty });
+    },
+    [saver],
+  );
 
   /**
    * Give this register a form of its own — W2 requirement B.
@@ -393,6 +416,49 @@ export default function FormBuilder({
           ))}
         </div>
 
+        {/*
+          THE SAVE STATE, VISIBLE AT ALL TIMES.
+
+          The editor has always autosaved and never had a Save button, which is
+          right. What it had no way of saying was whether a save had happened:
+          `busy` reached an `aria-busy` and a disabled switch, and nothing else.
+          On a write path whose measured failure mode is the connection pooler
+          refusing outright, an editor that cannot say "not saved" is an editor
+          that loses work silently.
+
+          `role="status"` rather than `aria-live="assertive"`: this is an
+          ambient fact, and interrupting a screen reader mid-sentence on every
+          keystroke's save would be worse than not announcing it.
+        */}
+        <p
+          className="form-builder__savestate"
+          data-state={saver.state}
+          role="status"
+          aria-live="polite"
+        >
+          <Icon
+            name={
+              saver.state === "saved"
+                ? "check"
+                : saver.state === "saving"
+                  ? "upload"
+                  : "alert"
+            }
+            size={14}
+          />
+          {formSaveLabel(saver.state)}
+          {/*
+            Undo sits with the state it undoes. Offered only once there is a
+            saved definition to go back to — a button that would restore
+            nothing is worse than no button.
+          */}
+          {saver.canUndo && saver.state !== "saving" && (
+            <button type="button" className="form-builder__undo" onClick={saver.undo}>
+              Undo
+            </button>
+          )}
+        </p>
+
         <div className="form-builder__share">
           <button
             type="button"
@@ -448,6 +514,32 @@ export default function FormBuilder({
           <Icon name="alert" size={15} />
           This form is deactivated — the shared link will not open until it is activated
           again.
+        </p>
+      )}
+      {/*
+        A FAILED SAVE, NAMED, WITH THE CHANGE STILL IN HAND.
+
+        Its own banner rather than the load/create one, because the two need
+        different things from the reader. This one is persistent — no timeout —
+        keeps the edit in `pending` so Retry re-sends exactly what failed, and
+        arms the browser's unsaved-changes warning until it is resolved. The
+        reason comes from the server, so "You do not have permission to edit
+        this form" and "the workspace database is out of connections right now"
+        arrive as the different problems they are, and only the second offers a
+        button, because only the second can work.
+      */}
+      {saver.failure && (
+        <p className="form-builder__banner form-builder__banner--error" role="alert">
+          <Icon name="alert" size={15} />
+          {saver.failure.message}
+          {saver.failure.retryable && (
+            <button type="button" onClick={saver.retry}>
+              Retry
+            </button>
+          )}
+          <button type="button" onClick={saver.dismiss} aria-label="Dismiss">
+            ×
+          </button>
         </p>
       )}
       {error && (

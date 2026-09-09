@@ -383,9 +383,26 @@ test("W2 B the builder never draws another register's form", async () => {
     /Create a form for this register/,
     "the answer to 'this register has no form' is to make it one, not to hide the tab",
   );
-  /* Both fetches carry the board, and both re-run when it changes. */
-  const fetches = [...builder.matchAll(/\/api\/board\/form\?board=\$\{encodeURIComponent\(boardId\)\}/g)];
+  /*
+   * EVERY call carries the board, and each re-runs when it changes.
+   *
+   * RE-POINTED ACROSS A SPLIT, NOT RELAXED. The PATCH moved to
+   * `form-builder-save.ts` when autosave grew a debounce, a history stack and
+   * a retryable failure. Counting only what is left in `form-builder.tsx`
+   * would have quietly dropped the SAVE from a check whose entire subject is
+   * that a save must not land on another register's form — the leak this test
+   * exists for. Both files are counted instead, so the total is what it always
+   * was and the assertion still covers the write.
+   */
+  const saver = codeOnly(await source("app/(app)/portal/form-builder-save.ts"));
+  const pattern = /\/api\/board\/form\?board=\$\{encodeURIComponent\(boardId\)\}/g;
+  const fetches = [...builder.matchAll(pattern), ...saver.matchAll(pattern)];
   assert.ok(fetches.length >= 3, `every call must name the board, found ${fetches.length}`);
+  assert.match(
+    saver,
+    /useFormSave\(\{ boardId/,
+    "and the saver is HANDED the board rather than defaulting to one",
+  );
   /*
    * The two effects that READ `boardId` must depend on it. They had `[]`, so
    * the builder kept whichever board it first mounted with: moving between two
@@ -393,7 +410,19 @@ test("W2 B the builder never draws another register's form", async () => {
    * one. Asserted per call site rather than by banning `[]` outright, because
    * the matchMedia effect below legitimately has no dependencies.
    */
-  const boardDependent = [...builder.matchAll(/\}, \[boardId\]\);/g)];
+  /*
+   * RE-POINTED ACROSS THE SPLIT, AND WIDENED FROM A LITERAL TO THE CONTRACT.
+   * The PATCH is now `flush` in `form-builder-save.ts`, whose dependency array
+   * is `[boardId, setForm]` — the same guarantee, spelled differently, and a
+   * pin that only matched the exact string `[boardId]` would have reported a
+   * regression where there was none while missing a real one the day somebody
+   * added a second dependency here. What matters is that every closure reading
+   * the board is rebuilt when the board changes.
+   */
+  const boardDependent = [
+    ...builder.matchAll(/\}, \[boardId[^\]]*\]\);/g),
+    ...saver.matchAll(/\}, \[boardId[^\]]*\]\);/g),
+  ];
   assert.ok(
     boardDependent.length >= 3,
     `the load effect, the PATCH and the create must all re-run for a new board, found ${boardDependent.length}`,
