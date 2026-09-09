@@ -36,6 +36,7 @@ import {
 } from "./board-format";
 import { stickyZIndex, type StickyColumn } from "./board-pinning";
 import type { BoardOptionColumn, MaintenanceRequest } from "../../lib/types";
+import { sumCostPounds } from "../../lib/money";
 /**
  * The stored summary choice, if the column carries one.
  *
@@ -453,7 +454,7 @@ export default function BoardColumnSummary({
     );
   }
   if (key === "cost") {
-    const total = rows.reduce((sum, request) => sum + (request.cost ?? 0), 0);
+    const total = sumCostPounds(rows);
     const formatted = new Intl.NumberFormat("en-GB", {
       style: "currency",
       currency: "GBP",

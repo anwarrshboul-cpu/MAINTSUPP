@@ -82,6 +82,7 @@
  */
 
 import type { MaintenanceRequest } from "./types";
+import { sumCostPounds } from "./money";
 
 /**
  * The minimum a register row has to carry to be attributable.
@@ -208,7 +209,7 @@ export function attributeContractorWork<T extends ContractorRosterEntry>(
  * than a rate, so the total is what was recorded and never what was quoted.
  */
 export function contractorJobCost(jobs: readonly MaintenanceRequest[]): number {
-  return jobs.reduce((sum, request) => sum + (request.cost ?? 0), 0);
+  return sumCostPounds(jobs);
 }
 
 /**

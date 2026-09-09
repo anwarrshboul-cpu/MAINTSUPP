@@ -366,6 +366,8 @@ export interface MaintenanceRequest {
   scheduledTime?: string | null;
   targetCompletionDate?: string | null;
   cost: number | null;
+  /** The same money, in integer pence. Aggregate from this, never `cost`. */
+  costPence?: number | null;
   approvedBy?: string | null;
   invoice?: string | null;
   attachmentCount: number;

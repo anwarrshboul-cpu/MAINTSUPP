@@ -268,6 +268,25 @@ export function costValue(text) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+/**
+ * The same cost as integer pence, read from the source DIGITS.
+ *
+ * `costValue` returns a float because that is what the legacy `cost` column
+ * holds. This is the canonical one, and it never consults a float: monday's
+ * cell is text, and reading the digits either side of the point is exact where
+ * `Math.round(Number(x) * 100)` is only usually exact.
+ */
+export function costPenceValue(text) {
+  const raw = useful(text).replace(/[£$€,\s]/g, "");
+  if (raw === "") return null;
+  const match = /^([+-]?)(\d+)(?:\.(\d{1,2}))?$/.exec(raw);
+  if (!match) return null;
+  const [, sign, whole, fraction = ""] = match;
+  const pence = Number(whole) * 100 + Number(fraction.padEnd(2, "0") || "0");
+  if (!Number.isSafeInteger(pence)) return null;
+  return sign === "-" ? -pence : pence;
+}
+
 /** monday dates are already ISO; anything else is kept verbatim to be seen. */
 export function dateValue(text) {
   const raw = useful(text);

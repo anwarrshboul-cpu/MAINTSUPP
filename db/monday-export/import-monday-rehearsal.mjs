@@ -251,6 +251,7 @@ export function planJobs(items, aliasIndex, groupStageByName) {
       dueAt: T.timelineEnd(cellText(item, COL.timeline)),
       nextUpdateAt: T.dateValue(cellText(item, COL.nextUpdate)),
       cost: T.costValue(cellText(item, COL.cost)),
+      costPence: T.costPenceValue(cellText(item, COL.cost)),
       archived: (item.state ?? "active") !== "active",
       createdAt: item.created_at ?? null,
       updatedAt: item.updated_at ?? null,

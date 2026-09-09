@@ -28,6 +28,7 @@ import { columnLabels } from "../board-model";
 import type { ColumnKey } from "../board-model";
 import { displaySource, systemColumnSortValue } from "../board-ordering";
 import { type BoardItem, formatDate, formatMoney } from "./view-model";
+import { sumCostPounds } from "../../../lib/money";
 
 /**
  * The board hands `MaintenanceRequest` rows straight through as `BoardItem`, so
@@ -729,7 +730,7 @@ export function BuildVibeView({ items }: { items: BoardItem[] }) {
   const figures = useMemo(() => {
     const rows = items as FormItem[];
     const open = rows.filter((item) => !isComplete(item));
-    const spend = rows.reduce((total, item) => total + (item.cost ?? 0), 0);
+    const spend = sumCostPounds(rows);
     return [
       { label: "Items in view", value: String(rows.length) },
       { label: "Open", value: String(open.length) },

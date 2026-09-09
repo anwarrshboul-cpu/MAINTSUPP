@@ -12,6 +12,7 @@ import {
   formatMoney,
   groupBy,
 } from "./view-model";
+import { sumCostPounds } from "../../../lib/money";
 
 type Palette = Record<string, string>;
 
@@ -308,7 +309,7 @@ export function ReportsView({ items }: { items: BoardItem[] }) {
       (item) => (item.priority ?? "").toLowerCase() === "urgent" && !item.completedAt,
     ).length;
     const unassigned = items.filter((item) => !item.assignee && !item.completedAt).length;
-    const spend = items.reduce((total, item) => total + (item.cost ?? 0), 0);
+    const spend = sumCostPounds(items);
 
     const closed = items.filter((item) => item.completedAt && item.requestedAt);
     const averageDays = closed.length

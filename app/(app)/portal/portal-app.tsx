@@ -248,6 +248,7 @@ import { useGeneratorDocument } from "./reports/invoice-generator";
 import { ReportTab } from "./reports/report-tab";
 import { InvoiceTab } from "./reports/invoice-tab";
 import { GeneratedDocuments } from "./reports/generated-documents";
+import { sumCostPounds } from "../../lib/money";
 
 export type Section =
   | "overview"
@@ -5281,7 +5282,7 @@ function ContractorsView({
       assignedJobs: theirs.length,
       completedJobs: theirs.filter(isClosedRequest).length,
       urgentJobs: theirs.filter((request) => request.priority === "Urgent" && isOpenRequest(request)).length,
-      spend: theirs.reduce((sum, request) => sum + (request.cost ?? 0), 0),
+      spend: sumCostPounds(theirs),
       /*
        * W06-10 — THEIR JOBS, not just how many.
        *

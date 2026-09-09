@@ -29,6 +29,7 @@ import {
 import { documentName } from "../views/document-register";
 import { expiryStatus } from "../../../lib/expiry-status";
 import type { ComplianceState } from "../../../lib/types";
+import { sumCostPounds } from "../../../lib/money";
 
 type JobRow = {
   id: string;
@@ -220,7 +221,7 @@ export function SiteDetail({
 
   const { site } = data;
   const openJobs = data.jobs.filter((job) => !job.completedAt);
-  const spend = data.jobs.reduce((total, job) => total + (job.cost ?? 0), 0);
+  const spend = sumCostPounds(data.jobs);
 
   return (
     <section className="section-stack site-detail">

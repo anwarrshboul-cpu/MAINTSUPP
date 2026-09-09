@@ -277,7 +277,7 @@ function main() {
       `${job.tier === null ? 2 : job.tier}, ${qn(job.priority ?? "Medium")}, ${qn(job.stage)}, ` +
       `${qn(job.status)}, ${q(job.contractor)}, ${q(job.assignee)}, ${q(job.approvedBy)}, ` +
       `${q(job.invoice)}, ${q(job.formUrl)}, ${ts(job.requestedAt)}, ${q(job.completedAt)}, ` +
-      `${q(job.dueAt)}, ${q(job.nextUpdateAt)}, ${n(job.cost)}, ${b(job.archived)}, ` +
+      `${q(job.dueAt)}, ${q(job.nextUpdateAt)}, ${n(job.cost)}, ${n(job.costPence)}, ${b(job.archived)}, ` +
       `${ts(job.createdAt)}, ${ts(job.updatedAt)})`
     );
   });
@@ -287,7 +287,7 @@ function main() {
       "external_id, title, title_rule, source_item_name, source_group, source_number, source_url, " +
       "description, location, requester, contact, category, engineer, tier, priority, stage, status, " +
       "contractor, assignee, approved_by, invoice, form_url, requested_at, completed_at, due_at, " +
-      "next_update_at, cost, archived, created_at, updated_at)",
+      "next_update_at, cost, cost_pence, archived, created_at, updated_at)",
     rows: jobRows,
     conflict:
       "ON CONFLICT (id) DO UPDATE SET site_id = EXCLUDED.site_id, title = EXCLUDED.title, " +
@@ -301,6 +301,7 @@ function main() {
       "approved_by = EXCLUDED.approved_by, invoice = EXCLUDED.invoice, " +
       "form_url = EXCLUDED.form_url, completed_at = EXCLUDED.completed_at, " +
       "due_at = EXCLUDED.due_at, next_update_at = EXCLUDED.next_update_at, cost = EXCLUDED.cost, " +
+      "cost_pence = EXCLUDED.cost_pence, " +
       "archived = EXCLUDED.archived, updated_at = now()",
   }).forEach((sql, i) => add(`02-jobs-${String(i + 1).padStart(2, "0")}.sql`, sql));
 

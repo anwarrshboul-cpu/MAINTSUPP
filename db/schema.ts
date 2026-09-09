@@ -544,6 +544,14 @@ export const maintenanceRequests = sqliteTable(
     isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
     seedBatchId: text("seed_batch_id"),
     cost: real("cost"),
+    /*
+     * The canonical cost. `cost` is a `real`, which is binary32 and cannot
+     * represent £52,408.06 — every individual value round-trips, and only
+     * the sum is wrong, which is the worst way for money to be wrong. Kept
+     * beside it rather than replacing it: `cost` is read in a dozen places
+     * and is the source decimal for provenance.
+     */
+    costPence: integer("cost_pence"),
     approvedBy: text("approved_by"),
     invoice: text("invoice"),
     attachmentCount: integer("attachment_count").notNull().default(0),

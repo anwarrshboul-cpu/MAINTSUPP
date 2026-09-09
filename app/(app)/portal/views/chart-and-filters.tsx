@@ -11,6 +11,7 @@ import {
   formatMoney,
   groupBy,
 } from "./view-model";
+import { sumCostPounds } from "../../../lib/money";
 
 /* ── Chart — P6 ──────────────────────────────────────────────────────────── */
 
@@ -41,7 +42,7 @@ export function ChartView({ items, palette }: { items: BoardItem[]; palette: Rec
       value:
         measure === "count"
           ? bucket.length
-          : bucket.reduce((total, item) => total + (item.cost ?? 0), 0),
+          : sumCostPounds(bucket),
     }));
     return computed.sort((a, b) => b.value - a.value).slice(0, 20);
   }, [items, field, measure]);

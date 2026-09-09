@@ -895,7 +895,8 @@ const BASE_TABLE_DECLARATIONS: readonly string[] = [
          source_group TEXT,
          source_number TEXT,
          source_url TEXT,
-         title_rule INTEGER
+         title_rule INTEGER,
+         cost_pence INTEGER
        )`,
   /*
    * The five `source_*` columns above are monday provenance for the migration.

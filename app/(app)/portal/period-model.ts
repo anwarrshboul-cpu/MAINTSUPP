@@ -40,6 +40,7 @@
  */
 
 import { analyticsWindow } from "./dashboard-meters";
+import { costPenceOf } from "../../lib/money";
 
 export const DAY_MS = 86_400_000;
 
@@ -870,11 +871,12 @@ export function periodSpendSeries<T extends { requestedAt: string; cost: number 
     if (stamp < window.start || stamp > window.end) return;
     const at = bucketFor(buckets, stamp);
     if (at < 0) return;
-    totals[at] += row.cost ?? 0;
+    totals[at] += costPenceOf(row);
   });
+  // Accumulated in pence so a spend trend cannot drift; divided once, here.
   return buckets.map((bucket, index) => ({
     label: bucket.label,
-    value: totals[index],
+    value: totals[index] / 100,
   }));
 }
 
