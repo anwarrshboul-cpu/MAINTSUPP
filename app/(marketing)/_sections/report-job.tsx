@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, RefObject } from "react";
+import { track } from "./analytics";
 
 /**
  * SECTION 2 — Report a Job.
@@ -458,6 +459,13 @@ export function ReportJob() {
       clearAttachments();
       setUrgency("");
       setErrors({});
+      /* Analytics: the request exists. No reporter details, no fault text. */
+      track("report_job_submit", {
+        request_id: result.request.id,
+        job_category: category,
+        job_priority: priority,
+        attachments: files.length,
+      });
       setStatus({
         text: `Request ${result.request.id} received.${
           failed
