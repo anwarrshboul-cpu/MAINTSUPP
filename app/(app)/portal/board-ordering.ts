@@ -81,26 +81,48 @@ export function displaySource(source: MaintenanceRequest["source"]) {
 /**
  * What a row is called when its Name cell is empty.
  *
- * On maintenance that is how the job arrived, which is what monday shows and
- * what the parity tests pin. On every other board the row is a thing rather
- * than a ticket and carries its own title: Store Documentation's rows are
- * stores, imported with the store name on `title` and no Name cell at all, so
- * falling through to `displaySource` labelled all 31 of them "Incoming form
- * answer".
+ * ── THE FAULT ─────────────────────────────────────────────────────────────
+ *
+ * This read `if (boardId !== "maintenance" && request.title?.trim())`, so on
+ * the JOB board it never consulted the title at all and every row fell through
+ * to `displaySource`. The result was the whole board reading "Incoming form
+ * answer", row after row, while `maintenance_requests.title` held a real,
+ * distinct description of each job the entire time — `requestTitle` in the
+ * public submit route, in `/api/report-job` and in `request-fields.ts` all
+ * compute one from the first line of the description. A board where every row
+ * has the same name is unusable whatever columns are on it, and two views
+ * already worked around this by reading `name` themselves rather than asking
+ * (`views/parity-views.tsx`, `views/fix-tracker.tsx`).
+ *
+ * The exclusion was there for monday parity — monday's Name column does show
+ * which form a job arrived through. But the guard was the wrong shape for that
+ * intent, because the parity case takes care of ITSELF: a row imported from
+ * monday carries "Incoming form answer" in `title`, put there by
+ * `monday-import.ts` mapping monday's Name column onto it. So preferring the
+ * title changes nothing for an imported row and everything for a job this
+ * product created. Parity is preserved by the DATA rather than by a board-key
+ * comparison, which is the same lesson `seedViews` and this file's own
+ * `boardId !== "store-documentation"` history record.
+ *
+ * `displaySource` therefore now means what it says: the label for a row with no
+ * Name cell AND no title of its own.
+ *
+ * ── WHAT THIS DOES NOT DO ─────────────────────────────────────────────────
+ *
+ * It does not retitle anything. Rows whose stored title IS "Incoming form
+ * answer" still read that way, honestly, because that is the only name their
+ * data holds — a backfill from their stored answers is proposed separately and
+ * deliberately not run here.
  *
  * The Name cell still wins where one exists — renaming a store in the grid
- * writes a cell, and that edit must survive.
+ * writes a cell, and that edit must survive. Pinned by
+ * `tests/audit-s1-rename.test.mjs`.
  */
-export function boardItemName(
-  request: MaintenanceRequest,
-  boardId: string,
-  cellValue?: string,
-) {
+export function boardItemName(request: MaintenanceRequest, cellValue?: string) {
   const edited = cellValue?.trim();
   if (edited) return edited;
-  if (boardId !== "maintenance" && request.title?.trim()) {
-    return request.title.trim();
-  }
+  const title = request.title?.trim();
+  if (title) return title;
   return displaySource(request.source);
 }
 
@@ -117,6 +139,18 @@ export function systemColumnSortValue(
   key: ColumnKey,
 ): string | number {
   switch (key) {
+    /*
+     * PROVENANCE, NOT THE TITLE — and this is deliberately NOT the same answer
+     * `boardItemName` now gives, so a reader who notices the difference finds
+     * the reason here rather than assuming one of them was missed.
+     *
+     * SORTING never reaches this arm: `board-sort.ts` answers `name` through
+     * `boardItemName` before it asks, so the column sorts by what it displays.
+     * What DOES reach it is "Group by → Name" (`live-board.tsx`), and there the
+     * two answers are not interchangeable — grouping by a free-text job title
+     * produces one group per row, which is not a grouping. Grouping by how the
+     * work arrived is the question somebody is actually asking.
+     */
     case "name":
       return displaySource(request.source);
     case "location":

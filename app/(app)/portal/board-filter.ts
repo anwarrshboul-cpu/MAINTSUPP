@@ -311,7 +311,6 @@ export function toFilterItem(
     ...(request as unknown as BoardItem),
     __name: boardItemName(
       request,
-      context.boardId,
       nameColumnId ? context.cells[customCellKey(request.id, nameColumnId)] : undefined,
     ),
     cells,

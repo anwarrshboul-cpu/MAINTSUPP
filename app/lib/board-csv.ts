@@ -110,7 +110,6 @@ function systemCsvValue(
     case "name": {
       const name = boardItemName(
         request,
-        input.boardId,
         input.cells[customCellKey(request.id, column.id)],
       );
       return request.commentCount
