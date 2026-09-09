@@ -77,6 +77,9 @@ export async function GET(request: Request) {
       siteName: entry.siteName,
       kind: entry.kind,
       responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
+      /* Whose obligation it is, which is a different question from who chases
+         it — and the one the percentage depends on. See ComplianceRow. */
+      dutyHolder: entry.dutyHolder,
       state: entry.state,
       expiry: entry.expiry,
       fileCount: entry.fileCount,

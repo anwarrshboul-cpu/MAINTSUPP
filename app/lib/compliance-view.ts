@@ -44,7 +44,28 @@ export type ComplianceRow = {
   siteId: string;
   siteName: string;
   kind: string;
+  /**
+   * WHO CHASES THE CERTIFICATE — Contractor, Fire safety partner, Insurance
+   * broker, and so on, falling back to the site manager. Derived per slot by
+   * `responsibilityFor`, offered as the `?who=` filter.
+   *
+   * NOT to be confused with `dutyHolder` below. They are two axes and the
+   * confusion is easy: a fire alarm service can be chased by the fire safety
+   * partner and still be the landlord's obligation in a mall unit.
+   */
   responsibility: string;
+  /**
+   * WHOSE OBLIGATION IT IS — client / landlord / centre / not_applicable, or
+   * `"unconfirmed"`, or null if nobody has ever been asked.
+   *
+   * Load-bearing rather than decorative: `complianceCompletion` reads it to
+   * decide whether the record belongs in the percentage at all. It has to be
+   * carried on THIS type, not only on `RegisterEntry`, because `groupCompliance`
+   * and `portfolioCounts` both score `ComplianceRow[]` — dropping it here is
+   * what made a brand-new site's twelve unclaimed requirements read 0%
+   * compliant instead of "not yet confirmed".
+   */
+  dutyHolder: string | null;
   state: ComplianceState;
   expiry: string | null;
   fileCount: number;

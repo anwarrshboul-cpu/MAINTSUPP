@@ -11,6 +11,7 @@ import {
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
+import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import {
   isPlaceholderManager,
   loadSiteMetrics,
@@ -594,7 +595,9 @@ async function logChange(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    /* `actor` is read for one purpose: the repair below writes an activity_log
+       row, and an audit entry with no author is worth very little. */
+    const { actor, db, orgId } = await scopedDb(request);
     const url = new URL(request.url);
 
     /*
@@ -680,6 +683,44 @@ export async function GET(request: Request) {
          screen and vice versa. The id is not a capability. */
       const site = await getSite(db, orgId, id, scope);
       if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
+
+      /*
+       * REPAIRED ON READ — the gap for everything created before the create
+       * paths started doing this.
+       *
+       * Eleven sites already exist with no compliance profile, and a fix that
+       * only covers new ones leaves them invisible to the register for ever.
+       * `ensureComplianceProfile` is idempotent, matches on requirement kind
+       * and never duplicates, so opening a site that already has its twelve
+       * costs one indexed SELECT and writes nothing.
+       *
+       * HERE, AND DELIBERATELY NOT IN `readComplianceRegister`. That module's
+       * docstring ends "Nothing here writes, and nothing here drops a row",
+       * and a reader that quietly writes is a much worse thing than a missing
+       * profile — it would fire on the portfolio read, for every site at once,
+       * on every page load. This is one site, on the one request that opened
+       * it. It is also not in `db/init.ts`: CLAUDE.md puts invariant repairs
+       * there, but that runs on the boot path of EVERY request and this is
+       * exactly the "anything expensive" the same sentence excludes.
+       *
+       * A failure here must not take the site page down with it. The profile
+       * is an invariant worth repairing, not a precondition for reading a
+       * site's jobs and documents, so it is logged and the page is still
+       * served — the next open tries again.
+       */
+      try {
+        const repair = await ensureComplianceProfile(db, orgId, id);
+        if (repair.created.length) {
+          await logChange(db, orgId, id, "compliance_profile_created", actor.email, {
+            created: repair.created.length,
+            matched: repair.matched.length,
+            reason: "repaired on read",
+          });
+        }
+      } catch (cause) {
+        console.error("[/api/sites] compliance profile repair failed", cause);
+      }
+
       const [jobs, assets, documents, groups, files, activity, allGroups, allAliases] =
         await Promise.all([
         db
@@ -1067,6 +1108,61 @@ export async function POST(request: Request) {
         appliedValue: address.value,
         detail: "Stray quotation marks were removed from the address.",
       });
+    }
+
+    /*
+     * A SITE WITHOUT A COMPLIANCE PROFILE IS NOT A SITE THIS PRODUCT CAN
+     * ADMINISTER — so it is not left as one.
+     *
+     * `ensureComplianceProfile` is the same function the CSV importer and the
+     * Manage-data drawer call, which is the point: three routes create sites
+     * and there must not be three answers to what a new site's compliance
+     * looks like. See `app/lib/compliance-profile.ts`.
+     *
+     * COMPENSATED RATHER THAN TRANSACTIONAL, and the difference is worth
+     * stating. The brief asks for one transaction, and this route is a sequence
+     * of awaits rather than a `db.batch` — aliases, group membership, the
+     * anomaly record and the audit row all follow, and wrapping the whole
+     * sequence would change how each of them fails. What the brief is actually
+     * protecting is that a failure must not leave a site with no profile, and
+     * that is achieved here: if the profile cannot be written the site row is
+     * removed again and the caller is told why, so no half-created site
+     * survives the request. The site has no aliases, no group membership and no
+     * jobs at this point, so there is nothing else to unwind.
+     */
+    try {
+      await ensureComplianceProfile(db, orgId, id);
+    } catch (cause) {
+      /*
+       * SCOPED, like every other write to `sites` in this file.
+       *
+       * The id is one this request generated moments ago, so reasoning about
+       * this particular call it could not reach another register. That is
+       * exactly why the invariant is enforced on the STATEMENT and not on the
+       * argument — `tests/w2-scope-model.test.mjs` refuses a `sites` write whose
+       * where clause has no `registerScopeFilter`, and it caught this one. A
+       * rule that holds only where somebody has thought it through is not a
+       * rule; `= NULL` is never true, so the canonical register is a filter
+       * nobody may hand-roll.
+       */
+      await db
+        .delete(sites)
+        .where(
+          and(
+            eq(sites.id, id),
+            eq(sites.organisationId, orgId),
+            registerScopeFilter(sites.boardId, scope),
+          ),
+        );
+      console.error("[/api/sites] compliance profile failed; site rolled back", cause);
+      return Response.json(
+        {
+          error:
+            "The site was not created: its compliance profile could not be set up. " +
+            "Nothing was saved — try again.",
+        },
+        { status: 503 },
+      );
     }
 
     const aliasWrite = await setSiteAliases(db, orgId, id, [

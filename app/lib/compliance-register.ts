@@ -266,6 +266,17 @@ export type RegisterEntry = {
   expiry: string | null;
   fileCount: number;
   notRequired: boolean;
+  /**
+   * Whose obligation this requirement is — client / landlord / centre /
+   * not_applicable / "unconfirmed" — or null if nobody has been asked.
+   *
+   * Comes from the `compliance_documents` annotation whether or not a board row
+   * speaks for the requirement, which is what lets a board-derived slot be
+   * confirmed without inventing a board column for it. See
+   * `app/lib/compliance-duty-holder.ts` for why null and "unconfirmed" are not
+   * the same answer.
+   */
+  dutyHolder: string | null;
   /** The last warning stage the digest sent for this document. */
   lastAlertStage: string | null;
   /**
@@ -845,6 +856,7 @@ export async function readComplianceRegister(
     expiryDate: string | null;
     attachmentId: string | null;
     notRequired: boolean;
+    dutyHolder: string | null;
     lastAlertStage: string | null;
   };
   const rows = registerRows as RegisterRow[];
@@ -920,6 +932,10 @@ export async function readComplianceRegister(
         expiry: document.expiry,
         fileCount: document.fileCount,
         notRequired: document.state === "Not required",
+        /* The annotation answers even when the BOARD owns the requirement: a
+           slot can be confirmed as the landlord's without the board growing a
+           column for it. */
+        dutyHolder: registerRow?.dutyHolder ?? null,
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
@@ -930,6 +946,7 @@ export async function readComplianceRegister(
           state: document.state,
           expiry: document.expiry,
           fileCount: document.fileCount,
+          dutyHolder: registerRow?.dutyHolder ?? null,
         });
       }
     }
@@ -998,6 +1015,7 @@ export async function readComplianceRegister(
       expiry: row.expiryDate,
       fileCount,
       notRequired: row.notRequired || state === "Not required",
+      dutyHolder: row.dutyHolder,
       lastAlertStage: row.lastAlertStage,
       /* No board row, so no group. The site's own lifecycle is all there is. */
       boardGroup: null,
@@ -1008,6 +1026,21 @@ export async function readComplianceRegister(
       state,
       expiry: row.expiryDate,
       fileCount,
+      /*
+       * THE ENTRY CARRIED THIS AND THE REMEMBERED ITEM DID NOT, WHICH IS TWO
+       * DIFFERENT ANSWERS TO ONE QUESTION.
+       *
+       * `entries` feeds the register list and `bySite` feeds every PERCENTAGE —
+       * the portfolio meter, the per-site meter, the Sites row and the Overview
+       * tile. Omitting it here left `complianceCompletion` reading `undefined`,
+       * which it correctly treats as "never asked" and therefore counts. A
+       * brand-new site's twelve unconfirmed requirements duly came back as
+       * `applicable: 12, percent: 0, scored: true` — the "0% for a site nobody
+       * has been asked about" that this whole mechanism exists to prevent.
+       * Caught by querying the summary after creating a site, not by reading
+       * the diff.
+       */
+      dutyHolder: row.dutyHolder,
     });
   }
 

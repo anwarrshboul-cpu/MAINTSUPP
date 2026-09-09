@@ -450,6 +450,16 @@ export interface ComplianceItem {
   state: ComplianceState;
   expiry: string | null;
   fileCount: number;
+  /**
+   * Whose obligation this requirement is, or null if nobody has ever been
+   * asked. Read by `complianceCompletion` to decide whether it belongs in the
+   * percentage at all — see `app/lib/compliance-duty-holder.ts`.
+   *
+   * Optional so that a caller assembling records for a score without touching
+   * the register keeps exactly today's arithmetic. NULL and absent mean the
+   * same thing here; neither means "unconfirmed", which is a stored value.
+   */
+  dutyHolder?: string | null;
 }
 
 /**

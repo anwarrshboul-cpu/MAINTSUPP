@@ -30,6 +30,7 @@ import type { getDb } from "../../db";
 import { maintenanceRequests } from "../../db/schema";
 import { closedJobSql } from "./dashboard-aggregates";
 import { complianceCompletion, type ComplianceCompletion } from "./compliance-status";
+import { selectInChunks } from "./sql-batching";
 import { mailtoHref } from "./contact-links";
 import type { ComplianceState } from "./types";
 
@@ -140,6 +141,11 @@ const EMPTY_COMPLETION: ComplianceCompletion = {
   total: 0,
   percent: 0,
   scored: false,
+  /* A site absent from the register has no requirements at all, which is not
+     the same as having requirements nobody has claimed. `total: 0` with
+     `excluded: 0` is what lets a screen say "No requirements set" here and
+     "Not yet confirmed" for a site that has twelve of them and no answers. */
+  excluded: 0,
   counts: {
     Compliant: 0,
     "Expiring soon": 0,
@@ -164,7 +170,14 @@ export async function loadSiteMetrics(
   db: Database,
   orgId: string,
   siteIds: readonly string[],
-  complianceBySite: ReadonlyMap<string, Array<{ state: ComplianceState }>>,
+  /* `dutyHolder` is declared, not merely tolerated. Structural typing let the
+     narrower shape compile while the real `ComplianceItem[]` carried the field
+     through to `complianceCompletion` at runtime — so the score was right and
+     the signature was quietly lying about what this function depends on. */
+  complianceBySite: ReadonlyMap<
+    string,
+    Array<{ state: ComplianceState; dutyHolder?: string | null }>
+  >,
 ): Promise<Map<string, SiteMetrics>> {
   const out = new Map<string, SiteMetrics>();
   for (const id of siteIds) {
@@ -180,25 +193,60 @@ export async function loadSiteMetrics(
   }
   if (!siteIds.length) return out;
 
-  const rows = await db
-    .select({
-      siteId: maintenanceRequests.siteId,
-      totalJobs: count(),
-      openJobs: sql<number>`sum(case when not ${closedJobSql} then 1 else 0 end)`,
-      urgentOpen: sql<number>`sum(case when not ${closedJobSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "p1"]} then 1 else 0 end)`,
-      spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
-    })
-    .from(maintenanceRequests)
-    .where(
-      and(
-        eq(maintenanceRequests.organisationId, orgId),
-        isNull(maintenanceRequests.deletedAt),
-        eq(maintenanceRequests.archived, false),
-        isNull(maintenanceRequests.parentId),
-        inArray(maintenanceRequests.siteId, [...siteIds]),
-      ),
-    )
-    .groupBy(maintenanceRequests.siteId);
+  /*
+   * CHUNKED, BECAUSE THE ESTATE OUTGREW THE STATEMENT.
+   *
+   * `IN (…)` binds one variable per element, and this statement carries
+   * thirteen others of its own — four closed-stage strings twice over, three
+   * priority strings, the organisation and the archived flag. At 89 sites that
+   * is 102 variables and D1 refuses the lot:
+   *
+   *   D1_ERROR: too many SQL variables at offset 885
+   *
+   * The whole site register then answers 503 rather than one site's meter
+   * reading zero, because `GET /api/sites?id=` needs this aggregate before it
+   * can render anything. Measured on the development estate, which has
+   * accumulated 87 sites of fixture residue — one more site was enough to cross
+   * the line, and nothing in the code got worse to make that happen. That is
+   * the whole hazard of an unchunked `IN`: it is correct right up until an
+   * ordinary day's data makes it fail, and the failure is total.
+   *
+   * `selectInChunks` is the helper this repository already reaches for, for
+   * this exact reason — see `attachment-counts.ts` and `board-mutations.ts`.
+   * `GROUP BY site_id` makes the split free: each chunk returns whole rows for
+   * its own sites, so concatenating them needs no merge step.
+   */
+  const rows = await selectInChunks(siteIds, (chunk) =>
+    db
+      .select({
+        siteId: maintenanceRequests.siteId,
+        totalJobs: count(),
+        openJobs: sql<number>`sum(case when not ${closedJobSql} then 1 else 0 end)`,
+        urgentOpen: sql<number>`sum(case when not ${closedJobSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "p1"]} then 1 else 0 end)`,
+        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+      })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.organisationId, orgId),
+          isNull(maintenanceRequests.deletedAt),
+          eq(maintenanceRequests.archived, false),
+          isNull(maintenanceRequests.parentId),
+          inArray(maintenanceRequests.siteId, chunk),
+        ),
+      )
+      .groupBy(maintenanceRequests.siteId),
+    /*
+     * NOT the default 90, and the arithmetic is the reason. `SQL_VARIABLE_CHUNK`
+     * is documented as leaving "a comfortable margin under the 100-variable
+     * floor for the handful of other bound values in the same statement" —
+     * organisation, board, flags. This statement carries THIRTEEN of them, so
+     * 90 ids would bind 103 and reintroduce the very failure being fixed, one
+     * chunk at a time and with a comment claiming it was safe. 80 leaves seven
+     * spare on top of the thirteen.
+     */
+    80,
+  );
 
   for (const row of rows) {
     const id = (row.siteId ?? "").trim();
