@@ -121,7 +121,22 @@ async function listFiles(request: Request) {
   const kind = requestedKind && allowedKinds.has(requestedKind)
     ? requestedKind
     : null;
-  const limit = Math.min(Math.max(Number(search.get("limit")) || 100, 1), 100);
+  /*
+   * The ceiling is 500, the default is still 100.
+   *
+   * The register walks this endpoint page by page whenever it needs the whole
+   * matching set, and the portal shell enters that walk on mount. At 100 rows
+   * a page, an estate of 3,107 attachments — which is what the monday
+   * migration brings — is 32 requests for one dashboard load. On a serverless
+   * host each of those can be a cold instance opening its own pool against a
+   * session-mode pooler, and that is the shape of EMAXCONNSESSION: not one
+   * greedy query, but many small invocations each holding a connection.
+   *
+   * 500 makes the same walk 7 requests. The rows are metadata — a 500-row
+   * page is roughly 150 KB — and no existing caller changes behaviour,
+   * because only a caller that asks for more than 100 gets more than 100.
+   */
+  const limit = Math.min(Math.max(Number(search.get("limit")) || 100, 1), 500);
   /*
    * W07-11 — OFFSET, BECAUSE THERE WAS NO WAY PAST THE FIRST HUNDRED.
    *

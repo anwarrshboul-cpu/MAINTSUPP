@@ -613,7 +613,7 @@ export const DOCUMENT_PAGE_SIZE = 25;
  * The endpoint's maximum, because a walk that has to happen should take as few
  * round trips as it can. It is never the size of a page on screen.
  */
-export const DOCUMENT_WALK_SIZE = 100;
+export const DOCUMENT_WALK_SIZE = 500;
 
 /**
  * How many walk pages the register will read before it stops and SAYS it
