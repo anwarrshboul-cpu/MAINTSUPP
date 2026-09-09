@@ -450,10 +450,25 @@ export default function FormBuilder({
           {/*
             Undo sits with the state it undoes. Offered only once there is a
             saved definition to go back to — a button that would restore
-            nothing is worse than no button.
+            nothing is worse than no button. `canUndo` is false both when the
+            stack is empty and when everything on it belongs to the register
+            somebody has just navigated away from, because restoring one
+            board's definition onto another is not an undo, it is a leak.
+
+            The keyboard shortcut is NAMED on the control rather than left to
+            be discovered. It is registered on `window` by `useFormSave`, so
+            this button is the only place in the product a reader could learn
+            that it exists; `aria-keyshortcuts` carries the same fact to a
+            screen reader, which cannot read a tooltip.
           */}
           {saver.canUndo && saver.state !== "saving" && (
-            <button type="button" className="form-builder__undo" onClick={saver.undo}>
+            <button
+              type="button"
+              className="form-builder__undo"
+              onClick={saver.undo}
+              title="Undo the last saved change (Ctrl+Z)"
+              aria-keyshortcuts="Control+Z Meta+Z"
+            >
               Undo
             </button>
           )}
