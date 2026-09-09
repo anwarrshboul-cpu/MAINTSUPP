@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, RefObject } from "react";
 
+import { uploadEvidenceFile } from "../../lib/client-upload";
+
 /**
  * SECTION 2 — Report a Job.
  *
@@ -444,16 +446,50 @@ export function ReportJob() {
       if (!response.ok || !result.request) {
         throw new Error(result.error || "The request could not be submitted.");
       }
-      let failed = 0;
+      /*
+       * THE SHARED UPLOADER, not a bare POST — the same correction already made
+       * for the contractor job link, for the same reason and on a page with a
+       * wider audience.
+       *
+       * This built a FormData and posted `/api/files` directly. That works up to
+       * the Workers form parser's ~1 MiB ceiling and then stops dead: anything
+       * larger comes back 413 carrying bare text and no JSON `error`, and the
+       * only thing this page did with it was increment a counter. A member of
+       * the public photographing a fault on any current phone produces a 2-5 MB
+       * file, so the ORDINARY case was the broken one, and the message they got
+       * was "N attachment(s) could not be uploaded" with no reason and nothing
+       * to do about it.
+       *
+       * `uploadEvidenceFile` is the helper CLAUDE.md names as the only correct
+       * way in: it routes anything over `DIRECT_UPLOAD_LIMIT` (900 KB) through
+       * `/api/files/multipart` in chunks, retries a direct upload that 413s,
+       * enforces the real ceilings with a sentence a person can act on, and
+       * offers a WebP thumbnail afterwards. It forwards `uploadToken` on both
+       * the direct and the multipart path, which is what makes it usable from
+       * this anonymous form at all — `/api/report-job` always mints one.
+       *
+       * The reasons are collected rather than counted, because "could not be
+       * uploaded" is precisely the message that made this defect invisible for
+       * as long as it was.
+       */
+      const failures: string[] = [];
       for (const file of files) {
-        const upload = new FormData();
-        upload.append("file", file);
-        upload.append("requestId", result.request.id);
-        upload.append("kind", "issue");
-        if (result.uploadToken) upload.append("uploadToken", result.uploadToken);
-        const uploadResponse = await fetch("/api/files", { method: "POST", body: upload });
-        if (!uploadResponse.ok) failed++;
+        try {
+          await uploadEvidenceFile({
+            file,
+            requestId: result.request.id,
+            kind: "issue",
+            uploadToken: result.uploadToken,
+          });
+        } catch (error) {
+          failures.push(
+            error instanceof Error && error.message.trim()
+              ? `${file.name} — ${error.message}`
+              : `${file.name} — upload failed`,
+          );
+        }
       }
+      const failed = failures.length;
       form.reset();
       clearAttachments();
       setUrgency("");
@@ -461,7 +497,7 @@ export function ReportJob() {
       setStatus({
         text: `Request ${result.request.id} received.${
           failed
-            ? ` ${failed} attachment(s) could not be uploaded.`
+            ? ` ${failed} attachment(s) could not be uploaded: ${failures.join("; ")}`
             : " The operations team can now begin triage."
         }`,
         tone: "is-ok",
