@@ -84,8 +84,13 @@ const cssStub = asModule(`export default {};`);
 const chipInkUrl = await build("app/(app)/portal/chip-ink.ts", {});
 const formatDateUrl = await build("app/lib/format-date.ts", {});
 const metersUrl = await build("app/(app)/portal/dashboard-meters.ts", {});
+// `period-model` reads costs through `costPenceOf`, because summing the
+// binary32 `cost` column loses pennies. A data: URL has no directory, so that
+// relative specifier has to be substituted like every other one here.
+const moneyUrl = await build("app/lib/money.ts", {});
 const periodUrl = await build("app/(app)/portal/period-model.ts", {
   "./dashboard-meters": metersUrl,
+  "../../lib/money": moneyUrl,
 });
 const statusMapUrl = await build("app/(app)/portal/job-status-map.ts", {});
 const plannedVisitUrl = await build("app/(app)/portal/planned-visit.ts", {});

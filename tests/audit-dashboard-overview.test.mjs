@@ -56,12 +56,22 @@ const asModule = (javascript) =>
 const metersUrl = asModule(
   transpile(await read("app/(app)/portal/dashboard-meters.ts")),
 );
+/*
+ * `money.ts` gets the same treatment as `dashboard-meters.ts`, and for the same
+ * reason: a module loaded from a data: URL has no directory, so EVERY relative
+ * specifier inside it has to be rewritten to another data: URL or the import
+ * throws ERR_UNSUPPORTED_RESOLVE_REQUEST before a single assertion runs.
+ *
+ * `period-model.ts` reads costs through `costPenceOf` because summing the
+ * binary32 `cost` column loses pennies. That import is what this rewrite
+ * exists for. It transpiles standalone because `money.ts` imports nothing.
+ */
+const moneyUrl = asModule(transpile(await read("app/lib/money.ts")));
 const period = await import(
   asModule(
-    transpile(await read("app/(app)/portal/period-model.ts")).replace(
-      /from ["']\.\/dashboard-meters["']/g,
-      `from "${metersUrl}"`,
-    ),
+    transpile(await read("app/(app)/portal/period-model.ts"))
+      .replace(/from ["']\.\/dashboard-meters["']/g, `from "${metersUrl}"`)
+      .replace(/from ["']\.\.\/\.\.\/lib\/money["']/g, `from "${moneyUrl}"`),
   )
 );
 

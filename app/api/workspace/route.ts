@@ -15,6 +15,7 @@ import {
   users,
   workspaceSettings,
 } from "../../../db/schema";
+import { poundsFromSum, sumCostPenceSql } from "../../lib/cost-sql";
 // The one table of Store Documentation slots. The register keys off it too; a
 // second copy here is how the calendar and the board would drift apart.
 import { storeDocumentationCertificates } from "../../../db/monday-board-spec";
@@ -739,7 +740,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         assigned: count(),
         completed: sql<number>`sum(case when ${completedJobPredicate} then 1 else 0 end)`,
         urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and not (${completedJobPredicate}) then 1 else 0 end)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spend: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(
@@ -755,7 +756,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         assigned: count(),
         completed: sql<number>`sum(case when ${completedJobPredicate} then 1 else 0 end)`,
         urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and not (${completedJobPredicate}) then 1 else 0 end)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spend: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(
@@ -1111,7 +1112,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       assignedJobs: Number(byId?.assigned ?? 0) + Number(byName?.assigned ?? 0),
       completedJobs: Number(byId?.completed ?? 0) + Number(byName?.completed ?? 0),
       urgentJobs: Number(byId?.urgent ?? 0) + Number(byName?.urgent ?? 0),
-      spend: Number(byId?.spend ?? 0) + Number(byName?.spend ?? 0),
+      spend: poundsFromSum(Number(byId?.spend ?? 0) + Number(byName?.spend ?? 0)),
       /* Zero is a real answer here, not an absent one — see the type. */
       documentCount: documentsByContractor.get(contractor.id) ?? 0,
       /*

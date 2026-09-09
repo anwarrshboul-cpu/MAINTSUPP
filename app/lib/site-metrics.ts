@@ -28,6 +28,7 @@
 import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { maintenanceRequests } from "../../db/schema";
+import { poundsFromSum, sumCostPenceSql } from "./cost-sql";
 import { closedJobSql } from "./dashboard-aggregates";
 import { complianceCompletion, type ComplianceCompletion } from "./compliance-status";
 import { mailtoHref } from "./contact-links";
@@ -186,7 +187,7 @@ export async function loadSiteMetrics(
       totalJobs: count(),
       openJobs: sql<number>`sum(case when not ${closedJobSql} then 1 else 0 end)`,
       urgentOpen: sql<number>`sum(case when not ${closedJobSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "p1"]} then 1 else 0 end)`,
-      spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+      spend: sumCostPenceSql,
     })
     .from(maintenanceRequests)
     .where(
@@ -207,7 +208,7 @@ export async function loadSiteMetrics(
     current.totalJobs = Number(row.totalJobs ?? 0);
     current.openJobs = Number(row.openJobs ?? 0);
     current.urgentOpen = Number(row.urgentOpen ?? 0);
-    current.spend = Number(row.spend ?? 0);
+    current.spend = poundsFromSum(Number(row.spend ?? 0));
   }
   return out;
 }

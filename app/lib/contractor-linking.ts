@@ -30,6 +30,7 @@ import {
   contractors,
   maintenanceRequests,
 } from "../../db/schema";
+import { poundsFromSum, sumCostPenceSql } from "./cost-sql";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -91,7 +92,7 @@ export async function unlinkedContractorNames(
       .select({
         name: maintenanceRequests.contractor,
         jobs: sql<number>`count(*)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spend: sumCostPenceSql,
         linked: sql<number>`sum(case when ${maintenanceRequests.contractorId} is not null then 1 else 0 end)`,
       })
       .from(maintenanceRequests)
@@ -115,7 +116,7 @@ export async function unlinkedContractorNames(
       .where(eq(contractorNameAliases.organisationId, orgId)),
     db
       .select({
-        total: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        total: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(
@@ -150,7 +151,7 @@ export async function unlinkedContractorNames(
     if (candidates.length === 1) continue;
     // Every job carrying this string already has an id on it.
     if (candidates.length === 0 && Number(row.linked) === Number(row.jobs)) continue;
-    const spend = Number(row.spend ?? 0);
+    const spend = poundsFromSum(Number(row.spend ?? 0));
     unlinkedSpend += spend;
     names.push({
       name,
@@ -165,7 +166,7 @@ export async function unlinkedContractorNames(
   names.sort((left, right) => right.spend - left.spend || right.jobs - left.jobs);
   return {
     names,
-    totalSpend: Number(totals[0]?.total ?? 0),
+    totalSpend: poundsFromSum(Number(totals[0]?.total ?? 0)),
     unlinkedSpend,
   };
 }

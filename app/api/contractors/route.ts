@@ -51,6 +51,7 @@ import {
   contractorCertifications,
   maintenanceRequests,
 } from "../../../db/schema";
+import { poundsFromSum, sumCostPenceSql } from "../../lib/cost-sql";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import {
   aliasesByContractor,
@@ -188,7 +189,7 @@ export async function GET(request: Request) {
               assigned: count(),
               completed: sql<number>`sum(case when ${maintenanceRequests.stage} = 'Completed' then 1 else 0 end)`,
               urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = 'Urgent' and ${maintenanceRequests.stage} <> 'Completed' then 1 else 0 end)`,
-              spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+              spend: sumCostPenceSql,
             })
             .from(maintenanceRequests)
             .where(
@@ -322,7 +323,7 @@ export async function GET(request: Request) {
           assignedJobs: Number(jobs?.assigned ?? 0),
           completedJobs: Number(jobs?.completed ?? 0),
           urgentJobs: Number(jobs?.urgent ?? 0),
-          spend: Number(jobs?.spend ?? 0),
+          spend: poundsFromSum(Number(jobs?.spend ?? 0)),
           documentCount: documentsById.get(contractor.id) ?? 0,
           /*
            * WHERE THIS RECORD LIVES — the record id, the scope it belongs to,
