@@ -360,7 +360,38 @@ recomputed from the rows actually written.
   PAT certificate on two sites mean different things.
 - The bucket stays **private**. Access is brokered through `/api/files`; a
   monday URL is never stored as an application link.
-- Uploads are gated on §14's storage capacity check.
+- Uploads are gated on the storage capacity check below.
+
+### Storage capacity: BLOCKED
+
+Confirmed from Supabase usage on 2026-09-09. The Staging project is on the
+**Free** plan: storage 0.02 GB of 1 GB, database 0.055 GB of 0.5 GB, egress
+0.529 GB of 5 GB.
+
+The corpus is **3.73 GB**. It does not fit, and the plan is not to be upgraded
+and existing Staging objects are not to be deleted to make room. So:
+
+| | |
+| --- | --- |
+| Full file upload | **NOT PERFORMED** |
+| Files in source | 3,107 |
+| Full file reconciliation | **CAPACITY BLOCKED** — not PASS |
+
+Attachment *records* still import in full: 3,107 rows carrying the source asset
+id, checksum, filename, MIME type, byte size, source column and update/reply
+association. What is missing is the bytes, and every row says so — a row whose
+object has not been uploaded is distinguishable from one whose object is there.
+
+A representative sample is uploaded instead, sized to stay comfortably inside
+the remaining 0.98 GB, chosen to exercise every path the full run would: a
+private upload, a job attachment, an update attachment, a reply attachment, a
+signed URL, a checksum comparison, an idempotent re-run, and a NEEDS REVIEW
+document that must not become evidence.
+
+**Database growth is watched, not assumed.** The metadata import adds roughly
+20 MB against 0.445 GB of headroom, which fits — but the figure is measured
+before and after rather than trusted, because the Free plan's database ceiling
+is the next thing that would stop this.
 
 ---
 
