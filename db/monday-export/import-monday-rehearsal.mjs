@@ -33,6 +33,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import * as T from "./monday-transform.mjs";
+import { resolveStoredMime } from "../../app/lib/attachment-mime.ts";
 
 /* Tenants this importer must never write to. */
 const PROTECTED_ORGS = new Set([
@@ -320,6 +321,10 @@ export function planAttachments({ maintenance, storeDoc }, manifestByAsset) {
   const rows = [];
   const push = (item, asset, board, source, columnId, extra) => {
     const manifest = manifestByAsset.get(String(asset.id)) ?? {};
+    const mime = resolveStoredMime({
+      declaredType: manifest.content_type,
+      filename: asset.name ?? manifest.name ?? "",
+    });
     rows.push({
       id: `ma-${asset.id}`,
       sourceAssetId: String(asset.id),
@@ -329,7 +334,13 @@ export function planAttachments({ maintenance, storeDoc }, manifestByAsset) {
       storeDocItemId: board === STORE_DOC_BOARD ? String(item.id) : null,
       sourceColumnId: columnId ?? null,
       originalName: asset.name ?? `asset_${asset.id}`,
-      contentType: manifest.content_type || "application/octet-stream",
+      // monday's CDN returned no Content-Type for 200 of the 3,107 assets. The
+      // first pass stored the fallback as if it were a fact, which both failed
+      // the upload validator and would have filed 123 photographs as
+      // undisplayable. One helper decides it, shared with the app's own routes.
+      contentType: mime.mime ?? "application/octet-stream",
+      contentTypeSource: mime.source,
+      sourceContentType: manifest.content_type ?? "",
       byteSize: Number(manifest.downloaded_size ?? asset.file_size ?? 0),
       checksum: manifest.sha256 ?? null,
       localPath: manifest.path ?? null,

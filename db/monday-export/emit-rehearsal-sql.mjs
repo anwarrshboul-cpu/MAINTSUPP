@@ -20,7 +20,7 @@
  * an HTTP API will accept.
  */
 
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { buildPlan, summarise } from "./import-monday-rehearsal.mjs";
@@ -226,8 +226,20 @@ function main() {
   const org = args.org;
   const files = [];
 
-  if (existsSync(args.out)) rmSync(args.out, { recursive: true, force: true });
+  /*
+   * Clear the SQL, keep the runner's checkpoint.
+   *
+   * `rmSync` on the whole directory took `.run-checkpoint.json` with it, so
+   * re-emitting after a fix silently reset which files had already been
+   * applied. Harmless here because every statement is an upsert — but only by
+   * luck, and on a slower estate it means re-running an hour of work to change
+   * one file. The checkpoint belongs to the runner; the emitter owns the .sql
+   * files and nothing else in this directory.
+   */
   mkdirSync(args.out, { recursive: true });
+  for (const stale of readdirSync(args.out)) {
+    if (stale.endsWith(".sql")) rmSync(path.join(args.out, stale), { force: true });
+  }
 
   const add = (name, sql) => files.push({ name, sql });
 

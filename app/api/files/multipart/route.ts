@@ -35,6 +35,11 @@ import {
   resolveUploadAuthority,
   resolveUploadTenant,
 } from "../upload-authority";
+import {
+  fileExtension,
+  isAllowedFile as isAllowedAttachment,
+  resolveStoredMime,
+} from "../../../lib/attachment-mime";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -43,54 +48,6 @@ const allowedKinds = new Set<AttachmentKind>([
   "issue",
   "completion",
   "general",
-]);
-const allowedTypes = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/heic",
-  "image/heif",
-  "video/mp4",
-  "video/webm",
-  "video/quicktime",
-  "video/x-m4v",
-  "video/x-matroska",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "text/plain",
-  "text/csv",
-  "application/zip",
-  "application/x-zip-compressed",
-]);
-const allowedExtensions = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "webp",
-  "gif",
-  "heic",
-  "heif",
-  "mp4",
-  "webm",
-  "mov",
-  "m4v",
-  "mkv",
-  "pdf",
-  "doc",
-  "docx",
-  "xls",
-  "xlsx",
-  "ppt",
-  "pptx",
-  "txt",
-  "csv",
-  "zip",
 ]);
 const videoExtensions = new Set(["mp4", "webm", "mov", "m4v", "mkv"]);
 
@@ -102,9 +59,6 @@ function safeFileName(value: string) {
     .slice(0, 120);
 }
 
-function fileExtension(name: string) {
-  return name.split(".").pop()?.toLowerCase() ?? "";
-}
 
 function isVideo(originalName: string, contentType: string) {
   return (
@@ -133,9 +87,7 @@ function isVideo(originalName: string, contentType: string) {
  * stored before this change must not become executable just because it is old.
  */
 function isAllowedFile(originalName: string, contentType: string) {
-  const declared = (contentType ?? "").trim();
-  const typeOk = declared ? allowedTypes.has(declared) : true;
-  return typeOk && allowedExtensions.has(fileExtension(originalName));
+  return isAllowedAttachment({ name: originalName, type: contentType });
 }
 
 /*
@@ -508,7 +460,13 @@ async function completeMetadata(
     metadata,
     fileId: metadata.fileId,
     originalName: metadata.originalName,
-    contentType: metadata.contentType || "application/octet-stream",
+    // Same rule as the direct path: an absent or uninformative header is
+    // resolved from the extension rather than stored as opaque binary.
+    contentType:
+      resolveStoredMime({
+        declaredType: metadata.contentType,
+        filename: metadata.originalName ?? "",
+      }).mime ?? "application/octet-stream",
   };
 }
 

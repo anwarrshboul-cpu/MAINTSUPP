@@ -34,6 +34,11 @@ import {
   resolveUploadAuthority,
   resolveUploadTenant,
 } from "./upload-authority";
+import {
+  fileExtension,
+  isAllowedFile,
+  resolveStoredMime,
+} from "../../lib/attachment-mime";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -41,54 +46,6 @@ const allowedKinds = new Set<AttachmentKind>([
   "issue",
   "completion",
   "general",
-]);
-const allowedTypes = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/heic",
-  "image/heif",
-  "video/mp4",
-  "video/webm",
-  "video/quicktime",
-  "video/x-m4v",
-  "video/x-matroska",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "text/plain",
-  "text/csv",
-  "application/zip",
-  "application/x-zip-compressed",
-]);
-const allowedExtensions = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "webp",
-  "gif",
-  "heic",
-  "heif",
-  "mp4",
-  "webm",
-  "mov",
-  "m4v",
-  "mkv",
-  "pdf",
-  "doc",
-  "docx",
-  "xls",
-  "xlsx",
-  "ppt",
-  "pptx",
-  "txt",
-  "csv",
-  "zip",
 ]);
 
 function safeFileName(value: string) {
@@ -99,41 +56,12 @@ function safeFileName(value: string) {
     .slice(0, 120);
 }
 
-function fileExtension(name: string) {
-  return name.split(".").pop()?.toLowerCase() ?? "";
-}
 
 function isVideo(file: File) {
   return file.type.startsWith("video/") ||
     ["mp4", "webm", "mov", "m4v", "mkv"].includes(fileExtension(file.name));
 }
 
-/**
- * Whether this file may be stored at all.
- *
- * AND, not OR. This was `allowedTypes.has(type) || allowedExtensions.has(ext)`,
- * and BOTH halves are supplied by the caller — so naming a file `poc.png` while
- * declaring `Content-Type: text/html` satisfied the extension half and stored
- * the HTML type, which `GET /api/files/[id]` then echoed back as the response
- * type with `Content-Disposition: inline`. That is script execution on the
- * application's own origin, and a contractor job link — no session at all — was
- * enough to plant it.
- *
- * Requiring both closes it at the door: a declared type outside the list is
- * refused however the file is named, and a name outside the list is refused
- * however it is declared. SVG is absent from both lists on purpose, and the OR
- * was quietly defeating that.
- *
- * The serving side is hardened independently in `files/[id]/route.ts` — a file
- * stored before this change must not become executable just because it is old.
- */
-function isAllowedFile(file: File) {
-  // An empty type means the browser declined to guess; fall back to the
-  // extension rather than refusing a legitimate upload outright.
-  const declared = file.type.trim();
-  const typeOk = declared ? allowedTypes.has(declared) : true;
-  return typeOk && allowedExtensions.has(fileExtension(file.name));
-}
 
 function requestPayload(
   row: typeof maintenanceRequests.$inferSelect,
@@ -823,9 +751,22 @@ export async function POST(request: Request) {
      * halves drift apart.
      */
     const key = `${orgId}/maintenance/${anchorSegment(filedAgainst)}/${kind}/${id}-${cleanName}`;
+    /*
+     * `file.type || "application/octet-stream"` stored the fallback as if it
+     * were a fact. A browser that declines to guess a type is not asserting
+     * that the file is opaque binary — and the serving route reads the stored
+     * type to decide between rendering inline and forcing a download, so a
+     * photograph that arrived without a header was filed as undisplayable.
+     * The extension is the better evidence, checked against the same
+     * allow-list the upload was admitted by; an unknown one still falls back
+     * rather than being guessed at.
+     */
+    const storedType =
+      resolveStoredMime({ declaredType: file.type, filename: file.name }).mime ??
+      "application/octet-stream";
     await runtimeEnv.BUCKET.put(key, await file.arrayBuffer(), {
       httpMetadata: {
-        contentType: file.type || "application/octet-stream",
+        contentType: storedType,
         contentDisposition: `inline; filename="${cleanName}"`,
       },
       customMetadata: {
@@ -886,7 +827,7 @@ export async function POST(request: Request) {
             boardColumnId || version?.plan.carried.boardColumnId || null,
           objectKey: key,
           originalName: file.name,
-          contentType: file.type || "application/octet-stream",
+          contentType: storedType,
           byteSize: file.size,
           // W07-02 metadata: the predecessor's values, then this request's.
           title: fields.values.title ?? version?.plan.carried.title ?? null,
