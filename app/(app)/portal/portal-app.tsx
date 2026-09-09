@@ -196,6 +196,7 @@ import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 import { openJobCount } from "../../lib/job-metrics";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
+import { AppearancePanel } from "./views/appearance-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -6115,6 +6116,11 @@ function SettingsView({
           {busy ? "Saving…" : "Save settings"}
         </button>
       </section>
+
+      {/* Appearance is a per-person device setting, not part of the workspace
+          save above — it applies on click and mirrors itself. See
+          views/appearance-panel.tsx. */}
+      <AppearancePanel />
 
       <section className="panel settings-card">
         <div className="settings-card__heading">
