@@ -155,5 +155,29 @@ export function useBoardViews(
     // `boardId` gates the fetch above, so a board change must re-run it.
   }, [boardId, refreshToken, setActiveKey]);
 
-  return { board, views, types, loading, error, setError, refresh };
+  return {
+    board,
+    views,
+    types,
+    /*
+     * DERIVED, NOT STORED, FOR THE ONE CASE THAT NEVER LOADS.
+     *
+     * `loading` starts true and is only ever cleared by the fetch's `finally`.
+     * The effect returns early when there is no board to ask about — a section
+     * with no register of its own — so nothing cleared it, and that section sat
+     * at `aria-busy="true"` for the life of the page, announcing a tab strip
+     * that was permanently arriving. Exactly the loading-versus-empty confusion
+     * the flag was added to end, reintroduced by the flag itself.
+     *
+     * Derived rather than fixed with a `setLoading(false)` before the return:
+     * that is a setState in an effect body, which `react-hooks/set-state-in-effect`
+     * refuses and is right to. A board that was never asked about is not
+     * loading, and saying so once here is simpler than keeping a second piece
+     * of state honest.
+     */
+    loading: boardId ? loading : false,
+    error,
+    setError,
+    refresh,
+  };
 }

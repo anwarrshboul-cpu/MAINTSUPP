@@ -124,6 +124,42 @@ export function countsTowardCompliance(value: string | null | undefined): boolea
 }
 
 /**
+ * THE DUTY HOLDER FOR A REQUIREMENT THE BOARD ITSELF SPEAKS FOR.
+ *
+ * A defect this exists to prevent, found in review and confirmed by tracing
+ * `registerRowFor` — the join, not a screen.
+ *
+ * `ensureComplianceProfile` writes one annotation row per requirement KIND, and
+ * those kinds are `storeDocumentationKinds` — exactly the twelve labels a Store
+ * Documentation board slot carries. `readComplianceRegister` looks an
+ * annotation up by `${siteId}::${kind}`, so once a site has been given a
+ * profile, every BOARD slot of that site finds one of these rows and adopts its
+ * duty holder. A requirement with a real, in-date certificate on the board
+ * would therefore inherit "unconfirmed" and drop out of the compliance score
+ * entirely: a store reading 25% would read "—", and its satisfied requirements
+ * would leave the numerator and the denominator together.
+ *
+ * The resolution is not to distrust the annotation but to read the placeholder
+ * for what it is. "unconfirmed" means "this system created a requirement and
+ * nobody has said whose it is". A BOARD ROW IS THAT ANSWER: somebody set this
+ * store up on the compliance board and has been filing certificates against it,
+ * which is positive evidence that the requirement is administered here. The
+ * placeholder must not override it.
+ *
+ * A HUMAN answer still wins, which is the whole reason this is not simply
+ * `?? null`: if somebody has said a board-tracked fire alarm is the landlord's,
+ * that is a decision and it survives.
+ *
+ * Not reproducible on the development estate — its 192 board-derived
+ * requirements belong to board rows whose titles match no site, so the join
+ * never fires there. That is a property of the fixtures, not a defence.
+ */
+export function boardDutyHolder(stored: string | null | undefined): string | null {
+  if (stored === DUTY_HOLDER_UNCONFIRMED) return null;
+  return stored ?? null;
+}
+
+/**
  * Is this requirement hidden from the register?
  *
  * "Not applicable" is the duty-holder answer that means the asset is not there

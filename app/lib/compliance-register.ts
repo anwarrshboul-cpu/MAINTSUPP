@@ -53,6 +53,7 @@ import {
   sites,
 } from "../../db/schema";
 import { storeDocumentationCertificates } from "../../db/monday-board-spec";
+import { boardDutyHolder } from "./compliance-duty-holder";
 import { liveAttachmentRows } from "./attachment-counts";
 import { normaliseSiteName } from "./sites-repository";
 import {
@@ -934,8 +935,10 @@ export async function readComplianceRegister(
         notRequired: document.state === "Not required",
         /* The annotation answers even when the BOARD owns the requirement: a
            slot can be confirmed as the landlord's without the board growing a
-           column for it. */
-        dutyHolder: registerRow?.dutyHolder ?? null,
+           column for it. But the machine's "unconfirmed" placeholder must NOT
+           travel this way — a board row is itself the answer it was waiting
+           for. See `boardDutyHolder`. */
+        dutyHolder: boardDutyHolder(registerRow?.dutyHolder),
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
@@ -946,7 +949,7 @@ export async function readComplianceRegister(
           state: document.state,
           expiry: document.expiry,
           fileCount: document.fileCount,
-          dutyHolder: registerRow?.dutyHolder ?? null,
+          dutyHolder: boardDutyHolder(registerRow?.dutyHolder),
         });
       }
     }
@@ -1090,6 +1093,13 @@ export type SiteComplianceRecord = {
   state: ComplianceState;
   /** Real attachment count — board file columns included, not a 0/1 pointer. */
   fileCount: number;
+  /**
+   * Whose obligation this requirement is, or null if nobody has been asked.
+   * Not used in a calculation here — the site drawer lists rather than scores —
+   * but a list that cannot distinguish "missing" from "not yet claimed" is
+   * telling the reader the wrong thing about their own estate.
+   */
+  dutyHolder: string | null;
   /** The board row this came from, or null for a register-only requirement. */
   itemId: string | null;
   slotKey: string | null;
@@ -1139,6 +1149,16 @@ export async function readSiteComplianceRecords(
       notRequired: entry.notRequired,
       state: entry.state,
       fileCount: entry.fileCount,
+      /*
+       * Carried here too. This is the third mapper that has to pass the duty
+       * holder on and the third that was missed — the other two silently used
+       * the old arithmetic while the list beside them looked right. This one
+       * computes no percentage, so the cost is honesty rather than a wrong
+       * number: it feeds the site drawer's Compliance tab, the only screen that
+       * lists ONE site's requirements, and without it twelve freshly created
+       * rows read as twelve failures rather than as twelve nobody has claimed.
+       */
+      dutyHolder: entry.dutyHolder,
       itemId: entry.itemId,
       slotKey: entry.slotKey,
       /*

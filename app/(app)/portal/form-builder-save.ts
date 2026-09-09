@@ -162,8 +162,17 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
          * mean something and what stops a failed save discarding the edit —
          * the whole point of the exercise. `state` goes to "failed" rather
          * than "unsaved" so the toolbar can offer the reason and the button.
+         *
+         * MERGED UNDER anything queued while this request was in the air, not
+         * assigned over it. `body` was captured before the fetch; a straight
+         * assignment discarded every edit made during the round trip. Add a
+         * question, reorder it while the PATCH is in flight, have the PATCH
+         * fail: the reorder vanished, Retry re-sent only the add, it
+         * succeeded, and the toolbar said "All changes saved" — the silent
+         * loss this module exists to prevent, arriving through its own
+         * recovery path. Later keys win, because they are later.
          */
-        pending.current = body;
+        pending.current = { ...body, ...(pending.current ?? {}) };
         setFailure({
           message: payload.error || "That change could not be saved.",
           retryable: payload.retry === true,
@@ -183,7 +192,8 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
       setFailure(null);
       setState(pending.current ? "unsaved" : "saved");
     } catch (caught) {
-      pending.current = body;
+      // Merged, not assigned, for the reason given on the arm above.
+      pending.current = { ...body, ...(pending.current ?? {}) };
       // Nothing answered at all, so there is nothing to distinguish — a
       // dropped connection is always worth one more try.
       setFailure({
@@ -289,11 +299,26 @@ export function useFormSave({ boardId, form, setForm }: Options): FormSave {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo]);
 
-  /* A pending change must not be dropped because the tab was closed or the
-     board switched. Flushed on unmount rather than cancelled. */
+  /*
+   * A PENDING CHANGE MUST NOT BE DROPPED BECAUSE THE BOARD SWITCHED.
+   *
+   * This cleared the timer and said in a comment that it flushed. It did not,
+   * and the gap was reachable: `FormBuilder` is mounted only while the Form tab
+   * is the active view (`board-view-pane.tsx`), so clicking another tab
+   * unmounts it — and `beforeunload` does not fire for an in-app navigation. A
+   * Design change made inside the 800ms window and followed by a tab click was
+   * simply gone, with nothing on screen having said so. It could not be lost
+   * that way before this module existed, because the write was immediate.
+   *
+   * Flushed through the ref, so it reaches the current `flush` rather than a
+   * stale closure. React's development StrictMode mounts, unmounts and remounts
+   * once; a flush here is idempotent in that case because `flush` clears
+   * `pending` before it sends and refuses to run while `inFlight`.
+   */
   useEffect(
     () => () => {
       if (timer.current !== null) window.clearTimeout(timer.current);
+      if (pending.current) flushRef.current();
     },
     [],
   );

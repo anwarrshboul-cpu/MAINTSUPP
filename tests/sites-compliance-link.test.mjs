@@ -262,9 +262,26 @@ test("the Add site form creates neither the site nor nothing", async () => {
    */
   const create = source.slice(source.indexOf("export async function POST"));
   const call = create.indexOf("ensureComplianceProfile");
-  const rollback = create.indexOf("db.delete(sites)");
-  assert.ok(call > 0 && rollback > call, "a failed profile must roll the site back");
+  /*
+   * Matched WITHOUT the receiver, deliberately. This read `db.delete(sites)`
+   * and broke the moment the statement gained a `registerScopeFilter` and had
+   * to be wrapped across lines — a pin that fails on reformatting rather than
+   * on the contract is a pin that gets deleted the next time it fires. What
+   * matters is that a delete of `sites` happens AFTER the profile call, which
+   * is the ordering that makes it a rollback rather than a race.
+   */
+  const rollback = create.search(/\.delete\(sites\)/);
+  assert.ok(call > 0, "the create path must ask for a profile");
+  assert.ok(rollback > call, "a failed profile must roll the site back");
   assert.match(create, /Nothing was saved/, "and must say so");
+  /* The rollback is a `sites` write like any other and carries the register
+     scope — w2-scope-model enforces that on the statement, and caught this one
+     when it did not. */
+  assert.match(
+    create.slice(rollback, rollback + 400),
+    /registerScopeFilter\(sites\.boardId, scope\)/,
+    "including the rollback",
+  );
 });
 
 test("the profile insert is chunked, because twelve rows is 144 variables", async () => {

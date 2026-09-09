@@ -175,9 +175,19 @@ test("autosave cannot fail quietly", async () => {
   const saver = codeOnly(await read("app/(app)/portal/form-builder-save.ts"));
   const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
 
-  // The change survives its own failure, or Retry is a button with nothing
-  // behind it and the edit is gone.
-  assert.match(saver, /pending\.current = body;/, "a failed save keeps the change");
+  /*
+   * The change survives its own failure, or Retry is a button with nothing
+   * behind it and the edit is gone.
+   *
+   * Asserted as a MERGE, which is stronger than the `pending.current = body`
+   * this first pinned. A straight assignment kept the failed change and
+   * silently discarded anything queued while the request was in the air — add
+   * a question, reorder it mid-flight, have the PATCH fail, and the reorder was
+   * gone while the toolbar went on to say "All changes saved". Both failure
+   * arms merge, and later keys win.
+   */
+  const restores = saver.match(/pending\.current = \{ \.\.\.body, \.\.\.\(pending\.current \?\? \{\}\) \};/g) ?? [];
+  assert.equal(restores.length, 2, "both failure arms keep the change, and merge rather than assign");
   assert.match(saver, /retryable: payload\.retry === true/, "the server says whether to offer Retry");
   assert.match(saver, /beforeunload/, "and the browser warns before it is lost");
 
