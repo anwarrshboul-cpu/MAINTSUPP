@@ -172,3 +172,167 @@ export function boardDutyHolder(stored: string | null | undefined): string | nul
 export function isNotApplicable(value: string | null | undefined): boolean {
   return value === "not_applicable";
 }
+
+/* ── The words a CONTROL needs, so nothing retypes the vocabulary ─────────── */
+
+/**
+ * The four answers, each already carrying the word a person reads.
+ *
+ * Built from `DUTY_HOLDERS` and `dutyHolderLabel` rather than written out
+ * again, because a hand-typed option list is how a fifth spelling of "centre"
+ * reaches the database. Every control that offers the choice — the per-record
+ * select on the register, the bulk bar in the confirmation queue — renders this
+ * array and posts `value`, so the string the browser sends is by construction
+ * one `isDutyHolder` accepts.
+ *
+ * `unconfirmed` is deliberately absent. It is not an answer a person may give;
+ * it is the machine's statement that nobody has given one, and offering it in a
+ * menu would invite somebody to "set" a requirement back to unanswered by
+ * choosing it — which is what clearing the value does, and clearing is offered
+ * separately as "Not recorded".
+ */
+export const DUTY_HOLDER_CHOICES: ReadonlyArray<{ value: DutyHolder; label: string }> =
+  DUTY_HOLDERS.map((value) => ({ value, label: dutyHolderLabel(value) }));
+
+/**
+ * A one-line explanation of what each answer commits the product to.
+ *
+ * Used as the control's `title` and its accessible description, for the same
+ * reason `COMPLIANCE_MEANING` exists beside the status chips: a reader picking
+ * "Landlord" is deciding that this requirement leaves the compliance
+ * percentage, and a menu that does not say so is asking them to guess.
+ */
+export function dutyHolderMeaning(value: string | null | undefined): string {
+  switch (value) {
+    case "client":
+      return "Ours to administer. Scheduled, chased, and counted in the compliance score.";
+    case "landlord":
+      return "The landlord's obligation. Recorded and displayed, not scored against us.";
+    case "centre":
+      return "The shopping centre's obligation. Recorded and displayed, not scored against us.";
+    case "not_applicable":
+      return "The asset is not at this unit, so there is no obligation to be in date about.";
+    case DUTY_HOLDER_UNCONFIRMED:
+      return "Created by this system and waiting on somebody to say whose it is. Not scored.";
+    default:
+      return "Nobody has been asked. Counts exactly as it did before responsibilities were recorded.";
+  }
+}
+
+/* ── Coverage: how much of a register has been answered for ───────────────── */
+
+/**
+ * WHAT THE READER IS TOLD ABOUT HOW MUCH HAS BEEN CONFIRMED — and why it can
+ * never be a percentage.
+ *
+ * `complianceCompletion().percent` is a claim about CERTIFICATES; this is a
+ * count of ANSWERS. Printing the second as a percentage is the exact defect the
+ * duty-holder design exists to prevent: a brand-new site has twelve
+ * requirements, none of them confirmed, and "0%" beside the word compliance is
+ * read as "this store is failing" by every person who has ever seen a
+ * dashboard. It is not failing. Nobody has been asked yet.
+ *
+ * So there are two sentences and no third:
+ *
+ *   "3 of 12 requirements confirmed"   at least one answer exists
+ *   "Not yet confirmed"                no answer exists       — NEVER "0%"
+ *
+ * `total === 0` is a third fact again — there is nothing to confirm — and gets
+ * the phrase the register already uses for it, so the queue and the group
+ * header do not describe an empty site two ways.
+ */
+export const RESPONSIBILITY_NOT_CONFIRMED = "Not yet confirmed";
+
+/** The phrase for a site that has no requirements at all to confirm. */
+export const RESPONSIBILITY_NOTHING_TO_CONFIRM = "No requirements set";
+
+export type ResponsibilityCoverage = {
+  /** Requirements carrying one of the four real answers. */
+  confirmed: number;
+  /** Requirements this system created and is explicitly waiting on. */
+  unconfirmed: number;
+  /**
+   * Requirements nobody has ever been asked about — the NULL estate.
+   *
+   * Counted apart from `unconfirmed` for the reason argued at the top of this
+   * file: they are different facts, and only the second belongs in a queue that
+   * says "these are waiting on you". Every row that predates the column is in
+   * here, and pulling them into the queue would invite one pass of clicking to
+   * restate the compliance figure for an estate nobody had changed.
+   */
+  neverAsked: number;
+  total: number;
+  /** Every requirement has an answer. */
+  complete: boolean;
+  /** The sentence to print. NEVER contains a percent sign. */
+  label: string;
+};
+
+/**
+ * Coverage over a set of records — one site's, or a whole portfolio's.
+ *
+ * Takes the same loose record shape `complianceCompletion` takes, so a caller
+ * that already has `ComplianceRow[]` or `ComplianceItem[]` passes them straight
+ * through and the two numbers on screen are computed from one array.
+ */
+export function responsibilityCoverage(
+  records: readonly { dutyHolder?: string | null }[],
+): ResponsibilityCoverage {
+  let confirmed = 0;
+  let unconfirmed = 0;
+  let neverAsked = 0;
+  for (const record of records) {
+    const value = record.dutyHolder;
+    if (isDutyHolder(value)) confirmed += 1;
+    else if (value === DUTY_HOLDER_UNCONFIRMED) unconfirmed += 1;
+    else neverAsked += 1;
+  }
+  const total = records.length;
+  return {
+    confirmed,
+    unconfirmed,
+    neverAsked,
+    total,
+    complete: total > 0 && confirmed === total,
+    label: !total
+      ? RESPONSIBILITY_NOTHING_TO_CONFIRM
+      : confirmed === 0
+        ? RESPONSIBILITY_NOT_CONFIRMED
+        : `${confirmed} of ${total} requirement${total === 1 ? "" : "s"} confirmed`,
+  };
+}
+
+/**
+ * WHAT "NOT REQUIRED" MUST BE AFTER A RESPONSIBILITY IS CHANGED.
+ *
+ * `isNotApplicable` explains why the answer "Not applicable" is stored as the
+ * `not_required` flag rather than as a sixth `ComplianceState`. That mapping
+ * has a direction nobody had needed until a control existed to change an answer
+ * a SECOND time, and getting it wrong makes the answer a one-way door: mark a
+ * kiosk's gas certificate Not applicable, realise it was the wrong store,
+ * change it to Landlord — and the requirement stays flagged not-required
+ * forever, out of the register's applicable count, with nothing on screen
+ * explaining why.
+ *
+ * So the flag follows the answer that set it, and only that one:
+ *
+ *   next is not_applicable        → true.  The answer means the asset is absent.
+ *   stored WAS not_applicable     → false. That answer has been withdrawn.
+ *   neither                       → unchanged. Somebody ticked "Not required"
+ *                                   in Manage register for their own reasons and
+ *                                   a responsibility edit is not the place to
+ *                                   silently undo it.
+ *
+ * Stated as a pure function here, in the module that owns the vocabulary,
+ * rather than inline in a route handler — there are now two write paths and
+ * they must not disagree about it.
+ */
+export function notRequiredAfterDutyHolder(
+  stored: string | null | undefined,
+  next: string | null,
+  notRequired: boolean,
+): boolean {
+  if (isNotApplicable(next)) return true;
+  if (isNotApplicable(stored)) return false;
+  return notRequired;
+}
