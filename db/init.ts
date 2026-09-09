@@ -890,8 +890,41 @@ const BASE_TABLE_DECLARATIONS: readonly string[] = [
          public_upload_token_expires_at TEXT,
          created_by_email TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         source_item_name TEXT,
+         source_group TEXT,
+         source_number TEXT,
+         source_url TEXT,
+         title_rule INTEGER
        )`,
+  /*
+   * The five `source_*` columns above are monday provenance for the migration.
+   * `external_id` already carries the item id and is the importer's idempotency
+   * key; these carry what the id alone cannot say.
+   *
+   * `source_item_name` exists because `title` stops being monday's Name. On the
+   * live board 437 of 774 items are called "Incoming form answer" and only 37
+   * distinct names exist across the whole estate, so a readable title has to be
+   * generated — and the original still has to survive, because it is what
+   * somebody searching monday will remember.
+   *
+   * `source_group` because the Status column is authoritative over the group a
+   * row sits in, and 40 items disagree. Keeping the group is what makes that
+   * disagreement auditable rather than merely resolved.
+   *
+   * `source_number` because monday's Number lands in `contact`, which is a
+   * phone field, and 583 of 774 rows have no number at all — so `contact`
+   * cannot be read back as "did the source have one".
+   *
+   * `title_rule` because the migration reports a count per title rule, and a
+   * count that cannot be recomputed from the data is a claim.
+   *
+   * DECLARED HERE AND NOT COMMENTED INSIDE THE SQL. `splitColumnDefinitions`
+   * splits this string on top-level commas and hands each part to ALTER TABLE;
+   * a prose comment containing a comma becomes two nonsense column definitions,
+   * and one beginning with a word ("and 40 items disagree") parses as a column
+   * named `and`. The first draft of this change did exactly that.
+   */
   `CREATE TABLE IF NOT EXISTS maintenance_groups (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
@@ -963,8 +996,23 @@ const BASE_TABLE_DECLARATIONS: readonly string[] = [
          byte_size INTEGER NOT NULL,
          kind TEXT NOT NULL DEFAULT 'issue',
          uploaded_by_email TEXT,
-         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         source_asset_id TEXT,
+         source_column_id TEXT,
+         checksum_sha256 TEXT
        )`,
+  /*
+   * `board_column_id` already holds the MAINTSUPP column key; `source_column_id`
+   * holds monday's, so a board rename cannot cost us the knowledge that a file
+   * came from the PAT slot rather than the fire door one — which on Store
+   * Documentation is the whole of what makes a file a certificate.
+   *
+   * `checksum_sha256` is what turns "3,107 files were uploaded" into a claim
+   * that can be checked: the export hashed every byte it wrote, so an
+   * attachment whose stored hash matches is provably the same file. It is also
+   * the only safe basis for storing one physical object behind two logical
+   * attachments, which the PLI certificate on two sites requires.
+   */
   `CREATE TABLE IF NOT EXISTS compliance_documents (
          id TEXT PRIMARY KEY NOT NULL,
          client_id TEXT NOT NULL DEFAULT 'sunnamusk-uk',
@@ -3864,6 +3912,37 @@ async function ensureImportIdentity(d1: D1DatabaseLike) {
          ON maintenance_requests(organisation_id, external_id)`,
     )
     .run();
+
+  /*
+   * The same identity, for a comment.
+   *
+   * `item_updates` is created by Stage 3 rather than from
+   * BASE_TABLE_DECLARATIONS, so it is not reached by the declaration
+   * reconciler and its additive columns belong here — beside the job's
+   * `external_id`, which is the same idea for the same reason.
+   *
+   * A monday update and a monday reply are both rows in this table, told apart
+   * by `parent_id`. The importer derives each row id from the source id, so
+   * re-running reconciles rather than duplicating; this column is what a
+   * reconciliation query joins on to prove that it did.
+   */
+  await addColumn(d1, "item_updates", "source_update_id", "TEXT");
+  try {
+    await d1
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS item_updates_source_idx
+           ON item_updates(organisation_id, source_update_id)`,
+      )
+      .run();
+  } catch {
+    /*
+     * An index that cannot be built must not take the application down with
+     * it — this file runs on the boot path of every request. The column above
+     * is guarded by addColumn, which returns early when the table does not
+     * exist yet; the index has no such guard and would throw on a database
+     * that has not reached Stage 3.
+     */
+  }
 }
 
 /*
