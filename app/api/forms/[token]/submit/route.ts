@@ -583,7 +583,30 @@ export async function POST(request: Request, context: { params: Promise<{ token:
      * logged. The browser uses it immediately for the uploads and then drops it.
      */
     return Response.json({ request: { id }, uploadToken }, { status: 201 });
-  } catch {
+  } catch (error) {
+    /*
+     * LOGGED, because a public door that fails silently cannot be fixed.
+     *
+     * This was a bare `catch {}`. The 503 it returns is the right answer to
+     * give a member of the public — they cannot act on a stack trace — but the
+     * cause reached nobody at all: not the response, not the runtime log. It is
+     * the same omission this batch already corrected on `/api/board` and
+     * `/api/board/views`, which were the only two board routes swallowing their
+     * error unlogged, and it is how a real failure stayed invisible.
+     *
+     * Found by release QA, and it is NOT hypothetical: submitting this form
+     * against Staging answers 503 while the identical submission against the
+     * local database answers 201. That divergence is exactly what
+     * `db/sqlite-to-postgres.ts` exists to absorb and exactly the class
+     * CLAUDE.md warns can pass locally and fail deployed — and with no log line
+     * there was no way to tell which statement was refusing. Measured on the
+     * deployment that PREDATES this batch's intake work as well, so the fault
+     * is older than the refactor; only its visibility is new.
+     *
+     * The prefix matches the board routes so one grep finds every swallowed
+     * server error in this codebase.
+     */
+    console.error("[/api/forms/:token/submit]", error);
     return Response.json({ error: "Your request could not be submitted." }, { status: 503 });
   }
 }
