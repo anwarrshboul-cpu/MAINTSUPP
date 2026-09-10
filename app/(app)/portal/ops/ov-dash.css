@@ -466,6 +466,130 @@
   }
 }
 
+/* ── The block owns its own ink, in EITHER app theme ──────────────────────── */
+
+/*
+ * THIS BLOCK IS ALWAYS DARK. THE APP AROUND IT IS NOT.
+ *
+ * `app/globals.css` carries its portal text rules inside
+ * `body[data-theme="dark"] { … }`, which makes `.portal-main h1, h2, h3`
+ * specificity (0,2,2) — and this file's own `.ov-dash .ov-card__title` is
+ * (0,2,0). So globals won in BOTH themes, and the two outcomes look very
+ * different:
+ *
+ *   · in DARK it painted #f1f6f8 where this file asked for #F4F7FA, which is
+ *     close enough that nothing looked wrong and the bug stayed hidden;
+ *   · in LIGHT the rule does not apply at all, the title fell back to the
+ *     light theme's `--ink`, and every card heading rendered dark navy on the
+ *     dark card — measured rgb(19, 37, 55) on #0E1721, about 1.3:1. The
+ *     selects went white for the same reason.
+ *
+ * Measured on the Preview, where the signed-in profile is light: the block was
+ * legible in dark and had invisible headings in light. The KPI labels and
+ * values were fine throughout, because they are not h-tags or form controls
+ * and nothing global was reaching for them.
+ *
+ * Raising these to (0,3,1) and (0,3,2) settles it in both directions without
+ * an `!important` and without touching a global rule that 14 other routes
+ * depend on. `body[data-theme]` always matches: `theme-boot.ts` stamps the
+ * attribute on `html` AND `body` before first paint, in all three states.
+ */
+body[data-theme] .ov-dash .ov-card__title,
+body[data-theme] .ov-dash .ov-dash__title,
+body[data-theme] .ov-dash h2,
+body[data-theme] .ov-dash h3,
+body[data-theme] .ov-dash strong {
+  color: var(--ov-text);
+}
+
+/*
+ * THE CONTROLS ARE DRAWN, NOT INHERITED.
+ *
+ * `globals.css` carries `button, input, select, textarea { color: inherit }`,
+ * so a native control takes whatever the surrounding theme is painting — which
+ * on a LIGHT app profile is a dark navy `--ink` sitting on the browser's own
+ * white select. Measured on the Preview, where the signed-in profile is light:
+ * dark navy text on a white box, inside an always-dark block.
+ *
+ * Inheritance is the mechanism, so a colour alone does not settle it: the
+ * select must stop being the UA's control and become this block's. That is
+ * what `appearance: none` is for, and it is also what lets the chevron, the
+ * border and the hit target match the rest of the header instead of being
+ * whatever the platform draws.
+ */
+/*
+ * EVERY control in the block, not only the header's.
+ *
+ * The spend-trend window selector lives in `.ov-card__link` rather than
+ * `.ov-dash__control`, so a rule written only for the header left one white
+ * select in the middle of a dark card — visible at 390px on a light profile
+ * and easy to miss on a dark one. Selecting on the ELEMENT inside `.ov-dash`
+ * covers both without either file having to know where the other put a class.
+ */
+body[data-theme] .ov-dash select,
+body[data-theme] .ov-dash input,
+body[data-theme] .ov-dash .ov-dash__control,
+body[data-theme] .ov-dash .ov-dash__control select,
+body[data-theme] .ov-dash .ov-dash__control input,
+body[data-theme] .ov-dash .ov-dash__control > select {
+  appearance: none;
+  -webkit-appearance: none;
+  /*
+   * `!important` ON EXACTLY TWO PROPERTIES, and here is what it beats.
+   *
+   * `brand-overrides.css` carries
+   * `body[data-theme="light"] :is(.portal-main, .workspace-manager, …)` rules
+   * that paint every descendant control `--paper` on `--ink`. `:is()` takes
+   * the specificity of its most specific argument, so raising this selector
+   * further is an arms race against a list somebody will extend later —
+   * measured, (0,3,2) was already losing to it.
+   *
+   * This block is an always-dark island inside a themeable app, which is the
+   * one situation where the island has to win outright rather than by one
+   * point. The same file sets the precedent at its own `.live-board-search`
+   * rules, for the same reason and with the same two properties. Everything
+   * else here stays at normal weight, so nothing outside these controls is
+   * made harder to restyle later.
+   */
+  color: var(--ov-text) !important;
+  background-color: var(--ov-card) !important;
+  background-image: none;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+  /* §3's floor for a control somebody taps on a phone. */
+  min-height: 34px;
+}
+
+/*
+ * A chevron, because `appearance: none` takes the platform's away and a select
+ * that looks like a text box is a select nobody opens.
+ */
+body[data-theme] .ov-dash select {
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
+    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+body[data-theme] .ov-dash select option {
+  color: var(--ov-text);
+  background-color: var(--ov-card);
+}
+
+/* The legend and caption inks, for the same reason and at the same weight. */
+body[data-theme] .ov-dash .ov-legend__label,
+body[data-theme] .ov-dash .ov-kpi__label {
+  color: var(--ov-text-2);
+}
+
+body[data-theme] .ov-dash .ov-card__link {
+  color: var(--ov-teal);
+}
+
 /* ── Shared chart chrome ──────────────────────────────────────────────────── */
 
 /*
