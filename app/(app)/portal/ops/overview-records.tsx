@@ -32,6 +32,7 @@ import type { RecordsPayload, RecordsQuery } from "./overview-contract";
  */
 const FALLBACK_TITLE: Record<RecordsQuery, string> = {
   missing_measure_date: "Jobs the period cannot see",
+  incomplete_records: "Jobs with something missing",
   no_site: "Jobs that point at no site in the register",
   no_cost: "Jobs in this period with no cost recorded",
   completed_without_cost: "Completed jobs with no cost recorded",

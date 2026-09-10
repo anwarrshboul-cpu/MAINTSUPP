@@ -405,6 +405,12 @@ export type RecordRow = {
 
 export type RecordsQuery =
   | "missing_measure_date"
+  /*
+   * The five conditions the Pulse tile COUNTS, so tapping it opens the jobs it
+   * was counting. It used to open `no_site`, which is one of the five: a reader
+   * tapped a figure of N and got a shorter list with no explanation.
+   */
+  | "incomplete_records"
   | "no_site"
   | "no_cost"
   | "completed_without_cost"

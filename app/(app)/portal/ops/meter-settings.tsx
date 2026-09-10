@@ -361,12 +361,29 @@ export function MeterSettings({ onSaved }: { onSaved?: () => void } = {}) {
           <h3 className="ovt-preview__title">
             Preview · {plural(payload.cohortTotal, "job")} in the current period
           </h3>
+          {/*
+            THE PREVIEW DREW THE OPPOSITE OF WHAT THE PAGE DRAWS.
+
+            Its total, its segments and its legend were all filtered to
+            `meter.visible`, directly under a caption reading "Hidden from the
+            bar, still counted" and a label promising "as this configuration
+            would draw it". The Overview does the opposite, and correctly:
+            `overview-glance.tsx` builds the bar from EVERY meter and passes
+            `total={data.cohortTotal}`, because §2.5 makes hiding a meter remove
+            its TILE and not its share of the work. So the one screen whose job
+            is to show the consequence of a setting showed a bar the page would
+            never draw, and the heading above it used `payload.cohortTotal` — a
+            third denominator, different again from the bar beneath it.
+
+            Now the bar is every meter over the cohort total, the same two
+            values the page uses, and the hidden note below explains what
+            hiding actually does.
+          */}
           <SegmentedMeter
             label="At a glance, as this configuration would draw it"
             height={14}
-            total={ordered.reduce((sum, meter) => sum + (meter.visible ? countFor(meter.key) : 0), 0)}
+            total={payload.cohortTotal}
             segments={ordered
-              .filter((meter) => meter.visible)
               .map((meter) => ({
                 key: meter.key,
                 label: meter.label,
@@ -376,7 +393,6 @@ export function MeterSettings({ onSaved }: { onSaved?: () => void } = {}) {
           />
           <ul className="ovt-preview__legend">
             {ordered
-              .filter((meter) => meter.visible)
               .map((meter) => (
                 <li key={meter.key}>
                   <span
@@ -390,7 +406,7 @@ export function MeterSettings({ onSaved }: { onSaved?: () => void } = {}) {
           </ul>
           {hidden.length ? (
             <p className="ovt-preview__hidden">
-              Hidden from the bar, still counted:{" "}
+              Hidden from the tiles, still in the bar and in the total:{" "}
               {hidden.map((meter) => `${meter.label} ${countFor(meter.key)}`).join(" · ")}
             </p>
           ) : null}

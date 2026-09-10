@@ -1781,8 +1781,20 @@ export async function loadCost(
     measure: filters.measure,
     cohortTotal: totals.cohortTotal,
     costedJobs: totals.costedJobs,
-    /* §3.2 — read FIRST, and the banner threshold is decided from it. */
-    coveragePercent: percentOf(totals.costedJobs, totals.cohortTotal),
+    /*
+     * §3.2 — read FIRST, and the banner threshold is decided from it.
+     *
+     * NULL when there is nothing to cover, which is not the same as 0%.
+     * `percentOf` answers 0 for a zero denominator, so a period holding no job
+     * at all reported `cohortTotal: 0, costedJobs: 0, coveragePercent: 0` and
+     * the amber banner fired "Cost data covers 0% of jobs in this period" — a
+     * confident finding about a coverage gap, over an empty period. Reproduced
+     * on `?period=custom&from=2020-01-01&to=2020-03-31`. `medianCostPence` and
+     * `largest` in this same payload have always been nullable for exactly
+     * this reason; only this field was typed so that it could not be.
+     */
+    coveragePercent:
+      totals.cohortTotal > 0 ? percentOf(totals.costedJobs, totals.cohortTotal) : null,
     totalSpendPence: totals.spendPence,
     medianCostPence,
     largest: largest
@@ -2697,6 +2709,7 @@ export async function loadSitesAttention(
 
 const RECORD_QUERIES: readonly RecordsQuery[] = [
   "missing_measure_date",
+  "incomplete_records",
   "no_site",
   "no_cost",
   "completed_without_cost",
@@ -2711,6 +2724,7 @@ export function isRecordsQuery(value: string): value is RecordsQuery {
 
 const RECORD_TITLE: Record<RecordsQuery, string> = {
   missing_measure_date: "Jobs with no date on the current measure",
+  incomplete_records: "Jobs with something missing",
   no_site: "Jobs that point at no site in the register",
   no_cost: "Jobs in this period with no cost recorded",
   completed_without_cost: "Completed jobs with no cost recorded",
@@ -2743,6 +2757,11 @@ export async function loadRecords(
   switch (query) {
     case "missing_measure_date":
       where = measureMissingCondition(orgId, filters);
+      break;
+    case "incomplete_records":
+      /* The SAME predicate the Pulse tile counts, called rather than restated,
+         so the figure and the list cannot drift apart. */
+      where = and(scope, incompleteRecordSql(orgId))!;
       break;
     case "no_site":
       where = and(scope, unassignedSiteCondition(orgId))!;

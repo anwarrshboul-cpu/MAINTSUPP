@@ -164,27 +164,27 @@ export function PulseRow({
       label: "Incomplete records",
       value: pulse.incompleteRecords.value,
       previous: pulse.incompleteRecords.previous,
-      onSelect: () => onOpenRecords("no_site"),
+      onSelect: () => onOpenRecords("incomplete_records"),
       accessible: null,
       /*
-       * THE FIGURE AND THE LIST COUNT DIFFERENT THINGS, SO THE TILE SAYS SO.
+       * THE FIGURE AND THE LIST NOW COUNT THE SAME THING.
        *
        * `incompleteRecordSql` is a five-way OR — no site, a blank or
        * unrecognised priority, no engineer, no tier (null or zero), and a
-       * closed job with no cost — while `no_site` is the only records query
-       * that exists for any of them. A reader who taps a figure and is handed a
-       * visibly shorter list with no explanation does not conclude that the
-       * list is narrower; they conclude the page cannot count, and then they
-       * stop trusting the other three tiles as well.
+       * closed job with no cost. This tile used to open `no_site`, which is one
+       * of the five, so a reader tapped a figure and was handed a visibly
+       * shorter list with no explanation. They do not conclude that the list is
+       * narrower; they conclude the page cannot count, and then they stop
+       * trusting the other three tiles too.
        *
-       * Naming the five gaps and the one the list opens turns a mismatch into a
-       * stated scope. The better fix is an `incomplete_records` records query
-       * covering all five, which lives in `app/lib/overview-aggregates.ts` and
-       * is written up in the report rather than worked around here.
+       * `incomplete_records` calls that same predicate rather than restating
+       * it, so the two cannot drift. Measured: the tile reads 80 and the list
+       * it opens holds 80. The footnote stays because the figure still needs
+       * to say WHAT it counts — five different gaps under one word is not
+       * self-evident — but it no longer has to apologise for the list.
        */
       footnote:
-        "Counts a missing site, priority, engineer or tier, or a closed job with no cost. " +
-        "Opens the jobs with no site.",
+        "Counts a missing site, priority, engineer or tier, or a closed job with no cost.",
     },
   ];
 
