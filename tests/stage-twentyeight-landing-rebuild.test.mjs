@@ -28,36 +28,65 @@ const read = (file) => readFile(path.join(root, file), "utf8");
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-/* ── 1. Ten sections, each exactly once ──────────────────────────────────── */
+/* ── 1. Fourteen sections, each exactly once ─────────────────────────────── */
 
-/** The ten, by the anchor each one owns. Section 10 is a band plus a panel. */
+/**
+ * EVERY SECTION ON THE PAGE, BY THE ANCHOR IT OWNS, IN DOM ORDER.
+ *
+ * RE-POINTED FOR HOMEPAGE V3, and corrected on the way. Two things were wrong
+ * with the old list beyond being short by three: `founder` was missing
+ * altogether — the section has carried `id="founder"` since the v2 edit added
+ * it — and `report` sat second, where the section had not been since that same
+ * edit. Both were invisible because the only test that reads this list in DOM
+ * order is the live one, which needs Chrome at a macOS path and skips
+ * everywhere else. The list is the page's real order now, so the source test
+ * that uses it as the set of legal nav targets is checking something true.
+ *
+ * V3 adds `replaces`, `your-contractors` and `faq`, and moves `report` to the
+ * end — directly above the footer, which is the owner's instruction and the
+ * reason the last three entries read the way they do.
+ */
 const ANCHORS = [
   "hero",
-  "report",
   "sectors",
   "services",
   "problem",
+  "replaces",
   "how",
+  "your-contractors",
   "pricing",
   "case-study",
+  "founder",
   "portal",
+  "faq",
   "trust",
   "review",
-  /* Not a twelfth section — a second name for the eleventh. `#contact` is on
-     the final CTA's inner wrapper so that "Contact Us" in the nav lands on the
-     page's only form that asks who you are, without renaming the anchor the
-     "Book a Portfolio Review" buttons have always used. */
+  /* Not a section of its own — a second name for the one above. `#contact` is
+     on the final CTA's inner wrapper so that "Contact Us" in the nav lands on
+     the page's only form that asks who you are, without renaming the anchor the
+     "Book a Portfolio Review" buttons have always used. It is out of DOM order
+     here for that reason: the live test below drops it before comparing. */
   "contact",
+  "report",
 ];
 
-test("the page is eleven sections, in the v2 order, each exactly once", async () => {
+/** The same list without the alias, which is what the DOM actually contains. */
+const SECTION_IDS = ANCHORS.filter((id) => id !== "contact");
+
+test("the page is fourteen sections, in the V3 order, each exactly once", async () => {
   /*
-   * Was ten. The v2 positioning edit moved Report a Job from second to fourth
-   * and added "Who runs Maintsupp" between the case study and the portal.
+   * Was eleven. Homepage V3 adds three sections and moves one:
    *
-   * The order is asserted, not just the count: the whole point of the edit was
-   * the sequence — who it is for, what it covers, then the form — and a count
-   * alone would pass just as happily with the form back at the top.
+   *   WhatThisReplaces  after Problem
+   *   ContractorChoice  after HowItWorks
+   *   Faq               after Portal
+   *   ReportJob         from fourth to LAST, above the footer
+   *
+   * The order is asserted, not just the count, and that matters more after this
+   * edit than before it: the sequence IS the argument — who it is for, what it
+   * covers, what it replaces, how it runs, whose contractors, what it costs —
+   * and a count alone would pass just as happily with the eleven-field form
+   * back in the middle of it.
    */
   const page = await read("app/(marketing)/page.tsx");
   const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map(
@@ -67,17 +96,21 @@ test("the page is eleven sections, in the v2 order, each exactly once", async ()
     "Hero",
     "WhoWeHelp",
     "Services",
-    "ReportJob",
     "Problem",
+    "WhatThisReplaces",
     "HowItWorks",
+    "ContractorChoice",
     "Pricing",
     "CaseStudy",
     "Founder",
     "Portal",
+    "Faq",
     "TrustStrip",
     "FinalCta",
-  ], "eleven sections; the last is two components — a dark band and the form beneath it");
+    "ReportJob",
+  ], "fourteen sections; one of them is two components — a dark band and the form beneath it");
   assert.equal(new Set(rendered).size, rendered.length, "each exactly once");
+  assert.equal(rendered.at(-1), "ReportJob", "Report a Job is the last thing above the footer");
 });
 
 /* ── 2. Copy rules ───────────────────────────────────────────────────────── */
@@ -119,20 +152,53 @@ test("the forbidden claims appear nowhere on the marketing site", async () => {
   assert.deepEqual(offenders, [], "the brief forbids these phrases");
 });
 
-test("every price is shown + VAT", async () => {
+test("no price is shown + VAT", async () => {
+  /*
+   * THIS ASSERTION IS THE REVERSE OF THE ONE IT REPLACES.
+   *
+   * It was "every price is shown + VAT", and the comment above the pricing
+   * component said in as many words that carrying "+ VAT" was "a rule of the
+   * brief and not a detail". Homepage V3 withdraws it: the owner's instruction
+   * is that "+ VAT" appears nowhere on the marketing site. Five places carried
+   * it — the shared price line, the compliance setup footnote, a whole matrix
+   * row that said "+ VAT on top" three times, and two of the portfolio notes.
+   *
+   * IT IS A REMOVAL, NOT A SUBSTITUTION, which is why the second loop below
+   * exists: "excluding VAT", "ex VAT" and "+VAT" are the same qualifier wearing
+   * a different hat, and putting one of them back would satisfy a naive check
+   * for the exact string while defeating the instruction.
+   *
+   * WHAT DID NOT CHANGE. The four figures are still pinned. They are the money
+   * a client is quoted outside the per-store rate, and the risk of an edit that
+   * strips a qualifier is that it strips the sentence around it too.
+   */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  // Each of the four money figures outside the tier cards carries it inline;
-  // the per-store figures carry it in the shared price line.
-  assert.match(pricing, /\+ VAT/, "the price line must say + VAT");
+
   for (const figure of ["£295/month", "£65 each", "£125 per incident", "£25/store"]) {
-    const at = pricing.indexOf(figure);
-    assert.ok(at > 0, `${figure} is missing`);
-    assert.match(
-      pricing.slice(at, at + 60),
-      /\+ VAT/,
-      `${figure} must be followed by "+ VAT"`,
-    );
+    assert.ok(pricing.indexOf(figure) > 0, `${figure} is missing`);
   }
+
+  /*
+   * Comments stripped, exactly as the urgency-chip test does it. The note that
+   * records why the qualifier went has to quote it, and a check that fails on
+   * its own rationale would push the reasoning out of the file to make the test
+   * pass — which is how a rule loses the only record of why it exists.
+   */
+  const rendered = pricing.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(rendered, /\+\s*VAT/i, "no rendered string may carry + VAT");
+  assert.doesNotMatch(rendered, /\bVAT\b/i, "and none may mention VAT at all");
+  for (const substitute of [/ex\.?\s*VAT/i, /exclud\w* VAT/i, /plus VAT/i, /VAT on top/i]) {
+    assert.doesNotMatch(rendered, substitute, `${substitute} is the same rule renamed`);
+  }
+
+  /* And nowhere else on the marketing site either — the qualifier was never
+     only in this file's gift, and marketing.css quoted the sentence too. */
+  const css = await read("app/(marketing)/marketing.css");
+  assert.doesNotMatch(
+    css.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /VAT/i,
+    "the stylesheet must not carry it either",
+  );
 });
 
 test("the Total Care saving is derived from the prices above it", async () => {
@@ -827,7 +893,7 @@ async function openBrowser(width, height) {
   };
 }
 
-test("live: the ten sections are on the page, once each, with no duplicate heading", async (t) => {
+test("live: the fourteen sections are on the page, once each, with no duplicate heading", async (t) => {
   if (!(await serverIsUp())) {
     t.skip(`no dev server on ${BASE_URL}`);
     return;
@@ -844,7 +910,12 @@ test("live: the ten sections are on the page, once each, with no duplicate headi
       const h2 = [...main.querySelectorAll("h2")].map(h => h.textContent.trim());
       return { ids, h1: main.querySelectorAll("h1").length, dupes: h2.filter((h,i) => h2.indexOf(h) !== i) };
     })()`);
-    assert.deepEqual(found.ids, ANCHORS, "the sections, in the brief's order");
+    /* `SECTION_IDS`, not `ANCHORS`: `#contact` is an alias carried on the final
+       CTA's inner wrapper, so it is a legal nav target but never a <section>
+       child of <main>. Comparing against the full list asserted a section that
+       has never existed — which nothing caught, because this test needs Chrome
+       at a macOS path and skips everywhere else. */
+    assert.deepEqual(found.ids, SECTION_IDS, "the sections, in the page's order");
     assert.equal(found.h1, 1, "one h1 on the page");
     assert.deepEqual(found.dupes, [], "a repeated heading means a section is drawn twice");
     assert.deepEqual(browser.consoleErrors, []);

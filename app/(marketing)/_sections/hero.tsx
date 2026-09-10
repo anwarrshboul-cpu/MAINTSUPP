@@ -207,7 +207,18 @@ export function Hero() {
                 <path d="M15 21V13h6v8" />
                 <path d="M2 21h20M7 12h2M7 16h2" />
               </svg>
-              <span>+20 stores currently coordinated</span>
+              {/* 21, EXACTLY — and not the 21 in the feed above.
+                  This read "+20" until Homepage V3: a deliberate "at least"
+                  notation that stayed true as the portfolio grew. The owner's
+                  V3 copy states the real count, so the plus goes and the digits
+                  become a fact with a date behind them. The case study says the
+                  same 21 in three more places and they move together.
+                  THE OTHER 21 IN THIS FILE IS A DEADLINE — "certificate due in
+                  21 days", in the rotating feed. It is a number of days, it has
+                  nothing to do with the portfolio, and a search-and-replace on
+                  "21" would silently change it. Both are pinned in
+                  tests/landing-positioning-v2.test.mjs, in both directions. */}
+              <span>21 stores currently coordinated</span>
             </li>
           </ul>
           <div className="hero__actions">

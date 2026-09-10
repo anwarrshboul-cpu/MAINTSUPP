@@ -433,6 +433,19 @@ export function SiteFooter() {
             <li><a href="#pricing">Pricing</a></li>
             <li><a href="#case-study">Case Study</a></li>
             <li><a href="#sectors">Who We Help</a></li>
+            {/*
+              THE THREE V3 SECTIONS ARE REACHABLE FROM HERE, NOT FROM THE NAV.
+
+              The top nav is five items and stays five. It collapses into the
+              drawer at 1119px and already drops the CTA's long label between
+              1120 and 1219 to fit what is there — a sixth item would be
+              spending the one place on the page that has no room left. The
+              footer has columns to spare, and these are destinations a reader
+              looks for by name after they have read the page rather than
+              before.
+            */}
+            <li><a href="#replaces">What This Replaces</a></li>
+            <li><a href="#your-contractors">Your Contractors or Ours</a></li>
             {/* Footer only, deliberately — the top nav is for the people the
                 site is selling to, and a contractor looking for work is not
                 that reader. */}
@@ -447,7 +460,12 @@ export function SiteFooter() {
             <li><a href="#report">Report a Job</a></li>
             {/* Same door, same name as the header and the utility bar. */}
             <li><Link href="/portal">Portal Login</Link></li>
-            <li><Link href="/faqs">FAQs</Link></li>
+            {/* Two FAQ destinations, and they are not a duplicate: the anchor
+                is the accordion further up THIS page, the link is the standalone
+                page that renders every answer open and carries the FAQPage
+                markup. Named so the difference is visible before the click. */}
+            <li><a href="#faq">FAQs on this page</a></li>
+            <li><Link href="/faqs">All FAQs</Link></li>
             <li><a href="#portal">Client portal</a></li>
           </ul>
         </div>

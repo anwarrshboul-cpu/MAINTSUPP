@@ -24,7 +24,21 @@ import { useState, type ReactNode } from "react";
  * after a price change. The struck-through "was" price is derived the same way,
  * from the entry band, and only renders once the reader is past it.
  *
- * Every price carries "+ VAT", which is a rule of the brief and not a detail.
+ * NO PRICE CARRIES "+ VAT" ANY MORE, AND THAT IS THE RULE NOW.
+ *
+ * This comment used to read "Every price carries '+ VAT', which is a rule of
+ * the brief and not a detail", and it was enforced by a test named "every price
+ * is shown + VAT". Homepage V3 reverses it: the owner's instruction is that
+ * "+ VAT" appears nowhere on the marketing site. Five figures carried it — the
+ * per-store price line, the compliance setup footnote, a whole matrix row, and
+ * two of the portfolio notes — and all five are now the figure alone.
+ *
+ * It is a REMOVAL, not a substitution. "excluding VAT", "ex. VAT" and "+VAT"
+ * are the same qualifier wearing a different hat, so none of them replaced it;
+ * the rates read as rates and the quote confirmed at the portfolio review is
+ * where tax is stated. The inverted test is
+ * `tests/stage-twentyeight-landing-rebuild.test.mjs`, which now asserts the
+ * absence and still pins the four figures themselves so they cannot go quiet.
  *
  * TWO PRESENTATIONS, ONE SET OF FACTS. Wide enough for three columns, the
  * section is three cards. On a phone the three cards stacked ran to 2294px —
@@ -95,10 +109,10 @@ function Price({ amount, was }: { amount: number; was: number }) {
           £{was}
         </s>
       )}
-      <span className="pkg__per">
-        per store / month
-        <br />+ VAT
-      </span>
+      {/* One line now, not two. The second line was "+ VAT"; with it gone the
+          `<br />` would leave the price line reserving a row of nothing under
+          every card. */}
+      <span className="pkg__per">per store / month</span>
     </div>
   );
 }
@@ -132,7 +146,7 @@ const PLANS: readonly Plan[] = [
         <path d="m9 12 2 2 4-4" />
       </>
     ),
-    footnote: "One-off setup from £25/store + VAT.",
+    footnote: "One-off setup from £25/store.",
   },
   {
     key: "total",
@@ -217,7 +231,18 @@ export function Pricing() {
    * between bands, and setting one moves the slider to that band's low end so
    * the two controls can never disagree.
    */
-  const [storeCount, setStoreCount] = useState(8);
+  /*
+   * IT OPENS AT FIVE, NOT EIGHT.
+   *
+   * Eight was a midpoint of the 1–10 band and nothing else. Five is the number
+   * the page already tells the reader it is for — "typically 5–50 locations",
+   * on the Who we help note — so the calculator now opens on the bottom of the
+   * range the site claims to serve rather than in the middle of it. A reader
+   * with four stores drags left and finds the minimum still applies; a reader
+   * with thirty drags right; neither is shown a portfolio bigger than their own
+   * before they have touched the control.
+   */
+  const [storeCount, setStoreCount] = useState(5);
   const band = bandForCount(storeCount);
   const bandId = band.id;
   const setBandId = (id: Band["id"]) => {
@@ -422,14 +447,17 @@ export function Pricing() {
                       );
                     })}
                   </tr>
-                  <tr>
-                    <th scope="row">VAT</th>
-                    {PLANS.map((plan) => (
-                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
-                        + VAT on top
-                      </td>
-                    ))}
-                  </tr>
+                  {/*
+                    THE VAT ROW IS GONE, NOT HIDDEN.
+
+                    It read "+ VAT on top" in all three columns — one fact,
+                    typed three times, in the widest row of the narrowest
+                    presentation on the page. With "+ VAT" withdrawn from the
+                    site (see the note at the top of this file) the row has no
+                    content left, so it is deleted rather than emptied: a row
+                    header with three blank cells is worse than no row, and a
+                    screen reader would still announce it.
+                  */}
                   {/*
                     The row header carries "per month" and the store count, so
                     the cell is the figure alone — "≈ £520/month" broke as
@@ -512,17 +540,25 @@ export function Pricing() {
 
         <div className="pkgfoot reveal">
           <ul className="pricing__notes">
-            <li>Portfolio minimum £295/month + VAT.</li>
+            <li>Portfolio minimum £295/month.</li>
             <li>
               Includes up to 2 coordinated jobs per store per month, pooled across your
-              portfolio. Additional jobs from £65 each + VAT; complex or multi-trade work
+              portfolio. Additional jobs from £65 each; complex or multi-trade work
               quoted separately.
             </li>
             <li>
-              Projects, kiosk works and out-of-hours P1 escalation (£125 per incident + VAT)
+              Projects, kiosk works and out-of-hours P1 escalation (£125 per incident)
               are quoted and charged separately.
             </li>
             <li>Compliance pricing assumes a standard retail asset profile.</li>
+            {/* Contractor invoices are the other half of what a reader pays and
+                they are not ours, so the note says so where the fees are. The
+                sentence exists in the section lede as a claim; here it is a
+                line item, which is where somebody totting up a budget looks. */}
+            <li>
+              Contractor invoices are separate and come from the contractor at their own
+              agreed rates. Maintsupp charges the coordination fee and nothing on top.
+            </li>
             <li>Final quote confirmed at your free portfolio review.</li>
           </ul>
         </div>

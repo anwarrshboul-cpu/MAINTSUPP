@@ -59,31 +59,55 @@ test("marketing copy was ported, not rewritten", async () => {
  * a closed list, so the check is now closed too: these ten, in this order,
  * each exactly once, and no eleventh.
  *
- * `TrustStrip` and `FinalCta` are the two halves of section 10 — a dark
+ * `TrustStrip` and `FinalCta` are the two halves of ONE section — a dark
  * full-bleed band and the form beneath it — which is why the list of components
- * is eleven long and the list of SECTIONS is ten.
+ * is one longer than the list of sections on the page.
  */
 /*
- * The v2 positioning order. Report a Job moved from second to fourth — the page
- * now says who it is for and what it covers before asking for eleven fields —
- * and "Who runs Maintsupp" was added between the case study and the portal.
+ * RE-POINTED TO THE HOMEPAGE V3 ORDER. The closed-list contract is unchanged
+ * and so is everything it was protecting; what moved is which list is closed.
+ *
+ * The v2 order was Hero, WhoWeHelp, Services, ReportJob, Problem, HowItWorks,
+ * Pricing, CaseStudy, Founder, Portal, TrustStrip, FinalCta. V3 is a delta on
+ * it, not a second rebuild:
+ *
+ *   ADDED  WhatThisReplaces  after Problem — what the reader stops paying for,
+ *                            which the symptom-level comparison never said
+ *   ADDED  ContractorChoice  after HowItWorks — "your contractors or ours",
+ *                            the objection that lands between the process and
+ *                            the price
+ *   ADDED  Faq               after Portal — the questions are back on the
+ *                            homepage, sharing content.ts with /faqs
+ *   MOVED  ReportJob         from fourth to LAST, directly above the footer,
+ *                            on the owner's instruction: it is the door an
+ *                            existing client's store manager uses, reached by
+ *                            the header, the hero and the footer, not by
+ *                            scrolling — so it no longer interrupts the
+ *                            argument for every reader who is not that person
+ *
+ * The reason this list is asserted in ORDER rather than as a set is unchanged
+ * and now matters more, not less: the sequence IS the argument, and a count
+ * alone would pass just as happily with the form back at the top.
  */
 const SECTIONS = [
   "Hero",
   "WhoWeHelp",
   "Services",
-  "ReportJob",
   "Problem",
+  "WhatThisReplaces",
   "HowItWorks",
+  "ContractorChoice",
   "Pricing",
   "CaseStudy",
   "Founder",
   "Portal",
+  "Faq",
   "TrustStrip",
   "FinalCta",
+  "ReportJob",
 ];
 
-test("the eleven sections render on the homepage, in order, each exactly once", async () => {
+test("the fourteen sections render on the homepage, in order, each exactly once", async () => {
   const page = await read("app/(marketing)/page.tsx");
   const body = page.slice(page.indexOf("export default function HomePage"));
 
@@ -112,7 +136,18 @@ test("the sections the rebuild removed are gone from the repo, not just unrender
     "calculator.tsx",  // in-house cost slider
     "sectors.tsx",     // five photo tiles + detail panel
     "trust.tsx",       // testimonial carousel
-    "faq-section.tsx", // accordion; /faqs carries the questions and the schema
+    /*
+     * STILL GONE, AND THE QUESTIONS ARE BACK ANYWAY.
+     *
+     * Homepage V3 puts an FAQ on the homepage again, so the obvious reading of
+     * these two lines is that they are stale. They are not, and the difference
+     * is the whole point of the rule: what was deleted was a hand-rolled
+     * accordion carrying its OWN second copy of the nine questions in
+     * `faq-items.ts`, which nothing kept in step with `content.ts`. The new
+     * `faq.tsx` is <details> over the shared array — no state, no second copy —
+     * so neither of these files may come back.
+     */
+    "faq-section.tsx",
     "faq-items.ts",
   ]) {
     assert.ok(!files.includes(gone), `${gone} should have been deleted`);
@@ -429,24 +464,39 @@ test("the marketing CSS keeps its accessibility floors", async () => {
     "reveal-on-scroll must not hide content when motion is reduced");
 });
 
-test("structured data survived the FAQ section being removed", async () => {
+test("the FAQ structured data has exactly one home, and it is /faqs", async () => {
   const page = await read("app/(marketing)/page.tsx");
   assert.match(page, /"@type": "Organization"/);
   assert.match(page, /17262302/, "the company number belongs in the Organization data");
 
   /*
-   * `FAQPage` is deliberately NOT on the homepage any more.
+   * SAME ASSERTION, RE-POINTED REASON — this was "structured data survived the
+   * FAQ section being removed".
    *
-   * The accordion it described is gone, and FAQ structured data has to describe
-   * questions the reader can see — Google's own requirement, and a block
-   * pointing at content that is not on the page is the kind of thing that
-   * earns a manual action rather than a rich result.
+   * It used to hold because the homepage had no FAQ section at all, and FAQ
+   * markup has to describe questions the reader can actually see; a block
+   * pointing at content that is not on the page earns a manual action rather
+   * than a rich result. Homepage V3 renders the questions again (`Faq` in
+   * `_sections/faq.tsx`), so that reason has expired and the rule has NOT.
+   *
+   * What holds it up now is duplication: /faqs publishes `FAQPage` built from
+   * the same `content.ts` array this section renders, and two URLs claiming the
+   * same nine questions is a duplicate rather than twice the coverage. One
+   * canonical home for the schema, on the page whose entire subject is the
+   * questions. If the homepage ever takes the markup, /faqs has to give it up
+   * in the same edit — never both.
    */
   assert.doesNotMatch(
     page,
     /"@type": "FAQPage"/,
-    "the homepage has no FAQ section, so it must not claim FAQ markup",
+    "one canonical FAQPage, and it is /faqs — the homepage renders the questions without claiming the markup",
   );
+  /* And the homepage really does render them, or the paragraph above is an
+     excuse rather than a reason. */
+  const faqSection = await read("app/(marketing)/_sections/faq.tsx");
+  assert.match(faqSection, /import \{ faq \} from "\.\/content"/, "shared, not copied");
+  assert.match(faqSection, /faq\.map\(\(entry, index\) => \(/, "and actually rendered");
+  assert.match(page, /<Faq \/>/, "and the section is on the page");
 
   // It has to still exist somewhere, and it does: on the page that renders the
   // questions. Checked as a real pairing rather than a grep for the word.

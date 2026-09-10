@@ -17,13 +17,41 @@ const read = (file) => readFile(path.join(root, file), "utf8");
  */
 
 test("Report a Job moved down, and its anchor moved with it", async () => {
+  /*
+   * RE-POINTED, AND THE MOVE IT RECORDS WENT FURTHER.
+   *
+   * This asserted `indexOf("ReportJob") === 3` — the v2 edit, which took the
+   * form out of the fold and put it fourth. Homepage V3 takes the same
+   * reasoning to its end and puts it LAST, directly above the footer, on the
+   * owner's instruction. The argument is the same one written down here in v2
+   * and simply carried further: an eleven-field form is not a step in a sales
+   * argument, it is the door a store manager at an EXISTING client walks
+   * through with a broken shutter, and they arrive by bookmark, by the header's
+   * "Report a Job", by the hero's second button or by the footer — never by
+   * scrolling past six sections about who Maintsupp sells to.
+   *
+   * What this test is actually protecting is unchanged and is asserted more
+   * strictly than before: the form does not come before the case for it, and
+   * the `#report` anchor travels with the section so none of the four routes
+   * into it had to be edited. The position is pinned as "last" rather than as a
+   * number, so adding a fifteenth section above it does not silently un-do the
+   * instruction the way a hard-coded index would.
+   */
   const page = await read("app/(marketing)/page.tsx");
   const body = page.slice(page.indexOf("HomePage"));
   const order = [...body.matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map((m) => m[1]);
 
-  assert.ok(order.indexOf("ReportJob") === 3, `Report a Job is fourth, found at ${order.indexOf("ReportJob")}`);
+  assert.equal(
+    order.indexOf("ReportJob"),
+    order.length - 1,
+    `Report a Job is last, above the footer; found at ${order.indexOf("ReportJob")} of ${order.length}`,
+  );
   assert.ok(order.indexOf("WhoWeHelp") < order.indexOf("ReportJob"), "who it is for comes first");
   assert.ok(order.indexOf("Services") < order.indexOf("ReportJob"), "then what it covers");
+  /* The footer is the layout's, so "above the footer" is a statement about
+     being last in <main> — there is nothing else in the layout between them. */
+  const layout = await read("app/(marketing)/layout.tsx");
+  assert.match(layout, /\{children\}\s*\n\s*<SiteFooter \/>/, "nothing sits between the page and the footer");
 
   /* The anchor lives on the section, so moving the component moves the target —
      nothing in the nav or the hero needed editing, and nothing should have. */
@@ -415,43 +443,66 @@ test("five cards never leave a row with a hole in it", async () => {
 
 test("the store count is one number, and it is not the certificate deadline", async () => {
   /*
-   * THE TRAP THIS CLOSES. The portfolio is 20 stores, and it is claimed in four
-   * places across two sections. The hero also carries "certificate due in 21
-   * days" — a number of days, in the same file, one search-and-replace away
-   * from being changed along with the store count. Both directions are pinned:
-   * the count must read 20 everywhere it is claimed, and the deadline must stay
-   * at 21 days.
+   * RE-POINTED FROM "+20" TO "21", AND THE TRAP IT CLOSES IS NOW SHARPER.
+   *
+   * The portfolio is claimed in four places across two sections. Until
+   * Homepage V3 the notation was "+20" — a deliberate "at least" that stayed
+   * true as the portfolio grew, and this test pinned the plus in every one of
+   * the four so the page could not come to claim two different things. The
+   * owner's V3 copy states the real count instead: 21, exactly, with no plus.
+   * Every part of the old rule survives the change except the digits and the
+   * prefix — one number, in all four places, and nothing un-prefixed left over.
+   *
+   * AND THE COLLISION THIS TEST EXISTED FOR IS NOW REAL RATHER THAN
+   * HYPOTHETICAL. The hero's rotating feed carries "certificate due in 21
+   * days". Under "+20" the two numbers merely sat in the same file; under 21
+   * they are the SAME DIGITS in the same file, one careless
+   * search-and-replace from being changed together. So both directions stay
+   * pinned, and the deadline is now asserted with its unit attached: 21 stores
+   * is a portfolio, 21 days is a deadline, and neither may take the other's
+   * wording.
    */
   const hero = await read("app/(marketing)/_sections/hero.tsx");
   const caseStudy = await read("app/(marketing)/_sections/case-study.tsx");
 
-  /* "+20", not "20", in all four places — the owner's notation. A bare 20
-     claims an exact count the business would have to keep correcting; the plus
-     says "at least", which stays true as the portfolio grows. The digits are
-     pinned and so is the plus, in every one of the four, because dropping it
-     anywhere would leave the page claiming two different things about the same
-     portfolio. */
-  assert.match(hero, /<span>\+20 stores currently coordinated<\/span>/, "the hero trust line");
-  assert.match(caseStudy, /\{ value: "\+20", label: "stores coordinated" \}/, "the case-study stat tile");
-  assert.match(caseStudy, /<h2 className="h2">\+20 stores\. One point of contact\.<\/h2>/, "the case-study heading");
-  assert.match(caseStudy, /A UK fragrance retailer with \+20 stores and kiosks/, "the case-study lede");
+  assert.match(hero, /<span>21 stores currently coordinated<\/span>/, "the hero trust line");
+  assert.match(caseStudy, /\{ value: "21", label: "stores coordinated" \}/, "the case-study stat tile");
+  assert.match(caseStudy, /<h2 className="h2">21 stores\. One point of contact\.<\/h2>/, "the case-study heading");
+  assert.match(caseStudy, /A UK fragrance retailer with 21 stores and kiosks/, "the case-study lede");
 
-  /* And no un-prefixed survivor. A "20 stores" without the plus, anywhere in
-     either file, means one of the four was missed. */
+  /* No survivor of the old notation, anywhere in either file — a "+20 stores"
+     left behind would leave the page claiming two portfolio sizes at once.
+     Comments included, deliberately: the notes recording the change name the
+     count they replaced, and they name it as "+20" in prose rather than as a
+     claim, which this pattern does not match. */
   for (const [name, source] of [["hero.tsx", hero], ["case-study.tsx", caseStudy]]) {
-    const bare = [...source.matchAll(/(?<!\+)\b20 stores\b/g)];
-    assert.equal(bare.length, 0, `${name} claims "20 stores" without the plus`);
+    const stale = [...source.matchAll(/\+20 stores\b/g)];
+    assert.equal(stale.length, 0, `${name} still claims "+20 stores"`);
+    const bare20 = [...source.matchAll(/\b20 stores\b/g)];
+    assert.equal(bare20.length, 0, `${name} still claims 20 stores`);
   }
 
-  for (const [name, source] of [["hero.tsx", hero], ["case-study.tsx", caseStudy]]) {
-    const stale = [...source.matchAll(/\b21\b(?=[^\n]*\bstores?\b)/g)];
-    assert.equal(stale.length, 0, `${name} still claims 21 stores somewhere`);
-  }
-
+  /* The deadline, with its unit. Pinned separately from the store count so that
+     changing one can never quietly change the other. */
   assert.match(
     hero,
     /certificate due in 21 days/,
     "21 days is a deadline, not a store count — it must survive every store-count edit",
+  );
+  /* Counted with the comments stripped, for the same reason the urgency-chip
+     test strips them: the note above the trust chip has to name the deadline in
+     order to warn the next person off it, and a check that failed on its own
+     rationale would push the reasoning out of the file to make the test pass. */
+  const heroRendered = hero.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.equal(
+    [...heroRendered.matchAll(/21 days/g)].length,
+    1,
+    "one deadline, in the feed line, and nowhere else",
+  );
+  assert.equal(
+    [...heroRendered.matchAll(/21 stores/g)].length,
+    1,
+    "and one store count, in the trust chip, so the two can never be confused for each other",
   );
 });
 
