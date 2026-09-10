@@ -1076,6 +1076,19 @@ function buildDimension(
     keepZeros?: boolean;
     colourFor?: (entry: RawBucket, rank: number) => string;
     sort?: boolean;
+    /*
+     * THE KEY THE GREY BUCKET FILTERS BY, when it is not the shared sentinel.
+     *
+     * `NOT_RECORDED_KEY` ("__not_recorded__") is one value across tier,
+     * engineer and label so that one rule in the SQL builder covers all three.
+     * Priority is the exception and always was: "not recorded" is a real
+     * member of `PriorityKey`, spelled `not_recorded`, and `parseFilters`
+     * DROPS anything that is not a `PriorityKey`. So the grey priority bucket
+     * used to send a value the server silently discarded — "Fix these" built a
+     * filter that matched nothing and opened an empty board, while the chip in
+     * the header claimed a filter was applied.
+     */
+    notRecordedKey?: string;
     note?: (buckets: BreakdownBucket[], recorded: number, total: number) => string;
     warning?: (buckets: BreakdownBucket[], recorded: number, total: number) => string | null;
   } = {},
@@ -1119,7 +1132,7 @@ function buildDimension(
 
   if (notRecorded > 0) {
     buckets.push({
-      key: NOT_RECORDED_KEY,
+      key: options.notRecordedKey ?? NOT_RECORDED_KEY,
       label: NOT_RECORDED_LABEL,
       value: notRecorded,
       /* No share: §1.4 excludes blanks from the maths and reports them as
@@ -1335,6 +1348,10 @@ export async function loadBreakdown(
     {
       keepZeros: true,
       sort: false,
+      /* `not_recorded`, not the shared sentinel — see `notRecordedKey`. This
+         is the one dimension whose blank bucket has a name in the filter
+         vocabulary already. */
+      notRecordedKey: "not_recorded",
       colourFor: (entry) => OVERVIEW_PRIORITY_COLOUR[entry.key] ?? NOT_RECORDED_INK,
       note: (buckets, recorded) => {
         const urgent = buckets.find((bucket) => bucket.key === "urgent");
@@ -1852,6 +1869,22 @@ const SLA_STAGE_COLUMN: Record<"acknowledged" | "assigned" | "attended", string>
  * carry an acknowledgement timestamp is measured correctly rather than against
  * raw elapsed time nobody labelled.
  */
+/**
+ * Elapsed WALL-CLOCK minutes, for a target whose basis is `calendar`.
+ *
+ * §4.4 allows both bases and `sla_targets.basis` says which one a row means:
+ * "P1 within 30 minutes" runs through the night, "P3 same working day" does
+ * not. Measuring a calendar target on business hours would report a breach as
+ * a success every weekend, so the two are kept apart and the row decides.
+ */
+export function calendarMinutesBetween(from: string, to: string): number | null {
+  const start = Date.parse(from);
+  const end = Date.parse(to);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (end <= start) return 0;
+  return Math.round((end - start) / 60_000);
+}
+
 export function businessMinutesBetween(
   from: string,
   to: string,
@@ -1941,6 +1974,8 @@ export async function loadPerformance(
     resolvedRows,
     previousResolvedRows,
     spanRows,
+    stageRows,
+    holidays,
   ] = await Promise.all([
     db
       .select(pairSelection)
@@ -2050,6 +2085,47 @@ export async function loadPerformance(
           .from(maintenanceRequests)
           .where(where)
       : Promise.resolve(null),
+    /*
+     * THE ROWS THAT MAKE A LADDER STAGE MEASURABLE — §4.4, and gate 25.
+     *
+     * Only jobs that actually CARRY one of the three stage timestamps, so this
+     * costs the size of the measured population and not the size of the estate.
+     * On every estate today that is zero rows, which is what makes reading whole
+     * rows here acceptable: it grows only as somebody starts recording
+     * acknowledgements, and a stage nobody records costs nothing to not measure.
+     *
+     * The comparison happens in JS rather than SQL deliberately. §4.4 states its
+     * targets in BUSINESS minutes, and minute-level arithmetic across both
+     * dialects would need `julianday`/`strftime`/`unixepoch`, all forbidden here,
+     * while business hours additionally need the bank-holiday calendar expanded.
+     * `businessMinutesBetween` already does that, purely and under test — this is
+     * what finally calls it.
+     */
+    db
+      .select({
+        priority: maintenanceRequests.priority,
+        raisedAt: sql<string>`${dayText(maintenanceRequests.requestedAt)}`.as("raised_at"),
+        acknowledgedAt: sql<string | null>`${dayText(
+          rawColumn(maintenanceRequests, "acknowledged_at"),
+        )}`.as("acknowledged_at_text"),
+        assignedAt: sql<string | null>`${dayText(
+          rawColumn(maintenanceRequests, "assigned_at"),
+        )}`.as("assigned_at_text"),
+        attendedAt: sql<string | null>`${dayText(
+          rawColumn(maintenanceRequests, "attended_at"),
+        )}`.as("attended_at_text"),
+      })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          where,
+          sql`(nullif(${dayText(rawColumn(maintenanceRequests, "acknowledged_at"))}, '') is not null
+             or nullif(${dayText(rawColumn(maintenanceRequests, "assigned_at"))}, '') is not null
+             or nullif(${dayText(rawColumn(maintenanceRequests, "attended_at"))}, '') is not null)`,
+        ),
+      )
+      .limit(5000),
+    readBankHolidays(db),
   ]);
 
   const { bucketing, buckets } = overviewBuckets(window, now, spanRows?.[0]?.earliest ?? null);
@@ -2158,10 +2234,97 @@ export async function loadPerformance(
     previousPercent: null,
   });
 
+  /*
+   * A LADDER STAGE, MEASURED AGAINST `sla_targets` — §4.4, and gate 25:
+   * "changing an SLA target changes the chart, with no deploy".
+   *
+   * This used to be three unconditional calls to `unmeasuredStage`, so no
+   * stage could EVER report a percentage however much data arrived, and no
+   * code path read `sla_targets` at all. The output happened to be honest — no
+   * job on any estate records these timestamps — but it was honest by accident
+   * rather than by measurement, and a target nobody reads is a setting that
+   * lies about being a setting.
+   *
+   * The floor stays exactly where it was: a stage with no coverage still says
+   * "not measured" in the same words, and never draws 0% or 100% against a
+   * column nobody has written.
+   */
+  const targetFor = (stage: string, priority: string) =>
+    targets.find((row) => row.stage === stage && row.priorityKey === priority)
+    ?? targets.find((row) => row.stage === stage && row.priorityKey === "any")
+    ?? targets.find((row) => row.stage === stage);
+
+  const measureStage = (
+    key: "acknowledged" | "assigned" | "attended",
+    reachedAtOf: (row: (typeof stageRows)[number]) => string | null,
+  ): SlaStage => {
+    const measured = Number(
+      coverage?.[key as "acknowledged" | "assigned" | "attended"] ?? 0,
+    );
+    /* No coverage, or no agreed target: unchanged behaviour, same sentence. */
+    if (measured <= 0 || !hasTargetFor(key)) return unmeasuredStage(key, measured);
+
+    const perBucket = buckets.map(() => ({ sample: 0, met: 0 }));
+    let totalSample = 0;
+    let totalMet = 0;
+
+    for (const row of stageRows) {
+      const reached = (reachedAtOf(row) ?? "").trim();
+      const raised = String(row.raisedAt ?? "").trim();
+      if (!reached || !raised) continue;
+      const target = targetFor(key, priorityBucket(row.priority));
+      /* A stage with coverage but no target for THIS priority is not a
+         failure — it is a job nobody promised anything about, so it leaves the
+         denominator rather than counting as a breach. */
+      if (!target) continue;
+
+      const elapsed =
+        String(target.basis ?? "calendar") === "business"
+          ? businessMinutesBetween(raised, reached, holidays)
+          : calendarMinutesBetween(raised, reached);
+      if (elapsed === null) continue;
+
+      const index = bucketIndexFor(buckets, reached.slice(0, 10));
+      const met = elapsed <= Number(target.targetMinutes ?? 0) ? 1 : 0;
+      totalSample += 1;
+      totalMet += met;
+      if (index < 0) continue;
+      perBucket[index].sample += 1;
+      perBucket[index].met += met;
+    }
+
+    if (totalSample <= 0) return unmeasuredStage(key, measured);
+
+    return {
+      key,
+      label: SLA_STAGE_LABEL[key],
+      measurable: true,
+      reason: null,
+      coverage: { measured, total: cohortTotal },
+      buckets: buckets.map((bucket, index) => ({
+        label: bucket.label,
+        start: bucket.start,
+        endInclusive: bucket.endInclusive,
+        sample: perBucket[index].sample,
+        /* Same rule as every other percentage on this page: no denominator,
+           no number. */
+        percent:
+          perBucket[index].sample > 0
+            ? percentOf(perBucket[index].met, perBucket[index].sample)
+            : null,
+      })),
+      percent: percentOf(totalMet, totalSample),
+      /* The previous period would need a second pass over a population that is
+         empty on every estate today; stated as unknown rather than computed
+         from nothing. */
+      previousPercent: null,
+    };
+  };
+
   const stages: SlaStage[] = [
-    unmeasuredStage("acknowledged", Number(coverage?.acknowledged ?? 0)),
-    unmeasuredStage("assigned", Number(coverage?.assigned ?? 0)),
-    unmeasuredStage("attended", Number(coverage?.attended ?? 0)),
+    measureStage("acknowledged", (row) => row.acknowledgedAt),
+    measureStage("assigned", (row) => row.assignedAt),
+    measureStage("attended", (row) => row.attendedAt),
   ];
 
   let resolvedMeasured = 0;
@@ -2245,10 +2408,33 @@ export async function loadPerformance(
     timeToClose: {
       buckets: timeToCloseBuckets,
       openExcluded: Number(openRows[0]?.total ?? 0),
-      medianDays: round(quantileFromCounts(overall, 0.5)),
-      p90Days: round(quantileFromCounts(overall, 0.9)),
-      previousMedianDays: previousPairs ? round(quantileFromCounts(previousEntries, 0.5)) : null,
-      previousP90Days: previousPairs ? round(quantileFromCounts(previousEntries, 0.9)) : null,
+      /*
+       * §4.3'S FLOOR APPLIES TO THE HEADLINE TOO, and it did not.
+       *
+       * The buckets have always refused to draw a median under three completed
+       * jobs — "noise drawn as a trend" — but the figure ABOVE them was
+       * computed straight off `overall` with no floor at all. Measured on the
+       * 90-day window: the only bucket with any data reported `sample: 1,
+       * medianDays: null`, correctly, while the header printed a median AND a
+       * 90th percentile of 44 days from that single job. The chart was refusing
+       * to draw the number the header was asserting.
+       *
+       * `sample` travels with them so the card can say WHY there is no figure —
+       * "1 completed job, too few to average" reads as a fact about coverage,
+       * where a bare blank reads as a bug.
+       */
+      sample: sampleOf(overall),
+      medianDays: sampleOf(overall) >= 3 ? round(quantileFromCounts(overall, 0.5)) : null,
+      p90Days: sampleOf(overall) >= 3 ? round(quantileFromCounts(overall, 0.9)) : null,
+      previousSample: previousPairs ? sampleOf(previousEntries) : 0,
+      previousMedianDays:
+        previousPairs && sampleOf(previousEntries) >= 3
+          ? round(quantileFromCounts(previousEntries, 0.5))
+          : null,
+      previousP90Days:
+        previousPairs && sampleOf(previousEntries) >= 3
+          ? round(quantileFromCounts(previousEntries, 0.9))
+          : null,
       splitByPriority: split,
     },
     sla: {
