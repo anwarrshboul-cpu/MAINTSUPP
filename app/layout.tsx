@@ -45,6 +45,43 @@ export const metadata: Metadata = {
     shortcut: "/favicon.ico",
     apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
   },
+  /*
+   * metadataBase is what turns the relative image path below into the absolute
+   * URL that Open Graph requires. Without it Next warns and the image is
+   * dropped, which is the failure that leaves a shared link showing a blank
+   * card.
+   */
+  metadataBase: new URL("https://maintsupp.com"),
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    siteName: "MAINTSUPP",
+    locale: "en_GB",
+    url: "https://maintsupp.com",
+    title: "MAINTSUPP | Maintenance coordination, done right",
+    description:
+      "MAINTSUPP coordinates maintenance, compliance, contractors and property operations across multi-site portfolios.",
+    images: [
+      {
+        url: "/assets/photos/hero-london-maintenance.jpg",
+        width: 1774,
+        height: 887,
+        alt: "Commercial maintenance across a London skyline",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "MAINTSUPP | Maintenance coordination, done right",
+    description:
+      "MAINTSUPP coordinates maintenance, compliance, contractors and property operations across multi-site portfolios.",
+    images: ["/assets/photos/hero-london-maintenance.jpg"],
+  },
+  verification: {
+    google: "2a_6h1gdZv0Xev0zfGeBscLPGrPXVetMpazl2UtoVVA",
+  },
 };
 
 export default function RootLayout({

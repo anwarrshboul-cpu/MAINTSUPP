@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { track } from "./analytics";
 
 /**
  * SECTION 10 — Trust strip, then the final CTA.
@@ -298,6 +299,8 @@ export function FinalCta() {
         throw new Error(result.error || "The request could not be sent.");
       }
       setSentRange(sites);
+      /* Analytics: a lead was accepted. Band only — no name, email or phone. */
+      track("lead_submit", { site_range: sites });
       try {
         // The lead is safely accepted, so the draft has done its job.
         window.sessionStorage.removeItem(DRAFT_KEY);

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Analytics } from "./_sections/analytics";
 import {
   CookieNotice,
   ScrollFurniture,
@@ -43,6 +44,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
       <SiteFooter />
       <CookieNotice />
       <RevealObserver />
+      <Analytics />
     </div>
   );
 }
