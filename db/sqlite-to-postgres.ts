@@ -255,7 +255,7 @@ export const BOOLEAN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
    */
   approval_rules: ["requires_client", "active"],
   attachments: ["pending", "is_current", "is_seed"],
-  bank_accounts: ["active"],
+  payment_sources: ["active"],
   billing_settings: ["vat_enabled", "pro_rata_enabled"],
   board_views: ["is_default", "system"],
   boards: ["archived"],

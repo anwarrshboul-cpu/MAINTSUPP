@@ -209,10 +209,28 @@ test("every section the browser can draw is one the server also knows about", as
   const metaKeys = [...metaBlock.matchAll(/^ {2}"?([a-z-]+)"?: \{$/gm)].map((m) => m[1]);
   assert.ok(metaKeys.length >= 15, `expected the section map, found ${metaKeys.length} keys`);
 
-  const excludedBlock = portal.slice(portal.indexOf("const navExcluded"));
+  /*
+   * PARSED FROM THE DECLARATION, not from a fixed-width slice after it.
+   *
+   * This read the 200 characters following `const navExcluded` and treated
+   * every quoted word in them as an exclusion. That worked only while nothing
+   * else lived within 200 characters of it. `JOB_LIST_SURFACES` now sits
+   * immediately below — the Overview stopped downloading the job list, so the
+   * shell had to name the surfaces that still read it — and its first entry is
+   * `"maintenance"`. The test then believed maintenance was excluded and failed
+   * on its own next assertion, reporting a contradiction that exists nowhere in
+   * the source: `navExcluded` is, and remains, `["units"]`.
+   *
+   * The contract is unchanged and is still asserted below. Only the way it is
+   * measured has been narrowed to the declaration itself, so the next constant
+   * added underneath cannot break it again.
+   */
+  const excludedDecl = portal.match(/const navExcluded[^=]*=\s*new Set<string>\(\[([^\]]*)\]\)/);
+  assert.ok(excludedDecl, "navExcluded is still a literal Set the sidebar reads");
   const excluded = new Set(
-    [...excludedBlock.slice(0, 200).matchAll(/"([a-z-]+)"/g)].map((m) => m[1]),
+    [...excludedDecl[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]),
   );
+  assert.ok(excluded.size > 0, "and it still withholds at least one section");
   const known = new Set(BUILT_IN_ORDER.map((entry) => entry.key));
 
   for (const key of metaKeys) {

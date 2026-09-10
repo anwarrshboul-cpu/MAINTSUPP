@@ -3210,7 +3210,7 @@ export const payments = sqliteTable(
     paymentDate: text("payment_date").notNull(),
     /** bank_transfer | card | direct_debit | cheque | offset */
     method: text("method").notNull().default("bank_transfer"),
-    bankAccountId: text("bank_account_id"),
+    paymentSourceId: text("payment_source_id"),
     paymentRunId: text("payment_run_id"),
     /** The remittance advice, in the private bucket. §15.12. */
     attachmentId: text("attachment_id"),
@@ -3416,7 +3416,7 @@ export const paymentRuns = sqliteTable(
     paymentDate: text("payment_date").notNull(),
     /** draft | scheduled | paid | cancelled */
     status: text("status").notNull().default("draft"),
-    bankAccountId: text("bank_account_id"),
+    paymentSourceId: text("payment_source_id"),
     totalPence: integer("total_pence").notNull().default(0),
     invoiceCount: integer("invoice_count").notNull().default(0),
     exportedAt: text("exported_at"),
@@ -3437,23 +3437,40 @@ export const paymentRuns = sqliteTable(
  * never committed to a file. `sort_code` and `account_number` are returned
  * masked to anybody without `billing.manage`, by `app/lib/finance/banking.ts`.
  */
-export const bankAccounts = sqliteTable(
-  "bank_accounts",
+export const paymentSources = sqliteTable(
+  "payment_sources",
   {
     id: text("id").primaryKey(),
     organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /*
+     * NO PAYMENT CREDENTIAL IS STORED HERE, AND THAT IS DELIBERATE.
+     *
+     * §16 asks for bank details in settings, and this table held
+     * `bank_name`, `sort_code`, `account_number` and `iban` for one commit.
+     * It should not have: W06-09 is an OWNER-APPROVED security decision that
+     * predates Module 5 — "the owner-approved payment model is TERMS plus an
+     * EXTERNAL accounting reference, and it is approved precisely because the
+     * alternative … is a breach waiting for its first misconfigured backup.
+     * The accounting system that already holds those is built for them." This
+     * repository is public, and an independent security review reached the
+     * same conclusion from the other end.
+     *
+     * So a bank account here is a NAME somebody recognises plus the reference
+     * that finds it in the accounting system — enough to say which account a
+     * payment run is drawn on, and nothing anybody could pay from. The
+     * payment-run export already returns empty payee columns and says so in
+     * its own header; this is the same decision, one table earlier.
+     */
     label: text("label").notNull(),
     accountName: text("account_name"),
-    bankName: text("bank_name"),
-    sortCode: text("sort_code"),
-    accountNumber: text("account_number"),
-    iban: text("iban"),
+    /** The account's id in the accounting system, not a credential. */
+    accountingReference: text("accounting_reference"),
     referencePrefix: text("reference_prefix"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     updatedByEmail: text("updated_by_email"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("bank_accounts_org_idx").on(table.organisationId)],
+  (table) => [index("payment_sources_org_idx").on(table.organisationId)],
 );
 
 /** §15.9 — a dispute has a record rather than living in an inbox. */

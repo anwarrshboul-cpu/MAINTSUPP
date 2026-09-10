@@ -115,7 +115,7 @@ export interface PaymentRecord {
   amountPence: number;
   paymentDate: string;
   method: string;
-  bankAccountId: string | null;
+  paymentSourceId: string | null;
   paymentRunId: string | null;
   attachmentId: string | null;
   note: string | null;

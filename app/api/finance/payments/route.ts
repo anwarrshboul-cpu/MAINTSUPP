@@ -22,8 +22,8 @@
  * ── BANK DETAILS ARE NOT HERE ──────────────────────────────────────────────
  *
  * §16: "Bank details appear only in settings, never in code." A payment carries
- * a `bank_account_id` and nothing else; the account itself lives in
- * `bank_accounts`, typed by an administrator, and this repository is public.
+ * a `payment_source_id` and nothing else; the account itself lives in
+ * `payment_sources`, typed by an administrator, and this repository is public.
  */
 
 import { auditActor, recordAudit } from "../../../lib/audit";
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
         amountPence,
         paymentDate,
         method,
-        bankAccountId: text(body.bankAccountId, 120),
+        paymentSourceId: text(body.paymentSourceId, 120),
         note: note(body.note, 2000),
         recordedBy: scope.identityEmail,
       },

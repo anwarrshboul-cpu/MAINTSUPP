@@ -443,15 +443,46 @@ test("a calendar chip can never be dragged", async () => {
   assert.ok(chips >= 2, "both chip kinds carry it");
 });
 
-test("bank details are masked to everyone without the capability", async () => {
-  /* §16, and the narrowest door the product has. */
-  const source = await read("app/api/finance/settings/route.ts");
-  assert.match(source, /can\(\{ role: scope\.actor\.role, capabilities: \{\} \}, "billing\.manage"\)/);
-  assert.match(source, /unmasked \? account\.sortCode : mask\(account\.sortCode\)/);
-  assert.match(source, /unmasked \? account\.accountNumber : mask\(account\.accountNumber\)/);
-  /* A refusal, not a silent skip: a form that appears to save a sort code and
-     does not is worse than one that says no. */
-  assert.match(source, /status: 403/);
+test("no payment credential is stored, returned or accepted", async () => {
+  /*
+   * RE-POINTED, from masking to absence.
+   *
+   * This asserted that a sort code and account number were MASKED for anyone
+   * without `billing.manage`. The mask worked — an independent review proved
+   * it — but W06-09 is an owner-approved decision that predates Module 5: the
+   * payment model is terms plus an EXTERNAL accounting reference, and never a
+   * credential, "precisely because the alternative … is a breach waiting for
+   * its first misconfigured backup". This repository is public.
+   *
+   * So the columns are gone rather than hidden, and a `bank_accounts` table
+   * that holds no bank details is not one — it is a `payment_sources` row: a
+   * label, an account name, and the reference that finds it in the accounting
+   * system. §16 asks for bank details in settings; this is the safe reading of
+   * it, and the divergence is deliberate.
+   *
+   * Absence is asserted at every layer, because a credential can come back in
+   * three different ways: a column, a response field, or an accepted body key.
+   */
+  const route = await read("app/api/finance/settings/route.ts");
+  const schema = await read("db/schema.ts");
+  const init = await read("db/init.ts");
+  const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  for (const [name, source] of [["schema", schema], ["init", init], ["settings route", route]]) {
+    for (const pattern of [/IBAN/i, /sort_?code/i, /account_?number/i, /card_?number/i]) {
+      assert.doesNotMatch(code(source), pattern, `${name} still names a payment credential (${pattern})`);
+    }
+  }
+
+  /* The capability still guards EDITING a payment source, which is the part of
+     §16 that survives: `billing.manage`, which the built-in defaults grant to
+     `super_admin` alone. */
+  assert.match(route, /can\(\{ role: scope\.actor\.role, capabilities: \{\} \}, "billing\.manage"\)/);
+  /* A refusal, not a silent skip: a form that appears to save and does not is
+     worse than one that says no. */
+  assert.match(route, /status: 403/);
+  /* And what a payment source DOES carry is a reference, not a number. */
+  assert.match(schema, /accountingReference: text\("accounting_reference"\)/);
 });
 
 test("exporting a payment run is what schedules it", async () => {

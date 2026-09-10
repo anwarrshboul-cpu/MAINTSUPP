@@ -17,7 +17,7 @@
  *
  * ── THE BANK DETAILS ARE NOT IN THE FILE THIS ROUTE BUILDS ────────────────
  *
- * §16: they live in settings. A run names a `bank_account_id`; the export
+ * §16: they live in settings. A run names a `payment_source_id`; the export
  * resolves it, and only for somebody who may see it.
  */
 
@@ -185,7 +185,7 @@ export async function POST(request: Request) {
       reference,
       paymentDate,
       status: "draft",
-      bankAccountId: typeof body.bankAccountId === "string" ? body.bankAccountId : null,
+      paymentSourceId: typeof body.paymentSourceId === "string" ? body.paymentSourceId : null,
       totalPence,
       invoiceCount: unsettled.length,
       createdBy: scope.identityEmail,

@@ -15,7 +15,7 @@
  * ── §16: BANK DETAILS APPEAR ONLY IN SETTINGS, NEVER IN CODE ──────────────
  *
  * `contractors` deliberately carries no account number and this repository is
- * public, so the workspace's own accounts live in `bank_accounts` and are typed
+ * public, so the workspace's own accounts live in `payment_sources` and are typed
  * by an administrator. Without `billing.manage` the sort code and account
  * number arrive from the server already masked, and this screen renders the
  * masking it was given rather than un-masking anything or asking again. A
@@ -23,7 +23,7 @@
  *
  * The flag that decides it is `canSeeBankDetails` from the settings payload —
  * the SERVER's own answer, computed by the same check that masks the digits and
- * that refuses a `bankAccount` in a PUT with a 403. Asking `/api/context` for the
+ * that refuses a `paymentSource` in a PUT with a 403. Asking `/api/context` for the
  * capability separately would be a second answer to one question, and the two
  * would eventually differ; the screen that renders a mask should be told by
  * whoever applied it.
@@ -64,15 +64,12 @@ interface ToleranceSettings {
   currency?: string;
 }
 
-interface BankAccountRow {
+interface PaymentSourceRow {
   id: string;
   label: string;
   accountName?: string | null;
-  bankName?: string | null;
+  accountingReference?: string | null;
   /** Already masked by the server for anybody without `billing.manage`. */
-  sortCode?: string | null;
-  accountNumber?: string | null;
-  iban?: string | null;
   active?: boolean;
 }
 
@@ -98,8 +95,8 @@ interface SettingsPayload extends Partial<ToleranceSettings> {
   rules?: ApprovalBand[];
   statusMap?: StatusMapEntry[];
   statuses?: StatusMapEntry[];
-  bankAccounts?: BankAccountRow[];
-  accounts?: BankAccountRow[];
+  paymentSources?: PaymentSourceRow[];
+  accounts?: PaymentSourceRow[];
 }
 
 interface RecurringPayload {
@@ -120,7 +117,7 @@ export function FinanceSettingsPanel({ onNotify }: { onNotify: (message: string)
   const tolerances = payload?.settings ?? (payload as ToleranceSettings | null);
   const bands = payload?.approvalRules ?? payload?.rules ?? [];
   const statusMap = payload?.statusMap ?? payload?.statuses ?? [];
-  const accounts = payload?.bankAccounts ?? payload?.accounts ?? [];
+  const accounts = payload?.paymentSources ?? payload?.accounts ?? [];
   const canSeeBankDetails = payload?.canSeeBankDetails === true;
   const rules = recurring.data?.rules ?? recurring.data?.recurring ?? [];
   const frequencies = recurring.data?.frequencies ?? ["monthly", "quarterly", "annually"];
@@ -160,7 +157,7 @@ export function FinanceSettingsPanel({ onNotify }: { onNotify: (message: string)
           />
           <ApprovalBandCard bands={bands} state={settings} busy={write.busy} onSave={save} />
           <StatusMapCard entries={statusMap} state={settings} busy={write.busy} onSave={save} />
-          <BankAccountCard
+          <PaymentSourceCard
             accounts={accounts}
             state={settings}
             canSee={canSeeBankDetails}
@@ -617,14 +614,14 @@ function StatusMapCard({
 
 /* ── §16: bank accounts ───────────────────────────────────────────────────── */
 
-function BankAccountCard({
+function PaymentSourceCard({
   accounts,
   state,
   canSee,
   busy,
   onSave,
 }: {
-  accounts: BankAccountRow[];
+  accounts: PaymentSourceRow[];
   state: { loading: boolean; error: string | null; unavailable: boolean; reload: () => void };
   canSee: boolean;
   busy: boolean;
@@ -634,9 +631,8 @@ function BankAccountCard({
   ) => Promise<{ ok: boolean; payload: Record<string, unknown> | null }>;
 }) {
   const [label, setLabel] = useState("");
-  const [bankName, setBankName] = useState("");
-  const [sortCode, setSortCode] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [accountingReference, setAccountingReference] = useState("");
 
   return (
     <section className="fin-card">
@@ -670,11 +666,10 @@ function BankAccountCard({
             <li className="fin-unbilled__job" key={account.id}>
               <span>
                 <strong>{account.label}</strong>
-                {account.bankName ? ` · ${account.bankName}` : ""}
                 {account.accountName ? ` · ${account.accountName}` : ""}
               </span>
               <span className="fin-masked">
-                {account.sortCode ?? "—"} · {account.accountNumber ?? "—"}
+                {account.accountingReference ?? "No accounting reference"}
               </span>
             </li>
           ))}
@@ -690,27 +685,36 @@ function BankAccountCard({
                   autoComplete="off"
                 />
               </Field>
-              <Field label="Bank">
+              <Field
+                label="Account name"
+                hint="Whose account it is, as your accounting system names it."
+              >
                 <input
                   type="text"
-                  value={bankName}
-                  onChange={(event) => setBankName(event.target.value)}
+                  value={accountName}
+                  onChange={(event) => setAccountName(event.target.value)}
                   autoComplete="off"
                 />
               </Field>
-              <Field label="Sort code">
+              {/*
+                NO SORT CODE, ACCOUNT NUMBER OR IBAN, AND THE HINT SAYS WHY.
+
+                W06-09 is an owner-approved decision that this product stores
+                terms and an EXTERNAL accounting reference and never a payment
+                credential — "a breach waiting for its first misconfigured
+                backup", on a public repository. §16 asks for bank details in
+                settings; this is the safe reading, and a form that quietly
+                omitted the fields would invite somebody to paste the digits
+                into the label instead.
+              */}
+              <Field
+                label="Accounting reference"
+                hint="The id that finds this account in your accounting system. Never a sort code, account number or IBAN — those stay where they already are."
+              >
                 <input
                   type="text"
-                  value={sortCode}
-                  onChange={(event) => setSortCode(event.target.value)}
-                  autoComplete="off"
-                />
-              </Field>
-              <Field label="Account number">
-                <input
-                  type="text"
-                  value={accountNumber}
-                  onChange={(event) => setAccountNumber(event.target.value)}
+                  value={accountingReference}
+                  onChange={(event) => setAccountingReference(event.target.value)}
                   autoComplete="off"
                 />
               </Field>
@@ -723,20 +727,18 @@ function BankAccountCard({
                 onClick={() => {
                   void onSave(
                     {
-                      bankAccount: {
+                      paymentSource: {
                         label: label.trim(),
-                        bankName: bankName.trim() || undefined,
-                        sortCode: sortCode.trim() || undefined,
-                        accountNumber: accountNumber.trim() || undefined,
+                        accountName: accountName.trim() || undefined,
+                        accountingReference: accountingReference.trim() || undefined,
                       },
                     },
-                    "Bank account saved.",
+                    "Payment source saved.",
                   ).then((result) => {
                     if (!result.ok) return;
                     setLabel("");
-                    setBankName("");
-                    setSortCode("");
-                    setAccountNumber("");
+                    setAccountName("");
+                    setAccountingReference("");
                   });
                 }}
               >

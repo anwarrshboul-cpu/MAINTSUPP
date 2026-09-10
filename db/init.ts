@@ -5638,7 +5638,7 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
          amount_pence INTEGER NOT NULL DEFAULT 0,
          payment_date TEXT NOT NULL,
          method TEXT NOT NULL DEFAULT 'bank_transfer',
-         bank_account_id TEXT,
+         payment_source_id TEXT,
          payment_run_id TEXT,
          attachment_id TEXT,
          note TEXT,
@@ -5786,7 +5786,7 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
          reference TEXT NOT NULL,
          payment_date TEXT NOT NULL,
          status TEXT NOT NULL DEFAULT 'draft',
-         bank_account_id TEXT,
+         payment_source_id TEXT,
          total_pence INTEGER NOT NULL DEFAULT 0,
          invoice_count INTEGER NOT NULL DEFAULT 0,
          exported_at TEXT,
@@ -5798,22 +5798,19 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
     d1.prepare("CREATE INDEX IF NOT EXISTS payment_runs_org_idx ON payment_runs(organisation_id, payment_date)"),
 
     d1.prepare(
-      `CREATE TABLE IF NOT EXISTS bank_accounts (
+      `CREATE TABLE IF NOT EXISTS payment_sources (
          id TEXT PRIMARY KEY,
          organisation_id TEXT NOT NULL REFERENCES organisations(id),
          label TEXT NOT NULL,
          account_name TEXT,
-         bank_name TEXT,
-         sort_code TEXT,
-         account_number TEXT,
-         iban TEXT,
+         accounting_reference TEXT,
          reference_prefix TEXT,
          active INTEGER NOT NULL DEFAULT 1,
          updated_by_email TEXT,
          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
     ),
-    d1.prepare("CREATE INDEX IF NOT EXISTS bank_accounts_org_idx ON bank_accounts(organisation_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payment_sources_org_idx ON payment_sources(organisation_id)"),
 
     d1.prepare(
       `CREATE TABLE IF NOT EXISTS invoice_disputes (

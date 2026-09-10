@@ -107,14 +107,14 @@ interface PaymentRunsPayload {
   today?: string;
 }
 
-interface BankAccount {
+interface PaymentSource {
   id: string;
   label: string;
-  bankName?: string | null;
+  accountingReference?: string | null;
 }
 
 interface SettingsPayload {
-  bankAccounts?: BankAccount[];
+  paymentSources?: PaymentSource[];
 }
 
 export function FinancePayments({ onNotify }: { onNotify: (message: string) => void }) {
@@ -124,7 +124,7 @@ export function FinancePayments({ onNotify }: { onNotify: (message: string) => v
   return (
     <div className="fin-stack">
       <RecordPaymentCard
-        accounts={settings.data?.bankAccounts ?? []}
+        accounts={settings.data?.paymentSources ?? []}
         accountsUnavailable={settings.unavailable}
         onNotify={onNotify}
         onRecorded={payments.reload}
@@ -213,7 +213,7 @@ function RecordPaymentCard({
   onNotify,
   onRecorded,
 }: {
-  accounts: BankAccount[];
+  accounts: PaymentSource[];
   accountsUnavailable: boolean;
   onNotify: (message: string) => void;
   onRecorded: () => void;
@@ -226,7 +226,7 @@ function RecordPaymentCard({
   const [paymentDate, setPaymentDate] = useState(today);
   const [method, setMethod] = useState<string>("bank_transfer");
   const [reference, setReference] = useState("");
-  const [bankAccountId, setBankAccountId] = useState("");
+  const [paymentSourceId, setPaymentSourceId] = useState("");
   const [note, setNote] = useState("");
   const [rows, setRows] = useState<AllocationDraft[]>([
     { key: "pay-1", targetId: "", amount: "" },
@@ -306,7 +306,7 @@ function RecordPaymentCard({
           paymentDate,
           method,
           reference: reference || undefined,
-          bankAccountId: bankAccountId || undefined,
+          paymentSourceId: paymentSourceId || undefined,
           note: note || undefined,
           attachmentId: attachmentId ?? undefined,
           allocations: rows.map((row) => ({
@@ -428,15 +428,15 @@ function RecordPaymentCard({
             {accountsUnavailable || accounts.length === 0 ? (
               <input
                 type="text"
-                value={bankAccountId}
-                onChange={(event) => setBankAccountId(event.target.value)}
+                value={paymentSourceId}
+                onChange={(event) => setPaymentSourceId(event.target.value)}
                 autoComplete="off"
                 placeholder="No accounts configured"
               />
             ) : (
               <select
-                value={bankAccountId}
-                onChange={(event) => setBankAccountId(event.target.value)}
+                value={paymentSourceId}
+                onChange={(event) => setPaymentSourceId(event.target.value)}
               >
                 <option value="">Not recorded</option>
                 {accounts.map((account) => (

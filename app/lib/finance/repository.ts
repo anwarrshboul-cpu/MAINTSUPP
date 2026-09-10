@@ -814,7 +814,7 @@ export interface NewPayment {
   amountPence: number;
   paymentDate: string;
   method: string;
-  bankAccountId: string | null;
+  paymentSourceId: string | null;
   note: string | null;
   recordedBy: string | null;
 }
@@ -947,7 +947,7 @@ export async function createPayment(
     amountPence: Math.trunc(input.amountPence),
     paymentDate: input.paymentDate,
     method: input.method,
-    bankAccountId: input.bankAccountId,
+    paymentSourceId: input.paymentSourceId,
     note: input.note,
     recordedBy: input.recordedBy,
     recordedAt: stamp,

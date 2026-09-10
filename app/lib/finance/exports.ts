@@ -431,7 +431,7 @@ export interface PaymentRunLine {
  * ── WHY THE TWO PAYEE BANK COLUMNS ARE EMPTY, AND WHY THAT IS NOT A GAP ────
  *
  * This schema records no supplier bank details anywhere. `db/schema.ts` says so
- * beside `bank_accounts` in as many words — "`contractors` deliberately carries
+ * beside `payment_sources` in as many words — "`contractors` deliberately carries
  * no account number at all — this repository is public" — and §16 makes it a
  * rule: "Bank details appear only in settings, never in code." So the columns
  * are emitted, in the position every UK bulk-payment template puts them, and

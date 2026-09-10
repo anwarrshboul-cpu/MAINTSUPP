@@ -421,7 +421,7 @@ test("the boolean name set and the per-table map agree", () => {
    * 63, across 32 tables. It was 28 at Workstream 7, 52 after pre-W14, and the
    * Overview rebuild plus Module 5 added the eleven that take it to 63:
    * `dashboard_meters` two (`visible`, `is_catch_all`), `invoice_status_map`
-   * four, `approval_rules` two, `bank_accounts` one, `recurring_invoice_rules`
+   * four, `approval_rules` two, `payment_sources` one, `recurring_invoice_rules`
    * one, and `quotations.client_approval_required`.
    *
    * That last one is the only one worth a second look, and it was given one.
