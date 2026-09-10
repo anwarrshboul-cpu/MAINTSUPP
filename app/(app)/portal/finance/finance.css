@@ -1,0 +1,37 @@
+/*
+ * PLACEHOLDER — the Invoice Tracker's own sheet, replaced in this same release.
+ * `ops.css` and `ops-tokens.css` carry everything shared; this file holds only
+ * what is specific to the ledger. Same rules apply: tokens only, no hex
+ * literals, and the agreed breakpoints (640 / 767 / 768 / 1024 / 1280).
+ */
+
+.fin-page {
+  display: grid;
+  gap: 16px;
+}
+
+.fin-tabs__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fin-tabs__tab {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fin-tabs__tab[aria-current="page"] {
+  background: var(--surface-active);
+  border-color: var(--ms-teal-500);
+  color: var(--ink);
+}

@@ -84,6 +84,13 @@ export const BUILT_IN_ORDER: ReadonlyArray<{ key: string; group: string }> = [
   { key: "stores", group: "group:operations" },
   { key: "contractors", group: "group:operations" },
   { key: "documents", group: "group:operations" },
+  /*
+   * Module 5, between Documents and Reports exactly as its specification places
+   * it. The position is not arbitrary: an invoice arrives as a document and
+   * leaves as a figure in a report, so the ledger sits between the two things
+   * it connects.
+   */
+  { key: "invoice-tracker", group: "group:operations" },
   { key: "reports", group: "group:operations" },
   { key: "settings", group: "group:operations" },
   { key: "team", group: "group:workspace" },
@@ -134,6 +141,7 @@ const BUILT_IN_LABELS: Record<string, string> = {
   contractors: "Contractors",
   compliance: "Compliance",
   documents: "Documents",
+  "invoice-tracker": "Invoice Tracker",
   reports: "Reports",
   settings: "Settings",
   team: "Team",

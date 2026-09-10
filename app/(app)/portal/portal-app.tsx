@@ -189,6 +189,7 @@ import {
   JobVolumeTrend,
 } from "./dashboard-insights";
 import { OverviewPage } from "./ops/overview-page";
+import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
 import { CompliancePage } from "./ops/compliance-page";
 import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 /*
@@ -263,6 +264,14 @@ export type Section =
   | "compliance"
   | "calendar"
   | "documents"
+  /*
+   * Module 5 — the Invoice Tracker. Payable and receivable in one ledger, plus
+   * quotes, payments, credit notes and the three-way match. It is its own
+   * section rather than a Reports tab because Reports is where MAINTSUPP's own
+   * coordination-fee document is generated, and the two answer opposite
+   * questions: one is what we invoiced, this is what everybody owes everybody.
+   */
+  | "invoice-tracker"
   | "reports"
   | "team"
   | "settings"
@@ -486,6 +495,12 @@ const sectionMeta: Record<
     title: "Documents & evidence",
     icon: "folder",
   },
+  "invoice-tracker": {
+    label: "Invoice Tracker",
+    eyebrow: "Money in and money out",
+    title: "Invoice Tracker",
+    icon: "inbox",
+  },
   reports: {
     label: "Reports",
     eyebrow: "Portfolio intelligence",
@@ -554,6 +569,9 @@ const navPrimary: Section[] = [
   "stores",
   "contractors",
   "documents",
+  // Module 5, between Documents and Reports. Kept level with `BUILT_IN_ORDER`
+  // in app/api/navigation/layout.ts by tests/stage-twenty-navigation.
+  "invoice-tracker",
   "reports",
   "settings",
 ];
@@ -611,6 +629,7 @@ const sectionRoutes: Record<Section, string> = {
   contractors: "contractors",
   compliance: "compliance",
   documents: "documents",
+  "invoice-tracker": "invoice-tracker",
   reports: "reports",
   settings: "settings",
   team: "team",
@@ -3230,6 +3249,31 @@ export default function PortalApp({
               truncated={documentsTruncated}
               onNotify={setToast}
               onChanged={() => void loadDocuments()}
+            />
+          )}
+          {/*
+            Module 5. No `dataMode` gate and no `requests` prop, deliberately:
+            the ledger reads `/api/finance/*` and nothing else, so it must not
+            be held behind the shell's job download the way Reports is. A
+            finance screen that says "workspace unavailable" because the job
+            board is still paging would be reporting a fault it does not have.
+          */}
+          {activeSurface === "invoice-tracker" && (
+            <InvoiceTrackerPage
+              key={activeSection}
+              onNavigate={setSection}
+              onOpenJob={(id) => {
+                /*
+                 * The shell's job list is the only place a full record lives,
+                 * and it may still be paging. A miss therefore navigates to the
+                 * board rather than doing nothing — an invoice line naming a
+                 * job the reader cannot reach is worse than a second click.
+                 */
+                const match = requests.find((request) => request.id === id);
+                if (match) openRequest(match);
+                else setSection("maintenance");
+              }}
+              onNotify={setToast}
             />
           )}
           {activeSurface === "reports" && dataMode === "unavailable" && (
