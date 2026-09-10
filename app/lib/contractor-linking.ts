@@ -52,6 +52,15 @@ export type UnlinkedName = {
   name: string;
   key: string;
   jobs: number;
+  /*
+   * POUNDS, not pence — `maintenance_requests.cost` is a REAL in pounds and
+   * this carries it through untouched. The field is deliberately not called
+   * `spendPence`, and `money()` in `ops-primitives.tsx` takes pounds, so the
+   * two agree at every call site. `/api/dashboard/cost` converts to integer
+   * pence for the money card because that card shares the finance formatter;
+   * the same figure therefore appears as 5342 here and 534200 there, and both
+   * are right for their own reader.
+   */
   spend: number;
   /** Register rows whose own name matches this string, if any. */
   candidates: Array<{ id: string; name: string }>;
@@ -144,12 +153,26 @@ export async function unlinkedContractorNames(
     if (!name) continue;
     const key = contractorNameKey(name);
     if (aliased.has(key)) continue;
+    /*
+     * ALREADY ATTRIBUTED, HOWEVER MANY REGISTER ROWS SHARE THE NAME.
+     *
+     * This test used to be written `candidates.length === 0 && ...`, so a name
+     * that matched SEVERAL register rows was reported as unlinked even when
+     * every job carrying it already had a `contractor_id` on it. Nothing needed
+     * linking; the ambiguity was in the register, not in the attribution.
+     *
+     * That put two panels on one page in contradiction — `/api/dashboard/cost`
+     * reporting `unlinkedNames: 0` with every row linked and
+     * `contractorLinkedPence` equal to the total, while
+     * `/api/overview/contractor-aliases` reported unlinked spend against a name
+     * whose attributed spend it simultaneously agreed was complete. §3.6 exists
+     * to end exactly that class of disagreement, so it may not open with one.
+     */
+    if (Number(row.linked) === Number(row.jobs)) continue;
     const candidates = byRegisterName.get(key) ?? [];
     // Exactly one register row of this name — already attributed by the name
     // rule, nothing to link.
     if (candidates.length === 1) continue;
-    // Every job carrying this string already has an id on it.
-    if (candidates.length === 0 && Number(row.linked) === Number(row.jobs)) continue;
     const spend = Number(row.spend ?? 0);
     unlinkedSpend += spend;
     names.push({
