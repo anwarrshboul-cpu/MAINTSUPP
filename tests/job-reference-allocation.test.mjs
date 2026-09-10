@@ -47,17 +47,36 @@ const read = async (path) =>
 
 const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const OWNER = { email: "owner@maintsupp.com", password: "Sunnamusk-Owner-2026" };
-const SOURCE = "app/lib/board-mutations.ts";
+/*
+ * RE-POINTED. The allocator MOVED, and it moved because it was the only correct
+ * one in the codebase.
+ *
+ * `nextItemNumber` and the walk-past-a-taken-id loop were written in
+ * `board-mutations.ts` for `createBoardItem`, and nothing else could reach
+ * them: the three submission routes each read
+ * `max(cast(substr(id, 4) as integer))` and inserted on top of it with no
+ * conflict handling, which is the very defect the header above describes,
+ * reproduced three more times on the doors a member of the public uses.
+ *
+ * So it is now `app/lib/submission-service.ts` — `nextJobNumber` (the same
+ * three reads, renamed only because "item" meant one door) and
+ * `allocateSubmission` (the same loop) — and all five doors call it.
+ * `board-mutations.ts` is one of those callers now, so its shape is pinned
+ * where the code is, and the LIVE half below is unchanged: it still drives
+ * `create_item` through `board-mutations.ts` and still proves the reference it
+ * gets is free everywhere.
+ */
+const SOURCE = "app/lib/submission-service.ts";
 
 /* ── 1. The floor ─────────────────────────────────────────────────────────── */
 
 test("the allocator's floor is taken over every table that holds a reference", async () => {
   const source = await read(SOURCE);
   const fn = source.slice(
-    source.indexOf("async function nextItemNumber("),
-    source.indexOf("/**\n * How many consecutive ids"),
+    source.indexOf("export async function nextJobNumber("),
+    source.indexOf("export type AllocatedSubmission"),
   );
-  assert.ok(fn.length > 0, "nextItemNumber must still exist");
+  assert.ok(fn.length > 0, "nextJobNumber must still exist");
 
   for (const table of [
     "maintenanceRequests",
@@ -108,11 +127,33 @@ test("the allocator's floor is taken over every table that holds a reference", a
     "only job entries in the bin carry an MN reference",
   );
 
-  // Still per organisation, like the read it replaced.
+  /*
+   * RE-POINTED, AND REVERSED. This asserted all three ceiling reads were scoped
+   * to the organisation — which is what the read it replaced did, and what
+   * `c14ad76` did before that. It was wrong the whole time, and the assertion
+   * was holding the fault in place.
+   *
+   * `maintenance_requests.id` is `text("id").primaryKey()`: ONE namespace for
+   * every tenant. An organisation-scoped ceiling therefore answers a question
+   * the allocator is not asking. For a tenant holding no numbered job the
+   * ceiling collapsed to `JOB_REFERENCE_FLOOR` and the walk began at MN-1049 —
+   * inside ids another tenant owned.
+   *
+   * Measured on Staging: `org_…0001` holds MN-1049…MN-1078 and nobody else
+   * holds a numbered id, so a second tenant's submission walked all eight
+   * attempts into taken rows and failed with "Could not allocate a job id; too
+   * many simultaneous creates" — concurrency wording for a collision, behind a
+   * 503 the route swallowed unlogged. That tenant could not create its first
+   * job.
+   *
+   * The claim is now the opposite and the count is still three: no ceiling read
+   * may filter by organisation. `allocateSubmission` still writes every row
+   * under the caller's organisation — only the ceiling is global.
+   */
   assert.equal(
-    (fn.match(/organisationId, orgId\)/g) ?? []).length,
-    3,
-    "every one of the three reads stays scoped to the organisation",
+    (fn.match(/organisationId, organisationId\)/g) ?? []).length,
+    0,
+    "no ceiling read may be organisation-scoped — the id it allocates is global",
   );
 });
 
@@ -125,8 +166,8 @@ test("the bin is still counted, so a binned job keeps its reference", async () =
    */
   const source = await read(SOURCE);
   const fn = source.slice(
-    source.indexOf("async function nextItemNumber("),
-    source.indexOf("/**\n * How many consecutive ids"),
+    source.indexOf("export async function nextJobNumber("),
+    source.indexOf("export type AllocatedSubmission"),
   );
   assert.ok(
     !/isNull\((maintenanceRequests\.)?deletedAt\)/.test(fn),
@@ -140,8 +181,8 @@ test("the bin is still counted, so a binned job keeps its reference", async () =
 test("the request row and its placement are allocated together", async () => {
   const source = await read(SOURCE);
   const loop = source.slice(
-    source.indexOf("const base = await nextItemNumber(db, orgId);"),
-    source.indexOf("const item = placement;"),
+    source.indexOf("const base = await nextJobNumber(db, input.organisationId);"),
+    source.indexOf("return { request: created, placement: placed ?? null };"),
   );
   assert.ok(loop.length > 0, "the allocation loop must still exist");
 
@@ -159,10 +200,20 @@ test("the request row and its placement are allocated together", async () => {
     /\.delete\(maintenanceRequests\)/,
     "a taken placement must delete the request row before walking on",
   );
+  /*
+   * RE-POINTED, and the condition grew a clause rather than losing one.
+   *
+   * It read `if (!created || !placement)`. The allocator now also serves a
+   * caller with NO group to file into — a board whose groups have not been
+   * seeded yet, where refusing the job would be worse than filing it unplaced
+   * and letting `ensureBoardState` pick it up. So the placement is required
+   * exactly when one was asked for, which is what the old form meant on the one
+   * caller it had.
+   */
   assert.match(
     loop,
-    /if \(!created \|\| !placement\)/,
-    "success requires BOTH, or the allocation failed",
+    /if \(!created \|\| \(input\.groupId && !placed\)\)/,
+    "success requires BOTH whenever a group was named, or the allocation failed",
   );
 });
 

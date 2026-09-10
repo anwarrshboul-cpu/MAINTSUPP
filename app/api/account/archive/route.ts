@@ -45,8 +45,8 @@ import {
 const RESTORABLE = new Set(["job", "group", "board"]);
 
 export async function GET(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const context = await scopedDb(request);
     const orgId = context.orgId;
 
@@ -247,8 +247,8 @@ export async function GET(request: Request) {
  * suggestion rather than a control.
  */
 export async function POST(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
     const context = guard.scope;

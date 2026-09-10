@@ -92,6 +92,7 @@ import {
   translateSql,
   type TranslateOptions,
 } from "./sqlite-to-postgres.ts";
+import { isPoolerAtCapacity } from "./pooler-capacity.ts";
 
 /* ----------------------------------------------------------------- node -- */
 
@@ -706,38 +707,15 @@ function retryDelays(
   return POOLER_RETRY_DELAYS_MS.slice(0, count);
 }
 
-/**
- * Whether this failure is the pooler saying "not right now".
- *
- * Deliberately narrow, and matched on the marker in the MESSAGE rather than on
- * the SQLSTATE. Reproduced against the real project by opening clients until it
- * refused — the sixteenth — and the error is:
- *
- *   PostgresError { name: "PostgresError", code: "XX000",
- *     message: "(EMAXCONNSESSION) max clients reached in session mode -
- *               max clients are limited to pool_size: 15" }
- *
- * `XX000` is `internal_error`, the code Postgres and everything wearing its
- * wire protocol reach for when nothing more specific fits, so retrying on the
- * code would retry genuine server faults as well. `EMAXCONNSESSION` is
- * supavisor's own marker and means one specific thing.
- *
- * WHY RETRYING THIS IS SAFE EVEN FOR A WRITE, which is the question any retry
- * has to answer. The refusal is issued during the client STARTUP exchange,
- * before postgres.js has sent a Parse or a Bind: there is no connection, so
- * there is no backend, so the statement provably did not run. Nothing can be
- * executed twice by retrying it. That is why this predicate must not be widened
- * to cover, say, `CONNECTION_CLOSED` — a socket that dropped mid-statement has
- * no such guarantee, and an INSERT retried through one is a duplicate row.
+/*
+ * `isPoolerAtCapacity` used to be defined here. It moved to
+ * `db/pooler-capacity.ts` when the ROUTE layer needed the same question
+ * answered — `busyRefusal` in `app/lib/tenant-db.ts` turns a yes into the
+ * sentence a person reads instead of "the board change could not be saved".
+ * Two callers, one rule, and neither can import the other: this file is
+ * Node-only. The reasoning for matching the message rather than the SQLSTATE,
+ * and for why retrying it is safe even for a write, went with it.
  */
-function isPoolerAtCapacity(error: unknown): boolean {
-  const message = (error as { message?: unknown } | null)?.message;
-  return (
-    typeof message === "string" &&
-    /EMAXCONNSESSION|max clients reached in session mode/i.test(message)
-  );
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

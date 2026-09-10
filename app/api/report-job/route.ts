@@ -1,21 +1,16 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
-import {
-  CANONICAL_REGISTER,
-  registerScopeFilter,
-} from "../../lib/register-scope";
-import { activityLog, maintenanceRequests, siteAliases, sites } from "../../../db/schema";
+import { maintenanceRequests } from "../../../db/schema";
 import { exposeRequest } from "../../lib/request-payload";
 import {
   jobAlertTemplate,
   notificationTargets,
   sendNotification,
 } from "../../lib/notifications";
-import { configuredValue } from "../../lib/options-repository";
-import { priorityRule } from "../../lib/priority-rules";
+import { DEFAULT_BOARD_KEY } from "../../lib/board-registry";
+import { automationContext, dispatchAutomationEvents, itemCreatedEvent } from "../../lib/automations";
+import { createSubmission, resolveSubmissionSite } from "../../lib/submission-service";
 import { PRIMARY_ORGANISATION_ID, scopedDb } from "../../lib/tenant-db";
-import { normaliseSiteName } from "../../lib/sites-repository";
-import { unassignedSiteId } from "../../lib/site-reference";
 
 export const dynamic = "force-dynamic";
 
@@ -51,9 +46,20 @@ export const dynamic = "force-dynamic";
  *   · `source` is "Website form", which is what tells a coordinator this came
  *     from outside and nobody has vetted it.
  *
- * It writes one work order and nothing else. See the matching note in
- * app/api/forms/[token]/submit/route.ts — three routes now create a job, and
- * whoever changes the shape of one should look at the other two.
+ * ── WHAT MOVED, AND WHAT STAYED ───────────────────────────────────────────
+ *
+ * The paragraph that used to end this comment said "three routes now create a
+ * job, and whoever changes the shape of one should look at the other two". It
+ * was wrong twice over: there were FIVE, and asking each author to remember the
+ * others is precisely the arrangement that let three copies of `requestTitle`
+ * drift apart and left this route without a placement, without a retry on a
+ * lost id race, and without the option resolver that matches a renamed label.
+ *
+ * The whole middle of a submission now lives in `app/lib/submission-service.ts`
+ * and every door calls it. What did NOT move is everything above: this route
+ * still owns its own tenancy pin, its own field caps and its own refusal, and
+ * `resolveSubmissionSite` is still called with the default `CANONICAL_REGISTER`
+ * scope because an anonymous reporter cannot name a register.
  */
 
 function trimString(value: unknown, max: number) {
@@ -68,121 +74,6 @@ async function sha256(value: string) {
     .join("");
 }
 
-function requestTitle(description: string) {
-  const firstLine = description.split(/[.!?\n]/)[0]?.trim() || "Maintenance request";
-  return firstLine.length > 72 ? `${firstLine.slice(0, 69)}…` : firstLine;
-}
-
-type PublicDatabase = Awaited<ReturnType<typeof scopedDb>>["db"];
-
-/**
- * The site a public report belongs to.
- *
- * The form asks for a site by NAME in a free-text box, because the alternative
- * — a picker — would publish the list of every site under contract to anyone
- * who loaded the home page.
- *
- * A typed name will therefore sometimes match nothing. Refusing the report is
- * the wrong answer: a shop with water coming through the ceiling, typing
- * "Oxford St" where the row says "Sunnamusk Oxford Street", would be turned
- * away. So an unmatched name is filed with NO site, and the words they actually
- * typed are kept in `location`.
- *
- * It used to be filed against a standing "Unmatched website reports" row in
- * `sites`, created on demand — a site that is not a site, which then appeared
- * in the register, in the portfolio filter, in spend-by-site, in the site count
- * and in every site-joined report, and which the comment here promised could be
- * "reassigned in one edit" while no surface in the application could set a
- * job's site at all. Both halves are fixed: nothing is invented here, and
- * `PATCH /api/maintenance` can now attach the job to a real site when somebody
- * recognises the name.
- *
- * Matching is exact, then case-insensitive, then this organisation's own
- * aliases — which is what a renamed site leaves behind, so a reporter typing
- * the name the shop carried last year still lands on the right row.
- *
- * ── AND ONLY EVER THE CANONICAL REGISTER ──────────────────────────────────
- *
- * Every one of the four reads below is scoped to `CANONICAL_REGISTER`, and on
- * this route that is a security boundary rather than a tidiness rule.
- *
- * THIS ENDPOINT IS PUBLIC. There is no session, no actor and no instance
- * context — a stranger with the link submits a job and names a location as free
- * text. Unscoped, those reads matched every site in the organisation, so naming
- * a site that lives inside a custom Sites SECTION attached the submission to
- * it: a private register, populated by one team for their own work, taking rows
- * from an anonymous form it was never connected to. Reproduced before the fix.
- *
- * Canonical is the right answer rather than a safe-looking default. An
- * anonymous reporter cannot name a register — they have not seen one and the
- * form does not offer one — so the only register they can mean is the
- * workspace's own. A name that matches nothing there falls through to
- * `unassignedSiteId()` exactly as an unknown name always has, which is a state
- * the product already handles and a person can see and correct. Silently
- * routing it into somebody's instance is not.
- *
- * The same reasoning `app/lib/register-scope.ts` sets out for every inbound
- * path with no session.
- */
-async function resolveSite(
-  db: PublicDatabase,
-  orgId: string,
-  location: string,
-): Promise<{ id: string; name: string } | null> {
-  const [exact] = await db
-    .select({ id: sites.id, name: sites.name })
-    .from(sites)
-    .where(
-      and(
-        eq(sites.name, location),
-        eq(sites.organisationId, orgId),
-        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
-      ),
-    )
-    .limit(1);
-  if (exact) return exact;
-
-  const [loose] = await db
-    .select({ id: sites.id, name: sites.name })
-    .from(sites)
-    .where(
-      and(
-        eq(sites.organisationId, orgId),
-        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
-        sql`lower(${sites.name}) = lower(${location})`,
-      ),
-    )
-    .limit(1);
-  if (loose) return loose;
-
-  /*
-   * A renamed site keeps its previous canonical name as an organisation-scoped
-   * alias. `site_aliases` is unique on (organisation_id, normalised), so this
-   * resolves to at most one site — and joining on `sites.organisationId` as
-   * well as the alias's own means a submitted string can never reach another
-   * tenant's row.
-   */
-  const normalised = normaliseSiteName(location);
-  if (!normalised) return null;
-  const [alias] = await db
-    .select({ id: sites.id, name: sites.name })
-    .from(siteAliases)
-    .innerJoin(sites, eq(sites.id, siteAliases.siteId))
-    .where(
-      and(
-        eq(siteAliases.organisationId, orgId),
-        eq(siteAliases.normalised, normalised),
-        eq(sites.organisationId, orgId),
-        /* The alias is only a way of spelling a site. Following one into an
-           instance would reach exactly the row the two predicates above are
-           there to keep an anonymous caller away from. */
-        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
-      ),
-    )
-    .limit(1);
-  return alias ?? null;
-}
-
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
@@ -193,6 +84,27 @@ export async function POST(request: Request) {
     const contact = trimString(payload.contact, 80);
     const description = trimString(payload.description, 2000);
     const category = trimString(payload.category, 80) || "Other";
+    /*
+     * THE JOB'S NAME, SENT BY THE FORM — and this is a defect being closed, not
+     * a new capability.
+     *
+     * The page assembles a FIVE-LINE description: the P-code, then the fault,
+     * then the site address, then the access window, then who reported it. The
+     * title was derived from the first line of that blob, so every job this
+     * form has ever raised was called "[P1] Critical, site unsafe or cannot
+     * trade" — the urgency band, identical across every P1 report in the
+     * workspace, and never a word about the fault. A board of them is
+     * unreadable and none of them can be found by searching for what broke.
+     *
+     * The blob itself is deliberately unchanged: the P-code stays at the top
+     * because it is what triage reads first, and the postcode and access window
+     * have no column of their own. Only the NAME is now sent separately.
+     *
+     * It is still only a suggestion. `createSubmission` caps it, and a request
+     * that omits it falls back to the description exactly as before, so a stale
+     * cached copy of the page keeps working.
+     */
+    const title = trimString(payload.title, 200);
 
     if (!location || !requester || !contact || description.length < 10) {
       return Response.json(
@@ -203,32 +115,40 @@ export async function POST(request: Request) {
 
     // The website form has no account behind it by definition — the same
     // exemption the public lead form takes, and for the same reason.
-    const { db, orgId: resolvedOrg } = await scopedDb(request, { allowAnonymous: true });
+    const scope = await scopedDb(request, { allowAnonymous: true });
+    const { db } = scope;
     // PINNED. An anonymous caller resolves to the primary tenant anyway; this
     // makes it true regardless of what any cookie on the request claims.
-    const orgId = PRIMARY_ORGANISATION_ID || resolvedOrg;
+    const orgId = PRIMARY_ORGANISATION_ID || scope.orgId;
 
-    const priority = await configuredValue(db, orgId, "priority", payload.priority);
-    const engineer = await configuredValue(db, orgId, "engineer_required", payload.engineer);
-    const site = await resolveSite(db, orgId, location);
-    // No site rather than an invented one. The submitted text is kept below.
-    const siteId = site?.id ?? unassignedSiteId();
-
-    const [latest] = await db
-      .select({
-        maxNumber: sql<number>`coalesce(max(cast(substr(${maintenanceRequests.id}, 4) as integer)), 1048)`,
-      })
-      .from(maintenanceRequests)
-      .where(
-        and(
-          eq(maintenanceRequests.organisationId, orgId),
-          sql`${maintenanceRequests.id} like 'MN-%'`,
-        ),
-      );
-    const id = `MN-${Number(latest.maxNumber ?? 1048) + 1}`;
-
-    const slaRule = priorityRule(priority);
-    const dueAt = new Date(Date.now() + slaRule.dueHours * 60 * 60 * 1000).toISOString();
+    /*
+     * The site a public report belongs to.
+     *
+     * The form asks for a site by NAME in a free-text box, because the
+     * alternative — a picker — would publish the list of every site under
+     * contract to anyone who loaded the home page.
+     *
+     * A typed name will therefore sometimes match nothing. Refusing the report
+     * is the wrong answer: a shop with water coming through the ceiling, typing
+     * "Oxford St" where the row says "Sunnamusk Oxford Street", would be turned
+     * away. So an unmatched name is filed with NO site, and the words they
+     * actually typed are kept in `location`.
+     *
+     * The ladder — exact, then case-insensitive, then this organisation's own
+     * aliases — is `resolveSubmissionSite`, and it is now the same ladder the
+     * authenticated doors climb. It used to live only here, on the one caller
+     * that cannot show a picker or let anyone correct a mistake, while an
+     * operator typing a store's previous name into "raise a job" was refused.
+     *
+     * The scope is left at its default, `CANONICAL_REGISTER`, and on this route
+     * that is a security boundary rather than a tidiness rule. THIS ENDPOINT IS
+     * PUBLIC: a stranger names a location as free text, and unscoped, that
+     * string matched every site in the organisation — so naming a site inside a
+     * custom Sites SECTION attached the submission to it. An anonymous reporter
+     * cannot name a register, so the only one they can mean is the workspace's
+     * own. See `app/lib/register-scope.ts`.
+     */
+    const site = await resolveSubmissionSite(db, { organisationId: orgId, location });
 
     /*
      * The single-use grant that lets the reporter attach the photographs they
@@ -238,65 +158,51 @@ export async function POST(request: Request) {
      * `/api/files` already knows how to accept it.
      */
     const uploadToken = crypto.randomUUID().replace(/-/g, "");
-    const uploadTokenHash = await sha256(uploadToken);
-    const uploadTokenExpiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-    const [created] = await db
-      .insert(maintenanceRequests)
-      .values({
-        id,
-        organisationId: orgId,
-        siteId,
-        source: "Website form",
-        title: requestTitle(description),
-        description,
-        location,
-        requester,
-        contact,
-        category,
-        engineer,
-        tier: slaRule.tier,
-        priority,
-        stage: "Incoming",
-        status: "Pending Approval",
-        contractor: null,
-        assignee: null,
-        requestedAt: new Date().toISOString(),
-        dueAt,
-        completedAt: null,
-        nextUpdateAt: dueAt,
-        cost: null,
-        attachmentCount: 0,
-        issueAttachmentCount: 0,
-        completedAttachmentCount: 0,
-        generalAttachmentCount: 0,
-        publicUploadTokenHash: uploadTokenHash,
-        publicUploadTokenExpiresAt: uploadTokenExpiresAt,
-        commentCount: 0,
-        // Nobody signed in, so nobody is credited. Attributing this to an
-        // account that was not there would be worse than leaving it null.
-        createdByEmail: null,
-      })
-      .returning();
-
-    await db.insert(activityLog).values({
-      id: crypto.randomUUID(),
+    const submission = await createSubmission(db, {
       organisationId: orgId,
-      entityType: "maintenance_request",
-      entityId: id,
-      action: "request.created",
-      actorEmail: null,
-      detail: JSON.stringify({ source: "Website form", priority, location }),
+      /*
+       * The canonical job board, named rather than assumed. This route wrote no
+       * placement at all and left `ensureBoardState` to file the row onto
+       * whichever board somebody opened next — which returns early for
+       * `store-documentation` and for every generated register before it reaches
+       * the filing loop, so on some workspaces "next" meant never.
+       */
+      boardId: DEFAULT_BOARD_KEY,
+      // Nobody signed in, so nobody is credited. Attributing this to an account
+      // that was not there would be worse than leaving it null.
+      actor: null,
+      source: "Website form",
+      explicitTitle: title,
+      description,
+      location,
+      requester,
+      contact,
+      category,
+      priority: payload.priority,
+      engineer: payload.engineer,
+      // No site rather than an invented one. The submitted text is kept above.
+      siteId: site?.id ?? null,
+      publicUploadTokenHash: await sha256(uploadToken),
+      publicUploadTokenExpiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     });
+    const created = submission.request;
 
     // Delivery failure never fails the request: the job is saved, and losing it
     // because a mail provider was down would be worse than a missed alert.
     const { opsInbox } = notificationTargets();
     const alert = jobAlertTemplate({
-      reference: created.reference,
+      /*
+       * `displayReference`, not `created.reference`. Four of the five doors
+       * leave `reference` NULL — every screen in the product renders
+       * `reference ?? id` for exactly that reason — so reading the column raw
+       * put "New job — Aldgate" in the subject of every alert this route and
+       * `/api/maintenance` have ever sent, with no job named in it.
+       */
+      reference: submission.displayReference,
       title: created.title,
       site: location,
-      priority,
+      priority: submission.priority,
       requester: created.requester,
       contact: created.contact,
       description: created.description,
@@ -304,9 +210,9 @@ export async function POST(request: Request) {
     const alertResult = await sendNotification(db, {
       organisationId: orgId,
       channel: "email",
-      event: (priority ?? "").toLowerCase() === "urgent" ? "job.urgent" : "job.created",
+      event: submission.priority.toLowerCase() === "urgent" ? "job.urgent" : "job.created",
       subjectType: "job",
-      subjectId: id,
+      subjectId: created.id,
       to: opsInbox,
       subject: alert.subject,
       body: alert.body,
@@ -318,7 +224,36 @@ export async function POST(request: Request) {
         notifiedAt: alertResult.ok ? sql`CURRENT_TIMESTAMP` : null,
         notifyAttempts: 1,
       })
-      .where(eq(maintenanceRequests.id, id));
+      .where(eq(maintenanceRequests.id, created.id));
+
+    /*
+     * THE BOARD'S OWN RULES, which this route never ran.
+     *
+     * `item_created` was dispatched by `/api/maintenance`, `/api/board/items`
+     * and `createBoardItem`, and by neither public door. So a workspace whose
+     * owner had built "when an item is created, notify the duty coordinator"
+     * got it for every job raised from inside the product and for none of the
+     * ones raised by a member of the public standing in front of the fault —
+     * exactly inverted.
+     *
+     * The actor is anonymous and stays anonymous: the engine records the run
+     * against nobody, which is the truth. A rule that fails cannot undo the job
+     * — see `dispatchAutomationEvent`.
+     */
+    await dispatchAutomationEvents(
+      /*
+       * The scope's OWN actor, which for an anonymous caller is the anonymous
+       * one. Substituting a made-up display name here would put a person who
+       * does not exist in the run history; the engine already knows how to
+       * record a run against nobody.
+       *
+       * `orgId` is the PINNED organisation, not `scope.orgId`, so the rules that
+       * run are the primary tenant's own even if a stray cookie resolved
+       * somewhere else.
+       */
+      automationContext({ ...scope, orgId }, request),
+      [itemCreatedEvent(DEFAULT_BOARD_KEY, created.id, null, submission.group?.id ?? null)],
+    );
 
     return Response.json(
       { request: exposeRequest(created), notified: alertResult.ok, uploadToken },

@@ -100,6 +100,12 @@ import {
 import { linkedContractorIds } from "../../lib/contractor-linking";
 import { RESERVED_EMAIL_TLD } from "../../lib/contact-links";
 import { isUnreachableEmail } from "../../lib/site-metrics";
+import { ensureComplianceProfile } from "../../lib/compliance-profile";
+import {
+  DUTY_HOLDERS,
+  isDutyHolder,
+  isNotApplicable,
+} from "../../lib/compliance-duty-holder";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
 
 function text(value: unknown, max = 240) {
@@ -1343,6 +1349,11 @@ export async function POST(request: Request) {
          over the Sites route's own inserts. Nothing here spreads the caller's
          payload, so there is nothing for it to overwrite. */
       await db.insert(sites).values({ id, organisationId: orgId, boardId: scoped.scope, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", ...siteState, address: text(data.address, 300), manager: optionalText(data.manager, 120) });
+      /* The third caller of the one profile function. This drawer is the
+         thinnest of the three site-create paths — it generates no code, no slug
+         and no position — and it must still not be able to produce a site the
+         compliance register cannot see. See `app/lib/compliance-profile.ts`. */
+      await ensureComplianceProfile(db, orgId, id);
     } else if (entity === "compliance") {
       /*
        * The same validation the PATCH does, for the same reasons — see the long
@@ -2977,11 +2988,45 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      /*
+       * `dutyHolder` IS THE ONE OPTIONAL KEY IN THIS BRANCH, AND THE ASYMMETRY
+       * IS ARGUED RATHER THAN OVERLOOKED.
+       *
+       * Everything above is required because the statement is a full replace
+       * and the calendar's drag sends all four keys together, so an omitted key
+       * there is an erasure rather than a no-op. `dutyHolder` is not in that
+       * payload and never has been: the calendar moves a DATE, and if omission
+       * were treated the same way, dragging a certificate would silently
+       * un-confirm a responsibility somebody had gone to the trouble of
+       * establishing — and un-confirming it takes the requirement out of the
+       * compliance percentage. So here, and only here, absence means "leave it
+       * alone", which is exactly what `supplied` encodes elsewhere in this file.
+       *
+       * An EXPLICIT null or "" still clears it, back to "never asked". Clearing
+       * on purpose is legitimate; clearing because a key was left out is not.
+       *
+       * This is the write half of the unconfirmed state. Without it
+       * `ensureComplianceProfile` would be a one-way door — every new
+       * requirement excluded from the score with no way to ever include it.
+       */
+      const dutyHolderSent = "dutyHolder" in data;
+      const dutyHolder = dutyHolderSent ? visibleText(data.dutyHolder, 24) : "";
+      if (dutyHolderSent && dutyHolder && !isDutyHolder(dutyHolder)) {
+        return Response.json(
+          { error: `A responsibility must be one of: ${DUTY_HOLDERS.join(", ")}.` },
+          { status: 400 },
+        );
+      }
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
       ]);
       if (badReference) return badReference;
-      await db.update(complianceDocuments).set({ siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required", updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+      await db.update(complianceDocuments).set({ siteId, kind, status: state, expiryDate: expiry || null, /* "Not applicable" is the duty-holder answer that means the asset is not
+           there, and it maps onto the state the product already has a word for
+           rather than a sixth state eleven suites would have to learn. Either
+           route to it sets the same flag, so the register cannot show a
+           requirement as applicable and not-applicable at once. */
+        notRequired: state === "Not required" || isNotApplicable(dutyHolder), ...(dutyHolderSent ? { dutyHolder: dutyHolder || null } : {}), updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     } else if (entity === "unit") {
       /*
        * Only what was sent — see `supplied`. `siteId`, `name`, `category` and

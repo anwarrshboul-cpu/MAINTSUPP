@@ -5,6 +5,7 @@ import { BoardActionsHost } from "./board-actions/board-actions-host";
 import { AddViewMenu, ViewOverflowMenu, ViewTabMenu } from "./board-actions/view-menus";
 import { rememberLandingView, useLandingView } from "./board-view-memory";
 import { writeBoardView } from "./board-view-writes";
+import { useBoardViews } from "./board-views-load";
 import { TabGlyph } from "./board-tab-glyph";
 import { Icon } from "../../components";
 import BoardViewPane, {
@@ -15,7 +16,7 @@ import BoardViewPane, {
 import { useScrollOverflow } from "./views/scroll-affordance";
 import { BoardViewsScroll, useDismissOnOutside } from "./board-views-controls";
 import type { BoardItem } from "./views/view-model";
-import type { BoardSummary, BoardView, ViewType } from "./board-view-types";
+import type { BoardView, ViewType } from "./board-view-types";
 
 /* Re-exported from where it has always been imported. `live-board.tsx` and
    `board-tab-glyph.tsx` take `BoardView` off this module; the shapes moved to
@@ -88,12 +89,14 @@ export default function BoardChrome({
   onFormSubmitted,
   calendar,
 }: Props) {
-  const [board, setBoard] = useState<BoardSummary | null>(null);
-  const [views, setViews] = useState<BoardView[]>([]);
-  const [types, setTypes] = useState<ViewType[]>([]);
   const [activeKey, setActiveKey] = useState("");
-  const [refreshToken, setRefreshToken] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  /* The strip's read half — what came back, what did not, and whether asking
+     again could help. See `board-views-load.ts`, the sibling of
+     `board-view-writes.ts`. */
+  const { board, views, types, loading, error, setError, refresh } = useBoardViews(
+    boardId,
+    setActiveKey,
+  );
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -130,61 +133,6 @@ export default function BoardChrome({
   const tabsRef = useScrollOverflow<HTMLDivElement>();
   useActiveTabInView(tabsRef, activeKey);
 
-  useEffect(() => {
-    /*
-     * ASK THE ENDPOINT ABOUT ANY BOARD THAT HAS ONE.
-     *
-     * This read `boardId !== "maintenance"` and then `boardId !==
-     * "store-documentation"`, and both spellings were the same mistake: which
-     * boards have a tab strip decided by NAME. The first left a section's own
-     * register with no tabs at all (W02-06); the second is the pattern
-     * requirement C exists to remove, and it would have hidden the strip on a
-     * Store-Documentation-template INSTANCE too, which does have views of its
-     * own.
-     *
-     * The board answers for itself now: the built-in Store Documentation board
-     * holds no `board_views` rows — it declares its three tabs in
-     * `views/store-documentation-board.tsx` and would show two strips if this
-     * drew a second — so the fetch returns `views: []` and the nav below simply
-     * has nothing to render. Same outcome on that board, by a property of the
-     * board rather than by its key.
-     *
-     * An EMPTY board id is still refused here rather than sent: it is a section
-     * with no register of its own, and `?board=` with nothing after it is what
-     * the route 404s. Nothing is gained by making the round trip.
-     */
-    if (!boardId) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch(`/api/board/views?board=${encodeURIComponent(boardId)}`);
-        if (!response.ok) throw new Error("Views could not be loaded.");
-        const payload = (await response.json()) as {
-          board: BoardSummary;
-          views: BoardView[];
-          types: ViewType[];
-        };
-        if (cancelled) return;
-        setBoard(payload.board);
-        setViews(payload.views);
-        setTypes(payload.types);
-        setActiveKey((current) => {
-          if (current && payload.views.some((view) => view.key === current)) return current;
-          const fallback = payload.views.find((view) => view.isDefault) ?? payload.views[0];
-          return fallback?.key ?? "";
-        });
-        setError(null);
-      } catch (cause) {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : "Something went wrong.");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // `boardId` gates the fetch above, so a board change must re-run it.
-  }, [boardId, refreshToken]);
 
   /*
    * Which tab to open on — `?view=` from a shared link, then the remembered
@@ -221,10 +169,10 @@ export default function BoardChrome({
   async function send(method: "POST" | "PATCH" | "DELETE", body?: unknown, query = "") {
     const result = await writeBoardView(boardId, method, body, query);
     if (!result.ok) {
-      setError(result.error);
+      setError({ message: result.error, retryable: result.retryable });
       return null;
     }
-    setRefreshToken((token) => token + 1);
+    refresh();
     return result.payload;
   }
 
@@ -265,7 +213,16 @@ export default function BoardChrome({
     <>
     {/* Collapse is a Main-Table affordance: remembered, but applied only while
         row 3 is drawn — `viewReplacesGrid` names the dead end otherwise. */}
-    <div className={`board-chrome${collapsed && gridOnScreen ? " is-collapsed" : ""}`}>
+    {/* `aria-busy` is what separates the third state from the other two. A
+        strip still loading and a board that legitimately has no tabs both draw
+        nothing — Store Documentation declares its three elsewhere and would
+        show two strips if this drew a second — so "empty" must stay silent
+        rather than become a "no views yet" panel that would be wrong there.
+        Which of the two it is, is now readable rather than inferred. */}
+    <div
+      className={`board-chrome${collapsed && gridOnScreen ? " is-collapsed" : ""}`}
+      aria-busy={loading || undefined}
+    >
       {/* ── Row 1 — board header (AA1) ───────────────────────────────── */}
       <BoardActionsHost
         boardId={boardId}
@@ -275,7 +232,19 @@ export default function BoardChrome({
 
       {error && (
         <p className="board-chrome__error" role="alert">
-          {error}
+          {error.message}
+          {/* Offered only where the server said repeating it could work. */}
+          {error.retryable && (
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                refresh();
+              }}
+            >
+              Retry
+            </button>
+          )}
           <button type="button" onClick={() => setError(null)} aria-label="Dismiss">×</button>
         </p>
       )}

@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, RefObject } from "react";
 import { track } from "./analytics";
 
+import { uploadEvidenceFile } from "../../lib/client-upload";
+import { submissionTitle } from "../../lib/submission-title";
+
 /**
  * SECTION 2 — Report a Job.
  *
@@ -410,6 +413,49 @@ export function ReportJob() {
      */
     const detail = valueOf(form, "rjDesc").trim();
     const access = valueOf(form, "rjAccess").trim();
+    /*
+     * AND THE JOB'S NAME IS SENT SEPARATELY, because the blob below cannot
+     * supply one.
+     *
+     * `/api/report-job` derived the title from the first line of `description`,
+     * and the first line is the P-code band. So every report this page has ever
+     * filed arrived on the board called "[P1] Critical, site unsafe or cannot
+     * trade" — the same words on every P1 in the workspace, naming the urgency
+     * and never the fault. Nobody could scan the board and nobody could search
+     * for the thing that broke.
+     *
+     * The description is deliberately untouched: the P-code stays first because
+     * that is what triage reads first, and the postcode and the access window
+     * still have nowhere else to go. The title is the CATEGORY and the
+     * reporter's own first sentence, which is the pair a coordinator scans by.
+     *
+     * The server still caps it and still falls back to the description when it
+     * is absent, so a cached copy of this page keeps working.
+     */
+    /*
+     * THE SHARED RULE, imported — not a fifth copy of it.
+     *
+     * This derived the summary itself with a local `SENTENCE_END` pattern, so
+     * the public website named jobs by a different rule from the four doors
+     * `submission-title.ts` was written to unify, and that module's own header
+     * ("the rule lives here and both sides import it") was untrue of the one
+     * caller with no account behind it.
+     *
+     * The pattern was also the ONLY lookbehind assertion anywhere under `app/`,
+     * as a module-level literal. On a WebKit older than Safari 16.4 that is a
+     * SyntaxError at parse time, which takes down the whole chunk — on the
+     * anonymous page a member of the public uses to report a fault, with no
+     * other route in. `submissionTitle` uses no lookbehind.
+     *
+     * The category prefix stays: it is this form's own decision that a job
+     * raised from the website should say what kind of fault it is, and the
+     * server caps the result regardless.
+     */
+    const summary = submissionTitle({
+      description: detail,
+      fallback: "fault reported from the website",
+    });
+    const title = [category, summary].filter(Boolean).join(" — ").slice(0, 120);
     const description = [
       `[${urgency}] ${chosen?.label.replace(/^P\d — /, "") ?? ""}`.trim(),
       detail || `${category} fault reported from the website.`,
@@ -431,6 +477,7 @@ export function ReportJob() {
           location: valueOf(form, "rjSite"),
           requester: valueOf(form, "rjName"),
           contact: valueOf(form, "rjPhone"),
+          title,
           description,
           category,
           engineer,
@@ -445,16 +492,50 @@ export function ReportJob() {
       if (!response.ok || !result.request) {
         throw new Error(result.error || "The request could not be submitted.");
       }
-      let failed = 0;
+      /*
+       * THE SHARED UPLOADER, not a bare POST — the same correction already made
+       * for the contractor job link, for the same reason and on a page with a
+       * wider audience.
+       *
+       * This built a FormData and posted `/api/files` directly. That works up to
+       * the Workers form parser's ~1 MiB ceiling and then stops dead: anything
+       * larger comes back 413 carrying bare text and no JSON `error`, and the
+       * only thing this page did with it was increment a counter. A member of
+       * the public photographing a fault on any current phone produces a 2-5 MB
+       * file, so the ORDINARY case was the broken one, and the message they got
+       * was "N attachment(s) could not be uploaded" with no reason and nothing
+       * to do about it.
+       *
+       * `uploadEvidenceFile` is the helper CLAUDE.md names as the only correct
+       * way in: it routes anything over `DIRECT_UPLOAD_LIMIT` (900 KB) through
+       * `/api/files/multipart` in chunks, retries a direct upload that 413s,
+       * enforces the real ceilings with a sentence a person can act on, and
+       * offers a WebP thumbnail afterwards. It forwards `uploadToken` on both
+       * the direct and the multipart path, which is what makes it usable from
+       * this anonymous form at all — `/api/report-job` always mints one.
+       *
+       * The reasons are collected rather than counted, because "could not be
+       * uploaded" is precisely the message that made this defect invisible for
+       * as long as it was.
+       */
+      const failures: string[] = [];
       for (const file of files) {
-        const upload = new FormData();
-        upload.append("file", file);
-        upload.append("requestId", result.request.id);
-        upload.append("kind", "issue");
-        if (result.uploadToken) upload.append("uploadToken", result.uploadToken);
-        const uploadResponse = await fetch("/api/files", { method: "POST", body: upload });
-        if (!uploadResponse.ok) failed++;
+        try {
+          await uploadEvidenceFile({
+            file,
+            requestId: result.request.id,
+            kind: "issue",
+            uploadToken: result.uploadToken,
+          });
+        } catch (error) {
+          failures.push(
+            error instanceof Error && error.message.trim()
+              ? `${file.name} — ${error.message}`
+              : `${file.name} — upload failed`,
+          );
+        }
       }
+      const failed = failures.length;
       form.reset();
       clearAttachments();
       setUrgency("");
@@ -469,7 +550,7 @@ export function ReportJob() {
       setStatus({
         text: `Request ${result.request.id} received.${
           failed
-            ? ` ${failed} attachment(s) could not be uploaded.`
+            ? ` ${failed} attachment(s) could not be uploaded: ${failures.join("; ")}`
             : " The operations team can now begin triage."
         }`,
         tone: "is-ok",

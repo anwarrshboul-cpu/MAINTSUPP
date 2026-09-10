@@ -386,7 +386,13 @@ export const faq = [
   },
   {
     "q": "Can we keep our current contractors?",
-    "a": "Yes. Existing contractors can be retained subject to agreed onboarding, insurance, documentation and performance requirements. Plenty of clients start that way."
+    /* Widened for Homepage V3 to say what the "Your contractors or ours"
+       section says. The old answer ("Yes. Existing contractors can be retained
+       subject to agreed onboarding…") was correct and half the position: it
+       answered whether you may keep yours and never said the two panels run
+       side by side, which is what most portfolios actually do. The two must
+       stay worded from the same facts — if one changes, change both. */
+    "a": "Yes — your contractors or ours, and most portfolios run a mix. Existing contractors are retained subject to onboarding: insurance, qualifications, documentation and the same performance expectations everyone on the panel works to, at the rates you have already agreed with them. Where you have no cover for a trade, a region or an hour, we source from the vetted panel instead. The split is yours to set and yours to change."
   },
   {
     "q": "Who pays the contractor?",
@@ -402,7 +408,16 @@ export const faq = [
   },
   {
     "q": "What does it cost?",
-    "a": "We do not publish fixed fees, because a small reactive-only estate and a large fully managed portfolio are not the same product. Scope and commercial terms are agreed after the portfolio review."
+    /* REWRITTEN FOR HOMEPAGE V3, because it had come to contradict the page.
+       It read: "We do not publish fixed fees, because a small reactive-only
+       estate and a large fully managed portfolio are not the same product."
+       That was true when the site published no prices. The Pricing section now
+       publishes a per-store rate for three plans across three portfolio bands,
+       so the old answer told a reader the page was lying to them.
+       NO FIGURE IS TYPED HERE, deliberately. `pricing.tsx` holds the only price
+       table on the site and a second copy of a rate in this file is exactly how
+       an FAQ comes to quote a price the cards no longer charge. */
+    "a": "Coordination is priced per store per month, and the rates are published on this page — pick your portfolio size on the pricing calculator and every figure follows from it. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Your final quote is confirmed at the free portfolio review."
   },
   {
     "q": "Can store teams report jobs directly?",

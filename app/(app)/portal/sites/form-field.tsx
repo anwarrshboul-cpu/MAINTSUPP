@@ -26,6 +26,8 @@ export function FormField({
   min,
   max,
   step,
+  problem,
+  onBlur,
 }: {
   id: string;
   label: string;
@@ -51,8 +53,37 @@ export function FormField({
   min?: number;
   max?: number;
   step?: string;
+  /**
+   * 2H/2K — something wrong with what is currently typed, or null.
+   *
+   * ADVISORY, NOT BLOCKING, and the distinction is the whole reason this is a
+   * separate prop from `required`. The first field to use it is the postcode:
+   * an unrecognisable postcode is still SAVED, because this product has sites
+   * outside the UK and refusing the save would make the form harder to finish
+   * than the spreadsheet it replaces. What it must not do is stay silent — a
+   * typo in a postcode is invisible until somebody tries to use it.
+   *
+   * Wired to `aria-invalid` and into `aria-describedby` ALONGSIDE the hint
+   * rather than instead of it, so a screen reader gets the rule and the problem
+   * in one pass. `role="status"` rather than `alert`: this is a hint about the
+   * field being edited, not an interruption.
+   */
+  problem?: string | null;
+  /**
+   * Called when the control loses focus.
+   *
+   * Added for the postcode, which canonicalises on blur rather than on change:
+   * rewriting a value on every keystroke fights the person typing it. Only the
+   * text input carries it — a select has no half-typed state to tidy, and a
+   * textarea's content is prose.
+   */
+  onBlur?: () => void;
 }) {
-  const describedBy = hint ? `${id}-hint` : undefined;
+  const hintId = hint ? `${id}-hint` : undefined;
+  const problemId = problem ? `${id}-problem` : undefined;
+  /* Both, in reading order. `undefined` when neither exists, because an empty
+     `aria-describedby` points at nothing and some readers announce that. */
+  const describedBy = [hintId, problemId].filter(Boolean).join(" ") || undefined;
 
   const choices = (options ?? [])
     .map((option) => ({
@@ -105,13 +136,21 @@ export function FormField({
           max={max}
           step={step}
           aria-describedby={describedBy}
+          aria-invalid={problem ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
         />
       )}
 
       {hint ? (
-        <p id={describedBy} className="form-hint">
+        <p id={hintId} className="form-hint">
           {hint}
+        </p>
+      ) : null}
+
+      {problem ? (
+        <p id={problemId} className="form-hint form-hint--problem" role="status">
+          {problem}
         </p>
       ) : null}
     </div>

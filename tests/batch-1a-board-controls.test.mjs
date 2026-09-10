@@ -62,7 +62,23 @@ const formatUrl = asModule(
     .replace(/from ["']\.\.\/\.\.\/lib\/format-date["']/g, `from "${formatDateUrl}"`)
     .replace(/from ["']\.\/board-model["']/g, `from "${modelUrl}"`),
 );
-const orderingUrl = asModule(transpile(await read("app/(app)/portal/board-ordering.ts")));
+/*
+ * `board-ordering.ts` gained a runtime import when what a row is CALLED moved
+ * out to `board-row-name.ts` — the split that put it back under its 200-line
+ * ceiling. A relative specifier cannot resolve from a `data:` URL at all, so
+ * without this rewrite the whole suite dies on LOAD with
+ * ERR_UNSUPPORTED_RESOLVE_REQUEST rather than failing an assertion, which is
+ * the loudest and least informative way for a test file to break.
+ *
+ * The leaf is transpiled on its own because it imports nothing but types.
+ */
+const rowNameUrl = asModule(transpile(await read("app/(app)/portal/board-row-name.ts")));
+const orderingUrl = asModule(
+  transpile(await read("app/(app)/portal/board-ordering.ts")).replace(
+    /from ["']\.\/board-row-name["']/g,
+    `from "${rowNameUrl}"`,
+  ),
+);
 const viewModelUrl = asModule(
   transpile(await read("app/(app)/portal/views/view-model.ts")).replace(
     /from ["']\.\.\/\.\.\/\.\.\/lib\/format-date["']/g,

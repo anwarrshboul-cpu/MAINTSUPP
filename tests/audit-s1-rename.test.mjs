@@ -62,7 +62,14 @@ test("every other system column is still refused, so a cell cannot shadow a fiel
 test("the client still prefers the cell it can now write", async () => {
   // If boardItemName ever stopped reading the cell first, storing it would be
   // pointless — the rename would save and never appear.
-  const ordering = await read("app/(app)/portal/board-ordering.ts");
+  //
+  // RE-POINTED, NOT WEAKENED. `boardItemName` moved from `board-ordering.ts` to
+  // `board-row-name.ts` when the job board stopped calling every row "Incoming
+  // form answer" and the account of why grew past that file's 200-line ceiling.
+  // The contract this asserts did not move with it: the CELL still wins, which
+  // is what makes an in-grid rename stick now that a title can also supply the
+  // name. `board-ordering.ts` re-exports it, so no caller changed.
+  const ordering = await read("app/(app)/portal/board-row-name.ts");
   const fn = ordering.slice(ordering.indexOf("export function boardItemName"));
   assert.match(
     fn.slice(0, 400),

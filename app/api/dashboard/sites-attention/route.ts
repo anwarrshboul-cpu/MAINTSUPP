@@ -44,6 +44,11 @@ const NO_REGISTER = {
   total: 0,
   percent: 0,
   scored: false,
+  /* Kept in step with `ComplianceCompletion` and with `EMPTY_COMPLETION` in
+     `app/lib/site-metrics.ts`: two literals standing in for the same shape must
+     not answer with different fields, or a caller reading `excluded` gets it
+     from one endpoint and `undefined` from the other. */
+  excluded: 0,
   counts: {
     Compliant: 0,
     "Expiring soon": 0,

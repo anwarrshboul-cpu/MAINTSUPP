@@ -94,8 +94,34 @@ test("the public form no longer invents a site for what it cannot match", async 
     /const intakeId\s*=|return intakeId/,
     "nor resolved to by id",
   );
-  assert.match(route, /const siteId = site\?\.id \?\? unassignedSiteId\(\)/, "no match means no site");
-  assert.match(route, /siteAliases/, "and a renamed store still resolves by its former name");
+  /*
+   * RE-POINTED. `resolveSite` left this route and became `resolveSubmissionSite`
+   * in app/lib/submission-service.ts — the SAME ladder, now climbed by all five
+   * intake doors instead of only by the anonymous one. The alias rung used to
+   * live here alone, so an operator typing a store's former name into
+   * "raise a job" was refused while a stranger typing it into the public form
+   * was matched.
+   *
+   * The claim is unchanged in both halves: an unmatched name invents nothing,
+   * and a renamed store still resolves by the name it used to carry.
+   */
+  assert.match(
+    route,
+    /siteId: site\?\.id \?\? null/,
+    "no match means no site",
+  );
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(service, /siteAliases/, "and a renamed store still resolves by its former name");
+  assert.match(
+    service,
+    /siteId: input\.siteId \?\? unassignedSiteId\(\)/,
+    "and the absence is written the strongest way the column can hold",
+  );
+  assert.doesNotMatch(
+    service,
+    /\.insert\(sites\)/,
+    "nothing shared may invent a site either — that is the whole of D7",
+  );
 });
 
 test("a job's site can be reassigned, but never by an unattended rule", async () => {

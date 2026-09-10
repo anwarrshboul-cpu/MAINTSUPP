@@ -2,12 +2,40 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components";
-import { FormDesignPanel, FormEditPanel, FormSettingsPanel } from "./form-builder-panels";
+import FormActivity from "./form-activity";
+import type { BuilderColumn } from "./form-bindings";
+import { FormDesignPanel, FormSettingsPanel } from "./form-builder-panels";
+import { FormEditPanel } from "./form-edit-panel";
 import FormPreview from "./form-preview";
 import FormShareDialog from "./form-share-dialog";
 import type { BuilderForm, BuilderMode } from "./form-builder-model";
+import { formSaveLabel, useFormSave } from "./form-builder-save";
 import { FormView } from "./views/board-views";
 import "./form-builder.css";
+
+/**
+ * The four PATCH sections that can arrive in a burst, and are therefore worth
+ * coalescing. See `patch` below for why the list is short rather than long.
+ */
+const DEBOUNCED_SECTIONS = new Set(["title", "description", "appearance", "accessibility"]);
+
+/**
+ * The four editing surfaces, and their words, in one place.
+ *
+ * A tuple list rather than a string array with a ternary chain beside it: the
+ * chain was already two levels deep for three modes and would have been three
+ * for four, which is the shape that eventually labels a button wrong. `editing`
+ * below is derived from this same list, so a mode added here cannot be one the
+ * "Back to view" button has forgotten about — which would strand a phone inside
+ * a panel with no way out, the exact failure the removed `matchMedia` reset
+ * used to cause.
+ */
+const EDITING_MODES: ReadonlyArray<readonly [BuilderMode, string]> = [
+  ["edit", "Edit"],
+  ["design", "Design"],
+  ["settings", "Settings"],
+  ["activity", "Activity"],
+];
 
 /**
  * The Form tab: monday's form builder over our own live form.
@@ -90,6 +118,24 @@ export default function FormBuilder({
   const [form, setForm] = useState<BuilderForm | null>(null);
   const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
   /*
+   * EVERY COLUMN OF THIS BOARD, not the subset the form happens to ask about.
+   *
+   * The Content panel could only ever offer the questions already in the stored
+   * configuration, so a column added to the board after the form was created
+   * was simply unreachable from the builder: there was no control anywhere that
+   * could put it on the form. `/api/board/form` does not carry the column list
+   * (it sends the form and the board's groups), and it is not this batch's file
+   * to change — but `GET /api/board/columns` has always returned exactly this,
+   * live columns only, scoped to the organisation and the board, in the board's
+   * own order. So the builder asks it.
+   *
+   * FETCHED HERE, IN THE SHELL, and handed down. The panels must not reach the
+   * network on their own — `tests/stage-twentynine-form-builder.test.mjs` holds
+   * that, and it is right: a panel that fetches is a panel that re-fetches on
+   * every re-render of a canvas that re-renders on every keystroke.
+   */
+  const [columns, setColumns] = useState<BuilderColumn[]>([]);
+  /*
    * This register has no form YET, and one can be made for it — the server's
    * `canCreate` on the 404. Kept apart from `form === null`, which also covers
    * "the request failed": offering to mint a public link because a fetch timed
@@ -99,7 +145,10 @@ export default function FormBuilder({
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<BuilderMode>("view");
   const [sharing, setSharing] = useState(false);
-  const [busy, setBusy] = useState(false);
+  /* `error` is now ONLY the load and create path. A failed SAVE is a different
+     thing with a different remedy and lives on `saver.failure`, which carries a
+     Retry — see `useFormSave`. Sharing one banner between them is how a
+     transient pooler refusal came to look like a broken form. */
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -157,6 +206,33 @@ export default function FormBuilder({
   }, [boardId]);
 
   /*
+   * `[boardId]` for the same reason the form's own load has it: the column list
+   * belongs to one register, and offering another register's columns in the
+   * field picker would bind a question to a column this board does not have.
+   *
+   * A failure here is silent on purpose. The columns are what the picker and
+   * the "has nowhere to save its answer" check are built from; without them the
+   * picker says "Loading the board's columns…" and the binding check stands
+   * down (see `boundIds` in form-intake-warnings.ts) rather than accusing every
+   * question on the form of being unbound because a second request timed out.
+   */
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/board/columns?board=${encodeURIComponent(boardId)}`, {
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as { columns?: BuilderColumn[] };
+        if (active && Array.isArray(payload.columns)) setColumns(payload.columns);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [boardId]);
+
+  /*
    * THE MODE RESET IS GONE, and its absence is the change.
    *
    * There used to be a `matchMedia("(max-width: 767px)")` effect here that
@@ -187,24 +263,37 @@ export default function FormBuilder({
    * and it returns the whole saved form — so taking its answer rather than the
    * locally guessed one means the panel can never drift from what was stored.
    */
-  const patch = useCallback(async (body: Record<string, unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/board/form?board=${encodeURIComponent(boardId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = (await response.json()) as { form?: BuilderForm; error?: string };
-      if (!response.ok) throw new Error(payload.error || "That change could not be saved.");
-      if (payload.form) setForm(payload.form);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "That change could not be saved.");
-    } finally {
-      setBusy(false);
-    }
-  }, [boardId]);
+  const saver = useFormSave({ boardId, form, setForm });
+
+  /*
+   * WHICH CHANGES WAIT, AND WHICH DO NOT.
+   *
+   * The brief asks for a debounce on typing and none on a discrete action, and
+   * those are not the same request against this editor. Every existing call
+   * site is ALREADY a discrete commit — `DraftInput` holds a local draft and
+   * writes on blur or Enter, switches fire once — so a blanket 800ms delay
+   * would make toggling Required feel broken while buying nothing.
+   *
+   * These four are the sections that can arrive in a burst: the title and
+   * description as somebody edits and re-edits them, and `appearance` /
+   * `accessibility` because a colour input and a size slider emit while they
+   * are being dragged. Coalescing those is the difference between one save and
+   * forty, against a pooler that is already the bottleneck. Everything else —
+   * add, remove, reorder, every toggle — is one decision and goes at once,
+   * because a decision sitting in a timer is a decision that can be lost.
+   */
+  /* What the panels have always meant by `busy`: a write is in the air, so an
+     input should say so. Derived rather than tracked twice. */
+  const busy = saver.state === "saving";
+
+  const patch = useCallback(
+    (body: Record<string, unknown>) => {
+      const keys = Object.keys(body);
+      const bursty = keys.length > 0 && keys.every((key) => DEBOUNCED_SECTIONS.has(key));
+      saver.save(body, { immediate: !bursty });
+    },
+    [saver],
+  );
 
   /**
    * Give this register a form of its own — W2 requirement B.
@@ -353,7 +442,7 @@ export default function FormBuilder({
     );
   }
 
-  const editing = mode === "edit" || mode === "design" || mode === "settings";
+  const editing = EDITING_MODES.some(([value]) => value === mode);
 
   return (
     <div className="form-builder">
@@ -380,7 +469,7 @@ export default function FormBuilder({
         </button>
 
         <div className="form-builder__modes" role="group" aria-label="Form builder">
-          {(["edit", "design", "settings"] as const).map((value) => (
+          {EDITING_MODES.map(([value, label]) => (
             <button
               key={value}
               type="button"
@@ -388,10 +477,68 @@ export default function FormBuilder({
               aria-pressed={mode === value}
               onClick={() => setMode(mode === value ? "view" : value)}
             >
-              {value === "edit" ? "Edit" : value === "design" ? "Design" : "Settings"}
+              {label}
             </button>
           ))}
         </div>
+
+        {/*
+          THE SAVE STATE, VISIBLE AT ALL TIMES.
+
+          The editor has always autosaved and never had a Save button, which is
+          right. What it had no way of saying was whether a save had happened:
+          `busy` reached an `aria-busy` and a disabled switch, and nothing else.
+          On a write path whose measured failure mode is the connection pooler
+          refusing outright, an editor that cannot say "not saved" is an editor
+          that loses work silently.
+
+          `role="status"` rather than `aria-live="assertive"`: this is an
+          ambient fact, and interrupting a screen reader mid-sentence on every
+          keystroke's save would be worse than not announcing it.
+        */}
+        <p
+          className="form-builder__savestate"
+          data-state={saver.state}
+          role="status"
+          aria-live="polite"
+        >
+          <Icon
+            name={
+              saver.state === "saved"
+                ? "check"
+                : saver.state === "saving"
+                  ? "upload"
+                  : "alert"
+            }
+            size={14}
+          />
+          {formSaveLabel(saver.state)}
+          {/*
+            Undo sits with the state it undoes. Offered only once there is a
+            saved definition to go back to — a button that would restore
+            nothing is worse than no button. `canUndo` is false both when the
+            stack is empty and when everything on it belongs to the register
+            somebody has just navigated away from, because restoring one
+            board's definition onto another is not an undo, it is a leak.
+
+            The keyboard shortcut is NAMED on the control rather than left to
+            be discovered. It is registered on `window` by `useFormSave`, so
+            this button is the only place in the product a reader could learn
+            that it exists; `aria-keyshortcuts` carries the same fact to a
+            screen reader, which cannot read a tooltip.
+          */}
+          {saver.canUndo && saver.state !== "saving" && (
+            <button
+              type="button"
+              className="form-builder__undo"
+              onClick={saver.undo}
+              title="Undo the last saved change (Ctrl+Z)"
+              aria-keyshortcuts="Control+Z Meta+Z"
+            >
+              Undo
+            </button>
+          )}
+        </p>
 
         <div className="form-builder__share">
           <button
@@ -450,6 +597,32 @@ export default function FormBuilder({
           again.
         </p>
       )}
+      {/*
+        A FAILED SAVE, NAMED, WITH THE CHANGE STILL IN HAND.
+
+        Its own banner rather than the load/create one, because the two need
+        different things from the reader. This one is persistent — no timeout —
+        keeps the edit in `pending` so Retry re-sends exactly what failed, and
+        arms the browser's unsaved-changes warning until it is resolved. The
+        reason comes from the server, so "You do not have permission to edit
+        this form" and "the workspace database is out of connections right now"
+        arrive as the different problems they are, and only the second offers a
+        button, because only the second can work.
+      */}
+      {saver.failure && (
+        <p className="form-builder__banner form-builder__banner--error" role="alert">
+          <Icon name="alert" size={15} />
+          {saver.failure.message}
+          {saver.failure.retryable && (
+            <button type="button" onClick={saver.retry}>
+              Retry
+            </button>
+          )}
+          <button type="button" onClick={saver.dismiss} aria-label="Dismiss">
+            ×
+          </button>
+        </p>
+      )}
       {error && (
         <p className="form-builder__banner form-builder__banner--error" role="alert">
           <Icon name="alert" size={15} />
@@ -458,11 +631,14 @@ export default function FormBuilder({
       )}
 
       <div className="form-builder__stage" data-mode={mode}>
-        {mode === "edit" && <FormEditPanel form={form} patch={patch} busy={busy} />}
+        {mode === "edit" && (
+          <FormEditPanel form={form} patch={patch} busy={busy} columns={columns} />
+        )}
         {mode === "design" && <FormDesignPanel form={form} patch={patch} busy={busy} />}
         {mode === "settings" && (
           <FormSettingsPanel form={form} patch={patch} busy={busy} groups={groups} />
         )}
+        {mode === "activity" && <FormActivity log={saver.log} canUndo={saver.canUndo} />}
         {/*
           THE LIVE FILLABLE FORM, ONLY WHERE IT WOULD FILE HERE.
 

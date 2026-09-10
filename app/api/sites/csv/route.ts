@@ -25,6 +25,7 @@ import {
 } from "../../../lib/sites-repository";
 // W05-01 — the same bounds the Sites form and `PATCH /api/sites` use.
 import { coordinateRefusal } from "../../../lib/site-state";
+import { ensureComplianceProfile } from "../../../lib/compliance-profile";
 /* W2 — which register this import or export is about. See `register-scope.ts`;
    absent `?section=` is the canonical register, which is what the Sites screen
    sends today and what every existing import kept doing. */
@@ -674,6 +675,21 @@ export async function POST(request: Request) {
             values.code ??
             generateSiteCode(name, await existingSiteCodes(db, orgId)),
         });
+        /*
+         * The same profile a site created on the Sites page gets. One function,
+         * three callers — an imported site that arrived without a compliance
+         * profile was invisible to the register exactly like a hand-created
+         * one, and a sheet of thirty is thirty times the problem.
+         *
+         * NOT compensated here, unlike `POST /api/sites`, and deliberately: the
+         * importer is a per-row loop that already reports `created`, `skipped`
+         * and per-row anomalies rather than failing the whole sheet, so a throw
+         * here propagates to the route's own catch and the rows already written
+         * stay written — which is the importer's existing contract. A profile
+         * missed this way is repaired by the same `ensureComplianceProfile` on
+         * the next read of that site, because it is idempotent.
+         */
+        await ensureComplianceProfile(db, orgId, id);
         if (address.changed) {
           await recordAnomaly(db, orgId, {
             batchId,

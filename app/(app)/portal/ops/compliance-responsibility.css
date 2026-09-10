@@ -1,0 +1,370 @@
+/*
+ * THE RESPONSIBILITY CONTROLS — its own stylesheet, on purpose.
+ *
+ * `ops.css` is deliberately one file for the four operations pages, because
+ * splitting a shared design into four is how those pages drifted apart the
+ * first time. This is not a fifth page: it is a set of controls that appear
+ * INSIDE those pages, and it is owned by a different piece of work. Keeping it
+ * separate means the register's own rules cannot be edited by accident from
+ * here, and it composes — `.resp-*` sits beside `.ops-*` on the same element
+ * (`.ops-group .resp-group`, `.ops-option .resp-bulk__action`) and inherits the
+ * card, the border and the focus ring rather than restating them.
+ *
+ * Loaded with `<link rel="stylesheet" precedence="default">`, the same way the
+ * ops pages load theirs, so it is hoisted once however many controls render.
+ *
+ * ── BREAKPOINTS ────────────────────────────────────────────────────────────
+ *
+ * 768 and nothing else here. The agreed set is 640 / 767 / 768 / 1024 / 1280
+ * and several stage tests fail on any other width (CLAUDE.md). 375px is the
+ * BASE case: every rule below describes the phone first and widens from it.
+ *
+ * ── WHY THE TOUCH TARGETS ARE SPELLED OUT ──────────────────────────────────
+ *
+ * A checkbox is 13px by default and a row of four answer buttons at 0.78rem is
+ * about 30px tall. Both are under the 44px minimum this product holds itself
+ * to, and both are the controls somebody uses forty times in a row while
+ * clearing a backlog — which is exactly the case where a missed tap costs a
+ * wrong answer written to a compliance record.
+ */
+
+/* ── The coverage sentence ────────────────────────────────────────────────── */
+
+/*
+ * "3 of 12 requirements confirmed" / "Not yet confirmed".
+ *
+ * Never a percentage — see `responsibilityCoverage`. Styled as a quiet fact
+ * rather than as a meter, because a bar would invite the eye to read it as the
+ * compliance score sitting a few pixels above it, and they are different claims
+ * about the store.
+ */
+.resp-coverage {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.resp-coverage--strong {
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+/* Complete is stated in words as well; the colour only reinforces it. */
+.resp-coverage[data-complete="true"] {
+  color: #22c55e;
+}
+
+.resp-coverage__waiting {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
+  color: var(--muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* ── One requirement's control ────────────────────────────────────────────── */
+
+.resp-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resp-control__label {
+  display: block;
+  min-width: 0;
+}
+
+/*
+ * FULL WIDTH ON A PHONE, and 16px type.
+ *
+ * Under 16px iOS zooms the page on focus and does not zoom back, which on a
+ * list of forty requirements leaves the reader panned sideways with the row
+ * they were answering off screen. The same rule the board chrome and the view
+ * renderers already hold themselves to.
+ */
+.resp-control__select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.resp-control__select:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.resp-control__select:disabled {
+  opacity: 0.6;
+}
+
+.resp-control__busy {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* A refusal carries the server's own sentence; it must not be the same colour
+   as the muted line above it or it reads as more metadata. */
+.resp-control__error {
+  font-size: 0.72rem;
+  color: #e5484d;
+  overflow-wrap: anywhere;
+}
+
+/* ── The queue ────────────────────────────────────────────────────────────── */
+
+.resp-queue__notice,
+.resp-queue__error {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.resp-queue__notice {
+  color: var(--ink);
+}
+
+.resp-queue__error {
+  color: #e5484d;
+}
+
+/*
+ * THE BULK BAR.
+ *
+ * Sticky rather than fixed: fixed would sit over the last row of the queue on a
+ * short list and there would be no way to scroll it out of the way. Sticky
+ * keeps it in reach while the list is long and lets the page end normally.
+ *
+ * It stays in the flow when nothing is selected — the buttons are disabled
+ * rather than removed — because a control that appears only after a selection
+ * is a control nobody discovers, and its arrival shifts every row beneath it.
+ */
+.resp-bulk {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.resp-bulk[data-active="true"] {
+  border-color: var(--accent-fg);
+}
+
+.resp-bulk__count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resp-bulk__all,
+.resp-group__select,
+.resp-row__pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  min-width: 0;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* 20px, not the browser's 13px. See the note at the top of this file. */
+.resp-bulk__all input[type="checkbox"],
+.resp-group__select input[type="checkbox"],
+.resp-row__pick input[type="checkbox"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent-fg);
+  cursor: pointer;
+}
+
+.resp-bulk__cap {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/*
+ * The four answers WRAP at 375px rather than shrinking.
+ *
+ * "Shopping centre" and "Not applicable" cannot share a 375px line with two
+ * more buttons at a legible size, and the alternative — ellipsing them — turns
+ * a decision about a compliance record into a guess about a truncated word.
+ */
+.resp-bulk__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.resp-bulk__action {
+  min-height: 44px;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.resp-bulk__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── One site's group ─────────────────────────────────────────────────────── */
+
+.resp-group {
+  padding: 12px;
+}
+
+.resp-group__heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.resp-group__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The register's own record row, plus its responsibility control.
+ *
+ * `.ops-record` is a full-width `<button>` and the control cannot live inside
+ * it (see the note in `compliance-page.tsx`), so the two are siblings. On a
+ * phone they stack and the button keeps its own hairline; at 768px they share a
+ * line and the hairline moves onto the wrapper, or the separator would stop
+ * halfway across the row.
+ */
+.resp-record {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.resp-record > .resp-control {
+  padding-bottom: 8px;
+}
+
+/* The per-site sentence under a collapsed group header. */
+.resp-group__coverage {
+  margin: 0;
+  padding: 0 0 4px;
+}
+
+/* ── One waiting requirement ──────────────────────────────────────────────── */
+
+/*
+ * Stacked at 375px: the pick line, then the state, then the control. Three
+ * short lines beat one line that has to be scrolled sideways, which is the
+ * thing the register rebuild exists to remove.
+ */
+.resp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.resp-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The state as a tinted word, not a coloured dot. Colour is never the sole
+ * carrier of meaning: "Expired" says it, and `--resp-state` only reinforces it.
+ */
+.resp-row__state {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--resp-state, var(--line));
+  color: var(--resp-state, var(--muted));
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+@media (min-width: 768px) {
+  /*
+   * The row becomes three columns: requirement, state, control. The parts are
+   * already separate elements, so this is a template rather than a restructure.
+   */
+  .resp-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 220px);
+    align-items: center;
+    gap: 12px;
+  }
+
+  .resp-bulk {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .resp-bulk__actions {
+    flex: 0 1 auto;
+  }
+
+  .resp-bulk__action {
+    flex: 0 0 auto;
+  }
+
+  /* Beside the requirement rather than under it, where there is room for it. */
+  .resp-control--compact .resp-control__select {
+    font-size: 0.85rem;
+    min-height: 36px;
+  }
+
+  .resp-record {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* The wrapper carries the separator now, so the button must not draw a second
+     one two pixels above it. */
+  .resp-record > .ops-record {
+    flex: 1 1 auto;
+    border-top: 0;
+    min-width: 0;
+  }
+
+  .resp-record > .resp-control {
+    flex: 0 0 200px;
+    padding-bottom: 0;
+  }
+}

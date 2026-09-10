@@ -56,6 +56,21 @@ import {
   type ComplianceState,
 } from "../../../lib/compliance-status";
 import { formatDate } from "../../../lib/format-date";
+import {
+  ConfirmResponsibilitiesQueue,
+  ResponsibilityControl,
+  ResponsibilityCoverageLine,
+  type ResponsibilityCoverage,
+} from "./compliance-responsibility";
+/*
+ * 2B/2C/2D — the register's setup tools, in a file of their own.
+ *
+ * Reached as `?view=setup`, beside the four reading views, because the work is
+ * the same work: somebody looking at a register that does not describe their
+ * estate fixes it here. Kept out of this file because this one is already a
+ * thousand lines and the three tools have nothing to say to the accordion.
+ */
+import { ComplianceSetup } from "./compliance-setup";
 
 type Completion = {
   satisfied: number;
@@ -64,6 +79,16 @@ type Completion = {
   total: number;
   percent: number;
   scored: boolean;
+  /*
+   * Requirements left OUT of the percentage because nobody has confirmed whose
+   * obligation they are, or has confirmed they are somebody else's.
+   *
+   * Declared here because the server has always sent it and this page dropped
+   * it: without it "8%" and "3 of 12 HELD" are indistinguishable on screen from
+   * "8%" and "3 of 12 CONFIRMED", which are entirely different facts about a
+   * store. See `ComplianceCompletion` in compliance-status.ts.
+   */
+  excluded: number;
   counts: Record<ComplianceState, number>;
 };
 
@@ -71,6 +96,10 @@ type Group = {
   siteId: string;
   siteName: string;
   completion: Completion;
+  /* How many of this store's responsibilities have been answered for — a count,
+     never a percentage. It rides on the GROUP HEADER because the header is drawn
+     while the group is still collapsed. */
+  coverage: ResponsibilityCoverage;
   outstanding: number;
   noDueDate: number;
   expiringSoon: number;
@@ -86,6 +115,7 @@ type SummaryPayload = {
   portfolio: {
     counts: Record<ComplianceState, number>;
     completion: Completion;
+    coverage: ResponsibilityCoverage;
     noDueDate: number;
     sites: number;
     total: number;
@@ -110,7 +140,23 @@ type Record_ = {
   siteId: string;
   siteName: string;
   kind: string;
+  /**
+   * WHO CHASES THIS CERTIFICATE — the `?who=` filter's axis.
+   *
+   * Not `dutyHolder`. The two are printed a few pixels apart on this row and
+   * the confusion is easy, so they are named apart everywhere: a fire alarm
+   * service can be chased by the fire safety partner and still be the
+   * landlord's obligation in a mall unit.
+   */
   responsibility: string;
+  /**
+   * WHOSE OBLIGATION IT IS — client / landlord / centre / not_applicable, or
+   * "unconfirmed", or null if nobody has ever been asked.
+   *
+   * The API has always sent it; this type did not declare it, so the value was
+   * dropped on the floor and the register could not show or set it.
+   */
+  dutyHolder: string | null;
   state: ComplianceState;
   expiry: string | null;
   fileCount: number;
@@ -275,6 +321,13 @@ export function CompliancePage({
               ["site", "By site"],
               ["kind", "By requirement"],
               ["all", "All records"],
+              /* The backlog as its own view rather than a separate page: it is
+                 the same register read by one more question, and it shares the
+                 filter bar, the chips and the URL state with the other three. */
+              ["confirm", "Confirm responsibilities"],
+              /* Last, because it is the least often wanted and the only one
+                 that writes. */
+              ["setup", "Set up"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -343,6 +396,24 @@ export function CompliancePage({
           <SkeletonRow lines={3} height={96} />
           <SkeletonRow lines={3} height={96} />
         </div>
+      ) : view === "setup" ? (
+        /*
+          BEFORE the empty-state guards below, and this is the case that proves
+          why they have to be. "No compliance requirements are set up yet" is
+          precisely the state somebody comes here to fix, so letting that guard
+          short-circuit would make the fix unreachable from the screen that
+          reports the problem.
+        */
+        <ComplianceSetup onChanged={summary.reload} />
+      ) : view === "confirm" ? (
+        /*
+          BEFORE the two empty-state guards below, deliberately. Those describe
+          the RECORD list — "no requirements match these filters" — and letting
+          them short-circuit would make the queue unreachable from a filtered
+          register, which is exactly the state somebody is in when they narrow to
+          one store and then go to confirm its responsibilities.
+        */
+        <ConfirmResponsibilitiesQueue search={search} onSaved={summary.reload} />
       ) : summary.data.registerTotal === 0 ? (
         <OpsCard title="Certificate register">
           <EmptyState>
@@ -375,6 +446,9 @@ export function CompliancePage({
               expiryWindowDays={summary.data!.expiryWindowDays}
               onManageRecord={onManageRecord}
               onOpenStoreDocumentation={onOpenStoreDocumentation}
+              /* A responsibility set on a record moves it into or out of the
+                 percentage, so the header above it has to be re-read. */
+              onSaved={summary.reload}
             />
           ))}
         </div>
@@ -463,6 +537,27 @@ function PortfolioBand({
         </div>
       </div>
       {/*
+        HOW MUCH OF THE REGISTER HAS BEEN ANSWERED FOR — beside the percentage,
+        never inside it.
+
+        "Complete 8%" on its own is read as a claim about certificates. It is
+        also a claim about a DENOMINATOR, and on a register where 144 of 204
+        requirements are waiting on somebody to say whose they are, the
+        denominator is the more surprising half. The two sentences sit together
+        so neither can be read without the other, and this one is a count: it
+        does not, and cannot, print a percent sign.
+      */}
+      <p className="ops-card__note">
+        <ResponsibilityCoverageLine coverage={portfolio.coverage} tone="strong" />
+      </p>
+      {portfolio.completion.excluded > 0 ? (
+        <p className="ops-card__note">
+          {portfolio.completion.excluded} of {plural(portfolio.total, "requirement")} are outside
+          the percentage because their responsibility is unconfirmed, or belongs to a landlord or
+          shopping centre.
+        </p>
+      ) : null}
+      {/*
         The no-due-date figure, in the header rather than left to distort the
         status column silently. On this estate it is the single biggest fact
         about the register.
@@ -498,6 +593,7 @@ function SiteGroup({
   expiryWindowDays,
   onManageRecord,
   onOpenStoreDocumentation,
+  onSaved,
 }: {
   group: Group;
   expanded: boolean;
@@ -506,6 +602,8 @@ function SiteGroup({
   expiryWindowDays: number;
   onManageRecord: (id: string | null) => void;
   onOpenStoreDocumentation: () => void;
+  /** Re-read the summary after a responsibility changes on one of these rows. */
+  onSaved: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
   const records = useOpsQuery<RecordsPayload>(
@@ -513,6 +611,20 @@ function SiteGroup({
     search,
     { enabled: expanded },
   );
+
+  /*
+   * BOTH QUERIES, OR THE CONTROL SNAPS BACK.
+   *
+   * The select is controlled by `record.dutyHolder`, which comes from THIS
+   * group's records query — not from the summary. Reloading only the summary
+   * left the row's own payload stale, so a saved answer reverted on the next
+   * render and looked like a failed write. The header has to be re-read as well
+   * because a confirmed requirement moves into or out of the percentage.
+   */
+  const handleSaved = useCallback(() => {
+    records.reload();
+    onSaved();
+  }, [onSaved, records]);
 
   /*
    * The action line names only the states that need action, and omits a zero.
@@ -551,23 +663,62 @@ function SiteGroup({
       >
         <span className="ops-group__title">
           <span className="ops-group__name">{group.siteName}</span>
+          {/*
+            "0 of 0" IS NOT A FACT ABOUT A STORE WITH TWELVE REQUIREMENTS.
+            The fraction is the compliance score's, and its denominator is only
+            the requirements confirmed as ours. A store whose twelve are all
+            still unconfirmed has an applicable count of zero, so the fraction
+            read "0 of 0" beside a header that then said "No requirements set" —
+            two sentences, both saying the store is empty, about a store with a
+            full register. When there is nothing to score, the honest number is
+            how many requirements there are.
+          */}
           <span className="ops-group__count">
-            {group.completion.satisfied} of {group.completion.applicable}
+            {group.completion.scored
+              ? `${group.completion.satisfied} of ${group.completion.applicable}`
+              : plural(group.total, "requirement")}
           </span>
           <Icon name="chevron" size={16} />
         </span>
-        <ProgressMeter
-          value={group.completion.satisfied}
-          max={Math.max(group.completion.applicable, 1)}
-          tone={tone}
-          label={`${group.siteName}: ${group.completion.satisfied} of ${group.completion.applicable} applicable requirements met, ${group.completion.percent}%`}
-        />
+        {/*
+          No meter when there is nothing to score. An empty bar is read as a
+          failing store, which is the same lie as "0%" drawn a different way.
+        */}
+        {group.completion.scored ? (
+          <ProgressMeter
+            value={group.completion.satisfied}
+            max={Math.max(group.completion.applicable, 1)}
+            tone={tone}
+            label={`${group.siteName}: ${group.completion.satisfied} of ${group.completion.applicable} applicable requirements met, ${group.completion.percent}%`}
+          />
+        ) : null}
         <span className="ops-record__meta">
-          {group.completion.scored ? `${group.completion.percent}% complete` : "No requirements set"}
+          {group.completion.scored
+            ? `${group.completion.percent}% complete`
+            : /*
+                NEVER "0%", and never "No requirements set" for a store that has
+                twelve of them. `coverage.label` is the one place that sentence
+                is decided — "Not yet confirmed", or "3 of 12 requirements
+                confirmed" — so this header, the portfolio band and the queue
+                cannot phrase it three ways.
+              */
+              group.total === 0
+              ? "No requirements set"
+              : group.coverage.label}
           {actions.length ? ` · ${actions.join(" · ")}` : ""}
         </span>
       </button>
       </h3>
+      {/*
+        The coverage sentence sits under the header whether the group is open or
+        shut, because the store whose responsibilities nobody has answered for is
+        exactly the one nobody expands.
+      */}
+      {group.completion.scored && group.coverage.total > 0 ? (
+        <p className="resp-group__coverage">
+          <ResponsibilityCoverageLine coverage={group.coverage} />
+        </p>
+      ) : null}
 
       {expanded ? (
         <div className="ops-group__body">
@@ -590,6 +741,7 @@ function SiteGroup({
                   record={record}
                   onManage={onManageRecord}
                   onOpenBoard={onOpenStoreDocumentation}
+                  onSaved={handleSaved}
                 />
               ))}
               {records.data.records.length > visible.length ? (
@@ -625,12 +777,25 @@ function RecordRow({
   record,
   onManage,
   onOpenBoard,
+  onSaved,
 }: {
   record: Record_;
   onManage: (id: string | null) => void;
   onOpenBoard: () => void;
+  /** Re-read the meters after this row's responsibility changes. */
+  onSaved: () => void;
 }) {
   return (
+    /*
+      THE CONTROL IS A SIBLING OF THE ROW, NOT A CHILD OF IT.
+
+      `.ops-record` is a `<button>`, and a `<select>` inside a button is invalid
+      — a button takes phrasing content, and browsers that render it anyway
+      swallow the select's own clicks into the button's. So the row and its
+      control sit side by side in a wrapper, and `.resp-record` moves the row
+      separator onto that wrapper at the width where they share a line.
+    */
+    <div className="resp-record">
     <button
       type="button"
       className="ops-record"
@@ -677,6 +842,17 @@ function RecordRow({
         <Icon name="chevron" size={14} />
       </span>
     </button>
+    {/*
+      OFFERED ON A LOCKED ROW TOO, and that is not an oversight. The lock says
+      the CERTIFICATE is held on the Store Documentation board and cannot be
+      edited from here. Whose obligation the requirement is has never been a
+      board column at all — it is an annotation — so it is answerable on a
+      board-derived row exactly as it is on a register-only one, which is the
+      whole reason this write addresses a requirement by site × name rather
+      than by a `compliance_documents` id half the register does not have.
+    */}
+    <ResponsibilityControl record={record} onSaved={onSaved} compact />
+    </div>
   );
 }
 

@@ -1,0 +1,98 @@
+/*
+ * Settings → Appearance.
+ *
+ * Written entirely against the palette tokens — no colour literal appears
+ * below. That is not tidiness: this panel is one of the two places the LIGHT
+ * theme is chosen from, so a literal here would be a control that paints the
+ * same in both skins and cannot follow the one it just selected. `views/
+ * account-views.css` still holds a handful of literals for the same widget in
+ * the account area; this file does not add more.
+ *
+ * There is no media query at all. The three options are a wrapping flex row, so
+ * they reflow on a phone without a breakpoint — which also keeps this file out
+ * of the 640/767/768/1024/1280 rule the stage tests enforce, rather than
+ * spending one of those widths on a card that does not need it.
+ */
+
+.appearance-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.appearance-choice {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.appearance-choice:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+/*
+ * `aria-pressed` is the state, so the selector reads it rather than a class
+ * kept in step by hand. A toggle button whose ring and whose assistive-tech
+ * state can disagree is worse than no ring at all.
+ */
+.appearance-choice[aria-pressed="true"] {
+  border-color: var(--accent-fg);
+  background: var(--surface-active);
+}
+
+.appearance-choice strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.appearance-choice small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/*
+ * A real preview of the two grounds, not an icon of one. The values are the
+ * `--canvas` and `--paper` of each theme written out, because a swatch that
+ * used the CURRENT theme's tokens would show the same two colours whichever
+ * option it sat under — which is the one place in this file where a literal is
+ * the correct answer.
+ */
+.appearance-swatch {
+  width: 34px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+}
+
+.appearance-swatch--dark {
+  background: linear-gradient(135deg, #0b1218 50%, #182830 50%);
+}
+
+.appearance-swatch--light {
+  background: linear-gradient(135deg, #f4f7f8 50%, #ffffff 50%);
+}
+
+.appearance-swatch--system {
+  background: linear-gradient(135deg, #0b1218 50%, #f4f7f8 50%);
+}
+
+.appearance-summary {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}

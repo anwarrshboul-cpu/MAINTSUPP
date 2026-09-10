@@ -26,7 +26,25 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const read = (file) => readFile(path.join(root, file), "utf8");
+/*
+ * NORMALISED, BECAUSE THIS IS A WINDOWS CHECKOUT AND LINE ENDINGS ARE PER FILE.
+ *
+ * There is no `.gitattributes`, so `app/lib/site-metrics.ts` is CRLF while its
+ * neighbours are LF — CLAUDE.md records the same trap for `app/api/files/
+ * route.ts` against `portal-app.tsx`. `fnBody` below looks for the literal
+ * "\n}\n" to find where a function ends, which a CRLF file does not contain,
+ * so "isPlaceholderManager must end with a brace at column zero" failed on a
+ * function that plainly does. The test was not wrong about the code; it was
+ * reading bytes it had not normalised, and it therefore only ever tested on an
+ * LF checkout.
+ *
+ * The other suites that slice source already do this — see the `read` in
+ * `tests/audit-api-field-types.test.mjs`. Normalising can only make a match
+ * that is written against LF succeed, never fail, so no existing assertion
+ * changes meaning.
+ */
+const read = async (file) =>
+  (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
 /** Comments quote the strings they explain; a rule against that is a rule
     against writing the explanation down. Every source check strips them. */
@@ -84,6 +102,19 @@ const metrics = await import("../app/lib/job-metrics.ts");
 const compliance = await (async () => {
   const formatDate = asModule(transpile(await read("app/lib/format-date.ts")));
   const spec = asModule(transpile(await read("db/monday-board-spec.ts")));
+  /*
+   * `compliance-duty-holder.ts` joined the chain when the compliance
+   * percentage learned to exclude a requirement nobody has claimed. It imports
+   * NOTHING, which is the whole reason it is a file of its own and not a few
+   * exports added to `compliance-status.ts`: a leaf can be transpiled and
+   * handed to `import()` with no rewriting at all, and the rule it holds is
+   * asked by both the register and this module.
+   *
+   * It is rewritten below by exact string, like every other specifier here. A
+   * VALUE import that is not rewritten does not fail loudly — it takes the
+   * whole suite out on load, which is how eleven files went red in one edit.
+   */
+  const dutyHolder = asModule(transpile(await read("app/lib/compliance-duty-holder.ts")));
   const expiry = asModule(
     transpile(await read("app/lib/expiry-status.ts")).replace(
       /from ["']\.\/format-date["']/g,
@@ -99,7 +130,8 @@ const compliance = await (async () => {
     asModule(
       transpile(await read("app/lib/compliance-status.ts"))
         .replace(/from ["']\.\/expiry-status["']/g, `from "${expiry}"`)
-        .replace(/from ["']\.\/store-documentation-register["']/g, `from "${register}"`),
+        .replace(/from ["']\.\/store-documentation-register["']/g, `from "${register}"`)
+        .replace(/from ["']\.\/compliance-duty-holder["']/g, `from "${dutyHolder}"`),
     )
   );
 })();

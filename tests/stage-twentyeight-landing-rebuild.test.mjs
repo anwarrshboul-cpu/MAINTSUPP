@@ -28,36 +28,65 @@ const read = (file) => readFile(path.join(root, file), "utf8");
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-/* ── 1. Ten sections, each exactly once ──────────────────────────────────── */
+/* ── 1. Fourteen sections, each exactly once ─────────────────────────────── */
 
-/** The ten, by the anchor each one owns. Section 10 is a band plus a panel. */
+/**
+ * EVERY SECTION ON THE PAGE, BY THE ANCHOR IT OWNS, IN DOM ORDER.
+ *
+ * RE-POINTED FOR HOMEPAGE V3, and corrected on the way. Two things were wrong
+ * with the old list beyond being short by three: `founder` was missing
+ * altogether — the section has carried `id="founder"` since the v2 edit added
+ * it — and `report` sat second, where the section had not been since that same
+ * edit. Both were invisible because the only test that reads this list in DOM
+ * order is the live one, which needs Chrome at a macOS path and skips
+ * everywhere else. The list is the page's real order now, so the source test
+ * that uses it as the set of legal nav targets is checking something true.
+ *
+ * V3 adds `replaces`, `your-contractors` and `faq`, and moves `report` to the
+ * end — directly above the footer, which is the owner's instruction and the
+ * reason the last three entries read the way they do.
+ */
 const ANCHORS = [
   "hero",
-  "report",
   "sectors",
   "services",
   "problem",
+  "replaces",
   "how",
+  "your-contractors",
   "pricing",
   "case-study",
+  "founder",
   "portal",
+  "faq",
   "trust",
   "review",
-  /* Not a twelfth section — a second name for the eleventh. `#contact` is on
-     the final CTA's inner wrapper so that "Contact Us" in the nav lands on the
-     page's only form that asks who you are, without renaming the anchor the
-     "Book a Portfolio Review" buttons have always used. */
+  /* Not a section of its own — a second name for the one above. `#contact` is
+     on the final CTA's inner wrapper so that "Contact Us" in the nav lands on
+     the page's only form that asks who you are, without renaming the anchor the
+     "Book a Portfolio Review" buttons have always used. It is out of DOM order
+     here for that reason: the live test below drops it before comparing. */
   "contact",
+  "report",
 ];
 
-test("the page is eleven sections, in the v2 order, each exactly once", async () => {
+/** The same list without the alias, which is what the DOM actually contains. */
+const SECTION_IDS = ANCHORS.filter((id) => id !== "contact");
+
+test("the page is fourteen sections, in the V3 order, each exactly once", async () => {
   /*
-   * Was ten. The v2 positioning edit moved Report a Job from second to fourth
-   * and added "Who runs Maintsupp" between the case study and the portal.
+   * Was eleven. Homepage V3 adds three sections and moves one:
    *
-   * The order is asserted, not just the count: the whole point of the edit was
-   * the sequence — who it is for, what it covers, then the form — and a count
-   * alone would pass just as happily with the form back at the top.
+   *   WhatThisReplaces  after Problem
+   *   ContractorChoice  after HowItWorks
+   *   Faq               after Portal
+   *   ReportJob         from fourth to LAST, above the footer
+   *
+   * The order is asserted, not just the count, and that matters more after this
+   * edit than before it: the sequence IS the argument — who it is for, what it
+   * covers, what it replaces, how it runs, whose contractors, what it costs —
+   * and a count alone would pass just as happily with the eleven-field form
+   * back in the middle of it.
    */
   const page = await read("app/(marketing)/page.tsx");
   const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map(
@@ -67,17 +96,21 @@ test("the page is eleven sections, in the v2 order, each exactly once", async ()
     "Hero",
     "WhoWeHelp",
     "Services",
-    "ReportJob",
     "Problem",
+    "WhatThisReplaces",
     "HowItWorks",
+    "ContractorChoice",
     "Pricing",
     "CaseStudy",
     "Founder",
     "Portal",
+    "Faq",
     "TrustStrip",
     "FinalCta",
-  ], "eleven sections; the last is two components — a dark band and the form beneath it");
+    "ReportJob",
+  ], "fourteen sections; one of them is two components — a dark band and the form beneath it");
   assert.equal(new Set(rendered).size, rendered.length, "each exactly once");
+  assert.equal(rendered.at(-1), "ReportJob", "Report a Job is the last thing above the footer");
 });
 
 /* ── 2. Copy rules ───────────────────────────────────────────────────────── */
@@ -119,20 +152,75 @@ test("the forbidden claims appear nowhere on the marketing site", async () => {
   assert.deepEqual(offenders, [], "the brief forbids these phrases");
 });
 
-test("every price is shown + VAT", async () => {
+test("no price is shown + VAT", async () => {
+  /*
+   * THIS ASSERTION IS THE REVERSE OF THE ONE IT REPLACES.
+   *
+   * It was "every price is shown + VAT", and the comment above the pricing
+   * component said in as many words that carrying "+ VAT" was "a rule of the
+   * brief and not a detail". Homepage V3 withdraws it: the owner's instruction
+   * is that "+ VAT" appears nowhere on the marketing site. Five places carried
+   * it — the shared price line, the compliance setup footnote, a whole matrix
+   * row that said "+ VAT on top" three times, and two of the portfolio notes.
+   *
+   * IT IS A REMOVAL, NOT A SUBSTITUTION, which is why the second loop below
+   * exists: "excluding VAT", "ex VAT" and "+VAT" are the same qualifier wearing
+   * a different hat, and putting one of them back would satisfy a naive check
+   * for the exact string while defeating the instruction.
+   *
+   * WHAT DID NOT CHANGE. Four figures are still pinned, for the same reason:
+   * they are the money a client is quoted outside the per-store rate, and the
+   * risk of an edit that strips a qualifier is that it strips the sentence
+   * around it too.
+   *
+   * RE-POINTED at the approved portfolio terms. The old four (£295/month
+   * minimum, £65 each additional job, £125 per incident, £25/store setup) were
+   * replaced wholesale by the pricing rebuild: the minimum is £300, additional-
+   * job pricing is gone entirely in favour of two coordinated jobs per store
+   * per month, and onboarding is £75/store capped at £1,200. They are pinned as
+   * the CONSTANTS now rather than as strings, because the markup interpolates
+   * them — a figure typed into a sentence is the defect the next test forbids.
+   */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  // Each of the four money figures outside the tier cards carries it inline;
-  // the per-store figures carry it in the shared price line.
-  assert.match(pricing, /\+ VAT/, "the price line must say + VAT");
-  for (const figure of ["£295/month", "£65 each", "£125 per incident", "£25/store"]) {
-    const at = pricing.indexOf(figure);
-    assert.ok(at > 0, `${figure} is missing`);
-    assert.match(
-      pricing.slice(at, at + 60),
-      /\+ VAT/,
-      `${figure} must be followed by "+ VAT"`,
-    );
+
+  for (const figure of [
+    "const PORTFOLIO_MINIMUM = 300",
+    "const ONBOARDING_PER_STORE = 75",
+    "const ONBOARDING_CAP = 1200",
+    "const OUT_OF_HOURS_P1 = 125",
+  ]) {
+    assert.ok(pricing.indexOf(figure) > 0, `${figure} is missing`);
   }
+  /* And each one still reaches the reader inside its sentence. */
+  for (const sentence of [
+    /Portfolio minimum £\{PORTFOLIO_MINIMUM\}\/month/,
+    /Onboarding and asset capture £\{ONBOARDING_PER_STORE\}\/store, capped at £/,
+    /out-of-hours P1 incidents \(£\{OUT_OF_HOURS_P1\} each\)/,
+  ]) {
+    assert.match(pricing, sentence, `${sentence} no longer reaches the page`);
+  }
+
+  /*
+   * Comments stripped, exactly as the urgency-chip test does it. The note that
+   * records why the qualifier went has to quote it, and a check that fails on
+   * its own rationale would push the reasoning out of the file to make the test
+   * pass — which is how a rule loses the only record of why it exists.
+   */
+  const rendered = pricing.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(rendered, /\+\s*VAT/i, "no rendered string may carry + VAT");
+  assert.doesNotMatch(rendered, /\bVAT\b/i, "and none may mention VAT at all");
+  for (const substitute of [/ex\.?\s*VAT/i, /exclud\w* VAT/i, /plus VAT/i, /VAT on top/i]) {
+    assert.doesNotMatch(rendered, substitute, `${substitute} is the same rule renamed`);
+  }
+
+  /* And nowhere else on the marketing site either — the qualifier was never
+     only in this file's gift, and marketing.css quoted the sentence too. */
+  const css = await read("app/(marketing)/marketing.css");
+  assert.doesNotMatch(
+    css.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /VAT/i,
+    "the stylesheet must not carry it either",
+  );
 });
 
 test("the Total Care saving is derived from the prices above it", async () => {
@@ -142,36 +230,57 @@ test("the Total Care saving is derived from the prices above it", async () => {
    * The arithmetic is checked here against the same table the component uses.
    */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  /*
+   * RE-POINTED to the approved rates and the new plan names. The CLAIM is
+   * unchanged and is the reason this test exists: the badge is arithmetic over
+   * the table, never a typed figure.
+   *
+   * What changed under it: the plans are Essential / Compliance Administration
+   * / Complete, there are FOUR bands, and the top one carries no rate at all —
+   * 51+ is "Book a Portfolio Review", so its entries are `null` and it is
+   * excluded from the arithmetic rather than given an invented number.
+   */
   const bands = [...pricing.matchAll(
-    /coordination: (\d+), compliance: (\d+), total: (\d+)/g,
-  )].map(([, coordination, compliance, total]) => ({
-    coordination: Number(coordination),
+    /essential: (\d+), compliance: (\d+), complete: (\d+)/g,
+  )].map(([, essential, compliance, complete]) => ({
+    essential: Number(essential),
     compliance: Number(compliance),
-    total: Number(total),
+    complete: Number(complete),
   }));
 
-  /*
-   * Three numbered bands now, not two: 26+ used to be a "Custom" card with a
-   * button and carries a published rate. The approved figures, pinned here so
-   * a price cannot drift silently — they are quoted to clients.
-   */
+  /* The approved figures, pinned because they are quoted to clients. */
   assert.deepEqual(bands, [
-    { coordination: 65, compliance: 55, total: 100 },
-    { coordination: 58, compliance: 48, total: 88 },
-    { coordination: 52, compliance: 42, total: 78 },
+    { essential: 55, compliance: 50, complete: 85 },
+    { essential: 50, compliance: 48, complete: 78 },
+    { essential: 45, compliance: 45, complete: 70 },
   ]);
 
-  /* The badge claims a saving per band; each band's cards must produce it. */
+  /* The badge claims a saving per band; each band's cards must produce it. It
+     is £20 at all three numbered bands, which is a property of the approved
+     rates rather than a coincidence worth hiding. */
   assert.deepEqual(
-    bands.map((band) => band.coordination + band.compliance - band.total),
-    [20, 18, 16],
+    bands.map((band) => band.essential + band.compliance - band.complete),
+    [20, 20, 20],
   );
+
+  /* The fourth band exists and carries no rate. A figure here would be a price
+     for a portfolio nobody has scoped. */
+  assert.match(pricing, /label: "51\+ stores"/, "the top band is published as a band");
+  assert.match(
+    pricing,
+    /essential: null,[\s\S]{0,40}complete: null,/,
+    "and carries no rate — it offers a review instead",
+  );
+  assert.match(pricing, /Book a Portfolio Review/, "which is what it offers");
+
   assert.match(pricing, /save £\{saving\} per store/, "the badge must read the computed figure");
   assert.match(
     pricing,
-    /const saving = band\.coordination \+ band\.compliance - band\.total/,
+    /band\.essential \+ band\.compliance - band\.complete/,
     "and must derive it from the band on screen rather than a typed number",
   );
+  /* The badge cannot render in the band that has no numbers to subtract. */
+  assert.match(pricing, /saving !== null && \(/, "no saving is claimed where there are no rates");
 });
 
 test("the store count drives the band, the rate and the monthly total", async () => {
@@ -183,10 +292,13 @@ test("the store count drives the band, the rate and the monthly total", async ()
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
   assert.match(pricing, /type="range"/, "there is a real slider, not a band picker alone");
   assert.match(pricing, /function bandForCount/, "the band is computed from the count");
+  /* RE-POINTED: the multiplication moved into `monthlyFor`, which also has to
+     answer `null` in the band that carries no rate. The claim — the total is
+     rate x count and never a typed figure — is unchanged. */
   assert.match(
     pricing,
-    /amount \* storeCount/,
-    "the monthly total is rate x count, not a typed figure",
+    /rate === null \? null : rate \* storeCount/,
+    "the monthly total is rate x count, not a typed figure, and absent without a rate",
   );
   /* The struck-through price is the entry band's, so it cannot contradict it. */
   assert.match(pricing, /was=\{entryBand\[plan\.key\]\}/);
@@ -206,9 +318,16 @@ test("the store count drives the band, the rate and the monthly total", async ()
  * only one of them knows.
  */
 
-/** Every feature the cards listed before the matrix existed, in order. */
+/**
+ * Every feature the cards listed before the matrix existed, in order.
+ *
+ * RE-POINTED: the plan keys are `essential` / `compliance` / `complete` since
+ * the pricing rebuild renamed Coordination to Essential and Total Care to
+ * Complete. THE FEATURES THEMSELVES DID NOT MOVE, which is the whole point of
+ * this list — a rename must not be able to smuggle a dropped feature past it.
+ */
 const CARD_FEATURES = {
-  coordination: [
+  essential: [
     "Intake & triage",
     "Contractor assignment",
     "Quote control",
@@ -224,12 +343,17 @@ const CARD_FEATURES = {
     "Remedial tracking",
     "Traffic-light compliance dashboard",
   ],
-  total: ["Quarterly portfolio review"],
+  complete: ["Quarterly portfolio review"],
 };
 
 test("every feature the cards listed still exists, once, in the shared table", async () => {
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  const table = pricing.slice(pricing.indexOf("const FEATURES"), pricing.indexOf("/** Whether `plan`"));
+  /* RE-POINTED: the slice used to end at the `planHas` helper the matrix
+     needed. With the matrix gone the table ends where `cardPoints` begins. */
+  const table = pricing.slice(
+    pricing.indexOf("const FEATURES"),
+    pricing.indexOf("function cardPoints"),
+  );
   const rows = [...table.matchAll(/\{ label: "([^"]+)", plan: "(\w+)" \}/g)].map(
     ([, label, plan]) => ({ label, plan }),
   );
@@ -248,111 +372,202 @@ test("every feature the cards listed still exists, once, in the shared table", a
   assert.equal(new Set(rows.map((r) => r.label)).size, rows.length);
 });
 
-test("both presentations render from that table, not from copies of it", async () => {
+test("every presentation renders from that table, not from copies of it", async () => {
+  /*
+   * RE-POINTED, and STRENGTHENED rather than weakened.
+   *
+   * There used to be two presentations — cards above 768px, a nineteen-row
+   * matrix below it — and the risk this test existed for was the second copy
+   * of the facts. The rebuild deleted the matrix, so the risk it guarded is
+   * now carried by the THREE cards: Essential, Compliance Administration and
+   * Complete, where Complete's list is a roll-up of the other two. That is the
+   * same defect in a smaller space, so the same rule applies to it.
+   *
+   * The £-literal check below gets stricter as a direct result: with no
+   * footnote figures typed into the markup at all, the expected list is empty.
+   */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
 
-  /* The card's bullets are derived, including Total Care's summary lines. */
+  /* Every card's bullets are derived, including Complete's summary lines. */
   assert.match(pricing, /cardPoints\(plan\)\.map\(/, "the card must render derived points");
   assert.match(
     pricing,
-    /`Everything in \$\{titleOf\(key\)\}`/,
-    "Total Care's roll-up wording must be built from the plan titles, not typed",
+    /cardPoints\(COMPLIANCE_PLAN\)\.map\(/,
+    "the smaller option is not exempt — a typed list there drifts just as easily",
   );
-  /* The matrix enumerates the same table. */
-  assert.match(pricing, /FEATURES\.map\(\(feature\)/, "the matrix must render every feature row");
-  assert.match(pricing, /planHas\(plan, feature\)/, "and decide each tick from the same data");
-  /* Prices in both come from the band on screen. */
-  assert.match(pricing, /const amount = band\[plan\.key\]/);
+  assert.match(
+    pricing,
+    /`Everything in \$\{titleOf\(key\)\}`/,
+    "Complete's roll-up wording must be built from the plan titles, not typed",
+  );
+  assert.match(
+    pricing,
+    /FEATURES\.filter\(\(feature\) => feature\.plan === plan\.key\)/,
+    "and each card's own bullets must be selected out of the one table",
+  );
+  /* Prices in every card come from the band on screen. */
+  assert.match(pricing, /const rateFor = \(plan: Plan\) => band\[plan\.key\]/);
+  assert.match(
+    pricing,
+    /<Price amount=\{rateFor\(COMPLIANCE_PLAN\)\}/,
+    "including the smaller option's",
+  );
 
-  /* One price table. Outside BANDS and the footnote list, no £ figure may be
-     typed into the markup — a second one is how a matrix comes to quote a
-     price the cards no longer charge. */
+  /* One price table. No £ figure may be typed into the markup at all — that
+     is how a card comes to quote a price the band no longer charges. */
   const body = pricing
     .slice(pricing.indexOf("export function Pricing"))
     .replace(/\/\*[\s\S]*?\*\//g, "");
   const literals = [...body.matchAll(/£(\d[\d,]*)/g)].map((m) => m[0]);
   assert.deepEqual(
     literals,
-    ["£295", "£65", "£125"],
-    `only the three footnote figures may be typed; found ${literals.join(", ")}`,
+    [],
+    `every figure must be interpolated from a constant; found ${literals.join(", ")}`,
   );
 });
 
-test("the matrix says what is included in words, never in colour alone", async () => {
+test("availability is stated in words, never in colour alone", async () => {
+  /*
+   * RE-POINTED from the matrix to the cards.
+   *
+   * The matrix carried this contract because a tick in a table is a glyph, and
+   * a glyph read out by a screen reader is nothing. The rebuild deleted the
+   * matrix, so the contract moves to the presentation that replaced it: the
+   * card bullet lists. It has not been dropped, and it has not been softened
+   * — what a plan includes must still be a WORD, not a tint and not a shape.
+   */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  assert.match(pricing, /<span className="vh">Included<\/span>/, "a tick needs a name");
+
+  /* The matrix stays gone. If it comes back, it comes back with this test. */
+  assert.doesNotMatch(pricing, /pmx/, "the comparison matrix was deleted, not hidden");
+  const css = await read("app/(marketing)/marketing.css");
+  assert.doesNotMatch(css, /pmx/, "and so were its styles");
+
+  /* Each bullet is text. The tick beside it is decoration and says so, which
+     is what stops a reader being told a plan includes a checkmark. */
   assert.match(
     pricing,
-    /function NotIncluded\(\{ label = "Not included" \}/,
-    "an excluded cell needs a name too",
+    /<Tick \/>[\s\S]{0,40}?<span>\{point\}<\/span>/,
+    "a card bullet is a glyph followed by its own words",
   );
-  assert.match(pricing, /<span className="pmx__no" aria-hidden="true">/, "and a glyph, not a tint");
-
-  /* It is a real table: a row header and a column header per cell. */
-  assert.match(pricing, /<th\s+scope="col"/);
-  assert.match(pricing, /<th scope="row">/);
-  assert.match(pricing, /<caption className="vh">/, "the table must name itself");
-});
-
-test("the matrix scrolls inside its own box, and the page never does", async () => {
-  const css = await read("app/(marketing)/marketing.css");
-  const block = css.slice(css.indexOf(".pmx{display:none}"));
-  assert.ok(block.length > 0, "the matrix styles have been removed");
-
-  const scroll = block.slice(block.indexOf(".pmx__scroll{"), block.indexOf(".pmx__table{"));
-  assert.match(scroll, /overflow-x:auto/);
   assert.match(
-    scroll,
-    /contain:paint/,
-    "without it the table's width reaches the document and the whole page slides sideways at 320",
+    pricing,
+    /function Tick\(\)[\s\S]{0,400}?aria-hidden="true"/,
+    "and the glyph is hidden from assistive technology rather than named twice",
   );
 
-  /* Sized so 375, 390 and 430 need no sideways scroll at all. */
-  assert.match(block, /\.pmx__table\{[^}]*min-width:340px/);
-  /* The feature column stays named while the plans pass under it. */
-  assert.match(block, /th\[scope=row\]\{width:29%;position:sticky;left:0/);
+  /* The band that includes no rate says so in words too, rather than showing
+     an empty price and leaving the reader to infer it. */
+  assert.match(pricing, /const REVIEW = "Book a Portfolio Review"/);
+  assert.match(
+    pricing,
+    /className="pkg__talk"/,
+    "the review offer renders as its own labelled price line",
+  );
 
-  /* The two presentations swap; neither is hidden to shorten the page. */
-  assert.match(block, /@media \(max-width:767px\)\{\s*\.pkgs\{display:none\}\s*\.pmx\{display:block\}/);
+  /* The block is a real landmark with a real heading, and the smaller option
+     is beside the choice rather than inside it — the structural half of what
+     the table's <caption> and row headers used to provide. */
+  assert.match(pricing, /<section className="section section--tint" id="pricing">/);
+  assert.match(pricing, /<h2 className="h2">Simple per-store pricing/, "and carries its heading");
+  assert.match(pricing, /<aside className="pkgalt"/, "the smaller option is beside the choice, not in it");
+  assert.match(
+    pricing,
+    /<h3>\{COMPLIANCE_PLAN\.title\}<\/h3>/,
+    "with a heading of its own, read off the plan rather than typed twice",
+  );
+  assert.match(pricing, /title: "Compliance Administration"/, "which is what it is called");
 });
 
-test("the matrix cells do not hyphenate", async () => {
+test("the pricing section fits its column, and the page never scrolls sideways", async () => {
   /*
-   * `hyphens:auto` was tried here and removed after QA on the deployed
-   * preview: the cells that carry a sentence rather than a label rendered
-   * "Reactive re-pairs, run end to end" and "Certificates tracked be-fore
-   * they expire" at 430 and below, which reads as a typo in a pricing table.
+   * RE-POINTED from the matrix's scroll box to the section that replaced it.
    *
-   * `overflow-wrap:break-word` stays and covers the only thing hyphenation
-   * was needed for — stopping a long word overflowing its column. Verified in
-   * Chromium at 430/390/375/360/320: no cell overflows its box, and the only
-   * breaks that are not at a space are two compound labels at 375 breaking at
-   * their OWN hyphen ("Photo-" / "verified", "90/60/30-" / "day"), which is
-   * correct typography rather than an inserted hyphen.
+   * THE CLAIM IS UNCHANGED AND IS THE REASON THIS TEST EXISTS: at 320px the
+   * pricing block must not push the document sideways. The matrix solved that
+   * with `overflow-x:auto` plus `contain:paint` on its own box, because a
+   * 340px-min table inside a 320px page reaches the document without it.
    *
-   * Widening the feature column to make even those fit was measured and
-   * rejected: at 30% the plan names stop fitting, which trades a correct
-   * hyphen break for an incorrect mid-word one ("Administratio/n").
+   * With the matrix deleted there is no fixed-width child left to contain, so
+   * the rule is enforced at its source instead: nothing in the pricing block
+   * may declare a min-width or a fixed width that exceeds the narrowest
+   * supported viewport. That is a stronger statement than the old one — it
+   * forbids the condition rather than mitigating it.
+   *
+   * Measured in Chromium at 320/375/414/1440 on this build: document
+   * scrollWidth equals innerWidth at every one, and no element inside
+   * #pricing has a right edge past the viewport.
    */
   const css = await read("app/(marketing)/marketing.css");
-  const block = css.slice(css.indexOf(".pmx{display:none}"));
-  const cellRule = block.slice(block.indexOf(".pmx__table th,.pmx__table td{"));
 
-  assert.doesNotMatch(
-    cellRule.slice(0, cellRule.indexOf("}") + 1),
-    /hyphens/,
-    "the matrix cells must not hyphenate — see the note above this rule",
-  );
-  assert.match(cellRule.slice(0, cellRule.indexOf("}") + 1), /overflow-wrap:break-word/);
+  /* The card grid tracks the column it is given; it never demands a width. */
   assert.match(
-    block,
-    /No `hyphens:auto` here, deliberately/,
-    "the reason must stay recorded, or the next person reads it as an accidental deletion",
+    css,
+    /\.pkgs\{display:grid;gap:16px;grid-template-columns:repeat\(auto-fit,minmax\(238px,1fr\)\)/,
+    "the grid is auto-fit with a minmax floor, so one card per row is reachable",
   );
-  /* The row header's `hyphens:manual` is a different rule and still correct:
-     it wraps on spaces and on its own punctuation, never on an inserted
-     hyphen. */
-  assert.match(block, /th\[scope=row\]\{[^}]*hyphens:manual/);
+
+  /*
+   * minmax()'s floor is not a min-width: a single 238px track still shrinks
+   * with its container below 238px. A declared `min-width` would not, and a
+   * declared fixed `width` in px would not either. Neither may appear on any
+   * rule that styles this section — that is the condition the matrix's
+   * `contain:paint` existed to mitigate.
+   *
+   * Rules are read out of the stylesheet with comments stripped, and every one
+   * whose selector names a pricing class is checked.
+   */
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const offenders = [];
+  for (const [, selector, body] of bare.matchAll(/([^{}@]+)\{([^{}]*)\}/g)) {
+    if (!/\.(pkgs?|pkgalt|pkgfoot|pricing)/.test(selector)) continue;
+    const bad = [...body.matchAll(/(?:^|;)\s*(min-width|width):\s*(\d+)px/g)];
+    for (const [, prop, value] of bad) {
+      offenders.push(`${selector.trim()} { ${prop}:${value}px }`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `nothing in the pricing block may demand a width; found ${offenders.join(" / ")}`,
+  );
+
+  /* The two main cards go to one column on a phone and two abreast above 640,
+     which is the swap the matrix used to perform at 767. */
+  assert.match(
+    css,
+    /@media\s*\(min-width:640px\)\{\.pkgs--two\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}\}/,
+    "two abreast where there is room, one where there is not",
+  );
+});
+
+test("pricing copy does not hyphenate", async () => {
+  /*
+   * `hyphens:auto` was tried in the pricing block and removed after QA on the
+   * deployed preview: cells that carry a sentence rather than a label rendered
+   * "Reactive re-pairs, run end to end" and "Certificates tracked be-fore they
+   * expire" at 430 and below, which reads as a typo in a pricing table.
+   *
+   * RE-POINTED from the matrix's cells to the whole pricing block, because the
+   * matrix that carried those cells is gone and the reason the rule exists is
+   * not specific to a table — it is specific to this copy, which is full of
+   * compound labels ("Photo-verified close-out", "90/60/30-day reminders").
+   * Scoped to the block rather than the file on purpose: `.comparetable__text`
+   * in section 3 sets `hyphens:auto` deliberately and is not in scope here.
+   *
+   * `overflow-wrap` stays and covers the only thing hyphenation was needed for
+   * — stopping a long word overflowing its column.
+   */
+  const css = await read("app/(marketing)/marketing.css");
+  const block = css.slice(
+    css.indexOf(".pkgs{"),
+    css.indexOf("/* ------------------------------------------------------------ calculator"),
+  );
+  assert.ok(block.length > 400, "the pricing block was not located");
+  assert.doesNotMatch(block, /hyphens:/, "no rule in the pricing block may hyphenate");
+
+  /* And the long-word case is still handled. */
+  assert.match(css, /overflow-wrap:(anywhere|break-word)/);
 });
 
 test("the page's vertical rhythm is a scale, not thirty typed numbers", async () => {
@@ -582,7 +797,29 @@ test("the form posts to a route a logged-out visitor may actually use", async ()
     /payload\.(organisationId|orgId|tenant)/,
     "no request may steer a job into another workspace",
   );
-  assert.match(route, /configuredValue\(db, orgId, "priority"/, "canonicalise, do not trust");
+  /*
+   * RE-POINTED, and the canonicalisation got STRICTER on the way.
+   *
+   * `configuredValue` matched a submitted string against an option's stable
+   * VALUE and nothing else, while this form shows LABELS — so renaming
+   * "Urgent" made every subsequent report fall back to the workspace default
+   * and buy itself the 120-hour clock. The route now hands the raw answer to
+   * `createSubmission`, which resolves it through `canonicalSubmissionOption`:
+   * value first, then the current label, then the default. The claim is
+   * unchanged — an arbitrary string may not invent a board value or a shorter
+   * SLA — and it is now true of a renamed label as well.
+   */
+  assert.match(
+    route,
+    /priority: payload\.priority/,
+    "the raw answer must go through the service, never straight into a column",
+  );
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(
+    service,
+    /canonicalOptionValue\(options, text, fallback\)/,
+    "canonicalise, do not trust",
+  );
   assert.match(route, /source: "Website form"/, "a coordinator must see where this came from");
   assert.match(route, /uploadToken/, "and the reporter must be able to attach the photographs");
 });
@@ -805,7 +1042,7 @@ async function openBrowser(width, height) {
   };
 }
 
-test("live: the ten sections are on the page, once each, with no duplicate heading", async (t) => {
+test("live: the fourteen sections are on the page, once each, with no duplicate heading", async (t) => {
   if (!(await serverIsUp())) {
     t.skip(`no dev server on ${BASE_URL}`);
     return;
@@ -822,7 +1059,12 @@ test("live: the ten sections are on the page, once each, with no duplicate headi
       const h2 = [...main.querySelectorAll("h2")].map(h => h.textContent.trim());
       return { ids, h1: main.querySelectorAll("h1").length, dupes: h2.filter((h,i) => h2.indexOf(h) !== i) };
     })()`);
-    assert.deepEqual(found.ids, ANCHORS, "the sections, in the brief's order");
+    /* `SECTION_IDS`, not `ANCHORS`: `#contact` is an alias carried on the final
+       CTA's inner wrapper, so it is a legal nav target but never a <section>
+       child of <main>. Comparing against the full list asserted a section that
+       has never existed — which nothing caught, because this test needs Chrome
+       at a macOS path and skips everywhere else. */
+    assert.deepEqual(found.ids, SECTION_IDS, "the sections, in the page's order");
     assert.equal(found.h1, 1, "one h1 on the page");
     assert.deepEqual(found.dupes, [], "a repeated heading means a section is drawn twice");
     assert.deepEqual(browser.consoleErrors, []);

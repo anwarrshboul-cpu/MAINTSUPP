@@ -196,13 +196,37 @@ export function AccountMenu({
         const response = await fetch("/api/account", {
           headers: { Accept: "application/json" },
         });
-        const payload = (await response.json()) as {
+        /*
+         * PARSED DEFENSIVELY, BECAUSE AN ERROR DOES NOT ALWAYS ARRIVE AS JSON.
+         *
+         * This read `await response.json()` before looking at `response.ok`, so
+         * a body-less answer threw inside the parse and the catch below
+         * reported the PARSER's complaint — "Failed to execute 'json' on
+         * 'Response': Unexpected end of JSON input" — as though it were the
+         * account's problem. That is the sentence an operator saw in this menu
+         * while the actual fault was the database refusing connections, and it
+         * sent the investigation at the client instead of the server.
+         *
+         * A body-less 500 is not hypothetical here: twenty-nine API handlers
+         * called `ensureDatabase()` OUTSIDE their try block, so a boot-path
+         * failure escaped the handler entirely and the platform answered with
+         * an empty body. Thirteen of those are fixed in this change, including
+         * this endpoint — but the client must not depend on that, because the
+         * platform can still answer for itself: a function timeout and a cold
+         * start that dies both arrive with nothing in them.
+         */
+        const payload = (await response.json().catch(() => null)) as {
           account?: AccountSnapshot;
           error?: string;
-        };
+        } | null;
         if (!live) return;
-        if (!response.ok || !payload.account) {
-          throw new Error(payload.error || "The account could not be loaded.");
+        if (!response.ok || !payload?.account) {
+          /* The STATUS is carried when the server had nothing to say, so the
+             reader still learns something they can pass on. */
+          throw new Error(
+            payload?.error ||
+              `The account could not be loaded (HTTP ${response.status}).`,
+          );
         }
         setFetched(payload.account);
       } catch (error) {
@@ -354,12 +378,16 @@ export function AccountMenu({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const payload = (await response.json()) as {
+      /* Same rule as the read above: a WRITE that fails without a body must
+         report the failure, not the parser's opinion of the empty string. */
+      const payload = (await response.json().catch(() => null)) as {
         profile?: AccountSnapshot["profile"];
         error?: string;
-      };
-      if (!response.ok || !payload.profile) {
-        throw new Error(payload.error || "The change could not be saved.");
+      } | null;
+      if (!response.ok || !payload?.profile) {
+        throw new Error(
+          payload?.error || `The change could not be saved (HTTP ${response.status}).`,
+        );
       }
       const next = payload.profile;
       setFetched((current) => (current ? { ...current, profile: next } : current));

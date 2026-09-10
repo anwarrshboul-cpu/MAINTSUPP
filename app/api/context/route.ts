@@ -187,8 +187,8 @@ async function contextPayload(request: Request) {
 }
 
 export async function GET(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     return Response.json({ context: await contextPayload(request) });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
@@ -207,8 +207,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const payload = (await request.json()) as Record<string, unknown>;
     const action = clean(payload.action, 40);
 

@@ -1269,6 +1269,29 @@ export const maintenanceFormConfiguration = {
     board: {
       /** null means the board's top group — "Incoming requests". */
       itemGroupId: null as string | null,
+      /**
+       * WHAT THE FORM CALLS THE JOBS IT RAISES.
+       *
+       * null means "the first line of the description", which is what every
+       * submission has always been named and is still the fallback. A template
+       * is `{placeholder}` text — `{site}`, `{category}`, `{priority}`,
+       * `{engineer}`, `{requester}`, `{contact}`, `{source}` — rendered by
+       * `submissionTitle()` in app/lib/submission-title.ts.
+       *
+       * It exists because a description does not always contain a name. The
+       * public "Report a job" page assembles a five-line blob whose first line
+       * is the urgency band, so every report it filed was called
+       * "[P1] Critical, site unsafe or cannot trade"; a shared form for a
+       * cleaning schedule has the same problem in a different shape. An
+       * unknown placeholder renders as nothing rather than as its own braces,
+       * and a template that renders to nothing falls through to the
+       * description, so a mistyped template can never produce an untitled job.
+       *
+       * Saved through the existing `features` merge in
+       * `PATCH /api/board/form`, so it needs no new `PatchBody` field and the
+       * undo projection already covers it as part of `features`.
+       */
+      itemTitleTemplate: null as string | null,
       includeNameQuestion: false,
       includeUpdateQuestion: false,
       syncQuestionAndColumnsTitles: false,

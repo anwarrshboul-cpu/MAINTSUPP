@@ -130,17 +130,108 @@ test("a phone cannot be stranded inside a builder panel", async () => {
 test("a phone edits the same configuration a desktop does", async () => {
   const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
   const panels = codeOnly(await read("app/(app)/portal/form-builder-panels.tsx"));
-  /* One write path. There must be no mobile-only form model, no second draft
-     and nothing to reconcile — every panel control calls the same `patch`. */
+  /*
+   * One write path. There must be no mobile-only form model, no second draft
+   * and nothing to reconcile — every panel control calls the same `patch`.
+   *
+   * RE-POINTED, NOT WEAKENED. The PATCH itself moved out of `form-builder.tsx`
+   * into `form-builder-save.ts` when autosave grew a debounce, a history stack
+   * and a failure it can retry — that is a state machine, and it was not going
+   * to live legibly inside a component that also draws five modes. The
+   * contract this test protects is unchanged and is now asserted where the
+   * request actually is: still ONE request, still ONE endpoint, still carrying
+   * the board.
+   */
+  const saver = codeOnly(await read("app/(app)/portal/form-builder-save.ts"));
   assert.match(
-    builder,
+    saver,
     /api\/board\/form\?board=\$\{encodeURIComponent\(boardId\)\}`, \{\s*method: "PATCH"/,
     "settings are saved by one request to one endpoint",
   );
   assert.equal(
-    (panels.match(/fetch\(/g) ?? []).length,
-    0,
-    "no panel may reach the network on its own; they all go through the builder's patch",
+    (saver.match(/fetch\(/g) ?? []).length,
+    1,
+    "one save path, not one per section",
+  );
+  /* And the component still owns which board it is editing — the prop the
+     saver is handed, never a default. */
+  assert.match(builder, /useFormSave\(\{ boardId, form, setForm \}\)/);
+  /*
+   * RE-POINTED ACROSS A SPLIT, AND WIDENED. The Edit panel left this file for
+   * `form-edit-panel.tsx` when it grew a page model, an insertion control, a
+   * shared field picker and an intake report; counting only what is left here
+   * would have quietly dropped the biggest panel out of a check whose whole
+   * subject is that a panel must not fetch. Every file that draws a builder
+   * surface is counted instead, so the guarantee is what it always was and now
+   * covers more.
+   *
+   * The rule matters more than it looks: these components re-render on every
+   * keystroke of a `DraftInput`, so a fetch inside one is a request per
+   * character against the connection pooler this product's saves already fail
+   * on. The board's columns are fetched ONCE, by the shell, and handed down.
+   */
+  const surfaces = {
+    "form-builder-panels.tsx": panels,
+    "form-edit-panel.tsx": codeOnly(await read("app/(app)/portal/form-edit-panel.tsx")),
+    "form-question-card.tsx": codeOnly(await read("app/(app)/portal/form-question-card.tsx")),
+    "form-field-picker.tsx": codeOnly(await read("app/(app)/portal/form-field-picker.tsx")),
+    "form-activity.tsx": codeOnly(await read("app/(app)/portal/form-activity.tsx")),
+    "form-builder-controls.tsx": codeOnly(
+      await read("app/(app)/portal/form-builder-controls.tsx"),
+    ),
+  };
+  for (const [name, source] of Object.entries(surfaces)) {
+    assert.equal(
+      (source.match(/fetch\(/g) ?? []).length,
+      0,
+      `${name}: no panel may reach the network on its own; they all go through the builder's patch`,
+    );
+  }
+});
+
+test("autosave cannot fail quietly", async () => {
+  /*
+   * The reason this is worth a test rather than a comment: the board's
+   * configuration writes DO fail, and not rarely. Supabase's session-mode
+   * pooler refused connections 181 times in twenty days on the live project,
+   * and every route touching Postgres fails together while it lasts. An editor
+   * that autosaves and cannot say "not saved" loses somebody's afternoon on
+   * the day that happens.
+   */
+  const saver = codeOnly(await read("app/(app)/portal/form-builder-save.ts"));
+  const builder = codeOnly(await read("app/(app)/portal/form-builder.tsx"));
+
+  /*
+   * The change survives its own failure, or Retry is a button with nothing
+   * behind it and the edit is gone.
+   *
+   * Asserted as a MERGE, which is stronger than the `pending.current = body`
+   * this first pinned. A straight assignment kept the failed change and
+   * silently discarded anything queued while the request was in the air — add
+   * a question, reorder it mid-flight, have the PATCH fail, and the reorder was
+   * gone while the toolbar went on to say "All changes saved". Both failure
+   * arms merge, and later keys win.
+   */
+  const restores = saver.match(/pending\.current = \{ \.\.\.body, \.\.\.\(pending\.current \?\? \{\}\) \};/g) ?? [];
+  assert.equal(restores.length, 2, "both failure arms keep the change, and merge rather than assign");
+  assert.match(saver, /retryable: payload\.retry === true/, "the server says whether to offer Retry");
+  assert.match(saver, /beforeunload/, "and the browser warns before it is lost");
+
+  // Three states, one vocabulary, so a toolbar and a screen reader cannot
+  // describe the same moment differently.
+  assert.match(saver, /All changes saved/);
+  assert.match(saver, /Saving…/);
+  assert.match(saver, /Not saved/);
+  assert.match(builder, /formSaveLabel\(saver\.state\)/, "the toolbar prints that vocabulary");
+  assert.match(builder, /data-state=\{saver\.state\}/);
+
+  // Undo is a real save, not a screen change the next reload corrects.
+  assert.match(saver, /FORM_HISTORY_LIMIT = 25/, "the brief asks for at least twenty");
+  assert.match(saver, /event\.key\.toLowerCase\(\) !== "z"/, "Ctrl/Cmd+Z");
+  assert.match(
+    saver,
+    /tag === "INPUT" \|\| tag === "TEXTAREA"/,
+    "but not while somebody is typing, where the browser's own undo is the right one",
   );
 });
 
@@ -159,16 +250,34 @@ test("the Design panel's colour pickers are not read-only fields", async () => {
   for (const match of panels.match(/<input[\s\S]{0,400}?type="color"[\s\S]{0,400?}?\/>/g) ?? []) {
     assert.doesNotMatch(match, /\svalue=\{/, "a colour picker must not be controlled without an onChange");
   }
+  /*
+   * RE-POINTED FROM A COUNT TO THE RULE, and widened rather than weakened.
+   *
+   * This asserted the number 2 — "the accent and the background swatch" — which
+   * was an inventory, not the contract. The Design panel now offers a THIRD
+   * swatch: `appearance.text.color`, which `Shell` in form-renderer.tsx has
+   * always applied as the `--pf-ink` custom property and which no control ever
+   * set, so a form with a dark Background had unreadable text and no remedy.
+   *
+   * A hard 2 would have failed on the day that gap was closed while saying
+   * nothing about whether the new swatch was correct. What actually matters is
+   * the property every colour input must have, and it is now asserted OF EACH
+   * ONE: uncontrolled (a `value` with no `onChange` is a React read-only field)
+   * and keyed (a `defaultValue` is read once at mount, so without a key it
+   * never re-seeds when Reset clears the stored colour). Three inputs, three
+   * `defaultValue`s, three keys — checked by equality with the count of inputs,
+   * so a fourth swatch added without either is caught too.
+   */
   const colourInputs = (panels.match(/type="color"/g) ?? []).length;
-  assert.equal(colourInputs, 2, "the accent and the background swatch");
+  assert.ok(colourInputs >= 2, "at least the accent and the background swatch");
   assert.equal(
     (panels.match(/defaultValue=\{appearance\./g) ?? []).length,
-    2,
-    "both swatches must be uncontrolled, so the native picker owns the live value and blur commits it once",
+    colourInputs,
+    "every swatch must be uncontrolled, so the native picker owns the live value and blur commits it once",
   );
   assert.equal(
-    (panels.match(/key=\{appearance\.(primaryColor|background\.value)/g) ?? []).length,
-    2,
+    (panels.match(/key=\{appearance\.[A-Za-z.]+ \?\? "/g) ?? []).length,
+    colourInputs,
     "each needs a key, or a defaultValue read once at mount never re-seeds when Reset changes the stored colour",
   );
 });
@@ -399,10 +508,21 @@ test("availability is checked on the read, not only on the submit", async () => 
 });
 
 test("a response is counted only once it exists", async () => {
+  /*
+   * RE-POINTED. The insert moved into `createSubmission`, so the ordering is
+   * now between the CALL and the counter rather than between two statements in
+   * one function. The claim is unchanged and is the reason it matters:
+   * incrementing first would let a rejected submission consume somebody else's
+   * place under a response limit.
+   */
   const submit = await read("app/api/forms/[token]/submit/route.ts");
-  const insert = submit.indexOf(".insert(maintenanceRequests)");
+  const insert = submit.indexOf("await createSubmission(db, {");
   const increment = submit.indexOf("responseCount} + 1");
   assert.ok(insert > 0 && increment > insert, "the counter must follow the insert, not precede it");
+  assert.ok(
+    !submit.includes(".insert(maintenanceRequests)"),
+    "and the row must be written by the shared service, not by a second copy here",
+  );
 });
 
 test("the submit route resolves the site inside the form's own organisation", async () => {
@@ -423,16 +543,37 @@ test("the submit route resolves the site inside the form's own organisation", as
    * and immune to the next reformat: the name, the organisation and the
    * canonical register must each be in the predicate.
    */
-  assert.match(submit, /eq\(sites\.name, location\)/, "matched by the submitted name");
+  /*
+   * RE-POINTED AGAIN, and the ladder grew a third rung. The lookup moved into
+   * `resolveSubmissionSite` in app/lib/submission-service.ts — one ladder for
+   * all five intake doors: exact, then case-insensitive, then this
+   * organisation's own aliases, so a submitter naming a store by the name it
+   * carried before a rename still lands on the right row. All three of the
+   * clauses this test names are still required, and each is asserted at the
+   * rung it belongs to.
+   */
   assert.match(
     submit,
-    /eq\(sites\.organisationId, record\.organisationId\)/,
+    /resolveSubmissionSite\(db, \{\s*\n\s*organisationId: record\.organisationId,/,
+    "the form's own organisation is what is passed, never one from the request",
+  );
+
+  const service = await read("app/lib/submission-service.ts");
+  assert.match(service, /eq\(sites\.name, location\)/, "matched by the submitted name");
+  assert.match(
+    service,
+    /eq\(sites\.organisationId, input\.organisationId\)/,
     "inside the form's own organisation",
   );
   assert.match(
-    submit,
-    /registerScopeFilter\(sites\.boardId, CANONICAL_REGISTER\)/,
-    "and only the canonical register — a public submitter cannot name an instance",
+    service,
+    /registerScopeFilter\(sites\.boardId, scope\)/,
+    "and only the register the caller named — which DEFAULTS to canonical",
+  );
+  assert.match(
+    service,
+    /const scope = input\.scope === undefined \? CANONICAL_REGISTER : input\.scope;/,
+    "a public submitter who names no register cannot reach an instance",
   );
 });
 

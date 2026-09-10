@@ -1,27 +1,32 @@
 "use client";
 
 import * as React from "react";
-import { Icon, type IconName } from "../../components";
-import {
-  orderedQuestions,
-  questionGlyph,
-  type BuilderForm,
-} from "./form-builder-model";
-import { FormQuestionOptionsEditor } from "./form-options-editor";
+import { DraftArea, DraftInput, Section, Switch } from "./form-builder-controls";
+import type { BuilderForm } from "./form-builder-model";
 
 /**
- * The Edit, Design and Settings panels.
+ * The Design and Settings panels.
  *
- * All three take the same two props — the form and a patch function — and none
- * of them holds state of its own. Every control writes straight through to
+ * Both take the same three props — the form, a patch function and `busy` — and
+ * neither holds state of its own. Every control writes straight through to
  * `/api/board/form`, because monday's builder has no Save button and inventing
  * one would create a window where the panel and the live form disagree about
  * what the form is.
  *
- * The panels are one file because they are one screen: the toolbar swaps
- * between them and they share the whole visual language of rows, switches and
- * section cards. Splitting them into three would triple the CSS import surface
- * for no reviewability gain — this file is long but it is a list, not a graph.
+ * ── WHAT MOVED OUT OF THIS FILE, AND WHY ──────────────────────────────────
+ *
+ * The Edit panel used to be here too, and the header said the three belonged
+ * together because they were one screen sharing one visual language of rows,
+ * switches and section cards. That was true of three lists of switches. Edit is
+ * no longer a list: it has a page model, three reordering gestures, an
+ * insertion control, a shared field picker and an intake report, and it is made
+ * of two components of its own. It lives in `form-edit-panel.tsx` with them.
+ *
+ * The three shared controls went to `form-builder-controls.tsx` in the same
+ * move, so the Edit surface can use `DraftInput` without importing a module
+ * that also draws two unrelated panels. Copying it was the alternative and the
+ * wrong one: the focus fix inside it is subtle, was found in a browser rather
+ * than in review, and a second copy would drift out of it silently.
  */
 
 type PanelProps = {
@@ -31,437 +36,6 @@ type PanelProps = {
   /** The board's real groups, for "Group for answers". */
   groups?: Array<{ id: string; name: string }>;
 };
-
-/* ── A few shared controls ───────────────────────────────────────────────── */
-
-/**
- * A text-ish input that can actually be typed into.
- *
- * THE BUG THIS EXISTS TO FIX. Typing one character into any of these fields
- * lost focus, so a value had to be entered one character per click. The cause
- * was not remounting and not the list identity — the question cards are keyed
- * by stable monday column ids and React reconciles them in place. It was
- * `disabled={busy}`:
- *
- *     keystroke → patch() → setBusy(true) → React commits disabled={true}
- *     → the user agent BLURS the disabled control → PATCH resolves
- *     → setBusy(false) → the input is re-enabled, and nothing re-focuses it
- *
- * Disabling a focused form control blurs it; there is no way to keep the caret.
- * So `busy` no longer disables anything the caret can live in — it is surfaced
- * with `aria-busy` on the panel instead, which announces the state without
- * stealing focus.
- *
- * The second half of the fix is this component holding a LOCAL draft. The value
- * used to be bound straight to server state, which lags a round trip, so the
- * character you typed visibly vanished and reappeared and the caret jumped to
- * the end. The draft is authoritative while the field has focus; the server
- * value re-seeds it only when it changes from outside.
- *
- * Committing on blur (and on Enter) rather than per keystroke also fixes a
- * third problem that was invisible until you look at the API: the Redirect URL
- * field validates `http(s)://` server-side, so typing "h", "ht", "htt" raised a
- * refusal on EVERY keystroke and the field could never be filled in. Same for
- * the response limit, where an empty box posts 0 and is refused.
- */
-function DraftInput({
-  value,
-  onCommit,
-  busy,
-  ...rest
-}: {
-  value: string;
-  onCommit: (next: string) => void;
-  busy: boolean;
-} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
-  const [draft, setDraft] = React.useState(value);
-  const focused = React.useRef(false);
-
-  /*
-   * Re-seed from the server only when this field is NOT being edited. Without
-   * the guard, an unrelated PATCH landing mid-word would overwrite what the
-   * person is halfway through typing.
-   */
-  React.useEffect(() => {
-    if (!focused.current) setDraft(value);
-  }, [value]);
-
-  return (
-    <input
-      {...rest}
-      value={draft}
-      aria-busy={busy || undefined}
-      onFocus={() => {
-        focused.current = true;
-      }}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => {
-        focused.current = false;
-        if (draft !== value) onCommit(draft);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          (event.target as HTMLInputElement).blur();
-        }
-        if (event.key === "Escape") {
-          setDraft(value);
-          (event.target as HTMLInputElement).blur();
-        }
-      }}
-    />
-  );
-}
-
-function Switch({
-  label,
-  hint,
-  checked,
-  onChange,
-  busy,
-  badge,
-  note,
-}: {
-  label: string;
-  hint?: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  busy: boolean;
-  badge?: string;
-  /** Shown when a toggle records intent that this build cannot yet act on. */
-  note?: string;
-}) {
-  return (
-    <label className="form-panel__row">
-      <div>
-        <strong>
-          {label}
-          {badge && <em className="form-panel__badge">{badge}</em>}
-        </strong>
-        {hint && <span>{hint}</span>}
-        {note && <span className="form-panel__note">{note}</span>}
-      </div>
-      <input
-        type="checkbox"
-        className="form-switch"
-        checked={checked}
-        disabled={busy}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
-  );
-}
-
-function Section({
-  icon,
-  title,
-  children,
-}: {
-  icon: IconName;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="form-panel__section">
-      <h3>
-        <Icon name={icon} size={15} /> {title}
-      </h3>
-      <div className="form-panel__body">{children}</div>
-    </section>
-  );
-}
-
-/* ── Edit — the Content list and the form canvas ─────────────────────────── */
-
-/**
- * monday's Edit tab: a Content sidebar naming every question, and the canvas.
- *
- * REORDERING IS BUTTONS, NOT DRAG-AND-DROP, AND THAT IS DELIBERATE.
- * monday uses drag handles. A pointer-only reorder is unusable by keyboard and
- * by anyone using a screen reader, and this panel already only renders on
- * desktop — so the accessible control is the one that ships. The move buttons
- * write the same `order` array a drag would.
- */
-export function FormEditPanel({ form, patch, busy }: PanelProps) {
-  const questions = orderedQuestions(form.config);
-
-  function move(id: string, direction: -1 | 1) {
-    const order = questions.map((question) => question.id);
-    const from = order.indexOf(id);
-    const to = from + direction;
-    if (from < 0 || to < 0 || to >= order.length) return;
-    [order[from], order[to]] = [order[to], order[from]];
-    /*
-     * The page block leads the stored order and is not in this list, so it is
-     * put back at the front rather than being dropped by the round trip.
-     */
-    const pageBlocks = form.config.order.filter((entry) =>
-      form.config.questions.some(
-        (question) => question.id === entry && question.type === "PAGE_BLOCK",
-      ),
-    );
-    patch({ order: [...pageBlocks, ...order] });
-  }
-
-  /**
-   * Merge one question's settings.
-   *
-   * Merged rather than replaced so setting "include time" cannot wipe "today
-   * as default" that was set a moment earlier — each control owns one key.
-   */
-  function setSetting(id: string, changes: Record<string, unknown>) {
-    patch({
-      questions: form.config.questions.map((question) =>
-        question.id === id
-          ? { ...question, settings: { ...(question.settings ?? {}), ...changes } }
-          : question,
-      ),
-    });
-  }
-
-  function update(id: string, changes: Record<string, unknown>) {
-    patch({
-      questions: form.config.questions.map((question) =>
-        question.id === id ? { ...question, ...changes } : question,
-      ),
-    });
-  }
-
-  return (
-    <div className="form-edit">
-      <aside className="form-edit__content" aria-label="Form content">
-        <header>
-          <Icon name="chevron" size={14} />
-          <strong>Content</strong>
-        </header>
-        <p className="form-edit__page">Page 1</p>
-        <ol>
-          {questions.map((question) => {
-            const glyph = questionGlyph(question.type);
-            return (
-              <li
-                key={question.id}
-                className={question.visible ? undefined : "is-hidden"}
-                title={question.visible ? question.title : `${question.title} — hidden`}
-              >
-                <span className={`form-edit__glyph form-edit__glyph--${glyph.tone}`}>
-                  <Icon name={glyph.icon} size={12} />
-                </span>
-                <span className="form-edit__name">{question.title}</span>
-                {!question.visible && <Icon name="close" size={12} />}
-              </li>
-            );
-          })}
-        </ol>
-      </aside>
-
-      <div className="form-edit__canvas">
-        <div className="form-edit__card form-edit__card--head">
-          <h2>{form.title}</h2>
-          {form.description && <p>{form.description}</p>}
-        </div>
-
-        {questions.map((question, index) => {
-          const glyph = questionGlyph(question.type);
-          return (
-            <article
-              key={question.id}
-              className={`form-edit__card${question.visible ? "" : " is-hidden"}`}
-            >
-              <div className="form-edit__cardhead">
-                <span className={`form-edit__glyph form-edit__glyph--${glyph.tone}`}>
-                  <Icon name={glyph.icon} size={12} />
-                </span>
-                {/*
-                  The question's own words are editable in place, as monday's
-                  canvas does it. An emptied title keeps the old one — a
-                  question with no name is a field nobody can answer.
-                */}
-                <DraftInput
-                  className="form-edit__titleinput"
-                  type="text"
-                  value={question.title}
-                  maxLength={120}
-                  busy={busy}
-                  aria-label={`Rename the question ${question.title}`}
-                  onCommit={(next) => {
-                    if (next.trim()) update(question.id, { title: next.trim() });
-                  }}
-                />
-                {question.required && <em aria-label="Required">*</em>}
-                <div className="form-edit__cardtools">
-                  <button
-                    type="button"
-                    onClick={() => move(question.id, -1)}
-                    disabled={busy || index === 0}
-                    aria-label={`Move ${question.title} up`}
-                  >
-                    <Icon name="chevron" size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="is-down"
-                    onClick={() => move(question.id, 1)}
-                    disabled={busy || index === questions.length - 1}
-                    aria-label={`Move ${question.title} down`}
-                  >
-                    <Icon name="chevron" size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => update(question.id, { visible: !question.visible })}
-                    disabled={busy}
-                    aria-pressed={question.visible}
-                    aria-label={
-                      question.visible ? `Hide ${question.title}` : `Show ${question.title}`
-                    }
-                  >
-                    <Icon name={question.visible ? "check" : "close"} size={14} />
-                  </button>
-                </div>
-              </div>
-
-              <DraftInput
-                className="form-edit__helpinput"
-                type="text"
-                value={question.description ?? ""}
-                placeholder="Add a description for submitters (optional)"
-                maxLength={300}
-                busy={busy}
-                aria-label={`Describe the question ${question.title}`}
-                onCommit={(next) =>
-                  update(question.id, { description: next.trim() || null })
-                }
-              />
-
-              {/*
-                QUESTION SETTINGS — monday's per-question panel, inline.
-                Every control here changes what a submitter sees, and each one
-                is rendered only for the question types it means anything for:
-                a "today as default" switch on a text question would be a
-                control that does nothing, which is the thing being fixed.
-              */}
-              <div className="form-edit__settings">
-                {(question.type === "Date" || question.type === "DateRange") && (
-                  <>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={question.settings?.defaultCurrentDate === true}
-                        disabled={busy || !question.visible}
-                        onChange={(event) =>
-                          setSetting(question.id, { defaultCurrentDate: event.target.checked })
-                        }
-                      />
-                      Today as default
-                    </label>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={question.settings?.includeTime === true}
-                        disabled={busy || !question.visible}
-                        onChange={(event) =>
-                          setSetting(question.id, { includeTime: event.target.checked })
-                        }
-                      />
-                      Include time
-                    </label>
-                  </>
-                )}
-
-                {question.type === "SingleSelect" && (
-                  <>
-                    <label className="form-edit__setting">
-                      <span>Display</span>
-                      <select
-                        value={question.settings?.display ?? "Dropdown"}
-                        disabled={busy || !question.visible}
-                        onChange={(event) =>
-                          setSetting(question.id, {
-                            display: event.target.value as "Dropdown" | "Vertical" | "Horizontal",
-                          })
-                        }
-                      >
-                        <option value="Dropdown">Show options in a dropdown</option>
-                        <option value="Vertical">List the options</option>
-                        <option value="Horizontal">List the options side by side</option>
-                      </select>
-                    </label>
-                    <label className="form-edit__setting">
-                      <span>Options order</span>
-                      <select
-                        value={question.settings?.optionsOrder ?? "Custom"}
-                        disabled={busy || !question.visible}
-                        onChange={(event) =>
-                          setSetting(question.id, {
-                            optionsOrder: event.target.value as "Custom" | "Alphabetical",
-                          })
-                        }
-                      >
-                        <option value="Custom">Custom</option>
-                        <option value="Alphabetical">Alphabetical</option>
-                      </select>
-                    </label>
-                  </>
-                )}
-
-                {(question.type === "ShortText" || question.type === "LongText") && (
-                  <label className="form-edit__setting form-edit__setting--wide">
-                    <span>Pre-fill value</span>
-                    <DraftInput
-                      type="text"
-                      value={question.settings?.defaultAnswer ?? ""}
-                      placeholder="Leave empty for none"
-                      maxLength={200}
-                      busy={busy}
-                      readOnly={!question.visible}
-                      onCommit={(next) =>
-                        setSetting(question.id, { defaultAnswer: next || null })
-                      }
-                    />
-                  </label>
-                )}
-              </div>
-
-              {/*
-                The options themselves — monday's Add / rename / reorder /
-                per-option actions, wired to the canonical registers. See the
-                header of form-options-editor.tsx for which register owns what.
-              */}
-              {question.type === "SingleSelect" && (
-                <FormQuestionOptionsEditor
-                  question={question}
-                  form={form}
-                  patch={patch}
-                  busy={busy}
-                />
-              )}
-
-              <div className="form-edit__cardfoot">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={question.required}
-                    disabled={busy || !question.visible}
-                    onChange={(event) =>
-                      update(question.id, { required: event.target.checked })
-                    }
-                  />
-                  Required
-                </label>
-                {!question.visible && <span className="form-edit__count">Hidden</span>}
-              </div>
-            </article>
-          );
-        })}
-
-        <div className="form-edit__card form-edit__card--submit">
-          <span>{form.config.appearance.submitButton.text || "Submit"}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ── Design ──────────────────────────────────────────────────────────────── */
 
@@ -545,6 +119,45 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
           </button>
         )}
 
+        {/*
+          TEXT COLOUR — the one appearance field the renderer already honours
+          and the panel never offered.
+
+          `Shell` in form-renderer.tsx assigns `appearance.text.color` to the
+          `--pf-ink` custom property on the form's own element, so it has always
+          worked; there was simply no way to set it. It matters most on a form
+          whose Background has been set to a dark colour, where the default ink
+          is unreadable and an operator's only recourse was to give up on the
+          background.
+
+          Uncontrolled and keyed for the same reason as the accent above: a
+          colour picker fires on every drag tick, `value` without `onChange` is
+          a React-controlled field with no way to update, and a `defaultValue`
+          alone is read once at mount and would not re-seed when Reset clears it.
+        */}
+        <label className="form-panel__field">
+          <span>Text colour</span>
+          <input
+            type="color"
+            key={appearance.text.color ?? "ink-default"}
+            defaultValue={appearance.text.color ?? "#132537"}
+            aria-busy={busy || undefined}
+            onBlur={(event) =>
+              setAppearance({ text: { ...appearance.text, color: event.target.value } })
+            }
+          />
+        </label>
+        {appearance.text.color && (
+          <button
+            type="button"
+            className="form-panel__link"
+            disabled={busy}
+            onClick={() => setAppearance({ text: { ...appearance.text, color: null } })}
+          >
+            Reset the text to the default ink
+          </button>
+        )}
+
         <label className="form-panel__field">
           <span>Background</span>
           <select
@@ -606,6 +219,48 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
             }
           />
         </label>
+
+        {/*
+          WHAT THE LOGO SAYS, for somebody who cannot see it.
+
+          `accessibility.logoAltText` has been in the stored configuration since
+          the monday import with nothing writing it and nothing reading it. It
+          is offered here because a logo is very often the only thing on a form
+          that names the organisation, and "image" is what a screen reader says
+          instead.
+
+          This note used to say the value was recorded and not yet used, because
+          the renderer drew the logo with `alt=""` and nothing read the setting.
+          That is no longer true: `Shell` takes `logoAlt` and the public link and
+          the Preview both announce it. The wording is corrected rather than
+          deleted, because a control that once did nothing and now does is worth
+          saying so — and because this panel still carries genuinely inert
+          settings (Save as draft, reCAPTCHA, AI translation) whose notes must
+          stay honest.
+        */}
+        <label className="form-panel__field form-panel__field--stack">
+          <span>Logo description</span>
+          <DraftInput
+            type="text"
+            value={form.config.accessibility.logoAltText ?? ""}
+            placeholder="For example: Sunnamusk UK"
+            maxLength={120}
+            busy={busy}
+            onCommit={(next) =>
+              patch({
+                accessibility: {
+                  ...form.config.accessibility,
+                  logoAltText: next.trim() || null,
+                },
+              })
+            }
+          />
+        </label>
+        <p className="form-panel__note">
+          Read aloud in place of the image. Leave it empty and the logo is
+          treated as decorative and skipped, which is the right answer when the
+          form&rsquo;s title already names you.
+        </p>
 
         <label className="form-panel__field">
           <span>Font</span>
@@ -811,7 +466,153 @@ export function FormSettingsPanel({ form, patch, busy, groups = [] }: PanelProps
         </label>
       </Section>
 
+      {/*
+        THE WELCOME PAGE — monday's `preSubmissionView`, which the captured
+        configuration has carried since the import with no control behind it.
+
+        WHAT IT IS FOR. A form sent to a store manager opens on question one,
+        so the first thing a submitter reads is "Location". A welcome page is
+        where the sentence that stops the wrong request being raised goes —
+        "photographs are required", "this is for maintenance, not stock" — and
+        it is the difference between a triage queue and an intake.
+
+        WHY IT NEEDED NO NEW FIELD. `preSubmissionView` is a key of `features`,
+        and `features` is already a section of `PatchBody` that the route MERGES
+        and that `formUndoBody()` already sends whole. So the welcome page
+        persists, restores and undoes with no route change and no new hole in
+        the undo contract — `tests/form-undo.test.mjs` reads both lists and
+        would fail the day they disagreed. Every switch below is the same
+        merge-one-key-of-`features` write the rest of this panel makes.
+      */}
+      <Section icon="document" title="Welcome page">
+        <Switch
+          label="Show a welcome page"
+          hint="Open the form on a message, with a button to begin"
+          checked={features.preSubmissionView.enabled}
+          busy={busy}
+          onChange={(next) =>
+            setFeatures({
+              preSubmissionView: { ...features.preSubmissionView, enabled: next },
+            })
+          }
+        />
+        {features.preSubmissionView.enabled && (
+          <>
+            <label className="form-panel__field form-panel__field--stack">
+              <span>Heading</span>
+              <DraftInput
+                type="text"
+                value={features.preSubmissionView.title ?? ""}
+                placeholder={form.title}
+                maxLength={120}
+                busy={busy}
+                onCommit={(next) =>
+                  setFeatures({
+                    preSubmissionView: {
+                      ...features.preSubmissionView,
+                      title: next.trim() || null,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="form-panel__field form-panel__field--stack">
+              <span>Message</span>
+              <DraftArea
+                rows={4}
+                value={features.preSubmissionView.description ?? ""}
+                placeholder="What a submitter should know before they start."
+                maxLength={1200}
+                busy={busy}
+                onCommit={(next) =>
+                  setFeatures({
+                    preSubmissionView: {
+                      ...features.preSubmissionView,
+                      description: next.trim() || null,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="form-panel__field form-panel__field--stack">
+              <span>Button</span>
+              <DraftInput
+                type="text"
+                value={features.preSubmissionView.startButton.text ?? ""}
+                placeholder="Start"
+                maxLength={40}
+                busy={busy}
+                onCommit={(next) =>
+                  setFeatures({
+                    preSubmissionView: {
+                      ...features.preSubmissionView,
+                      startButton: { text: next.trim() || null },
+                    },
+                  })
+                }
+              />
+            </label>
+            <p className="form-panel__note">
+              Shown in Preview exactly as it will appear. The public link needs the
+              same block in its renderer before a submitter sees it.
+            </p>
+          </>
+        )}
+      </Section>
+
       <Section icon="check" title="After submission">
+        <label className="form-panel__field form-panel__field--stack">
+          <span>Confirmation heading</span>
+          <DraftInput
+            type="text"
+            value={features.afterSubmissionView.title ?? ""}
+            placeholder="Thank you!"
+            maxLength={120}
+            busy={busy}
+            onCommit={(next) =>
+              setFeatures({
+                afterSubmissionView: {
+                  ...features.afterSubmissionView,
+                  title: next.trim() || null,
+                },
+              })
+            }
+          />
+        </label>
+        <label className="form-panel__field form-panel__field--stack">
+          <span>Confirmation message</span>
+          <DraftArea
+            rows={3}
+            value={features.afterSubmissionView.description ?? ""}
+            placeholder="Left empty, the form names the work order it created."
+            maxLength={600}
+            busy={busy}
+            onCommit={(next) =>
+              setFeatures({
+                afterSubmissionView: {
+                  ...features.afterSubmissionView,
+                  description: next.trim() || null,
+                },
+              })
+            }
+          />
+        </label>
+        {/*
+          Both of the above and the switch below are read by `DoneScreen` in
+          form-renderer.tsx through the shared projection, so what is typed here
+          is what a submitter reads — no renderer change is owed for these three.
+        */}
+        <Switch
+          label="Success image"
+          hint="Show the tick above the confirmation message"
+          checked={features.afterSubmissionView.showSuccessImage}
+          busy={busy}
+          onChange={(next) =>
+            setFeatures({
+              afterSubmissionView: { ...features.afterSubmissionView, showSuccessImage: next },
+            })
+          }
+        />
         <Switch
           label="Response viewing"
           hint="Allow submitters to view and download their submissions"

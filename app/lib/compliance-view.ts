@@ -27,6 +27,10 @@
 
 import { storeDocumentationResponsibility } from "../../db/monday-board-spec";
 import {
+  responsibilityCoverage,
+  type ResponsibilityCoverage,
+} from "./compliance-duty-holder";
+import {
   complianceCompletion,
   complianceUrgency,
   compareDueDates,
@@ -44,7 +48,28 @@ export type ComplianceRow = {
   siteId: string;
   siteName: string;
   kind: string;
+  /**
+   * WHO CHASES THE CERTIFICATE — Contractor, Fire safety partner, Insurance
+   * broker, and so on, falling back to the site manager. Derived per slot by
+   * `responsibilityFor`, offered as the `?who=` filter.
+   *
+   * NOT to be confused with `dutyHolder` below. They are two axes and the
+   * confusion is easy: a fire alarm service can be chased by the fire safety
+   * partner and still be the landlord's obligation in a mall unit.
+   */
   responsibility: string;
+  /**
+   * WHOSE OBLIGATION IT IS — client / landlord / centre / not_applicable, or
+   * `"unconfirmed"`, or null if nobody has ever been asked.
+   *
+   * Load-bearing rather than decorative: `complianceCompletion` reads it to
+   * decide whether the record belongs in the percentage at all. It has to be
+   * carried on THIS type, not only on `RegisterEntry`, because `groupCompliance`
+   * and `portfolioCounts` both score `ComplianceRow[]` — dropping it here is
+   * what made a brand-new site's twelve unclaimed requirements read 0%
+   * compliant instead of "not yet confirmed".
+   */
+  dutyHolder: string | null;
   state: ComplianceState;
   expiry: string | null;
   fileCount: number;
@@ -64,6 +89,20 @@ export type ComplianceGroup = {
   siteId: string;
   siteName: string;
   completion: ComplianceCompletion;
+  /**
+   * HOW MANY OF THIS SITE'S RESPONSIBILITIES HAVE BEEN ANSWERED FOR.
+   *
+   * A count, never a percentage, and it travels on the GROUP HEADER because
+   * that is where it is needed: the header is drawn from the summary while the
+   * group is still collapsed, so a coverage line computed from the records
+   * would be blank until somebody opened the accordion — which is precisely the
+   * store whose "0 of 12" nobody would ever see.
+   *
+   * Beside `completion` rather than inside it, because they answer different
+   * questions: `completion.percent` is a claim about certificates and this is a
+   * count of answers. See `responsibilityCoverage`.
+   */
+  coverage: ResponsibilityCoverage;
   outstanding: number;
   noDueDate: number;
   /** Expiring inside the shared amber window. */
@@ -211,6 +250,7 @@ export function groupCompliance(
       siteId,
       siteName: records[0]?.siteName ?? siteId,
       completion,
+      coverage: responsibilityCoverage(records),
       outstanding: outstandingCount(completion.counts),
       noDueDate: records.filter((record) => !record.expiry).length,
       expiringSoon: completion.counts["Expiring soon"],
@@ -288,6 +328,10 @@ export function portfolioCounts(rows: readonly ComplianceRow[]) {
   return {
     counts: completion.counts,
     completion,
+    /* The same sentence as every group header, from the same function, so the
+       portfolio band and the store beneath it cannot disagree about how much of
+       the register has been answered for. */
+    coverage: responsibilityCoverage(rows),
     noDueDate: rows.filter((row) => !row.expiry).length,
     sites: new Set(rows.map((row) => row.siteId)).size,
     total: rows.length,

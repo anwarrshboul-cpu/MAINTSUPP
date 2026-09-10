@@ -53,8 +53,16 @@ import {
   sites,
 } from "../../db/schema";
 import { storeDocumentationCertificates } from "../../db/monday-board-spec";
+import { boardDutyHolder } from "./compliance-duty-holder";
 import { liveAttachmentRows } from "./attachment-counts";
-import { normaliseSiteName } from "./sites-repository";
+/*
+ * 2A — the site↔board-row link has ONE implementation now, and it is not in
+ * this file. `siteIdByBoardName` and `linkBoardRowsToSites` lived here, which
+ * meant the canonical submission service could only have them by importing a
+ * module that reads the whole compliance estate. See `site-name-link.ts` for
+ * why the shared copy imports no database at all.
+ */
+import { linkBoardRowsToSites } from "./site-name-link";
 import {
   boardRowsFrom,
   complianceStateFor,
@@ -266,6 +274,17 @@ export type RegisterEntry = {
   expiry: string | null;
   fileCount: number;
   notRequired: boolean;
+  /**
+   * Whose obligation this requirement is — client / landlord / centre /
+   * not_applicable / "unconfirmed" — or null if nobody has been asked.
+   *
+   * Comes from the `compliance_documents` annotation whether or not a board row
+   * speaks for the requirement, which is what lets a board-derived slot be
+   * confirmed without inventing a board column for it. See
+   * `app/lib/compliance-duty-holder.ts` for why null and "unconfirmed" are not
+   * the same answer.
+   */
+  dutyHolder: string | null;
   /** The last warning stage the digest sent for this document. */
   lastAlertStage: string | null;
   /**
@@ -564,43 +583,18 @@ async function readStoreDocumentationRows(
   };
 }
 
-/**
- * Which site, if any, a board row is the same place as.
- *
- * Board rows carry no `site_id` — the monday export has store names and nothing
- * else — so the link goes through `normaliseSiteName`, the same resolver the
- * sites importer uses, over a site's canonical name, its two recorded monday
- * names and its aliases. There is no fuzzy matching: a name either normalises
- * to one of those or the board row keeps its own identity. Guessing would
- * attach one store's fire alarm certificate to another store's row, which is
- * worse than not linking at all.
- *
- * "Solihull" and "Touchwood - Solihull" therefore do NOT link until somebody
- * records the board name on the site — `db/monday-export/link-store-documentation-sites.mjs`
- * writes exactly that, and only where the token sets are identical.
+/*
+ * `siteIdByBoardName` USED TO BE DEFINED HERE and is now
+ * `buildSiteNameIndex` in `site-name-link.ts`, character for character. The
+ * rule it enforces is unchanged and worth restating where the register reads,
+ * because it is the rule that decides whether a certificate lands on the right
+ * store: THERE IS NO FUZZY MATCHING. A board row's name either normalises to
+ * one the site answers to — its own, its two monday names, or an alias — or the
+ * row keeps its own identity. Guessing would attach one store's fire alarm
+ * certificate to another store's row, which is worse than not linking at all.
+ * "Solihull" and "Touchwood - Solihull" still do NOT link until somebody
+ * records the board name on the site.
  */
-function siteIdByBoardName(
-  siteRows: Array<{
-    id: string;
-    name: string;
-    mondayComplianceName: string | null;
-    mondayMaintenanceName: string | null;
-  }>,
-  aliasRows: Array<{ siteId: string; normalised: string }>,
-) {
-  const byName = new Map<string, string>();
-  const remember = (value: string | null | undefined, siteId: string) => {
-    const key = value ? normaliseSiteName(value) : "";
-    if (key && !byName.has(key)) byName.set(key, siteId);
-  };
-  for (const site of siteRows) {
-    remember(site.name, site.id);
-    remember(site.mondayComplianceName, site.id);
-    remember(site.mondayMaintenanceName, site.id);
-  }
-  for (const alias of aliasRows) remember(alias.normalised, alias.siteId);
-  return byName;
-}
 
 /** One board slot an admin has marked as not applicable to that store. */
 export type NotRequiredSlot = { itemId: string; slotKey: string };
@@ -643,32 +637,12 @@ export function notRequiredSlotsFrom(
   return slots;
 }
 
-/**
- * `boardItemId → siteId` and its inverse, for one organisation's board rows.
- *
- * The link is by normalised name only — see `siteIdByBoardName` for why there
- * is no fuzzy matching.
+/*
+ * `linkBoardRowsToSites` USED TO BE DEFINED HERE. It is imported from
+ * `site-name-link.ts` now — same body, same first-writer-wins tie-break on
+ * both maps — so the submission service and this register cannot come to
+ * different conclusions about which store a row is.
  */
-function linkBoardRowsToSites(
-  boardNames: Array<{ id: string; name: string }>,
-  siteRows: Array<{
-    id: string;
-    name: string;
-    mondayComplianceName: string | null;
-    mondayMaintenanceName: string | null;
-  }>,
-  aliasRows: Array<{ siteId: string; normalised: string }>,
-) {
-  const linkByName = siteIdByBoardName(siteRows, aliasRows);
-  const siteIdByItemId = new Map<string, string | null>(
-    boardNames.map((row) => [row.id, linkByName.get(normaliseSiteName(row.name)) ?? null]),
-  );
-  const itemIdBySiteId = new Map<string, string>();
-  for (const [itemId, siteId] of siteIdByItemId) {
-    if (siteId && !itemIdBySiteId.has(siteId)) itemIdBySiteId.set(siteId, itemId);
-  }
-  return { siteIdByItemId, itemIdBySiteId };
-}
 
 /**
  * Just the "Not required" overrides, for the board payload.
@@ -845,6 +819,7 @@ export async function readComplianceRegister(
     expiryDate: string | null;
     attachmentId: string | null;
     notRequired: boolean;
+    dutyHolder: string | null;
     lastAlertStage: string | null;
   };
   const rows = registerRows as RegisterRow[];
@@ -920,6 +895,12 @@ export async function readComplianceRegister(
         expiry: document.expiry,
         fileCount: document.fileCount,
         notRequired: document.state === "Not required",
+        /* The annotation answers even when the BOARD owns the requirement: a
+           slot can be confirmed as the landlord's without the board growing a
+           column for it. But the machine's "unconfirmed" placeholder must NOT
+           travel this way — a board row is itself the answer it was waiting
+           for. See `boardDutyHolder`. */
+        dutyHolder: boardDutyHolder(registerRow?.dutyHolder),
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
@@ -930,6 +911,7 @@ export async function readComplianceRegister(
           state: document.state,
           expiry: document.expiry,
           fileCount: document.fileCount,
+          dutyHolder: boardDutyHolder(registerRow?.dutyHolder),
         });
       }
     }
@@ -998,6 +980,7 @@ export async function readComplianceRegister(
       expiry: row.expiryDate,
       fileCount,
       notRequired: row.notRequired || state === "Not required",
+      dutyHolder: row.dutyHolder,
       lastAlertStage: row.lastAlertStage,
       /* No board row, so no group. The site's own lifecycle is all there is. */
       boardGroup: null,
@@ -1008,6 +991,21 @@ export async function readComplianceRegister(
       state,
       expiry: row.expiryDate,
       fileCount,
+      /*
+       * THE ENTRY CARRIED THIS AND THE REMEMBERED ITEM DID NOT, WHICH IS TWO
+       * DIFFERENT ANSWERS TO ONE QUESTION.
+       *
+       * `entries` feeds the register list and `bySite` feeds every PERCENTAGE —
+       * the portfolio meter, the per-site meter, the Sites row and the Overview
+       * tile. Omitting it here left `complianceCompletion` reading `undefined`,
+       * which it correctly treats as "never asked" and therefore counts. A
+       * brand-new site's twelve unconfirmed requirements duly came back as
+       * `applicable: 12, percent: 0, scored: true` — the "0% for a site nobody
+       * has been asked about" that this whole mechanism exists to prevent.
+       * Caught by querying the summary after creating a site, not by reading
+       * the diff.
+       */
+      dutyHolder: row.dutyHolder,
     });
   }
 
@@ -1057,6 +1055,13 @@ export type SiteComplianceRecord = {
   state: ComplianceState;
   /** Real attachment count — board file columns included, not a 0/1 pointer. */
   fileCount: number;
+  /**
+   * Whose obligation this requirement is, or null if nobody has been asked.
+   * Not used in a calculation here — the site drawer lists rather than scores —
+   * but a list that cannot distinguish "missing" from "not yet claimed" is
+   * telling the reader the wrong thing about their own estate.
+   */
+  dutyHolder: string | null;
   /** The board row this came from, or null for a register-only requirement. */
   itemId: string | null;
   slotKey: string | null;
@@ -1106,6 +1111,16 @@ export async function readSiteComplianceRecords(
       notRequired: entry.notRequired,
       state: entry.state,
       fileCount: entry.fileCount,
+      /*
+       * Carried here too. This is the third mapper that has to pass the duty
+       * holder on and the third that was missed — the other two silently used
+       * the old arithmetic while the list beside them looked right. This one
+       * computes no percentage, so the cost is honesty rather than a wrong
+       * number: it feeds the site drawer's Compliance tab, the only screen that
+       * lists ONE site's requirements, and without it twelve freshly created
+       * rows read as twelve failures rather than as twelve nobody has claimed.
+       */
+      dutyHolder: entry.dutyHolder,
       itemId: entry.itemId,
       slotKey: entry.slotKey,
       /*

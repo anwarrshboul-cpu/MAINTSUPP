@@ -21,7 +21,8 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import {
-  MOBILE_THEME_QUERY,
+  DEFAULT_THEME_CHOICE,
+  THEME_COLOR_META_SELECTOR,
   THEME_MIGRATION_KEY,
   THEME_STORAGE_KEY,
 } from "./theme-boot";
@@ -67,25 +68,30 @@ function migrate(store: Storage) {
 }
 
 /**
- * What "nothing has been chosen" means — DARK on a phone, the device
- * everywhere else.
+ * What "nothing has been chosen" means — DARK, on every device.
  *
- * The owner's requirement is that the app is dark out of the box on a phone.
- * This is the same decision `theme-boot.ts` makes before paint, written the
- * same way against the same exported query, so the pre-paint stamp and the
- * value React reads afterwards cannot disagree — that disagreement is a
- * one-frame flash, and avoiding it is the entire reason the boot script exists.
+ * This was dark on a phone and the device everywhere else. The owner's
+ * requirement is now that the signed-in portal is dark out of the box full
+ * stop, so the width query is gone and the answer is a constant. It is the
+ * SAME constant `theme-boot.ts` uses before paint, imported rather than
+ * restated, so the pre-paint stamp and the value React reads afterwards cannot
+ * disagree — that disagreement is a one-frame flash, and avoiding it is the
+ * entire reason the boot script exists.
+ *
+ * There is deliberately no `window` guard left. There was one only because the
+ * old body called `matchMedia`; a constant answers identically on the server,
+ * which is what lets `serverChoice()` below be this same function and lets the
+ * SSR snapshot finally agree with a fresh visitor's client state.
  *
  * It is the DEFAULT that moves, not the resolution: `resolveTheme` is
  * untouched, an explicit "light" or "dark" is still read first and still wins,
- * and an explicit "system" still means the device on a phone. So the picker in
- * `theme-toggle.tsx` reads "Dark" on a fresh phone, which is the truth — the
- * page IS dark — rather than reading "System" beside a page that is ignoring
- * the system.
+ * and an explicit "system" still resolves through `prefers-color-scheme`. So
+ * the picker in `theme-toggle.tsx` reads "Dark" on a fresh browser, which is
+ * the truth — the page IS dark — rather than reading "System" beside a page
+ * that is ignoring the system.
  */
 export function defaultThemeChoice(): ThemeChoice {
-  if (typeof window === "undefined" || !window.matchMedia) return "system";
-  return window.matchMedia(MOBILE_THEME_QUERY).matches ? "dark" : "system";
+  return DEFAULT_THEME_CHOICE;
 }
 
 /** The stored choice, or the default above when nothing has been chosen. */
@@ -116,6 +122,15 @@ function readResolved(): ResolvedTheme {
  * `color-scheme` goes on with it so the browser's own furniture — scrollbars,
  * date pickers, the caret, form controls with no styling of their own — follows
  * the theme rather than staying dark under a light page.
+ *
+ * `<meta name="theme-color">` goes on with it for the same reason one step out:
+ * the address bar and the overscroll gutter are painted by the BROWSER, from
+ * that tag, and nothing else in the app can reach them. The layout renders two
+ * tags and the browser takes the first whose `media` matches, so all that is
+ * needed here is to enable or disable the light one — which keeps the two
+ * colour literals in the markup instead of duplicated in script. Without this
+ * the tint would follow the device rather than the choice, and a user who
+ * picked Light on a dark phone would get a light page under a black bar.
  */
 export function applyTheme(resolved: ResolvedTheme) {
   const root = document.documentElement;
@@ -124,6 +139,10 @@ export function applyTheme(resolved: ResolvedTheme) {
   // Both, because the token blocks are on `:root` and the light skin is written
   // against `body[data-theme="light"]`.
   if (document.body) document.body.dataset.theme = resolved;
+  const tint = document.querySelector(THEME_COLOR_META_SELECTOR);
+  // Absent on any route that does not load the app layout, which is every
+  // marketing and public page. Missing it must not throw here.
+  if (tint) tint.setAttribute("media", resolved === "light" ? "all" : "not all");
 }
 
 /*
@@ -145,19 +164,17 @@ function subscribe(onChange: () => void) {
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   media.addEventListener("change", onChange);
   /*
-   * The width matters now too: with nothing stored, the default is dark below
-   * the phone boundary and the device above it, so a window dragged across
-   * that boundary changes the answer. A phone never fires this; a desktop
-   * browser being resized would otherwise keep painting a stale default until
-   * something else happened to re-read the store.
+   * The viewport width used to be subscribed to as well, because the default
+   * was dark below `(max-width: 760px)` and the device above it, so a window
+   * dragged across that boundary changed the answer. The default is now a
+   * constant, so nothing about the answer depends on the width and that
+   * listener would only wake every subscriber on a resize to re-read a value
+   * that cannot have moved. Removed with the query it used.
    */
-  const width = window.matchMedia(MOBILE_THEME_QUERY);
-  width.addEventListener("change", onChange);
   return () => {
     listeners.delete(onChange);
     window.removeEventListener("storage", onChange);
     media.removeEventListener("change", onChange);
-    width.removeEventListener("change", onChange);
   };
 }
 
@@ -185,6 +202,27 @@ export function setThemeChoice(next: ThemeChoice) {
   emit();
 }
 
+/**
+ * Adopt the choice this person made on ANOTHER device.
+ *
+ * `users.theme_preference` is written by every picker in the app and was then
+ * read back by nothing at all — `theme-toggle.tsx` said so in as many words —
+ * so a user who chose Light on their laptop got the default on their phone and
+ * the column was a write-only record of a decision it never enforced. This is
+ * the read-back half, called once per browser per account from
+ * `theme-toggle.tsx`, which owns the marker and the request.
+ *
+ * It goes through `setThemeChoice` on purpose rather than writing the key
+ * itself. The value IS a deliberate choice — made by this same person, through
+ * one of these same pickers, on a different device — so it deserves the same
+ * treatment: stored, applied, announced to every subscriber, and marked so the
+ * one-off migration can never land on top of it. Keeping one writer of the
+ * storage key is also what stops this becoming the next `live-board.tsx`.
+ */
+export function adoptProfileTheme(choice: ThemeChoice) {
+  setThemeChoice(choice);
+}
+
 /** The stored choice — "system" | "light" | "dark" — for a picker's value. */
 export function useThemeChoice(): ThemeChoice {
   return useSyncExternalStore(subscribe, readThemeChoice, serverChoice);
@@ -196,19 +234,44 @@ export function useResolvedTheme(): ResolvedTheme {
 }
 
 /*
- * The server cannot know any of it: the choice is in the visitor's browser, and
- * both the device preference and the viewport width are media queries. It
- * renders "system" and the first client render uses the same value, so the
- * markup matches; `useSyncExternalStore` then re-reads and re-renders with the
- * real choice. The DOM is already correct throughout, because the boot script
- * stamped it before paint — this is only what a picker shows.
+ * THE SSR SNAPSHOT NOW AGREES WITH THE DEFAULT, AND THAT IS THE CHANGE.
+ *
+ * The server still cannot know the stored choice — it is in the visitor's
+ * browser — so this can only ever be a guess at the commonest case, and the
+ * question is which case that is. It used to be "system", for two reasons that
+ * were both about the OLD default: a literal "dark" here would have made the
+ * device irrelevant on a desktop, where an absent preference meant
+ * `prefers-color-scheme`; and it would have been a guaranteed hydration
+ * correction for every desktop visitor, since "system" was what the client
+ * actually computed there.
+ *
+ * Neither survives the default becoming dark unconditionally. An absent
+ * preference no longer consults the device at all, so nothing here can make the
+ * device irrelevant — `resolveTheme` still asks it, and only for an explicit
+ * "system". And the value a fresh visitor's client computes is now "dark", so
+ * "system" here would be the mismatch: the server would render the picker
+ * reading "System theme" and React would correct it to "Dark" a frame later,
+ * on every first visit, which is exactly the correction this snapshot exists to
+ * avoid. Returning the default instead makes the two agree for the common case
+ * and leaves the uncommon one (a stored value that differs) as the single
+ * re-render it always was.
+ *
+ * It is `defaultThemeChoice()` rather than a second literal so there is one
+ * declaration of the default in this file, not two that can drift apart. And
+ * the resolved snapshot is derived from it for the same reason: "dark" was
+ * previously right by coincidence — `resolveTheme("system")` off-DOM happens to
+ * answer "dark" — and a coincidence is not a contract.
+ *
+ * Neither value reaches the document. The boot script stamped the real theme
+ * before paint and `applyTheme` runs from an effect with the real store value;
+ * this is only what a picker shows during the hydration render.
  */
 function serverChoice(): ThemeChoice {
-  return "system";
+  return defaultThemeChoice();
 }
 
 function serverResolved(): ResolvedTheme {
-  return "dark";
+  return resolveTheme(serverChoice());
 }
 
 /**

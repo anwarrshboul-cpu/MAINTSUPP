@@ -12,6 +12,16 @@ import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/te
 import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
 import {
+  complianceProfileGap,
+  ensureComplianceProfile,
+} from "../../lib/compliance-profile";
+/* 2F — one definition of "this store is not real"; see `demo-sites.ts` for why
+   it is a reserved group slug and a read-only fixture convention, not a column. */
+import { isDemoSite } from "../../lib/demo-sites";
+/* 2H — the capture half of address handling. There is no geocoding provider in
+   this product and this file does not invent one. */
+import { formatUkPostcode } from "../../lib/uk-postcode";
+import {
   isPlaceholderManager,
   loadSiteMetrics,
   realManagerName,
@@ -393,7 +403,24 @@ function sitePayload(data: Record<string, unknown>) {
     addressLine1: text(data.addressLine1 ?? data.address, 300),
     addressLine2: optionalText(data.addressLine2, 300),
     city: optionalText(data.city, 120),
-    postcode: optionalText(data.postcode, 20),
+    /*
+     * 2H — CANONICALISED HERE, on the one path POST and PATCH share, so the
+     * column cannot hold "m1 1ae" from one screen and "M1 1AE" from another.
+     * `formatUkPostcode` returns anything it cannot parse trimmed and unchanged
+     * rather than emptied: this product has sites outside the UK, and a
+     * normaliser that silently discarded an overseas postal code would be a
+     * data loss dressed as a tidy-up.
+     *
+     * Deliberately NOT refused when it is not a UK postcode. A postcode is a
+     * detail `siteCompleteness` chases, not a precondition for recording that a
+     * store exists — see `checkPostcode`, which is what the form shows.
+     */
+    postcode: optionalText(
+      data.postcode === undefined || data.postcode === null
+        ? data.postcode
+        : formatUkPostcode(String(data.postcode)),
+      20,
+    ),
     country: text(data.country, 80) || "United Kingdom",
     latitude: optionalNumber(data.latitude),
     longitude: optionalNumber(data.longitude),
@@ -594,7 +621,9 @@ async function logChange(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    /* `actor` is read for one purpose: the repair below writes an activity_log
+       row, and an audit entry with no author is worth very little. */
+    const { actor, db, orgId } = await scopedDb(request);
     const url = new URL(request.url);
 
     /*
@@ -680,6 +709,61 @@ export async function GET(request: Request) {
          screen and vice versa. The id is not a capability. */
       const site = await getSite(db, orgId, id, scope);
       if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
+
+      /*
+       * DETECTED ON READ. NOT REPAIRED ON READ. THIS REQUEST WRITES NOTHING.
+       *
+       * It used to call `ensureComplianceProfile` here, which inserted up to
+       * twelve `compliance_documents` rows and wrote an `activity_log` entry.
+       * The repair was correct in itself — idempotent, matched on requirement
+       * kind, verified preserving a real estate byte for byte — but this
+       * handler resolves `scopedDb` with NO capability, because reading a site
+       * needs none. So the caller who caused those writes could be a `client`,
+       * whose entire permission set is `board.view` and `data.export`, and the
+       * audit row named them as the author of a change they never asked for.
+       *
+       * Two further costs, both quiet. A GET that writes is invisible to the
+       * preview-and-revert machinery `POST /api/compliance/backfill` exists to
+       * provide, so a repair nobody chose could not be examined first or undone
+       * afterwards. And it made an ordinary page view a write on the pooler's
+       * budget, on a path a read-only viewer can hit.
+       *
+       * Deleting the repair was not an option either: sites created before that
+       * function existed hold no profile and would stay invisible to the
+       * register for ever. So the invariant is REPORTED here and REPAIRED by
+       * somebody holding `sites.edit`. `complianceProfileGap` is the same
+       * matcher `ensureComplianceProfile` uses — one answer to "does this site
+       * already hold this requirement, under any of its names" — with no insert
+       * anywhere on its call path.
+       *
+       * A failure still must not take the page down. The gap is a fact about
+       * the site, not a precondition for reading its jobs and documents.
+       */
+      /*
+       * Deliberately NOT carrying a `repairable` flag. Whether this caller may
+       * run the repair is a capability question `/api/context` already answers
+       * — it returns the actor's capabilities — and asking it again here would
+       * mean a second source of truth for the same permission plus a
+       * `role_capabilities` read on every site view. The screen offers the
+       * action when the context says `sites.edit`; the endpoint refuses if it
+       * is wrong. This says only what is true of the SITE.
+       */
+      let complianceProfile: {
+        complete: boolean;
+        missing: number;
+        recorded: number;
+      } | null = null;
+      try {
+        const gap = await complianceProfileGap(db, orgId, id);
+        complianceProfile = {
+          complete: gap.missing.length === 0,
+          missing: gap.missing.length,
+          recorded: gap.matched.length,
+        };
+      } catch (cause) {
+        console.error("[/api/sites] compliance profile check failed", cause);
+      }
+
       const [jobs, assets, documents, groups, files, activity, allGroups, allAliases] =
         await Promise.all([
         db
@@ -805,6 +889,12 @@ export async function GET(request: Request) {
         jobCount: jobs.length,
         units: assets,
         compliance: documents,
+        /*
+         * Whether this site's profile is complete, reported rather than fixed.
+         * `null` when the check itself failed — which is not the same as
+         * "complete", and a screen must not read it as one.
+         */
+        complianceProfile,
         files,
         activity,
         groupIds: groups.map((entry) => entry.siteGroupId),
@@ -887,6 +977,21 @@ export async function GET(request: Request) {
            blank, because a blank prompts somebody to fill it in. */
         managerDisplay: realManagerName(row.managerName, row.manager),
         managerPlaceholder: isPlaceholderManager(row.managerName ?? row.manager),
+        /*
+         * 2F — whether this row is a demonstration store.
+         *
+         * Carried as a FIELD rather than left for the browser to work out, so
+         * every consumer of this payload gets the same answer from the same
+         * predicate. Two screens disagreeing about which stores are real is a
+         * worse failure than either answer, because the disagreement is the
+         * part nobody notices.
+         *
+         * Group membership is not in scope for this row projection — groups are
+         * fetched separately and are per register — so this is the name and code
+         * convention only. That is the read-only half by design: it recognises
+         * the purpose-built fixtures and can never promote a client's store.
+         */
+        demo: isDemoSite({ name: row.name, code: row.code }),
       })),
       groups,
       siteTypes,
@@ -909,6 +1014,9 @@ export async function GET(request: Request) {
         withPostcode: rows.filter((row) => Boolean((row.postcode ?? "").trim())).length,
         withCode: rows.filter((row) => Boolean((row.code ?? "").trim())).length,
         withBudget: rows.filter((row) => row.annualBudgetPence !== null).length,
+        /* 2F — so a list can offer to hide them and say how many it would hide.
+           Counted over the SAME rows as `total`, so the two never disagree. */
+        demo: rows.filter((row) => isDemoSite({ name: row.name, code: row.code })).length,
       },
     });
   } catch (error) {
@@ -1067,6 +1175,61 @@ export async function POST(request: Request) {
         appliedValue: address.value,
         detail: "Stray quotation marks were removed from the address.",
       });
+    }
+
+    /*
+     * A SITE WITHOUT A COMPLIANCE PROFILE IS NOT A SITE THIS PRODUCT CAN
+     * ADMINISTER — so it is not left as one.
+     *
+     * `ensureComplianceProfile` is the same function the CSV importer and the
+     * Manage-data drawer call, which is the point: three routes create sites
+     * and there must not be three answers to what a new site's compliance
+     * looks like. See `app/lib/compliance-profile.ts`.
+     *
+     * COMPENSATED RATHER THAN TRANSACTIONAL, and the difference is worth
+     * stating. The brief asks for one transaction, and this route is a sequence
+     * of awaits rather than a `db.batch` — aliases, group membership, the
+     * anomaly record and the audit row all follow, and wrapping the whole
+     * sequence would change how each of them fails. What the brief is actually
+     * protecting is that a failure must not leave a site with no profile, and
+     * that is achieved here: if the profile cannot be written the site row is
+     * removed again and the caller is told why, so no half-created site
+     * survives the request. The site has no aliases, no group membership and no
+     * jobs at this point, so there is nothing else to unwind.
+     */
+    try {
+      await ensureComplianceProfile(db, orgId, id);
+    } catch (cause) {
+      /*
+       * SCOPED, like every other write to `sites` in this file.
+       *
+       * The id is one this request generated moments ago, so reasoning about
+       * this particular call it could not reach another register. That is
+       * exactly why the invariant is enforced on the STATEMENT and not on the
+       * argument — `tests/w2-scope-model.test.mjs` refuses a `sites` write whose
+       * where clause has no `registerScopeFilter`, and it caught this one. A
+       * rule that holds only where somebody has thought it through is not a
+       * rule; `= NULL` is never true, so the canonical register is a filter
+       * nobody may hand-roll.
+       */
+      await db
+        .delete(sites)
+        .where(
+          and(
+            eq(sites.id, id),
+            eq(sites.organisationId, orgId),
+            registerScopeFilter(sites.boardId, scope),
+          ),
+        );
+      console.error("[/api/sites] compliance profile failed; site rolled back", cause);
+      return Response.json(
+        {
+          error:
+            "The site was not created: its compliance profile could not be set up. " +
+            "Nothing was saved — try again.",
+        },
+        { status: 503 },
+      );
     }
 
     const aliasWrite = await setSiteAliases(db, orgId, id, [

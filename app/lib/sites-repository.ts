@@ -17,6 +17,12 @@ import {
  * too and both are client components. Re-exported below so a server module that
  * already imports this repository does not have to know that.
  */
+/*
+ * 2A — the name resolver, from the module that owns it. Imported AND
+ * re-exported below: a bare `export ... from` would re-export the name
+ * without binding it here, and a dozen functions in this file call it.
+ */
+import { normaliseSiteName } from "./site-name-link";
 import {
   SITE_LIFECYCLE_CLOSED,
   SITE_LIFECYCLE_CURRENT,
@@ -40,15 +46,21 @@ export type SiteRow = typeof sites.$inferSelect;
  * "Wood Green - High Road" against "Woodgreen", "Brent Cross - Shopping Centre"
  * against "Brentcross". Normalisation strips everything that differs between
  * the two conventions so either spelling resolves to the same key.
+ *
+ * MOVED TO `site-name-link.ts` AND RE-EXPORTED, not deleted. Four callers now
+ * resolve a name to a site — this repository, the compliance register, the
+ * sites importer and the public job form — and a fifth is arriving. The
+ * resolver could not be shared while it lived here: this module imports
+ * `db/schema`, so a client component asking "is this name already taken?"
+ * would have pulled the whole ORM into the browser bundle. It is the same
+ * split, for the same reason, as the `site-state` import above.
+ *
+ * Re-exported rather than moved outright so every existing importer keeps its
+ * path. `app/api/report-job/route.ts` is one of them and belongs to another
+ * agent this session; the re-export is what makes this one file's change
+ * instead of four.
  */
-export function normaliseSiteName(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u2010-\u2015]/g, "-")
-    .replace(/[^a-z0-9]+/g, "")
-    .trim();
-}
+export { normaliseSiteName };
 
 export function toSlug(value: string) {
   return value

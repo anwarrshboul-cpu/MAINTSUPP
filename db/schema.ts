@@ -1079,6 +1079,19 @@ export const complianceDocuments = sqliteTable(
     supersededById: text("superseded_by_id"),
     isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
     seedBatchId: text("seed_batch_id"),
+    /**
+     * Whose obligation this requirement is — `client`, `landlord`, `centre`,
+     * `not_applicable`, or the literal `unconfirmed`.
+     *
+     * NULL means nobody has ever been asked, which is NOT the same as
+     * `unconfirmed` and must never be conflated with it: NULL counts toward the
+     * compliance percentage as it always has, `unconfirmed` does not. See
+     * `app/lib/compliance-duty-holder.ts`.
+     *
+     * Distinct from `StoreDocumentSlot.responsibility`, which says who CHASES
+     * the certificate. Two axes, two names.
+     */
+    dutyHolder: text("duty_holder"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },

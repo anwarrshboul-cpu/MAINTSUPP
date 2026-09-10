@@ -14676,6 +14676,24 @@ body[data-theme="dark"] {
   color: var(--muted, #8aa0b4);
 }
 
+/*
+ * 2H/2K — an advisory problem on a field, as opposed to its standing hint.
+ *
+ * The two sit one above the other and would otherwise be the same grey
+ * sentence, which would make the message that appeared indistinguishable from
+ * the one that was always there. Amber rather than red on purpose: this does
+ * NOT block the save — a postal code from outside the UK is stored exactly as
+ * typed — and red would say it did.
+ *
+ * Weight and colour together, never colour alone; the message is also
+ * announced through `aria-describedby` and `role="status"`, so nothing here is
+ * the only carrier of the meaning.
+ */
+.form-hint--problem {
+  color: var(--warn, #b26a00);
+  font-weight: 600;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

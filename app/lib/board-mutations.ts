@@ -15,7 +15,7 @@
  * resolved tenancy and nothing here may widen it.
  */
 
-import { and, asc, eq, inArray, isNull, like, max } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, max } from "drizzle-orm";
 import { maintenanceGroups as maintenanceGroupSeeds } from "../../db/monday-board-spec";
 import type { getDb } from "../../db";
 import {
@@ -25,14 +25,41 @@ import {
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
-  recycleBin,
 } from "../../db/schema";
 import type { RequestStage } from "./types";
 import { statusForStage } from "./stage-status";
 import { selectInChunks } from "./sql-batching";
 import { PRIMARY_ORGANISATION_ID } from "./tenant-access";
 import { unassignedSiteId } from "./site-reference";
-import { jobReferenceNumber, nextJobReferenceNumber } from "./job-reference";
+/*
+ * THE ID ALLOCATOR IS SHARED NOW, and it left this file rather than arriving
+ * in it.
+ *
+ * `nextItemNumber` and the walk-past-a-taken-id loop were written here, for
+ * `createBoardItem`, and they were the only correct allocator in the codebase:
+ * the three submission routes each read `max(cast(substr(id, 4) as integer))`
+ * and inserted on top of it with no conflict handling at all, so two people
+ * submitting in the same second raced for one primary key and the loser got a
+ * bare 503. They also reached the cast with references that are not `MN-<n>`,
+ * which SQLite silently reads as 0 and Postgres refuses outright.
+ *
+ * So the allocator moved to `app/lib/submission-service.ts`, where all five
+ * intake doors can reach it, and this function calls it like everybody else.
+ * Nothing about its behaviour changed — `tests/audit-s4-atomic-ids.test.mjs`
+ * pins its shape and now pins it there.
+ */
+import { allocateSubmission, nextJobNumber } from "./submission-service";
+import { priorityRule } from "./priority-rules";
+
+/**
+ * What a blank row opens at, in one place.
+ *
+ * The priority is named once and its tier and clock are looked up rather than
+ * written beside it, so the three can no longer disagree — which is exactly how
+ * a Medium row came to carry the Low tier.
+ */
+const BLANK_ROW_PRIORITY = "Medium";
+const BLANK_ROW_PRIORITY_RULE = priorityRule(BLANK_ROW_PRIORITY);
 
 export type BoardDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -96,137 +123,6 @@ async function boardItemNoun(db: BoardDatabase, orgId: string, boardId: string) 
 export function tenantSeedId(base: string, orgId: string) {
   return orgId === PRIMARY_ORGANISATION_ID ? base : `${base}-${orgId}`;
 }
-
-/**
- * The next `MN-…` id.
- *
- * Stage 23 — DELIBERATELY UNFILTERED. Do not add `isNull(deletedAt)`. A job
- * sitting in the recycle bin still owns its id; excluding binned rows would
- * hand the same reference to a new job, and the collision would only surface
- * when somebody restored the old one — the worst possible moment.
- *
- * PRE-W14 — AND A JOB'S REFERENCE OUTLIVES THE JOB ROW.
- *
- * The `MAX` used to be taken over `maintenance_requests` alone, which is only
- * the table the reference is a PRIMARY KEY *of*. It is also the primary key of
- * `maintenance_group_items` and half of the unique key of `recycle_bin`, and a
- * row in either can outlive the request it names — a purge that removed the
- * request and left the placement, a bin entry whose job was later hard-deleted.
- * When that happens the MAX drops back below a reference that is still spoken
- * for, the allocator re-issues it, and the insert that collides is not the one
- * the retry below guards:
- *
- *   · a surviving placement  -> `create_item`  answers a bare 503
- *   · a surviving bin entry  -> `delete_items` answers a bare 503
- *
- * Both were observed on the dev estate: `maintenance_requests` topped out at
- * MN-1157 while placements held MN-1162, so no job could be created on the
- * board at all until the leftovers were removed by hand.
- *
- * So the floor is now the highest reference ANY of those tables still holds.
- * The product no longer depends on a cleanup script having been run, and
- * `scripts/repair-orphaned-placements.mjs` goes back to being what it should
- * always have been: a tidy-up, not a prerequisite.
- *
- * Scoped per organisation, like the read it replaces. `recycle_bin` is filtered
- * to `entity_type = 'job'` because its `entity_id` also carries group, column
- * and board-view ids, and those share no numbering with `MN-…`.
- */
-async function nextItemNumber(db: BoardDatabase, orgId: string) {
-  /*
-   * THE MAX IS TAKEN IN JAVASCRIPT, AND THAT IS NOT A PREFERENCE.
-   *
-   * This was `max(cast(substr(id, 4) as integer))` in SQL, with `LIKE 'MN-%'`
-   * nowhere in it. A reference that is not `MN-<digits>` therefore reached the
-   * cast — and the two dialects disagree about what that means:
-   *
-   *   SQLite   cast('req_4ff2', 'integer') -> 0, silently
-   *   Postgres                             -> 22P02 invalid input syntax
-   *
-   * So a single malformed id could not fail locally and could not do anything
-   * BUT fail deployed, where it takes out the whole create path: the throw
-   * happens before any insert, so `create_item` answers a bare 503 and nobody
-   * can raise a job at all. `maintenance_requests.id` is application-generated
-   * text — this codebase's own migration notes give `req_4ff2c25d…` and
-   * `store-aldgate` as examples of the shape — and an imported estate is
-   * exactly where a non-`MN-` id turns up.
-   *
-   * Guarding it in SQL needs an all-digits test, and the obvious ones are not
-   * portable: `~` is Postgres-only, `GLOB` is SQLite-only, and two-argument
-   * `trim(x, chars)` means different things in each. Parsing in JS instead
-   * reuses `jobReferenceNumber`, which is already strict, already tested, and
-   * already the single definition of what a reference looks like.
-   *
-   * The cost is reading the ids rather than one number per table. They are
-   * filtered to `MN-%` and bounded by the jobs in one organisation, on a path
-   * that runs once per created job — which is the right trade against a
-   * dialect-dependent outage.
-   *
-   * `deleted_at` IS DELIBERATELY UNFILTERED, here as before. A job in the
-   * recycle bin still owns its reference: excluding binned rows would hand the
-   * same MN to a new job and collide the moment somebody restored the old one,
-   * which is the worst possible time to find out.
-   */
-  const highest = (values: Array<{ reference: string | null }>) => {
-    let top: number | null = null;
-    for (const row of values) {
-      const number = jobReferenceNumber(row.reference);
-      if (number !== null && (top === null || number > top)) top = number;
-    }
-    return top;
-  };
-
-  const requestRows = await db
-    .select({ reference: maintenanceRequests.id })
-    .from(maintenanceRequests)
-    .where(
-      and(
-        eq(maintenanceRequests.organisationId, orgId),
-        like(maintenanceRequests.id, "MN-%"),
-      ),
-    );
-
-  const placementRows = await db
-    .select({ reference: maintenanceGroupItems.requestId })
-    .from(maintenanceGroupItems)
-    .where(
-      and(
-        eq(maintenanceGroupItems.organisationId, orgId),
-        like(maintenanceGroupItems.requestId, "MN-%"),
-      ),
-    );
-
-  const binRows = await db
-    .select({ reference: recycleBin.entityId })
-    .from(recycleBin)
-    .where(
-      and(
-        eq(recycleBin.organisationId, orgId),
-        eq(recycleBin.entityType, "job"),
-        like(recycleBin.entityId, "MN-%"),
-      ),
-    );
-
-  /* The arithmetic lives in ./job-reference.ts so a test can RUN it; this
-     function is only the three reads that feed it. */
-  return nextJobReferenceNumber([
-    highest(requestRows),
-    highest(placementRows),
-    highest(binRows),
-  ]);
-}
-
-/**
- * How many consecutive ids `createBoardItem` will try before giving up.
- *
- * `nextItemNumber` reads a MAX rather than reserving from an atomic counter, so
- * simultaneous creates compute the same number and every insert after the first
- * loses the primary key. Rather than let that surface as a 503, the insert uses
- * `ON CONFLICT DO NOTHING` and walks to the next number when the row it wanted
- * was taken — so a burst of creates fans out across consecutive slots. Eight
- * covers far more simultaneous creators than a board ever has.
- */
-const MAX_ITEM_ID_ATTEMPTS = 8;
 
 async function nextPosition(db: BoardDatabase, orgId: string, groupId: string) {
   const [last] = await db
@@ -374,15 +270,33 @@ export async function createBoardItem(
     contact: "Not provided",
     category: "Other",
     engineer: "Handyman",
-    tier: 3,
-    priority: "Medium",
+    /*
+     * THE TIER AND THE CLOCK COME FROM THE PRIORITY, not from two literals
+     * beside it.
+     *
+     * This wrote `priority: "Medium"` with `tier: 3` and a 72-hour due date.
+     * `priorityRule("Medium")` is `{ dueHours: 72, tier: 2 }` and tier 3 is
+     * what LOW means — so a blank row opened at the Low service tier while
+     * displaying Medium and carrying Medium's own due date. Right date, wrong
+     * severity, which is the combination hardest to spot on a board.
+     *
+     * Found by review. `createBoardItem` calls `allocateSubmission` but not
+     * `createSubmission` — a blank row has no description to derive a title
+     * from and no site to resolve — so it does not inherit the shared
+     * derivation the four intake doors get, and these two fields had drifted
+     * from the table every meter reads.
+     */
+    tier: BLANK_ROW_PRIORITY_RULE.tier,
+    priority: BLANK_ROW_PRIORITY,
     stage,
     status: statusForStage(stage),
     contractor: null,
     assignee: null,
     parentId: options.parentId ?? null,
     requestedAt,
-    dueAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+    dueAt: new Date(
+      Date.now() + BLANK_ROW_PRIORITY_RULE.dueHours * 60 * 60 * 1000,
+    ).toISOString(),
     completedAt: null,
     nextUpdateAt: null,
     cost: null,
@@ -395,123 +309,30 @@ export async function createBoardItem(
   };
 
   /*
-   * Pick an id and insert, walking PAST a concurrent create that took the same
-   * number first. `base` is read once; each retry tries `base + attempt`
-   * rather than re-reading the MAX, because a re-read can still see the losing
-   * value before the winner's row is visible and hand back the same number
-   * again. Walking a fixed offset means every attempt targets a definitively
-   * different id, so N simultaneous creates fan out across N consecutive slots
-   * instead of all queuing behind one. See `MAX_ITEM_ID_ATTEMPTS`.
+   * THE ID, THE ROW AND THE PLACEMENT, IN ONE CALL.
    *
-   * A taken id is detected with `onConflictDoNothing().returning()` — the
-   * conflict becomes an empty result, never an exception — because that is how
-   * every other writer in this codebase treats a lost insert race, and because
-   * the D1 adapters do not guarantee a typed constraint error that could be
-   * told apart from a real failure.
+   * `allocateSubmission` is the loop that used to live here, moved so the four
+   * other intake doors get it too — see the note beside its import. It picks an
+   * id, walks past one a concurrent create took first, pairs the placement with
+   * the row and undoes the row if the placement cannot be written. A create is
+   * only safe once BOTH are down: a request left without a placement does not
+   * vanish, it appears on the JOB BOARD belonging to nobody, because the board
+   * route deliberately files an unplaced row into the default board's first
+   * group. Six were produced that way while W02-06 was being built, on a board
+   * carrying real work.
    */
-  const base = await nextItemNumber(db, orgId);
-  let created: RequestRow | undefined;
-  let placement: ItemRow | undefined;
-  let id = "";
-  for (let attempt = 0; attempt < MAX_ITEM_ID_ATTEMPTS; attempt++) {
-    id = `MN-${base + attempt}`;
-    const [row] = await db
-      .insert(maintenanceRequests)
-      .values({ id, ...values })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) continue;
-
-    /*
-     * THE PLACEMENT IS PART OF THE ALLOCATION, not a step after it.
-     *
-     * `nextItemNumber` now starts above every table that still holds a
-     * reference, so this should not fire — but the retry is what makes the
-     * guarantee not depend on that list being complete. The reference is a key
-     * in more than one table, and a create is only safe once the row AND its
-     * placement are both down. Inserting the request, declaring victory, and
-     * discovering the placement was taken is exactly how `create_item` came to
-     * answer a bare 503.
-     *
-     * `onConflictDoNothing` rather than a catch, for the reason the request
-     * insert gives: the D1 adapters do not promise a typed constraint error
-     * that could be told apart from a real failure.
-     *
-     * THE CATCH IS STILL HERE, AND IS A DIFFERENT CASE ENTIRELY. A conflict is
-     * an empty result and means "walk on"; anything that THROWS is a real
-     * failure — a lost connection, a constraint this insert did not name — and
-     * for that the request row is already committed and has no placement. The
-     * board route files an unplaced row into the default board's first group,
-     * so letting the error out on its own would put a job on the JOB BOARD
-     * belonging to nobody. Six appeared that way while this was first built,
-     * which is why `stage-two-section-registers.test.mjs` pins these three
-     * lines. Undo the row, then rethrow the ORIGINAL error: the caller needs
-     * the real cause, not "could not allocate a job id".
-     */
-    let placed: ItemRow | undefined;
-    try {
-      const placedRows = await db
-        .insert(maintenanceGroupItems)
-        .values({
-          requestId: id,
-          organisationId: orgId,
-          boardId,
-          groupId: group.id,
-          position,
-        })
-        .onConflictDoNothing()
-        .returning();
-      placed = placedRows[0];
-    } catch (error) {
-      await db
-        .delete(maintenanceRequests)
-        .where(
-          and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
-        )
-        .catch(() => undefined);
-      throw error;
-    }
-
-    if (placed) {
-      created = row;
-      placement = placed;
-      break;
-    }
-
-    /*
-     * The reference was free in `maintenance_requests` and taken in the
-     * placements table. Undo the row we just made and walk on — leaving it
-     * would strand an unplaced row, which the board files onto the default
-     * board belonging to nobody. Best-effort, as below.
-     */
-    await db
-      .delete(maintenanceRequests)
-      .where(
-        and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
-      )
-      .catch(() => undefined);
-  }
-  if (!created || !placement) {
-    throw new Error("Could not allocate a job id; too many simultaneous creates.");
-  }
-
-  /*
-   * THE PLACEMENT IS WHAT PUTS THE ROW ON A BOARD, so a row without one is not
-   * a half-created item — it is an invisible row on somebody else's board.
-   *
-   * `maintenance_requests` carries no board id: a row's board comes from its
-   * placement, and the board route deliberately files an UNPLACED row into the
-   * default board's first group so nothing is ever stranded. A request row left
-   * behind without one therefore does not vanish — it appears on the JOB BOARD,
-   * belonging to nobody, under whatever title it was given. Six were produced
-   * that way while W02-06 was being built, on a board carrying real work.
-   *
-   * There is still no transaction to lean on — D1 and the Postgres shim do not
-   * give this code one — so the two inserts are paired inside the allocation
-   * loop above instead, and every path that leaves a request without a
-   * placement deletes it again before moving on. By here both are down.
-   */
-  const item = placement;
+  const allocated = await allocateSubmission(db, {
+    organisationId: orgId,
+    boardId,
+    groupId: group.id,
+    position,
+    values,
+  });
+  const created = allocated.request;
+  const id = created.id;
+  /* Never null here: a group was named, so the allocator either wrote the
+     placement or threw. */
+  const item = allocated.placement as ItemRow;
 
   await db.insert(activityLog).values({
     id: crypto.randomUUID(),
@@ -689,7 +510,12 @@ export async function duplicateBoardItems(
       ),
   );
 
-  let nextNumber = await nextItemNumber(db, orgId);
+  /* `nextJobNumber`, formerly `nextItemNumber` here — the same three reads,
+     now in app/lib/submission-service.ts so all five intake doors share one
+     floor. Duplicating still walks the numbers itself rather than calling
+     `allocateSubmission` per row: it inserts N rows in one pass and re-reading
+     the MAX for each would be N times the three reads. */
+  let nextNumber = await nextJobNumber(db, orgId);
   const nextPositions = new Map<string, number>();
   const requests: RequestRow[] = [];
   const items: ItemRow[] = [];

@@ -7,7 +7,6 @@ import {
   maintenanceGroupItems,
   maintenanceGroups,
   maintenanceRequests,
-  sites,
 } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { isBoardNotFound, nextReference, resolveBoard } from "../../../lib/board-registry";
@@ -47,6 +46,25 @@ import {
 import { getColumnType } from "../../../lib/column-types";
 import { chunkIds, selectInChunks } from "../../../lib/sql-batching";
 import { isUnassignedSite, unassignedSiteId } from "../../../lib/site-reference";
+/*
+ * THE CREATE GOES THROUGH THE SHARED SUBMISSION SERVICE.
+ *
+ * This route built a work order by hand, and what it left out was not cosmetic:
+ * NO `tier`, NO `due_at` and NO `next_update_at`, so every item raised from the
+ * board was invisible to the overdue meter, the SLA report and the "needs an
+ * update" tray. It hard-coded `stage: "Incoming"` even when the caller named a
+ * group whose `stage_key` was something else, so a row filed into Jobs Booked
+ * carried the Incoming stage. It wrote `priority` and `status` as raw
+ * length-capped strings, so any 40 characters became a value the board then had
+ * to group by. And it wrote a placement only when a `groupId` was supplied,
+ * leaving anything else for `ensureBoardState` to adopt onto whichever board
+ * loaded first.
+ *
+ * `app/lib/submission-service.ts` answers all of that once, for all five intake
+ * doors. What stays here is this route's own: the `board.edit` guard, the
+ * cross-tenant checks on site, group and parent, and the duplicate intent.
+ */
+import { createSubmission, resolveSubmissionSite } from "../../../lib/submission-service";
 
 export const dynamic = "force-dynamic";
 
@@ -382,10 +400,15 @@ export async function POST(request: Request) {
      */
     const siteId = isUnassignedSite(rawSiteId) ? unassignedSiteId() : rawSiteId;
     if (siteId && !isUnassignedSite(siteId)) {
-      const [site] = await db
-        .select({ id: sites.id })
-        .from(sites)
-        .where(and(eq(sites.id, siteId), eq(sites.organisationId, orgId)));
+      /*
+       * `resolveSubmissionSite` with an ID, which is the same verification this
+       * route already did — the shared resolver deliberately does NOT apply a
+       * register scope to an id lookup, because a caller holding one got it
+       * from a screen that showed it to them and that screen may legitimately
+       * be an instance's own site register. The organisation filter is what
+       * stops it crossing a tenant, and that is the whole check.
+       */
+      const site = await resolveSubmissionSite(db, { organisationId: orgId, siteId });
       if (!site) return bad("Site not found.", 404);
     }
 
@@ -422,66 +445,106 @@ export async function POST(request: Request) {
       if (!parent) return bad("Parent item not found.", 404);
     }
 
-    const id = newId("req");
-    const reference = await nextReference(db, orgId, board.id);
-
-    await db.insert(maintenanceRequests).values({
-      id,
-      organisationId: orgId,
-      reference,
-      title,
-      parentId,
-      description: text(body.description, 4000),
-      siteId,
-      source: "board",
-      status: text(body.status, 80) || "Pending Approval",
-      priority: text(body.priority, 40) || "Medium",
-      stage: "Incoming",
-      // Non-null columns inherited from the original request table. They are
-      // filled in through the board's own cells once the item exists.
-      category: text(body.category, 80),
-      location: text(body.location, 240),
-      requester: text(body.requester, 120),
-      contact: text(body.contact, 40),
-      engineer: text(body.engineer, 80),
-    });
-
-    if (groupId) {
-      const [tail] = await db
-        .select({ maxPosition: sql<number>`COALESCE(MAX(${maintenanceGroupItems.position}), -1)` })
+    /*
+     * WHERE IT LANDS, AND THEREFORE WHAT STAGE IT CARRIES.
+     *
+     * `groupId` is optional on this route, and a subitem raised from the row
+     * menu sends none. That used to mean NO PLACEMENT — and a row without one
+     * does not go nowhere: `ensureBoardState` in /api/board adopts every
+     * unplaced work order in the organisation onto whichever board is being
+     * loaded, into `groups[0]`. So an item created on a section's register
+     * could surface on the job board instead.
+     *
+     * A subitem inherits its PARENT's group, which is what the automation
+     * engine's `create_subitem` already did and is the only answer that keeps a
+     * child beside its parent. Failing that, the board's own first lane.
+     */
+    let preferredGroupId = groupId || null;
+    if (!preferredGroupId && parentId) {
+      const [parentPlacement] = await db
+        .select({ groupId: maintenanceGroupItems.groupId })
         .from(maintenanceGroupItems)
         .where(
           and(
             eq(maintenanceGroupItems.organisationId, orgId),
-            eq(maintenanceGroupItems.groupId, groupId),
+            eq(maintenanceGroupItems.boardId, board.key),
+            eq(maintenanceGroupItems.requestId, parentId),
           ),
         );
-      await db.insert(maintenanceGroupItems).values({
-        requestId: id,
-        organisationId: orgId,
-        boardId: board.key,
-        groupId,
-        position: Number(tail?.maxPosition ?? -1) + 1,
-      });
+      preferredGroupId = parentPlacement?.groupId ?? null;
     }
 
+    /*
+     * THE `MS-yyyy-nnnn` REFERENCE IS DELIBERATELY KEPT, and it is the one
+     * divergence in this file that was NOT unified.
+     *
+     * Four of the five doors leave `reference` NULL and every screen in the
+     * product renders `reference ?? id`, so a job raised anywhere else is known
+     * by its `MN-…`. Giving those doors an `MS-…` too would change what 776
+     * existing jobs' successors are CALLED, on every board, drawer, report and
+     * email — a visible identity change with no defect behind it. Taking it
+     * away from this route would break the `{ reference }` its response has
+     * always carried.
+     *
+     * So the board counter still turns here, and `displayReference` in the
+     * service is what gives the other four doors an answer to "what is this job
+     * called" without inventing one.
+     */
+    const reference = await nextReference(db, orgId, board.id);
+
+    const submission = await createSubmission(db, {
+      organisationId: orgId,
+      boardId: board.key,
+      actor,
+      source: "board",
+      /* Caller-supplied and REQUIRED on this route — refused above. The board's
+         own create is the one door where a person types the name. */
+      explicitTitle: title,
+      description: text(body.description, 4000),
+      location: text(body.location, 240),
+      requester: text(body.requester, 120),
+      contact: text(body.contact, 40),
+      category: text(body.category, 80),
+      /* Raw, and canonicalised by the service against this organisation's
+         registry. These were length-capped strings written straight into
+         columns every dashboard groups by. */
+      priority: body.priority,
+      engineer: body.engineer,
+      siteId: siteId && !isUnassignedSite(siteId) ? siteId : null,
+      preferredGroupId,
+      parentId,
+      overrides: {
+        reference,
+        /*
+         * AN EXPLICIT STATUS STILL WINS, and this is deliberate rather than an
+         * oversight. Monday's SUBITEM board carries its own three labels —
+         * Stuck, Working on it, Done — and the row menu opens a child on
+         * "Working on it". `statusForStage` maps the PARENT board's four
+         * stages; applying it to a subitem would rename every child the moment
+         * it was created. So the caller's answer is honoured when it gives one,
+         * and the stage decides only when it does not.
+         */
+        ...(text(body.status, 80) ? { status: text(body.status, 80) } : {}),
+      },
+    });
+    const created = submission.request;
+    const id = created.id;
+
     await recordActivity(db, orgId, board.key, id, who, "created");
+
+    // A subitem when `parentId` is set — the engine tells the two apart. The
+    // group is the one the row was actually filed into, not the one the caller
+    // may or may not have named: a rule scoped to "created in Incoming" has to
+    // match a row that landed there without being told to.
+    await dispatchAutomationEvents(automationContext(guard.scope, request), [
+      itemCreatedEvent(board.key, id, parentId, submission.group?.id ?? null),
+    ]);
 
     // The full row, not just its id. A caller that has just created an item —
     // the subitem editor, for one — has to render it immediately, and three
     // fields is not enough to draw a row without refetching the whole board.
-    const [created] = await db
-      .select()
-      .from(maintenanceRequests)
-      .where(
-        and(eq(maintenanceRequests.id, id), eq(maintenanceRequests.organisationId, orgId)),
-      );
-
-    // A subitem when `parentId` is set — the engine tells the two apart.
-    await dispatchAutomationEvents(automationContext(guard.scope, request), [
-      itemCreatedEvent(board.key, id, parentId, groupId || null),
-    ]);
-
+    // `createSubmission` returns the inserted row, so the follow-up SELECT this
+    // used to do is gone.
     return Response.json({ id, reference, title, item: created ?? null }, { status: 201 });
   } catch (error) {
     return unavailable(error);

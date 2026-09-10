@@ -47,6 +47,7 @@
  * not the definition of amber.
  */
 
+import { countsTowardCompliance } from "./compliance-duty-holder";
 import {
   EXPIRY_DUE_SOON_DAYS,
   expiryStatus,
@@ -134,6 +135,18 @@ export type ComplianceCompletion = {
   percent: number;
   /** False when nothing applicable is on file, so a caller prints "-" not "0%". */
   scored: boolean;
+  /**
+   * COVERAGE, STATED SEPARATELY FROM THE SCORE.
+   *
+   * Records excluded because nobody has confirmed whose obligation they are,
+   * or has confirmed they are somebody else's. Reported beside the percentage
+   * for the same reason `notRequired` is: a reader has to be able to see that
+   * "8%" is 3 of 12 confirmed rather than 3 of 12 held, and those are entirely
+   * different facts about a store.
+   *
+   * `total - notRequired - excluded === applicable`.
+   */
+  excluded: number;
   counts: Record<ComplianceState, number>;
 };
 
@@ -169,7 +182,7 @@ export type ComplianceCompletion = {
  * and that is the more dangerous of the two.
  */
 export function complianceCompletion(
-  records: readonly { state: ComplianceState }[],
+  records: readonly { state: ComplianceState; dutyHolder?: string | null }[],
 ): ComplianceCompletion {
   const counts: Record<ComplianceState, number> = {
     Compliant: 0,
@@ -184,8 +197,37 @@ export function complianceCompletion(
   }
   const total = records.length;
   const notRequired = counts["Not required"];
-  const applicable = total - notRequired;
-  const satisfied = counts.Compliant;
+  /*
+   * ── AND SO IS A REQUIREMENT NOBODY HAS CLAIMED ────────────────────────
+   *
+   * Maintsupp administers a schedule; it does not assume responsibility for
+   * assets it was never given. So a requirement confirmed as the landlord's or
+   * the shopping centre's is recorded and displayed but not scored, and one
+   * nobody has answered for yet is not scored either — we cannot report a
+   * failure that may belong to a landlord, or to an asset a kiosk does not
+   * have.
+   *
+   * WHY THIS DOES NOT MOVE THE EXISTING ESTATE. `countsTowardCompliance`
+   * returns true for `null`, and every one of the 748 rows that predates the
+   * `duty_holder` column is NULL. The only records this excludes are ones
+   * something positively marked — `ensureComplianceProfile` stamps
+   * "excluded" as it creates them, and a person choosing Landlord or Shopping
+   * centre stamps those. A caller that does not track duty holders at all passes
+   * records without the field and gets precisely today's arithmetic.
+   *
+   * Counted AFTER `notRequired` and excluded from it, so the three groups
+   * partition the total rather than overlapping: a record marked Not applicable
+   * arrives here already carrying the `Not required` state, and must not be
+   * subtracted twice.
+   */
+  const excluded = records.filter(
+    (record) =>
+      record.state !== "Not required" && !countsTowardCompliance(record.dutyHolder),
+  ).length;
+  const applicable = total - notRequired - excluded;
+  const satisfied = records.filter(
+    (record) => record.state === "Compliant" && countsTowardCompliance(record.dutyHolder),
+  ).length;
   return {
     satisfied,
     applicable,
@@ -193,6 +235,7 @@ export function complianceCompletion(
     total,
     percent: applicable ? Math.round((satisfied / applicable) * 100) : 0,
     scored: applicable > 0,
+    excluded,
     counts,
   };
 }

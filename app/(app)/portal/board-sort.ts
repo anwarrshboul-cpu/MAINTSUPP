@@ -190,7 +190,6 @@ export function boardSortValue(
   if (entry.key === "name") {
     return boardItemName(
       request,
-      context.boardId,
       context.cells[customCellKey(request.id, entry.column.id)],
     );
   }

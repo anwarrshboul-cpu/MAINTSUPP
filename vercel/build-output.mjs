@@ -241,7 +241,16 @@ await fsp.writeFile(
         },
         /*
          * Everything in `static/` is served by the CDN and never wakes the
-         * function: /assets/*, /favicon.svg and the rest of public/.
+         * function: /assets/*, the favicon set (/favicon.ico, /favicon.svg,
+         * /favicon-96.png, /apple-touch-icon.png) and the rest of public/.
+         *
+         * There is no allow-list anywhere above: `copyDir(distClient,
+         * staticDir)` copies whatever vinext emitted, and vinext copies
+         * public/ wholesale. So a new file in public/ ships with no change
+         * here — but it ships ONLY through this handler. If `filesystem`
+         * ever stops matching, /favicon.ico falls through to the catch-all
+         * below and a browser gets the app shell with a 200, which looks
+         * like success and renders as a broken icon.
          */
         { handle: "filesystem" },
         /*

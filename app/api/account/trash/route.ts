@@ -138,8 +138,8 @@ const RECOVERY_MATRIX = [
 ] as const;
 
 export async function GET(request: Request) {
-  await ensureDatabase();
   try {
+    await ensureDatabase();
     const context = await scopedDb(request);
     const orgId = context.orgId;
 

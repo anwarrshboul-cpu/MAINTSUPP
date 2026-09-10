@@ -74,6 +74,8 @@ const PORTAL = "app/(app)/portal/portal-app.tsx";
 const BOARD = "app/(app)/portal/live-board.tsx";
 const ACCOUNT_SHELL = "app/(app)/portal/views/account-shell.tsx";
 const ACCOUNT_EXPLORE = "app/(app)/portal/views/account-explore.tsx";
+const ACCOUNT_API = "app/api/account/route.ts";
+const APPEARANCE = "app/(app)/portal/views/appearance-panel.tsx";
 
 /** Comments in these files contain braces and colour literals. Strip them. */
 const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -173,50 +175,104 @@ const declarationList = (declarations) =>
     .filter(Boolean);
 
 // ---------------------------------------------------------------------------
-// 1. The default follows the device.
+// 1. The default is dark; an explicit choice still decides.
 // ---------------------------------------------------------------------------
 
-test("with nothing stored: 'system' on a desktop, DARK on a phone", async () => {
+test("with nothing stored: DARK, on every device", async () => {
   const theme = await read(THEME);
   const boot = await read(BOOT);
 
   /*
-   * THE DEFAULT MOVED; THE RESOLUTION DID NOT.
+   * THE DEFAULT MOVED AGAIN; THE RESOLUTION STILL DID NOT.
    *
-   * This test used to say an absent preference is "system" everywhere, which
-   * was right while there was one answer. The owner's requirement is that a
-   * phone is dark out of the box, so "nothing has been chosen" now means DARK
-   * on a phone and the device everywhere else. What must NOT move with it: an
-   * explicit "light" or "dark" is still read first and still wins, and an
-   * explicit "system" still means the device on a phone — otherwise the picker
-   * becomes decorative, which the brief ruled out in as many words.
+   * This test has now said three things, and each was the contract of its day.
+   * First "an absent preference is 'system' everywhere". Then "dark on a phone,
+   * the device elsewhere", when the owner asked for a phone to be dark out of
+   * the box. Now: DARK, on every width — the portal is a dark product, the rail
+   * is dark in both skins by token, and a desktop whose OS happened to say
+   * "light" was being handed a palette nobody had asked for.
+   *
+   * The assertion is re-pointed rather than deleted because what it protects
+   * has never changed: the default must be stated ONCE and read by both
+   * decision points. It used to be one shared media query; it is now one shared
+   * constant, `DEFAULT_THEME_CHOICE`. Two literals that happen to agree is the
+   * failure this catches, and it is a one-frame flash when they stop agreeing.
+   *
+   * What must NOT move with it, and is asserted below: an explicit "light" or
+   * "dark" is still read first and still wins, and an explicit "system" still
+   * resolves through `prefers-color-scheme`. That last one carries more weight
+   * than it used to — the fallback no longer asks the device at all, so System
+   * is now the ONLY route to `prefers-color-scheme` and the picker would be
+   * decorative without it, which the brief ruled out in as many words.
    */
   assert.match(
     theme,
-    /export function defaultThemeChoice\(\): ThemeChoice \{[\s\S]*?matchMedia\(MOBILE_THEME_QUERY\)\.matches \? "dark" : "system";/,
-    "an absent preference is dark on a phone and the device elsewhere",
+    /export function defaultThemeChoice\(\): ThemeChoice \{\s*return DEFAULT_THEME_CHOICE;\s*\}/,
+    "an absent preference is the shared default, not a second literal",
   );
 
   /*
-   * ONE QUERY, IMPORTED — not two strings that happen to agree. The pre-paint
-   * script and the value React reads afterwards must decide identically: a
-   * boundary that differs between them is a one-frame flash, and avoiding that
-   * is the entire reason the blocking boot script exists.
+   * ONE CONSTANT, IMPORTED — the successor to the one shared media query.
    */
-  assert.match(boot, /export const MOBILE_THEME_QUERY = "\(max-width: 760px\)";/);
-  assert.match(theme, /MOBILE_THEME_QUERY,[\s\S]{0,160}from "\.\/theme-boot";/);
+  assert.match(boot, /export const DEFAULT_THEME_CHOICE = "dark" as const;/);
+  assert.match(theme, /DEFAULT_THEME_CHOICE,[\s\S]{0,200}from "\.\/theme-boot";/);
   assert.match(
     boot,
-    /matchMedia\(\$\{JSON\.stringify\(MOBILE_THEME_QUERY\)\}\)\.matches\)\{c="dark"\}/,
-    "the boot script decides the same thing before paint, from the same string",
+    /\{c=\$\{JSON\.stringify\(DEFAULT_THEME_CHOICE\)\}\}/,
+    "the boot script decides the same thing before paint, from the same constant",
   );
 
-  // The server snapshot stays 'system'. A literal 'dark' here is what made the
-  // device irrelevant, and it would be a hydration mismatch on a desktop too.
+  /*
+   * AND THE WIDTH QUERY IS GONE, not merely unused.
+   *
+   * `MOBILE_THEME_QUERY` existed only to make this answer depend on the
+   * viewport. With a constant default it decides nothing, and an exported
+   * constant that nothing reads is the trap this suite exists to prevent — the
+   * next person moves it to 767 to match a breakpoint and changes no behaviour
+   * at all, or restores a branch around it. It went with the branch.
+   *
+   * Comments are stripped first, deliberately. Both files still NAME the query
+   * in prose, explaining what it did and why it went; that history is the point
+   * of those comments and must not be the thing that fails this. What must not
+   * come back is the identifier as code.
+   */
+  for (const [path, source] of [
+    [BOOT, boot],
+    [THEME, theme],
+  ]) {
+    const code = strip(source).replace(/\/\/[^\n]*/g, "");
+    assert.equal(
+      /MOBILE_THEME_QUERY/.test(code),
+      false,
+      `${path} must not keep the phone-boundary query: it no longer decides anything`,
+    );
+  }
+
+  /*
+   * THE SERVER SNAPSHOT NOW AGREES WITH THE DEFAULT, AND HAS TO.
+   *
+   * This used to require the literal "system", for two reasons that were both
+   * about the old default: a "dark" here would have made the device irrelevant
+   * on a desktop, where an absent preference meant `prefers-color-scheme`; and
+   * it would have been a guaranteed hydration correction for every desktop
+   * visitor. Neither survives. Nothing here can make the device irrelevant now
+   * — only an explicit "system" reaches `resolveTheme`'s media query, and that
+   * path is asserted in the next test — while "system" here would be the
+   * mismatch, since a fresh visitor's client computes "dark".
+   *
+   * So the pin moves from a literal to the RELATIONSHIP, which is the stronger
+   * statement: the snapshot must be the default function, so the two cannot be
+   * changed apart.
+   */
   assert.match(
     theme,
-    /function serverChoice\(\): ThemeChoice \{\s*return "system";/,
-    "the server snapshot must be 'system'; a literal 'dark' made the device irrelevant",
+    /function serverChoice\(\): ThemeChoice \{\s*return defaultThemeChoice\(\);\s*\}/,
+    "the server snapshot must BE the default, not a second guess at it",
+  );
+  assert.match(
+    theme,
+    /function serverResolved\(\): ResolvedTheme \{\s*return resolveTheme\(serverChoice\(\)\);\s*\}/,
+    "and the resolved snapshot derived from it — 'dark' was previously right only by coincidence",
   );
 
   // Both fallbacks go through the default, so storage being unreadable answers
@@ -226,7 +282,11 @@ test("with nothing stored: 'system' on a desktop, DARK on a phone", async () => 
   assert.equal(
     /return\s+"dark"/.test(stored[0]),
     false,
-    "nothing may fall back to a bare 'dark'; the default is a function of the device",
+    // Re-pointed reason: the default is no longer "a function of the device",
+    // it is a constant — but it must still be reached through
+    // `defaultThemeChoice()` rather than inlined here, or this function becomes
+    // a second declaration of the default and the boot script can drift from it.
+    "nothing may fall back to a bare 'dark'; the default is named in exactly one place",
   );
   assert.equal(
     (stored[0].match(/defaultThemeChoice\(\)/g) ?? []).length >= 2,
@@ -267,10 +327,29 @@ test("the boot script asks the device before it assumes anything", async () => {
     storedAt !== -1 && storedAt < deviceAt,
     "the stored choice must be read before the device is asked, or an explicit choice loses",
   );
+  /*
+   * RE-POINTED: this asserted `c="system"` — "anything that is not an explicit
+   * light/dark resolves to 'system'". That was the old default written as a
+   * literal inside the script. The fallback is now the shared constant, so the
+   * pin follows it to its new home rather than being dropped; what it guards is
+   * the same thing it always guarded, that the absent case is decided here and
+   * not left to whatever the stylesheet happens to paint.
+   */
   assert.match(
     script[1],
-    /c="system"/,
-    "anything that is not an explicit light/dark resolves to 'system'",
+    /if\(c!=="light"&&c!=="dark"&&c!=="system"\)\{c=\$\{JSON\.stringify\(DEFAULT_THEME_CHOICE\)\}\}/,
+    "an absent choice resolves to the shared default, before paint",
+  );
+  /*
+   * And the three explicit choices are still told apart. Collapsing "system"
+   * into the fallback would cost nothing on the surface — both would paint dark
+   * — and would silently make the picker's System option unreachable, since
+   * the fallback no longer consults the device.
+   */
+  assert.match(
+    script[1],
+    /c==="system"\?\(w\.matchMedia/,
+    "an explicit 'system' must still reach the device query; nothing else does now",
   );
 });
 
@@ -664,4 +743,223 @@ test("the rail's own controls state their colours rather than hoping to inherit"
   assert.ok(testing, ".sidebar-profile__copy select must be styled");
   assert.match(testing.declarations, /color:\s*var\(--rail-accent\)/);
   assert.match(testing.declarations, /background:\s*var\(--rail-control-bg\)/);
+});
+
+// ---------------------------------------------------------------------------
+// 6. The browser's own chrome, and the account row that finally decides.
+// ---------------------------------------------------------------------------
+
+test("the address bar is told what colour the page is", async () => {
+  /*
+   * `<meta name="theme-color">` did not exist anywhere in this repository, so a
+   * phone painted its address bar and its overscroll gutter from its own
+   * default — white on iOS, grey on Android — directly above a page whose
+   * ground is #0b1218. It is the one surface the stylesheets cannot reach.
+   */
+  const layout = await read(APP_LAYOUT);
+  const boot = await read(BOOT);
+  const theme = await read(THEME);
+
+  assert.match(boot, /export const THEME_COLOR_DARK = "#0b1218";/);
+  assert.match(boot, /export const THEME_COLOR_LIGHT = "#f4f7f8";/);
+  assert.match(
+    boot,
+    /export const THEME_COLOR_LIGHT_MEDIA = "\(prefers-color-scheme: light\)";/,
+  );
+
+  /*
+   * TWO TAGS AND THE ORDER IS THE MECHANISM: a browser uses the FIRST
+   * theme-color whose media matches, so the light one must carry the media and
+   * come first, and the dark one must carry none and come last as the fallback.
+   * Reversed, every visitor gets the light tint. That ordering is also what
+   * makes the tags correct with no script at all — which is what the first
+   * frame of every load actually gets.
+   */
+  const lightAt = layout.indexOf("THEME_COLOR_LIGHT_MEDIA");
+  const darkAt = layout.indexOf('<meta name="theme-color" content={THEME_COLOR_DARK} />');
+  assert.ok(lightAt !== -1, "the light theme-color tag must be rendered");
+  assert.ok(darkAt !== -1, "the dark theme-color tag must be rendered, with no media");
+  assert.ok(
+    lightAt < darkAt,
+    "the media-qualified tag must come first, or the unqualified one always wins",
+  );
+
+  // It belongs to the app group only. The marketing and public layouts pin
+  // their own light surface and must not inherit the dashboard's ground — the
+  // same isolation argument that keeps the boot script out of the root layout.
+  const root = await read(ROOT_LAYOUT);
+  assert.equal(
+    /theme-color/.test(root),
+    false,
+    "the root layout also wraps the marketing site; a dark tint there is out of scope",
+  );
+
+  /*
+   * And it has to FOLLOW THE CHOICE, not the device. The media attribute is the
+   * switch: "all" enables the light tag, "not all" disables it. Both the
+   * pre-paint script and the post-hydration applier own it, for the same reason
+   * they both own `data-theme` — an effect cannot win the first paint.
+   */
+  assert.match(boot, /export const THEME_COLOR_META_SELECTOR = 'meta\[name="theme-color"\]\[media\]';/);
+  assert.match(
+    boot,
+    /if\(m\)\{m\.setAttribute\("media",r==="light"\?"all":"not all"\)\}/,
+    "the tint is settled before paint, like the attributes above it",
+  );
+  const apply = /export function applyTheme\(resolved: ResolvedTheme\)[\s\S]*?\n\}/.exec(theme);
+  assert.match(
+    apply[0],
+    /setAttribute\("media", resolved === "light" \? "all" : "not all"\)/,
+    "and kept in step afterwards, or a device flip leaves a light page under a black bar",
+  );
+  assert.match(
+    apply[0],
+    /if \(tint\)/,
+    "absent on every route that does not load the app layout; missing it must not throw",
+  );
+});
+
+test("users.theme_preference is read back, and wins on a new device", async () => {
+  /*
+   * THE COLUMN HAD EVERY WRITER AND NO READER.
+   *
+   * Both pickers and the account panel PATCH `users.theme_preference`, and
+   * `theme-toggle.tsx` said in as many words that it "is not read back to apply
+   * anything". That was defensible while an absent preference followed the
+   * device; with a fixed default it means a person who chose Light on their
+   * laptop signs in on their phone and gets dark, and the row records a
+   * decision it never enforces.
+   */
+  const toggle = await read(TOGGLE);
+  const api = await read(ACCOUNT_API);
+  const boot = await read(BOOT);
+  const theme = await read(THEME);
+
+  // A narrow endpoint, because this runs on arrival on every hard load. The
+  // full account payload counts jobs, sites, units and members first.
+  assert.match(
+    api,
+    /searchParams\.get\("scope"\) === "theme"/,
+    "the read-back must not pay for the whole account payload",
+  );
+  assert.match(toggle, /fetch\("\/api\/account\?scope=theme"/);
+
+  /*
+   * AND ONLY FOR A CALLER WHO PROVED WHO THEY ARE.
+   *
+   * Measured over Playwright before this guard existed: in development
+   * `demoIdentityAllowed()` is true, so a browser that had never signed in
+   * still resolved to the seeded `super-admin@test.maintsupp.com`, this route
+   * still answered 200, and a fresh context painted dark before paint and then
+   * adopted that row's stored "system" a second later — repainting LIGHT on a
+   * light-preferring device. The dark default defeated by somebody else's
+   * preference. A preference belongs to an ACCOUNT; a caller who is not one
+   * has none.
+   */
+  assert.match(api, /userId: context\.authenticated \? \(row\?\.id \?\? null\) : null/);
+  assert.match(
+    api,
+    /preference: context\.authenticated \? \(row\?\.theme_preference \?\? null\) : null/,
+  );
+
+  /*
+   * THE MARKER IS AN ACCOUNT ID, NOT A BOOLEAN. Seeing an id this browser has
+   * not stored means it has never taken THIS person's preference — a new
+   * device, a cleared profile, a second person on a shared machine — so the
+   * profile wins. Seeing the stored id means the two are already in sync and
+   * the local value is left alone, which is the difference between "the profile
+   * is authoritative on sign-in" and "the profile overwrites your choice on
+   * every page view".
+   */
+  assert.match(boot, /export const THEME_PROFILE_KEY = "maintsupp:theme-profile-synced";/);
+  assert.match(
+    toggle,
+    /window\.localStorage\.getItem\(THEME_PROFILE_KEY\) === userId\) return null;/,
+    "a browser already in sync with this account must not be repainted",
+  );
+  assert.match(toggle, /window\.localStorage\.setItem\(THEME_PROFILE_KEY, userId\)/);
+
+  // Only a real choice may be adopted; an unknown string must be ignored rather
+  // than stamped onto the document, which is how `data-theme="system"` got
+  // there the first time.
+  assert.match(
+    toggle,
+    /preference !== "system" &&[\s\S]{0,120}preference !== "dark"/,
+    "the column is free text; only the three real choices may be applied",
+  );
+
+  /*
+   * AND THE ADOPTION MUST NOT WRITE THE ROW BACK. Seeding `lastPersisted`
+   * BEFORE the store changes is what makes the mirror effect compare equal when
+   * it re-runs — otherwise reconciling would PATCH /api/account with the value
+   * it had just been given by /api/account, on arrival, which is exactly the
+   * write "the account row is written on a change, not on arrival" forbids.
+   */
+  const adopt = /useEffect\(\(\) => \{\s*if \(!persist\) return;\s*let cancelled[\s\S]*?\n  \}, \[persist\]\);/.exec(toggle);
+  assert.ok(adopt, "the reconciliation must live in its own arrival-only effect");
+  assert.ok(
+    adopt[0].indexOf("lastPersisted.current = adopted") <
+      adopt[0].indexOf("adoptProfileTheme(adopted)"),
+    "the ref must be seeded before the store moves, or reconciling PATCHes on arrival",
+  );
+
+  // One writer of the storage key, still: adoption goes through setThemeChoice
+  // rather than becoming the second `setItem` this suite spent a stage removing.
+  assert.match(
+    theme,
+    /export function adoptProfileTheme\(choice: ThemeChoice\) \{\s*setThemeChoice\(choice\);\s*\}/,
+    "a value chosen by this person on another device deserves the same path as one chosen here",
+  );
+});
+
+test("the theme is reachable from Settings, without a fourth copy of the state", async () => {
+  /*
+   * There was a 15px select in the topbar and a card three clicks into the
+   * account menu, and nothing at all on the Settings screen — which is where a
+   * person looks for a setting. This is a discoverability fix, so what it must
+   * NOT be is a third implementation: five racing writers is what Stage 26
+   * removed, and a control with its own `useState` would put one back.
+   */
+  const panel = await read(APPEARANCE);
+  const portal = await read(PORTAL);
+
+  // Comments stripped: the file explains at length why it holds no state of its
+  // own, and naming the hook in that explanation must not be what fails this.
+  const code = strip(panel).replace(/\/\/[^\n]*/g, "");
+
+  assert.match(panel, /from "\.\.\/theme"/, "the panel must drive the shared store");
+  assert.match(panel, /setThemeChoice\(option\.value\)/);
+  assert.equal(
+    /useState/.test(code),
+    false,
+    "a private copy of the theme is what made the topbar read 'Light' beside a board reading 'Dark'",
+  );
+
+  // All three stay selectable. Light disappearing from any picker is the defect
+  // `tests/stage-twenty-account-menu.test.mjs` guards from the other side.
+  for (const value of ["dark", "light", "system"]) {
+    assert.match(
+      panel,
+      new RegExp(`value: "${value}"`),
+      `${value} must remain selectable from Settings`,
+    );
+  }
+
+  /*
+   * AND IT MUST NOT PATCH. `ThemeToggle` is mounted in the topbar on every
+   * dashboard screen including this one, and it mirrors any change to the
+   * account row already because it watches the STORE rather than its own
+   * rendered value. Saving from here as well sends two identical PATCHes for
+   * one click.
+   */
+  assert.equal(
+    /fetch\(/.test(code),
+    false,
+    "the topbar toggle already mirrors the store; a second save is one gesture writing the row twice",
+  );
+
+  // Mounted, and cheaply: portal-app.tsx is over 7,000 lines and under an
+  // enforced ceiling elsewhere in the suite, so the panel is a file of its own.
+  assert.match(portal, /import \{ AppearancePanel \} from "\.\/views\/appearance-panel";/);
+  assert.match(portal, /<AppearancePanel \/>/);
 });

@@ -45,6 +45,10 @@ import {
 } from "./ops-primitives";
 import { OpsFilterBar, type FilterGroup } from "./ops-filter-bar";
 import { useQueryState } from "./ops-url-state";
+/* 2F — the shared predicate's filter half. The PREDICATE itself is not imported:
+   the server sends `demo` on every row, and recomputing it here would be a
+   second answer to the question. */
+import { parseDemoFilter } from "../../../lib/demo-sites";
 import { complianceBandColour } from "../../../lib/compliance-status";
 import { NOT_RECORDED_COLOUR } from "../../../lib/job-metrics";
 import type { ComplianceState } from "../../../lib/types";
@@ -93,11 +97,21 @@ export type SiteListRow = {
   aliases?: string[];
   mondayMaintenanceName?: string | null;
   mondayComplianceName?: string | null;
+  /**
+   * 2F — a demonstration store rather than a real one.
+   *
+   * Sent by the server from `isDemoSite`, never recomputed here. Optional so a
+   * payload without it simply has no demo sites, which is the honest reading
+   * for a caller that predates the field.
+   */
+  demo?: boolean;
 };
 
 export type SiteCoverage = {
   total: number;
   incomplete: number;
+  /** 2F — how many of `total` are demonstration stores. */
+  demo?: number;
   placeholderManagers: number;
   withCoordinates: number;
   withTown: number;
@@ -114,6 +128,16 @@ const FILTER_KEYS = [
   "hasJobs",
   "compliance",
   "budget",
+  /*
+   * 2G — `?details=incomplete`. The header already SAID how many sites had
+   * incomplete details and there was no way to see WHICH: a count somebody
+   * cannot act on is a count that stays the same for a year. In the URL with
+   * every other filter, so "the seven stores with no postcode" is a link
+   * somebody sends rather than a thing they re-find.
+   */
+  "details",
+  /* 2F — `?demo=hide|only`. Absent means SHOWN; see `parseDemoFilter`. */
+  "demo",
   "sort",
   "layout",
 ] as const;
@@ -197,6 +221,8 @@ export function SitesList({
   const hasJobs = params.get("hasJobs");
   const complianceBelow = params.get("compliance");
   const budget = params.get("budget");
+  const details = params.get("details");
+  const demo = parseDemoFilter(params.get("demo"));
 
   const visible = useMemo(() => {
     const filtered = sites.filter((site) => {
@@ -216,6 +242,19 @@ export function SitesList({
       }
       if (budget === "none" && site.annualBudgetPence !== null) return false;
       if (budget === "set" && site.annualBudgetPence === null) return false;
+      /*
+       * 2G. `completeness` absent is treated as COMPLETE rather than as
+       * incomplete: a payload that does not carry the field is not evidence
+       * that anything is missing, and guessing the other way would fill this
+       * list with every site the moment the field was dropped.
+       */
+      if (details === "incomplete" && (site.completeness?.missing.length ?? 0) === 0) {
+        return false;
+      }
+      if (details === "complete" && (site.completeness?.missing.length ?? 0) > 0) return false;
+      /* 2F — one predicate, applied where every other filter is applied. */
+      if (demo === "hide" && site.demo) return false;
+      if (demo === "only" && !site.demo) return false;
       if (query) {
         const haystack = [
           site.name,
@@ -255,7 +294,18 @@ export function SitesList({
           );
       }
     });
-  }, [budget, complianceBelow, hasJobs, query, selectedStatus, selectedType, sites, sort]);
+  }, [
+    budget,
+    complianceBelow,
+    demo,
+    details,
+    hasJobs,
+    query,
+    selectedStatus,
+    selectedType,
+    sites,
+    sort,
+  ]);
 
   const groups: FilterGroup[] = useMemo(
     () => [
@@ -308,6 +358,22 @@ export function SitesList({
         onRemove: () => setValue("budget", "", ""),
       });
     }
+    if (details) {
+      out.push({
+        key: "details",
+        label: "Details",
+        value: details === "incomplete" ? "Incomplete" : "Complete",
+        onRemove: () => setValue("details", "", ""),
+      });
+    }
+    if (demo !== "all") {
+      out.push({
+        key: "demo",
+        label: "Demo sites",
+        value: demo === "hide" ? "Hidden" : "Only demo sites",
+        onRemove: () => setValue("demo", "", ""),
+      });
+    }
     if (query) {
       out.push({
         key: "q",
@@ -317,7 +383,18 @@ export function SitesList({
       });
     }
     return out;
-  }, [budget, complianceBelow, groups, hasJobs, params, query, setParams, setValue]);
+  }, [
+    budget,
+    complianceBelow,
+    demo,
+    details,
+    groups,
+    hasJobs,
+    params,
+    query,
+    setParams,
+    setValue,
+  ]);
 
   const totals = useMemo(() => {
     const active = sites.filter((site) => site.status !== "closed").length;
@@ -398,12 +475,55 @@ export function SitesList({
           </button>
         </div>
         {coverage && coverage.incomplete > 0 ? (
+          /*
+           * 2G — THE SENTENCE IS NOW THE WAY IN.
+           *
+           * This said "22 of 74 sites have incomplete details" and stopped
+           * there, which told somebody there was work without telling them
+           * where it was. The count is a button now: it filters the list to
+           * exactly those sites and writes `?details=incomplete`, so the
+           * answer is a link rather than a re-derivation.
+           *
+           * A BUTTON INSIDE THE PARAGRAPH, not a paragraph inside a button —
+           * the rest of the sentence is not clickable and must not read as if
+           * it were.
+           */
           <p className="ops-card__note">
-            {coverage.incomplete} of {plural(coverage.total, "site")} have incomplete details
+            <button
+              type="button"
+              className="ops-link"
+              aria-pressed={details === "incomplete"}
+              onClick={() =>
+                setValue("details", details === "incomplete" ? "" : "incomplete", "")
+              }
+            >
+              {coverage.incomplete} of {plural(coverage.total, "site")} have incomplete
+              details
+            </button>
             {coverage.placeholderManagers > 0
               ? `, and ${coverage.placeholderManagers} carry a placeholder manager name that is treated as unset`
               : ""}
             .
+          </p>
+        ) : null}
+        {coverage && (coverage.demo ?? 0) > 0 ? (
+          /*
+           * 2F — demo stores are SHOWN by default and offered for hiding, never
+           * hidden by default. A list that silently omits rows while the meters
+           * above it still count them is a page contradicting itself, and the
+           * contradiction is the part nobody notices.
+           */
+          <p className="ops-card__note">
+            {plural(coverage.demo ?? 0, "site")} in this workspace{" "}
+            {(coverage.demo ?? 0) === 1 ? "is a demonstration store" : "are demonstration stores"}.{" "}
+            <button
+              type="button"
+              className="ops-link"
+              aria-pressed={demo === "hide"}
+              onClick={() => setValue("demo", demo === "hide" ? "" : "hide", "")}
+            >
+              {demo === "hide" ? "Show them" : "Hide them"}
+            </button>
           </p>
         ) : null}
         {coverage ? (
@@ -616,6 +736,22 @@ function SiteRow({
         >
           {statusLabel(site.status)}
         </StatusChip>
+        {site.demo ? (
+          /*
+           * 2F — LABELLED RATHER THAN HIDDEN.
+           *
+           * A demonstration store contributes to every meter on this page like
+           * any other site, and it should: it has jobs and a compliance profile
+           * and quietly excluding it would make the totals disagree with the
+           * rows. What it must never do is be mistaken for a real one, so it
+           * carries a word. `title` repeats the word rather than abbreviating
+           * it, because the chip is small and a tooltip that only restates a
+           * truncation helps nobody.
+           */
+          <StatusChip tone="#8B5CF6" size="small" title="A demonstration store, not a real one">
+            Demo
+          </StatusChip>
+        ) : null}
         <span className="ops-menu">
           <button
             type="button"

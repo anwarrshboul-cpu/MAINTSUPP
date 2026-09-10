@@ -12,6 +12,12 @@ import type {
   MaintenanceGroupItem,
   MaintenanceRequest,
 } from "../../lib/types";
+import { displaySource } from "./board-row-name";
+
+/* Re-exported from where they have always been imported. Six modules take
+   these off this file; a move must not be a rename for every caller. The same
+   arrangement `board-chrome.tsx` uses for `BoardView`. */
+export { boardItemName, displaySource } from "./board-row-name";
 
 /**
  * Where a row lands when it is dragged into a group — H1, moved out of
@@ -73,37 +79,6 @@ export function moveBoardItemPlacement(
   return [...unaffected, ...sourceItems, ...reindexedTarget];
 }
 
-/** How the Name column reads: monday shows the form a job arrived through. */
-export function displaySource(source: MaintenanceRequest["source"]) {
-  return source === "Manual" ? "Manual" : "Incoming form answer";
-}
-
-/**
- * What a row is called when its Name cell is empty.
- *
- * On maintenance that is how the job arrived, which is what monday shows and
- * what the parity tests pin. On every other board the row is a thing rather
- * than a ticket and carries its own title: Store Documentation's rows are
- * stores, imported with the store name on `title` and no Name cell at all, so
- * falling through to `displaySource` labelled all 31 of them "Incoming form
- * answer".
- *
- * The Name cell still wins where one exists — renaming a store in the grid
- * writes a cell, and that edit must survive.
- */
-export function boardItemName(
-  request: MaintenanceRequest,
-  boardId: string,
-  cellValue?: string,
-) {
-  const edited = cellValue?.trim();
-  if (edited) return edited;
-  if (boardId !== "maintenance" && request.title?.trim()) {
-    return request.title.trim();
-  }
-  return displaySource(request.source);
-}
-
 /**
  * The value a system column sorts on.
  *
@@ -117,6 +92,18 @@ export function systemColumnSortValue(
   key: ColumnKey,
 ): string | number {
   switch (key) {
+    /*
+     * PROVENANCE, NOT THE TITLE — and this is deliberately NOT the same answer
+     * `boardItemName` now gives, so a reader who notices the difference finds
+     * the reason here rather than assuming one of them was missed.
+     *
+     * SORTING never reaches this arm: `board-sort.ts` answers `name` through
+     * `boardItemName` before it asks, so the column sorts by what it displays.
+     * What DOES reach it is "Group by → Name" (`live-board.tsx`), and there the
+     * two answers are not interchangeable — grouping by a free-text job title
+     * produces one group per row, which is not a grouping. Grouping by how the
+     * work arrived is the question somebody is actually asking.
+     */
     case "name":
       return displaySource(request.source);
     case "location":

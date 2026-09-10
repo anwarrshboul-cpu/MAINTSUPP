@@ -173,6 +173,9 @@ import { installSessionGuard } from "./session-guard";
 import { publishedBoardOptions } from "../../lib/board-option-registry";
 import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
 import { priorityOptions } from "./board-model";
+/* One rule for what a row is called. This file held two hand-written copies of
+   it and both had the old answer. See `boardItemName`. */
+import { boardItemName } from "./board-ordering";
 import { attributeContractorWork } from "../../lib/contractor-attribution";
 import {
   classifySpend,
@@ -196,6 +199,7 @@ import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 import { openJobCount } from "../../lib/job-metrics";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
+import { AppearancePanel } from "./views/appearance-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -6116,6 +6120,11 @@ function SettingsView({
         </button>
       </section>
 
+      {/* Appearance is a per-person device setting, not part of the workspace
+          save above — it applies on click and mirrors itself. See
+          views/appearance-panel.tsx. */}
+      <AppearancePanel />
+
       <section className="panel settings-card">
         <div className="settings-card__heading">
           <span>
@@ -6511,9 +6520,11 @@ function MobileMondayColumns({
       cellValues[mobileBoardCellKey(request.id, column.id)] ?? "";
     switch (key) {
       case "name": {
-        const value =
-          boardValue.trim() ||
-          (request.source === "Manual" ? "Manual" : "Incoming form answer");
+        /* The phone asks the same function the grid does. This was a third
+           hand-written copy of the rule and it had the old answer in it, so
+           the mobile board went on showing "Incoming form answer" for every
+           row after the desktop one had stopped. */
+        const value = boardItemName(request, boardValue);
         return (
           <MobileMondayField
             key={column.id}
@@ -7726,9 +7737,13 @@ function RequestDrawer({
         <div className="detail-drawer__header">
           <div>
             <span>{request.id}</span>
-            <h2>
-              {request.source === "Manual" ? "Manual" : "Incoming form answer"}
-            </h2>
+            {/* The drawer headline is the row's name, by the same rule. It read
+                the source directly, so opening any job announced itself as
+                "Incoming form answer" while the job's real title sat two
+                fields below it. No Name cell is in scope here — the drawer is
+                opened from several screens — so the title-or-provenance
+                fallback is exactly what is wanted. */}
+            <h2>{boardItemName(request)}</h2>
           </div>
           <div className="detail-drawer__actions">
             {itemActions && (

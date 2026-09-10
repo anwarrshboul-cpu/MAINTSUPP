@@ -891,7 +891,6 @@ export function LiveMaintenanceBoard({
               request.id,
               boardItemName(
                 request,
-                boardId,
                 itemNameColumn
                   ? customCells[customCellKey(request.id, itemNameColumn.id)]
                   : undefined,
@@ -4853,7 +4852,6 @@ function BoardRow({
       case "name": {
         const itemName = boardItemName(
           request,
-          boardId,
           customCells[customCellKey(request.id, column.id)],
         );
         return (

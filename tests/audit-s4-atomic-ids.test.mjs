@@ -45,16 +45,30 @@ test("nextReference increments and reads the counter in one statement", async ()
 });
 
 test("createBoardItem walks past a taken id instead of failing", async () => {
-  const source = await read("app/lib/board-mutations.ts");
+  /*
+   * RE-POINTED. The walk MOVED to `allocateSubmission` in
+   * app/lib/submission-service.ts, and the reason is the defect this file
+   * documents, found three more times: `/api/maintenance`,
+   * `/api/report-job` and `/api/forms/[token]/submit` each read a SQL MAX and
+   * inserted on top of it with no conflict handling at all, so two people
+   * submitting in the same second raced for one primary key and the loser was
+   * answered a bare 503. `createBoardItem` had the only correct allocator and
+   * nothing else could reach it.
+   *
+   * So the shape is pinned where the code now lives, and a second assertion
+   * pins that `createBoardItem` still goes through it — which is what stops the
+   * loop being quietly reintroduced beside the shared one.
+   */
+  const source = await read("app/lib/submission-service.ts");
   assert.match(
     source,
-    /const MAX_ITEM_ID_ATTEMPTS = 8;/,
+    /export const MAX_ITEM_ID_ATTEMPTS = 8;/,
     "the walk-up budget is part of the contract",
   );
-  const fn = source.slice(source.indexOf("export async function createBoardItem"));
+  const fn = source.slice(source.indexOf("export async function allocateSubmission"));
   assert.match(
     fn,
-    /for \(let attempt = 0; attempt < MAX_ITEM_ID_ATTEMPTS; attempt\+\+\) \{\s*\n\s*id = `MN-\$\{base \+ attempt\}`;/,
+    /for \(let attempt = 0; attempt < MAX_ITEM_ID_ATTEMPTS; attempt\+\+\) \{\s*\n\s*const id = `MN-\$\{base \+ attempt\}`;/,
     "each retry must target base+attempt — re-reading MAX can hand back the same number",
   );
   assert.match(
@@ -67,13 +81,30 @@ test("createBoardItem walks past a taken id instead of failing", async () => {
     /Could not allocate a job id; too many simultaneous creates\./,
     "exhausting the walk must fail loudly rather than corrupt",
   );
+
+  const mutations = await read("app/lib/board-mutations.ts");
+  const create = mutations.slice(mutations.indexOf("export async function createBoardItem"));
+  assert.match(
+    create,
+    /await allocateSubmission\(db, \{/,
+    "createBoardItem must go through the shared allocator, not grow a second loop",
+  );
+  assert.doesNotMatch(
+    create,
+    /MAX_ITEM_ID_ATTEMPTS/,
+    "and must not re-implement the walk beside it",
+  );
 });
 
 test("the MN- numbering still counts binned rows", async () => {
-  const source = await read("app/lib/board-mutations.ts");
+  /* RE-POINTED with the allocator — see the note above. `nextItemNumber` is
+     `nextJobNumber` in app/lib/submission-service.ts, renamed only because
+     "item" named one door of five. The rule it carries is Stage 23's and is
+     unchanged. */
+  const source = await read("app/lib/submission-service.ts");
   const fn = source.slice(
-    source.indexOf("async function nextItemNumber"),
-    source.indexOf("const MAX_ITEM_ID_ATTEMPTS"),
+    source.indexOf("export async function nextJobNumber"),
+    source.indexOf("export type AllocatedSubmission"),
   );
   assert.ok(
     !fn.includes("deletedAt"),

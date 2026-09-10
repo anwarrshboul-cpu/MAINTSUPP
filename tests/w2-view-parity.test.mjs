@@ -72,6 +72,15 @@ const CHROME = "app/(app)/portal/board-chrome.tsx";
 const PANE = "app/(app)/portal/board-view-pane.tsx";
 const MENU = "app/(app)/portal/board-actions/view-menus.tsx";
 const TYPES = "app/(app)/portal/board-view-types.ts";
+/*
+ * The strip's READ path. It came out of `board-chrome.tsx` — the same 500-line
+ * ceiling that produced `board-view-pane.tsx`, `board-view-writes.ts`,
+ * `board-view-types.ts` and `board-actions/view-menus.tsx` — when the loader
+ * grew the three-state handling the Jobs-board defect needed. Requirement C's
+ * contract did not move with it: which boards get a strip is still decided by
+ * whether one was ADDRESSED, never by its name. See `board-views-load.ts`.
+ */
+const LOADER = "app/(app)/portal/board-views-load.ts";
 
 /** The offer list the "+" menu and the tab strip are both drawn from. */
 async function viewTypes() {
@@ -304,7 +313,21 @@ test("W2 C which types a board is offered is one function, asked of the board", 
 
 test("W2 C the chrome draws a strip for a board that has views, not for one with the right name", async () => {
   const chrome = codeOnly(await read(CHROME));
-  assert.match(chrome, /if \(!boardId\) return;/, "only an unaddressed board is skipped");
+  /*
+   * RE-POINTED, NOT WEAKENED. The gate used to sit in an effect inside
+   * `board-chrome.tsx`; the fetch and its three states now live in
+   * `board-views-load.ts`, so the assertion follows the contract to its new
+   * home rather than being dropped. Both halves still have to hold, and they
+   * are now checked in the two files that own them: the loader decides whether
+   * to ASK, the chrome decides whether to DRAW.
+   */
+  const loader = codeOnly(await read(LOADER));
+  assert.match(loader, /if \(!boardId\) return;/, "only an unaddressed board is skipped");
+  assert.doesNotMatch(
+    loader,
+    /boardId !== "(maintenance|store-documentation)"/,
+    "which boards have a strip must never be decided by name again — W02-06",
+  );
   assert.match(
     chrome,
     /\{views\.length > 0 && \(/,

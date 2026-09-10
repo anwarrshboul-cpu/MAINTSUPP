@@ -4939,6 +4939,27 @@ async function ensurePreW14Foundation(d1: D1DatabaseLike) {
     ["superseded_by_id", "TEXT"],
     ["is_seed", "INTEGER NOT NULL DEFAULT 0"],
     ["seed_batch_id", "TEXT"],
+    /*
+     * WHOSE OBLIGATION THIS REQUIREMENT IS — client / landlord / centre /
+     * not_applicable, or the literal "unconfirmed".
+     *
+     * NULLABLE ON PURPOSE, AND NULL IS NOT "unconfirmed". Every row that
+     * predates this column is NULL and keeps counting toward the compliance
+     * percentage exactly as it did; only a row this product CREATED and is
+     * explicitly waiting on carries "unconfirmed", and only those are excluded
+     * from the maths. Defaulting the column would erase that distinction and
+     * silently restate the compliance of 748 existing records. The full
+     * argument is in `app/lib/compliance-duty-holder.ts`.
+     *
+     * TEXT, so it is nothing to do with `BOOLEAN_COLUMNS` in
+     * `db/sqlite-to-postgres.ts` and cannot be caught by the bare-name rewrite.
+     *
+     * Named `duty_holder` rather than `responsibility` because THAT name is
+     * already taken by a different question — who chases the certificate, per
+     * `StoreDocumentSlot.responsibility` — and is already a filter dimension on
+     * the register. The words a person reads are still "Responsibility".
+     */
+    ["duty_holder", "TEXT"],
   ];
   for (const [column, definition] of complianceColumns) {
     await addColumn(d1, "compliance_documents", column, definition);
