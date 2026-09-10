@@ -229,12 +229,20 @@ const series = (from, to) => {
 /* ── 1. The bound, measured ───────────────────────────────────────────────── */
 
 test("a 2,000-job estate costs one window per table, not the whole estate", async (t) => {
+  /*
+   * The neighbouring tenant's `MN-99999` was removed from this fixture when the
+   * ceiling stopped being organisation-scoped. It was here to prove a foreign
+   * reference stayed INVISIBLE, which is the behaviour that turned out to be
+   * the collision — a second tenant walking into ids it does not own. That
+   * question now has a test of its own above, in both directions. This one is
+   * about COST, and a foreign row would only add noise to the counts it exists
+   * to measure.
+   */
   const requests = series(1049, 3048);
   const { database, db, log } = estate({
     requests,
     placements: requests,
     bin: requests.slice(0, 500),
-    foreign: ["MN-99999"],
   });
 
   const answer = await nextJobNumber(db, ORG);
@@ -258,10 +266,36 @@ test("a 2,000-job estate costs one window per table, not the whole estate", asyn
   );
 });
 
-test("the reads stay bounded, ordered and org-scoped in the SQL itself", async () => {
+test("the reads stay bounded and ordered in the SQL, and span every tenant", async () => {
+  /*
+   * RE-POINTED, AND THE CLAIM IS REVERSED, because the original claim was the
+   * defect.
+   *
+   * This asserted the ceiling read was scoped to the caller's organisation and
+   * that "a neighbouring tenant's higher references must not be visible".
+   * `maintenance_requests.id` is `text("id").primaryKey()` — ONE namespace for
+   * every tenant — so an organisation-scoped ceiling answers a question the
+   * allocator is not asking, and hands it a number another tenant already owns.
+   *
+   * Measured on Staging, which is exactly that shape: `org_…0001` holds
+   * MN-1049 through MN-1078 and no other organisation holds a numbered id.
+   * A share-link submission for a second tenant therefore started at the floor,
+   * walked MN-1049…MN-1056, found all eight taken, exhausted the attempts and
+   * answered "Could not allocate a job id; too many simultaneous creates" — a
+   * message about concurrency for a collision, behind a 503 the route swallowed
+   * unlogged. That tenant could not create its first job at all.
+   *
+   * So the neighbouring tenant's references MUST be visible: they are the ones
+   * that would collide. The bound and the ordering — the actual subject of this
+   * file — are asserted exactly as before.
+   */
   const { db, log } = estate({ requests: series(1049, 1100), foreign: series(2000, 2100) });
   const answer = await nextJobNumber(db, ORG);
-  assert.equal(answer, 1101, "a neighbouring tenant's higher references must not be visible");
+  assert.equal(
+    answer,
+    2101,
+    "the ceiling must clear EVERY tenant's references, because the id is a global primary key",
+  );
 
   for (const entry of log) {
     assert.match(entry.sql, /order by length\("[a-z_]+"\."[a-z_]+"\) desc/, entry.sql);
@@ -272,10 +306,24 @@ test("the reads stay bounded, ordered and org-scoped in the SQL itself", async (
       "the bound the database receives is the exported one, not a literal typed twice",
     );
     assert.ok(
-      entry.params.includes(ORG) && !entry.params.includes(OTHER),
-      `${entry.sql} must be scoped to the caller's organisation`,
+      !entry.params.includes(ORG),
+      `${entry.sql} must NOT filter the ceiling by organisation — that is the collision`,
     );
   }
+});
+
+test("a tenant with no jobs of its own does not collide with another tenant's", async () => {
+  /*
+   * The outage, reproduced. The caller's organisation holds nothing; another
+   * holds the ids immediately above the floor. Before the fix the ceiling was
+   * the floor and the allocator walked straight into rows it did not own.
+   */
+  const { db } = estate({ requests: [], foreign: series(1049, 1078) });
+  assert.equal(
+    await nextJobNumber(db, ORG),
+    1079,
+    "the first job of a new tenant must land above every id that already exists",
+  );
 });
 
 /* ── 2. The ordering is the numbers ───────────────────────────────────────── */

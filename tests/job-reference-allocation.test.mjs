@@ -127,14 +127,33 @@ test("the allocator's floor is taken over every table that holds a reference", a
     "only job entries in the bin carry an MN reference",
   );
 
-  /* Still per organisation, like the read it replaced. RE-POINTED only for the
-     parameter's NAME: the shared allocator takes `organisationId` where the
-     board-local one took `orgId`, because it now serves five callers and
-     "org" was the board route's shorthand. The count of three is the claim. */
+  /*
+   * RE-POINTED, AND REVERSED. This asserted all three ceiling reads were scoped
+   * to the organisation — which is what the read it replaced did, and what
+   * `c14ad76` did before that. It was wrong the whole time, and the assertion
+   * was holding the fault in place.
+   *
+   * `maintenance_requests.id` is `text("id").primaryKey()`: ONE namespace for
+   * every tenant. An organisation-scoped ceiling therefore answers a question
+   * the allocator is not asking. For a tenant holding no numbered job the
+   * ceiling collapsed to `JOB_REFERENCE_FLOOR` and the walk began at MN-1049 —
+   * inside ids another tenant owned.
+   *
+   * Measured on Staging: `org_…0001` holds MN-1049…MN-1078 and nobody else
+   * holds a numbered id, so a second tenant's submission walked all eight
+   * attempts into taken rows and failed with "Could not allocate a job id; too
+   * many simultaneous creates" — concurrency wording for a collision, behind a
+   * 503 the route swallowed unlogged. That tenant could not create its first
+   * job.
+   *
+   * The claim is now the opposite and the count is still three: no ceiling read
+   * may filter by organisation. `allocateSubmission` still writes every row
+   * under the caller's organisation — only the ceiling is global.
+   */
   assert.equal(
     (fn.match(/organisationId, organisationId\)/g) ?? []).length,
-    3,
-    "every one of the three reads stays scoped to the organisation",
+    0,
+    "no ceiling read may be organisation-scoped — the id it allocates is global",
   );
 });
 

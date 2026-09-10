@@ -439,7 +439,49 @@ export const MAX_ITEM_ID_ATTEMPTS = 8;
  * walking `base + attempt` past a taken id, and it is untouched. A bounded read
  * is a smaller read, not a reservation.
  */
+/**
+ * THE CEILING IS GLOBAL, BECAUSE THE ID IS GLOBAL. This read is deliberately
+ * not organisation-scoped, and that is a correction rather than an oversight.
+ *
+ * ── THE OUTAGE IT FIXES ───────────────────────────────────────────────────
+ *
+ * `maintenance_requests.id` is `text("id").primaryKey()` — one namespace for
+ * every tenant. The ceiling read filtered by organisation, so it answered "the
+ * highest id THIS organisation holds" and handed it to an allocator competing
+ * for a GLOBAL key. For a tenant with no numbered jobs of its own the ceiling
+ * fell to `JOB_REFERENCE_FLOOR` (1048) and the walk started at MN-1049 —
+ * straight into ids another tenant already owned.
+ *
+ * Measured on Staging, which is exactly that shape: `org_…0001` holds MN-1049
+ * through MN-1078 and no other organisation holds a numbered id at all. So a
+ * share-link submission for Demo Client walked MN-1049…MN-1056, found all eight
+ * taken, exhausted `MAX_ITEM_ID_ATTEMPTS` and answered
+ *
+ *     Error: Could not allocate a job id; too many simultaneous creates.
+ *
+ * — a message about concurrency for a failure that had nothing to do with it,
+ * behind a 503 the route was swallowing unlogged. An organisation could not
+ * create its FIRST job. Confirmed pre-existing: the deployment predating this
+ * batch's intake work fails identically, and `c14ad76` shows the same
+ * `eq(organisationId, orgId)` on the same read with the same 1048 default.
+ *
+ * ── WHY A GLOBAL READ IS THE RIGHT SHAPE AND NOT A LEAK ───────────────────
+ *
+ * It returns one integer: the largest numbered id in existence. No tenant's
+ * rows, columns or counts cross a boundary — and the number is already
+ * inferable from any id that tenant has ever been given, because the sequence
+ * is shared and visible. Set against that, scoping it produces collisions that
+ * stop a tenant working at all.
+ *
+ * Raising `MAX_ITEM_ID_ATTEMPTS` would not fix this. It would walk further past
+ * another tenant's rows on every insert, turning an O(1) allocation into a run
+ * of failing writes whose length grows with somebody else's history.
+ *
+ * `organisationId` is still taken, and still used by `allocateSubmission` for
+ * the rows it writes. Only the ceiling is global.
+ */
 export async function nextJobNumber(db: SubmissionDatabase, organisationId: string) {
+  void organisationId;
   const highest = (values: Array<{ reference: string | null }>) =>
     highestJobReference(values.map((row) => row.reference));
 
@@ -467,10 +509,8 @@ export async function nextJobNumber(db: SubmissionDatabase, organisationId: stri
       .select({ reference: maintenanceRequests.id })
       .from(maintenanceRequests)
       .where(
-        and(
-          eq(maintenanceRequests.organisationId, organisationId),
-          like(maintenanceRequests.id, "MN-%"),
-        ),
+        /* NOT organisation-scoped — see the note on this function. */
+        like(maintenanceRequests.id, "MN-%"),
       )
       .orderBy(sql`length(${maintenanceRequests.id}) desc`, desc(maintenanceRequests.id))
       .limit(limit),
@@ -481,10 +521,7 @@ export async function nextJobNumber(db: SubmissionDatabase, organisationId: stri
       .select({ reference: maintenanceGroupItems.requestId })
       .from(maintenanceGroupItems)
       .where(
-        and(
-          eq(maintenanceGroupItems.organisationId, organisationId),
-          like(maintenanceGroupItems.requestId, "MN-%"),
-        ),
+        like(maintenanceGroupItems.requestId, "MN-%"),
       )
       .orderBy(
         sql`length(${maintenanceGroupItems.requestId}) desc`,
@@ -499,7 +536,7 @@ export async function nextJobNumber(db: SubmissionDatabase, organisationId: stri
       .from(recycleBin)
       .where(
         and(
-          eq(recycleBin.organisationId, organisationId),
+          /* NOT organisation-scoped — see the note on this function. */
           eq(recycleBin.entityType, "job"),
           like(recycleBin.entityId, "MN-%"),
         ),
