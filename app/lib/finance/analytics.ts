@@ -176,9 +176,36 @@ export async function loadUnbilled(
       completedAt: sql<string>`max(${completed})`,
     })
     .from(invoiceJobAllocations)
-    .innerJoin(invoices, eq(invoices.id, invoiceJobAllocations.invoiceId))
-    .innerJoin(maintenanceRequests, eq(maintenanceRequests.id, invoiceJobAllocations.requestId))
-    .leftJoin(sites, eq(sites.id, maintenanceRequests.siteId))
+    .innerJoin(
+      invoices,
+      and(eq(invoices.id, invoiceJobAllocations.invoiceId), eq(invoices.organisationId, organisationId)),
+    )
+    /*
+     * EVERY JOIN CARRIES THE ORGANISATION, and these three did not.
+     *
+     * `invoice_job_allocations.request_id` and `invoices.site_id` are accepted
+     * as free text on write, so a caller who knows one id from another
+     * workspace can put it on their own row — and these joins then resolved it
+     * against the whole table. Proven: an org-1 admin's unbilled list came
+     * back carrying org 2's job title and completion date, and the Xero export
+     * carried org 2's site name. Ids here are human-readable (`store-woodgreen`,
+     * `MN-1356`), so this needs one guess, not a scrape.
+     *
+     * There is no RLS behind this — `CLAUDE.md` says so plainly — which makes
+     * the predicate in the join the entire boundary, not a second line of
+     * defence.
+     */
+    .innerJoin(
+      maintenanceRequests,
+      and(
+        eq(maintenanceRequests.id, invoiceJobAllocations.requestId),
+        eq(maintenanceRequests.organisationId, organisationId),
+      ),
+    )
+    .leftJoin(
+      sites,
+      and(eq(sites.id, maintenanceRequests.siteId), eq(sites.organisationId, organisationId)),
+    )
     .where(
       and(
         eq(invoiceJobAllocations.organisationId, organisationId),
@@ -194,6 +221,7 @@ export async function loadUnbilled(
          */
         sql`not exists (select 1 from ${invoiceJobAllocations} as billed
               join ${invoices} as sale on sale.id = billed.invoice_id
+               and sale.organisation_id = ${organisationId}
              where billed.request_id = ${invoiceJobAllocations.requestId}
                and billed.organisation_id = ${organisationId}
                and sale.direction = 'receivable'
@@ -244,7 +272,10 @@ export async function loadMarginInputs(
       invoiceCounterpartyName: invoices.counterpartyName,
     })
     .from(invoiceJobAllocations)
-    .innerJoin(invoices, eq(invoices.id, invoiceJobAllocations.invoiceId))
+    .innerJoin(
+      invoices,
+      and(eq(invoices.id, invoiceJobAllocations.invoiceId), eq(invoices.organisationId, organisationId)),
+    )
     .where(
       and(eq(invoiceJobAllocations.organisationId, organisationId), isNull(invoices.voidedAt)),
     );
@@ -278,8 +309,21 @@ export async function loadMarginInputs(
         requestedAt: requested,
       })
       .from(maintenanceRequests)
-      .leftJoin(sites, eq(sites.id, maintenanceRequests.siteId))
-      .leftJoin(contractors, eq(contractors.id, maintenanceRequests.contractorId))
+      /* Both org-scoped: the request is scoped below, but `site_id` and
+         `contractor_id` on it are ids this product does not enforce as foreign
+         keys, so an unscoped join resolves whatever row happens to carry that
+         id — including another workspace's. */
+      .leftJoin(
+        sites,
+        and(eq(sites.id, maintenanceRequests.siteId), eq(sites.organisationId, organisationId)),
+      )
+      .leftJoin(
+        contractors,
+        and(
+          eq(contractors.id, maintenanceRequests.contractorId),
+          eq(contractors.organisationId, organisationId),
+        ),
+      )
       .where(
         and(
           eq(maintenanceRequests.organisationId, organisationId),
@@ -344,7 +388,13 @@ export async function loadExportInvoices(
       siteName: sites.name,
     })
     .from(invoices)
-    .leftJoin(sites, eq(sites.id, invoices.siteId))
+    /* Org-scoped for the same reason as `loadUnbilled` above: `site_id` is
+       free text on the invoice, so an unscoped join resolves another
+       workspace's site name into this workspace's accounting export. */
+    .leftJoin(
+      sites,
+      and(eq(sites.id, invoices.siteId), eq(sites.organisationId, organisationId)),
+    )
     .where(and(...clauses));
 
   /*
@@ -364,7 +414,10 @@ export async function loadExportInvoices(
         .from(invoiceJobAllocations)
         .leftJoin(
           maintenanceRequests,
-          eq(maintenanceRequests.id, invoiceJobAllocations.requestId),
+          and(
+            eq(maintenanceRequests.id, invoiceJobAllocations.requestId),
+            eq(maintenanceRequests.organisationId, organisationId),
+          ),
         )
         .where(
           and(

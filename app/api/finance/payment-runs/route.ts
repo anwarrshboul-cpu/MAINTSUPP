@@ -69,6 +69,9 @@ export async function GET(request: Request) {
           eq(invoices.direction, "payable"),
           eq(invoices.status, "approved"),
           isNull(invoices.voidedAt),
+          /* Not already in a run. An invoice that is in one bank file has no
+             business being offered for a second. */
+          isNull(invoices.paymentRunId),
         ),
       );
 
@@ -118,7 +121,12 @@ export async function POST(request: Request) {
      * tick and the button an invoice can be voided, credited or paid.
      */
     const rows = await db
-      .select({ id: invoices.id, status: invoices.status, direction: invoices.direction })
+      .select({
+        id: invoices.id,
+        status: invoices.status,
+        direction: invoices.direction,
+        paymentRunId: invoices.paymentRunId,
+      })
       .from(invoices)
       .where(
         and(
@@ -136,6 +144,23 @@ export async function POST(request: Request) {
       return financeConflict(
         "Some of those are no longer approved payables, so the run was not created.",
         { rejected },
+      );
+    }
+
+    /*
+     * ALREADY IN A RUN. Checked separately from the line above so the message
+     * can say which of the two things went wrong — "no longer approved" and
+     * "already scheduled in another batch" call for different actions, and a
+     * reader who cannot tell them apart will simply try again.
+     */
+    const claimed = ids.filter((id) => {
+      const row = rows.find((candidate) => candidate.id === id);
+      return !!row?.paymentRunId;
+    });
+    if (claimed.length > 0) {
+      return financeConflict(
+        "Some of those are already in another payment run, so this one was not created.",
+        { claimed },
       );
     }
 
@@ -167,13 +192,23 @@ export async function POST(request: Request) {
     });
 
     /*
-     * The membership is the invoices' own `payment_run_id`… which they do not
-     * have. `payments.payment_run_id` links a PAYMENT to a run, and a run is
-     * created before any payment exists. So the batch is recorded in the audit
-     * detail and re-derived at export time from the same approved-and-unsettled
-     * test — which is also what keeps a run honest if an invoice is settled
-     * between creating it and exporting it.
+     * THE MEMBERSHIP, WRITTEN DOWN.
+     *
+     * This block used to explain that a run had no membership and that the
+     * export would re-derive it from the same approved-and-unsettled test —
+     * which kept a run honest if an invoice was settled in between, and also
+     * meant every run exported every other run's invoices. Proven: a run for
+     * one £10 invoice produced a two-row £1,210 file, and the next run
+     * re-included both. Two suppliers paid twice, by the ordinary path.
+     *
+     * So the invoices are claimed here, and the export reads the claim. The
+     * honesty the old comment was reaching for is kept by re-checking the
+     * BALANCE at export time rather than by re-deriving the membership.
      */
+    await db
+      .update(invoices)
+      .set({ paymentRunId: id, updatedAt: new Date().toISOString() })
+      .where(and(eq(invoices.organisationId, orgId), inArray(invoices.id, unsettled)));
     await recordAudit({
       db,
       organisationId: orgId,

@@ -5989,6 +5989,10 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
     ["created_by", "TEXT"],
     ["finalised_at", "TEXT"],
     ["finalised_by", "TEXT"],
+    /* §13 membership — see the column comment in `db/schema.ts`. Without it
+       the export re-derived its rows and re-sent invoices another run had
+       already put in a bank file. */
+    ["payment_run_id", "TEXT"],
     ["voided_at", "TEXT"],
     ["voided_by", "TEXT"],
     ["void_reason", "TEXT"],
@@ -6048,6 +6052,17 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
       .run();
   } catch (error) {
     console.warn("[init] attachments_invoice_idx skipped", error);
+  }
+
+  /* Its own try/catch AFTER the `addColumn` above, because
+     `CREATE INDEX IF NOT EXISTS` guards the INDEX and not the column: on a
+     database that predates `payment_run_id` this statement is what fails. */
+  try {
+    await d1
+      .prepare("CREATE INDEX IF NOT EXISTS invoices_payment_run_idx ON invoices(payment_run_id)")
+      .run();
+  } catch (error) {
+    console.warn("[init] invoices_payment_run_idx skipped", error);
   }
 
   await seedInvoiceStatusMap(d1);

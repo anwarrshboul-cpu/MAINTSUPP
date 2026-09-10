@@ -75,9 +75,22 @@ export async function POST(
     }
 
     /*
-     * RE-DERIVED rather than read from a stored membership list. An invoice
-     * that was settled or voided since the run was created must not appear in a
-     * file somebody is about to upload to a bank.
+     * THIS RUN'S OWN INVOICES, and only this run's.
+     *
+     * It used to re-derive the rows — "every approved or scheduled payable
+     * with a balance" — rather than read a membership, so every run exported
+     * every other run's invoices too. Proven: a run created for one £10
+     * invoice exported two rows totalling £1,210, and a second run created for
+     * one £1 invoice exported three, re-including both of the first run's.
+     * Upload both files as the product tells you to and two suppliers are paid
+     * twice. `scheduled` in that status list was what made it compound: the
+     * first export moved its invoices to `scheduled`, and the next export
+     * swept them straight back up.
+     *
+     * The membership is now `invoices.payment_run_id`, claimed when the run is
+     * created. What the old comment was right about is kept below: the BALANCE
+     * is re-read here, so an invoice settled, credited or voided since the run
+     * was created still cannot reach a bank file.
      */
     const approved = await db
       .select({
@@ -90,8 +103,7 @@ export async function POST(
       .where(
         and(
           eq(invoices.organisationId, orgId),
-          eq(invoices.direction, "payable"),
-          inArray(invoices.status, ["approved", "scheduled"]),
+          eq(invoices.paymentRunId, run.id),
           isNull(invoices.voidedAt),
         ),
       );

@@ -51,6 +51,7 @@ import {
   quoteStatusKey,
   type InvoiceDirection,
 } from "./model";
+import { invoiceBalances } from "./balance";
 import { paymentAllocationState } from "./rules";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -868,6 +869,47 @@ export async function createPayment(
         error:
           `${row.invoiceId} is a ${invoice.direction} invoice, which money ${input.direction} does not settle. `
           + `Money out settles payables; money in settles receivables.`,
+      };
+    }
+  }
+
+  /*
+   * NOTHING MAY BE PAID TWICE, OR PAID BEYOND WHAT IS OWED.
+   *
+   * There was no check here at all: a £10 invoice accepted a £100 payment and
+   * recorded `overpaidPence: 9000`. That is not merely untidy — a negative
+   * balance on a PAYABLE flips its sign in `signedForCashPosition`, so one
+   * mistyped payment turns money owed into money expected and §9's net cash
+   * position reads the wrong way round.
+   *
+   * The balance is read HERE, immediately before the insert, rather than
+   * trusted from whatever the browser last saw — between a reader opening the
+   * form and pressing the button the invoice can be credited, voided or paid
+   * by somebody else.
+   *
+   * `overpaidPence` still exists and is still reported, because an
+   * overpayment can arise honestly after the fact: a credit note raised
+   * against an invoice that was already settled leaves exactly that shape.
+   * Refusing to CREATE one is a different thing from refusing to SHOW one,
+   * and `rules.ts` is right that hiding it would be worse.
+   */
+  const outstanding = await invoiceBalances(db, organisationId, [...seen]);
+  for (const row of cleaned) {
+    const balancePence = outstanding.get(row.invoiceId)?.balancePence ?? 0;
+    if (balancePence <= 0) {
+      return {
+        ok: false,
+        error:
+          `${row.invoiceId} has nothing left outstanding, so this payment would be a `
+          + `second settlement of the same invoice.`,
+      };
+    }
+    if (row.amountPence > balancePence) {
+      return {
+        ok: false,
+        error:
+          `${pounds(row.amountPence)} allocated to ${row.invoiceId}, which has only `
+          + `${pounds(balancePence)} outstanding. Allocate at most what is owed.`,
       };
     }
   }

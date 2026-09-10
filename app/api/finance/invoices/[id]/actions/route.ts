@@ -97,7 +97,24 @@ const TARGET_STATUS: Record<Action, { payable: string | null; receivable: string
   approve: { payable: "approved", receivable: "sent" },
   reject: { payable: "query_raised", receivable: "disputed" },
   schedule: { payable: "scheduled", receivable: "sent" },
-  finalise: { payable: "approved", receivable: "issued" },
+  /*
+   * FINALISE DOES NOT APPROVE. It used to, and that was a hole straight
+   * through §13.
+   *
+   * Finalising means "the document is complete and every penny lands on a
+   * job" — it locks the accounting fields. It says nothing about whether
+   * anybody has AGREED to pay it. With `approved` as the target, one holder of
+   * `settings.edit` (which the built-in `admin` role has) could take a £1,200
+   * payable from `draft` to `approved` in a single call: no `canApprove`
+   * check, `approvals: []`, `approvalProgress {required: 2, held: 0}`, and the
+   * invoice immediately appeared as a payment-run candidate. The approver
+   * count, maker/checker and client sign-off were all defeated at once, and
+   * the only route that enforces them — `approve` — was simply not on the path.
+   *
+   * `under_review` is where a finalised payable belongs: ready to be approved,
+   * by the ladder, through the action that runs it.
+   */
+  finalise: { payable: "under_review", receivable: "issued" },
   void: { payable: "voided", receivable: "voided" },
   rematch: { payable: null, receivable: null },
   dispute: { payable: "disputed", receivable: "disputed" },
@@ -403,15 +420,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
+    /*
+     * Finalising must never move an invoice BACKWARDS either. An invoice that
+     * has already been approved, scheduled or paid keeps the status it earned;
+     * finalise only carries a draft forward to the review stage. So the target
+     * is applied when the invoice is still a draft, and is otherwise left
+     * exactly where the ladder put it.
+     */
+    const finaliseTarget = TARGET_STATUS.finalise[direction]!;
+    const nextStatus = from === "draft" ? finaliseTarget : from;
     await updateInvoice(scope.db, scope.orgId, id, {
       finalisedAt: now.toISOString(),
       finalisedBy: scope.identityEmail,
-      status: TARGET_STATUS.finalise[direction]!,
+      status: nextStatus,
     });
     await recordStatusChange(scope.db, scope.orgId, {
       invoiceId: id,
       fromStatus: from,
-      toStatus: TARGET_STATUS.finalise[direction]!,
+      toStatus: nextStatus,
       actorEmail: scope.identityEmail,
       actorUserId,
       reason: text(body.reason, 400) ?? "Finalised. The accounting fields are now immutable.",
@@ -429,7 +455,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       request,
     });
     return Response.json({
-      status: TARGET_STATUS.finalise[direction],
+      status: nextStatus,
       finalisedAt: now.toISOString(),
       allocation: state,
     });

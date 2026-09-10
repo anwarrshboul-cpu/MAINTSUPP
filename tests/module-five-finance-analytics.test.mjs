@@ -463,7 +463,48 @@ test("exporting a payment run is what schedules it", async () => {
   assert.match(source, /export async function POST/, "it is a POST, because it writes");
   assert.match(source, /status: "scheduled"/);
   assert.match(source, /if \(run\.status === "draft"\)/, "and a second export does not re-schedule");
-  /* The batch is re-derived, so an invoice settled since the run was built
-     cannot reach a bank file. */
-  assert.match(source, /inArray\(invoices\.status, \["approved", "scheduled"\]\)/);
+
+  /*
+   * THIS PIN USED TO PROTECT THE BUG IT WAS WRITTEN TO PREVENT.
+   *
+   * It asserted `inArray(invoices.status, ["approved", "scheduled"])` and
+   * called it "the batch is re-derived, so an invoice settled since the run
+   * was built cannot reach a bank file". Re-deriving did achieve that — and it
+   * also meant a run exported every OTHER run's invoices, because it never
+   * asked which invoices this run was for. Measured: a run created for one £10
+   * invoice exported two rows totalling £1,210, and a second run created for
+   * one £1 invoice exported three, re-including both of the first run's.
+   * `scheduled` in that list is what made it compound — the first export moved
+   * its invoices to `scheduled` and the next export swept them back up. Two
+   * suppliers paid twice, by the ordinary path, with no attacker involved.
+   *
+   * Re-pointed at the contract that replaced it: membership is claimed on the
+   * invoice when the run is created, and the export reads that claim. The
+   * property the old pin was protecting is kept by the balance re-read below,
+   * which is what actually keeps a settled invoice out of a bank file.
+   */
+  assert.match(
+    source,
+    /eq\(invoices\.paymentRunId, run\.id\)/,
+    "the export reads this run's own membership, not every approved payable",
+  );
+  assert.doesNotMatch(
+    source,
+    /inArray\(invoices\.status, \["approved", "scheduled"\]\)/,
+    "and never re-derives the batch from status again",
+  );
+  assert.match(
+    source,
+    /balancePence > 0/,
+    "an invoice settled since the run was built still cannot reach the file",
+  );
+
+  /* The claim is written where it can be enforced, and released when a draft
+     run is cancelled — a claim with no release would strand the invoices. */
+  const create = await read("app/api/finance/payment-runs/route.ts");
+  assert.match(create, /set\(\{ paymentRunId: id/, "creating a run claims its invoices");
+  assert.match(create, /isNull\(invoices\.paymentRunId\)/, "and a claimed invoice is not offered again");
+  const cancel = await read("app/api/finance/payment-runs/[id]/route.ts");
+  assert.match(cancel, /export async function DELETE/, "a draft run can be cancelled");
+  assert.match(cancel, /paymentRunId: null/, "which releases what it was holding");
 });

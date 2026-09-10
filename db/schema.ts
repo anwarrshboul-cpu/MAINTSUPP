@@ -758,6 +758,25 @@ export const invoices = sqliteTable(
     /** After this instant the accounting facts are immutable. §15.14. */
     finalisedAt: text("finalised_at"),
     finalisedBy: text("finalised_by"),
+    /*
+     * WHICH PAYMENT RUN THIS INVOICE BELONGS TO — the membership §13 needs and
+     * did not have.
+     *
+     * The export used to RE-DERIVE its rows ("every approved or scheduled
+     * payable with a balance") instead of reading a membership list, on the
+     * reasoning that re-deriving keeps a run honest if an invoice is settled
+     * between creating it and exporting it. It does — and it also puts every
+     * other run's invoices in the file. Proven: a run created for one £10
+     * invoice exported two rows totalling £1,210, and a second run created for
+     * one £1 invoice exported three, re-including both the first run had
+     * already sent to the bank. Upload both files as intended and two
+     * suppliers are paid twice.
+     *
+     * Holding it on the INVOICE rather than as a list on the run is what makes
+     * double membership impossible rather than merely unlikely: an invoice
+     * already carrying a run id cannot be picked up by the next one.
+     */
+    paymentRunId: text("payment_run_id"),
     voidedAt: text("voided_at"),
     voidedBy: text("voided_by"),
     voidReason: text("void_reason"),
