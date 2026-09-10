@@ -47,7 +47,7 @@
  * Everything after that point is one implementation, here.
  */
 
-import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, like, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   activityLog,
@@ -58,7 +58,13 @@ import {
   siteAliases,
   sites,
 } from "../../db/schema";
-import { jobReferenceNumber, nextJobReferenceNumber } from "./job-reference";
+import {
+  highestJobReference,
+  jobReferenceWindowInconclusive,
+  JOB_REFERENCE_RESCAN_WINDOW,
+  JOB_REFERENCE_WINDOW,
+  nextJobReferenceNumber,
+} from "./job-reference";
 import { listOptionValues } from "./options-repository";
 import { canonicalOptionValue, priorityRule } from "./priority-rules";
 import {
@@ -411,47 +417,96 @@ export const MAX_ITEM_ID_ATTEMPTS = 8;
  * means different things in each. Parsing in JS instead reuses
  * `jobReferenceNumber`, which is already strict, already tested, and already
  * the single definition of what a reference looks like.
+ *
+ * ── AND EACH READ IS BOUNDED ───────────────────────────────────────────────
+ *
+ * It was not. Each of the three fetched EVERY `MN-%` row it could see and threw
+ * all but one away — 339 rows locally, ~1,600 on production, on every single
+ * created job, through a pooler with a documented client cap, on a path that
+ * now includes the anonymous public intake at `/api/report-job`. The cost of
+ * raising a job grew with the number of jobs ever raised.
+ *
+ * Each read now asks the database to put the candidates in numeric order and
+ * returns the top `JOB_REFERENCE_WINDOW` of them, so the work per submission is
+ * constant. `job-reference.ts` carries the reasoning for the ordering
+ * expression, for the window rather than `LIMIT 1`, and for the size; the two
+ * properties it rests on are that the ordering agrees with the numbers, and
+ * that nothing in it can throw on a row of any shape.
+ *
+ * NOTHING ABOUT THE RACE CHANGED. This is still a MAX, still read outside any
+ * transaction, and still capable of handing the same number to two simultaneous
+ * submissions — `allocateSubmission` below is where that is made safe, by
+ * walking `base + attempt` past a taken id, and it is untouched. A bounded read
+ * is a smaller read, not a reservation.
  */
 export async function nextJobNumber(db: SubmissionDatabase, organisationId: string) {
-  const highest = (values: Array<{ reference: string | null }>) => {
-    let top: number | null = null;
-    for (const row of values) {
-      const number = jobReferenceNumber(row.reference);
-      if (number !== null && (top === null || number > top)) top = number;
-    }
-    return top;
+  const highest = (values: Array<{ reference: string | null }>) =>
+    highestJobReference(values.map((row) => row.reference));
+
+  /*
+   * One window, widened once if it came back full and carried no reference at
+   * all. See `jobReferenceWindowInconclusive` for why that single case is the
+   * one a bounded read may not answer from: every other result — a short
+   * window, or a full one with even one well-formed row in it — has already
+   * seen the maximum, because the rows arrive in descending numeric order.
+   *
+   * The widened read is the unbounded one this replaced. It has never fired on
+   * any estate measured, and it exists so that the bound can never be the
+   * reason a live reference is re-issued.
+   */
+  const windowed = async (
+    read: (limit: number) => Promise<Array<{ reference: string | null }>>,
+  ) => {
+    const rows = await read(JOB_REFERENCE_WINDOW);
+    if (!jobReferenceWindowInconclusive(rows.map((row) => row.reference))) return rows;
+    return read(JOB_REFERENCE_RESCAN_WINDOW);
   };
 
-  const requestRows = await db
-    .select({ reference: maintenanceRequests.id })
-    .from(maintenanceRequests)
-    .where(
-      and(
-        eq(maintenanceRequests.organisationId, organisationId),
-        like(maintenanceRequests.id, "MN-%"),
-      ),
-    );
+  const requestRows = await windowed((limit) =>
+    db
+      .select({ reference: maintenanceRequests.id })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.organisationId, organisationId),
+          like(maintenanceRequests.id, "MN-%"),
+        ),
+      )
+      .orderBy(sql`length(${maintenanceRequests.id}) desc`, desc(maintenanceRequests.id))
+      .limit(limit),
+  );
 
-  const placementRows = await db
-    .select({ reference: maintenanceGroupItems.requestId })
-    .from(maintenanceGroupItems)
-    .where(
-      and(
-        eq(maintenanceGroupItems.organisationId, organisationId),
-        like(maintenanceGroupItems.requestId, "MN-%"),
-      ),
-    );
+  const placementRows = await windowed((limit) =>
+    db
+      .select({ reference: maintenanceGroupItems.requestId })
+      .from(maintenanceGroupItems)
+      .where(
+        and(
+          eq(maintenanceGroupItems.organisationId, organisationId),
+          like(maintenanceGroupItems.requestId, "MN-%"),
+        ),
+      )
+      .orderBy(
+        sql`length(${maintenanceGroupItems.requestId}) desc`,
+        desc(maintenanceGroupItems.requestId),
+      )
+      .limit(limit),
+  );
 
-  const binRows = await db
-    .select({ reference: recycleBin.entityId })
-    .from(recycleBin)
-    .where(
-      and(
-        eq(recycleBin.organisationId, organisationId),
-        eq(recycleBin.entityType, "job"),
-        like(recycleBin.entityId, "MN-%"),
-      ),
-    );
+  const binRows = await windowed((limit) =>
+    db
+      .select({ reference: recycleBin.entityId })
+      .from(recycleBin)
+      .where(
+        and(
+          eq(recycleBin.organisationId, organisationId),
+          eq(recycleBin.entityType, "job"),
+          like(recycleBin.entityId, "MN-%"),
+        ),
+      )
+      .orderBy(sql`length(${recycleBin.entityId}) desc`, desc(recycleBin.entityId))
+      .limit(limit),
+  );
 
   /* The arithmetic lives in ./job-reference.ts so a test can RUN it; this
      function is only the three reads that feed it. */
