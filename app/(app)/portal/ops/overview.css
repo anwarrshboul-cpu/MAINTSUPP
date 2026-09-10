@@ -639,9 +639,24 @@ button.ovw-severity__segment:focus-visible {
   list-style: none;
 }
 
+/*
+ * THE ROW WRAPS, AND THE SUFFIX IS WHAT WRAPS.
+ *
+ * Measured at 375px: the row was 321px wide with a scrollWidth of 510, and the
+ * drill button ended up at x=537 against a 375px viewport — the page scrolled
+ * sideways, which §1.8 forbids at every breakpoint. The cause was
+ * `.ovw-ranked__suffix { flex: 0 0 auto }` around the Financial card's
+ * per-row facts, which are several figures wide and cannot shrink.
+ *
+ * The fix is the one §1.8 already prescribes for a wide table — the same
+ * fields, stacked. Below 768 the suffix takes a full row of its own UNDERNEATH
+ * the bar and the drill (`order: 3`, so it falls after the button that sits
+ * after it in the DOM); from 768 up it goes back beside them.
+ */
 .ovw-ranked__row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
@@ -747,7 +762,10 @@ button.ovw-ranked__hit:focus-visible {
 }
 
 .ovw-ranked__suffix {
-  flex: 0 0 auto;
+  /* Its own line beneath the bar on a phone — see `.ovw-ranked__row`. */
+  flex: 1 1 100%;
+  order: 3;
+  min-width: 0;
   font-size: 0.72rem;
   color: var(--ms-ink-muted);
   font-variant-numeric: tabular-nums;
@@ -1151,6 +1169,12 @@ button.ovw-ranked__hit:focus-visible {
 }
 
 @media (min-width: 768px) {
+  /* Back beside the bar once there is room for it. */
+  .ovw-ranked__suffix {
+    flex: 0 0 auto;
+    order: 0;
+  }
+
   /* The bar no longer has to be a touch target, so it stops being one. */
   .ovw-segbar__track {
     height: 26px;

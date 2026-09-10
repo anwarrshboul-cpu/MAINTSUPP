@@ -1287,6 +1287,29 @@ button.ops-meter__fill:focus-visible {
   outline-offset: 2px;
 }
 
+/*
+ * 44px ON TOUCH, 32px WITH A POINTER.
+ *
+ * §1.8 sets a 44px floor on tap targets, and `.ops-link` sat at 32 — measured
+ * with Chrome at 375px, seven of them on the Overview alone: "Show them",
+ * "View all stuck work", "Resolve names" and the rest. A twelve-pixel miss on a
+ * control whose whole job is to be the way out of a data-quality sentence.
+ *
+ * Raised only below 768, because the reason for the floor is a finger rather
+ * than a preference: at desktop widths a 32px inline link is the right density
+ * beside a 0.79rem label, and inflating every one of them would put a gap
+ * between a sentence and the action it belongs to.
+ *
+ * This is `ops.css`, so it applies to all four Operations pages. That is
+ * intended — the rule is about touch, and Compliance, Sites and Contractors are
+ * read on the same phones.
+ */
+@media (max-width: 767px) {
+  .ops-link {
+    min-height: 44px;
+  }
+}
+
 .ops-actions {
   display: flex;
   flex-wrap: wrap;
