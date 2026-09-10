@@ -38,7 +38,8 @@
  * spreadsheet and a form, so "In Progress" and "in  progress" are one status.
  */
 
-import { statusFamily } from "../../lib/job-metrics.ts";
+import { statusFamily, statusKey } from "../../lib/job-metrics.ts";
+import { COMPLETED_STAGE, completedStatuses } from "./dashboard-meters.ts";
 import type { MaintenanceRequest } from "../../lib/types";
 
 /** Trim, lower-case, collapse runs of whitespace. The shared normalisation. */
@@ -76,6 +77,41 @@ function priorityKey(value: string | null | undefined): string {
  */
 function isPlanned(request: MaintenanceRequest): boolean {
   return key(request.category).includes("compliance") || (request.tier ?? 0) >= 4;
+}
+
+/**
+ * CLOSED, BY THE AGGREGATE'S OWN VOCABULARY.
+ *
+ * `closedJobSql` is `stage = 'Completed' OR status IN completedStatuses`, and
+ * the drill has to agree with it exactly or the list is a different population
+ * from the figure that opened it. It cannot simply ask `statusFamily`: that
+ * falls back to `in_progress` for a label it does not know, so a job whose
+ * STAGE says completed but whose status label is unmapped is closed to the
+ * aggregate and open to the drill.
+ *
+ * Measured before this: the Pulse "urgent open" tile read 15 and the board it
+ * opened showed 20.
+ */
+const CLOSED_STATUS_KEYS = new Set(completedStatuses.map((label) => statusKey(label)));
+
+function isClosed(request: MaintenanceRequest): boolean {
+  if ((request.stage ?? "") === COMPLETED_STAGE) return true;
+  return CLOSED_STATUS_KEYS.has(statusKey(request.status));
+}
+
+/**
+ * The rows that count as work at all — `liveWorkOrderCondition`'s three
+ * exclusions, as far as a row in the browser can express them.
+ *
+ * The aggregates drop binned, archived and sub-item rows before counting
+ * anything; the drill dropped none of them. Of the 23 urgent non-completed
+ * jobs in one measured window, five were archived, which is most of the gap
+ * between a tile reading 15 and a board showing 20. The shell has already
+ * removed deleted rows by the time it hands the list over, so `archived` and
+ * the sub-item test are the two that still matter here.
+ */
+function countsAsWork(request: MaintenanceRequest): boolean {
+  return request.archived !== true && !request.parentId;
 }
 
 export type DrillChip = { key: string; label: string; value: string };
@@ -235,6 +271,10 @@ export function readDrillFilter(
     empty: false,
     chips,
     matches(request) {
+      /* Applied to EVERY drill, not only the stage axis: a figure counted with
+         archived and sub-item rows excluded must not open a list that puts
+         them back. */
+      if (!countsAsWork(request)) return false;
       if (statuses.size && !statuses.has(key(request.status))) return false;
       if (sites.size) {
         /* `__unassigned__` is the Overview's sentinel for a job whose site is
@@ -279,8 +319,12 @@ export function readDrillFilter(
            already reports in its own words; it must not also spray the
            browser console once per row. */
         const family = statusFamily(request.status, { warn: false });
-        const open = family !== "completed";
-        if (!families.has(family) && !(families.has("open") && open)) return false;
+        /* `open` is the AGGREGATE's closure test, not `family !== "completed"`
+           — see `isClosed`. The three named families keep the family model,
+           which is what they are for. */
+        if (!families.has(family) && !(families.has("open") && !isClosed(request))) {
+          return false;
+        }
       }
       if (window) {
         const axis = day(measure === "completed" ? request.completedAt : request.requestedAt);

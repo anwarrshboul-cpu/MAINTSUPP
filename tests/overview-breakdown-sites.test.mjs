@@ -205,10 +205,36 @@ test("the status detail is still reachable — View all statuses", async () => {
     /View all statuses/,
     "§5.2 moves the per-status detail behind this action; it may not simply vanish",
   );
+  /*
+   * RE-POINTED, and the reason matters more than the new pattern.
+   *
+   * This asserted `onDrill({ group: "status" })`. `group` was read by NOTHING:
+   * not by `readDrillFilter`, not by the board, and not even by `DRILL_KEYS` —
+   * so it was not merely inert, it survived the board's own "Clear" and sat in
+   * the address bar implying a grouping that was never applied. A pin on a
+   * parameter nobody reads protects a promise nobody keeps.
+   *
+   * "All statuses" IS this cohort, and the drill already carries the period
+   * and every page filter, so both links now send no extra parameter. The
+   * contract the old pin was really protecting is unchanged and is re-asserted
+   * below: `overview-glance.tsx` makes the identical call, so the two
+   * groupings still cannot drift apart.
+   */
   assert.match(
     breakdownCode,
-    /onDrill\(\{ group: "status" \}\)/,
-    "the same parameter At a glance uses, so the two groupings cannot drift apart",
+    /onClick=\{\(\) => onDrill\(\{\}\)\}/,
+    "the breakdown link sends the cohort itself, with no invented narrowing",
+  );
+  const glanceCode = await read("app/(app)/portal/ops/overview-glance.tsx");
+  assert.match(
+    glanceCode,
+    /onClick=\{\(\) => onDrill\(\{\}\)\}/,
+    "and At a glance makes the identical call, which is the property that pin held",
+  );
+  assert.doesNotMatch(
+    breakdownCode + glanceCode,
+    /group: "status"/,
+    "neither sends a parameter the board cannot read or clear",
   );
 });
 

@@ -108,7 +108,18 @@ const BASED_ON = "Based on jobs with a cost recorded.";
  * is the third row of that table and the reason this returns `undefined`
  * rather than an empty string.
  */
-export function costBanner(coverageShare: number): string | undefined {
+export function costBanner(coverageShare: number | null): string | undefined {
+  /*
+   * NULL IS "NOTHING TO COVER", AND IT GETS NO SENTENCE.
+   *
+   * A period holding no job at all has no coverage to report, and the amber
+   * arm below would otherwise read "Cost data covers 0% of jobs in this
+   * period" — a confident judgement about data that does not exist. §1.5 keeps
+   * zero, null and "no data" apart, and this is the null. The strip beneath
+   * still says what happened, because `coverageSentence` answers "nothing in
+   * this period" on a zero denominator rather than "0 of 0 recorded (0%)".
+   */
+  if (coverageShare === null) return undefined;
   if (coverageShare < 40) {
     return (
       `Cost data covers ${coverageShare}% of jobs in this period. ` +
@@ -252,7 +263,7 @@ function MoneyBreakdown({
 
 export function FinancialStatusCard({
   state,
-  measure,
+  measure: requestedMeasure,
   filterChips,
   onToggle,
   onDrill,
@@ -285,17 +296,39 @@ export function FinancialStatusCard({
   const [basis, setBasis] = useState<"period" | "annual">("period");
   const data = state.data;
 
+  /*
+   * THE COHORT'S VERB IS THE SERVER'S, NOT THE CONTROL'S.
+   *
+   * `/api/dashboard/cost` reads the axis out of the query string and nowhere
+   * else — `parseFilters` has no route to a stored per-user preference — while
+   * the page resolves `measure` by layering that preference over the URL. On a
+   * bare `/dashboard` with a saved axis of `completed` the two disagree, and
+   * this header asserted "N jobs completed in this period" over a cohort cut on
+   * `requested_at`. `CostPayload.measure` is the axis that was actually
+   * counted, so the sentence is drawn from it; the prop arrives as
+   * `requestedMeasure` and the local `measure` is what was APPLIED. The intent
+   * is still read, for the single render before a payload exists, and no cohort
+   * sentence is drawn in that render — see the two guards below.
+   */
+  const measure = data?.measure ?? requestedMeasure;
+
   if (state.error) {
     return (
       <section className="ops-card" id="ops-cost">
         <link rel="stylesheet" href={analysisCss} precedence="default" />
-        <CohortHeader
-          title="Financial status"
-          total={0}
-          measure={measure}
-          filterChips={filterChips}
-          subtitle={SPEND_SUBTITLE}
-        />
+        {/*
+          THE TITLE, WITHOUT THE COHORT LINE.
+
+          `CohortHeader` cannot draw one without the other, and what it would
+          have drawn here is "0 jobs requested in this period" — a zero this
+          card did not measure, over a verb the server never confirmed, beside
+          a `role="alert"` saying the query failed. §1.5's rule that a failure
+          must never look like a zero is exactly this case, and it is the shape
+          `JobBreakdownCard` and `SitesAttentionCard` already take.
+        */}
+        <h2 className="ovw-cohort__title" id="ovw-money-title">
+          Financial status
+        </h2>
         {/*
           §1.5 and §9.10 — a failure never looks like a zero. `ChartFrame` owns
           all three appearances, so the error here is the same `role="alert"`
@@ -313,13 +346,11 @@ export function FinancialStatusCard({
     return (
       <section className="ops-card" id="ops-cost">
         <link rel="stylesheet" href={analysisCss} precedence="default" />
-        <CohortHeader
-          title="Financial status"
-          total={0}
-          measure={measure}
-          filterChips={filterChips}
-          subtitle={SPEND_SUBTITLE}
-        />
+        {/* The same title-only header the error branch draws, and for the same
+            reason: a wait has no cohort and no axis to state either. */}
+        <h2 className="ovw-cohort__title" id="ovw-money-title">
+          Financial status
+        </h2>
         {/* Skeletons occupy the finished dimensions — §9.44, no layout shift. */}
         <SkeletonRow lines={4} height={96} />
         <SkeletonRow lines={3} height={220} />
@@ -335,10 +366,30 @@ export function FinancialStatusCard({
    * by the tile. `CoverageStrip` recomputes it identically from the same two
    * numbers, so the sentence and the paint cannot drift apart.
    */
-  const [coverageShare] = sharesOfRecorded([
+  const [derivedCoverage] = sharesOfRecorded([
     Math.max(0, data.costedJobs),
     Math.max(0, data.cohortTotal - data.costedJobs),
   ]);
+
+  /*
+   * NOTHING TO COVER IS NOT ZERO COVER.
+   *
+   * `sharesOfRecorded([0, 0])` is `[0, 0]` by design — a breakdown with nothing
+   * recorded still has to draw its legend, and `NaN` is not a legend. But a 0
+   * read as a COVERAGE percentage is a judgement, and on a period holding no
+   * job at all this card announced "Cost data covers 0% of jobs in this period.
+   * Treat these figures as indicative, not as portfolio spend." above a card
+   * with no figures on it whatsoever.
+   *
+   * Two guards rather than one, because either source can answer the question:
+   * `cohortTotal` is what this card's own derivation divides by, and
+   * `coveragePercent` is the server's own null for the same state. The
+   * derivation itself is untouched, so the banner's sentence and the strip's
+   * paint still come from one implementation over the same two numbers.
+   */
+  const coverageShare =
+    data.cohortTotal <= 0 || data.coveragePercent === null ? null : derivedCoverage;
+
   const banner = costBanner(coverageShare);
 
   const annual = basis === "annual" ? data.annual : null;
@@ -445,6 +496,15 @@ export function FinancialStatusCard({
       <link rel="stylesheet" href={analysisCss} precedence="default" />
 
       <CohortHeader
+        /*
+         * `ovw-money-title` is the id the page's jump bar scrolls to — SECTIONS
+         * in `overview-page.tsx` names it — and no element carried it, so
+         * `getElementById` returned null and the "Cost" button silently did
+         * nothing. The two loading shapes above carry the same id for the same
+         * reason: a jump target that exists only once the payload lands is a
+         * control that works intermittently.
+         */
+        id="ovw-money-title"
         title="Financial status"
         total={data.cohortTotal}
         measure={measure}

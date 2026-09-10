@@ -186,6 +186,53 @@ test("the stage axis filters, and `open` is not a synonym for in progress", () =
   assert.equal(chip.value, "open");
   assert.ok(DRILL_KEYS.includes("family"), "and Clear still strips it");
 });
+test("the drilled list is the same population the figure was counted over", () => {
+  /*
+   * Two ways the drill used to be WIDER than the tile that opened it. Measured
+   * on one estate at `period=90`: the Pulse "urgent open" figure read 15 and
+   * the board it opened showed 20.
+   *
+   * 1. ARCHIVED AND SUB-ITEM ROWS. `liveWorkOrderCondition` drops binned,
+   *    archived and sub-item rows before the aggregate counts anything; this
+   *    filter dropped none of them. Five of the 23 urgent non-completed jobs in
+   *    that window were archived.
+   *
+   * 2. TWO DIFFERENT DEFINITIONS OF CLOSED. `closedJobSql` is
+   *    `stage = 'Completed' OR status IN completedStatuses`, while `family`
+   *    reads `STATUS_FAMILY`, whose fallback for an unknown label is
+   *    `in_progress`. So a job whose STAGE says completed but whose status
+   *    label nobody has mapped was closed to the aggregate and open to the
+   *    drill.
+   */
+  const archived = job({ status: "In Progress", archived: true });
+  const subItem = job({ status: "In Progress", parentId: "MN-1" });
+  const live = job({ status: "In Progress" });
+
+  const open = q("family=open");
+  assert.equal(open.matches(live), true);
+  assert.equal(open.matches(archived), false, "an archived job is not in the cohort");
+  assert.equal(open.matches(subItem), false, "and neither is a sub-item");
+
+  /* The exclusion is not specific to the stage axis: any drill must open the
+     population its figure was counted over. */
+  const bySite = q("site=store-aldgate");
+  assert.equal(bySite.matches(live), true);
+  assert.equal(bySite.matches(archived), false, "every drill drops archived work");
+
+  /* Stage beats an unmapped label, exactly as `closedJobSql` has it. */
+  const stageClosed = job({ status: "Some Label Nobody Mapped", stage: "Completed" });
+  assert.equal(
+    open.matches(stageClosed),
+    false,
+    "a stage-completed job is closed however its status label is spelled",
+  );
+  assert.equal(
+    q("family=completed").matches(job({ status: "Job Completed" })),
+    true,
+    "and the named families still read the family model",
+  );
+});
+
 test("the period window matches the server's, end exclusive and one day of grace", async () => {
   /*
    * `resolveWindow`'s end is TOMORROW and exclusive, because a job raised an

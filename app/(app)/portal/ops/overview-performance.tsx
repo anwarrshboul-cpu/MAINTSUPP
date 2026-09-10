@@ -137,12 +137,12 @@ export function sampledValue(value: number | null, sample: number): number | nul
 
 export function PerformanceCard({
   state,
-  measure,
+  measure: requestedMeasure,
   filterChips,
   onToggle,
   onDrill,
   onSelectWindow,
-  splitByPriority,
+  splitByPriority: splitRequested,
   onToggleSplit,
 }: {
   state: {
@@ -172,6 +172,27 @@ export function PerformanceCard({
   const [tab, setTab] = useState<"close" | "sla">("close");
   const data = state.data;
   const loading = !data && !state.error;
+
+  /*
+   * BOTH OF THESE STATE WHAT THE SERVER DID, NOT WHAT THE PAGE ASKED FOR.
+   *
+   * `/api/dashboard/performance` reads the cohort axis and the split out of the
+   * QUERY STRING and nowhere else, while the page resolves each by layering a
+   * stored per-user preference over the URL. They agree whenever the URL
+   * carries the parameter and disagree whenever it does not — so a reader whose
+   * saved axis is `completed`, opening a bare `/dashboard`, read "N jobs
+   * completed in this period" above a cohort the server had cut on
+   * `requested_at`, and a saved split of `on` lit this card's toggle over
+   * buckets the server had never been asked to split.
+   *
+   * The payload states both facts about itself, so both come from it. The props
+   * arrive RENAMED — `requestedMeasure`, `splitRequested` — and the canonical
+   * names below are what was APPLIED; the intents are still read, for the single
+   * render before a payload exists, which is a render in which this card states
+   * neither — see the header below.
+   */
+  const measure = data?.measure ?? requestedMeasure;
+  const splitByPriority = data?.timeToClose.splitByPriority ?? splitRequested;
 
   /*
    * §1.1 — the header states the cohort it is counting. `PerformancePayload`
@@ -209,8 +230,28 @@ export function PerformanceCard({
     </div>
   );
 
-  const header = (
+  /*
+   * NO COHORT SENTENCE UNTIL THERE IS A COHORT.
+   *
+   * `CohortHeader` cannot draw a title without also drawing `cohortWording`,
+   * and before the payload lands both of its arguments are unknown: the total
+   * is a placeholder zero and the axis is the page's INTENT rather than
+   * anything the server has confirmed. "0 jobs requested in this period" over a
+   * request that is still in flight states two things nobody measured, and the
+   * verb is the defect this card was corrected for. So the wait draws the title
+   * and the tabs alone — the shape `JobBreakdownCard` and `SitesAttentionCard`
+   * already take, and for the reason they give: a wait must not look like a
+   * zero.
+   *
+   * `ovw-performance-title` is also the id the page's jump bar scrolls to, and
+   * until now NO element carried it, so `getElementById` returned null and the
+   * "Performance" button silently did nothing. It is on both shapes, because a
+   * jump target that only exists once a payload lands is a control that works
+   * intermittently.
+   */
+  const header = data ? (
     <CohortHeader
+      id="ovw-performance-title"
       title="Performance over time"
       total={cohortTotal}
       measure={measure}
@@ -218,6 +259,14 @@ export function PerformanceCard({
       subtitle={PERFORMANCE_SUBTITLE}
       action={tabs}
     />
+  ) : (
+    <header className="ovw-cohort" id="ovw-performance-title">
+      <div className="ovw-cohort__titles">
+        <h2 className="ovw-cohort__title">Performance over time</h2>
+        <p className="ovw-cohort__subtitle">{PERFORMANCE_SUBTITLE}</p>
+      </div>
+      <div className="ovw-cohort__action">{tabs}</div>
+    </header>
   );
 
   if (!data) {
@@ -291,6 +340,36 @@ export function PerformanceCard({
       ];
 
   const closeEmpty = closeLines.every((line) => line.values.every((value) => value === null));
+
+  /*
+   * WHICH KIND OF NULL THE HEADLINE IS — §4.3's floor, said out loud.
+   *
+   * The aggregate applies the same "fewer than three completed jobs is noise
+   * drawn as a trend" floor to the headline median and p90 that it applies to
+   * every bucket, so both come back null on a window that closed one or two
+   * jobs. An em dash on its own cannot distinguish that from a period in which
+   * nothing closed at all, and the two are different facts about coverage: one
+   * says the team completed no work, the other says the figure existed but was
+   * computed from a sample too small to describe anything. `sample` is the
+   * count the floor was applied to, so it is what tells the reader which.
+   */
+  const closeSampleNote =
+    close.sample >= MIN_SAMPLE
+      ? null
+      : close.sample === 0
+        ? "No job was completed in this period, so there is nothing to average."
+        : `${plural(close.sample, "completed job")} — too few to average.`;
+
+  /*
+   * And the same question one period back. A tile whose trend arrow is missing
+   * while its figure is present looks like a comparison that failed; it is
+   * usually the floor again, applied to the previous window. `previousSample`
+   * is the only thing on the wire that can say so.
+   */
+  const closeTrendNote =
+    close.sample >= MIN_SAMPLE && close.previousSample < MIN_SAMPLE
+      ? `The previous period closed ${plural(close.previousSample, "job")}, too few to compare against.`
+      : null;
 
   const timeToClosePanel = (
     <div className="ova-section" role="tabpanel" id="ova-panel-close" aria-labelledby="ova-tab-close">
@@ -394,7 +473,10 @@ export function PerformanceCard({
               : close.medianDays - close.previousMedianDays
           }
           previous={close.previousMedianDays}
-          footnote="A median, not a mean: one 200-day job would distort every bucket it landed in."
+          footnote={
+            closeSampleNote ??
+            "A median, not a mean: one 200-day job would distort every bucket it landed in."
+          }
         />
         <MetricTile
           label="p90 days to close"
@@ -406,7 +488,7 @@ export function PerformanceCard({
               : close.p90Days - close.previousP90Days
           }
           previous={close.previousP90Days}
-          footnote="Nine completed jobs in ten closed faster than this."
+          footnote={closeSampleNote ?? "Nine completed jobs in ten closed faster than this."}
         />
       </div>
 
@@ -418,10 +500,18 @@ export function PerformanceCard({
       */}
       <p className="ova-note">
         {plural(close.openExcluded, "job")} still open and not included.{" "}
+        {closeTrendNote ? `${closeTrendNote} ` : null}
         <button
           type="button"
           className="ops-link"
-          onClick={() => onDrill({ family: "in_progress" })}
+          /*
+           * `open`, not `in_progress`. The status model is completed /
+           * in_progress / attention, so a job needing attention is open too;
+           * `openExcluded` counts both, and drilling on `in_progress` alone
+           * would open a list shorter than the figure the reader just tapped.
+           * `family=open` is the drill filter's word for that union.
+           */
+          onClick={() => onDrill({ family: "open" })}
         >
           View the open work →
         </button>

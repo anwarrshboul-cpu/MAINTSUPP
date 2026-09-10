@@ -97,25 +97,59 @@ export function PulseRow({
       label: "Open",
       value: pulse.open.value,
       previous: pulse.open.previous,
-      onSelect: () => onDrill({ family: "in_progress" }),
+      /*
+       * `open`, not `in_progress`. The status model is completed / in_progress
+       * / attention, so a job needing attention is open too and `openJobSql`
+       * counts it — drilling on `in_progress` alone would hand the reader a
+       * list SHORTER than the figure they tapped, which is the same class of
+       * error as one that is wider, and harder to notice.
+       */
+      onSelect: () => onDrill({ family: "open" }),
       /* Days are days; counts are counts. Only the counts abbreviate. */
       accessible: null as string | null,
+      footnote: null as string | null,
     },
     {
       key: "urgent",
       label: "P1 / Urgent open",
       value: pulse.urgentOpen.value,
       previous: pulse.urgentOpen.previous,
-      onSelect: () => onDrill({ priority: "urgent" }),
+      /*
+       * TWO conditions, because the figure has two: the aggregate counts
+       * `openJobSql and urgentSql`. The priority alone opened a board holding
+       * every urgent job in the period INCLUDING the closed ones, which on this
+       * estate is most of them. A drill-through wider than the figure it came
+       * from is worse than none at all — the reader has no way to see that the
+       * two are different populations, so they read the longer list as the
+       * number they tapped and conclude the tile is under-counting.
+       */
+      onSelect: () => onDrill({ priority: "urgent", family: "open" }),
       accessible: null,
+      footnote: null,
     },
     {
       key: "oldest",
       label: "Oldest open",
       value: pulse.oldestOpenDays.value,
       previous: pulse.oldestOpenDays.previous,
+      /*
+       * THIS USED TO NAVIGATE TO AN ENTIRELY UNFILTERED BOARD.
+       *
+       * It sent `status: ""`, and `drill()` DELETES an empty value rather than
+       * setting it, so the parameter never arrived and the tile landed on every
+       * job in the estate under no chip at all — from a figure about the age of
+       * ONE job. The honest destination is the population the figure was
+       * measured over, which is the open work in this cohort.
+       *
+       * The job itself is not reachable from here. `pulse.oldestOpenDays`
+       * carries `reference`, which the aggregate fills from the job's human
+       * reference and falls back to its id, so it cannot be handed to
+       * `onOpenJob` — and `PulseRow` is not given `onOpenJob` in any case. See
+       * the report: an `oldestOpenId` beside the reference would let this tile
+       * open the job it is actually about.
+       */
       onSelect: pulse.oldestOpenDays.reference
-        ? () => onDrill({ status: "" })
+        ? () => onDrill({ family: "open" })
         : undefined,
       accessible:
         pulse.oldestOpenDays.value === null
@@ -123,6 +157,7 @@ export function PulseRow({
           : `${pulse.oldestOpenDays.value} days${
               pulse.oldestOpenDays.reference ? `, ${pulse.oldestOpenDays.reference}` : ""
             }`,
+      footnote: null,
     },
     {
       key: "incomplete",
@@ -131,6 +166,25 @@ export function PulseRow({
       previous: pulse.incompleteRecords.previous,
       onSelect: () => onOpenRecords("no_site"),
       accessible: null,
+      /*
+       * THE FIGURE AND THE LIST COUNT DIFFERENT THINGS, SO THE TILE SAYS SO.
+       *
+       * `incompleteRecordSql` is a five-way OR — no site, a blank or
+       * unrecognised priority, no engineer, no tier (null or zero), and a
+       * closed job with no cost — while `no_site` is the only records query
+       * that exists for any of them. A reader who taps a figure and is handed a
+       * visibly shorter list with no explanation does not conclude that the
+       * list is narrower; they conclude the page cannot count, and then they
+       * stop trusting the other three tiles as well.
+       *
+       * Naming the five gaps and the one the list opens turns a mismatch into a
+       * stated scope. The better fix is an `incomplete_records` records query
+       * covering all five, which lives in `app/lib/overview-aggregates.ts` and
+       * is written up in the report rather than worked around here.
+       */
+      footnote:
+        "Counts a missing site, priority, engineer or tier, or a closed job with no cost. " +
+        "Opens the jobs with no site.",
     },
   ];
 
@@ -149,6 +203,7 @@ export function PulseRow({
                     : formatCount(figure.value, abbreviate)
               }
               previous={figure.previous}
+              footnote={figure.footnote}
               onSelect={figure.onSelect}
               accessibleValue={
                 figure.accessible ??
@@ -189,7 +244,7 @@ function ageingReadout(meter: MetersPayload["meters"][number]): string | null {
 export function AtAGlanceCard({
   meters,
   stuck,
-  measure,
+  measure: requestedMeasure,
   filterChips,
   onToggle,
   onDrill,
@@ -207,6 +262,42 @@ export function AtAGlanceCard({
 }) {
   const abbreviate = useAbbreviatedNumbers();
   const data = meters.data;
+
+  /*
+   * THE VERB COMES OFF THE WIRE, NOT OFF THE CONTROL.
+   *
+   * `/api/dashboard/meters` resolves the cohort axis from the QUERY STRING and
+   * from nothing else: `parseFilters` has no way to reach a stored user
+   * preference. The page's resolved `measure` layers that preference over the
+   * URL, which makes it an INTENT rather than a measurement — and a reader
+   * whose saved axis is `completed`, arriving at a bare `/dashboard`, was shown
+   * "N jobs completed in this period" over a cohort the server had cut on
+   * `requested_at`. That is not a cosmetic mismatch; it is a wrong statement of
+   * fact about the data, asserted in the largest sentence on the card.
+   *
+   * `MetersPayload.measure` is the axis the server actually counted on, so
+   * every sentence describing this cohort is drawn from it. The prop arrives
+   * as `requestedMeasure` and the local `measure` is what was APPLIED — the
+   * rename is the whole distinction, and it puts the intent one identifier away
+   * from any sentence that would state it as a fact. The prop is still read,
+   * for the single render before a payload exists, and no cohort sentence is
+   * drawn in that render anyway: see the header below.
+   */
+  const measure = data?.measure ?? requestedMeasure;
+
+  /*
+   * THE CATCH-ALL'S DISPLAY NAME, WHICH IS DATA.
+   *
+   * The unmapped-status notice below said "count under Other" in so many
+   * words, but §2.1 makes `other` a permanent ROLE rather than a permanent
+   * name: an operator may relabel that meter in Settings, and a workspace that
+   * had done so read a sentence pointing at a tile no longer on its own page.
+   * `isCatchAll` is the field that knows which meter holds the role, and §2.1
+   * guarantees exactly one does; the fallback covers only the render before the
+   * payload lands, where the notice is not drawn anyway.
+   */
+  const catchAllLabel =
+    (data?.meters ?? []).find((meter) => meter.isCatchAll)?.label ?? "Other";
 
   /*
    * The bar carries EVERY meter, visible or not (§2.3). The tiles carry only
@@ -244,18 +335,49 @@ export function AtAGlanceCard({
 
   return (
     <section className="ops-card ovw-glance" aria-labelledby="ovw-glance-title">
-      <CohortHeader
-        id="ovw-glance-title"
-        title="At a glance"
-        total={data?.cohortTotal ?? 0}
-        measure={measure}
-        filterChips={filterChips}
-        action={
-          <button type="button" className="ops-link" onClick={() => onDrill({ group: "status" })}>
-            View all statuses →
-          </button>
-        }
-      />
+      {/*
+        NO COHORT SENTENCE UNTIL THERE IS A COHORT.
+
+        Before the payload lands there is no server measure and no total, and
+        `CohortHeader` has no way to draw a title without also drawing
+        `cohortWording`. Printing "0 jobs requested in this period" while the
+        request is still in flight states two things that are not known — the
+        figure and the verb — and the second of them is the whole defect this
+        card was rewritten to fix. So the wait draws the title alone, which is
+        what `JobBreakdownCard` and `SitesAttentionCard` already do and for the
+        same stated reason: a failure, and a wait, must never look like a zero.
+
+        The better shape is a `CohortHeader` that accepts a null measure and
+        omits the line itself, so the three cards that already suppress it stop
+        doing so by hand. Until it takes one, the suppression is the caller's.
+      */}
+      {data ? (
+        <CohortHeader
+          id="ovw-glance-title"
+          title="At a glance"
+          total={data.cohortTotal}
+          measure={measure}
+          filterChips={filterChips}
+          action={
+            /*
+             * `group` was read by NOTHING — not by `readDrillFilter`, not even
+             * by `DRILL_KEYS`, so a board "Clear" would not have stripped it —
+             * and this link never meant a filter in the first place. "All
+             * statuses" IS this cohort; the drill carries the page's period and
+             * filters, and the board groups by status on its own. Sending an
+             * inert parameter only implied a narrowing that was never going to
+             * happen.
+             */
+            <button type="button" className="ops-link" onClick={() => onDrill({})}>
+              View all statuses →
+            </button>
+          }
+        />
+      ) : (
+        <h2 className="ovw-cohort__title" id="ovw-glance-title">
+          At a glance
+        </h2>
+      )}
 
       {/*
         §1.1's footnote. Never imputed, and it links to the records so the gap
@@ -278,8 +400,8 @@ export function AtAGlanceCard({
         <p className="ovw-glance__unmapped" role="status">
           {data.unmappedStatuses.length} status
           {data.unmappedStatuses.length === 1 ? " is" : "es are"} not in this workspace&rsquo;s
-          status map and {data.unmappedStatuses.length === 1 ? "counts" : "count"} under Other:{" "}
-          {data.unmappedStatuses.join(", ")}.
+          status map and {data.unmappedStatuses.length === 1 ? "counts" : "count"} under{" "}
+          {catchAllLabel}: {data.unmappedStatuses.join(", ")}.
         </p>
       ) : null}
 
@@ -347,6 +469,15 @@ export function AtAGlanceCard({
 
       <StuckWork
         state={stuck}
+        /*
+         * The meter rows travel down because they are the only place the STATUS
+         * LABELS live — `/api/dashboard/stuck` reports the four waiting meters
+         * by key and count, and the board filters on labels. Both payloads are
+         * already on this card, so the link below can be built from real data
+         * rather than from a hard-coded list that would go stale the first time
+         * a workspace mapped a new status.
+         */
+        meters={data?.meters ?? []}
         onOpenJob={onOpenJob}
         onDrill={onDrill}
         onOpenRecords={onOpenRecords}
@@ -379,11 +510,14 @@ function stuckSentence(data: StuckPayload): string | null {
 
 function StuckWork({
   state,
+  meters,
   onOpenJob,
   onDrill,
   onOpenRecords,
 }: {
   state: QueryState<StuckPayload>;
+  /** Every meter the workspace has, for the status labels the link must send. */
+  meters: MetersPayload["meters"];
   onOpenJob: (id: string) => void;
   onDrill: (extra: Record<string, string>) => void;
   onOpenRecords: (query: string) => void;
@@ -391,15 +525,55 @@ function StuckWork({
   const data = state.data;
   const sentence = data ? stuckSentence(data) : null;
 
+  /*
+   * WHAT "VIEW ALL STUCK WORK" ACTUALLY SELECTS ON.
+   *
+   * This link sent `meter=waiting&sort=held`, and neither parameter did
+   * anything. In `board-drill-filter.ts` `meter` only NAMES the chip — the
+   * pipe-joined `status` list is what selects rows — and `sort` is read by
+   * nothing at all. So the board showed EVERY job in the period, closed ones
+   * included, under a chip reading "Meter waiting": a promise of a filtered
+   * list delivered as an unfiltered one, which is the worst shape a
+   * drill-through can take because the chip is the reader's evidence that it
+   * worked.
+   *
+   * The meter tiles above already do this correctly, and this is the same
+   * construction widened across the four waiting meters. `byMeter` names which
+   * meters the stuck endpoint is reporting on — it is `WAITING_METERS`, and
+   * reading it rather than restating it is what stops the two drifting — and
+   * each meter row carries the status labels that meter owns. Nothing here is
+   * hard-coded: a status mapped to "Waiting for parts" tomorrow is in this list
+   * tomorrow, with no code change, which is §9.9's requirement.
+   */
+  const waitingStatuses = useMemo(() => {
+    if (!data) return "";
+    const reported = new Set(data.byMeter.map((entry) => entry.key));
+    const labels = new Set<string>();
+    for (const meter of meters) {
+      if (!reported.has(meter.key)) continue;
+      for (const status of meter.statuses) {
+        if (status.trim()) labels.add(status);
+      }
+    }
+    return [...labels].join("|");
+  }, [data, meters]);
+
   return (
     <div className="ovw-stuck">
       <div className="ops-card__head ovw-stuck__head">
         <p className="ops-section-title">Where work is stuck</p>
-        {data && data.totalWaiting > 0 ? (
+        {/*
+          The link appears only when it can be made to filter. With no status
+          labels to send — a workspace whose meters have not been read yet, or
+          one whose waiting meters own no statuses — the honest thing is to draw
+          no control rather than one that lands on the whole board. The
+          sentence above and the six rows below still say what is stuck.
+        */}
+        {data && data.totalWaiting > 0 && waitingStatuses ? (
           <button
             type="button"
             className="ops-link"
-            onClick={() => onDrill({ meter: "waiting", sort: "held" })}
+            onClick={() => onDrill({ meter: "waiting", status: waitingStatuses })}
           >
             View all stuck work →
           </button>

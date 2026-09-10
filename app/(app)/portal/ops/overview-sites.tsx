@@ -239,7 +239,15 @@ function SiteRow({
             <button
               type="button"
               className="ovp-site__count ovp-touch"
-              onClick={() => onDrill({ site: site.siteId, family: "in_progress" })}
+              /*
+                `open`, not `in_progress`. §6.3's figure is the site's OPEN
+                count, and open means "not completed" — the status model is
+                completed / in_progress / attention, so a job needing attention
+                is open too. Drilling on `in_progress` alone opened a list
+                shorter than the number printed on the button, which is the one
+                thing a count that is itself a button may never do.
+              */
+              onClick={() => onDrill({ site: site.siteId, family: "open" })}
               aria-label={`View the ${site.openCount} open jobs at ${site.siteName}`}
             >
               {site.openCount}
@@ -317,7 +325,7 @@ function SiteRow({
 
 export function SitesAttentionCard({
   state,
-  measure,
+  measure: requestedMeasure,
   filterChips,
   onToggle,
   onDrill,
@@ -338,6 +346,22 @@ export function SitesAttentionCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const data = state.data;
+
+  /*
+   * THE VERB IS THE SERVER'S, NOT THE CONTROL'S.
+   *
+   * `/api/dashboard/sites-attention` resolves the cohort axis from the query
+   * string alone — `parseFilters` cannot see a stored per-user preference — so
+   * the page's resolved `measure` is what the reader ASKED for while
+   * `data.measure` is what was counted. On a bare `/dashboard` with a saved
+   * axis of `completed` the two differ, and this card described its rows as
+   * "the jobs completed in this period" over a cohort the server had cut on
+   * `requested_at`. The prop therefore arrives as `requestedMeasure` and the
+   * local `measure` is what was APPLIED; the intent is still read, for the
+   * single render before a payload exists, and this card draws no cohort
+   * sentence in that render.
+   */
+  const measure = data?.measure ?? requestedMeasure;
 
   if (state.error) {
     return (
@@ -470,12 +494,22 @@ export function SitesAttentionCard({
       {intake ? (
         <p className="ovw-breakdown__warning ovp-notice" role="note">
           {intake}
+          {/*
+            `sort: "newest"` used to travel here and was read by nothing at all
+            — not by `readDrillFilter`, not by the board — so the link promised
+            an ordering it could not deliver and landed on the unfiltered board
+            besides. The notice above is a claim about the age of the portfolio's
+            OPEN work, so the destination that lets a reader check it is that
+            same population, narrowed by the same period and filters this page
+            is already showing. The wording follows the destination rather than
+            the other way round.
+          */}
           <button
             type="button"
             className="ops-link ovp-touch"
-            onClick={() => onDrill({ sort: "newest" })}
+            onClick={() => onDrill({ family: "open" })}
           >
-            Jobs, newest first →
+            View the open work →
           </button>
         </p>
       ) : null}

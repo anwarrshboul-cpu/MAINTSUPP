@@ -219,8 +219,25 @@ export type CostPayload = {
   measure: CohortMeasure;
   cohortTotal: number;
   costedJobs: number;
-  /** Read first — §3.2. The banner threshold is decided from this. */
-  coveragePercent: number;
+  /**
+   * Read first — §3.2. The banner threshold is decided from this.
+   *
+   * NULL WHEN THERE IS NOTHING TO COVER, AND THAT IS NOT THE SAME AS 0%.
+   *
+   * `percentOf` answers 0 for a zero denominator, so a period holding no job
+   * at all returned `cohortTotal: 0, costedJobs: 0, coveragePercent: 0` and the
+   * card fired §3.2's amber banner: "Cost data covers 0% of jobs in this
+   * period. Treat these figures as indicative, not as portfolio spend." That is
+   * a "no data" state rendered as a confident statement about bad data, which
+   * is precisely what §1.5 separates — zero, null and "no data" are three
+   * different things. Reproducible on
+   * `?period=custom&from=2020-01-01&to=2020-03-31`.
+   *
+   * The rest of this payload already knows how to say "unknown":
+   * `medianCostPence` and `largest` are both nullable for the same reason. Only
+   * this field was typed so that it could not.
+   */
+  coveragePercent: number | null;
   totalSpendPence: number;
   medianCostPence: number | null;
   largest: { id: string; reference: string | null; title: string; spendPence: number } | null;
@@ -290,6 +307,23 @@ export type PerformancePayload = {
     p90Days: number | null;
     previousMedianDays: number | null;
     previousP90Days: number | null;
+    /**
+     * THE COMPLETED JOBS THE HEADLINE WAS COMPUTED FROM, AND ITS PREVIOUS TWIN.
+     *
+     * §4.3's floor — "a median of fewer than three jobs is noise drawn as a
+     * trend" — was applied to the BUCKETS and not to the headline above them,
+     * so a window holding a single completed job reported a median and a
+     * ninetieth percentile that were both that one job's age. The aggregate now
+     * applies the same floor to the headline, which makes `medianDays` and
+     * `p90Days` null under three.
+     *
+     * These two counts are what let the card say WHICH null it is. "No job was
+     * completed in this period" and "1 completed job — too few to average" are
+     * different facts about coverage, and an em dash with nothing beside it
+     * states neither: it reads as a figure that failed to load.
+     */
+    sample: number;
+    previousSample: number;
     splitByPriority: boolean;
   };
   sla: {

@@ -872,11 +872,26 @@ test("every chart element both cross-filters and drills through", async () => {
    * the cohort axis and every active filter travel with it. Asserting the
    * builder rather than one call shape is what makes this true for the next
    * card as well as these five.
+   *
+   * RE-POINTED AGAIN, from `window.location.search` to `search`, because the
+   * address bar turned out NOT to hold the page's whole state. Every
+   * `/api/dashboard/*` route reads its axis from the query string, and a
+   * stored `measure` preference never appeared there — so a drill built from
+   * `window.location.search` carried an axis the cards had not been counted
+   * on. `search` is the URL merged with the stored axis, i.e. exactly what
+   * the six aggregates were fetched with, so this asserts something STRONGER
+   * than it did: the list opens on the cohort the figure was counted over,
+   * not merely on the same address.
    */
   assert.match(
     page,
-    /const next = new URLSearchParams\(window\.location\.search\);\s*\n\s*for \(const \[key, value\] of Object\.entries\(extra\)\)/,
+    /const next = new URLSearchParams\(search\);\s*\n\s*for \(const \[key, value\] of Object\.entries\(extra\)\)/,
     "drilling carries the page's own filter state across to the job list",
+  );
+  assert.match(
+    page,
+    /if \(!next\.has\("measure"\) && stored\.measure\) next\.set\("measure", stored\.measure\)/,
+    "and that state includes a stored axis the address bar never showed",
   );
   // And tapping the same bucket twice clears it, which is what makes exploring
   // reversible rather than a one-way door.

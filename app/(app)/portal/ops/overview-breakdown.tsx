@@ -363,9 +363,9 @@ function PrioritySection({
 
 export function JobBreakdownCard({
   state,
-  measure,
+  measure: requestedMeasure,
   filterChips,
-  splitByPriority,
+  splitByPriority: splitRequested,
   onToggleSplit,
   onToggle,
   onDrill,
@@ -381,6 +381,28 @@ export function JobBreakdownCard({
   onOpenRecords: (query: string) => void;
 }) {
   const data = state.data;
+
+  /*
+   * BOTH OF THESE DESCRIBE WHAT THE SERVER DID, NOT WHAT THE PAGE ASKED FOR.
+   *
+   * `/api/dashboard/job-breakdown` reads the cohort axis and the split out of
+   * the QUERY STRING and nowhere else, while the page resolves both by layering
+   * a stored per-user preference over the URL. The two agree whenever the URL
+   * carries the parameter and disagree whenever it does not — so a reader whose
+   * saved axis is `completed` was shown "N jobs completed in this period" over
+   * a cohort cut on `requested_at`, and a saved split of `on` lit the toggle
+   * over buckets the server had never split.
+   *
+   * The payload states both facts about itself, so both are read from it. The
+   * props arrive RENAMED — `requestedMeasure`, `splitRequested` — and the two
+   * canonical names below are what was APPLIED; the rename is the whole
+   * distinction, and it keeps the intent one identifier away from anything that
+   * would state it as a fact. They are still read, for the single render before
+   * a payload exists, which this card spends drawing its title and a skeleton
+   * and nothing else — see the two guards below.
+   */
+  const measure = data?.measure ?? requestedMeasure;
+  const splitByPriority = data?.splitByPriority ?? splitRequested;
 
   /*
    * LOADING, ERROR AND EMPTY ARE THREE PICTURES — §1.5 and §9.10.
@@ -465,13 +487,21 @@ export function JobBreakdownCard({
           /*
            * §5.2 deleted the Status block; this is where its detail went. The
            * Jobs list grouped by status is the same grouping At a glance's
-           * "View all statuses →" opens, and it is deliberately the same
-           * parameter so the two cannot drift apart.
+           * "View all statuses →" opens, and it is deliberately the same drill
+           * so the two cannot drift apart.
+           *
+           * It used to send `group: "status"`, which was read by NOTHING — not
+           * by `readDrillFilter`, and not even by `DRILL_KEYS`, so a board
+           * "Clear" would have left it in the address bar. The link never meant
+           * a filter: "all statuses" IS this cohort, and the drill already
+           * carries the period and every page filter. An inert parameter only
+           * implied a narrowing that was never going to happen, so it is gone
+           * rather than left as decoration.
            */
           <button
             type="button"
             className="ops-link ovp-touch"
-            onClick={() => onDrill({ group: "status" })}
+            onClick={() => onDrill({})}
           >
             View all statuses →
           </button>

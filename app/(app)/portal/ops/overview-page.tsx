@@ -161,7 +161,45 @@ export function OverviewPage({
   onNavigateToCompliance: () => void;
   onNavigateToSites: (query: string) => void;
 }) {
-  const { params, setParams, search } = useQueryState();
+  const { params, setParams, search: urlSearch } = useQueryState();
+  const preferences = useOpsQuery<PreferencesPayload>("/api/dashboard/preferences", "");
+
+  /*
+   * THE SEARCH THE AGGREGATES ACTUALLY GET — the URL, plus the stored axis
+   * when the URL is silent about it.
+   *
+   * Every `/api/dashboard/*` route resolves the axis through `parseFilters`,
+   * which reads the QUERY STRING and has no route to a per-user preference. So
+   * a saved axis of `completed` reached the CONTROL and never reached a single
+   * aggregate: the select read "Date completed" while all six cards counted on
+   * `requested_at`. Making each card state what its own payload measured
+   * stopped them asserting something false — but it left the control
+   * contradicting the page it controls, which is a smaller lie rather than
+   * none.
+   *
+   * Merging it into the search the FETCHES use is what makes a stored
+   * preference behave the way `app/api/dashboard/preferences/route.ts`
+   * documents it: "a stored preference SEEDS the page". The URL still wins
+   * whenever it says anything, so a shared link means the same thing to
+   * everyone who opens it — which is the property the note that used to stand
+   * here was protecting when it refused to write the preference INTO the
+   * address bar. Nothing is written to the address bar now either.
+   *
+   * The cost is one refetch for a reader whose saved axis is not the default:
+   * the preference arrives from its own request, so the first render fetches
+   * on the URL alone. Nobody who has never changed the setting pays it.
+   */
+  const search = useMemo(() => {
+    const stored = preferences.data;
+    if (!stored) return urlSearch;
+    const next = new URLSearchParams(urlSearch);
+    if (!next.has("measure") && stored.measure) next.set("measure", stored.measure);
+    if (!next.has("split") && stored.split) next.set("split", stored.split);
+    const merged = next.toString();
+    /* Returned unchanged when nothing was added, so the six queries below keep
+       the same key and do not refetch for a reader on the defaults. */
+    return merged === urlSearch ? urlSearch : merged;
+  }, [urlSearch, preferences.data]);
 
   /*
    * ONE ROUND TRIP PER CARD — §1.6. Seven cards, seven aggregates, and the
@@ -175,7 +213,6 @@ export function OverviewPage({
   const breakdown = useOpsQuery<BreakdownPayload>("/api/dashboard/job-breakdown", search);
   const attention = useOpsQuery<SitesAttentionPayload>("/api/dashboard/sites-attention", search);
   const options = useOpsQuery<FiltersPayload>("/api/dashboard/filters", "");
-  const preferences = useOpsQuery<PreferencesPayload>("/api/dashboard/preferences", "");
 
   /*
    * THE AXIS: the URL first, the stored preference second, the default last.
@@ -184,6 +221,28 @@ export function OverviewPage({
    * a fetch would mean a link copied a second after the page opened carried a
    * parameter the sender never chose, and it would need a setState in an effect
    * to do it — which the React Compiler rejects and which costs a render pass.
+   *
+   * ── THIS IS AN INTENT. IT IS NOT A MEASUREMENT. ───────────────────────────
+   *
+   * Every `/api/dashboard/*` route resolves the axis through `parseFilters`,
+   * which reads the QUERY STRING and has no route to a stored per-user
+   * preference. So the middle arm of this expression — the preference — reaches
+   * the CONTROL below and never reaches the aggregate: a reader whose saved
+   * axis is `completed`, arriving at a bare `/dashboard`, gets a cohort the
+   * server cut on `requested_at`.
+   *
+   * Printing `cohortWording(measure, total)` over that was a wrong statement of
+   * fact about the data, in the largest sentence on every card. Each card now
+   * takes its wording from the `measure` field ITS OWN payload returned, and
+   * none of them draws a cohort sentence before that payload exists. This value
+   * is what the reader has asked for and what the next fetch will carry once it
+   * reaches the URL; it no longer describes a figure anywhere.
+   *
+   * The remaining seam is visible rather than hidden: with a saved preference
+   * and a bare URL the control below reads "Date completed" while the cards
+   * read "requested". Closing it means making the preference reach the server —
+   * either by sending it with the fetch or by seeding the URL from it — and
+   * both are written up in the report rather than decided here.
    */
   const measure: CohortMeasure =
     params.get("measure") === "completed"
@@ -241,21 +300,54 @@ export function OverviewPage({
 
   /**
    * Through to the Jobs list, carrying this page's whole state plus whatever
-   * the caller adds. The board does not yet read every one of these parameters;
-   * what it does not read is inert rather than misleading — it is visible in
-   * the address bar, which is where a reader can see exactly what was asked
-   * for.
+   * the caller adds.
+   *
+   * "What the board does not read is inert rather than misleading" used to
+   * stand here as the licence for sending anything. It was wrong twice over.
+   * `readDrillFilter` draws its CHIPS from the same parameters it filters on,
+   * so an unread parameter that happens to be `meter` names a chip over an
+   * unfiltered board — the reader is shown evidence that a narrowing happened
+   * when none did. And a parameter outside `DRILL_KEYS` — `group`, `sort` —
+   * survives the board's own Clear, so it is not even inert in the address bar.
+   *
+   * Every caller on this page now sends parameters the filter actually reads,
+   * or sends none and means the whole cohort. An empty value is still deleted
+   * rather than set, which is why `status: ""` silently produced an unfiltered
+   * board from the Pulse row until it was corrected.
    */
   const drill = useCallback(
     (extra: Record<string, string>) => {
-      const next = new URLSearchParams(window.location.search);
+      /* The EFFECTIVE search, not `window.location.search`: a drill has to
+         carry the axis the figures were counted on, and that is not always in
+         the address bar — see the `search` memo above. */
+      const next = new URLSearchParams(search);
       for (const [key, value] of Object.entries(extra)) {
         if (!value) next.delete(key);
         else next.set(key, value);
       }
+      /*
+       * THE DEFAULT PERIOD HAS TO BE MADE EXPLICIT ON THE WAY OUT.
+       *
+       * `PeriodControl` reads `params.get("period") ?? DEFAULT_PERIOD_KEY`, and
+       * the default is deliberately never written into this page's address bar
+       * because a URL full of parameters nobody chose teaches people to stop
+       * copying it. A drill-through is not this page's URL though — it is a
+       * FILTER — and `resolveDays("")` in `board-drill-filter.ts` produces no
+       * window at all from an absent period, so a drill from an untouched
+       * Overview handed the board the whole history beneath a figure that had
+       * been counted over ninety days. Measured on this estate: "P1 / Urgent
+       * open" reads 15 and the board opened 20 rows.
+       *
+       * AFTER the loop, so a caller that sets its own window wins: the spend
+       * trend drills with `period: "custom"` and two dates, and defaulting
+       * before the loop would have been overwritten anyway while defaulting a
+       * caller-supplied empty period would not. Anything the reader chose is
+       * already in `next` and is left exactly as it is.
+       */
+      if (!next.get("period")) next.set("period", DEFAULT_PERIOD_KEY);
       onNavigateToJobs(next.toString());
     },
-    [onNavigateToJobs],
+    [onNavigateToJobs, search],
   );
 
   /** Persisted per user, and reflected in the URL so the current view is linkable. */
@@ -275,11 +367,24 @@ export function OverviewPage({
     [savePreference, setFilterParams],
   );
 
+  /*
+   * THE TOGGLE FLIPS WHAT IS ON SCREEN, WHICH IS WHAT THE URL SAYS.
+   *
+   * It used to flip `splitByPriority` — the preference-resolved intent — while
+   * the cards drew, and now report, the split the SERVER performed, which comes
+   * from the query string alone. With a saved preference of `on` and a bare
+   * URL the two disagreed, so the first tap computed `!true` and wrote
+   * `split=off` over a page that was already unsplit: a control that visibly
+   * did nothing until it was pressed twice.
+   *
+   * Reading the parameter here is the same expression the routes evaluate, so
+   * the flip is always against the state the reader can see.
+   */
   const toggleSplit = useCallback(() => {
-    const next = !splitByPriority;
+    const next = new URLSearchParams(window.location.search).get("split") !== "priority";
     setFilterParams((params_) => params_.set("split", next ? "priority" : "off"));
     savePreference({ split: next ? "on" : "off" });
-  }, [savePreference, setFilterParams, splitByPriority]);
+  }, [savePreference, setFilterParams]);
 
   /* ── The filter bar ────────────────────────────────────────────────────── */
 
