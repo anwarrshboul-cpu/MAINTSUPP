@@ -611,6 +611,22 @@ export const plannedMaintenance = sqliteTable(
   ],
 );
 
+/**
+ * A QUOTE, AS A FIRST-CLASS RECORD.
+ *
+ * Module 5 §3: "Track them as first-class records, not as attachments on a
+ * job." The nine columns above the fold are what this table has always had and
+ * what `app/lib/reporting/engine.ts` already reads; everything below them is
+ * Module 5's, added rather than duplicated into a second `quotes` table.
+ *
+ * `request_id` is NOT NULL and always was, which is exactly the rule §3 asks
+ * for — "Linked job: Required — a quote with no job is an orphan."
+ *
+ * `amount` is the legacy REAL. New code writes `net_pence` / `vat_pence` /
+ * `gross_pence` and reads nothing else; the old column is kept because a
+ * migration that drops a column is not one this bootstrap can perform, and
+ * `engine.ts` still selects it.
+ */
 export const quotations = sqliteTable(
   "quotations",
   {
@@ -623,13 +639,67 @@ export const quotations = sqliteTable(
     attachmentId: text("attachment_id"),
     submittedAt: text("submitted_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     approvedAt: text("approved_at"),
+
+    /* ── Module 5 §3 ──────────────────────────────────────────────────────── */
+    /** `QT-YYYY-NNN`, allocated by `app/lib/finance/references.ts`. */
+    internalRef: text("internal_ref"),
+    /** The supplier's own reference, as printed on their document. */
+    supplierRef: text("supplier_ref"),
+    /** Inherited from the job, overridable — §3. */
+    siteId: text("site_id"),
+    description: text("description"),
+    netPence: integer("net_pence"),
+    vatPence: integer("vat_pence"),
+    grossPence: integer("gross_pence"),
+    quoteDate: text("quote_date"),
+    /** Expiry drives the reminder seven days out. §3. */
+    validUntil: text("valid_until"),
+    approvedBy: text("approved_by"),
+    /** Required to move to Rejected. §3. */
+    rejectedReason: text("rejected_reason"),
+    rejectedBy: text("rejected_by"),
+    rejectedAt: text("rejected_at"),
+    clientApprovalRequired: integer("client_approval_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    clientApprovedBy: text("client_approved_by"),
+    clientApprovedAt: text("client_approved_at"),
+    poNumber: text("po_number"),
+    /** Set when another quote on the same job was approved instead. */
+    supersededById: text("superseded_by_id"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at"),
+    updatedAt: text("updated_at"),
   },
   (table) => [
     index("quotations_organisation_idx").on(table.organisationId),
     index("quotations_request_idx").on(table.requestId),
+    index("quotations_expiry_idx").on(table.organisationId, table.validUntil),
   ],
 );
 
+/**
+ * THE LEDGER — one row per invoice, either direction. Module 5 §4.
+ *
+ * The reasoning for extending this table rather than creating a new one is at
+ * the head of the Module 5 block further down this file. Three columns here are
+ * legacy and are deliberately left where they are:
+ *
+ *   · `amount` REAL — superseded by `net_pence` / `vat_pence` / `gross_pence`.
+ *     Never read by the finance module.
+ *   · `paid_at` — superseded by `payments` + `payment_alloc`. §6 is explicit
+ *     that one invoice can take several payments, which a single timestamp
+ *     cannot express, so nothing computes settlement from this column.
+ *   · `request_id` NOT NULL — the invoice's PRIMARY job. Multi-job invoices
+ *     put every share in `invoice_job_alloc`, including the primary one, and
+ *     `app/lib/finance/allocations.ts` reconciles against that table alone.
+ *     The column stays because it is NOT NULL and this bootstrap performs no
+ *     destructive ALTER; it is maintained as a mirror of the first allocation.
+ *
+ * `due_at` IS the due date. §4 names the field `due_date`; the column that was
+ * already here holds exactly that, so it is reused. Two columns for one
+ * contractual date is the same class of drift as a stored balance.
+ */
 export const invoices = sqliteTable(
   "invoices",
   {
@@ -644,10 +714,62 @@ export const invoices = sqliteTable(
     paidAt: text("paid_at"),
     attachmentId: text("attachment_id"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+
+    /* ── Module 5 §4 ──────────────────────────────────────────────────────── */
+    /** payable | receivable — the one field that makes this table serve both sides. */
+    direction: text("direction").notNull().default("payable"),
+    /** `AP-YYYY-NNN` or `AR-YYYY-NNN`, allocated by `app/lib/finance/references.ts`. */
+    internalRef: text("internal_ref"),
+    /** contractor | client */
+    counterpartyType: text("counterparty_type"),
+    /** A `contractors.id` on a payable, an `organisations.id` on a receivable. */
+    counterpartyId: text("counterparty_id"),
+    counterpartyName: text("counterparty_name"),
+    /** The supplier's department or contact — payable only. */
+    fromDepartment: text("from_department"),
+    /** The client department or cost centre — receivable only. */
+    toDepartment: text("to_department"),
+    faoContact: text("fao_contact"),
+    quoteId: text("quote_id"),
+    poNumber: text("po_number"),
+    siteId: text("site_id"),
+    invoiceDate: text("invoice_date"),
+    /** When it landed with us — payable only. */
+    receivedDate: text("received_date"),
+    /** When it went to the client — receivable only. */
+    sentDate: text("sent_date"),
+    paymentTermsDays: integer("payment_terms_days"),
+    netPence: integer("net_pence"),
+    vatPence: integer("vat_pence"),
+    grossPence: integer("gross_pence"),
+    currency: text("currency").notNull().default("GBP"),
+    costCentre: text("cost_centre"),
+    category: text("category"),
+    notes: text("notes"),
+    /** §15.5 — a percentage held back on project work until sign-off. */
+    retentionPence: integer("retention_pence"),
+    retentionReleaseDate: text("retention_release_date"),
+    retentionReleasedAt: text("retention_released_at"),
+    /** manual | email | csv | module4 | recurring */
+    source: text("source").notNull().default("manual"),
+    /** The `service_invoices.id` this receivable was raised from. §12. */
+    serviceInvoiceId: text("service_invoice_id"),
+    createdBy: text("created_by"),
+    /** After this instant the accounting facts are immutable. §15.14. */
+    finalisedAt: text("finalised_at"),
+    finalisedBy: text("finalised_by"),
+    voidedAt: text("voided_at"),
+    voidedBy: text("voided_by"),
+    voidReason: text("void_reason"),
+    updatedAt: text("updated_at"),
   },
   (table) => [
     index("invoices_organisation_idx").on(table.organisationId),
     index("invoices_request_idx").on(table.requestId),
+    /* §14 names these three by hand. */
+    index("invoices_due_status_idx").on(table.dueAt, table.status),
+    index("invoices_direction_status_idx").on(table.direction, table.status),
+    index("invoices_counterparty_idx").on(table.organisationId, table.counterpartyId),
   ],
 );
 
@@ -2897,4 +3019,529 @@ export const reportIssueWaivers = sqliteTable(
     revokedByEmail: text("revoked_by_email"),
   },
   (table) => [index("report_issue_waivers_invoice_idx").on(table.invoiceId)],
+);
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE OVERVIEW'S METER MODEL
+ *
+ * Eight meters, and every status this workspace has ever seen belongs to
+ * exactly one of them. The assignment itself lives on `job_status_map.meter_key`
+ * — that table already holds one row per (organisation, status label) behind a
+ * UNIQUE index, so "a status belongs to exactly one meter" is a property of the
+ * schema rather than of the code that reads it. What lives HERE is the meter: a
+ * name an operator can change, a colour, a position and whether it draws a tile.
+ *
+ * `is_catch_all` marks `other`, which cannot be deleted, hidden, or emptied of
+ * its role. It is a column and not a comparison against the literal string
+ * "other" because the display label is editable and the key has to survive
+ * being renamed on screen.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export const dashboardMeters = sqliteTable(
+  "dashboard_meters",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    meterKey: text("meter_key").notNull(),
+    displayLabel: text("display_label").notNull(),
+    colourHex: text("colour_hex").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    visible: integer("visible", { mode: "boolean" }).notNull().default(true),
+    isCatchAll: integer("is_catch_all", { mode: "boolean" }).notNull().default(false),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("dashboard_meters_key_idx").on(table.organisationId, table.meterKey),
+  ],
+);
+
+/**
+ * THE SLA LADDER THE OVERVIEW MEASURES AGAINST — versioned, never overwritten.
+ *
+ * A row is never edited. Changing a target closes the old row by stamping
+ * `superseded_at` and inserts a new one with the next `version`, so a chart of
+ * last quarter is still drawn against the target that applied last quarter.
+ * That is the whole reason this is not four numbers in a constants file.
+ *
+ * NOT the same question as `sla_rules`. That table holds the CONTRACTUAL
+ * resolution target in whole working days, per classification, and Module 4's
+ * client report is its only reader. This one holds the OPERATIONAL ladder —
+ * acknowledged / assigned / attended / resolved, per priority, in minutes — and
+ * the Overview's SLA tab is its only reader. Two different agreements measured
+ * at two different granularities; merging them would force one to lie about the
+ * other's units.
+ */
+export const slaTargets = sqliteTable(
+  "sla_targets",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** acknowledged | assigned | attended | resolved */
+    stage: text("stage").notNull(),
+    /** urgent | medium | low | not_recorded — `normalisePriority`'s vocabulary. */
+    priorityKey: text("priority_key").notNull(),
+    targetMinutes: integer("target_minutes").notNull(),
+    /** business | calendar — business honours `bank_holidays`. */
+    basis: text("basis").notNull().default("business"),
+    version: integer("version").notNull().default(1),
+    effectiveFrom: text("effective_from").notNull(),
+    supersededAt: text("superseded_at"),
+    note: text("note"),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("sla_targets_lookup_idx").on(table.organisationId, table.stage, table.supersededAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * MODULE 5 — THE INVOICE TRACKER
+ *
+ * WHY THE LEDGER IS THE `invoices` TABLE AND NOT A NEW ONE.
+ *
+ * Module 5 §1 is explicit: payable and receivable are one table with a
+ * `direction`, "because the lifecycle is nearly identical and the reports that
+ * matter — cash position, margin per job — need both sides in the same query".
+ * A table called `invoices` already existed with exactly the payable shape —
+ * one contractor bill against one job — and `app/api/workspace/route.ts` and
+ * `app/lib/contractor-attribution.ts` both record the same finding about it: it
+ * "has never been read or written by any code". Zero rows, zero readers. So it
+ * is extended rather than duplicated; a second table meaning "invoice" beside a
+ * dead one is how a ledger ends up with two answers.
+ *
+ * `service_invoices` is NOT this table and is not merged into it. That is
+ * Module 4's document — MAINTSUPP's own coordination fee, with lines, a
+ * snapshot and a five-state finalisation. It stays the authority for what was
+ * issued; finalising one writes a RECEIVABLE row here so the ledger sees it,
+ * which is Module 5 §12's "no re-entry, ever".
+ *
+ * MONEY IS INTEGER PENCE. `invoices.amount` is a legacy REAL and is left
+ * untouched and unread — this file has said "money is stored in integer pence,
+ * never a float" since the billing stack was built, and a ledger that has to
+ * reconcile allocations to the penny is the last place to make an exception.
+ *
+ * BALANCE IS NEVER STORED. §6: "always compute it. A stored balance drifts and
+ * then no one trusts the ledger." There is deliberately no balance column
+ * anywhere below, and `app/lib/finance/balance.ts` is the only thing allowed to
+ * answer the question.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * ONE INVOICE ACROSS MANY JOBS.
+ *
+ * §4: "A contractor invoice covering four jobs at one site must split across
+ * those jobs with a per-job allocation that sums to the invoice total. Enforce
+ * the sum." The UNIQUE index is why a job cannot appear twice on one invoice
+ * and quietly double its share.
+ */
+export const invoiceJobAllocations = sqliteTable(
+  "invoice_job_alloc",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    requestId: text("request_id").notNull(),
+    amountPence: integer("amount_pence").notNull().default(0),
+    note: text("note"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("invoice_job_alloc_invoice_idx").on(table.invoiceId),
+    index("invoice_job_alloc_job_idx").on(table.requestId),
+    uniqueIndex("invoice_job_alloc_once_idx").on(table.invoiceId, table.requestId),
+  ],
+);
+
+/**
+ * A PAYMENT IS ITS OWN RECORD.
+ *
+ * §6: "One invoice can have several payments; one payment can cover several
+ * invoices." Neither of those survives a `paid_at` column, which is why the
+ * money moves in this table and the link lives in `payment_alloc`.
+ */
+export const payments = sqliteTable(
+  "payments",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    reference: text("reference"),
+    /** in | out — money arriving settles receivables, money leaving settles payables. */
+    direction: text("direction").notNull(),
+    amountPence: integer("amount_pence").notNull().default(0),
+    paymentDate: text("payment_date").notNull(),
+    /** bank_transfer | card | direct_debit | cheque | offset */
+    method: text("method").notNull().default("bank_transfer"),
+    bankAccountId: text("bank_account_id"),
+    paymentRunId: text("payment_run_id"),
+    /** The remittance advice, in the private bucket. §15.12. */
+    attachmentId: text("attachment_id"),
+    note: text("note"),
+    recordedBy: text("recorded_by"),
+    recordedAt: text("recorded_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("payments_org_idx").on(table.organisationId, table.paymentDate),
+    index("payments_run_idx").on(table.paymentRunId),
+  ],
+);
+
+export const paymentAllocations = sqliteTable(
+  "payment_alloc",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    paymentId: text("payment_id").notNull(),
+    invoiceId: text("invoice_id").notNull(),
+    amountPence: integer("amount_pence").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("payment_alloc_payment_idx").on(table.paymentId),
+    index("payment_alloc_invoice_idx").on(table.invoiceId),
+    uniqueIndex("payment_alloc_once_idx").on(table.paymentId, table.invoiceId),
+  ],
+);
+
+/**
+ * A CREDIT NOTE, WHICH IS HOW A FINALISED INVOICE IS CORRECTED.
+ *
+ * §6 and §15.14: after finalisation the accounting facts are immutable and a
+ * correction is a new document, never an edit. `amount_pence` is always
+ * positive here; what it does to a balance is decided by the direction of the
+ * invoice it credits, and only `app/lib/finance/balance.ts` decides it.
+ */
+export const creditNotes = sqliteTable(
+  "credit_notes",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    reference: text("reference"),
+    invoiceId: text("invoice_id").notNull(),
+    amountPence: integer("amount_pence").notNull().default(0),
+    reason: text("reason").notNull(),
+    issuedDate: text("issued_date").notNull(),
+    attachmentId: text("attachment_id"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("credit_notes_invoice_idx").on(table.invoiceId)],
+);
+
+/**
+ * WHAT THE THREE-WAY MATCH FOUND.
+ *
+ * A flag is a row and not a computed view, because it can be WAIVED — and a
+ * waiver has an author, a typed reason and a time. §7: flags "block Approved
+ * for payment until cleared or waived with a typed reason". A
+ * recomputed-on-read flag cannot carry that, so the engine reconciles rows
+ * rather than replacing them: an open flag whose cause has gone is cleared, a
+ * waived one stays waived.
+ */
+export const invoiceFlags = sqliteTable(
+  "invoice_flags",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    /**
+     * no_approved_quote | over_quote | job_not_complete | site_mismatch |
+     * possible_duplicate | no_linked_job | vat_anomaly | outside_agreement
+     */
+    flagType: text("flag_type").notNull(),
+    /** blocking | warning */
+    severity: text("severity").notNull().default("blocking"),
+    detail: text("detail"),
+    /** open | cleared | waived */
+    status: text("status").notNull().default("open"),
+    waivedBy: text("waived_by"),
+    waiveReason: text("waive_reason"),
+    waivedAt: text("waived_at"),
+    clearedAt: text("cleared_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("invoice_flags_invoice_idx").on(table.invoiceId, table.status),
+    uniqueIndex("invoice_flags_once_idx").on(table.invoiceId, table.flagType),
+  ],
+);
+
+/**
+ * THE EDITABLE STATUS VOCABULARY, one row per (direction, status).
+ *
+ * Follows `job_status_map` exactly — same shape, same reason. §5: "Unmapped
+ * statuses render grey with the raw label and raise an admin notice, never
+ * disappear."
+ */
+export const invoiceStatusMap = sqliteTable(
+  "invoice_status_map",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    direction: text("direction").notNull(),
+    statusKey: text("status_key").notNull(),
+    displayLabel: text("display_label").notNull(),
+    colourHex: text("colour_hex").notNull(),
+    icon: text("icon"),
+    countsAsOpen: integer("counts_as_open", { mode: "boolean" }).notNull().default(true),
+    countsAsOverdueEligible: integer("counts_as_overdue_eligible", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    isTerminal: integer("is_terminal", { mode: "boolean" }).notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("invoice_status_map_key_idx").on(
+      table.organisationId,
+      table.direction,
+      table.statusKey,
+    ),
+  ],
+);
+
+/**
+ * VALUE-BANDED APPROVAL, as rows rather than as thresholds in code.
+ *
+ * §13. Bands are half-open on the upper bound and `max_amount_pence` NULL means
+ * "and above", so the ladder always covers every amount and an invoice can
+ * never fall between two rules.
+ */
+export const approvalRules = sqliteTable(
+  "approval_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    direction: text("direction").notNull().default("payable"),
+    minAmountPence: integer("min_amount_pence").notNull().default(0),
+    maxAmountPence: integer("max_amount_pence"),
+    approversRequired: integer("approvers_required").notNull().default(1),
+    requiresClient: integer("requires_client", { mode: "boolean" }).notNull().default(false),
+    /** Above this, whoever approved the quote may not approve the invoice. §13. */
+    makerCheckerFromPence: integer("maker_checker_from_pence"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("approval_rules_band_idx").on(table.organisationId, table.direction)],
+);
+
+/** Every status transition, append-only. §2: "This is the audit trail, and it is the point of the module." */
+export const invoiceStatusHistory = sqliteTable(
+  "invoice_status_history",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status").notNull(),
+    actorEmail: text("actor_email"),
+    actorUserId: text("actor_user_id"),
+    reason: text("reason"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("invoice_status_history_invoice_idx").on(table.invoiceId)],
+);
+
+/** One approver's decision, and the rule it satisfied. One row per approver per invoice. */
+export const invoiceApprovalRecords = sqliteTable(
+  "invoice_approval_records",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    approverEmail: text("approver_email").notNull(),
+    approverUserId: text("approver_user_id"),
+    /** approved | rejected | client_signed_off */
+    decision: text("decision").notNull(),
+    /** The sentence shown beside the approval: which band, how many approvers. */
+    basis: text("basis"),
+    ruleId: text("rule_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("invoice_approval_records_invoice_idx").on(table.invoiceId),
+    uniqueIndex("invoice_approval_records_once_idx").on(table.invoiceId, table.approverEmail),
+  ],
+);
+
+/** A batch of approved payables scheduled together and exported as one bank file. §13. */
+export const paymentRuns = sqliteTable(
+  "payment_runs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    reference: text("reference").notNull(),
+    paymentDate: text("payment_date").notNull(),
+    /** draft | scheduled | paid | cancelled */
+    status: text("status").notNull().default("draft"),
+    bankAccountId: text("bank_account_id"),
+    totalPence: integer("total_pence").notNull().default(0),
+    invoiceCount: integer("invoice_count").notNull().default(0),
+    exportedAt: text("exported_at"),
+    exportFilename: text("export_filename"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("payment_runs_org_idx").on(table.organisationId, table.paymentDate)],
+);
+
+/**
+ * BANK ACCOUNTS LIVE IN SETTINGS AND NOWHERE ELSE.
+ *
+ * §16: "Bank details appear only in settings, never in code." `contractors`
+ * deliberately carries no account number at all — this repository is public —
+ * and that rule is not relaxed here. These are the WORKSPACE's own accounts,
+ * the ones a payment run debits, typed by an administrator into a form and
+ * never committed to a file. `sort_code` and `account_number` are returned
+ * masked to anybody without `billing.manage`, by `app/lib/finance/banking.ts`.
+ */
+export const bankAccounts = sqliteTable(
+  "bank_accounts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    label: text("label").notNull(),
+    accountName: text("account_name"),
+    bankName: text("bank_name"),
+    sortCode: text("sort_code"),
+    accountNumber: text("account_number"),
+    iban: text("iban"),
+    referencePrefix: text("reference_prefix"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("bank_accounts_org_idx").on(table.organisationId)],
+);
+
+/** §15.9 — a dispute has a record rather than living in an inbox. */
+export const invoiceDisputes = sqliteTable(
+  "invoice_disputes",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    invoiceId: text("invoice_id").notNull(),
+    reason: text("reason").notNull(),
+    detail: text("detail"),
+    /** open | resolved | withdrawn */
+    status: text("status").notNull().default("open"),
+    raisedBy: text("raised_by"),
+    raisedAt: text("raised_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    resolution: text("resolution"),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: text("resolved_at"),
+  },
+  (table) => [index("invoice_disputes_invoice_idx").on(table.invoiceId, table.status)],
+);
+
+/** §15.4 — what the supplier thinks you owe, against what the ledger holds. */
+export const supplierStatements = sqliteTable(
+  "supplier_statements",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    counterpartyId: text("counterparty_id"),
+    counterpartyName: text("counterparty_name"),
+    statementDate: text("statement_date").notNull(),
+    claimedTotalPence: integer("claimed_total_pence").notNull().default(0),
+    sourceFilename: text("source_filename"),
+    uploadedBy: text("uploaded_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("supplier_statements_org_idx").on(table.organisationId, table.statementDate)],
+);
+
+export const supplierStatementLines = sqliteTable(
+  "supplier_statement_lines",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    statementId: text("statement_id").notNull(),
+    supplierRef: text("supplier_ref"),
+    invoiceDate: text("invoice_date"),
+    amountPence: integer("amount_pence").notNull().default(0),
+    matchedInvoiceId: text("matched_invoice_id"),
+    /** matched | supplier_only | ledger_only | amount_differs */
+    matchState: text("match_state").notNull().default("supplier_only"),
+    note: text("note"),
+  },
+  (table) => [index("supplier_statement_lines_statement_idx").on(table.statementId)],
+);
+
+/** §15.13 — the monthly retainer generates on a schedule rather than being remembered. */
+export const recurringInvoiceRules = sqliteTable(
+  "recurring_invoice_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    direction: text("direction").notNull().default("receivable"),
+    counterpartyId: text("counterparty_id"),
+    description: text("description"),
+    netPence: integer("net_pence").notNull().default(0),
+    category: text("category"),
+    /** monthly | quarterly | annually */
+    frequency: text("frequency").notNull().default("monthly"),
+    dayOfMonth: integer("day_of_month").notNull().default(1),
+    paymentTermsDays: integer("payment_terms_days"),
+    nextRunDate: text("next_run_date"),
+    lastRunAt: text("last_run_at"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("recurring_invoice_rules_due_idx").on(table.nextRunDate, table.active)],
+);
+
+/**
+ * WHAT A PDF READER THOUGHT IT SAW — a suggestion, never a value.
+ *
+ * §12: "Never save an extracted value without human confirmation. Extraction
+ * that writes silently will eventually book a wrong amount." So an extraction
+ * is its own row with its own confidences, and nothing it holds reaches
+ * `invoices` until somebody accepts it in the form.
+ */
+export const invoiceExtractions = sqliteTable(
+  "invoice_extractions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    attachmentId: text("attachment_id"),
+    invoiceId: text("invoice_id"),
+    engine: text("engine").notNull().default("heuristic"),
+    fieldsJson: text("fields_json").notNull().default("{}"),
+    confidenceJson: text("confidence_json").notNull().default("{}"),
+    /** suggested | accepted | rejected */
+    status: text("status").notNull().default("suggested"),
+    acceptedBy: text("accepted_by"),
+    acceptedAt: text("accepted_at"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("invoice_extractions_attachment_idx").on(table.attachmentId)],
+);
+
+/** §12 — the `invoices@` boundary. A message becomes a Draft payable, never a posted one. */
+export const financeInbox = sqliteTable(
+  "finance_inbox",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    messageId: text("message_id"),
+    sender: text("sender"),
+    subject: text("subject"),
+    receivedAt: text("received_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    attachmentId: text("attachment_id"),
+    invoiceId: text("invoice_id"),
+    /** received | drafted | rejected */
+    status: text("status").notNull().default("received"),
+    error: text("error"),
+  },
+  (table) => [
+    index("finance_inbox_org_idx").on(table.organisationId, table.status),
+    uniqueIndex("finance_inbox_message_idx").on(table.organisationId, table.messageId),
+  ],
 );

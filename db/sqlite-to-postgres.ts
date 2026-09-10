@@ -245,14 +245,31 @@ export const BOOLEAN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
    * comment prescribes: `is_current` exists on exactly one table in `portal` and
    * is boolean there.
    */
+  /*
+   * The Module 5 and Overview entries below were added with the same check the
+   * bare-name comment prescribes. Four names are NEW to `portal` —
+   * `is_catch_all`, `is_terminal`, `requires_client`, `client_approval_required`
+   * — so they cannot collide with anything; `visible` and `active` were already
+   * in the set from `maintenance_board_columns` and five other tables, and are
+   * boolean on every table that has them.
+   */
+  approval_rules: ["requires_client", "active"],
   attachments: ["pending", "is_current", "is_seed"],
+  bank_accounts: ["active"],
   billing_settings: ["vat_enabled", "pro_rata_enabled"],
   board_views: ["is_default", "system"],
   boards: ["archived"],
   calendar_events: ["all_day", "archived", "is_seed"],
   compliance_documents: ["not_required", "remedials_required", "is_seed"],
   contractors: ["active", "is_seed"],
+  dashboard_meters: ["visible", "is_catch_all"],
   import_anomalies: ["resolved"],
+  invoice_status_map: [
+    "counts_as_open",
+    "counts_as_overdue_eligible",
+    "is_terminal",
+    "active",
+  ],
   job_access_tokens: ["can_comment", "can_request_completion"],
   job_holds: ["approved"],
   job_status_map: ["counts_as_open", "counts_as_overdue_eligible", "active"],
@@ -261,6 +278,8 @@ export const BOOLEAN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   maintenance_groups: ["archived", "collapsed"],
   maintenance_requests: ["archived", "is_seed"],
   option_values: ["active", "is_default", "is_done", "system"],
+  quotations: ["client_approval_required"],
+  recurring_invoice_rules: ["active"],
   role_capabilities: ["allowed"],
   reminder_defaults: ["repeat_enabled", "active"],
   reminder_rules: ["is_enabled", "repeat_enabled"],
