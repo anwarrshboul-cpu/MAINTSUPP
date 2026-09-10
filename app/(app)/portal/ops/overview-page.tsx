@@ -48,6 +48,9 @@ import { PerformanceCard } from "./overview-performance";
 import { JobBreakdownCard } from "./overview-breakdown";
 import { SitesAttentionCard } from "./overview-sites";
 import { OverviewRecordsPanel } from "./overview-records";
+/* The visual dashboard block. It reads `/api/overview/metrics` and owns its own
+   three URL parameters; nothing below it moves or changes because of it. */
+import { OvDash } from "./ov-dash";
 import { MeterSettings } from "./meter-settings";
 import { ResolveNames } from "./resolve-names";
 import { BulkSiteAssign } from "./bulk-site-assign";
@@ -497,6 +500,11 @@ export function OverviewPage({
       <link rel="stylesheet" href={toolsCss} precedence="default" />
 
       <section className="ops-page">
+        <OvDash
+          onNavigateToJobs={onNavigateToJobs}
+          onNavigateToCompliance={onNavigateToCompliance}
+        />
+
         <header className="ops-page__head">
           <p className="ops-page__eyebrow">Live operations</p>
           <h1>Overview</h1>

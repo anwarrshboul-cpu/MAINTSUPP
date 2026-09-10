@@ -186,6 +186,47 @@ test("the stage axis filters, and `open` is not a synonym for in progress", () =
   assert.equal(chip.value, "open");
   assert.ok(DRILL_KEYS.includes("family"), "and Clear still strips it");
 });
+test("overdue is a dimension, and a bare due date is not late on the day itself", () => {
+  /*
+   * The Overview's Overdue tile and its SLA speedometer both mean "open work
+   * past its date", and this filter had no due-date dimension — so the only
+   * honest thing they could send was `family=open`, a superset. On the estate
+   * they were built against that is a tile reading 73 opening a board of 98.
+   *
+   * The day-versus-instant rule is the subtle half, and it is `overdueOpenSql`'s
+   * own: `due_at` holds a bare `YYYY-MM-DD` for work booked to a day and a full
+   * timestamp for work booked to a time. Treating a bare day as UTC midnight
+   * marks everything due today as already late for every reader west of
+   * Greenwich, which is why the two are compared differently.
+   */
+  const overdue = q("overdue=1");
+
+  /* NOW is 2026-09-10T12:00Z. */
+  assert.equal(overdue.matches(job({ dueAt: "2026-09-09" })), true, "yesterday is late");
+  assert.equal(overdue.matches(job({ dueAt: "2026-09-10" })), false, "today is not late yet");
+  assert.equal(overdue.matches(job({ dueAt: "2026-09-11" })), false, "tomorrow is not late");
+
+  /* A timestamp is compared as an instant, so earlier today IS late. */
+  assert.equal(
+    overdue.matches(job({ dueAt: "2026-09-10T09:00:00.000Z" })),
+    true,
+    "an hour that has passed is late even though the day has not",
+  );
+  assert.equal(overdue.matches(job({ dueAt: "2026-09-10T18:00:00.000Z" })), false);
+
+  /* A job nobody gave a date cannot be late, and a finished one never is. */
+  assert.equal(overdue.matches(job({ dueAt: null })), false, "no date, no judgement");
+  assert.equal(
+    overdue.matches(job({ dueAt: "2026-01-01", status: "Job Completed", completedAt: "2026-01-02" })),
+    false,
+    "a closed job is not overdue, however late it was",
+  );
+
+  /* It draws a chip and Clear strips it, like every other dimension. */
+  assert.ok(overdue.chips.some((chip) => chip.key === "overdue"));
+  assert.ok(DRILL_KEYS.includes("overdue"), "Clear strips it rather than leaving it in the bar");
+});
+
 test("the drilled list is the same population the figure was counted over", () => {
   /*
    * Two ways the drill used to be WIDER than the tile that opened it. Measured

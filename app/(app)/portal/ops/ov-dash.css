@@ -1,0 +1,1031 @@
+/*
+ * THE DASHBOARD BLOCK — layout, palette and chart chrome.
+ *
+ * ── THIS BLOCK IS DELIBERATELY ALWAYS DARK ────────────────────────────────
+ *
+ * Every other surface in this product is themeable: `ops-tokens.css` declares
+ * a light palette on bare `:root` and a dark one under `body[data-theme=dark]`,
+ * and no page stylesheet is allowed to write a hex literal, because writing one
+ * pins that rule to a single theme and leaves it unreadable on the other.
+ *
+ * This one is the exception, and the seventeen literals below are the reason
+ * the exception has to be declared rather than inherited. The block is a fixed
+ * visual composition — the dark portal in the reference screenshot — and its
+ * accents (`--ov-orange`, `--ov-amber`, `--ov-blue`, `--ov-green`, `--ov-red`,
+ * `--ov-grey`) are chosen against a near-black card and would fail contrast
+ * against a white one. `color-scheme: dark` on the root tells the engine the
+ * same thing, so form controls, scrollbars and the focus ring inside this
+ * subtree are drawn dark whatever the rest of the page is doing.
+ *
+ * Everything is scoped under `.ov-dash`. Not one rule in this file can match an
+ * element outside the block, which is what makes an always-dark island safe on
+ * a themeable page.
+ *
+ * ── CONTRAST, MEASURED ────────────────────────────────────────────────────
+ *
+ * Against `--ov-card` (#0E1721), which is what every text colour here actually
+ * sits on: `--ov-text` 16.79:1, `--ov-text-2` 11.88:1, `--ov-text-nav` 7.39:1,
+ * `--ov-text-muted` 5.10:1, `--ov-teal` 6.05:1, `--ov-amber` 8.11:1,
+ * `--ov-orange` 5.00:1 and `--ov-green` 5.10:1 — all clear of WCAG AA's 4.5:1.
+ *
+ * `--ov-blue` (3.66:1), `--ov-red` (4.26:1) and `--ov-grey` (3.27:1) do NOT,
+ * and are therefore FILLS ONLY — an arc, a swatch, a KPI tile — where the
+ * non-text threshold of 3:1 applies and all three clear it. No rule in this
+ * file paints text in them, and a value is never printed in its own category's
+ * colour, which is also why every legend value is `--ov-text`.
+ *
+ * `--ov-nav-active` is the hover ground under a legend row. `--ov-text-muted`
+ * on it measures 4.14:1, below AA, so nothing muted is ever placed there: a
+ * legend row's ink is `--ov-text-2` (9.65:1) and `--ov-text` (13.64:1).
+ *
+ * ── BREAKPOINTS ARE 640 / 767 / 768 / 1024 / 1280 AND NOTHING ELSE ────────
+ *
+ * Several stage tests fail on any other width and `tests/ops-rebuild-
+ * foundations.test.mjs` asserts the list over the neighbouring stylesheets.
+ * Mobile is the base case here and every rule widens from it. The brief's
+ * "768–1279px" tier is `min-width: 768px`, its "< 768px" tier is the base, and
+ * its "test at 390px" is a width to measure at, not a width to branch on.
+ *
+ * ── THE ONE INTERFACE THE COMPOSING BLOCK HAS TO KNOW ─────────────────────
+ *
+ * A KPI card's accent is DATA — teal for units, red for overdue, green for
+ * completed — so it cannot be written here. `.ov-kpi` reads it from a
+ * `--ov-accent` custom property and falls back to teal if none is set, so the
+ * composing component sets `style={{ "--ov-accent": kpi.colour }}` on the card
+ * and the tile, the icon and the focus ring all follow. That is the only
+ * property this stylesheet expects from outside.
+ */
+
+/* ── The root, and the palette ────────────────────────────────────────────── */
+
+.ov-dash {
+  color-scheme: dark;
+
+  --ov-frame: #05121b;
+  --ov-bg: #081018;
+  --ov-card: #0e1721;
+  --ov-card-border: #1a2632;
+  --ov-divider: #16212b;
+  --ov-track: #1f2b36;
+  --ov-nav-active: #112c33;
+  --ov-text: #f4f7fa;
+  --ov-text-2: #c9d3db;
+  --ov-text-nav: #9ea7ae;
+  --ov-text-muted: #7c8a96;
+  --ov-teal: #46a2ad;
+  --ov-orange: #d8652b;
+  --ov-amber: #e3a140;
+  --ov-blue: #5a7293;
+  --ov-green: #5e946e;
+  --ov-red: #d34e49;
+  --ov-grey: #5e697e;
+
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 20px;
+  background: var(--ov-bg);
+  color: var(--ov-text);
+  min-width: 0;
+}
+
+/*
+ * A number that changes width on refresh makes a whole column jump, so every
+ * figure in the block is tabular. Set once at the root and inherited rather
+ * than repeated on the eight classes that hold a number.
+ */
+.ov-dash {
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash *,
+.ov-dash *::before,
+.ov-dash *::after {
+  box-sizing: border-box;
+}
+
+.ov-dash :focus-visible {
+  outline: 2px solid var(--ov-teal);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── The header ───────────────────────────────────────────────────────────── */
+
+.ov-dash .ov-dash__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ov-dash .ov-dash__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ov-text);
+}
+
+.ov-dash .ov-dash__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ── The three grids ──────────────────────────────────────────────────────── */
+
+/*
+ * Mobile first, exactly as the brief lays it out: two KPI columns and one
+ * widget column below 768, three and two from 768, six and the reference's own
+ * proportions from 1280. `minmax(0, …)` on every track because a grid item's
+ * default `min-width: auto` is its content, and a 216px chart in a 190px column
+ * would push the whole row wider than the card rather than shrinking.
+ */
+.ov-dash .ov-kpis,
+.ov-dash .ov-row2,
+.ov-dash .ov-row3 {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ov-dash .ov-kpis {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ov-dash .ov-row2,
+.ov-dash .ov-row3 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 768px) {
+  .ov-dash .ov-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ov-dash .ov-row2,
+  .ov-dash .ov-row3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /*
+   * Row 3 holds three cards and this tier has two columns, so one of them
+   * wraps. Left alone it would sit at half width beside an empty half, which
+   * reads as a card that failed to load; spanning it is the only arrangement
+   * that looks deliberate. Keyed on `nth-child(3)` rather than `last-child` so
+   * a row that is composed with only two cards is untouched.
+   */
+  .ov-dash .ov-row3 > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1280px) {
+  .ov-dash .ov-kpis {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  /* The reference's proportions: the table is wider than the ring beside it. */
+  .ov-dash .ov-row2 {
+    grid-template-columns: minmax(0, 56fr) minmax(0, 44fr);
+  }
+
+  .ov-dash .ov-row3 {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+
+  .ov-dash .ov-row3 > :nth-child(3) {
+    grid-column: auto;
+  }
+}
+
+/* ── The card ─────────────────────────────────────────────────────────────── */
+
+.ov-dash .ov-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 10px;
+  background: var(--ov-card);
+}
+
+.ov-dash .ov-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ov-dash .ov-card__title {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ov-text);
+}
+
+.ov-dash .ov-card__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ov-teal);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ov-dash .ov-card__link:hover {
+  text-decoration: underline;
+}
+
+/* ── The KPI cards ────────────────────────────────────────────────────────── */
+
+.ov-dash .ov-kpi {
+  --ov-accent: var(--ov-teal);
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 10px;
+  background: var(--ov-card);
+}
+
+.ov-dash .ov-kpi__tile {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  /*
+   * The solid tint is the fallback for an engine without `color-mix`; the
+   * accent at 14% is the design. Both are dark enough for a stroked icon in the
+   * full-strength accent to read on top.
+   */
+  background: var(--ov-nav-active);
+  background: color-mix(in srgb, var(--ov-accent) 14%, transparent);
+  color: var(--ov-accent);
+}
+
+/*
+ * The icon is an OUTLINE, so it is stroked in the accent and filled with
+ * nothing. Stated here rather than on every icon, so the composing block can
+ * drop in any 16–18px line icon and it will match the rest.
+ */
+.ov-dash .ov-kpi__tile svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ov-dash .ov-kpi__label {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ov-text-2);
+}
+
+.ov-dash .ov-kpi__value {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--ov-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash .ov-kpi__spark {
+  grid-column: 1 / -1;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── The legend ───────────────────────────────────────────────────────────── */
+
+.ov-dash .ov-legend {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  list-style: none;
+}
+
+/*
+ * Written so the same class works on a `<li>`, a `<button>` and an `<a>`: the
+ * composing block makes it a button wherever the row drills into the jobs
+ * behind it, and a plain row where it does not. The resets below are the ones a
+ * button would otherwise inherit from the user agent.
+ */
+.ov-dash .ov-legend__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+
+.ov-dash :is(button, a).ov-legend__row {
+  cursor: pointer;
+}
+
+.ov-dash :is(button, a).ov-legend__row:hover {
+  background: var(--ov-nav-active);
+}
+
+.ov-dash .ov-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--ov-grey);
+}
+
+.ov-dash .ov-legend__label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ov-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-dash .ov-legend__value {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ov-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Widget A — the gauge and its ring meters ─────────────────────────────── */
+
+.ov-dash .ov-widget-a {
+  display: grid;
+  gap: 16px;
+  align-items: center;
+  min-width: 0;
+}
+
+.ov-dash .ov-widget-a__gauge {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+}
+
+.ov-dash .ov-widget-a__rings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 12px;
+  justify-items: center;
+  min-width: 0;
+}
+
+/*
+ * 640 is the narrowest agreed width at which a 200px gauge and a row of 76px
+ * rings both fit beside each other inside a card's padding. Below it they
+ * stack, which is the brief's "gauges and rings scale down and never overflow
+ * or overlap text" — they do not have to overlap if they are given their own
+ * rows.
+ *
+ * ── THE HEADER IS NOT A COLUMN ────────────────────────────────────────────
+ *
+ * `.ov-widget-a` IS the card, so `.ov-card__head` is its first grid child. A
+ * plain two-column rule therefore put the TITLE in column one and the gauge in
+ * column two, which pushed the rings onto a second row in the narrow column
+ * and stacked them vertically — measured: the title sat 180px down the card's
+ * left edge, the gauge sat top-right, and the three rings ran down the left in
+ * a 164px column. The brief asks for the gauge on the left half and the rings
+ * in a ROW on the right.
+ *
+ * So the head spans both columns and anchors to the top, and only the gauge
+ * and the rings share the two halves. `align-self: start` on the head is what
+ * stops `align-items: center` dragging the title into the middle of a 550px
+ * card.
+ */
+@media (min-width: 640px) {
+  .ov-dash .ov-widget-a {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .ov-dash .ov-widget-a > .ov-card__head {
+    grid-column: 1 / -1;
+    align-self: start;
+  }
+
+  /*
+   * A ROW, and explicitly so. `auto-fit` would still collapse to one column if
+   * the half it is given is narrow, which is the failure this replaces — three
+   * equal tracks say what the brief says.
+   */
+  .ov-dash .ov-widget-a__rings {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    grid-auto-columns: minmax(0, 1fr);
+    align-content: center;
+  }
+}
+
+/* ── Shared chart chrome ──────────────────────────────────────────────────── */
+
+/*
+ * THE CHART TAKES THE SLACK, RATHER THAN LEAVING IT AT THE BOTTOM.
+ *
+ * Every row is a grid, so its cards stretch to the tallest of them — row 3 is
+ * 473px because "Jobs by category" carries a six-row legend, while the spend
+ * trend's plot is barely 300px. Without this the trend drew at the top of its
+ * card and left ~170px of empty card beneath it, which reads as a rendering
+ * failure rather than as spare room.
+ *
+ * `flex: 1` gives the chart the leftover height and `align-content: center`
+ * puts the drawing in the middle of it. The SVGs are natural-size and only
+ * ever shrunk — see the header of `ov-dash-charts.tsx` — so the extra height
+ * is whitespace around the plot rather than a stretched, mis-stroked chart.
+ */
+.ov-dash .ov-chart {
+  position: relative;
+  flex: 1 1 auto;
+  align-content: center;
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+}
+
+.ov-dash .ov-chart__plot {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/*
+ * Drawn at its natural size and only ever shrunk. Every stroke width in
+ * `ov-dash-charts.tsx` is a literal CSS pixel while the card is wide enough,
+ * and nothing overflows a card that is not.
+ */
+.ov-dash .ov-chart__svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.ov-dash .ov-chart__centre {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The horseshoe's viewBox is cropped to where its arc ends, so its geometric
+ * centre is not the box's centre. 95 of 168 is where the ring is actually
+ * centred. */
+.ov-dash .ov-chart__centre--horseshoe {
+  top: 56.5%;
+}
+
+.ov-dash .ov-chart__centre-value {
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ov-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash .ov-chart__centre-caption {
+  max-width: 120px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--ov-text-muted);
+}
+
+.ov-dash .ov-arc {
+  cursor: pointer;
+  transition: filter 140ms ease;
+}
+
+.ov-dash .ov-arc--active {
+  filter: brightness(1.22);
+}
+
+/* ── The keyboard route into a multi-slice chart ──────────────────────────── */
+
+/*
+ * One real button per slice, stacked at the centre of the chart. They are
+ * invisible and inert to a pointer — the arcs are the pointer target and they
+ * are 7px to 24px thick, which a finger can hit — but they are in the tab
+ * order, they carry the slice's name and numbers, and Enter activates them.
+ * Focus turns one into a legible chip so a sighted keyboard reader can see
+ * where they have got to.
+ */
+.ov-dash .ov-keys {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.ov-dash .ov-keys__button {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: none;
+  color: transparent;
+  font: inherit;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ov-dash .ov-keys__button:focus-visible {
+  width: auto;
+  height: auto;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--ov-nav-active);
+  color: var(--ov-text);
+  font-size: 12px;
+  font-weight: 500;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+
+/* ── The tooltip ──────────────────────────────────────────────────────────── */
+
+/*
+ * INSIDE THE PLOT, AT THE TOP — not floating above it.
+ *
+ * Anchored above the plot the tooltip left the card entirely and printed over
+ * whatever card sat in the row above, measured on the donut at 1000px wide: the
+ * ring is the full height of its card, so "above the chart" and "outside the
+ * card" are the same place. At the top of the plot it covers the least
+ * informative band of every chart in the block — the top arc of a ring, the
+ * headroom over a trend line — and it can never escape the card it belongs to.
+ */
+.ov-dash .ov-tip {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 128px;
+  max-width: 200px;
+  padding: 8px 10px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 8px;
+  background: var(--ov-card);
+  box-shadow: 0 8px 22px var(--ov-frame);
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ov-text);
+  text-align: left;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* Pinned by a tap. It takes pointer events back so the drill button inside it
+ * can be pressed, and the teal border says it will stay until dismissed. */
+.ov-dash .ov-tip--pinned {
+  border-color: var(--ov-teal);
+  pointer-events: auto;
+}
+
+.ov-dash .ov-tip__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ov-text);
+}
+
+.ov-dash .ov-tip__line {
+  color: var(--ov-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash .ov-tip__action {
+  margin-top: 4px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 8px;
+  background: var(--ov-nav-active);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ov-text);
+  cursor: pointer;
+}
+
+/* ── The sparkline ────────────────────────────────────────────────────────── */
+
+.ov-dash .ov-spark {
+  display: block;
+  width: 100%;
+  height: 34px;
+  min-width: 0;
+}
+
+/* `overflow: visible` because the line's 1.5px stroke straddles the extreme
+ * coordinates and would otherwise be shaved in half at the top of the box. */
+.ov-dash .ov-spark__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* ── The gauges — speedometer and horseshoe ───────────────────────────────── */
+
+.ov-dash .ov-gauge {
+  min-width: 0;
+}
+
+.ov-dash .ov-gauge__hit {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.ov-dash button.ov-gauge__hit {
+  cursor: pointer;
+}
+
+.ov-dash .ov-gauge__body {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/*
+ * The speedometer's readout sits in the band its own viewBox reserves below the
+ * pivot — 52 units of a 152-unit box — because a 180° needle sweeps through
+ * everything above it. Anchored to the bottom rather than centred, so a
+ * three-digit percentage grows upward into empty space.
+ */
+.ov-dash .ov-gauge__readout {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.ov-dash .ov-gauge__sub {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ov-text-muted);
+  text-align: center;
+}
+
+/* ── The ring meters ──────────────────────────────────────────────────────── */
+
+.ov-dash .ov-ring {
+  min-width: 0;
+}
+
+.ov-dash .ov-ring__hit {
+  display: grid;
+  justify-items: center;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.ov-dash button.ov-ring__hit {
+  cursor: pointer;
+}
+
+.ov-dash .ov-ring__body {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ov-dash .ov-ring__label {
+  max-width: 96px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ov-text-2);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── The spend trend ──────────────────────────────────────────────────────── */
+
+/*
+ * Two columns and two rows: the money axis beside the plot, the month labels
+ * beneath the plot only. Laid out as one grid rather than as an axis beside a
+ * stack, so the axis is exactly as tall as the plot and its ticks line up with
+ * the gridlines instead of being pushed down by the labels.
+ */
+.ov-dash .ov-trend {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.ov-dash .ov-trend__axis {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--ov-text-nav);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash .ov-trend__plot {
+  grid-column: 2;
+  grid-row: 1;
+  display: block;
+  width: 100%;
+  height: 132px;
+  min-width: 0;
+}
+
+.ov-dash .ov-trend__svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * An HTML dot, not an SVG circle. The plot's viewBox is stretched to the card's
+ * width, which would draw a circle as an ellipse and change its shape as the
+ * column resized; a span placed at a percentage stays round at every width and
+ * still needs no measurement.
+ */
+.ov-dash .ov-trend__dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ov-teal);
+  box-shadow: 0 0 0 2px var(--ov-card);
+  transform: translate(-50%, -50%);
+  transition: width 140ms ease, height 140ms ease;
+  pointer-events: none;
+}
+
+.ov-dash .ov-trend__dot--active {
+  width: 10px;
+  height: 10px;
+}
+
+.ov-dash .ov-trend__hits {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-dash .ov-trend__hit-slot {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.ov-dash .ov-trend__hit {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ov-dash .ov-trend__hit--active {
+  background: color-mix(in srgb, var(--ov-teal) 10%, transparent);
+}
+
+.ov-dash .ov-trend__ticks {
+  position: relative;
+  grid-column: 2;
+  grid-row: 2;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-dash .ov-trend__tick {
+  position: absolute;
+  top: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--ov-text-nav);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* The first and last months sit ON the plot's edges, so centring their labels
+ * would hang half of each outside the card. They are pulled inside instead. */
+.ov-dash .ov-trend__tick:first-child {
+  transform: none;
+}
+
+.ov-dash .ov-trend__tick:last-child {
+  transform: translateX(-100%);
+}
+
+/*
+ * EVERY OTHER MONTH, ON A PHONE, ONCE THERE ARE NINE OR MORE OF THEM.
+ *
+ * Measured at 390px with the live payload's twelve months: the labels are 12 to
+ * 20px wide on a 26px pitch, and "Oct" and "Nov" printed as "OctNov". The
+ * selector reads "a first child that is also the ninth from the end" — which is
+ * only true of a list of nine or more — and then hides the even ones. Nothing
+ * is lost: every month still has its own hit column and its own tooltip
+ * carrying the label and the exact figure, and the full axis comes back at 768.
+ */
+.ov-dash .ov-trend__tick:first-child:nth-last-child(n + 9) ~ .ov-trend__tick:nth-child(even) {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .ov-dash .ov-trend__tick:first-child:nth-last-child(n + 9) ~ .ov-trend__tick:nth-child(even) {
+    display: block;
+  }
+
+  .ov-dash .ov-trend__plot {
+    height: 150px;
+  }
+
+  .ov-dash .ov-trend__axis,
+  .ov-dash .ov-trend__tick {
+    font-size: 11px;
+  }
+
+  .ov-dash .ov-trend__ticks {
+    height: 17px;
+  }
+}
+
+/* ── The loading state ────────────────────────────────────────────────────── */
+
+/*
+ * The same box as a card — same height, same radius, same border — so nothing
+ * on the page moves when the figures land. The shimmer is a card-coloured band
+ * travelling across the darker frame colour, which is what a card looks like
+ * before it has anything in it.
+ */
+.ov-dash .ov-skeleton {
+  min-height: 128px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 10px;
+  background-color: var(--ov-frame);
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    var(--ov-card) 50%,
+    transparent 80%
+  );
+  background-repeat: no-repeat;
+  background-size: 220% 100%;
+  animation: ov-dash-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes ov-dash-shimmer {
+  from {
+    background-position: 140% 0;
+  }
+
+  to {
+    background-position: -40% 0;
+  }
+}
+
+/* ── Touch ────────────────────────────────────────────────────────────────── */
+
+/*
+ * A 44px floor on every tap target, applied only where the pointer is coarse so
+ * a mouse-driven layout is not padded out for a finger that is not there. Chart
+ * arcs are exempt by necessity — an arc's thickness is its design and a 2%
+ * slice cannot be widened without lying about the number — which is what the
+ * legend rows and the pinned tooltip's action button are for.
+ */
+@media (pointer: coarse) {
+  .ov-dash .ov-legend__row,
+  .ov-dash .ov-card__link,
+  .ov-dash .ov-ring__hit,
+  .ov-dash .ov-gauge__hit {
+    min-height: 44px;
+  }
+
+  .ov-dash .ov-legend__row {
+    padding: 8px 6px;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
+/*
+ * Every transition and the skeleton's shimmer, off. The arcs and lines are the
+ * other half of this and they are not CSS: `useOvSweep` in `ov-dash-charts.tsx`
+ * reads the same media query and returns the target geometry without ever
+ * requesting a frame, so a reader who has asked for less movement gets the
+ * finished chart immediately — identical to where the animation would have
+ * ended, not an empty one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ov-dash .ov-arc,
+  .ov-dash .ov-trend__dot,
+  .ov-dash .ov-keys__button {
+    transition: none;
+  }
+
+  .ov-dash .ov-skeleton {
+    animation: none;
+  }
+}

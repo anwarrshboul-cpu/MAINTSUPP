@@ -112,7 +112,18 @@ export type OvKpi = {
 export type OvMetrics = {
   /** Echoed so a card states the window it was counted over, not the one asked for. */
   range: { from: string; to: string; label: string };
-  portfolio: { id: string; name: string };
+  /*
+   * THE CHOSEN PORTFOLIO, AND THE SITES IT IS MADE OF.
+   *
+   * `siteIds` is here so a drill-through can carry the portfolio across to the
+   * board. A portfolio is a `site_groups` row and the board's filter speaks
+   * `site=`, so a link that sent only the group id would narrow nothing: the
+   * reader taps a figure counted over eleven stores and opens a board showing
+   * the whole estate. Empty array means "every site" — the same shape the
+   * scope check uses — and it is empty for "All portfolios" too, where there
+   * is nothing to narrow.
+   */
+  portfolio: { id: string; name: string; siteIds: string[] };
   portfolios: { id: string; name: string }[];
   kpis: OvKpi[];
   jobsByStatus: OvSlice[];
@@ -631,7 +642,9 @@ export async function loadOverviewMetrics(
       to: rangeTo,
       label: `${formatDay(rangeFrom)} – ${formatDay(rangeTo)}`,
     },
-    portfolio: chosen ?? { id: "all", name: "All portfolios" },
+    portfolio: chosen
+      ? { ...chosen, siteIds: siteIds ?? [] }
+      : { id: "all", name: "All portfolios", siteIds: [] },
     portfolios,
     openJobs,
     kpis: [

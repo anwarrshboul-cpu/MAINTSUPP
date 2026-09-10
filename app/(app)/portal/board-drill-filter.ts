@@ -110,6 +110,25 @@ function isClosed(request: MaintenanceRequest): boolean {
  * removed deleted rows by the time it hands the list over, so `archived` and
  * the sub-item test are the two that still matter here.
  */
+/**
+ * Open, and past the date it was due — `overdueOpenSql` in the browser.
+ *
+ * Day versus instant is the whole subtlety. `due_at` holds a bare
+ * `YYYY-MM-DD` for work booked to a day and a full timestamp for work booked
+ * to a time, and the two cannot be compared the same way: treating a bare day
+ * as UTC midnight marks everything due today as already late. So a bare date
+ * is late only once the day has PASSED, and a timestamp is late once the
+ * instant has.
+ */
+function isOverdue(request: MaintenanceRequest, now: Date): boolean {
+  if (isClosed(request)) return false;
+  const due = String(request.dueAt ?? "").trim();
+  if (!due) return false;
+  if (due.length <= 10) return due.slice(0, 10) < isoDay(now);
+  const at = Date.parse(due);
+  return Number.isFinite(at) && at < now.getTime();
+}
+
 function countsAsWork(request: MaintenanceRequest): boolean {
   return request.archived !== true && !request.parentId;
 }
@@ -230,6 +249,22 @@ export function readDrillFilter(
    * under-report the very figure the reader tapped.
    */
   const families = new Set(list("family").map((value) => value.toLowerCase()));
+  /*
+   * OVERDUE, WHICH USED TO BE UNSAYABLE.
+   *
+   * The Overview's Overdue tile and its SLA speedometer both mean "open work
+   * that is past its date", and this filter had no due-date dimension at all —
+   * so the only honest thing those controls could send was `family=open`, a
+   * superset. On the estate they were built against that is a tile reading 73
+   * opening a board of 98: the same "list wider than the figure" fault the
+   * archived rows caused, arriving from the other direction.
+   *
+   * The test mirrors `overdueOpenSql`, which is the aggregate's own: a BARE
+   * `YYYY-MM-DD` is compared as a day, so a job due today is not yet late,
+   * while a full timestamp is compared as an instant. Getting that backwards
+   * marks everything due today as overdue for every reader west of Greenwich.
+   */
+  const overdueOnly = searchParams.get("overdue") === "1";
   const meterLabel = (searchParams.get("meter") ?? "").trim();
 
   const measure = searchParams.get("measure") === "completed" ? "completed" : "requested";
@@ -257,6 +292,7 @@ export function readDrillFilter(
       value: [...families].map((value) => value.replace(/_/g, " ")).join(", "),
     });
   }
+  if (overdueOnly) chips.push({ key: "overdue", label: "Overdue", value: "past its date" });
   if (window) {
     chips.push({
       key: "period",
@@ -314,6 +350,7 @@ export function readDrillFilter(
         const nature = isPlanned(request) ? "planned" : "reactive";
         if (!natures.has(nature)) return false;
       }
+      if (overdueOnly && !isOverdue(request, now)) return false;
       if (families.size) {
         /* `warn: false` — an unmapped status is a data condition the Overview
            already reports in its own words; it must not also spray the
@@ -349,6 +386,7 @@ export const DRILL_KEYS = [
   "contractor",
   "nature",
   "family",
+  "overdue",
   "period",
   "from",
   "to",
