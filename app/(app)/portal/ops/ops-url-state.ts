@@ -44,7 +44,13 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
  * so a component that only listened to `popstate` would update the address bar
  * and not the page.
  */
-const URL_CHANGED = "maintsupp:urlstate";
+/**
+ * Exported because a caller that changes the address bar WITHOUT `setParams` —
+ * the shell's drill-through pushes a different pathname, which `setParams`
+ * cannot do — has to announce it. Neither `pushState` nor `replaceState` fires
+ * an event of its own, so a subscriber that is not told simply never re-reads.
+ */
+export const URL_CHANGED = "maintsupp:urlstate";
 
 /**
  * "Re-read every aggregate on screen." Dispatched by the topbar's Refresh.

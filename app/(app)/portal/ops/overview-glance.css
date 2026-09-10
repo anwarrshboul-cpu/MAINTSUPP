@@ -1,0 +1,372 @@
+/*
+ * Section A — Pulse, the meters and the stuck-work band.
+ *
+ * `overview.css` carries the shared primitives (`.ovw-tile`, `.ovw-tiles`,
+ * `.ovw-segbar`, `.ovw-cohort`, `.ovw-frame`); this file carries only what
+ * belongs to this card. Same rules as every other sheet on these pages: tokens
+ * only, no hex literal anywhere, and the agreed widths — 640 / 767 / 768 /
+ * 1024 / 1280 — because several stage tests fail on any other.
+ *
+ * Mobile is the base case and every rule widens from it.
+ */
+
+/* ── Pulse ────────────────────────────────────────────────────────────────── */
+
+.ovw-pulse__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ovw-pulse__item {
+  min-width: 0;
+}
+
+/* ── At a glance ──────────────────────────────────────────────────────────── */
+
+.ovw-glance {
+  display: grid;
+  gap: 14px;
+}
+
+/*
+ * The three notes this card can carry — the excluded-rows footnote, the
+ * unmapped-status notice and the hidden-meter explanation — share one look.
+ *
+ * They are notes, not warnings: none of them is a fault, and colouring them as
+ * one would teach a reader to ignore the colour that does mean a fault.
+ */
+.ovw-glance__excluded,
+.ovw-glance__unmapped,
+.ovw-glance__hidden {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ms-line);
+  background: var(--surface-card-lo);
+  border-radius: var(--radius-sm);
+  color: var(--ms-ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.ovw-tiles__item {
+  min-width: 0;
+}
+
+/* ── Where work is stuck ──────────────────────────────────────────────────── */
+
+.ovw-stuck {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ms-line);
+}
+
+.ovw-stuck__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/*
+ * The derived sentence. Larger than the table beneath it on purpose: §2.4 calls
+ * this "the insight band", and the sentence is the insight — the table is the
+ * evidence for it.
+ */
+.ovw-stuck__lede {
+  margin: 0;
+  color: var(--ms-ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ovw-stuck__provenance {
+  margin: 0;
+  color: var(--ms-ink-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.ovw-stuck__table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ovw-stuck__table th,
+.ovw-stuck__table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--ms-line);
+  vertical-align: top;
+}
+
+.ovw-stuck__table thead th {
+  color: var(--ms-ink-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ovw-stuck__table tbody th {
+  font-weight: 600;
+  display: grid;
+  gap: 2px;
+}
+
+.ovw-stuck__title {
+  color: var(--ms-ink-muted);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+
+/* Days held is the column the table is sorted by, so it reads as the figure. */
+.ovw-stuck__held {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--ms-ink);
+  white-space: nowrap;
+}
+
+/* ── The same rows as cards, for a phone ──────────────────────────────────── */
+
+.ovw-stuck__cards {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ovw-stuck__card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+/* Primary value first — §1.8's rule for a table that has become cards. */
+.ovw-stuck__card-held {
+  margin: 0;
+  color: var(--ms-ink-muted);
+  font-size: 0.8rem;
+}
+
+.ovw-stuck__card-held strong {
+  color: var(--ms-ink);
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.ovw-stuck__card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ovw-stuck__card-meta dt {
+  color: var(--ms-ink-muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ovw-stuck__card-meta dd {
+  margin: 0;
+  color: var(--ms-ink);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 768px) {
+  .ovw-pulse__row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * THE PAGE SHELL — the axis control, the jump bar, the tools and the records
+ * panel. They live here rather than in a seventh stylesheet because the page
+ * already loads this one and a link tag per band is a request per band.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Measure by ───────────────────────────────────────────────────────────── */
+
+.ovw-measure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+
+.ovw-measure__label {
+  color: var(--ms-ink-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.ovw-measure select {
+  min-height: 44px;
+}
+
+/*
+ * Inside the mobile sheet the two controls stack and go full width. §1.8 puts
+ * the date range and the axis at the top of the sheet, and a control a thumb
+ * cannot reach is the same as one that is not there.
+ */
+.ops-sheet__lead {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--ms-line);
+}
+
+.ops-sheet__period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ops-sheet__lead select,
+.ops-sheet__lead input {
+  width: 100%;
+  min-height: 44px;
+}
+
+.ops-sheet__lead .ovw-measure {
+  display: grid;
+  gap: 4px;
+}
+
+/* ── The jump bar ─────────────────────────────────────────────────────────── */
+
+/*
+ * Sticky under the filter bar, which is itself sticky at `top: 0` with
+ * `z-index: 20`. This sits below it in both senses.
+ *
+ * Horizontally scrollable ON PURPOSE, and it is the one thing on this page
+ * allowed to be: five labels do not fit at 320px, and the alternative — wrapping
+ * to two rows — pushes the whole page down by 44px on every phone. It is an
+ * explicitly scrollable container with a visible edge, which is exactly the
+ * exception §1.8 carves out.
+ */
+.ovw-jump {
+  position: sticky;
+  top: 52px;
+  z-index: 19;
+  margin: 0 -2px;
+  padding: 6px 2px;
+  background: var(--canvas);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ovw-jump ul {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: max-content;
+}
+
+.ovw-jump button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--ms-ink-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ovw-jump button:hover {
+  color: var(--ms-ink);
+  border-color: var(--ms-teal-500);
+}
+
+.ovw-jump button:focus-visible {
+  outline: 2px solid var(--ms-teal-500);
+  outline-offset: 2px;
+}
+
+/* ── Tools and the records panel ──────────────────────────────────────────── */
+
+.ovw-tools {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.ovw-tool__panel,
+.ovw-records__panel {
+  max-width: 900px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.ovw-records__count {
+  margin: 0;
+  color: var(--ms-ink-muted);
+  font-size: 0.82rem;
+}
+
+.ovw-records__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ovw-records__row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.ovw-records__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ovw-records__meta dt {
+  color: var(--ms-ink-muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ovw-records__meta dd {
+  margin: 0;
+  color: var(--ms-ink);
+}
+
+@media (min-width: 768px) {
+  .ovw-records__meta {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

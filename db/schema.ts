@@ -2970,6 +2970,25 @@ export const jobStatusMap = sqliteTable(
       .default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
+    /**
+     * WHICH OF THE OVERVIEW'S EIGHT METERS THIS STATUS BELONGS TO.
+     *
+     * Nullable, and null means the catch-all. That is not a gap to be filled: a
+     * status invented tomorrow arrives with no row at all, resolves to `other`,
+     * and the eight still sum to the cohort total — which is what makes §9.9
+     * ("a status added later produces correct output with no code change") true
+     * by construction rather than by remembering.
+     *
+     * It lives HERE rather than in a join table because this table already
+     * holds exactly one row per (organisation, status) behind a UNIQUE index.
+     * One column on that row makes "a status belongs to exactly one meter" a
+     * property of the schema; a join table would make it a property of whatever
+     * code last wrote to it.
+     *
+     * Added by `addColumn` in `ensureOverviewFoundation`, so it is absent on a
+     * database that has not booted this release yet. Every reader coalesces.
+     */
+    meterKey: text("meter_key"),
     updatedByEmail: text("updated_by_email"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },

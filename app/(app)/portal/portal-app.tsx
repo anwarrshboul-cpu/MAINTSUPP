@@ -190,7 +190,8 @@ import {
 } from "./dashboard-insights";
 import { OverviewPage } from "./ops/overview-page";
 import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
-import { OPS_REFRESH } from "./ops/ops-url-state";
+import { OPS_REFRESH, URL_CHANGED, useQueryState } from "./ops/ops-url-state";
+import { DRILL_KEYS, readDrillFilter } from "./board-drill-filter";
 import { CompliancePage } from "./ops/compliance-page";
 import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 /*
@@ -1987,6 +1988,36 @@ export default function PortalApp({
   const surfaceReadsJobList = JOB_LIST_SURFACES.has(activeSurface);
 
   /*
+   * THE DRILL-THROUGH, APPLIED — see `board-drill-filter.ts` for why it is
+   * applied to the rows on their way into the board rather than inside it.
+   *
+   * Every chart on the Overview navigates here carrying its own filter state,
+   * and until now the board read none of it: `live-board.tsx` touches
+   * `searchParams` exactly once, to set `?item=`. So tapping a meter tile —
+   * "the whole tile is a button -> Jobs list filtered to that meter's
+   * statuses" — landed on the unfiltered board.
+   *
+   * The board is HANDED its rows, so filtering the list here produces exactly
+   * the same screen with none of the board's own code touched: its meters, its
+   * groups, its views and its search all operate on the rows they are given,
+   * which is what makes the filtered board internally consistent rather than a
+   * board with a caption contradicting it.
+   */
+  /* The address bar as reactive state. `useQueryState` subscribes to
+     `popstate` AND to the private event the ops pages dispatch after a
+     `replaceState`, because neither push nor replace fires anything on its
+     own — so a drill-through arriving by `pushState` is seen here. */
+  const { search: routeSearch } = useQueryState();
+  const drill = useMemo(
+    () => readDrillFilter(new URLSearchParams(routeSearch)),
+    [routeSearch],
+  );
+  const boardRequests = useMemo(
+    () => (drill.empty ? requests : requests.filter(drill.matches)),
+    [drill, requests],
+  );
+
+  /*
    * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
    *
    * Everything here is passed `requests` and computes from it: the board draws
@@ -3116,6 +3147,42 @@ export default function PortalApp({
             </div>
           )}
 
+          {/*
+            WHAT THE BOARD IS SHOWING, when it arrived from a drill-through.
+
+            §2.3 asks the meter tile to land on "the Jobs list filtered to that
+            meter's statuses ... showing one chip named after the meter, not five
+            status names". The chip is that sentence: without it a reader sees a
+            board holding 17 of 981 rows and no explanation, which is worse than
+            no filter at all.
+          */}
+          {activeSurface === "maintenance" && !drill.empty ? (
+            <div className="board-drill" role="status">
+              <span className="board-drill__lead">Filtered from the Overview:</span>
+              {drill.chips.map((chip) => (
+                <span key={chip.key} className="board-drill__chip">
+                  <strong>{chip.label}</strong> {chip.value}
+                </span>
+              ))}
+              <button
+                type="button"
+                className="board-drill__clear"
+                onClick={() => {
+                  const next = new URLSearchParams(window.location.search);
+                  for (const key of DRILL_KEYS) next.delete(key);
+                  const query = next.toString();
+                  window.history.replaceState(
+                    {},
+                    "",
+                    `${window.location.pathname}${query ? `?${query}` : ""}`,
+                  );
+                  window.dispatchEvent(new Event(URL_CHANGED));
+                }}
+              >
+                Show every job
+              </button>
+            </div>
+          ) : null}
           {activeSurface === "maintenance" && !sectionDetached && (
             <LiveMaintenanceBoard
               /*
@@ -3143,7 +3210,7 @@ export default function PortalApp({
                  board's own heading. */
               sectionLabel={activeCustom?.label ?? null}
               sectionDescription={activeCustom?.description ?? null}
-              requests={requests}
+              requests={boardRequests}
               onCreateDetailed={() => setShowCreateRequest(true)}
               onOpenRequest={openRequest}
               onRequestChange={(updated) => {
@@ -3773,6 +3840,10 @@ function OverviewView({
   const goToJobs = (query: string) => {
     const target = `/dashboard/${sectionRoutes.maintenance}`;
     window.history.pushState({}, "", `${target}${query ? `?${query}` : ""}`);
+    /* `pushState` fires nothing. Without this the shell's URL subscriber never
+       re-reads, so the board would be handed the unfiltered list even though
+       the address bar says otherwise. */
+    window.dispatchEvent(new Event(URL_CHANGED));
     onNavigate("maintenance");
   };
 
