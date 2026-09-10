@@ -36,8 +36,21 @@
   border-radius: 10px;
   /* A shade off the card behind it. The register's own rebuild note records
      what happens when a surface is within a shade of its background: the cards
-     visually merge and a list of twelve reads as one block. */
-  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+     visually merge and a list of twelve reads as one block.
+
+     `--surface-2` DOES NOT EXIST — it is defined nowhere in the stylesheet, so
+     every row fell through to the literal below. That value is a 2% white tint,
+     which is a dark-theme device: over the dark card (#182830) it composites to
+     rgb(29, 44, 52) and reads, but over the light card (#ffffff) it composites
+     to #ffffff exactly — measured luminance delta 0.00000. In light mode the
+     rows were therefore invisible against their own card, which is precisely
+     the failure the sentence above was written to prevent.
+
+     `--surface-card-lo` is a real token and is a shade off the card in BOTH
+     themes: #101b23 against the dark card, #f6f9fa against the light one. Text
+     contrast was never the problem and is not changed by this — 12.88:1 dark
+     and 15.58:1 light, both measured. */
+  background: var(--surface-card-lo, rgba(255, 255, 255, 0.02));
 }
 
 .compliance-template__head {
