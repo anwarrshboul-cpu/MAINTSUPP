@@ -3260,7 +3260,12 @@ export function LiveMaintenanceBoard({
         <AnalyticsMetricCard label="Awaiting parts" value={String(jobAnalytics.parts.count)} detail="Supply dependency" icon="tool" tone="orange" trend={jobAnalytics.parts.trend} trendLabel={jobMeterTrendLabels.parts} />
         <AnalyticsMetricCard label="Awaiting approval" value={String(jobAnalytics.approval.count)} detail="Sign-off required" icon="user" tone="purple" trend={jobAnalytics.approval.trend} trendLabel={jobMeterTrendLabels.approval} />
         <AnalyticsMetricCard label="Closed in period" value={String(jobAnalytics.closed.count)} detail="Completed in this view" icon="check" tone="green" trend={jobAnalytics.closed.trend} trendLabel={jobMeterTrendLabels.closed} />
-        <AnalyticsMetricCard label="Avg SLA target" value={jobAnalytics.sla.averageHours === null ? "—" : `${jobAnalytics.sla.averageHours.toFixed(1)} hrs`} detail={`Mean of ${jobAnalytics.sla.sample} due dates`} icon="clock" tone="blue" trend={jobAnalytics.sla.trend} trendLabel={jobMeterTrendLabels.sla} />
+        {/* SLA MET, not "Avg SLA target". The old card averaged the TARGETS on
+            the rows, so a portfolio three months late reported the same 64.8 hrs
+            as one that never missed. `slaMet` in dashboard-meters.ts answers the
+            performance question instead; a dash when no closed job in view
+            carries a due date, because that is not the same fact as 0%. */}
+        <AnalyticsMetricCard label="SLA met" value={jobAnalytics.sla.metPercent === null ? "—" : `${jobAnalytics.sla.metPercent}%`} detail={jobAnalytics.sla.metSample ? `${jobAnalytics.sla.metSample} closed job${jobAnalytics.sla.metSample === 1 ? "" : "s"} with a due date` : "No closed job in view carries a due date"} icon="clock" tone="blue" trend={jobAnalytics.sla.trend} trendLabel={jobMeterTrendLabels.sla} />
         <JobsMeterToggle stuck={meters.stuck} collapsed={meters.collapsed} onToggle={meters.toggle} />
       </section>
       )}

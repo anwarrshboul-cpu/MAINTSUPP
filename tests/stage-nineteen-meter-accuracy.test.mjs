@@ -337,6 +337,82 @@ test("Avg SLA target averages the board's own due dates", () => {
   assert.notEqual(result.sla.averageHours, 4);
 });
 
+test("SLA met counts closed jobs against their own due date, and judges nothing else", () => {
+  /*
+   * §4.4 of the dashboard master prompt: the old card averaged the TARGETS on
+   * the rows, so a portfolio three months late reported the same figure as one
+   * that never missed. This is the performance question.
+   *
+   * Three rules, each of which moves the number:
+   *   · only CLOSED jobs count — an open job has neither met nor missed, and
+   *     counting it as a miss would make the figure fall every day nobody did
+   *     anything, including the day the work was booked;
+   *   · no due date means no judgement, not a miss;
+   *   · a BARE YYYY-MM-DD due date is met by closing ON that day. Treating it
+   *     as UTC midnight marks work delivered on the due day as late for
+   *     everyone west of Greenwich — the same rule `duePassed` and
+   *     `overdueOpenSql` encode.
+   */
+  const closedOnTime = row({
+    status: "Job Completed",
+    requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+    dueAt: new Date(NOW - 2 * DAY).toISOString(),
+    completedAt: new Date(NOW - 3 * DAY).toISOString(),
+  });
+  const closedLate = row({
+    status: "Job Completed",
+    requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+    dueAt: new Date(NOW - 5 * DAY).toISOString(),
+    completedAt: new Date(NOW - 1 * DAY).toISOString(),
+  });
+  const stillOpen = row({
+    status: "Job In Progress",
+    requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+    dueAt: new Date(NOW - 9 * DAY).toISOString(),
+  });
+  const noDueDate = row({
+    status: "Job Completed",
+    requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+    completedAt: new Date(NOW - 1 * DAY).toISOString(),
+    dueAt: null,
+  });
+
+  assert.equal(meters.slaMet(closedOnTime), true);
+  assert.equal(meters.slaMet(closedLate), false);
+  assert.equal(meters.slaMet(stillOpen), null, "an open job has not missed anything yet");
+  assert.equal(meters.slaMet(noDueDate), null, "no target, no judgement");
+
+  /* A bare day, closed ON the day. */
+  const dueDay = new Date(NOW - 4 * DAY).toISOString().slice(0, 10);
+  assert.equal(
+    meters.slaMet(
+      row({
+        status: "Job Completed",
+        requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+        dueAt: dueDay,
+        completedAt: `${dueDay}T23:14:00.000Z`,
+      }),
+    ),
+    true,
+    "a bare due date is met by closing on that day",
+  );
+
+  const result = compute([closedOnTime, closedLate, stillOpen, noDueDate], "90");
+  assert.equal(result.sla.metSample, 2, "only the two judgeable rows are in the denominator");
+  assert.equal(result.sla.metPercent, 50);
+});
+
+test("SLA met is a dash, not a zero, when nothing can be judged", () => {
+  /* "No closed job carries a due date" and "none of them met it" are different
+     facts. 0% asserts the second. */
+  const result = compute(
+    [row({ status: "Job In Progress", requestedAt: new Date(NOW - DAY).toISOString() })],
+    "90",
+  );
+  assert.equal(result.sla.metPercent, null);
+  assert.equal(result.sla.metSample, 0);
+});
+
 test("rows with no due date are left out of the SLA mean, not counted as zero", () => {
   const rows = [
     row({
@@ -442,14 +518,30 @@ test("no meter sniffs a status for a substring any more", async () => {
   // And each card's small print says what that card counts.
   assert.match(board, /label="P1 critical"[\s\S]{0,80}detail="Urgent or Tier 1"/);
   assert.match(board, /label="Awaiting approval"[\s\S]{0,80}detail="Sign-off required"/);
-  // A mean is only as good as its sample, and this one's is thin — the monday
-  // export arrived with one due date across 745 rows. The card has to print
-  // the sample, or a single row reads as a portfolio-wide fact. It also has to
-  // fit: the detail line ellipsises past about 22 characters, and a caveat
-  // rendered as "Request-to-due · 0 of …" is no caveat at all.
+  /*
+   * RE-POINTED, NOT WEAKENED. The card is "SLA met" now, and the contract this
+   * assertion has always held is unchanged: a figure this thin must print its
+   * own sample, or one row reads as a portfolio-wide fact. The monday export
+   * arrived with one due date across 745 rows.
+   *
+   * What changed is which figure sits above the sample. §4.4 of the dashboard
+   * brief: "Avg SLA target 64.8 hrs ... is an average of the targets themselves
+   * and measures nothing about performance" — a portfolio three months late
+   * reported the same number as one that never missed. The card now shows the
+   * share of closed, due-dated jobs that closed on or before their due date,
+   * from `slaMet`, and prints how many jobs that is.
+   *
+   * The dash case is asserted too, because "no closed job carries a due date"
+   * and "none of them met it" are different facts and 0% would say the second.
+   */
   assert.match(
     board,
-    /label="Avg SLA target"[\s\S]{0,220}detail=\{`Mean of \$\{jobAnalytics\.sla\.sample\} due dates`\}/,
+    /label="SLA met"[\s\S]{0,320}\$\{jobAnalytics\.sla\.metSample\} closed job\$\{jobAnalytics\.sla\.metSample === 1 \? "" : "s"\} with a due date/,
+  );
+  assert.match(
+    board,
+    /jobAnalytics\.sla\.metPercent === null \? "—"/,
+    "nothing to judge must print a dash, never 0%",
   );
 });
 

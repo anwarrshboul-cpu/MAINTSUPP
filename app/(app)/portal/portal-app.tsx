@@ -620,6 +620,14 @@ const navSecondary: Section[] = [
  */
 const navExcluded: ReadonlySet<string> = new Set<string>(["units"]);
 
+const JOB_LIST_SURFACES: ReadonlySet<Section> = new Set<Section>([
+  "maintenance",
+  "calendar",
+  "contractors",
+  "reports",
+  "units",
+]);
+
 const sectionRoutes: Record<Section, string> = {
   overview: "",
   maintenance: "jobs",
@@ -1619,74 +1627,10 @@ export default function PortalApp({
    * Latched in state rather than derived per render because "has ever been
    * wanted" is the question, not "is wanted now".
    */
-  const [jobListWanted, setJobListWanted] = useState(false);
+  const jobListWanted = useRef(false);
   /** When the figures on screen were last successfully read. Null until then. */
   const [dataUpdatedAt, setDataUpdatedAt] = useState<Date | null>(null);
 
-  useEffect(() => {
-    if (!jobListWanted) return;
-    let active = true;
-    async function loadRequests() {
-      /*
-       * Every page of the board, not just the first.
-       *
-       * `/api/maintenance` was paged in Stage 16 after a bare `.limit(250)` made
-       * the board show 250 of 744 jobs while every total agreed with every other
-       * total. The server side was fixed; this caller was not — it asked for no
-       * limit, took the default 1000, and never read `hasMore`. Past 1000 jobs
-       * the dashboards would have gone quietly wrong in exactly the same way,
-       * and the oldest work — the overdue backlog — is what falls off the end.
-       */
-      try {
-        const collected: MaintenanceRequest[] = [];
-        let offset = 0;
-        for (;;) {
-          const response = await fetch(
-            `/api/maintenance?limit=1000&offset=${offset}`,
-            { headers: { Accept: "application/json" } },
-          );
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const payload = (await response.json()) as {
-            requests?: MaintenanceRequest[];
-            hasMore?: boolean;
-            nextOffset?: number | null;
-          };
-          if (!active) return;
-          collected.push(...(payload.requests ?? []));
-          if (!payload.hasMore || typeof payload.nextOffset !== "number") break;
-          offset = payload.nextOffset;
-        }
-        if (active) {
-          setRequests(collected);
-          setDataMode("live");
-          // Stamped only on success, so the time on screen is when the figures
-          // were last actually read — not when someone last pressed the button.
-          setDataUpdatedAt(new Date());
-        }
-      } catch {
-        /*
-         * Say so, and show nothing.
-         *
-         * Two rounds of this. First the chip said "Loading workspace" for ever,
-         * so a 503 from D1 presented `mock-data.ts` as the customer's own
-         * figures. Then the chip was made honest — but the invented rows stayed
-         * underneath it, and every dashboard on the screen went on computing
-         * spend, compliance and SLA from them. The rows are gone now: the state
-         * starts empty and a failure leaves it empty.
-         */
-        if (active) {
-          setRequests([]);
-          setDataMode("unavailable");
-        }
-      } finally {
-        if (active) setRefreshing(false);
-      }
-    }
-    loadRequests();
-    return () => {
-      active = false;
-    };
-  }, [jobListWanted, refreshToken]);
 
   useEffect(() => {
     let active = true;
@@ -2030,6 +1974,31 @@ export default function PortalApp({
   ) as Section;
 
   /*
+   * Whether THIS surface reads the job list, and therefore whether the
+   * freshness chip and the "Updated" stamp have anything to report.
+   *
+   * Derived rather than read off `jobListWanted`, which is a ref: a ref does
+   * not re-render, so the chip would never appear, and reading `.current`
+   * during render is exactly the impurity the compiler rule above objects
+   * to. The surface is already reactive and is the honest question anyway —
+   * the age of figures nobody on this screen is reading is not a fact worth
+   * a line of chrome.
+   */
+  const surfaceReadsJobList = JOB_LIST_SURFACES.has(activeSurface);
+
+  /*
+   * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
+   *
+   * Everything here is passed `requests` and computes from it: the board draws
+   * the rows, the calendar places them on dates, the contractor screen scores
+   * them, and the reporting tabs derive every panel from them. `overview` is
+   * NOT here — every figure on it comes from `/api/dashboard/*` — and neither
+   * is `invoice-tracker`, which reads `/api/finance/*`.
+   *
+   * A custom `section:` register resolves to the `maintenance` surface, so a
+   * section bound to its own board is covered by the first entry.
+   */
+  /*
    * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
    *
    * Everything here is passed `requests` and computes from it: the board draws
@@ -2042,15 +2011,79 @@ export default function PortalApp({
    * section bound to its own board is covered by the first entry.
    */
   useEffect(() => {
-    const readsJobList: readonly Section[] = [
-      "maintenance",
-      "calendar",
-      "contractors",
-      "reports",
-      "units",
-    ];
-    if (readsJobList.includes(activeSurface)) setJobListWanted(true);
-  }, [activeSurface]);
+    /*
+     * The latch, inside the effect rather than in a second one beside it.
+     *
+     * A `setJobListWanted(true)` in its own effect is a synchronous setState
+     * in an effect, which the React Compiler rejects outright
+     * (`react-hooks/set-state-in-effect`) and which costs a second render
+     * pass on every section change for a value nothing paints. A ref carries
+     * "has ever been wanted" without one.
+     */
+    if (!JOB_LIST_SURFACES.has(activeSurface) && !jobListWanted.current) return;
+    jobListWanted.current = true;
+    let active = true;
+    async function loadRequests() {
+      /*
+       * Every page of the board, not just the first.
+       *
+       * `/api/maintenance` was paged in Stage 16 after a bare `.limit(250)` made
+       * the board show 250 of 744 jobs while every total agreed with every other
+       * total. The server side was fixed; this caller was not — it asked for no
+       * limit, took the default 1000, and never read `hasMore`. Past 1000 jobs
+       * the dashboards would have gone quietly wrong in exactly the same way,
+       * and the oldest work — the overdue backlog — is what falls off the end.
+       */
+      try {
+        const collected: MaintenanceRequest[] = [];
+        let offset = 0;
+        for (;;) {
+          const response = await fetch(
+            `/api/maintenance?limit=1000&offset=${offset}`,
+            { headers: { Accept: "application/json" } },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = (await response.json()) as {
+            requests?: MaintenanceRequest[];
+            hasMore?: boolean;
+            nextOffset?: number | null;
+          };
+          if (!active) return;
+          collected.push(...(payload.requests ?? []));
+          if (!payload.hasMore || typeof payload.nextOffset !== "number") break;
+          offset = payload.nextOffset;
+        }
+        if (active) {
+          setRequests(collected);
+          setDataMode("live");
+          // Stamped only on success, so the time on screen is when the figures
+          // were last actually read — not when someone last pressed the button.
+          setDataUpdatedAt(new Date());
+        }
+      } catch {
+        /*
+         * Say so, and show nothing.
+         *
+         * Two rounds of this. First the chip said "Loading workspace" for ever,
+         * so a 503 from D1 presented `mock-data.ts` as the customer's own
+         * figures. Then the chip was made honest — but the invented rows stayed
+         * underneath it, and every dashboard on the screen went on computing
+         * spend, compliance and SLA from them. The rows are gone now: the state
+         * starts empty and a failure leaves it empty.
+         */
+        if (active) {
+          setRequests([]);
+          setDataMode("unavailable");
+        }
+      } finally {
+        if (active) setRefreshing(false);
+      }
+    }
+    loadRequests();
+    return () => {
+      active = false;
+    };
+  }, [activeSurface, refreshToken]);
 
   /*
    * A `section:` URL that resolved to nothing, once we know it resolved to
@@ -2780,7 +2813,7 @@ export default function PortalApp({
               than reworded: the age of figures nobody on this screen is reading
               is not a fact worth a line of chrome.
             */}
-            {jobListWanted && (
+            {surfaceReadsJobList && (
               <span
                 className={`data-indicator data-indicator--${dataMode}`}
                 title={
@@ -2829,7 +2862,7 @@ export default function PortalApp({
                 window.dispatchEvent(new Event(OPS_REFRESH));
                 // Nothing is in flight when no surface has asked for the job
                 // list, so the spinner would never be cleared by the effect.
-                if (!jobListWanted) setRefreshing(false);
+                if (!surfaceReadsJobList) setRefreshing(false);
               }}
               disabled={refreshing}
               aria-label="Refresh the figures on screen"
@@ -2837,7 +2870,7 @@ export default function PortalApp({
               <Icon name="refresh" size={17} />
               <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
             </button>
-            {jobListWanted && (
+            {surfaceReadsJobList && (
               <span className="topbar-updated" aria-live="polite">
                 {dataUpdatedAt
                   ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
