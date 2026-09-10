@@ -6041,6 +6041,26 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
    * so it needs its own, and `app/api/files/route.ts` refuses an upload with no
    * anchor at all.
    */
+  /*
+   * THE RENAMED COLUMN, ADDED RATHER THAN RENAMED.
+   *
+   * `bank_accounts` became `payment_sources` when the payment credentials came
+   * out of it (W06-09), and the two tables that point at it renamed their
+   * foreign key with it. `CREATE TABLE IF NOT EXISTS` does NOTHING to a table
+   * that already exists, so on any database that has already booted once,
+   * `payments` and `payment_runs` still carry only `bank_account_id` — and
+   * every `select()` drizzle builds from the schema names `payment_source_id`,
+   * so both routes answered 503. Measured on the Preview immediately after
+   * deploying the rename, which is exactly the legacy-schema trap this file's
+   * own notes warn about.
+   *
+   * Added, never renamed: `db/init.ts` performs no destructive ALTER. The old
+   * column stays where it is, unread — both tables held no rows carrying one
+   * on any estate, so there is nothing to copy across.
+   */
+  await addColumn(d1, "payments", "payment_source_id", "TEXT");
+  await addColumn(d1, "payment_runs", "payment_source_id", "TEXT");
+
   await addColumn(d1, "attachments", "invoice_id", "TEXT");
   await addColumn(d1, "attachments", "quote_id", "TEXT");
   try {
