@@ -9771,6 +9771,9 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
 }
 
 .board-drill__clear:focus-visible {
-  outline: 2px solid var(--brand-bright);
+  /* `--brand-bright` measured 2.59:1 here, below SC 1.4.11's 3:1 floor for a
+     focus indicator. Every other ring on this row already uses `--accent-fg`,
+     which measures 6.02:1 light and 8.65:1 dark. */
+  outline: 2px solid var(--accent-fg);
   outline-offset: 2px;
 }

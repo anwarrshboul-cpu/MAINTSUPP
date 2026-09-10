@@ -297,13 +297,26 @@
   cursor: pointer;
 }
 
+/*
+ * These two were the page's only ring and only hover border drawn in
+ * `--ms-teal-500` rather than `--accent-fg`, and they were the two that failed.
+ * `--ms-teal-500` aliased `--brand-bright`, which has no dark value, and
+ * measured 2.59:1 on the light card against SC 1.4.11's 3:1 — the ring was
+ * there and a low-vision reader could not find it.
+ *
+ * The token has since been given a real light value (4.12:1), which fixes it
+ * where it is a state border. A focus ring wants the colour the rest of the
+ * page already uses, though: `--accent-fg` measures 6.02:1 in light and 8.65:1
+ * in dark, and every other `:focus-visible` on the Overview is drawn with it,
+ * so a reader tabbing across the page sees one ring rather than two.
+ */
 .ovw-jump button:hover {
   color: var(--ms-ink);
-  border-color: var(--ms-teal-500);
+  border-color: var(--accent-fg);
 }
 
 .ovw-jump button:focus-visible {
-  outline: 2px solid var(--ms-teal-500);
+  outline: 2px solid var(--accent-fg);
   outline-offset: 2px;
 }
 

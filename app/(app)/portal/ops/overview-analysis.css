@@ -292,6 +292,27 @@
   border-radius: 10px;
   border: 1px solid var(--ms-line);
   background: transparent;
+  /*
+   * TWO THINGS WERE WRONG WITH THIS ONE DECLARATION, AND ONLY ONE OF THEM WAS
+   * VISIBLE.
+   *
+   * `--ms-teal-700` aliases `--brand-solid`, which `globals.css` declares once
+   * and never redefines for dark, so the value this rule asked for measured
+   * 2.92:1 on the dark card and 2.40:1 on the hover surface — under AA for
+   * normal text, on the only control that opens "Resolve names". The token now
+   * carries a real dark value (`--accent-fg`, 8.65:1 and 7.13:1).
+   *
+   * What the browser was actually painting in dark was something else again.
+   * `globals.css` carries a blanket `body[data-theme="dark"] .portal-main
+   * button { color: var(--control-own-fg, var(--ink)) }`, and at (0,3,1) it
+   * beat this rule at (0,1,0): measured, the button rendered `--ink` at
+   * 12.94:1 and this declaration did nothing in the default theme. So the
+   * fixed token alone would still not have shown. `--control-own-fg` is the
+   * opt-out that blanket was given for exactly this case — a control that has
+   * settled its own foreground declares it and wins without an `!important` —
+   * and setting it here is what makes the token's dark value real.
+   */
+  --control-own-fg: var(--ms-teal-700);
   color: var(--ms-teal-700);
   font: inherit;
   font-size: 0.78rem;
@@ -359,6 +380,16 @@
   gap: 6px;
 }
 
+/*
+ * The 4px rule down the left is the whole of the difference between a stage
+ * that has been measured and one that has not, so SC 1.4.11's 3:1 applies to
+ * both colours and each has to be told apart from the sunken card behind it.
+ * Neither was: measured on `--ms-surface-sunken` in light, `--ms-not-recorded`
+ * gave 2.17:1 and `--ms-teal-500` 2.44:1. Both tokens now carry a light value
+ * that clears it — 3.81:1 and 3.89:1 — and dark, which was already fine at
+ * 7.98:1 and 5.86:1, is untouched. The values live in `ops-tokens.css`; the
+ * two rules here are unchanged because the tokens were the defect.
+ */
 .ova-stage {
   display: flex;
   flex-direction: column;

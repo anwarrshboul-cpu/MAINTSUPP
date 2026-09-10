@@ -285,8 +285,19 @@
   background: var(--surface-card);
 }
 
+/*
+ * The row a pointer is currently carrying to another meter. It is ghosted so a
+ * reader can see where the drag started, which means it is live content being
+ * read during the drag — not a disabled control, and 1.4.3 does not exempt it.
+ *
+ * At `opacity: 0.55` its `.ovt-status__label`, which is `--ink`, measured
+ * 3.65:1 on the white card and 4.95:1 on the dark one: the default theme
+ * passed and the light theme did not. 0.7 measures 5.86:1 and 7.10:1 and is
+ * still visibly a ghost. The only `--muted` thing under this rule is
+ * `.ovt-status__dots`, which is `aria-hidden` decoration.
+ */
 .ovt-status.is-carried {
-  opacity: 0.55;
+  opacity: 0.7;
   border-color: var(--brand-solid);
 }
 

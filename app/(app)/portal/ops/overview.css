@@ -114,19 +114,24 @@
   overflow: hidden;
   background: var(--line-soft, var(--ms-line));
   /*
-   * A HAIRLINE ROUND THE TRACK, and it is a measurement rather than a flourish.
+   * THE SEAM ROUND THE TRACK. It is a seam and nothing more, and the paragraph
+   * that used to stand here claimed otherwise on both of its counts.
    *
-   * Measured with Chrome: in the LIGHT theme four of the brief's own fills sit
-   * below 3:1 against a white card — `#4FC3C0` at 2.12, `#E8C468` at 1.68,
-   * `#E0A32E` at 2.22, `#9AAFB2` at 2.30. §1.3 chose those values and names two
-   * of them "fills only", so they are kept exactly; what the border does is
-   * make the BAR's edge unambiguous, so a pale segment at either end is still
-   * bounded by something the eye can find.
+   * It claimed this hairline made "the BAR's edge unambiguous". Measured, this
+   * rule draws `--ms-line` at 1.12:1 against the track it sits on and 1.29:1
+   * against the card behind it, in light and dark alike. At those numbers it
+   * separates the bar from the card by a hair a sighted reader can just make
+   * out at rest; it cannot carry a boundary and it never did. What carries the
+   * boundary is the two-tone divider on `.ovw-severity__segment` below, which
+   * has an arithmetic guarantee against a fill of any colour.
    *
-   * The information itself never depended on the fill: every segment carries
-   * its name and its count, and ink on each fill measures 4.96 to 11.13 across
-   * both themes — comfortably AA. Dark, which is this product's default, is
-   * above 3:1 on every fill against the card anyway.
+   * It also claimed "ink on each fill measures 4.96 to 11.13 across both
+   * themes — comfortably AA", and that dark clears 3:1 on every fill. Neither
+   * is true. Both were computed against the dark ramp in `ops-tokens.css`,
+   * which nothing reads: the fill is data, the same hex in both themes. White
+   * on the real fills measures 3.14, 2.22 and 3.05 for fresh, ageing and
+   * overdue, and near-black measures 3.61 on critical — so every theme had a
+   * failing number, and different ones. `.ovw-severity__count` answers that.
    */
   box-shadow: inset 0 0 0 1px var(--ms-line);
 }
@@ -144,7 +149,25 @@
   border: 0;
   padding: 0;
   overflow: hidden;
-  color: var(--ms-on-fill);
+  /*
+   * WHERE ONE SEGMENT ENDS, against a colour nobody has chosen yet.
+   *
+   * A meter's fill comes from `dashboard_meters.colour` and a user may set it
+   * to anything, so two neighbouring segments can be any pair of colours at
+   * all, including two that a reader cannot tell apart. No single divider
+   * colour survives that. A white line beside a black one does: contrast to
+   * white times contrast to black is 21 for every possible colour, so if one
+   * of the pair falls under 3:1 the other is over 7:1, and the worst case is
+   * √21 = 4.58:1. Over the eight seeded fills the weaker line still measured
+   * 4.62:1. `ops-tokens.css` holds the two values and says why they are the
+   * only tokens there that must not follow the theme.
+   *
+   * It is a box-shadow rather than a border because the segment's width is an
+   * inline percentage; a border would take it out of the total.
+   */
+  box-shadow:
+    inset -1px 0 0 0 var(--ms-fill-edge-hi),
+    inset -2px 0 0 0 var(--ms-fill-edge-lo);
 }
 
 button.ovw-severity__segment {
@@ -156,7 +179,33 @@ button.ovw-severity__segment:focus-visible {
   outline-offset: -2px;
 }
 
+/*
+ * THE NUMBER BRINGS ITS OWN GROUND.
+ *
+ * This renders at 11.2px/600, which is normal text under 1.4.3, so 4.5:1
+ * applies. It used to inherit `--ms-on-fill` — white in light, near-black in
+ * dark — and sit straight on the fill. Measured on the fills the API actually
+ * sends: white gives 3.14 on fresh, 2.22 on ageing, 3.05 on overdue and 5.03
+ * on critical; near-black gives 5.78, 8.16, 5.95 and 3.61. Three failures in
+ * light, one in dark, and no single ink fixes both because the fill does not
+ * change with the theme.
+ *
+ * Nor could a cleverer ink fix it in general: a meter's colour is a value a
+ * user types into Meter Settings, so the ground under this number is unknown
+ * until it renders. The only reliable answer is to stop rendering on it. The
+ * chip is `--ms-surface` under `--ms-ink`, which is the card's own pairing and
+ * measures 15.58:1 in light and 12.94:1 in dark whatever the fill behind it.
+ *
+ * The chip can be clipped on a very narrow segment — `overflow: hidden` above
+ * takes care of that, as it already did for the bare number — and the count is
+ * carried losslessly by the segment's `aria-label` and by the visually-hidden
+ * data table, so nothing is only in the chip.
+ */
 .ovw-severity__count {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--ms-surface);
+  color: var(--ms-ink);
   font-size: 0.7rem;
   font-weight: 600;
   line-height: 1;
@@ -164,6 +213,7 @@ button.ovw-severity__segment:focus-visible {
 }
 
 .ovw-severity--small .ovw-severity__count {
+  padding: 0 4px;
   font-size: 0.62rem;
 }
 
@@ -270,12 +320,21 @@ button.ovw-severity__segment:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * These two are TEXT — 11.84px, so 4.5:1 — and they used to read the severity
+ * FILLS. Measured on the white card, `--ms-sev-fresh` gave 3.14:1 and
+ * `--ms-sev-overdue` 3.05:1; dark was already fine at 6.89 and 6.35. The fills
+ * are pinned to `overview-meters.ts` and cannot move, so the ink ramp exists
+ * instead: same hues, 6.27:1 and 5.91:1 in light, 6.89:1 and 6.35:1 in dark.
+ * The direction is never colour alone — each delta also carries a ▲/▼ and the
+ * word "Up" or "Down".
+ */
 .ovw-tile__delta--up {
-  color: var(--ms-sev-fresh);
+  color: var(--ms-sev-fresh-ink);
 }
 
 .ovw-tile__delta--down {
-  color: var(--ms-sev-overdue);
+  color: var(--ms-sev-overdue-ink);
 }
 
 .ovw-tile__previous {
@@ -370,8 +429,12 @@ button.ovw-severity__segment:focus-visible {
   background: transparent;
 }
 
+/* The border is the only thing marking this state as an error, so 1.4.11's
+   3:1 applies to it. The fill it used to read measured 4.75:1 in light and
+   4.93:1 in dark — passing, but the ink ramp is what every other severity line
+   on this page now draws with, and it measures 6.24:1 and 5.68:1. */
 .ovw-frame__state--error {
-  border: 1px solid var(--ms-sev-critical);
+  border: 1px solid var(--ms-sev-critical-ink);
   background: var(--ms-surface-sunken);
 }
 
@@ -482,7 +545,9 @@ button.ovw-severity__segment:focus-visible {
   flex-direction: column;
   gap: 3px;
   min-width: 132px;
-  max-width: 220px;
+  /* Never wider than the plot it is anchored inside, whatever 220px would be
+     at this width. The plot is the containing block, so `100%` is its width. */
+  max-width: min(220px, 100%);
   padding: 8px 10px;
   border: 1px solid var(--ms-line);
   border-radius: 10px;
@@ -514,6 +579,33 @@ button.ovw-severity__segment:focus-visible {
   min-height: 44px;
 }
 
+/*
+ * THE TIP CANNOT PUSH THE PAGE SIDEWAYS ON A PHONE.
+ *
+ * It is absolutely positioned inside `.ovw-segbar__plot`, which is `position:
+ * relative` and has no clipping ancestor, and it is centred on its segment:
+ * `left` is an inline percentage (clamped to 8–92 by `overview-charts.tsx`)
+ * with `transform: translateX(-50%)`. At 320px the plot is about 288px wide, so
+ * a tip on the first segment centres near 23px and its own 110px half-width
+ * reaches past the left edge of the document. It is opened by TAP, not hover,
+ * so this is a state a phone reader reaches on purpose.
+ *
+ * Below 768 the tip stops being anchored and becomes a panel the width of the
+ * plot, which is both the fix and the better shape at that size. `left` has to
+ * be `!important` because the value it is overriding is an inline style, and
+ * that is what `!important` is for; the alternative is a `.tsx` change, and
+ * `left` is the only declaration that needs it.
+ */
+@media (max-width: 767px) {
+  .ovw-tip {
+    left: 0 !important;
+    right: 0;
+    transform: none;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 /* ── The segmented bar ────────────────────────────────────────────────────── */
 
 .ovw-segbar {
@@ -538,19 +630,13 @@ button.ovw-severity__segment:focus-visible {
   overflow: hidden;
   background: var(--line-soft, var(--ms-line));
   /*
-   * A HAIRLINE ROUND THE TRACK, and it is a measurement rather than a flourish.
-   *
-   * Measured with Chrome: in the LIGHT theme four of the brief's own fills sit
-   * below 3:1 against a white card — `#4FC3C0` at 2.12, `#E8C468` at 1.68,
-   * `#E0A32E` at 2.22, `#9AAFB2` at 2.30. §1.3 chose those values and names two
-   * of them "fills only", so they are kept exactly; what the border does is
-   * make the BAR's edge unambiguous, so a pale segment at either end is still
-   * bounded by something the eye can find.
-   *
-   * The information itself never depended on the fill: every segment carries
-   * its name and its count, and ink on each fill measures 4.96 to 11.13 across
-   * both themes — comfortably AA. Dark, which is this product's default, is
-   * above 3:1 on every fill against the card anyway.
+   * The seam that separates the bar from the card. The copy of this comment on
+   * `.ovw-severity` used to claim it made the bar's edge unambiguous and that
+   * ink on the fills was "comfortably AA"; both were wrong, both are corrected
+   * there, and the same numbers apply here because it is the same track colour
+   * and the same data-driven fills. Measured: `--ms-line` at 1.12:1 against the
+   * track and 1.29:1 against the card, in both themes. The boundary that has to
+   * be readable is the one BETWEEN segments, and `.ovw-segbar__fill` draws it.
    */
   box-shadow: inset 0 0 0 1px var(--ms-line);
 }
@@ -562,6 +648,11 @@ button.ovw-severity__segment:focus-visible {
   border: 0;
   padding: 0;
   cursor: pointer;
+  /* The two-tone divider — see `.ovw-severity__segment` for the arithmetic
+     that makes one pixel of white beside one of black legible on any fill. */
+  box-shadow:
+    inset -1px 0 0 0 var(--ms-fill-edge-hi),
+    inset -2px 0 0 0 var(--ms-fill-edge-lo);
 }
 
 .ovw-segbar__fill:focus-visible {
@@ -693,8 +784,28 @@ button.ovw-severity__segment:focus-visible {
   min-width: 0;
 }
 
-.ovw-ranked__row--muted {
-  opacity: 0.75;
+/*
+ * DE-EMPHASIS THAT DOES NOT COST LEGIBILITY.
+ *
+ * This was `opacity: 0.75`, and opacity does not care what it is dimming. The
+ * row's `.ovw-ranked__share` is already `--ms-ink-muted`; at 75% on the white
+ * card it measured 3.67:1, against AA's 4.5:1 for normal text. Raising the
+ * figure does not help much either — `--ms-ink-muted` only reaches 4.5:1 at
+ * about 85%, by which point the de-emphasis has stopped being visible, so the
+ * rule would be paying a contrast cost for an effect nobody can see.
+ *
+ * A row is muted when it is a site with no costed jobs or a contractor nobody
+ * has linked — rows a reader is meant to read and then discount, not skip. So
+ * the emphasis comes off the label and the weight instead, at full strength:
+ * `--ms-ink-muted` measures 6.58:1 in light and 6.61:1 in dark, and the value
+ * keeps the card's ink at 15.58:1 and 12.94:1 while losing its bold.
+ */
+.ovw-ranked__row--muted .ovw-ranked__label {
+  color: var(--ms-ink-muted);
+}
+
+.ovw-ranked__row--muted .ovw-ranked__value {
+  font-weight: 500;
 }
 
 .ovw-ranked__hit {
@@ -764,6 +875,12 @@ button.ovw-ranked__hit:focus-visible {
   border-radius: 999px;
   overflow: hidden;
   background: var(--line-soft, var(--ms-line));
+  /* The third stacked bar on this page, and the only one that had no seam at
+     all: `--line-soft` on `--surface-card` measures 1.15:1 in light and 1.13:1
+     in dark, so an empty or nearly-empty track was invisible rather than empty.
+     Same seam as the other two tracks — 1.29:1 and 1.27:1, a seam, not a
+     boundary; the boundary between stacks is on `.ovw-ranked__stack`. */
+  box-shadow: inset 0 0 0 1px var(--ms-line);
 }
 
 .ovw-ranked__fill {
@@ -782,6 +899,12 @@ button.ovw-ranked__hit:focus-visible {
 .ovw-ranked__stack {
   display: block;
   height: 100%;
+  /* Stacked by priority, one colour per priority, straight from the same data
+     as every other bar here — so the same two-tone divider, for the same
+     reason. See `.ovw-severity__segment`. */
+  box-shadow:
+    inset -1px 0 0 0 var(--ms-fill-edge-hi),
+    inset -2px 0 0 0 var(--ms-fill-edge-lo);
 }
 
 /* §3.4 — the portfolio median, since there are no budgets to compare against. */
@@ -1102,10 +1225,14 @@ button.ovw-ranked__hit:focus-visible {
   color: var(--ms-ink-muted);
 }
 
+/* The 3px rule is the only thing that says "warning" — the text is the card's
+   own ink and there is no icon — so 1.4.11's 3:1 applies. `--ms-sev-ageing` is
+   a fill and measured 2.10:1 on the sunken card in light; the ink of the same
+   hue measures 5.60:1 there, and 8.94:1 in dark. */
 .ovw-breakdown__warning {
   margin: 0;
   padding: 8px 10px;
-  border-inline-start: 3px solid var(--ms-sev-ageing);
+  border-inline-start: 3px solid var(--ms-sev-ageing-ink);
   border-radius: 0 8px 8px 0;
   background: var(--ms-surface-sunken);
   font-size: 0.78rem;
@@ -1173,11 +1300,13 @@ button.ovw-ranked__hit:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* §3.2 — under 40% coverage this is the most important element on the card. */
+/* §3.2 — under 40% coverage this is the most important element on the card,
+   and its border was the same 2.10:1 fill as the breakdown warning above. The
+   ink of that hue measures 5.60:1 on the sunken card in light, 8.94:1 dark. */
 .ovw-coverage__banner {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--ms-sev-ageing);
+  border: 1px solid var(--ms-sev-ageing-ink);
   border-inline-start-width: 4px;
   border-radius: 0 10px 10px 0;
   background: var(--ms-surface-sunken);
