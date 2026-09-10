@@ -1870,6 +1870,32 @@ const SLA_STAGE_COLUMN: Record<"acknowledged" | "assigned" | "attended", string>
  * raw elapsed time nobody labelled.
  */
 /**
+ * An instant from a date-ish column, on BOTH dialects.
+ *
+ * This exists because of a failure that is invisible until it reaches
+ * Postgres and silent when it does. `dateText()` renders a column as
+ * `replace(trim(cast(col as text)), ' ', 'T')`. Postgres prints a
+ * `timestamptz` as `2026-08-20 08:20:00+00`, so that becomes
+ * `2026-08-20T08:20:00+00` — and a TWO-DIGIT offset is not valid ISO 8601, so
+ * `Date.parse` returns NaN for exactly the shape Production produces. SQLite
+ * stores the same instant as text that parses cleanly, so local runs are
+ * green.
+ *
+ * Measured on Staging while proving gate 25: four jobs carried an
+ * acknowledgement, coverage correctly read 4 of 12, every target was loaded —
+ * and the stage still reported "not measured", because every elapsed time came
+ * back null. Nothing errored and nothing looked wrong; the card simply said it
+ * could not measure, which is the most expensive kind of bug this page can
+ * have.
+ */
+function instantFrom(value: string | null | undefined): number {
+  const text = String(value ?? "").trim();
+  if (!text) return Number.NaN;
+  /* `+00` -> `+00:00`. Nothing else about the string is touched. */
+  return Date.parse(/[+-]\d{2}$/.test(text) ? `${text}:00` : text);
+}
+
+/**
  * Elapsed WALL-CLOCK minutes, for a target whose basis is `calendar`.
  *
  * §4.4 allows both bases and `sla_targets.basis` says which one a row means:
@@ -1878,8 +1904,8 @@ const SLA_STAGE_COLUMN: Record<"acknowledged" | "assigned" | "attended", string>
  * a success every weekend, so the two are kept apart and the row decides.
  */
 export function calendarMinutesBetween(from: string, to: string): number | null {
-  const start = Date.parse(from);
-  const end = Date.parse(to);
+  const start = instantFrom(from);
+  const end = instantFrom(to);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   if (end <= start) return 0;
   return Math.round((end - start) / 60_000);
@@ -1892,8 +1918,8 @@ export function businessMinutesBetween(
   dayStartHour = 8,
   dayEndHour = 18,
 ): number | null {
-  const start = Date.parse(from);
-  const end = Date.parse(to);
+  const start = instantFrom(from);
+  const end = instantFrom(to);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   if (end <= start) return 0;
 
