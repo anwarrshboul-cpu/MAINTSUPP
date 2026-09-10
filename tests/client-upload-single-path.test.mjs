@@ -59,8 +59,28 @@ const KNOWN_DIRECT_POSTERS = new Set([]);
  * longer makes — that is the point of those comments — so a naive text search
  * reports three fixed files as broken. Only real code counts.
  */
+/*
+ * ONLY LINE-LEADING COMMENTS ARE STRIPPED, and that restriction is the whole
+ * correctness of this file.
+ *
+ * The first version stripped `/* … *\/` anywhere. An independent review found
+ * the hole: `accept="image/*"` on a file input contains `/*`, which opens a
+ * pseudo-comment that runs to the next real close. Measured on
+ * `app/(marketing)/_sections/report-job.tsx`, that swallowed **266 of 1,067
+ * lines** — and the attribute sits on the `<input type="file">` element, which
+ * is exactly where a hand-rolled upload would be written. The sweep would have
+ * gone blind over the region it most needs to see. Five other files had the
+ * same shape.
+ *
+ * Every comment in this repository begins its own line, so anchoring to the
+ * line start keeps the comment-stripping this file needs while making it
+ * impossible for a mid-line `/*` inside an attribute or a URL to open one. The
+ * same anchored form is used by `tests/public-form-pages.test.mjs`.
+ */
 const stripComments = (source) =>
-  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  source
+    .replace(/^[ \t]*\/\*[\s\S]*?\*\/[ \t]*$/gm, "")
+    .replace(/^[ \t]*\/\/[^\n]*$/gm, "");
 
 const walk = async (dir) => {
   const found = [];
@@ -102,11 +122,33 @@ test("only client-upload.ts posts a file to /api/files", () => {
    * either way. A plain GET of `/api/files?…` for listing is untouched, which is
    * correct: reading the register is not uploading.
    */
+  /*
+   * WIDENED, after a review showed the first pattern was far narrower than the
+   * rule it claimed to enforce.
+   *
+   * It required `fetch("/api/files", { … method: "POST" … })` with no nested
+   * brace between the two, so it missed a headers object before the method, a
+   * spread of options, a URL held in a variable, `new Request`, an XHR — and,
+   * worst, `"/api/files/multipart"`, which bypasses the 900 KB routing and the
+   * thumbnail while sailing past the check.
+   *
+   * So: find every mention of the endpoint, then look at the code AROUND it for
+   * a POST. A window rather than one expression, because the two can be several
+   * lines apart and the shapes they can take are not worth enumerating. A plain
+   * `GET /api/files?…` listing has no POST near it and is untouched, which is
+   * correct — reading the register is not uploading.
+   */
+  const WINDOW = 260;
   const posts = sources.filter(([file, source]) => {
     if (file === OWNER || KNOWN_DIRECT_POSTERS.has(file)) return false;
-    return /fetch\(\s*["'`]\/api\/files["'`]\s*,\s*\{[^}]*method\s*:\s*["'`]POST["'`]/.test(
-      source,
-    );
+    for (const match of source.matchAll(/\/api\/files(?:\/[a-z-]+)?/g)) {
+      const from = Math.max(0, match.index - WINDOW);
+      const around = source.slice(from, match.index + WINDOW);
+      if (/method\s*:\s*["'`]POST["'`]/i.test(around)) return true;
+      if (/\.(?:send|open)\s*\(\s*["'`]POST["'`]/i.test(around)) return true;
+      if (/sendBeacon\s*\(/.test(around)) return true;
+    }
+    return false;
   });
 
   assert.deepEqual(

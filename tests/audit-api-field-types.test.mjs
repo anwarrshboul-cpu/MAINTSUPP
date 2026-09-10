@@ -28,12 +28,35 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const read = async (file) =>
   (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
-const fieldsModule = await (async () => {
-  const source = await read("app/lib/request-fields.ts");
-  const { outputText } = ts.transpileModule(source, {
+const asModule = (js) => `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
+const transpile = (source) =>
+  ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+  }).outputText;
+
+const fieldsModule = await (async () => {
+  /*
+   * `./submission-title` HAS TO BE REWRITTEN, not merely imported.
+   *
+   * This is the only suite that loads `request-fields.ts` by transpiling it to
+   * a `data:` URL, and a data URL has no base, so a relative specifier inside
+   * it cannot resolve — the failure is
+   * `ERR_UNSUPPORTED_RESOLVE_REQUEST … not hierarchical`, which reads like a
+   * broken module rather than a missing base. It appeared the moment
+   * `requestTitle` stopped carrying its own copy of the title rule and started
+   * delegating to the one module that owns it, which is the change worth
+   * keeping.
+   *
+   * `submission-title.ts` imports nothing, so it needs no rewriting of its own.
+   * Same pattern as `tests/sites-compliance-link.test.mjs`; if this chain ever
+   * grows a second link, it grows one here too.
+   */
+  const submissionTitle = asModule(transpile(await read("app/lib/submission-title.ts")));
+  const source = transpile(await read("app/lib/request-fields.ts")).replace(
+    /from ["']\.\/submission-title["']/g,
+    `from "${submissionTitle}"`,
+  );
+  return import(asModule(source));
 })();
 
 const { invalidRequestFields, requestFieldValues } = fieldsModule;

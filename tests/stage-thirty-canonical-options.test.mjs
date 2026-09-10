@@ -27,7 +27,23 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+/*
+ * Reads normalise CRLF, and that is load-bearing rather than housekeeping.
+ *
+ * `core.autocrlf=true` with no `.gitattributes` means every checkout writes CRLF
+ * into the working tree. Two assertions below match a comma followed by a bare
+ * newline, and a bare newline cannot match a carriage return — so on a fresh
+ * clone, on CI, or after the author's next checkout, they would match zero times
+ * and fail while the code they pin is perfectly correct.
+ *
+ * It passes today only because a tool wrote `submission-service.ts` and git has
+ * not re-checked it out: `git ls-files --eol` already reports it `i/lf w/lf`
+ * while its sibling `app/api/board/form/route.ts`, changed in the same batch,
+ * reads `i/lf w/crlf`. CLAUDE.md records this trap and it has broken this suite
+ * before.
+ */
+const read = async (path) =>
+  (await readFile(new URL(`../${path}`, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
 /* ── 1. SLA and tier come from values, not labels ────────────────────────── */
 

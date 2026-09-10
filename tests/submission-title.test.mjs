@@ -195,10 +195,47 @@ test("the P-code blob no longer decides what a website report is called", async 
   );
 
   const page = await read("app/(marketing)/_sections/report-job.tsx");
+  /*
+   * RE-POINTED, and at a stronger contract than before.
+   *
+   * This pinned the literal expression `[category, summary || "fault reported
+   * from the website"]`, which stopped matching when the page was moved onto
+   * the shared rule. The old line derived `summary` with a LOCAL pattern — a
+   * fifth copy of a rule this very module exists to unify, and the only
+   * lookbehind assertion under `app/`, which is a parse-time SyntaxError on
+   * WebKit before Safari 16.4 and would have taken the anonymous public page
+   * down with it.
+   *
+   * So the assertion is no longer about one expression's spelling. It is about
+   * the two things that actually matter: the page derives its summary from THIS
+   * module rather than from a rule of its own, and the title is still the
+   * category joined to that summary. Both are checked, and the fallback wording
+   * is kept as its own assertion so it cannot be quietly dropped.
+   */
   assert.match(
     page,
-    /const title = \[category, summary \|\| "fault reported from the website"\]/,
+    /import \{ submissionTitle \} from "\.\.\/\.\.\/lib\/submission-title"/,
+    "the page must import the shared rule, not re-implement it",
+  );
+  assert.match(
+    page,
+    /const summary = submissionTitle\(\{/,
+    "and must derive its summary through it",
+  );
+  assert.match(
+    page,
+    /const title = \[category, summary\]/,
     "the page must name the job from the category and the reporter's own sentence",
+  );
+  assert.match(
+    page,
+    /fallback: "fault reported from the website"/,
+    "with the same fallback wording when the reporter wrote nothing usable",
+  );
+  assert.doesNotMatch(
+    page,
+    /\(\?<=/,
+    "no lookbehind: it is a parse-time SyntaxError on older WebKit, on the one page with no other route in",
   );
   assert.match(page, /\n {10}title,\n/, "and must send it with the submission");
   assert.match(

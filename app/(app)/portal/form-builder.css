@@ -129,10 +129,22 @@
  * THE SAVE STATE. Tokens only — no literal colours, so it follows the theme
  * the portal is in rather than needing a dark variant of its own.
  *
- * The three states are distinguished by COLOUR AND BY WORDS AND BY ICON, not
- * by colour alone: "All changes saved", "Saving…" and "Not saved" are
- * different sentences before they are different greens and reds, which is what
- * makes the control readable to somebody who cannot tell them apart.
+ * The three states are distinguished by WORDS AND BY ICON before colour: "All
+ * changes saved", "Saving…" and "Not saved" are different sentences, which is
+ * what makes the control readable to somebody who cannot tell two hues apart.
+ *
+ * THESE USED TO NAME TOKENS THAT DO NOT EXIST. `--ink-muted`, `--ok-fg` and
+ * `--danger-fg` are defined nowhere in the stylesheet, so the base colour and
+ * the saved state both fell through to whatever the parent happened to be, and
+ * the failure state landed on `--ink` — ordinary body text. "Not saved" was
+ * never red. Same defect as the `--surface-2` one fixed on the compliance
+ * template rows, and the comment above asserted a behaviour it did not have.
+ *
+ * There is no success token in this design system, and one is not invented
+ * here: the resting and saved states share `--muted`, which is the right
+ * weight for a state that is not asking for anything. `--danger-solid` is
+ * real, is defined on `:root` so it reaches both themes, and is spent on the
+ * one state that does ask.
  */
 .form-builder__savestate {
   display: inline-flex;
@@ -141,17 +153,17 @@
   margin: 0;
   padding: 0 4px;
   font-size: 12px;
-  color: var(--ink-muted);
+  color: var(--muted);
   white-space: nowrap;
 }
 
 .form-builder__savestate[data-state="saved"] {
-  color: var(--ok-fg, var(--ink-muted));
+  color: var(--muted);
 }
 
 .form-builder__savestate[data-state="unsaved"],
 .form-builder__savestate[data-state="failed"] {
-  color: var(--danger-fg, var(--ink));
+  color: var(--danger-solid);
   font-weight: 600;
 }
 

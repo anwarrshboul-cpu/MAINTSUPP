@@ -49,6 +49,17 @@ import { unassignedSiteId } from "./site-reference";
  * pins its shape and now pins it there.
  */
 import { allocateSubmission, nextJobNumber } from "./submission-service";
+import { priorityRule } from "./priority-rules";
+
+/**
+ * What a blank row opens at, in one place.
+ *
+ * The priority is named once and its tier and clock are looked up rather than
+ * written beside it, so the three can no longer disagree — which is exactly how
+ * a Medium row came to carry the Low tier.
+ */
+const BLANK_ROW_PRIORITY = "Medium";
+const BLANK_ROW_PRIORITY_RULE = priorityRule(BLANK_ROW_PRIORITY);
 
 export type BoardDatabase = Awaited<ReturnType<typeof getDb>>;
 
@@ -259,15 +270,33 @@ export async function createBoardItem(
     contact: "Not provided",
     category: "Other",
     engineer: "Handyman",
-    tier: 3,
-    priority: "Medium",
+    /*
+     * THE TIER AND THE CLOCK COME FROM THE PRIORITY, not from two literals
+     * beside it.
+     *
+     * This wrote `priority: "Medium"` with `tier: 3` and a 72-hour due date.
+     * `priorityRule("Medium")` is `{ dueHours: 72, tier: 2 }` and tier 3 is
+     * what LOW means — so a blank row opened at the Low service tier while
+     * displaying Medium and carrying Medium's own due date. Right date, wrong
+     * severity, which is the combination hardest to spot on a board.
+     *
+     * Found by review. `createBoardItem` calls `allocateSubmission` but not
+     * `createSubmission` — a blank row has no description to derive a title
+     * from and no site to resolve — so it does not inherit the shared
+     * derivation the four intake doors get, and these two fields had drifted
+     * from the table every meter reads.
+     */
+    tier: BLANK_ROW_PRIORITY_RULE.tier,
+    priority: BLANK_ROW_PRIORITY,
     stage,
     status: statusForStage(stage),
     contractor: null,
     assignee: null,
     parentId: options.parentId ?? null,
     requestedAt,
-    dueAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+    dueAt: new Date(
+      Date.now() + BLANK_ROW_PRIORITY_RULE.dueHours * 60 * 60 * 1000,
+    ).toISOString(),
     completedAt: null,
     nextUpdateAt: null,
     cost: null,

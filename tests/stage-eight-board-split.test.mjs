@@ -121,6 +121,20 @@ test("no board file exceeds a reviewable size", async () => {
      */
     "app/(app)/portal/board-row-name.ts": 120,
     /*
+     * Split out of board-chrome when that file hit its 500-line ceiling and the
+     * views loader was the part with the least to do with chrome: it owns the
+     * fetch, the server's own error sentence, `retryable`, and deriving
+     * `loading` so an unaddressed board never sits at `aria-busy` for ever.
+     *
+     * Capped on the same argument as its three neighbours above, and it was
+     * MISSED when it was created — an independent review found it uncapped at
+     * 183 lines while every other relief-split in this list was capped from the
+     * start with that exact justification written in. A file created to relieve
+     * a ceiling is the easiest place for the next thing to be dropped without
+     * anyone noticing, which is precisely why the omission mattered.
+     */
+    "app/(app)/portal/board-views-load.ts": 220,
+    /*
      * Split out of live-board when the ordered sort needed a comparator that
      * could be tested against rows rather than eyeballed, and grown again when
      * the option-order table followed it out — that extraction is what bought

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, RefObject } from "react";
 
 import { uploadEvidenceFile } from "../../lib/client-upload";
+import { submissionTitle } from "../../lib/submission-title";
 
 /**
  * SECTION 2 — Report a Job.
@@ -110,16 +111,6 @@ const CATEGORIES = [
  */
 const POSTCODE = /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/;
 const EMAIL = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
-
-/**
- * Where the reporter's first sentence ends — the job's NAME, not its story.
- *
- * A sentence terminator followed by whitespace, or a line break. Kept beside
- * the other patterns rather than inlined so it is one thing to read and one
- * thing to change; `tests/submission-title.test.mjs` runs the server's half of
- * the same rule.
- */
-const SENTENCE_END = /(?<=[.!?])\s|\n/;
 
 /**
  * Every required field, in the order it appears on screen.
@@ -440,11 +431,30 @@ export function ReportJob() {
      * The server still caps it and still falls back to the description when it
      * is absent, so a cached copy of this page keeps working.
      */
-    const summary = detail.split(SENTENCE_END)[0]?.trim() ?? "";
-    const title = [category, summary || "fault reported from the website"]
-      .filter(Boolean)
-      .join(" — ")
-      .slice(0, 120);
+    /*
+     * THE SHARED RULE, imported — not a fifth copy of it.
+     *
+     * This derived the summary itself with a local `SENTENCE_END` pattern, so
+     * the public website named jobs by a different rule from the four doors
+     * `submission-title.ts` was written to unify, and that module's own header
+     * ("the rule lives here and both sides import it") was untrue of the one
+     * caller with no account behind it.
+     *
+     * The pattern was also the ONLY lookbehind assertion anywhere under `app/`,
+     * as a module-level literal. On a WebKit older than Safari 16.4 that is a
+     * SyntaxError at parse time, which takes down the whole chunk — on the
+     * anonymous page a member of the public uses to report a fault, with no
+     * other route in. `submissionTitle` uses no lookbehind.
+     *
+     * The category prefix stays: it is this form's own decision that a job
+     * raised from the website should say what kind of fault it is, and the
+     * server caps the result regardless.
+     */
+    const summary = submissionTitle({
+      description: detail,
+      fallback: "fault reported from the website",
+    });
+    const title = [category, summary].filter(Boolean).join(" — ").slice(0, 120);
     const description = [
       `[${urgency}] ${chosen?.label.replace(/^P\d — /, "") ?? ""}`.trim(),
       detail || `${category} fault reported from the website.`,

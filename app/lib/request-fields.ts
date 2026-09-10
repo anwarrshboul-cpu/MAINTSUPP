@@ -13,6 +13,7 @@
  */
 
 import type { maintenanceRequests } from "../../db/schema";
+import { submissionTitle } from "./submission-title";
 
 export type RequestFieldValues = Partial<typeof maintenanceRequests.$inferInsert>;
 
@@ -20,8 +21,29 @@ function trimString(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-export function requestTitle(description: string) {
-  return description.split(/[\n.]/)[0].trim().slice(0, 120) || description.slice(0, 120);
+/**
+ * A JOB'S NAME ON AN EDIT, which is the same question the intake doors ask.
+ *
+ * This used to hold a rule of its own — `description.split(/[\n.]/)[0]` capped
+ * at 120 — and it survived the batch that unified the five intake paths,
+ * because it is reached by a PATCH rather than a create. That made the "one
+ * title rule" claim untrue in the one place hardest to notice: a job created
+ * with a properly derived title kept it only until somebody edited the
+ * description, at which point a different rule silently renamed it.
+ *
+ * The rules genuinely disagree. Splitting on a bare `.` cuts
+ * "Leak. Started yesterday." down to "Leak", and it cuts "No. 4 shutter" down
+ * to "No" — which is precisely the failure `submission-title.ts` was written to
+ * end. So the derivation is delegated there, and this stays a thin wrapper so
+ * existing callers and their tests keep a name to point at.
+ *
+ * An EXPLICIT title now wins. Passing one through `fields.title` — which the
+ * board's own create requires — no longer loses it on the next description
+ * edit; without one the behaviour is unchanged, and the title still follows
+ * the description.
+ */
+export function requestTitle(description: string, explicit?: string | null) {
+  return submissionTitle({ explicit: explicit ?? null, description });
 }
 
 /** An ISO instant, `null` to clear, or `undefined` when unreadable. */
@@ -84,8 +106,16 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
     const description = trimString(fields.description, 1200);
     if (description) {
       values.description = description;
-      values.title = requestTitle(description);
+      /* An explicit title, when the caller sent one, outranks the derivation —
+         see `requestTitle`. Without one this is what it always was. */
+      values.title = requestTitle(description, trimString(fields.title, 200) || null);
     }
+  }
+  /* A title sent WITHOUT a description still lands: renaming a job is its own
+     edit and must not require restating the description to survive. */
+  if (typeof fields.title === "string" && values.title === undefined) {
+    const title = trimString(fields.title, 200);
+    if (title) values.title = title;
   }
   if (typeof fields.location === "string") {
     const location = trimString(fields.location, 160);
