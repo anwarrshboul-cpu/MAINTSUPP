@@ -155,6 +155,37 @@ test("nature is the same inference the server makes", async () => {
   assert.equal(reactive.matches(job({ category: "Compliance check" })), false);
 });
 
+test("the stage axis filters, and `open` is not a synonym for in progress", () => {
+  /*
+   * `family` sat in DRILL_KEYS — so "Clear" stripped it — while nothing read
+   * it. Three call sites send it meaning "open", and unread, each drilled to a
+   * list that included completed jobs: the list was always longer than the
+   * figure that opened it.
+   *
+   * The model is completed / in_progress / attention, so "open" must be BOTH
+   * of the last two. Filtering `open` to `in_progress` alone would under-report
+   * the figure instead of over-reporting it — a different wrong answer, not a
+   * fix.
+   */
+  const done = job({ status: "Completed", completedAt: "2026-09-05" });
+  const doing = job({ status: "In Progress" });
+  const stuck = job({ status: "On Hold" });
+
+  const open = q("family=open");
+  assert.equal(open.matches(done), false, "a completed job is not open");
+  assert.equal(open.matches(doing), true, "in progress is open");
+  assert.equal(open.matches(stuck), true, "needing attention is open too");
+
+  assert.equal(q("family=completed").matches(done), true);
+  assert.equal(q("family=completed").matches(doing), false);
+  assert.equal(q("family=in_progress").matches(stuck), false, "attention is its own family");
+
+  /* It draws a chip, so the reader can see the list was narrowed and undo it. */
+  const chip = open.chips.find((entry) => entry.key === "family");
+  assert.ok(chip, "the stage axis names itself in the chip row");
+  assert.equal(chip.value, "open");
+  assert.ok(DRILL_KEYS.includes("family"), "and Clear still strips it");
+});
 test("the period window matches the server's, end exclusive and one day of grace", async () => {
   /*
    * `resolveWindow`'s end is TOMORROW and exclusive, because a job raised an
@@ -169,14 +200,66 @@ test("the period window matches the server's, end exclusive and one day of grace
     "the server still uses an exclusive end",
   );
 
+  /*
+   * THIS ASSERTION USED TO ENCODE AN OFF-BY-ONE, and it is worth saying why,
+   * because it hid a real defect for a whole release cycle.
+   *
+   * The server computes the start as `shiftDay(tomorrow, -days)` — CALENDAR
+   * arithmetic away from an exclusive end — so a 7-day window on 2026-09-10 is
+   * 09-04 … 09-11, which is seven days. The drill originally computed it as
+   * `now - days * 86_400_000`, i.e. seven days back from the CURRENT INSTANT,
+   * landing on 09-03 and quietly making the drilled list eight days wide. The
+   * test was written from the drill rather than from the server, so it pinned
+   * the bug in place and reported it as agreement.
+   *
+   * Now pinned to the server's own expression, so the two cannot drift again:
+   * a change to `resolveWindow` that this module does not follow fails here.
+   */
+  assert.match(
+    filters,
+    /return bounded\(shiftDay\(tomorrow, -days\), tomorrow, `\$\{days\} days`\);/,
+    "the server still counts back from the exclusive end, by calendar days",
+  );
+
   const week = q("period=7");
   assert.equal(week.matches(job({ requestedAt: "2026-09-10T23:00:00.000Z" })), true, "today");
-  assert.equal(week.matches(job({ requestedAt: "2026-09-03T00:00:00.000Z" })), true, "the first day");
-  assert.equal(week.matches(job({ requestedAt: "2026-09-02T23:59:59.000Z" })), false, "the day before");
+  assert.equal(week.matches(job({ requestedAt: "2026-09-04T00:00:00.000Z" })), true, "the first day");
+  assert.equal(
+    week.matches(job({ requestedAt: "2026-09-03T23:59:59.000Z" })),
+    false,
+    "the day before — seven days means seven, not eight",
+  );
   assert.equal(week.matches(job({ requestedAt: "2026-09-11T09:00:00.000Z" })), false, "tomorrow is out");
 
-  /* All time is not a window and must not narrow anything by date. */
+  /*
+   * All time has no start, but it does have an end: a job dated in the future
+   * is not part of it, on either side of the drill. `resolveWindow` returns
+   * `start: null, endExclusive: tomorrow` and this now does the same.
+   */
   assert.equal(q("period=all&site=store-aldgate").matches(job({ requestedAt: "2019-01-01" })), true);
+  assert.equal(
+    q("period=all&site=store-aldgate").matches(job({ requestedAt: "2027-01-01" })),
+    false,
+    "a future-dated job is outside all time too",
+  );
+
+  /*
+   * THE THREE NAMED PRESETS, which `resolveDays` used to fall through on:
+   * `month`, `last-month` and `ytd` all returned no window at all, so a drill
+   * from any of them showed the whole history under a chip claiming a month.
+   */
+  const month = q("period=month");
+  assert.equal(month.matches(job({ requestedAt: "2026-09-01T00:00:00.000Z" })), true, "the 1st");
+  assert.equal(month.matches(job({ requestedAt: "2026-08-31T23:59:59.000Z" })), false, "August is out");
+
+  const lastMonth = q("period=last-month");
+  assert.equal(lastMonth.matches(job({ requestedAt: "2026-08-01" })), true, "the 1st of August");
+  assert.equal(lastMonth.matches(job({ requestedAt: "2026-08-31" })), true, "the 31st of August");
+  assert.equal(lastMonth.matches(job({ requestedAt: "2026-09-01" })), false, "September is out");
+
+  const ytd = q("period=ytd");
+  assert.equal(ytd.matches(job({ requestedAt: "2026-01-01" })), true, "new year's day");
+  assert.equal(ytd.matches(job({ requestedAt: "2025-12-31" })), false, "last year is out");
 });
 
 test("the completed axis cuts on the completion date and excludes the blanks", () => {

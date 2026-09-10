@@ -38,6 +38,7 @@
  * spreadsheet and a form, so "In Progress" and "in  progress" are one status.
  */
 
+import { statusFamily } from "../../lib/job-metrics.ts";
 import type { MaintenanceRequest } from "../../lib/types";
 
 /** Trim, lower-case, collapse runs of whitespace. The shared normalisation. */
@@ -97,24 +98,56 @@ const EMPTY: DrillFilter = { empty: true, chips: [], matches: () => true };
  * must be inside "the last 7 days". The arithmetic is repeated rather than
  * imported because that module is server-shaped; the two are pinned together.
  */
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** `YYYY-MM-DD` for an instant, on the UTC calendar. */
+function isoDay(at: Date): string {
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    at.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
+/** A day string moved by whole days. Calendar arithmetic, not 86.4e6 ms. */
+function shiftDayString(day: string, by: number): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + by);
+  return isoDay(at);
+}
+
 function resolveDays(period: string, from: string, to: string, now: Date) {
-  const iso = (at: Date) =>
-    `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-${String(
-      at.getUTCDate(),
-    ).padStart(2, "0")}`;
-  const tomorrow = iso(new Date(now.getTime() + 86_400_000));
-  if (period === "custom") {
-    if (!from && !to) return null;
-    const start = from || null;
-    const endExclusive = to
-      ? iso(new Date(Date.parse(`${to}T00:00:00Z`) + 86_400_000))
-      : tomorrow;
-    return { start, endExclusive };
+  const today = isoDay(now);
+  const tomorrow = shiftDayString(today, 1);
+
+  switch (period) {
+    case "all":
+      /* Unbounded at the start, but still ending TOMORROW: a job dated in the
+         future is not part of "all time" on either side of the drill. */
+      return { start: null, endExclusive: tomorrow };
+    case "month":
+      return { start: `${today.slice(0, 7)}-01`, endExclusive: tomorrow };
+    case "last-month": {
+      const firstOfThis = `${today.slice(0, 7)}-01`;
+      return {
+        start: `${shiftDayString(firstOfThis, -1).slice(0, 7)}-01`,
+        endExclusive: firstOfThis,
+      };
+    }
+    case "ytd":
+      return { start: `${today.slice(0, 4)}-01-01`, endExclusive: tomorrow };
+    case "custom": {
+      const start = DAY_PATTERN.test(from) ? from : shiftDayString(today, -90);
+      const rawEnd = DAY_PATTERN.test(to) ? shiftDayString(to, 1) : tomorrow;
+      /* A reversed range is a typo, not a query — swapped rather than refused,
+         exactly as `resolveWindow` does it. */
+      const [lo, hi] = start < rawEnd ? [start, rawEnd] : [rawEnd, start];
+      return { start: lo, endExclusive: hi };
+    }
+    default: {
+      const days = Number(period);
+      if (!Number.isFinite(days) || days <= 0) return null;
+      return { start: shiftDayString(tomorrow, -days), endExclusive: tomorrow };
+    }
   }
-  if (period === "all") return null;
-  const days = Number(period);
-  if (!Number.isFinite(days) || days <= 0) return null;
-  return { start: iso(new Date(now.getTime() - days * 86_400_000)), endExclusive: tomorrow };
 }
 
 /**
@@ -144,6 +177,23 @@ export function readDrillFilter(
   const labels = new Set(list("label").map(key));
   const contractors = new Set(list("contractor").map(key));
   const natures = new Set(list("nature"));
+  /*
+   * THE STAGE AXIS, WHICH USED TO BE INERT.
+   *
+   * `family` was in `DRILL_KEYS` — so "Clear" stripped it — but nothing here
+   * ever read it, and three call sites send it meaning "open": the Pulse's
+   * open figure, the performance card, and §6.3's "Jobs filtered to that site
+   * AND OPEN". Unread, every one of those drilled to a list that included
+   * completed jobs, so the list was always longer than the number that opened
+   * it.
+   *
+   * `open` is accepted alongside the three real families because it is the
+   * thing those callers actually mean, and it is NOT a synonym for
+   * `in_progress`: the model is completed / in_progress / attention, so a job
+   * needing attention is open too, and filtering to `in_progress` alone would
+   * under-report the very figure the reader tapped.
+   */
+  const families = new Set(list("family").map((value) => value.toLowerCase()));
   const meterLabel = (searchParams.get("meter") ?? "").trim();
 
   const measure = searchParams.get("measure") === "completed" ? "completed" : "requested";
@@ -164,6 +214,13 @@ export function readDrillFilter(
   if (labels.size) chips.push({ key: "label", label: "Label", value: [...labels].join(", ") });
   if (contractors.size) chips.push({ key: "contractor", label: "Contractor", value: [...contractors].join(", ") });
   if (natures.size) chips.push({ key: "nature", label: "Nature", value: [...natures].join(", ") });
+  if (families.size) {
+    chips.push({
+      key: "family",
+      label: "Stage",
+      value: [...families].map((value) => value.replace(/_/g, " ")).join(", "),
+    });
+  }
   if (window) {
     chips.push({
       key: "period",
@@ -216,6 +273,14 @@ export function readDrillFilter(
       if (natures.size) {
         const nature = isPlanned(request) ? "planned" : "reactive";
         if (!natures.has(nature)) return false;
+      }
+      if (families.size) {
+        /* `warn: false` — an unmapped status is a data condition the Overview
+           already reports in its own words; it must not also spray the
+           browser console once per row. */
+        const family = statusFamily(request.status, { warn: false });
+        const open = family !== "completed";
+        if (!families.has(family) && !(families.has("open") && open)) return false;
       }
       if (window) {
         const axis = day(measure === "completed" ? request.completedAt : request.requestedAt);
