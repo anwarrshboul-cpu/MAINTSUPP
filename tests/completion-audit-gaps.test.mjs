@@ -153,11 +153,26 @@ test("every analytics page owns a date range with presets and a custom span", as
   );
   const overview = await read("app/(app)/portal/ops/overview-page.tsx");
   assert.match(overview, /<PeriodControl/, "the page draws the control");
+  /*
+   * RE-POINTED. `/api/dashboard/summary` still exists and still answers; the
+   * Overview stopped reading it, because the Pulse row and the eight meters both
+   * come out of `/api/dashboard/meters` and fetching the old summary as well
+   * would be a second round trip for numbers already on the page — §1.6 asks for
+   * one per card.
+   *
+   * The contract is the one that matters, and it is now asserted across every
+   * card rather than one: each passes `search` — the live address bar — to its
+   * own `useOpsQuery`, so changing the period REFETCHES rather than filtering a
+   * list that was downloaded once.
+   */
   assert.match(
     overview,
-    /useOpsQuery<SummaryPayload>\("\/api\/dashboard\/summary", search\)/,
+    /useOpsQuery<MetersPayload>\("\/api\/dashboard\/meters", search\)/,
     "and every card refetches against the window rather than filtering a downloaded list",
   );
+  const refetching =
+    overview.match(/useOpsQuery<[A-Za-z]+>\("\/api\/dashboard\/[a-z-]+", search\)/g) ?? [];
+  assert.ok(refetching.length >= 6, `every card follows the window, got ${refetching.length}`);
 
   /*
    * Compliance keeps its expiry-horizon semantics — Overdue, next 30, next 90,

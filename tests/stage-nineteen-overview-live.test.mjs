@@ -121,19 +121,32 @@ test("compliance trend is flat at zero, never the decorative default", () => {
  * substitutes a different measurement when its own is zero.
  */
 test("every Overview tile counts the thing it names, and never borrows another measurement", async () => {
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
-  const tiles = page.slice(page.indexOf("const tiles = ["), page.indexOf('caption="At a glance"'));
+  /*
+   * RE-POINTED. The five hard-coded tiles are gone: §2.2 replaces them with
+   * four Pulse figures and §2.3 with eight meters rendered from
+   * `data.meters`, so there is no `const tiles = [` to slice and no
+   * `totals.unassignedOpen` tile — §6.1 moved "Unassigned site" off the card
+   * entirely, because it is a broken foreign key rather than a location.
+   *
+   * The contract is untouched and is what the expression list was really for:
+   * every figure on this page is READ from a payload the server computed, and
+   * no tile borrows another tile's measurement. Each Pulse figure names its own
+   * field, and the meter grid maps over the payload rather than over literals.
+   */
+  const page = await read("app/(app)/portal/ops/overview-glance.tsx");
+  /* Bounded by the array's own closing bracket. `return (` appears earlier, in
+     the error branch above it, so slicing to that gave an empty string. */
+  const figuresAt = page.indexOf("const figures = [");
+  const figures = page.slice(figuresAt, page.indexOf("\n  ];", figuresAt));
   for (const [label, expression] of [
-    ["Open jobs", "totals.open"],
-    ["Needs attention", "totals.attention"],
-    ["Urgent open", "totals.urgentOpen"],
-    ["Unassigned site", "totals.unassignedOpen"],
-    ["Oldest open", "oldestOpenDays"],
+    ["Open", "pulse.open.value"],
+    ["P1 / Urgent open", "pulse.urgentOpen.value"],
+    ["Oldest open", "pulse.oldestOpenDays.value"],
+    ["Incomplete records", "pulse.incompleteRecords.value"],
   ]) {
     assert.ok(
-      tiles.includes(`value: ${expression}`) ||
-        tiles.includes(`value: ${expression} ?? 0`),
-      `${label} must read ${expression} from the summary payload`,
+      figures.includes(`value: ${expression}`),
+      `${label} must read ${expression} from the meters payload`,
     );
   }
   assert.ok(
@@ -269,25 +282,61 @@ test("panels with nothing behind them say so instead of drawing an empty axis", 
    * an explicit statement rather than as a chart pinned to its axis, because a
    * flat line invites the reader to conclude the work was free.
    */
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  /*
+   * RE-POINTED AGAIN, and one of the four sentences is gone from the product
+   * rather than moved.
+   *
+   * §3.3 deletes the whole budget block: "Aldgate 898%" was a 90-day spend
+   * compared against an unreliable pro-rated annual figure with half the sites
+   * carrying no budget at all — a data fault rendered as a metric. So "No site
+   * has an annual budget set" no longer has anything to caption. The budget
+   * DATA is untouched in the database; only the card stopped presenting it.
+   *
+   * The rule is unchanged and is now carried by `ChartFrame`, which every chart
+   * on the page goes through: an empty answer draws a labelled empty state and
+   * never an axis with nothing on it. That is stronger than four hand-written
+   * sentences, because a new card cannot forget to write the fifth.
+   */
+  const page = (
+    await Promise.all(
+      [
+        "overview-page",
+        "overview-glance",
+        "overview-financial",
+        "overview-performance",
+        "overview-breakdown",
+        "overview-sites",
+        "overview-shared",
+      ].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
+    )
+  ).join("\n");
+
   for (const copy of [
-    "No site has an annual budget set",
     "No costed job in this period names a contractor",
-    "No jobs in this period",
-    "Every job in this period is completed or scheduled",
+    "No job was requested in this period",
   ]) {
     assert.ok(page.includes(copy), `missing honest empty state: ${copy}`);
   }
-  // The charts are behind those guards, not rendered regardless.
+  /*
+   * Comment-stripped: `overview-financial.tsx` explains in prose why the budget
+   * block went, and a rule against naming it would be a rule against writing
+   * the explanation down. Same `codeOnly` idiom the other ops suites use.
+   */
+  const code = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.ok(
+    !code.includes("annual budget"),
+    "§3.3 — the budget comparison is gone from the card, so it captions nothing",
+  );
+  // The charts are behind that guard, not rendered regardless.
   assert.match(
     page,
-    /budgeted\.length === 0 \? \(\s*\n?\s*<EmptyState>/,
-    "the budget bars only draw when a budget was set",
+    /empty=\{[^}]*length === 0\}/,
+    "a chart is told it is empty rather than being asked to draw nothing",
   );
   assert.match(
     page,
-    /data\.contractors\.length === 0 \? \(\s*\n?\s*<EmptyState>/,
-    "and the contractor bars only draw when a contractor was named",
+    /emptyLabel=/,
+    "and the empty state is a sentence the frame prints, not a blank axis",
   );
 });
 
@@ -384,17 +433,32 @@ test("every Overview figure is counted, never typed in", async () => {
    * issues `count()` and `sum(case when …)` and returns about a dozen numbers,
    * so there is nowhere for an invented figure to hide.
    */
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
-  const tiles = page.slice(page.indexOf("const tiles = ["), page.indexOf('caption="At a glance"'));
-  const values = [...tiles.matchAll(/\n      value: ([^,]+),/g)];
-  assert.equal(values.length, 5, "the Overview has five metric tiles");
+  const page = await read("app/(app)/portal/ops/overview-glance.tsx");
+  /* Bounded by the array's own closing bracket. `return (` appears earlier, in
+     the error branch above it, so slicing to that gave an empty string. */
+  const figuresAt = page.indexOf("const figures = [");
+  const figures = page.slice(figuresAt, page.indexOf("\n  ];", figuresAt));
+  const values = [...figures.matchAll(/\n      value: ([^,]+),/g)];
+  /*
+   * FOUR now, not five: §2.2's Pulse row. The eight meter tiles beside it are
+   * not in this list at all because they are a `.map` over the payload, which
+   * is the stronger form of the same guarantee — there is no literal to type a
+   * number into.
+   */
+  assert.equal(values.length, 4, "the Overview has four Pulse figures");
   for (const [, expression] of values) {
     assert.ok(
-      /totals\.|oldestOpenDays/.test(expression),
-      `a tile value must come from the payload, got: ${expression}`,
+      /pulse\./.test(expression),
+      `a Pulse value must come from the payload, got: ${expression}`,
     );
-    assert.ok(!/^\d+$/.test(expression.trim()), `a tile value must not be a literal: ${expression}`);
+    assert.ok(!/^\d+$/.test(expression.trim()), `a value must not be a literal: ${expression}`);
   }
+  assert.match(
+    page,
+    /value=\{formatCount\(meter\.total, abbreviate\)\}/,
+    "and every meter tile reads its own count off the payload",
+  );
+
   const aggregates = await read("app/lib/dashboard-aggregates.ts");
   assert.match(aggregates, /inPeriod: count\(\)/);
   assert.match(aggregates, /sum\(case when \$\{openJobSql\} then 1 else 0 end\)/);
