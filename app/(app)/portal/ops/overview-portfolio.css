@@ -1,0 +1,397 @@
+/*
+ * SECTIONS D AND E — Job breakdown and Sites needing attention.
+ *
+ * The two cards that read the portfolio rather than the pipeline, so they share
+ * a sheet the way `overview-glance.css` carries Section A. Everything shared —
+ * `.ovw-cohort`, `.ovw-breakdown`, `.ovw-severity`, `.ovw-frame`, `.ovw-dq` —
+ * stays in `overview.css` and is composed with, never restated: a `.ovp-*`
+ * class always sits BESIDE the `.ovw-*` or `.ops-*` class that already draws
+ * the box.
+ *
+ * ── THE THREE RULES THIS FILE IS HELD TO ──────────────────────────────────
+ *
+ * 1. BREAKPOINTS ARE 640 / 767 / 768 / 1024 / 1280 AND NOTHING ELSE. Several
+ *    stage tests fail on any other width. 375px is the BASE case — every rule
+ *    below is written for the phone and widens from there, which is also §1.8's
+ *    requirement that no feature is desktop-only.
+ *
+ * 2. NO HEX LITERAL AND NO RAW COLOUR OF ANY KIND. Every value is a `--ms-*`
+ *    token from `ops-tokens.css` or one of the product's own, so the light/dark
+ *    toggle reaches every rule. The colours that come from DATA — a severity
+ *    band, a traffic light, an urgent count — arrive as inline styles from
+ *    `app/lib/overview-meters.ts`, which is the only place they can come from.
+ *
+ * 3. FIGURES ARE TABULAR. §1.9, and because a share that changes width on
+ *    refresh makes a whole column of rows jump.
+ *
+ * ── 44px ──────────────────────────────────────────────────────────────────
+ *
+ * `.ops-link` is a 32px target, which is right for a dense desktop row and
+ * eight pixels short of §1.8's floor. `.ovp-touch` lifts every one of this
+ * card's controls to 44px where the pointer is coarse or the screen is small,
+ * without repainting the four other Operations pages that use `.ops-link`.
+ */
+
+/* ── Shared between the two cards ─────────────────────────────────────────── */
+
+.ovp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/*
+ * §1.8's absolute rule: "no horizontal scrolling of the page at any
+ * breakpoint". Every grid below can hold a long site name or a wide bar, and
+ * `min-width: 0` on the track is what stops one of them pushing the card wider
+ * than the viewport.
+ */
+.ovp-card > * {
+  min-width: 0;
+}
+
+.ovp-touch {
+  min-height: 32px;
+}
+
+/*
+ * The notice that carries an action — the tier underuse sentence, the label
+ * taxonomy warning, the intake warning. `.ovw-breakdown__warning` draws the
+ * box; this only makes room for the button that follows the sentence.
+ */
+.ovp-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ovp-excluded {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovp-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+
+/* ── Section D — the four dimensions ──────────────────────────────────────── */
+
+.ovp-dimensions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+/*
+ * The two rings sit side by side once there is room for both legends; the
+ * priority bar and the label list are full-width whatever the width, because
+ * a segmented bar reads by length and a ranked list by alignment, and halving
+ * either costs the thing it is read for.
+ */
+@media (min-width: 1024px) {
+  .ovp-dimensions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 24px;
+  }
+
+  .ovp-dimensions > :nth-child(n + 3) {
+    grid-column: 1 / -1;
+  }
+}
+
+.ovp-priority {
+  min-width: 0;
+}
+
+/* ── Section E — the ageing key ───────────────────────────────────────────── */
+
+/*
+ * §1.3 — "Colour never carries meaning alone — every segment has a text label
+ * and a number." `SeverityBar` draws the count ON the segment and names the
+ * band only in its accessible label, so the key beneath is what a sighted
+ * reader uses to turn amber into "Ageing, 15–30 days".
+ */
+.ovp-key {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ovp-key__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.76rem;
+  color: var(--ms-ink-muted);
+}
+
+.ovp-key__swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.ovp-key__label {
+  color: var(--ms-ink);
+}
+
+.ovp-key__range {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ovp-key__value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-ink);
+}
+
+@media (min-width: 640px) {
+  .ovp-key {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ── Section E — the site rows ────────────────────────────────────────────── */
+
+.ovp-sites {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * A CARD AT 375px. §1.8: "Wide tables become stacked cards, one record per
+ * card, same fields, primary value first." One DOM, two layouts — nothing is
+ * rendered twice and nothing is dropped on the way down.
+ */
+.ovp-site {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 12px;
+  background: var(--ms-surface-sunken);
+}
+
+.ovp-site__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovp-site__name {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: var(--ms-ink);
+  text-align: start;
+  cursor: pointer;
+}
+
+.ovp-site__name:hover {
+  text-decoration: underline;
+}
+
+.ovp-site__name:focus-visible,
+.ovp-site__count:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.ovp-site__focus {
+  flex: none;
+}
+
+.ovp-site__figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+}
+
+.ovp-site__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ovp-site__figure dt {
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ms-ink-muted);
+}
+
+.ovp-site__figure dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--ms-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Primary value first, and largest — the count is what the card is about. */
+.ovp-site__figure--primary {
+  grid-column: 1 / -1;
+}
+
+/* "1 of 12 in date" beside a dot does not fit a half-width phone column. */
+.ovp-site__figure--wide {
+  grid-column: 1 / -1;
+}
+
+.ovp-site__count {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 1.5rem;
+  font-weight: 650;
+  line-height: 1.1;
+  color: var(--ms-ink);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.ovp-site__count:hover {
+  text-decoration: underline;
+}
+
+.ovp-site__urgent,
+.ovp-site__share,
+.ovp-site__days {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovp-site__ref {
+  font-size: 0.72rem;
+  color: var(--ms-ink-muted);
+}
+
+/* §1.5 — an absent figure is a sentence, never a zero. */
+.ovp-site__missing {
+  font-size: 0.78rem;
+  color: var(--ms-ink-muted);
+}
+
+.ovp-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.ovp-site__ageing {
+  min-width: 0;
+}
+
+.ovp-quiet {
+  align-self: flex-start;
+}
+
+/*
+ * A ROW FROM 768px UP. The `<dl>` keeps its own grid rather than being flattened
+ * with `display: contents` — that would drop the description-list semantics in
+ * more than one screen reader, and the whole point of the stacked-card layout is
+ * that the same fields survive the change of shape.
+ */
+@media (min-width: 768px) {
+  .ovp-site {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.5fr) minmax(0, 3fr) minmax(130px, 1.3fr);
+    align-items: center;
+    column-gap: 14px;
+    row-gap: 6px;
+  }
+
+  .ovp-site__head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .ovp-site__figures {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ovp-site__figure--primary,
+  .ovp-site__figure--wide {
+    grid-column: auto;
+  }
+
+  .ovp-site__count {
+    font-size: 1.1rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .ovp-site {
+    grid-template-columns: minmax(170px, 1.5fr) minmax(0, 3fr) minmax(160px, 1.2fr);
+  }
+}
+
+/* ── Touch ────────────────────────────────────────────────────────────────── */
+
+/*
+ * §1.8's floor, applied where it is needed and nowhere else. A coarse pointer
+ * gets it at any width — a tablet is not a phone but a thumb is still a thumb.
+ */
+@media (max-width: 767px) {
+  .ovp-touch {
+    min-height: 44px;
+  }
+
+  .ovp-site__name {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .ovp-footer {
+    gap: 4px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (pointer: coarse) {
+  .ovp-touch {
+    min-height: 44px;
+  }
+}
