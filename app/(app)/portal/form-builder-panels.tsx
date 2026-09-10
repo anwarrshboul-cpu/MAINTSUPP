@@ -259,7 +259,7 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
         <p className="form-panel__note">
           Read aloud in place of the image. Leave it empty and the logo is
           treated as decorative and skipped, which is the right answer when the
-          form's title already names you.
+          form&rsquo;s title already names you.
         </p>
 
         <label className="form-panel__field">
