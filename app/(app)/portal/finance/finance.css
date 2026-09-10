@@ -1,13 +1,98 @@
 /*
- * PLACEHOLDER — the Invoice Tracker's own sheet, replaced in this same release.
- * `ops.css` and `ops-tokens.css` carry everything shared; this file holds only
- * what is specific to the ledger. Same rules apply: tokens only, no hex
- * literals, and the agreed breakpoints (640 / 767 / 768 / 1024 / 1280).
+ * THE INVOICE TRACKER'S OWN SHEET — Module 5.
+ *
+ * `ops-tokens.css` and `ops.css` load first and carry everything shared; this
+ * file holds only what the ledger adds. Three rules govern it and all three are
+ * pinned by `tests/module-five-finance-ui.test.mjs`:
+ *
+ *   1. THE §5 STATUS COLOURS LIVE IN ONE TOKEN BLOCK, and it is the only place
+ *      in this file where a hex literal is allowed. Every rule and every
+ *      component reads a token, so recolouring "Under review" is one edit in
+ *      one place rather than a grep across six components — and so the dark
+ *      canvas can lift each hue without a second copy of the mapping.
+ *
+ *   2. COLOUR IS NEVER THE ONLY SIGNAL. §5: "each row also carries a
+ *      days-overdue badge and a status icon". The chip below is a glyph, a dot
+ *      and a WORD; the overdue badge is a number of days in text. Turn every
+ *      colour in this file to grey and the ledger still reads correctly, which
+ *      is the test.
+ *
+ *   3. ONLY THE AGREED BREAKPOINTS — 640 / 767 / 768 / 1024 / 1280. Several
+ *      stage tests fail on any other width, and this page adds none.
+ *
+ * ── 380px IS A REQUIREMENT, NOT AN ASPIRATION ─────────────────────────────
+ *
+ * §16: "Every ledger view works at 380px width." So the ledger is a real
+ * `<table>` that becomes a stack of cards below 768px — one DOM, one set of
+ * table semantics (the explicit `role` attributes in the TSX survive the
+ * `display: block` that Chrome would otherwise strip the roles with), and no
+ * horizontal page scroll at any width. Every interactive control is at least
+ * 44px tall on the touch path.
  */
+
+/* fin-token-block:start
+ *
+ * §5's ten colours, and nothing else in this file may write a hex.
+ *
+ * The dark block lifts each hue rather than replacing it: a reader who learned
+ * "amber means a query is open" in one theme has not learned a different thing
+ * in the other. Dark is this product's default (`app/globals.css` puts the
+ * light palette on bare `:root` and the dark one on the negated selector), so
+ * both blocks are complete — a colour defined only inside a theme block is a
+ * colour that vanishes in the other, which is the mistake `globals.css` records
+ * at its own head.
+ *
+ * Tones are FILLS: dots, rules, meter segments, tinted badge grounds. Text on
+ * top of them is always `--ink` or `--muted`, so none of these values has to
+ * clear AA as a foreground and none of them is asked to.
+ */
+:root {
+  /* Draft / Received — slate */
+  --fin-draft: #64748b;
+  /* Under review / Query raised — amber */
+  --fin-review: #f59e0b;
+  /* Approved / Scheduled / Sent — teal */
+  --fin-approved: #14b8a6;
+  /* Due within 7 days — yellow */
+  --fin-due-soon: #eab308;
+  /* Overdue 1–30 — orange */
+  --fin-overdue-30: #f97316;
+  /* Overdue 31–60 — red */
+  --fin-overdue-60: #ef4444;
+  /* Overdue 60+ — dark red */
+  --fin-overdue-90: #991b1b;
+  /* Paid — green */
+  --fin-paid: #22c55e;
+  /* Disputed — purple */
+  --fin-disputed: #8b5cf6;
+  /* Voided / Written off — grey, and the row is struck through */
+  --fin-void: #475569;
+  /* A status the map has never heard of. §5: grey, raw label, never dropped. */
+  --fin-unmapped: #64748b;
+}
+
+:root:not([data-theme="light"]),
+body[data-theme="dark"] {
+  --fin-draft: #94a3b8;
+  --fin-review: #fbbf24;
+  --fin-approved: #2dd4bf;
+  --fin-due-soon: #facc15;
+  --fin-overdue-30: #fb923c;
+  --fin-overdue-60: #f87171;
+  --fin-overdue-90: #dc6262;
+  --fin-paid: #4ade80;
+  --fin-disputed: #a78bfa;
+  --fin-void: #6b7c8f;
+  --fin-unmapped: #94a3b8;
+}
+/* fin-token-block:end */
+
+/* ── The shell ────────────────────────────────────────────────────────────── */
 
 .fin-page {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .fin-tabs__list {
@@ -34,4 +119,1045 @@
   background: var(--surface-active);
   border-color: var(--ms-teal-500);
   color: var(--ink);
+}
+
+/* ── Sections and cards ───────────────────────────────────────────────────── */
+
+.fin-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.fin-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-card);
+}
+
+.fin-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.fin-card__head h2,
+.fin-card__head h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.fin-card__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fin-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+/* ── Money ────────────────────────────────────────────────────────────────── */
+
+/*
+ * Tabular numerals everywhere a figure appears, so a column of amounts lines up
+ * on the decimal and the eye can compare magnitudes down the page. Proportional
+ * digits in a ledger are the reason a wrong figure survives a read-through.
+ */
+.fin-money,
+.fin-table td,
+.fin-table th,
+.fin-tile__value,
+.fin-field input[inputmode="decimal"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-money--negative {
+  color: var(--danger-solid);
+}
+
+/* ── Tiles ────────────────────────────────────────────────────────────────── */
+
+.fin-tiles {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fin-tile {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.fin-tile__label {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.fin-tile__value {
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.fin-tile__foot {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fin-tile__rule {
+  display: block;
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* ── The status chip: glyph, dot, word ────────────────────────────────────── */
+
+.fin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-card-lo);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.fin-status__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.fin-status__glyph {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.fin-status__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* §5: voided and written off are struck through, so the state survives greyscale. */
+.fin-status--struck .fin-status__label,
+.fin-row--struck .fin-cell__ref {
+  text-decoration: line-through;
+}
+
+/* ── The days-overdue badge — the second, non-colour signal ───────────────── */
+
+.fin-age {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* ── Flags ────────────────────────────────────────────────────────────────── */
+
+.fin-flags {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fin-flag {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--fin-review);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.fin-flag--blocking {
+  border-left-color: var(--fin-overdue-60);
+}
+
+.fin-flag--waived,
+.fin-flag--cleared {
+  border-left-color: var(--fin-approved);
+}
+
+.fin-flag__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fin-flag__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fin-flag__detail,
+.fin-flag__reason {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Notices ──────────────────────────────────────────────────────────────── */
+
+/*
+ * Three notices, three meanings, and they are deliberately not one component:
+ * `--admin` is a status the workspace has not mapped and an administrator must
+ * fix; `--degraded` is an endpoint that is not answering, which is nobody's
+ * data problem; `--refused` is the server declining an action and explaining
+ * why, which is the sentence the operator has to read.
+ */
+.fin-notice {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--fin-draft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fin-notice p {
+  margin: 0;
+}
+
+.fin-notice--admin {
+  border-left-color: var(--fin-review);
+}
+
+.fin-notice--degraded {
+  border-left-color: var(--fin-draft);
+}
+
+.fin-notice--refused {
+  border-left-color: var(--fin-overdue-60);
+}
+
+.fin-notice--ok {
+  border-left-color: var(--fin-paid);
+}
+
+.fin-notice__code {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── Filters ──────────────────────────────────────────────────────────────── */
+
+.fin-filters {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fin-filters__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fin-filters__row > * {
+  min-width: 0;
+}
+
+.fin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fin-toggle[aria-pressed="true"] {
+  border-color: var(--ms-teal-500);
+  background: var(--surface-active);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+
+.fin-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fin-form__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fin-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fin-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.fin-field input,
+.fin-field select,
+.fin-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  /* 16px or iOS zooms on focus and never zooms back. */
+  font-family: inherit;
+  font-size: 16px;
+}
+
+.fin-field textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.fin-field__hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fin-actions--end {
+  justify-content: flex-end;
+}
+
+/*
+ * Every button on this page clears the 44px touch minimum, including the ones
+ * that only ever appear on a desktop panel. A control that is comfortable on a
+ * phone is not uncomfortable on a mouse; the reverse is not true.
+ */
+.fin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fin-button:hover {
+  background: var(--surface-card-lo);
+}
+
+.fin-button--primary {
+  border-color: var(--brand-solid);
+  background: var(--brand-solid);
+  color: var(--ms-on-fill);
+}
+
+.fin-button--danger {
+  border-color: var(--danger-solid);
+  color: var(--danger-solid);
+}
+
+.fin-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.fin-link-button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--brand-solid);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Focus must be visible on every interactive thing, at every width. */
+.fin-page :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ms-teal-500);
+  outline-offset: 2px;
+}
+
+/* ── The allocation editor ────────────────────────────────────────────────── */
+
+.fin-alloc {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fin-alloc__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+/*
+ * THE DIFFERENCE IS SHOWN LIVE, IN POUNDS, WITH ITS SIGN. §4: "Enforce the
+ * sum." A form that refuses on submit without ever saying by how much is a form
+ * people fight; the running difference is what makes the constraint teachable.
+ */
+.fin-alloc__sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--fin-review);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-alloc__sum--balanced {
+  border-left-color: var(--fin-paid);
+}
+
+.fin-alloc__difference {
+  font-weight: 650;
+}
+
+/* ── The ledger table, and the cards it becomes ───────────────────────────── */
+
+.fin-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.fin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.fin-table caption {
+  text-align: left;
+}
+
+.fin-table th,
+.fin-table td {
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.fin-table thead th {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fin-table tbody tr {
+  border-bottom: 1px solid var(--line);
+}
+
+.fin-table td--number,
+.fin-table th--number {
+  text-align: right;
+}
+
+.fin-cell__ref {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fin-cell__sub {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.fin-row__open {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fin-row--selected {
+  background: var(--surface-active);
+}
+
+/*
+ * BELOW 768 THE TABLE IS A STACK OF CARDS.
+ *
+ * `display: block` on table elements is what strips the table role out of the
+ * accessibility tree in Chrome, which is why the TSX writes `role="table"`,
+ * `role="row"` and `role="cell"` explicitly — redundant at desktop width,
+ * load-bearing here. Each cell carries its column name in `data-label` and
+ * prints it as its own label, so a card is readable without the header row that
+ * is now hidden.
+ */
+@media (max-width: 767px) {
+  .fin-table,
+  .fin-table tbody,
+  .fin-table tr,
+  .fin-table td,
+  .fin-table tbody th {
+    display: block;
+    width: auto;
+  }
+
+  .fin-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .fin-table tbody tr {
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-card-lo);
+  }
+
+  .fin-table tbody th,
+  .fin-table td {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 10px;
+    padding: 4px 0;
+    text-align: left;
+  }
+
+  .fin-table td--number {
+    text-align: left;
+  }
+
+  .fin-table tbody th[data-label]::before,
+  .fin-table td[data-label]::before {
+    flex: none;
+    color: var(--muted);
+    font-size: 12px;
+    content: attr(data-label);
+  }
+
+  .fin-table td[data-label=""]::before {
+    content: none;
+  }
+
+  .fin-row__open {
+    width: 100%;
+  }
+}
+
+/* ── The side panel ───────────────────────────────────────────────────────── */
+
+/*
+ * ONE PANEL, TWO SHAPES.
+ *
+ * Full screen below 768 and a docked right-hand drawer above it. It is an
+ * overlay at every width rather than a third, side-by-side layout, because a
+ * ledger squeezed into the remaining 400px of a 1024 viewport is a ledger
+ * nobody can read — and because one geometry is one set of focus and scroll
+ * behaviours instead of three.
+ */
+.fin-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer-backdrop);
+  border: 0;
+  padding: 0;
+  background: rgba(7, 24, 38, 0.45);
+}
+
+.fin-panel {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface-card);
+}
+
+.fin-panel__head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-card);
+}
+
+.fin-panel__title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fin-panel__title h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.fin-panel__close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fin-panel__body {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.fin-panel__section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.fin-panel__section:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ── Definition rows ──────────────────────────────────────────────────────── */
+
+.fin-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  min-width: 0;
+}
+
+.fin-facts div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+  min-width: 0;
+  padding: 3px 0;
+}
+
+.fin-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fin-facts dd {
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ── The history trail ────────────────────────────────────────────────────── */
+
+.fin-trail {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fin-trail li {
+  display: grid;
+  gap: 2px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.fin-trail__who {
+  color: var(--muted);
+}
+
+/* ── Quote comparison ─────────────────────────────────────────────────────── */
+
+.fin-compare {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fin-compare__card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--fin-draft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.fin-compare__card--approved {
+  border-top-color: var(--fin-approved);
+  background: var(--surface-active);
+}
+
+.fin-compare__card--rejected {
+  border-top-color: var(--fin-void);
+}
+
+.fin-compare__card--cheapest .fin-compare__amount {
+  color: var(--brand-solid);
+}
+
+.fin-compare__amount {
+  font-size: 19px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Ageing ladder ────────────────────────────────────────────────────────── */
+
+.fin-ageing {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fin-ageing__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  min-width: 0;
+}
+
+.fin-ageing__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-ageing__drill {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--brand-solid);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── The unbilled-work widget ─────────────────────────────────────────────── */
+
+/*
+ * §15.1 calls this "the highest-value item here", so it is drawn as a headline
+ * and not as a footnote: its own card, its own accent rule, the total in the
+ * same size as the cash position, and a drill-down that lists the jobs rather
+ * than a count that leads nowhere.
+ */
+.fin-unbilled {
+  border-left: 3px solid var(--fin-overdue-30);
+}
+
+.fin-unbilled__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.fin-unbilled__total {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.fin-unbilled__count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fin-unbilled__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fin-unbilled__job {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+/* ── Runs and selection ───────────────────────────────────────────────────── */
+
+.fin-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 13px;
+}
+
+/* Non-checkbox controls in a select row keep a comfortable minimum too. */
+.fin-select input:not([type="checkbox"]) {
+  min-height: 44px;
+}
+
+/* ── Controls that live inside a table cell ───────────────────────────────── */
+
+/*
+ * A CONTROL IN A TABLE CELL IS STILL A TOUCH TARGET.
+ *
+ * The settings tab edits approval bands and the status map in place, so the
+ * number box, the label box and the colour swatch are `<td>` children rather
+ * than `.fin-field` children — and they inherited none of the 44px minimum that
+ * rule sets. Measured at 380px they came out 24 and 27 pixels tall, which §16
+ * forbids and which is genuinely hard to hit with a thumb on a moving train.
+ *
+ * The colour input is capped rather than stretched: a full-width colour swatch
+ * reads as a banner, not as a control.
+ */
+.fin-table td input,
+.fin-table td select {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.fin-table td input[type="number"] {
+  width: 88px;
+}
+
+.fin-table td input[type="color"] {
+  width: 64px;
+  padding: 4px;
+}
+
+/*
+ * THE CHECKBOX IS 44px; THE BOX IT DRAWS IS 20px.
+ *
+ * A 20px checkbox is the size everybody expects to see and half the size a
+ * finger can reliably hit, and the two are not in conflict: the INPUT is
+ * forty-four pixels square with no appearance of its own, and its
+ * `::before` draws the small square in the middle. So the hit area is the one
+ * §16 asks for while the control still looks like a checkbox.
+ *
+ * Checked is a FILLED box against an empty outline, not a hue change — it
+ * survives greyscale, in keeping with the rest of this sheet.
+ */
+.fin-select input[type="checkbox"] {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.fin-select input[type="checkbox"]::before {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-card);
+  content: "";
+}
+
+.fin-select input[type="checkbox"]:checked::before {
+  border-color: var(--brand-solid);
+  background: var(--brand-solid);
+  box-shadow: inset 0 0 0 3px var(--surface-card);
+}
+
+/* ── Masked, because the reader lacks the capability ──────────────────────── */
+
+.fin-masked {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+/* ── Breakpoints — 640 / 767 / 768 / 1024 / 1280 and nothing else ─────────── */
+
+@media (min-width: 640px) {
+  .fin-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fin-form__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fin-alloc__row {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .fin-compare {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .fin-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fin-panel {
+    inset: 0 0 0 auto;
+    width: min(560px, 100%);
+    border-left: 1px solid var(--line);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+@media (min-width: 1024px) {
+  .fin-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .fin-compare {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .fin-panel {
+    width: 640px;
+  }
 }
