@@ -24,7 +24,22 @@
  * `tests/overview-foundations.test.mjs` pins the two lists identical.
  */
 
-import { statusKey } from "./job-metrics";
+/*
+ * THE `.ts` IS DELIBERATE AND IS THE ONLY THING THAT MAKES THIS FILE TESTABLE.
+ *
+ * `tests/overview-foundations.test.mjs` imports this module NATIVELY, so node's
+ * ESM resolver has to find the file — and it does not add extensions. An
+ * extensionless `"./job-metrics"` resolves under vite and throws
+ * ERR_MODULE_NOT_FOUND under `node --test`, which is exactly what happened
+ * here first.
+ *
+ * `job-metrics.ts` already carries the same specifier, for the same reason, on
+ * its own import of `dashboard-meters.ts`. The rule to remember is the inverse
+ * one recorded against `expiry-status.ts`: a module that suites TRANSPILE to a
+ * `data:` URL must NOT carry the extension, because a relative specifier cannot
+ * resolve from there. This module is imported, not transpiled.
+ */
+import { statusKey } from "./job-metrics.ts";
 
 /* ── The eight meters ─────────────────────────────────────────────────────── */
 
