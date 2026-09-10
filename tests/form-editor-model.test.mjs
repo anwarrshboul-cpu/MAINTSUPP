@@ -35,6 +35,14 @@ async function load(file) {
 }
 
 const pages = await load("app/(app)/portal/form-pages.ts");
+/*
+ * The projection is loaded the same way, and for the same reason: since the
+ * public renderer learnt about pages, WHERE a form breaks is arithmetic that
+ * two modules perform — this one for the builder, `form-projection.ts` for the
+ * payload — and only running both proves they agree. It is loadable here
+ * because it kept the same discipline: type-only imports, which erase.
+ */
+const projection = await load("app/lib/form-projection.ts");
 const intake = await load("app/(app)/portal/form-intake-warnings.ts");
 const bindings = await load("app/(app)/portal/form-bindings.ts");
 
@@ -126,15 +134,78 @@ test("questions before any page block still belong to a page", () => {
   assert.deepEqual(model[0].questions.map((entry) => entry.id), ["a"]);
 });
 
+/*
+ * `pageIndexById` MOVED to app/lib/form-projection.ts, and this pin followed it
+ * rather than being dropped or weakened.
+ *
+ * It was here with exactly one caller — the builder's Preview — under a note
+ * saying it was "what the public page's own paging will use when the renderer
+ * learns about pages". It learnt. The public renderer could not import it from
+ * here (this module is executed from a `data:` URL, which has no base URL for a
+ * relative runtime import — see the header), so the function went to the module
+ * both mounts already import and the payload now carries its answer as a `page`
+ * on every question.
+ *
+ * So the contract is asserted at its new home, and one step further than
+ * before: the builder's page model, the moved index, and the numbers actually
+ * SERVED must all say the same thing about where a form breaks. Two modules
+ * walking the same flat order is the price of neither being allowed to import
+ * the other; this is what stops them drifting.
+ */
 test("pageIndexById agrees with pagesOf, which is what lets a renderer page a form", () => {
   for (const config of [onePage(), twoPages()]) {
-    const index = pages.pageIndexById(config);
+    const index = projection.pageIndexById(config);
+    const served = new Map(
+      projection.projectQuestions(config).map((question) => [question.id, question.page]),
+    );
     pages.pagesOf(config).forEach((page, position) => {
       for (const entry of page.questions) {
         assert.equal(index.get(entry.id), position, `${entry.id} is on page ${position}`);
+        assert.equal(served.get(entry.id), position, `${entry.id} is SERVED as page ${position}`);
       }
     });
   }
+});
+
+/*
+ * And the split the two renderers walk, which is the same arithmetic one level
+ * up: `askedPages` groups the projected questions by that index and drops a
+ * page that has nothing on it. A blank step is the failure this prevents, and
+ * it has two causes that must both be covered — a page whose questions are all
+ * hidden (they never reach the payload) and one whose questions are all behind
+ * a `showIf` that the answers so far do not satisfy.
+ */
+test("askedPages never hands a renderer an empty page to draw", () => {
+  const config = {
+    order: ["pb1", "a", "pb2", "b", "pb3", "c"],
+    questions: [
+      pageBlock("pb1"),
+      question("a"),
+      pageBlock("pb2"),
+      question("b", { visible: false }),
+      pageBlock("pb3"),
+      question("c", { showIf: { questionId: "a", equals: ["yes"] } }),
+    ],
+  };
+  const asked = projection.projectQuestions(config);
+  assert.deepEqual(asked.map((entry) => [entry.id, entry.page]), [
+    ["a", 0],
+    /* Page 1 is gone from the payload entirely — its only question is hidden —
+       so "c" keeps the number of the page it is actually on rather than being
+       renumbered into the gap. */
+    ["c", 2],
+  ]);
+
+  /* Before the trigger: one page. The conditional page is not walked to. */
+  assert.deepEqual(
+    projection.askedPages(asked, {}).map((page) => page.map((entry) => entry.id)),
+    [["a"]],
+  );
+  /* After it: two, and never the hidden one in between. */
+  assert.deepEqual(
+    projection.askedPages(asked, { a: "yes" }).map((page) => page.map((entry) => entry.id)),
+    [["a"], ["c"]],
+  );
 });
 
 /* ── Slots ───────────────────────────────────────────────────────────────── */

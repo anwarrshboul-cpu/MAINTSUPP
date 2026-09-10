@@ -1875,35 +1875,6 @@
   color: var(--muted-2);
 }
 
-/* ── Preview: the page stepper ────────────────────────────── */
-
-.form-builder__preview-step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.form-builder__preview-step button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-card);
-  color: var(--muted);
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.form-builder__preview-step button svg {
-  transform: rotate(180deg);
-}
-
 /* ── Narrow ────────────────────────────────────────────────────────────────
  *
  * 767px is the app's phone boundary and is one of the five widths the parity

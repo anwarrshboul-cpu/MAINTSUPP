@@ -325,6 +325,8 @@ export type PublicForm = {
   questions: PublicQuestion[];
   appearance: FormAppearance;
   welcome: FormFeatures["preSubmissionView"];
+  /** `accessibility.logoAltText`, which `Shell` puts on the logo's `alt`. */
+  logoAlt: string | null;
   afterSubmission: {
     title: string | null;
     description: string | null;

@@ -291,10 +291,30 @@ test("a page break persists inside sections PATCH already accepts", async () => 
   }
 });
 
+/*
+ * THIS TEST'S THREE PINS ALL MOVED, and the test is stronger for it.
+ *
+ * They used to name what the preview did BY ITSELF while the public link could
+ * not page a form at all: `pageIndexById(form.config)`, its own
+ * `questions: pages[current]` payload, and its own "Next — page N of M" label.
+ * The link pages now, so the split went to `askedPages` in
+ * app/lib/form-projection.ts and the page payload — label included — went to
+ * `pagePayload` in form-renderer.tsx. The pins moved with them AND gained the
+ * other half: the two mounts are asserted to call the same functions, which is
+ * the difference between one implementation and two that agree by inspection.
+ */
 test("the preview pages the form with the same function a renderer would", async () => {
-  assert.match(preview, /pageIndexById\(form\.config\)/);
-  assert.match(preview, /questions: pages\[current\]/, "one page's questions per step");
-  assert.match(preview, /Next — page \$\{current \+ 2\} of \$\{pages\.length\}/);
+  const renderer = codeOnly(await read("app/(public)/f/[token]/form-renderer.tsx"));
+  const link = codeOnly(await read("app/(public)/f/[token]/public-form.tsx"));
+
+  assert.match(preview, /askedPages\(payload\.questions, answers\)/);
+  assert.match(link, /askedPages\(payload\.form\.questions, answers\)/);
+
+  assert.match(renderer, /questions: pages\[index\] \?\? \[\]/, "one page's questions per step");
+  assert.match(renderer, /`Next — page \$\{index \+ 2\} of \$\{pages\.length\}`/);
+  assert.match(preview, /pagePayload\(payload, pages, current\)/);
+  assert.match(link, /pagePayload\(form, pages, current\)/);
+
   /* Composed from what the renderer already exports rather than forked: one
      implementation of the layout, the progress bar and the file picker. */
   assert.match(preview, /from "\.\.\/\.\.\/\(public\)\/f\/\[token\]\/form-renderer"/);
@@ -308,9 +328,20 @@ test("the welcome page is configurable and previewed", async () => {
   assert.match(panels, /preSubmissionView: \{ \.\.\.features\.preSubmissionView, enabled: next \}/);
   assert.match(panels, /startButton: \{ text: next\.trim\(\) \|\| null \}/);
   /* Drawn in the SAME Shell as the form, so it inherits the accent, the
-     background, the logo and the language rather than restating any of them. */
-  assert.match(preview, /welcome\.startButton\.text \|\| "Start"/);
+     background, the logo and the language rather than restating any of them —
+     and drawn by `WelcomeScreen` in the RENDERER since the public link learnt
+     to show it, so this pin names that one home rather than the preview's own
+     copy of the markup. The fallback heading moved with it, which is the part
+     most likely to have drifted between two copies. */
+  const renderer = codeOnly(await read("app/(public)/f/[token]/form-renderer.tsx"));
+  assert.match(renderer, /form\.welcome\.startButton\.text \|\| "Start"/);
+  assert.match(renderer, /form\.welcome\.title \|\| form\.title/);
+  assert.match(preview, /<WelcomeScreen form=\{payload\} onStart=/);
   assert.match(preview, /step < 0 && welcome\.enabled/);
+  /* And the link shows it, which is what the preview was previewing. */
+  const link = codeOnly(await read("app/(public)/f/[token]/public-form.tsx"));
+  assert.match(link, /step < 0 && form\.welcome\.enabled/);
+  assert.match(link, /<WelcomeScreen form=\{form\} onStart=/);
 });
 
 /* ── 10. Design and Settings completion ──────────────────────────────────── */

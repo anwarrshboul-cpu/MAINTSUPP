@@ -60,6 +60,34 @@ export type PublicQuestion = {
   required: boolean;
   options: Array<{ label: string; value: string }> | null;
   showIf: { questionId: string; equals: string[] } | null;
+  /**
+   * The 0-based page this question is on.
+   *
+   * THE WHOLE OF WHAT PAGINATION COSTS THE PAYLOAD — one integer per question.
+   *
+   * A page is stored as a `PAGE_BLOCK` marker inside `order` (see
+   * app/(app)/portal/form-pages.ts for why it is a marker and not a
+   * `config.pages` array), and the projection drops those markers, so before
+   * this field the served payload carried no page information at all and the
+   * public link had no way to know where a form broke. It showed every page as
+   * one long scroll.
+   *
+   * WHY AN INDEX PER QUESTION AND NOT AN ARRAY OF PAGES. `questions` is the
+   * flat list four other things already read: the prefill seeding, the
+   * required-File check, the progress bar and `askedQuestions` (which the
+   * submit route mirrors). Nesting it would have rewritten all four and left
+   * the same question reachable by two paths that could disagree. An index
+   * leaves the flat list exactly as it was and lets `askedPages()` below do
+   * the grouping, once, for both mounts.
+   *
+   * The number is the RAW boundary count, not a compacted one, so it means the
+   * same thing as `pagesOf()` position in the builder's page model — which is
+   * what `tests/form-editor-model.test.mjs` runs both modules to prove. A page
+   * left empty because every question on it is hidden therefore leaves a gap
+   * in these numbers; `askedPages` closes it, because emptiness depends on the
+   * answers so far and can only be decided at render time.
+   */
+  page: number;
   settings: {
     display: "Dropdown" | "Vertical" | "Horizontal";
     includeTime: boolean;
@@ -129,7 +157,9 @@ export function resolvePrefill(question: FormQuestion, now: Date) {
  *    sees the question; sending it and hiding it in CSS would publish the
  *    board's internal columns — "Cost of Works", "Approved by" — to anyone who
  *    opened dev tools on a public link.
- *  · The page block, which is a container rather than a question.
+ *  · The page block, which is a container rather than a question. Where it
+ *    STOOD is not dropped: it becomes the `page` index on every question
+ *    after it, which is how the public link draws a multi-page form.
  *  · Deactivated and hidden OPTIONS, per question. A retired store must not be
  *    selectable, and monday retires a label by flag rather than by deleting it.
  *
@@ -137,12 +167,31 @@ export function resolvePrefill(question: FormQuestion, now: Date) {
  * appended rather than dropped — a question added to `questions` but never
  * added to `order` should still be asked, not silently lost.
  */
-export function projectQuestions(
-  config: { order: string[]; questions: FormQuestion[] },
-  /** Options to substitute, per question id. See the note in `form-config`. */
-  optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
-  now: Date = new Date(),
-): PublicQuestion[] {
+type PagedConfig = { order: string[]; questions: FormQuestion[] };
+
+/**
+ * The stored entries in the order the form is drawn in — PAGE BLOCKS INCLUDED.
+ *
+ * Two repairs, and both matter more than they look:
+ *
+ *   · an id in `order` with no question behind it is dropped, and an id listed
+ *     twice is taken once, because that is what a delete and a bad merge leave
+ *     behind and neither may become a gap; and
+ *   · a question `order` never mentions is APPENDED rather than lost — one
+ *     added by a migration, or by an older build, is still asked.
+ *
+ * Extracted because `projectQuestions` and `pageIndexById` must walk the SAME
+ * array: a question that ordered one way and paged another would be drawn on a
+ * page it does not belong to.
+ *
+ * `form-pages.ts` carries the builder-side twin of this repair, and the two
+ * cannot be collapsed into one: both modules are transpiled and executed from
+ * a `data:` URL by the suite, and a `data:` module has no base URL to resolve a
+ * relative runtime import against, so neither may import the other in either
+ * direction. `tests/form-editor-model.test.mjs` runs both over the same
+ * configurations and fails the day they disagree.
+ */
+export function orderedEntries(config: PagedConfig): FormQuestion[] {
   const byId = new Map(config.questions.map((question) => [question.id, question]));
 
   const ordered: FormQuestion[] = [];
@@ -154,6 +203,46 @@ export function projectQuestions(
     }
   }
   for (const remaining of byId.values()) ordered.push(remaining);
+  return ordered;
+}
+
+/**
+ * Question id -> the 0-based page it is on.
+ *
+ * The one function that says where a form breaks. It used to live in the
+ * builder's `form-pages.ts` with a single caller — the Preview — and a note
+ * saying it was "what the public page's own paging will use when the renderer
+ * learns about pages". It learned; so it moved here, to the module the server
+ * and the browser both already import, and `projectQuestions` stamps its
+ * answer onto every question it publishes.
+ */
+export function pageIndexById(config: PagedConfig): Map<string, number> {
+  const index = new Map<string, number>();
+  let page = 0;
+  let started = false;
+  for (const entry of orderedEntries(config)) {
+    if (entry.type === "PAGE_BLOCK") {
+      /* The first break opens page 0 rather than advancing past it: every
+         captured configuration begins with one, and counting it as a boundary
+         would leave page 0 permanently empty. */
+      if (started) page += 1;
+      started = true;
+      continue;
+    }
+    started = true;
+    index.set(entry.id, page);
+  }
+  return index;
+}
+
+export function projectQuestions(
+  config: PagedConfig,
+  /** Options to substitute, per question id. See the note in `form-config`. */
+  optionOverrides: Record<string, Array<{ label: string; value: string }>> = {},
+  now: Date = new Date(),
+): PublicQuestion[] {
+  const ordered = orderedEntries(config);
+  const pageOf = pageIndexById(config);
 
   return ordered
     .filter((question) => question.visible && question.type !== "PAGE_BLOCK")
@@ -172,6 +261,9 @@ export function projectQuestions(
         question.settings?.optionsOrder ?? "Custom",
       ),
       showIf: question.showIf,
+      /* Zero is the honest fallback: a question the page walk never reached is
+         one `order` never mentioned, and `orderedEntries` appends it. */
+      page: pageOf.get(question.id) ?? 0,
       settings: {
         display: question.settings?.display ?? "Dropdown",
         includeTime: question.settings?.includeTime === true,
@@ -263,7 +355,18 @@ export type ProjectedPublicForm = {
   description: string | null;
   questions: PublicQuestion[];
   appearance: FormConfigLike["appearance"];
-  welcome: FormConfigLike["features"]["preSubmissionView"];
+  welcome: WelcomePage;
+  /**
+   * What the logo SAYS, for somebody who cannot see it.
+   *
+   * `accessibility.logoAltText` has been in the stored configuration since the
+   * monday import, and the Design panel has been writing it, but the payload
+   * never carried it and `Shell` hard-coded `alt=""`. A logo is very often the
+   * only thing on a form that names the organisation, and "image" is what a
+   * screen reader says instead. Null means decorative, which is the correct
+   * answer for the MAINTSUPP mark and for an operator who left it blank.
+   */
+  logoAlt: string | null;
   afterSubmission: {
     title: string | null;
     description: string | null;
@@ -274,6 +377,21 @@ export type ProjectedPublicForm = {
   progressBar: boolean;
   submitButtonText: string | null;
   language: string | null;
+};
+
+/**
+ * The welcome page — the screen before the first question.
+ *
+ * Named rather than left as `unknown`, which is what `features` used to hand
+ * the projection. The public renderer draws it now, so the payload's shape is
+ * a contract two mounts depend on, and `unknown` would have made every read of
+ * it a cast.
+ */
+export type WelcomePage = {
+  enabled: boolean;
+  title: string | null;
+  description: string | null;
+  startButton: { text: string | null };
 };
 
 /**
@@ -289,7 +407,7 @@ type FormConfigLike = {
     submitButton: { text: string | null };
   };
   features: {
-    preSubmissionView: unknown;
+    preSubmissionView: WelcomePage;
     afterSubmissionView: {
       title: string | null;
       description: string | null;
@@ -298,7 +416,7 @@ type FormConfigLike = {
       redirectAfterSubmission: { enabled: boolean; redirectUrl: string | null };
     };
   };
-  accessibility: { language: string | null };
+  accessibility: { language: string | null; logoAltText: string | null };
 };
 
 export function projectPublicForm(
@@ -327,6 +445,7 @@ export function projectPublicForm(
     progressBar: config.appearance.showProgressBar,
     submitButtonText: config.appearance.submitButton.text,
     language: config.accessibility.language,
+    logoAlt: config.accessibility.logoAltText,
   };
 }
 
@@ -347,4 +466,54 @@ export function askedQuestions(
     if (!question.showIf) return true;
     return question.showIf.equals.includes(answers[question.showIf.questionId] ?? "");
   });
+}
+
+/**
+ * The form as a submitter WALKS it: one entry per page, in order, and no empty
+ * ones.
+ *
+ * Shared by the public link and the builder's Preview for the same reason
+ * everything else here is shared — two implementations of "where does this
+ * form break" is one too many, and the two mounts have to agree about a page
+ * count they both print on a button ("Next - page 2 of 3").
+ *
+ * WHY AN EMPTY PAGE IS NOT A PAGE. Two ways one arises, and they need
+ * different treatment:
+ *
+ *   · every question on it is HIDDEN. Those never reach the payload at all, so
+ *     the page simply has no questions here and drops out — and the `page`
+ *     numbers keep their gap, which is why this groups by key and sorts rather
+ *     than indexing an array of a fixed length;
+ *   · every question on it is behind a `showIf` that the answers so far do not
+ *     satisfy. That can change with the next keystroke, so it cannot be
+ *     decided in the projection: it is decided here, against the answers, and
+ *     the page returns the moment its trigger matches.
+ *
+ * Because the result never CONTAINS an empty page, a caller stepping through
+ * it skips one in both directions without owning any logic for that — which is
+ * the only version of "skip the blank step" that cannot be got wrong on Back.
+ *
+ * The questions handed back are the page's WHOLE list, not the asked subset:
+ * `FormBody` applies `showIf` itself, per field, and that stays the one place
+ * it happens.
+ */
+export function askedPages(
+  questions: PublicQuestion[],
+  answers: Record<string, string>,
+): PublicQuestion[][] {
+  const groups = new Map<number, PublicQuestion[]>();
+  for (const question of questions) {
+    const group = groups.get(question.page);
+    if (group) group.push(question);
+    else groups.set(question.page, [question]);
+  }
+
+  const pages = [...groups.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, group]) => group)
+    .filter((group) => askedQuestions(group, answers).length > 0);
+
+  /* A form with no questions at all still has one page, so the caller has
+     somewhere to draw the submit button rather than nothing. */
+  return pages.length ? pages : [[]];
 }

@@ -229,12 +229,14 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
           that names the organisation, and "image" is what a screen reader says
           instead.
 
-          The note is the honest half: this build's renderer draws the logo with
-          `alt=""` — decorative — so the value is recorded and not yet used. See
-          the report accompanying this change for the one-line renderer contract
-          that makes it live. A note is how this panel has always described a
-          setting it stores and cannot yet act on (Save as draft, reCAPTCHA, AI
-          translation), rather than hiding the control or pretending.
+          This note used to say the value was recorded and not yet used, because
+          the renderer drew the logo with `alt=""` and nothing read the setting.
+          That is no longer true: `Shell` takes `logoAlt` and the public link and
+          the Preview both announce it. The wording is corrected rather than
+          deleted, because a control that once did nothing and now does is worth
+          saying so — and because this panel still carries genuinely inert
+          settings (Save as draft, reCAPTCHA, AI translation) whose notes must
+          stay honest.
         */}
         <label className="form-panel__field form-panel__field--stack">
           <span>Logo description</span>
@@ -255,8 +257,9 @@ export function FormDesignPanel({ form, patch, busy }: PanelProps) {
           />
         </label>
         <p className="form-panel__note">
-          Recorded, and the public form still draws the logo as decorative — the
-          renderer has to read this before a screen reader will announce it.
+          Read aloud in place of the image. Leave it empty and the logo is
+          treated as decorative and skipped, which is the right answer when the
+          form's title already names you.
         </p>
 
         <label className="form-panel__field">

@@ -21,12 +21,15 @@ import type { FormQuestion } from "../../../db/monday-board-spec";
  * and no new hole in the undo contract. A `config.pages` array would have been
  * none of those things.
  *
- * It also degrades honestly. `projectQuestions()` in app/lib/form-projection.ts
- * filters `type !== "PAGE_BLOCK"`, so a form with three pages served by a
- * renderer that has not learnt about pages yet is the same form on one long
- * page — every question, in the same order, all of it answerable. A separate
- * `pages` array would have been silently ignored instead, which is the failure
- * mode that loses a submitter's answers rather than their pagination.
+ * It also degraded honestly while the public renderer was catching up. The
+ * marker is filtered out by `projectQuestions()` in app/lib/form-projection.ts,
+ * so a three-page form served by a renderer that did not know about pages was
+ * the same form on one long page — every question, in the same order, all of it
+ * answerable. A separate `pages` array would have been silently ignored
+ * instead, which is the failure mode that loses a submitter's answers rather
+ * than their pagination. That interim is over: the projection now stamps a
+ * `page` index on every question it publishes and `askedPages` splits on it, so
+ * the public link walks the pages this module authors.
  *
  * ── WHY ORDERING LIVES HERE AND NOT IN THE PANEL ──────────────────────────
  *
@@ -133,34 +136,24 @@ export function pagesOf(config: PagedConfig): FormPage[] {
 }
 
 /**
- * Question id → the 0-based page it is on.
+ * `pageIndexById` USED TO BE HERE, and is now in app/lib/form-projection.ts.
  *
- * The one function that lets a RENDERER page a form without re-deriving the
- * page model. The renderer works from the projected public payload, which has
- * already dropped hidden questions and the page blocks themselves, so it cannot
- * see where the breaks were; this maps back to them by id. Preview uses it
- * today, and it is what the public page's own paging will use when the renderer
- * learns about pages — one implementation of "which page is this on", so the
- * two mounts cannot disagree about where a form breaks.
+ * It only ever had one caller — a renderer asking "which page is this question
+ * on" — and when the PUBLIC renderer needed the same answer it could not have
+ * it from here. Both this module and the projection are transpiled and executed
+ * from a `data:` URL by the suite (`tests/form-editor-model.test.mjs` and
+ * `tests/public-form-pages.test.mjs`), and a `data:` module has no base URL to
+ * resolve a relative runtime import against — so neither may import the other,
+ * in either direction. The projection is the module both mounts already import,
+ * so the function moved to it and the payload now carries its answer as a
+ * `page` on every question.
+ *
+ * What stayed here is the page model the BUILDER edits — the pages, the slots
+ * and the moves. Do not re-add a local copy of the index: that module and this
+ * one must agree about where a form breaks, and
+ * `tests/form-editor-model.test.mjs` runs both over the same configurations to
+ * prove they do.
  */
-export function pageIndexById(config: PagedConfig): Map<string, number> {
-  const index = new Map<string, number>();
-  let page = 0;
-  let started = false;
-  for (const entry of orderedEntries(config)) {
-    if (entry.type === PAGE_BLOCK) {
-      /* The first break opens page 0 rather than advancing past it: every
-         captured configuration begins with one, and counting it as a boundary
-         would leave page 0 permanently empty. */
-      if (started) page += 1;
-      started = true;
-      continue;
-    }
-    started = true;
-    index.set(entry.id, page);
-  }
-  return index;
-}
 
 /** Every question a submitter is asked, page breaks removed. */
 export function questionsOf(config: PagedConfig): FormQuestion[] {

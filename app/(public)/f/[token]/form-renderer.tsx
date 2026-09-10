@@ -2,7 +2,11 @@
 
 import type { FormEvent } from "react";
 import { BrandMark, Icon } from "../../../components";
-import type { PublicQuestion } from "../../../lib/form-projection";
+import {
+  askedQuestions,
+  type PublicQuestion,
+  type WelcomePage,
+} from "../../../lib/form-projection";
 import publicFormCss from "./public-form.css?url";
 
 /**
@@ -22,7 +26,17 @@ import publicFormCss from "./public-form.css?url";
  * Everything here is presentational. Fetching, the availability gates, the
  * password unlock and the real submit live in `public-form.tsx`; the preview
  * substitutes its own harmless handlers. Nothing in this module may import
- * anything server-only — the projection types are type-only and erase.
+ * anything server-only — `form-projection.ts` is pure, and the rest of what
+ * this file takes from it is type-only and erases.
+ *
+ * WHAT A MULTI-PAGE FORM ADDS HERE, AND WHAT IT DELIBERATELY DOES NOT. A page
+ * is not a new layout: it is the SAME `FormBody` over one page's questions
+ * (`pagePayload` builds that), with `PageSteps` above it and the welcome
+ * screen in front. Which page a submitter is on, and what happens when they
+ * press the button, stay with the two mounts — because on the link that button
+ * eventually POSTs and in Preview it never does. Everything a submitter can
+ * SEE is here, once, so the two cannot drift; the page count printed on the
+ * button is the case in point, and it used to be written out at each mount.
  */
 
 export type PublicFormPayload = {
@@ -40,6 +54,10 @@ export type PublicFormPayload = {
     showProgressBar: boolean;
     submitButton: { text: string | null };
   };
+  /** The screen before the first question. Drawn by `WelcomeScreen`. */
+  welcome: WelcomePage;
+  /** `accessibility.logoAltText` — what the logo says out loud. */
+  logoAlt: string | null;
   afterSubmission: {
     title: string | null;
     description: string | null;
@@ -106,12 +124,14 @@ export function Shell({
   description,
   appearance,
   language,
+  logoAlt,
   children,
 }: {
   title?: string;
   description?: string | null;
   appearance?: PublicFormPayload["appearance"];
   language?: string | null;
+  logoAlt?: string | null;
   children: React.ReactNode;
 }) {
   const style: React.CSSProperties & Record<string, string> = {} as never;
@@ -144,11 +164,18 @@ export function Shell({
             /*
              * An operator-supplied URL. Rendered with a plain <img> rather than
              * a framework image component because it is an arbitrary external
-             * host that no loader is configured for, and it is decorative —
-             * the form's own title carries the meaning.
+             * host that no loader is configured for.
+             *
+             * The `alt` is the operator's own `accessibility.logoAltText`. An
+             * empty one is not a shortcoming — a mark beside a heading that
+             * already names the organisation IS decorative, and `alt=""` is how
+             * that is said to a screen reader. What was wrong was hard-coding
+             * it: the Design panel has collected this sentence since the monday
+             * import and nothing read it, so a form whose logo was the only
+             * thing naming the client announced itself as "image".
              */
             // eslint-disable-next-line @next/next/no-img-element
-            <img className="pf__logo" src={appearance.logo.url} alt="" />
+            <img className="pf__logo" src={appearance.logo.url} alt={logoAlt ?? ""} />
           ) : (
             <BrandMark compact />
           )}
@@ -395,15 +422,117 @@ export function Question({
   );
 }
 
-/** A question with a `showIf` only appears once its trigger has been answered. */
-export function visibleQuestions(
-  questions: PublicQuestion[],
-  answers: Record<string, string>,
-) {
-  return questions.filter((question) => {
-    if (!question.showIf) return true;
-    return question.showIf.equals.includes(answers[question.showIf.questionId] ?? "");
-  });
+/**
+ * A question with a `showIf` only appears once its trigger has been answered.
+ *
+ * One line, because it used to be a second copy of `askedQuestions` — same
+ * filter, same fallback, written out twice. That was harmless while nothing
+ * else read it; it stopped being harmless when `askedPages` began deciding
+ * whether a PAGE is empty by the same rule. Two copies of "is this asked"
+ * would let a page be judged worth showing and then render nothing on it.
+ * The name stays: out here the rule is about what is VISIBLE, and the callers
+ * read better for it.
+ */
+export const visibleQuestions = askedQuestions;
+
+/**
+ * The payload for ONE page: the same form, narrowed to that page's questions.
+ *
+ * The whole of what "a page" means to `FormBody`, and the reason it needed no
+ * other change. `submitButtonText` is the only other difference — a page that
+ * is not the last one says where it is going, because a button that says
+ * "Submit" and does not submit is the worst thing a paginated form can do.
+ *
+ * Shared, and this is the sharpest case for it: the public link and the
+ * builder's Preview each print this page count on a button, and each used to
+ * build the sentence itself. A form that said "Next - page 2 of 3" in the
+ * builder and something else on the link would be a defect nobody could see
+ * without opening both.
+ */
+export function pagePayload(
+  form: PublicFormPayload,
+  pages: PublicQuestion[][],
+  index: number,
+): PublicFormPayload {
+  const last = index >= pages.length - 1;
+  return {
+    ...form,
+    questions: pages[index] ?? [],
+    submitButtonText: last
+      ? form.submitButtonText
+      : `Next — page ${index + 2} of ${pages.length}`,
+  };
+}
+
+/**
+ * Where the submitter is, and the way back.
+ *
+ * Nothing at all on a single-page form — the overwhelming majority — which is
+ * decided HERE rather than at each mount, so neither can forget it.
+ *
+ * Back is a button and not a link because there is no history entry to go to:
+ * the pages are one mounted component and the answers live above it, which is
+ * what makes going back non-destructive. `onBack` is null on the first page.
+ */
+export function PageSteps({
+  page,
+  pages,
+  onBack,
+}: {
+  /** 1-based, as a submitter counts them. */
+  page: number;
+  pages: number;
+  onBack: (() => void) | null;
+}) {
+  if (pages < 2) return null;
+  return (
+    <p className="pf__steps">
+      <span>
+        Page {page} of {pages}
+      </span>
+      {onBack && (
+        <button type="button" onClick={onBack}>
+          <Icon name="arrow" size={13} />
+          Back
+        </button>
+      )}
+    </p>
+  );
+}
+
+/**
+ * The welcome page, card and all.
+ *
+ * The one component here that draws its own `Shell`, deliberately: which title
+ * it shows is a rule (`welcome.title`, falling back to the form's own), and
+ * that rule is exactly the sort of detail that drifts when two mounts each
+ * wrap their own card around it. Everything else — the accent, the background,
+ * the font, the logo, the language and its direction — comes free from being
+ * the same card the form is drawn on. A welcome page that looked like a
+ * different product would be worse than none.
+ */
+export function WelcomeScreen({
+  form,
+  onStart,
+}: {
+  form: PublicFormPayload;
+  onStart: () => void;
+}) {
+  return (
+    <Shell
+      title={form.welcome.title || form.title}
+      appearance={form.appearance}
+      language={form.language}
+      logoAlt={form.logoAlt}
+    >
+      <div className="pf__welcome">
+        {form.welcome.description && <p>{form.welcome.description}</p>}
+        <button type="button" className="pf__submit" onClick={onStart}>
+          {form.welcome.startButton.text || "Start"}
+        </button>
+      </div>
+    </Shell>
+  );
 }
 
 /**
@@ -422,6 +551,7 @@ export function FormBody({
   error,
   sending,
   uploading,
+  progressOver,
   onSubmit,
 }: {
   form: PublicFormPayload;
@@ -433,10 +563,18 @@ export function FormBody({
   sending: boolean;
   /** 1-based index of the file currently uploading, or 0. */
   uploading: number;
+  /**
+   * The questions the progress bar measures, when they are not the ones being
+   * drawn. A paginated form passes the WHOLE form's list: a bar that filled up
+   * and then reset to nothing on page 2 would be reporting progress through the
+   * page, which is not what anybody wants to know from it.
+   */
+  progressOver?: PublicQuestion[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const visible = visibleQuestions(form.questions, answers);
-  const answered = visible.filter((question) => (answers[question.id] ?? "").trim()).length;
+  const tracked = visibleQuestions(progressOver ?? form.questions, answers);
+  const answered = tracked.filter((question) => (answers[question.id] ?? "").trim()).length;
 
   return (
     <>
@@ -445,11 +583,11 @@ export function FormBody({
           className="pf__progress"
           role="progressbar"
           aria-valuemin={0}
-          aria-valuemax={visible.length}
+          aria-valuemax={tracked.length}
           aria-valuenow={answered}
           aria-label="Form progress"
         >
-          <span style={{ width: `${visible.length ? (answered / visible.length) * 100 : 0}%` }} />
+          <span style={{ width: `${tracked.length ? (answered / tracked.length) * 100 : 0}%` }} />
         </div>
       )}
 

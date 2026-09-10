@@ -477,6 +477,94 @@ body:has(.pf) {
   color: var(--pf-danger);
 }
 
+/*
+ * THE PAGE STEPPER — "Page 2 of 3", and the way back.
+ *
+ * Only drawn on a form that has more than one page (`PageSteps` returns
+ * nothing below two), so a single-page form is byte-for-byte the page it was.
+ *
+ * Back is a real button with a real tap target: 44px, the same floor the
+ * submit button is held to, because this form is opened one-handed on a phone
+ * in front of the thing being reported and a 20px "Back" is a mis-tap that
+ * costs a whole page of typing.
+ */
+.pf__steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--pf-muted);
+}
+
+.pf__steps button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px solid var(--pf-line);
+  border-radius: 8px;
+  background: var(--pf-card);
+  color: var(--pf-muted);
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pf__steps button:hover {
+  border-color: var(--pf-accent);
+  color: var(--pf-ink);
+}
+
+/*
+ * The one arrow glyph in the set points forward, so Back is that arrow
+ * reversed — and reversed BACK again in a right-to-left form, where the card
+ * has already been mirrored and "back" is the other way. The stepper is the
+ * only place on this page where a glyph carries direction.
+ */
+.pf__steps button svg {
+  transform: rotate(180deg);
+}
+
+[dir="rtl"] .pf__steps button svg {
+  transform: none;
+}
+
+/*
+ * THE WELCOME PAGE — the screen before the first question.
+ *
+ * Centred, like the thank-you screen it bookends. The start button borrows the
+ * submit button's own class, so an operator's accent colour reaches it without
+ * this rule knowing the accent exists — but it is centred here rather than
+ * pushed to the end, because on a screen with one control in it there is no
+ * form to align to.
+ *
+ * `pre-line`: the Message field is a 1,200-character textarea, and an operator
+ * who typed two paragraphs meant two paragraphs.
+ */
+.pf__welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 4px 0;
+  text-align: center;
+}
+
+.pf__welcome p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--pf-muted);
+  white-space: pre-line;
+}
+
+.pf__welcome .pf__submit {
+  align-self: center;
+}
+
 .pf__done {
   display: flex;
   flex-direction: column;

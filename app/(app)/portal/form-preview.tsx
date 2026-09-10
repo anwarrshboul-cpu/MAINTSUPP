@@ -2,15 +2,17 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Icon } from "../../components";
-import { projectPublicForm } from "../../lib/form-projection";
+import { askedPages, projectPublicForm } from "../../lib/form-projection";
 import {
   DoneScreen,
   FormBody,
+  PageSteps,
   Shell,
+  WelcomeScreen,
+  pagePayload,
   type PublicFormPayload,
 } from "../../(public)/f/[token]/form-renderer";
 import type { BuilderForm } from "./form-builder-model";
-import { pageIndexById } from "./form-pages";
 
 /**
  * The builder's Preview — the REAL renderer, not a picture of it.
@@ -35,30 +37,27 @@ import { pageIndexById } from "./form-pages";
  * the configured thank-you screen — which is itself part of what they are
  * previewing — and "Submit another" (if enabled) walks back.
  *
- * ── THE WELCOME PAGE AND THE PAGE BREAKS ARE COMPOSED, NOT FORKED ─────────
+ * ── THE WELCOME PAGE AND THE PAGE BREAKS ARE SHARED, NOT FORKED ───────────
  *
- * Two things the Settings and Edit panels can now configure are not yet drawn
- * by `form-renderer.tsx`: the welcome page (`features.preSubmissionView`) and
- * multi-page forms (a second `PAGE_BLOCK` in `order`). Rather than copy the
- * renderer and add them — which would be the second implementation this whole
- * module exists to avoid — both are built by COMPOSING what the renderer
- * already exports:
+ * Both were previewed here before the public renderer could draw them, and the
+ * note in this component used to say so on screen: "the link shows all N pages
+ * as one page until the public renderer learns about page breaks". It has
+ * learnt, so the sentence is gone and so is everything this file used to own
+ * about pages:
  *
- *   · the welcome page is a `Shell` with the configured heading, message and
- *     start button in it. `Shell` is the same card the form is drawn on, so it
- *     inherits the accent, the background, the font, the logo and the language
- *     without any of that being restated here;
- *   · a page is the SAME `FormBody` handed a payload whose `questions` are that
- *     page's, and whose `submitButtonText` is "Next" until the last one. Every
- *     rule inside `FormBody` — the progress bar, `visibleQuestions` for a
- *     conditional question, the file picker — therefore applies per page, with
- *     nothing re-implemented.
+ *   · WHERE the form breaks is `askedPages` in app/lib/form-projection.ts,
+ *     over the `page` index the projection stamps on every question. The
+ *     public link calls the same function over the same payload, which is what
+ *     makes "page 2 of 3" here and "page 2 of 3" there the same claim rather
+ *     than two claims that happen to agree today;
+ *   · WHAT a page looks like is `pagePayload` and `FormBody`, and what the
+ *     welcome page looks like is `WelcomeScreen` — both exported by the
+ *     renderer, so the accent, the background, the font, the logo, the alt
+ *     text, the language and its direction are inherited rather than restated.
  *
- * `pageIndexById` in `form-pages.ts` is the one function that says where the
- * breaks are, and it is what the public renderer will use when it learns about
- * pages. Until then the link shows every question on one page, in the same
- * order, all of it answerable — see that module's header for why degrading that
- * way was the point of storing a page as a marker rather than as a new field.
+ * What is left here is the only part that legitimately differs: which step the
+ * operator is on, and the fact that pressing the button walks them forward
+ * instead of POSTing anything.
  */
 export default function FormPreview({ form }: { form: BuilderForm }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -85,30 +84,25 @@ export default function FormPreview({ form }: { form: BuilderForm }) {
     [form],
   );
 
-  const welcome = form.config.features.preSubmissionView;
+  /* Read off the PROJECTION, not the configuration, so the preview's welcome
+     page is the one the link is served rather than one derived beside it. */
+  const welcome = payload.welcome;
 
   /*
-   * The projected questions, split by page.
+   * The projected questions, split into the pages a submitter walks.
    *
-   * Built from the PROJECTION rather than from the configuration, so a hidden
-   * question is absent here exactly as it is absent from the link — the page
-   * model only supplies the boundaries. A question whose page cannot be
-   * determined (one the order never mentioned, which the projection appends)
-   * lands on the last page rather than disappearing.
+   * `askedPages` does the whole split, and it is the function the public link
+   * calls: from the projection (so a hidden question is absent here exactly as
+   * it is absent from the link), over the `page` index the projection stamped,
+   * dropping a page with nothing left on it — including one whose every
+   * question is behind a `showIf` these answers do not satisfy. The Edit panel
+   * warns about an empty page; walking a submitter through a blank step would
+   * not help either of them.
    */
-  const pages = useMemo(() => {
-    const index = pageIndexById(form.config);
-    const count = Math.max(1, ...[...index.values()].map((value) => value + 1));
-    const split: PublicFormPayload["questions"][] = Array.from({ length: count }, () => []);
-    for (const question of payload.questions) {
-      const page = index.get(question.id);
-      split[page === undefined ? count - 1 : Math.min(page, count - 1)].push(question);
-    }
-    /* A page with nothing on it is not shown. The Edit panel warns about one;
-       walking a submitter through a blank step would not help either of them. */
-    const filled = split.filter((questions) => questions.length > 0);
-    return filled.length ? filled : [[]];
-  }, [form.config, payload.questions]);
+  const pages = useMemo(
+    () => askedPages(payload.questions, answers),
+    [payload.questions, answers],
+  );
 
   /*
    * NO EFFECT DECIDES WHERE THE PREVIEW STARTS, and that is deliberate.
@@ -170,70 +164,41 @@ export default function FormPreview({ form }: { form: BuilderForm }) {
   if (form.hasPassword) gates.push("the link asks for the form password");
   if (form.requireLogin) gates.push("the link requires signing in");
 
-  /*
-   * The page's own payload. `submitButtonText` becomes Next on every page but
-   * the last, which is the only difference between "a page" and "the form" as
-   * far as `FormBody` is concerned.
-   */
-  const pagePayload: PublicFormPayload = {
-    ...payload,
-    questions: pages[current],
-    submitButtonText: last
-      ? payload.submitButtonText
-      : `Next — page ${current + 2} of ${pages.length}`,
-  };
-
   return (
     <div className="form-builder__preview-live">
       <p className="form-builder__preview-note">
         <Icon name="alert" size={14} />
         This is a preview — nothing submitted here creates a request.
         {gates.length > 0 && ` Right now ${gates.join(", and ")}.`}
-        {pages.length > 1 &&
-          ` The link shows all ${pages.length} pages as one page until the public renderer learns about page breaks.`}
       </p>
       {done ? (
-        <Shell title={payload.title} appearance={payload.appearance} language={payload.language}>
+        <Shell
+          title={payload.title}
+          appearance={payload.appearance}
+          language={payload.language}
+          logoAlt={payload.logoAlt}
+        >
           <DoneScreen form={payload} reference="" onResubmit={restart} />
         </Shell>
       ) : step < 0 && welcome.enabled ? (
-        /*
-          THE WELCOME PAGE. Drawn in the same `Shell` as the form, so it is the
-          same card, the same accent and the same logo — a welcome page that
-          looked like a different product would be worse than none.
-        */
-        <Shell
-          title={welcome.title || payload.title}
-          appearance={payload.appearance}
-          language={payload.language}
-        >
-          <div className="pf__done">
-            {welcome.description && <p>{welcome.description}</p>}
-            <button type="button" className="pf__submit" onClick={() => setStep(0)}>
-              {welcome.startButton.text || "Start"}
-            </button>
-          </div>
-        </Shell>
+        /* THE WELCOME PAGE, drawn by the renderer — card, heading fallback and
+           start button — so the operator is previewing the screen itself. */
+        <WelcomeScreen form={payload} onStart={() => setStep(0)} />
       ) : (
         <Shell
           title={payload.title}
           description={current === 0 ? payload.description : null}
           appearance={payload.appearance}
           language={payload.language}
+          logoAlt={payload.logoAlt}
         >
-          {pages.length > 1 && (
-            <p className="form-builder__preview-step">
-              Page {current + 1} of {pages.length}
-              {current > 0 && (
-                <button type="button" onClick={() => setStep(current - 1)}>
-                  <Icon name="arrow" size={13} />
-                  Back
-                </button>
-              )}
-            </p>
-          )}
+          <PageSteps
+            page={current + 1}
+            pages={pages.length}
+            onBack={current > 0 ? () => setStep(current - 1) : null}
+          />
           <FormBody
-            form={pagePayload}
+            form={pagePayload(payload, pages, current)}
             answers={answers}
             onAnswer={(questionId, value) =>
               setAnswers((existing) => ({ ...existing, [questionId]: value }))
@@ -243,6 +208,9 @@ export default function FormPreview({ form }: { form: BuilderForm }) {
             error={null}
             sending={false}
             uploading={0}
+            /* The bar measures the whole form, not the page in front of the
+               operator — the link's does too. */
+            progressOver={payload.questions}
             onSubmit={submit}
           />
         </Shell>
