@@ -123,9 +123,20 @@ line(results.context);
 results.board = await hit("/api/board");
 line(results.board);
 
-/* Served by the CDN in the real deployment; proves the in-function fallback. */
+/*
+ * Served by the CDN in the real deployment; proves the in-function fallback.
+ *
+ * Both files, because they fail differently. /favicon.svg is linked from the
+ * root layout, so a miss is a missing icon. /favicon.ico is requested by the
+ * browser whether or not anything links it, and a miss there does not 404 —
+ * the catch-all route answers with the app shell, 200 and text/html, which
+ * reads as success everywhere except in the tab.
+ */
 results.asset = await hit("/favicon.svg");
-line(results.asset);
+line(results.asset, results.asset.type.startsWith("image/svg") ? "" : "  [NOT AN SVG]");
+
+results.icon = await hit("/favicon.ico");
+line(results.icon, results.icon.type.includes("icon") ? "" : "  [NOT AN ICON — served by the function, not the CDN]");
 
 results.missing = await hit("/this-route-does-not-exist");
 line(results.missing);
