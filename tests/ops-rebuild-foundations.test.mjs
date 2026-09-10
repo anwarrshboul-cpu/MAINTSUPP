@@ -479,6 +479,80 @@ test("every window boundary is a bare YYYY-MM-DD", async () => {
   );
 });
 
+test("the two date-text casts are one expression, and cannot drift apart", async () => {
+  /*
+   * `dashboard-aggregates.ts` exports `dateText` and `dashboard-filters.ts`
+   * keeps a private `dayTextSql` beside it. That duplication is deliberate —
+   * aggregates imports filters, so filters cannot import back, and a cycle
+   * between the filter vocabulary and the aggregates that consume it is worse
+   * than one repeated line — but a duplicate nobody checks is how the Overview
+   * came to have two answers for the same question in the first place.
+   *
+   * What it protects: Production's `completed_at` and `due_at` are real
+   * Postgres `date` columns and Postgres has no `trim(date)`. If one copy is
+   * corrected and the other is not, the cohort axis works on Staging, where
+   * those columns are `text`, and answers `btrim(date) does not exist` on
+   * Production — which is exactly how this failure arrived the first time.
+   */
+  const expression = "sql`replace(trim(cast(${column} as text)), ' ', 'T')`";
+  const filters = await read("app/lib/dashboard-filters.ts");
+  const aggregates = await read("app/lib/dashboard-aggregates.ts");
+  assert.ok(
+    filters.includes(expression),
+    "dashboard-filters.ts must cast before any text operation on a date column",
+  );
+  assert.ok(
+    aggregates.includes(expression),
+    "dashboard-aggregates.ts must use the identical expression",
+  );
+});
+
+test("the cohort axis is state, is in the URL, and is not counted as a filter", async () => {
+  /*
+   * §1.1 — Measure by: Date requested (default) / Date completed. It changes
+   * every card's figures AND its wording, so it belongs in the one shared state
+   * object and in the URL beside the filters.
+   *
+   * It is deliberately absent from `activeFilterCount`: that number is the
+   * badge on the mobile Filters button, and a reader who switched axis has not
+   * filtered anything. A `Filters (1)` badge over an unfiltered page is a lie
+   * the bottom sheet would then repeat.
+   */
+  const filters = codeOnly(await read("app/lib/dashboard-filters.ts"));
+  assert.match(filters, /measure: CohortMeasure/, "the axis is part of the filter state");
+  assert.match(filters, /params\.set\("measure", filters\.measure\)/, "…and reaches the URL");
+  assert.match(
+    filters,
+    /withinWindowCondition\(\s*window: PeriodWindow,\s*measure: CohortMeasure = DEFAULT_MEASURE,/,
+    "…and the window predicate takes it",
+  );
+  const count = filters.slice(filters.indexOf("export function activeFilterCount"));
+  assert.doesNotMatch(
+    count.slice(0, 500),
+    /measure/,
+    "the axis must not inflate the active-filter badge",
+  );
+});
+
+test("a completed-date cohort excludes the blanks rather than sweeping them in", async () => {
+  /*
+   * An all-time window has no lower bound, so with `measure = completed` the
+   * only comparison is `< endExclusive` — and `'' < '2026-09-11'` is true. Left
+   * unguarded, every job with no completion date would land in the cohort of
+   * jobs completed in the period, which is the one thing §1.1 forbids: "Never
+   * impute a date."
+   */
+  const filters = codeOnly(await read("app/lib/dashboard-filters.ts"));
+  const fn = filters.slice(filters.indexOf("export function withinWindowCondition"));
+  assert.match(fn.slice(0, 1200), /completedAt\} is not null/, "null is excluded");
+  assert.match(fn.slice(0, 1200), /\$\{day\} <> ''/, "and so is empty");
+  assert.match(
+    filters,
+    /export function measureMissingCondition/,
+    "the excluded rows are countable, so the footnote can name them",
+  );
+});
+
 test("a dangling site_id counts as unassigned, not as a site", async () => {
   const filters = codeOnly(await read("app/lib/dashboard-filters.ts"));
   const fn = filters.slice(filters.indexOf("export function unassignedSiteCondition"));

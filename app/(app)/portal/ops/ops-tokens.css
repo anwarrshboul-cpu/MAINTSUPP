@@ -1,0 +1,128 @@
+/*
+ * THE OVERVIEW'S TOKENS — the master prompt §1.3.
+ *
+ * ── WHY THESE NAMES, AND WHY THEY ARE MOSTLY ALIASES ──────────────────────
+ *
+ * §1.3 asks for eight `--ms-*` tokens and adds: "Match the existing portal
+ * system; where these conflict with existing tokens, keep the existing names
+ * and update the values."
+ *
+ * They conflict almost entirely. `app/globals.css` already defines `--ink`,
+ * `--muted`, `--line`, `--surface-card` and `--brand-solid`, in both themes,
+ * and every other portal surface is written against them. Repointing those five
+ * to the brief's hexes would restyle the Jobs board, Compliance, Sites,
+ * Contractors, Reports and the sidebar — six pages nobody asked to change — and
+ * would break the contrast pins in `tests/stage-twentysix-contrast.test.mjs`
+ * that hold the product to AA in both themes.
+ *
+ * So the structural tokens below are ALIASES onto the product's own. The
+ * `--ms-*` names exist, a rule written against them is spec-shaped, and the
+ * value is whatever the current theme says — which is the only way this page
+ * follows the light/dark toggle at all.
+ *
+ * The RAMPS are different. There is no existing meter ramp and no existing
+ * severity ramp, so those are new tokens with the brief's literal values, and
+ * they are the only literal colours the Overview is allowed to use.
+ *
+ * ── DARK IS THE DEFAULT HERE ──────────────────────────────────────────────
+ *
+ * `app/globals.css` puts the LIGHT palette on bare `:root` and the dark one on
+ * `:root:not([data-theme="light"]), body[data-theme="dark"]`, with
+ * `html { color-scheme: dark }`. So dark is what a reader sees unless they have
+ * chosen light. The ramp hexes in §1.3 were picked against a white card; on the
+ * dark canvas `#0B6E63` is nearly invisible and `#14343A` is the background.
+ * Both blocks below are therefore complete: bare `:root` carries the brief's
+ * values, and the dark selector lifts each one to the same hue at a lightness
+ * that clears AA on `--surface-card` (#182830). Neither ramp is defined ONLY
+ * inside a theme block — that is the mistake `globals.css` records at its head,
+ * and it ships a colour that applies in one state and vanishes in the other.
+ *
+ * ── ONE MORE COPY, AND IT IS PINNED ───────────────────────────────────────
+ *
+ * The same hexes are in `app/lib/overview-meters.ts`, because a `<div>` whose
+ * width comes from data needs its colour from data too and CSS cannot import
+ * TypeScript. `tests/overview-foundations.test.mjs` asserts the two lists are
+ * identical, so the duplication cannot drift.
+ */
+
+:root {
+  /* Structural — aliases onto the product's own tokens. See the note above. */
+  --ms-ink: var(--ink);
+  --ms-ink-muted: var(--muted);
+  --ms-line: var(--line);
+  --ms-surface: var(--surface-card);
+  --ms-surface-sunken: var(--surface-card-lo);
+  --ms-teal-700: var(--brand-solid);
+  --ms-teal-500: var(--brand-bright);
+  --ms-teal-050: var(--surface-active);
+  --ms-sidebar: var(--rail-bg);
+
+  /* The meter ramp — §1.3. Fills only; nothing here is ever text. */
+  --ms-meter-completed: #0b6e63;
+  --ms-meter-scheduled: #0da1a9;
+  --ms-meter-in-progress: #4fc3c0;
+  --ms-meter-waiting-approval: #e8c468;
+  --ms-meter-waiting-parts: #e0a32e;
+  --ms-meter-waiting-payment: #dc7a3c;
+  --ms-meter-needs-attention: #c24437;
+  --ms-meter-other: #9aafb2;
+
+  /* The severity ramp — §1.3, used only where a value is judged. */
+  --ms-sev-fresh: #0da1a9;
+  --ms-sev-ageing: #e0a32e;
+  --ms-sev-overdue: #dc7a3c;
+  --ms-sev-critical: #c24437;
+
+  /* Never a colour that could pass for a real category. */
+  --ms-not-recorded: #9aafb2;
+
+  /* The single-hue teal scale for neutral categorical data, darkest first. */
+  --ms-scale-1: #075e63;
+  --ms-scale-2: #077e85;
+  --ms-scale-3: #0a929a;
+  --ms-scale-4: #0da1a9;
+  --ms-scale-5: #35b4ba;
+  --ms-scale-6: #5fc6cb;
+  --ms-scale-7: #8ad8db;
+
+  /* Ink that is legible ON a ramp fill. Both ramps are dark enough for white
+     except the two §1.3 names as fills-only; those two take ink. */
+  --ms-on-fill: #ffffff;
+  --ms-on-pale-fill: #14343a;
+}
+
+/*
+ * The same tokens, lifted for the dark canvas. Hue is preserved so a reader who
+ * learns "amber means ageing" in one theme has not learned a different thing in
+ * the other; only lightness moves, and it moves far enough to clear AA against
+ * `--surface-card` at #182830.
+ */
+:root:not([data-theme="light"]),
+body[data-theme="dark"] {
+  --ms-meter-completed: #2f9e90;
+  --ms-meter-scheduled: #3cc0c6;
+  --ms-meter-in-progress: #74d6d3;
+  --ms-meter-waiting-approval: #e6c876;
+  --ms-meter-waiting-parts: #e5b155;
+  --ms-meter-waiting-payment: #e69465;
+  --ms-meter-needs-attention: #e0736a;
+  --ms-meter-other: #9fb3b6;
+
+  --ms-sev-fresh: #3cc0c6;
+  --ms-sev-ageing: #e5b155;
+  --ms-sev-overdue: #e69465;
+  --ms-sev-critical: #e0736a;
+
+  --ms-not-recorded: #9fb3b6;
+
+  --ms-scale-1: #0d7f86;
+  --ms-scale-2: #0f959c;
+  --ms-scale-3: #16a8ae;
+  --ms-scale-4: #35b9be;
+  --ms-scale-5: #5fc9cd;
+  --ms-scale-6: #86d7da;
+  --ms-scale-7: #ade4e6;
+
+  --ms-on-fill: #08181c;
+  --ms-on-pale-fill: #08181c;
+}
