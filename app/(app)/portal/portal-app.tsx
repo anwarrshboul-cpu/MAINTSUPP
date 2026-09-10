@@ -2029,18 +2029,6 @@ export default function PortalApp({
    * A custom `section:` register resolves to the `maintenance` surface, so a
    * section bound to its own board is covered by the first entry.
    */
-  /*
-   * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
-   *
-   * Everything here is passed `requests` and computes from it: the board draws
-   * the rows, the calendar places them on dates, the contractor screen scores
-   * them, and the reporting tabs derive every panel from them. `overview` is
-   * NOT here — every figure on it comes from `/api/dashboard/*` — and neither
-   * is `invoice-tracker`, which reads `/api/finance/*`.
-   *
-   * A custom `section:` register resolves to the `maintenance` surface, so a
-   * section bound to its own board is covered by the first entry.
-   */
   useEffect(() => {
     /*
      * The latch, inside the effect rather than in a second one beside it.
@@ -3839,12 +3827,26 @@ function OverviewView({
    */
   const goToJobs = (query: string) => {
     const target = `/dashboard/${sectionRoutes.maintenance}`;
-    window.history.pushState({}, "", `${target}${query ? `?${query}` : ""}`);
-    /* `pushState` fires nothing. Without this the shell's URL subscriber never
-       re-reads, so the board would be handed the unfiltered list even though
-       the address bar says otherwise. */
-    window.dispatchEvent(new Event(URL_CHANGED));
+    /*
+     * ORDER IS LOAD-BEARING. `setSection` ends with its own
+     * `pushState('/dashboard/jobs')`, which carries no query — correct when a
+     * reader clicks Jobs in the sidebar, fatal here. Pushing the drill first
+     * and navigating second meant every meter tile arrived unfiltered: traced
+     * on the Preview, the click pushed
+     * `/dashboard/jobs?meter=waiting_approval&status=…` and then `/dashboard/jobs`
+     * a moment later, so the chips drew and the board still showed all 12 rows.
+     *
+     * So navigate FIRST and let the section write its bare route, then replace
+     * that entry with the one that carries the filter. `replaceState` rather
+     * than a second `pushState` keeps it to a single history entry, so Back
+     * returns to the Overview instead of an unfiltered board.
+     */
     onNavigate("maintenance");
+    window.history.replaceState({}, "", `${target}${query ? `?${query}` : ""}`);
+    /* `pushState`/`replaceState` fire nothing. Without this the shell's URL
+       subscriber never re-reads, so the board would be handed the unfiltered
+       list even though the address bar says otherwise. */
+    window.dispatchEvent(new Event(URL_CHANGED));
   };
 
   return (
@@ -3874,12 +3876,25 @@ function OverviewView({
       }}
       onNavigateToCompliance={() => onNavigate("compliance")}
       onNavigateToSites={(query) => {
-        if (query) {
-          const params = new URLSearchParams(window.location.search);
-          for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
-          window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-        }
+        /*
+         * Same ordering trap as `goToJobs`, and it was losing the `site=`
+         * filter the same way: this wrote the query onto the CURRENT path
+         * (still `/dashboard`) and then `setSection` pushed `/dashboard/sites`
+         * without it. The existing search is captured before navigating
+         * because the section push is what clears it.
+         */
+        const carried = window.location.search;
         onNavigate("stores");
+        if (query) {
+          const params = new URLSearchParams(carried);
+          for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
+          window.history.replaceState(
+            {},
+            "",
+            `/dashboard/${sectionRoutes.stores}?${params.toString()}`,
+          );
+          window.dispatchEvent(new Event(URL_CHANGED));
+        }
       }}
     />
   );
