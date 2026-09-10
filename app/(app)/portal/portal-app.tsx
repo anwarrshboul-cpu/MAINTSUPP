@@ -190,6 +190,7 @@ import {
 } from "./dashboard-insights";
 import { OverviewPage } from "./ops/overview-page";
 import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
+import { OPS_REFRESH } from "./ops/ops-url-state";
 import { CompliancePage } from "./ops/compliance-page";
 import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 /*
@@ -1598,10 +1599,32 @@ export default function PortalApp({
    */
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  /*
+   * WHETHER ANY SURFACE HAS ASKED FOR THE JOB LIST YET.
+   *
+   * The paged `/api/maintenance` read below is the shell's single job snapshot:
+   * the board, the calendar, the contractor screen, the reporting tabs and the
+   * job side panel all draw from it. It used to run on mount for every section
+   * without exception, so opening the Overview downloaded every job in the
+   * estate — 776 rows in one page and more behind it — to compute nothing at
+   * all. Every figure on that page comes from `/api/dashboard/*`, each of which
+   * is one aggregate in Postgres.
+   *
+   * §1.6 of the dashboard brief states the requirement as a network-tab
+   * observation: "the network tab must show no bulk job fetch for the Overview
+   * page." So the fetch is deferred rather than removed. It starts the moment a
+   * surface that genuinely reads the list becomes active, and once started it
+   * stays loaded — moving between sections must not re-download the estate.
+   *
+   * Latched in state rather than derived per render because "has ever been
+   * wanted" is the question, not "is wanted now".
+   */
+  const [jobListWanted, setJobListWanted] = useState(false);
   /** When the figures on screen were last successfully read. Null until then. */
   const [dataUpdatedAt, setDataUpdatedAt] = useState<Date | null>(null);
 
   useEffect(() => {
+    if (!jobListWanted) return;
     let active = true;
     async function loadRequests() {
       /*
@@ -1663,7 +1686,7 @@ export default function PortalApp({
     return () => {
       active = false;
     };
-  }, [refreshToken]);
+  }, [jobListWanted, refreshToken]);
 
   useEffect(() => {
     let active = true;
@@ -2005,6 +2028,29 @@ export default function PortalApp({
         ? "__pending"
         : "overview"
   ) as Section;
+
+  /*
+   * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
+   *
+   * Everything here is passed `requests` and computes from it: the board draws
+   * the rows, the calendar places them on dates, the contractor screen scores
+   * them, and the reporting tabs derive every panel from them. `overview` is
+   * NOT here — every figure on it comes from `/api/dashboard/*` — and neither
+   * is `invoice-tracker`, which reads `/api/finance/*`.
+   *
+   * A custom `section:` register resolves to the `maintenance` surface, so a
+   * section bound to its own board is covered by the first entry.
+   */
+  useEffect(() => {
+    const readsJobList: readonly Section[] = [
+      "maintenance",
+      "calendar",
+      "contractors",
+      "reports",
+      "units",
+    ];
+    if (readsJobList.includes(activeSurface)) setJobListWanted(true);
+  }, [activeSurface]);
 
   /*
    * A `section:` URL that resolved to nothing, once we know it resolved to
@@ -2722,21 +2768,35 @@ export default function PortalApp({
 
           <div className="topbar-actions">
             <ThemeToggle />
-            <span
-              className={`data-indicator data-indicator--${dataMode}`}
-              title={
-                dataMode === "unavailable"
-                  ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
-                  : undefined
-              }
-            >
-              <span />
-              {dataMode === "live"
-                ? "Live workspace"
-                : dataMode === "unavailable"
-                  ? "Workspace unavailable"
-                  : "Loading workspace"}
-            </span>
+            {/*
+              THE CHIP REPORTS THE JOB LIST, so it says nothing on a surface
+              that does not read one.
+
+              It used to be unconditional because the list was unconditional.
+              Now that the Overview and the Invoice Tracker draw from aggregate
+              endpoints instead, leaving it in place would have printed
+              "Loading workspace" beside a fully loaded page, for ever — the
+              exact dishonesty the chip was made honest to avoid. Hidden rather
+              than reworded: the age of figures nobody on this screen is reading
+              is not a fact worth a line of chrome.
+            */}
+            {jobListWanted && (
+              <span
+                className={`data-indicator data-indicator--${dataMode}`}
+                title={
+                  dataMode === "unavailable"
+                    ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
+                    : undefined
+                }
+              >
+                <span />
+                {dataMode === "live"
+                  ? "Live workspace"
+                  : dataMode === "unavailable"
+                    ? "Workspace unavailable"
+                    : "Loading workspace"}
+              </span>
+            )}
             {/*
               Refresh, and when the figures were last read.
 
@@ -2760,6 +2820,16 @@ export default function PortalApp({
                 // The board keeps its own snapshot, so it is told to re-read
                 // rather than left a version behind the meters above it.
                 window.dispatchEvent(new Event("maintsupp:refresh-board"));
+                /*
+                 * And so do the aggregate cards. The Overview and the Invoice
+                 * Tracker read `/api/dashboard/*` and `/api/finance/*` rather
+                 * than the job list, so a button labelled "Refresh the figures
+                 * on screen" was refreshing none of the figures on screen there.
+                 * `useOpsQuery` listens for this. */
+                window.dispatchEvent(new Event(OPS_REFRESH));
+                // Nothing is in flight when no surface has asked for the job
+                // list, so the spinner would never be cleared by the effect.
+                if (!jobListWanted) setRefreshing(false);
               }}
               disabled={refreshing}
               aria-label="Refresh the figures on screen"
@@ -2767,11 +2837,13 @@ export default function PortalApp({
               <Icon name="refresh" size={17} />
               <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
             </button>
-            <span className="topbar-updated" aria-live="polite">
-              {dataUpdatedAt
-                ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
-                : "Not yet loaded"}
-            </span>
+            {jobListWanted && (
+              <span className="topbar-updated" aria-live="polite">
+                {dataUpdatedAt
+                  ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
+                  : "Not yet loaded"}
+              </span>
+            )}
             <button
               className="secondary-button topbar-data-button"
               type="button"
@@ -3647,35 +3719,54 @@ function OverviewView({
   onNavigate: (section: Section) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
 }) {
+  /*
+   * Drill-through carries the page's own filter state across to the job list,
+   * so a link built from a chart segment means the same thing there. The board
+   * does not yet read every one of these parameters; what it does read it reads
+   * from the URL, and the ones it does not are inert rather than misleading —
+   * they are visible in the address bar, which is where the reader can see
+   * exactly what was asked for.
+   *
+   * A named function rather than an inline prop because `onOpenJob` below now
+   * calls it too, as the fallback for a job the shell has not downloaded.
+   *
+   * The jobs route comes from the SECTION ROUTE MAP rather than from trimming
+   * the current path: `pathname.replace(/\/[^/]*$/, "")` gives "" for a bare
+   * "/dashboard", which would push "/jobs" — outside the portal entirely.
+   * `sectionRoutes` is the one map that says what a section's address is, and
+   * the server copy in `[[...section]]/page.tsx` reads the same slugs, so a
+   * reload of the link lands where the click did.
+   */
+  const goToJobs = (query: string) => {
+    const target = `/dashboard/${sectionRoutes.maintenance}`;
+    window.history.pushState({}, "", `${target}${query ? `?${query}` : ""}`);
+    onNavigate("maintenance");
+  };
+
   return (
     <OverviewPage
-      /*
-       * Drill-through carries the page's own filter state across to the job
-       * list, so a link built from a chart segment means the same thing there.
-       * The board does not yet read every one of these parameters; what it does
-       * read it reads from the URL, and the ones it does not are inert rather
-       * than misleading — they are visible in the address bar, which is where
-       * the reader can see exactly what was asked for.
-       */
-      onNavigateToJobs={(query) => {
-        /*
-         * The jobs route, derived from the SECTION ROUTE MAP rather than by
-         * trimming the current path.
-         *
-         * `pathname.replace(/\/[^/]*$/, "")` gives "" for a bare "/dashboard",
-         * which would push "/jobs" — outside the portal entirely. `sectionRoutes`
-         * is the one map that says what a section’s address is, and the server
-         * copy in `[[...section]]/page.tsx` reads the same slugs, so a reload of
-         * the link lands where the click did.
-         */
-        const target = `/dashboard/${sectionRoutes.maintenance}`;
-        window.history.pushState({}, "", `${target}${query ? `?${query}` : ""}`);
-        onNavigate("maintenance");
-      }}
+      onNavigateToJobs={goToJobs}
       onOpenJob={(id) => {
+        /*
+         * A MISS IS NOW THE NORMAL CASE, AND MUST NOT BE A DEAD CLICK.
+         *
+         * This used to `return` on a miss, which was harmless when the shell
+         * downloaded every job before the page painted. It no longer does —
+         * the Overview reads aggregates and the job list is deferred until a
+         * surface that needs it is opened — so `requests` is legitimately
+         * empty here, and a silent return would make every job link on the
+         * page do nothing at all.
+         *
+         * The board is the fallback rather than a one-off fetch: it is the
+         * screen that owns job records, it opens the row itself, and it is one
+         * click from where the reader already wanted to go.
+         */
         const request = requests.find((row) => row.id === id);
-        if (!request) return;
-        onOpenRequest(request);
+        if (request) {
+          onOpenRequest(request);
+          return;
+        }
+        goToJobs(`id=${encodeURIComponent(id)}`);
       }}
       onNavigateToCompliance={() => onNavigate("compliance")}
       onNavigateToSites={(query) => {
