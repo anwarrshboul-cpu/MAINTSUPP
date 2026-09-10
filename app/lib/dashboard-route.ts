@@ -38,6 +38,39 @@ export type DashboardScope = {
   url: URL;
 };
 
+/**
+ * A site id nothing can be filed under, used when a site-restricted member
+ * asks for a store outside their scope. It has to be a value rather than an
+ * empty list because an empty list means "no filter" everywhere downstream.
+ */
+const FORBIDDEN_SITE = "__site_outside_scope__";
+
+/**
+ * Narrow a request's site filter to what the membership allows.
+ *
+ * Pure and exported so it can be tested directly: no API sets `site_scope`,
+ * so the alternative was to edit a membership row by hand to exercise it, and
+ * a control nobody can test is a control nobody can trust.
+ */
+export function confineToSiteScope(
+  requested: DashboardFilters,
+  allowed: string[] | null,
+): DashboardFilters {
+  if (!allowed) return requested;
+  const wanted = requested.sites.length ? requested.sites : allowed;
+  const permitted = wanted.filter((id) => allowed.includes(id));
+  return {
+    ...requested,
+    /*
+     * An EMPTY list means "no site filter" downstream, i.e. everything — so a
+     * member who asks for a store they may not see must not fall through to
+     * the unfiltered estate. The sentinel is an id no row can carry, so the
+     * request answers honestly with nothing.
+     */
+    sites: permitted.length ? permitted : [FORBIDDEN_SITE],
+  };
+}
+
 export async function dashboardScope(
   request: Request,
 ): Promise<{ ok: true; value: DashboardScope } | { ok: false; response: Response }> {
@@ -45,8 +78,30 @@ export async function dashboardScope(
   const guard = await scopedDbWithCapability(request, "board.view");
   if (guard.denied) return { ok: false, response: guard.denied };
   const url = new URL(request.url);
-  const filters = parseFilters(url);
+  const requested = parseFilters(url);
   const now = new Date();
+
+  /*
+   * THE MEMBERSHIP'S SITE RESTRICTION, APPLIED ONCE FOR EVERY DASHBOARD ROUTE.
+   *
+   * `memberships.site_scope` confines a member to named stores, and the board
+   * has always honoured it (`app/api/workspace/route.ts`). No route under
+   * `/api/dashboard` ever did — not the ones this release added and not the
+   * ones that predate it. Until now that leaked totals; `/api/dashboard/records`
+   * is new and returns ROWS — reference, title, site, status, cost, contractor,
+   * up to 200 of them — which turns a wrong subtotal into a list of jobs at
+   * stores the reader cannot open.
+   *
+   * Folding it into the site filter rather than adding a predicate to thirty
+   * queries means every route, present and future, inherits it from the one
+   * helper they all already call.
+   *
+   * Measured before changing it: all 22 memberships on Staging carry a null
+   * `site_scope`, so this is hardening with no effect on anybody's figures
+   * today — which is exactly when it is safe to add.
+   */
+  const filters = confineToSiteScope(requested, guard.scope.siteScope);
+
   return {
     ok: true,
     value: {

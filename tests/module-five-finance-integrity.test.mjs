@@ -170,3 +170,61 @@ test("every finance join carries the organisation", async () => {
     "the correlated sale alias is scoped too, not only `billed`",
   );
 });
+
+test("a site-restricted membership cannot read outside its stores", async () => {
+  /*
+   * `memberships.site_scope` confines a member to named stores. The board has
+   * always honoured it; no route under `/api/dashboard` ever did — not the ones
+   * this release adds and not the ones that predate it. That leaked totals
+   * before, and `/api/dashboard/records` is new and returns ROWS (reference,
+   * title, site, status, cost, contractor, up to 200), which turns a wrong
+   * subtotal into a list of jobs at stores the reader cannot open.
+   *
+   * All 22 memberships on Staging carry a null `site_scope` today, so this
+   * changes nobody's figures — it is the case nobody has hit yet that matters.
+   *
+   * Exercised through the real module rather than a re-implementation, because
+   * the failure mode here is subtle: an empty site list means "no filter", i.e.
+   * EVERYTHING, so the obvious intersection would open the whole estate to
+   * exactly the person being confined.
+   */
+  const ts = (await import("typescript")).default;
+  const source = await read("app/lib/dashboard-route.ts");
+  /* The helper is pure; strip the module's imports so it can be evaluated
+     alone, the same trick the analytics suite uses. */
+  const isolated = source
+    .split("\n")
+    .filter((line) => !/^import |^\} from |^  [a-zA-Z]+,$|^  type /.test(line))
+    .join("\n");
+  const start = isolated.indexOf("const FORBIDDEN_SITE");
+  const end = isolated.indexOf("export async function dashboardScope");
+  const { confineToSiteScope } = await import(
+    `data:text/javascript,${encodeURIComponent(
+      ts.transpileModule(isolated.slice(start, end), {
+        compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+      }).outputText,
+    )}`
+  );
+
+  const base = { sites: [], priorities: [], families: [] };
+
+  /* No restriction: untouched, filter and all. */
+  assert.deepEqual(confineToSiteScope({ ...base, sites: ["a"] }, null).sites, ["a"]);
+
+  /* Restricted, asking for nothing: confined to the allowed stores. */
+  assert.deepEqual(confineToSiteScope(base, ["a", "b"]).sites, ["a", "b"]);
+
+  /* Restricted, asking for one they hold: just that one. */
+  assert.deepEqual(confineToSiteScope({ ...base, sites: ["a"] }, ["a", "b"]).sites, ["a"]);
+
+  /* Restricted, asking for a mix: only the permitted half survives. */
+  assert.deepEqual(confineToSiteScope({ ...base, sites: ["a", "z"] }, ["a", "b"]).sites, ["a"]);
+
+  /*
+   * THE ONE THAT MATTERS. Asking only for a store outside the scope must return
+   * nothing — never an empty list, which downstream reads as "no filter".
+   */
+  const denied = confineToSiteScope({ ...base, sites: ["z"] }, ["a", "b"]).sites;
+  assert.equal(denied.length, 1, "not an empty list");
+  assert.equal(denied[0], "__site_outside_scope__", "a sentinel no row can carry");
+});
