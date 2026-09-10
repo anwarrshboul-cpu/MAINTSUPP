@@ -51,12 +51,24 @@ import { OverviewRecordsPanel } from "./overview-records";
 import { MeterSettings } from "./meter-settings";
 import { ResolveNames } from "./resolve-names";
 import { BulkSiteAssign } from "./bulk-site-assign";
+/*
+ * FROM `overview-meters.ts`, NEVER FROM `dashboard-filters.ts`.
+ *
+ * This is a client component. `dashboard-filters.ts` imports drizzle and
+ * `db/schema`, so two words taken from it would drag the entire query builder
+ * into the browser bundle to render the string "Date completed" —
+ * `tests/ops-rebuild-foundations.test.mjs` pins the absence of that import for
+ * exactly this reason, and it caught it here.
+ *
+ * The full period preset list comes off the wire from `/api/dashboard/filters`
+ * for the same reason; `FALLBACK_PERIODS` below is what the control shows in
+ * the moment before that answers.
+ */
 import {
-  PERIOD_PRESETS,
-  DEFAULT_PERIOD,
   DEFAULT_MEASURE,
+  DEFAULT_PERIOD_KEY,
   type CohortMeasure,
-} from "../../../lib/dashboard-filters";
+} from "../../../lib/overview-meters";
 import {
   NATURE_KEYS,
   NATURE_LABEL,
@@ -102,7 +114,21 @@ const FILTER_KEYS = [
   "contractor",
 ] as const;
 
+/**
+ * The three the control shows before `/api/dashboard/filters` answers.
+ *
+ * Deliberately the short list rather than a copy of all eight: a fallback that
+ * looks complete is one nobody notices has gone stale, and these three cover
+ * every default the page can open with.
+ */
+const FALLBACK_PERIODS = [
+  { key: "7", label: "7 days" },
+  { key: "30", label: "30 days" },
+  { key: "90", label: "90 days" },
+] as const;
+
 type FiltersPayload = {
+  periods?: ReadonlyArray<{ key: string; label: string }>;
   sites: Array<{ value: string; label: string; count: number }>;
   contractors: Array<{ value: string; label: string; count: number }>;
   statuses: Array<{ value: string; label: string; count: number }>;
@@ -316,8 +342,8 @@ export function OverviewPage({
 
   const periodControl = (
     <PeriodControl
-      periods={PERIOD_PRESETS}
-      value={params.get("period") ?? DEFAULT_PERIOD}
+      periods={options.data?.periods ?? FALLBACK_PERIODS}
+      value={params.get("period") ?? DEFAULT_PERIOD_KEY}
       from={params.get("from") ?? ""}
       to={params.get("to") ?? ""}
       onChange={(next) =>

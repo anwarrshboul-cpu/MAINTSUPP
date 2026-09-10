@@ -36,6 +36,7 @@
 
 import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { maintenanceRequests, sites } from "../../db/schema";
+import { DEFAULT_MEASURE, type CohortMeasure } from "./overview-meters";
 import {
   NATURE_KEYS,
   UNASSIGNED_SITE_ID,
@@ -216,8 +217,14 @@ export const plannedCondition = sql`(lower(coalesce(${maintenanceRequests.catego
  * filtered anything, and a `Filters (1)` badge over an unfiltered page is a
  * lie the mobile sheet would repeat.
  */
-export type CohortMeasure = "requested" | "completed";
-export const DEFAULT_MEASURE: CohortMeasure = "requested";
+/*
+ * DECLARED IN `overview-meters.ts` AND RE-EXPORTED HERE, not the other way
+ * round. This module imports drizzle and `db/schema`; a client component that
+ * needed the type would have pulled the whole query builder into the browser
+ * bundle to render the words "Date completed". Server callers keep importing it
+ * from here, where the rest of the filter state is.
+ */
+export { DEFAULT_MEASURE, type CohortMeasure } from "./overview-meters";
 const MEASURE_KEYS: CohortMeasure[] = ["requested", "completed"];
 
 export type DashboardFilters = {

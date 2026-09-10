@@ -41,6 +41,32 @@
  */
 import { statusKey } from "./job-metrics.ts";
 
+/* ── The cohort axis ──────────────────────────────────────────────────────── */
+
+/**
+ * WHICH DATE PUTS A JOB IN THE COHORT — §1.1.
+ *
+ * DECLARED HERE RATHER THAN IN `dashboard-filters.ts`, which is where the
+ * filter state lives, and the reason is a bundle rather than a preference.
+ * That module imports drizzle and `db/schema`, so a client component that
+ * imports two words from it drags the entire query builder into the browser to
+ * render the string "Date completed" — the same trap
+ * `tests/ops-rebuild-foundations.test.mjs` already pins for `NATURE_LABEL`.
+ * This module reaches nothing but `job-metrics.ts`, so both sides can have it.
+ */
+export type CohortMeasure = "requested" | "completed";
+export const DEFAULT_MEASURE: CohortMeasure = "requested";
+
+/**
+ * The default period, as a browser-safe literal.
+ *
+ * The full preset list is served by `/api/dashboard/filters` for exactly the
+ * reason above — it is derived from `PERIOD_PRESETS`, which lives beside the
+ * SQL — and the page falls back to a short hard-coded list only until that
+ * answers. This is the one value the page needs before any fetch lands.
+ */
+export const DEFAULT_PERIOD_KEY = "90";
+
 /* ── The eight meters ─────────────────────────────────────────────────────── */
 
 /**
@@ -291,14 +317,14 @@ export function coverageSentence(label: string, recorded: number, total: number)
  * §1.1 — every card header changes wording with the axis, not just its figures.
  * "226 jobs requested in this period" / "226 jobs completed in this period".
  */
-export function cohortWording(measure: "requested" | "completed", total: number): string {
+export function cohortWording(measure: CohortMeasure, total: number): string {
   const noun = total === 1 ? "job" : "jobs";
   const verb = measure === "completed" ? "completed" : "requested";
   return `${total} ${noun} ${verb} in this period`;
 }
 
 /** The footnote for the rows the axis cannot see. §1.1: never impute a date. */
-export function excludedWording(measure: "requested" | "completed", excluded: number): string {
+export function excludedWording(measure: CohortMeasure, excluded: number): string {
   const noun = excluded === 1 ? "job" : "jobs";
   const field = measure === "completed" ? "completion date" : "request date";
   return `${excluded} ${noun} excluded — no ${field} recorded`;

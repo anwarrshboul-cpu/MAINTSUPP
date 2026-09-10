@@ -23,7 +23,16 @@
  * number anybody typed.
  */
 
-import type { CohortMeasure } from "../../../lib/dashboard-filters";
+/*
+ * From `overview-meters.ts`, which reaches nothing but `job-metrics.ts`.
+ *
+ * `dashboard-filters.ts` re-exports the same type, and taking it from there
+ * would be harmless at runtime — `import type` is erased — but this file is
+ * imported by client components and by route handlers alike, and the rule the
+ * suite pins is a rule about the SPECIFIER, not about whether the emit happens
+ * to be empty. One import path, and it is the browser-safe one.
+ */
+import type { CohortMeasure } from "../../../lib/overview-meters";
 
 export type { CohortMeasure };
 
