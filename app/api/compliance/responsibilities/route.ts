@@ -244,11 +244,26 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    /* `board.edit`. Confirming a responsibility moves a requirement into or out
-       of the compliance percentage, which is a change to the estate's record —
-       the same capability the board's own cells are written under, and not a
-       new one an administrator would have to keep in step by hand. */
-    const guard = await scopedDbWithCapability(request, "board.edit");
+    /*
+     * `sites.edit`, because that is the capability this product already
+     * defines for exactly this resource: "Change the site register, units and
+     * COMPLIANCE RECORDS" (`app/lib/permissions.ts`). `board.edit` is "create,
+     * update and move rows, columns and groups on a BOARD", which a
+     * `compliance_documents` row is not.
+     *
+     * This shipped as `board.edit` on the argument that confirming a
+     * responsibility is a change to the estate's record and should not need a
+     * capability of its own. The first half is right; the second picked the
+     * wrong one. Every sibling compliance write already takes `sites.edit` —
+     * `WORKSPACE_CAPABILITY.compliance`, and the three site routes — so this
+     * was the odd one out rather than the precedent.
+     *
+     * It is not an escalation under the built-in roles, which give `admin`
+     * both. It matters because `role_capabilities` is a per-organisation
+     * toggle: granting a bespoke role `board.edit` alone would have handed it
+     * the compliance register as well, silently.
+     */
+    const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId } = guard.scope;
 

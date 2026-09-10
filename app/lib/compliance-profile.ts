@@ -11,6 +11,7 @@ import { DUTY_HOLDER_UNCONFIRMED } from "./compliance-duty-holder";
  * asked for.
  */
 import { buildKindResolver, type KindResolver } from "./compliance-vocabulary";
+import { readComplianceTemplate } from "./compliance-template-store";
 import { chunkRows } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -117,36 +118,73 @@ export type ComplianceProfileResult = {
   aliased: Array<{ kind: string; matchedAs: string }>;
 };
 
+/** What a site is missing, without doing anything about it. */
+export type ComplianceProfileGap = {
+  /** Template requirements this site holds no row for, under any name. */
+  missing: string[];
+  /** Requirements already recorded. */
+  matched: string[];
+  /** Requirements matched under a name that is not the template's. */
+  aliased: Array<{ kind: string; matchedAs: string }>;
+};
+
 /**
- * Gives `siteId` the standard profile, and leaves anything already recorded
- * alone.
+ * WHICH REQUIREMENTS A SITE IS MISSING. READ ONLY — this function contains no
+ * insert, and that is the point of it existing.
  *
- * IDEMPOTENT BY CONSTRUCTION, which is what lets it be called from a create
- * path AND from a read path without either having to know about the other. The
- * repair-on-read case exists because sites created before this function did
- * have no profile and would otherwise stay invisible for ever.
+ * ── WHY THIS WAS SPLIT OUT ────────────────────────────────────────────────
  *
- * Deliberately does NOT open a transaction of its own. Every caller is already
- * inside one request's worth of work, and the D1 interface this app is written
- * against reserves a connection for a batch — see `db/node-pg-d1.ts`. The
- * caller decides atomicity; this decides content.
+ * `GET /api/sites?id=…` called `ensureComplianceProfile` to repair a missing
+ * profile as somebody opened the site. The repair itself was right — idempotent,
+ * matched on kind, never duplicating — and it was verified preserving a real
+ * estate byte for byte. What was wrong was WHO could cause it: that GET
+ * resolves `scopedDb` with no capability at all, so a `client`, whose entire
+ * permission set is `board.view` and `data.export`, minted twelve
+ * `compliance_documents` rows and an `activity_log` entry attributed to
+ * themselves merely by looking at a page. A read that writes is also invisible
+ * to the preview-and-revert machinery the backfill endpoint exists to provide.
+ *
+ * Removing the repair outright was not acceptable either: sites created before
+ * that function existed have no profile and would stay invisible to the register
+ * for ever. So the read path now DETECTS and reports, and the write happens only
+ * where somebody holds `sites.edit` — see the site GET, which returns this as
+ * `complianceProfile`, and `POST /api/compliance/backfill`, which repairs.
+ *
+ * Splitting the matcher out rather than duplicating it is deliberate: two copies
+ * of "does this site already hold this requirement, under any of its names"
+ * would be two answers to the question a duplicate row depends on.
  */
-export async function ensureComplianceProfile(
+export async function complianceProfileGap(
   db: Database,
   orgId: string,
   siteId: string,
   options: { kinds?: readonly string[]; resolve?: KindResolver } = {},
-): Promise<ComplianceProfileResult> {
+): Promise<ComplianceProfileGap> {
   const kinds = options.kinds ?? storeDocumentationKinds;
   /*
-   * The DEFAULT resolver knows the built-in synonyms and nothing organisation
-   * specific. A caller holding the organisation's template should pass its
-   * resolver — `readComplianceTemplate` then `buildKindResolver` — and the
-   * routes that create sites do. Defaulted rather than required so no existing
-   * caller had to change to stop duplicating, which was the point.
+   * THE ORGANISATION'S OWN TEMPLATE IS LOADED HERE WHEN THE CALLER DID NOT
+   * BRING ONE — correct by default rather than correct if you remember.
+   *
+   * This used to default to `buildKindResolver()` with no argument, which knows
+   * the built-in synonyms and nothing organisation-specific, under a comment
+   * claiming "the routes that create sites do" pass their own. A review checked
+   * and they did not: `app/api/sites/route.ts`, `app/api/sites/csv/route.ts`
+   * and `app/api/workspace/route.ts` all called this with no options at all.
+   * Only the backfill passed a resolver. So every path that creates a site
+   * ignored that organisation's aliases and re-created the duplication the 2C
+   * vocabulary work exists to end — the exact failure the docstring promised
+   * was handled.
+   *
+   * Fixing the four call sites would have left the same trap for the fifth. The
+   * default is the fix instead: pass `resolve` only to SKIP a read you have
+   * already done. The backfill does, because it loops over many sites and would
+   * otherwise re-read one row per site; a single-site caller pays one indexed
+   * lookup on `workspace_settings` keyed by organisation, next to the reads
+   * this function already performs.
    */
-  const resolve = options.resolve ?? buildKindResolver();
-  if (!kinds.length) return { created: [], matched: [], aliased: [] };
+  const resolve =
+    options.resolve ?? buildKindResolver(await readComplianceTemplate(db, orgId));
+  if (!kinds.length) return { missing: [], matched: [], aliased: [] };
 
   /*
    * EVERY REQUIREMENT THIS SITE HOLDS, not just the ones about to be written.
@@ -199,6 +237,39 @@ export async function ensureComplianceProfile(
        vocabulary would be a data migration disguised as a read. */
     if (matchedAs !== kind) aliased.push({ kind, matchedAs });
   }
+  return { missing, matched, aliased };
+}
+
+/**
+ * Gives `siteId` the standard profile, and leaves anything already recorded
+ * alone.
+ *
+ * IDEMPOTENT BY CONSTRUCTION, which is what lets a create path and a repair
+ * call it without either having to know about the other.
+ *
+ * Deliberately does NOT open a transaction of its own. Every caller is already
+ * inside one request's worth of work, and the D1 interface this app is written
+ * against reserves a connection for a batch — see `db/node-pg-d1.ts`. The
+ * caller decides atomicity; this decides content.
+ *
+ * THE MATCHING IS NOT REPEATED HERE. It is `complianceProfileGap` above, and
+ * the split is the whole of the write-on-read fix: a reader that needs to know
+ * whether a profile is complete can now ask without a function that inserts
+ * being anywhere on its call path. One matcher, two callers, and the read-only
+ * one cannot write because it has no insert in it to reach.
+ */
+export async function ensureComplianceProfile(
+  db: Database,
+  orgId: string,
+  siteId: string,
+  options: { kinds?: readonly string[]; resolve?: KindResolver } = {},
+): Promise<ComplianceProfileResult> {
+  const { missing, matched, aliased } = await complianceProfileGap(
+    db,
+    orgId,
+    siteId,
+    options,
+  );
   if (!missing.length) return { created: [], matched, aliased };
 
   /*

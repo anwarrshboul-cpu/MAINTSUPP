@@ -295,7 +295,27 @@ test("undo does not require data.delete, or a backfill could not be undone by it
    * this same endpoint created minutes ago is not that, and requiring it would
    * mean the only people who can run a backfill cannot reverse one.
    */
-  assert.match(backfill, /scopedDbWithCapability\(request, "board\.edit"\)/);
+  /*
+   * RE-POINTED from `board.edit` to `sites.edit`. The claim this test exists to
+   * make — that the undo is NOT behind `data.delete` — is unchanged and still
+   * asserted; only the capability it names has moved, and it moved because it
+   * was the wrong one.
+   *
+   * `sites.edit` is defined in `app/lib/permissions.ts` as "Change the site
+   * register, units and COMPLIANCE RECORDS", which is exactly what this
+   * endpoint writes and, on a revert, deletes. `board.edit` is "create, update
+   * and move rows, columns and groups on a BOARD". Every pre-existing writer of
+   * `compliance_documents` — `WORKSPACE_CAPABILITY.compliance` and the three
+   * site routes — already took `sites.edit`; this route and the responsibility
+   * queue were the two that did not.
+   *
+   * Not an escalation under the built-in roles, which give `admin` both. It
+   * mattered because `role_capabilities` is a per-organisation toggle: a
+   * bespoke role granted `board.edit` alone would have been handed the
+   * compliance register, and this endpoint's revert is a real delete.
+   */
+  assert.match(backfill, /scopedDbWithCapability\(request, "sites\.edit"\)/);
+  assert.doesNotMatch(backfill, /scopedDbWithCapability\(request, "board\.edit"\)/);
   assert.doesNotMatch(backfill, /scopedDbWithCapability\(request, "data\.delete"\)/);
 });
 

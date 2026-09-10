@@ -153,17 +153,59 @@ export async function PUT(request: Request) {
      * operator can act on, and a silent 200 is not.
      */
     const claimant = new Map<string, string>();
+    /*
+     * EVERY REQUIREMENT'S OWN NAME IS CLAIMED FIRST, and that seeding is the
+     * fix for a real hole.
+     *
+     * The loop below only ever compared aliases with OTHER ALIASES, so a
+     * template could hand one requirement's canonical name to another as an
+     * alias — `{kind: "Fire Alarm", aliases: ["Fire Door"]}` beside a real
+     * "Fire Door" — and be answered 200. Nothing broke visibly, which is the
+     * problem: `buildKindResolver` breaks the tie by specificity and a canonical
+     * name outranks an alias, so the alias was accepted, stored, and silently
+     * did nothing for ever. The operator is told their rule saved and it never
+     * fires.
+     *
+     * Seeding the canonical names into the same map turns that into the
+     * conflict it always was, and the tie-break in the resolver stops being the
+     * only thing standing between a typo and eleven certificates moving.
+     */
+    const canonical = new Set<string>();
+    for (const entry of template.kinds) {
+      const key = normaliseKind(entry.kind);
+      if (!key) continue;
+      claimant.set(key, entry.kind);
+      canonical.add(key);
+    }
     for (const entry of template.kinds) {
       for (const alias of entry.aliases) {
         const key = normaliseKind(alias);
         if (!key) continue;
         const held = claimant.get(key);
+        /*
+         * `held === entry.kind` is the harmless case and stays allowed: a
+         * requirement may list its own name, or a spelling of it that
+         * normalises to the same key, among its other names. That is a no-op,
+         * not a conflict, and refusing it would reject a template somebody
+         * typed carefully.
+         */
         if (held && held !== entry.kind) {
+          /*
+           * 409, not 400. The payload is well formed — this is a conflict with
+           * something already named in it, which is what 409 means and what
+           * this API uses it for elsewhere (`workspace-sections` answers 409
+           * when a name is still held, and the admin and invitation routes do
+           * the same). The pre-existing alias-versus-alias case moved to 409
+           * with it rather than leaving one route answering two codes for one
+           * class of problem.
+           */
           return Response.json(
             {
-              error: `"${alias}" is listed under both "${held}" and "${entry.kind}". A name can only mean one requirement.`,
+              error: canonical.has(key)
+                ? `"${alias}" is already the name of the "${held}" requirement, so it cannot also be another name for "${entry.kind}". Remove it, or rename that requirement.`
+                : `"${alias}" is listed under both "${held}" and "${entry.kind}". A name can only mean one requirement.`,
             },
-            { status: 400 },
+            { status: 409 },
           );
         }
         claimant.set(key, entry.kind);

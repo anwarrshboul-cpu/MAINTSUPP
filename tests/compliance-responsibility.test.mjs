@@ -319,17 +319,37 @@ test("a Not required somebody ticked by hand survives a responsibility edit", ()
 
 const ROUTE = "app/api/compliance/responsibilities/route.ts";
 
-test("the bulk write is guarded by board.edit and the queue by board.view", async () => {
+test("the bulk write is guarded by sites.edit and the queue by board.view", async () => {
   const source = await read(ROUTE);
   assert.match(
     source,
     /scopedDbWithCapability\(request, "board\.view"\)/,
     "reading which responsibilities are outstanding is not a wider permission than reading the register",
   );
+  /*
+   * RE-POINTED from `board.edit`, and the title moved with it.
+   *
+   * The reasoning behind the original — that confirming a responsibility moves
+   * a requirement into or out of the compliance percentage, so it needs a WRITE
+   * capability rather than a new one of its own — was right about the first
+   * half and wrong about which. `sites.edit` is defined as "Change the site
+   * register, units and COMPLIANCE RECORDS"; `board.edit` is about rows,
+   * columns and groups on a board, which a `compliance_documents` row is not.
+   * Every sibling writer of that table already took `sites.edit`.
+   *
+   * Measured after the change: a `client` calling this route is refused with
+   * 403 "Your role (Client) does not have the \"sites.edit\" permission in this
+   * workspace", and the read side still answers 200.
+   */
   assert.match(
     source,
+    /scopedDbWithCapability\(request, "sites\.edit"\)/,
+    "confirming one changes a compliance record, which is what sites.edit names",
+  );
+  assert.doesNotMatch(
+    source,
     /scopedDbWithCapability\(request, "board\.edit"\)/,
-    "confirming one moves a requirement into or out of the compliance percentage",
+    "and must not drift back to the board's capability",
   );
 });
 

@@ -11,7 +11,10 @@ import {
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
-import { ensureComplianceProfile } from "../../lib/compliance-profile";
+import {
+  complianceProfileGap,
+  ensureComplianceProfile,
+} from "../../lib/compliance-profile";
 /* 2F — one definition of "this store is not real"; see `demo-sites.ts` for why
    it is a reserved group slug and a read-only fixture convention, not a column. */
 import { isDemoSite } from "../../lib/demo-sites";
@@ -708,40 +711,57 @@ export async function GET(request: Request) {
       if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
 
       /*
-       * REPAIRED ON READ — the gap for everything created before the create
-       * paths started doing this.
+       * DETECTED ON READ. NOT REPAIRED ON READ. THIS REQUEST WRITES NOTHING.
        *
-       * Eleven sites already exist with no compliance profile, and a fix that
-       * only covers new ones leaves them invisible to the register for ever.
-       * `ensureComplianceProfile` is idempotent, matches on requirement kind
-       * and never duplicates, so opening a site that already has its twelve
-       * costs one indexed SELECT and writes nothing.
+       * It used to call `ensureComplianceProfile` here, which inserted up to
+       * twelve `compliance_documents` rows and wrote an `activity_log` entry.
+       * The repair was correct in itself — idempotent, matched on requirement
+       * kind, verified preserving a real estate byte for byte — but this
+       * handler resolves `scopedDb` with NO capability, because reading a site
+       * needs none. So the caller who caused those writes could be a `client`,
+       * whose entire permission set is `board.view` and `data.export`, and the
+       * audit row named them as the author of a change they never asked for.
        *
-       * HERE, AND DELIBERATELY NOT IN `readComplianceRegister`. That module's
-       * docstring ends "Nothing here writes, and nothing here drops a row",
-       * and a reader that quietly writes is a much worse thing than a missing
-       * profile — it would fire on the portfolio read, for every site at once,
-       * on every page load. This is one site, on the one request that opened
-       * it. It is also not in `db/init.ts`: CLAUDE.md puts invariant repairs
-       * there, but that runs on the boot path of EVERY request and this is
-       * exactly the "anything expensive" the same sentence excludes.
+       * Two further costs, both quiet. A GET that writes is invisible to the
+       * preview-and-revert machinery `POST /api/compliance/backfill` exists to
+       * provide, so a repair nobody chose could not be examined first or undone
+       * afterwards. And it made an ordinary page view a write on the pooler's
+       * budget, on a path a read-only viewer can hit.
        *
-       * A failure here must not take the site page down with it. The profile
-       * is an invariant worth repairing, not a precondition for reading a
-       * site's jobs and documents, so it is logged and the page is still
-       * served — the next open tries again.
+       * Deleting the repair was not an option either: sites created before that
+       * function existed hold no profile and would stay invisible to the
+       * register for ever. So the invariant is REPORTED here and REPAIRED by
+       * somebody holding `sites.edit`. `complianceProfileGap` is the same
+       * matcher `ensureComplianceProfile` uses — one answer to "does this site
+       * already hold this requirement, under any of its names" — with no insert
+       * anywhere on its call path.
+       *
+       * A failure still must not take the page down. The gap is a fact about
+       * the site, not a precondition for reading its jobs and documents.
        */
+      /*
+       * Deliberately NOT carrying a `repairable` flag. Whether this caller may
+       * run the repair is a capability question `/api/context` already answers
+       * — it returns the actor's capabilities — and asking it again here would
+       * mean a second source of truth for the same permission plus a
+       * `role_capabilities` read on every site view. The screen offers the
+       * action when the context says `sites.edit`; the endpoint refuses if it
+       * is wrong. This says only what is true of the SITE.
+       */
+      let complianceProfile: {
+        complete: boolean;
+        missing: number;
+        recorded: number;
+      } | null = null;
       try {
-        const repair = await ensureComplianceProfile(db, orgId, id);
-        if (repair.created.length) {
-          await logChange(db, orgId, id, "compliance_profile_created", actor.email, {
-            created: repair.created.length,
-            matched: repair.matched.length,
-            reason: "repaired on read",
-          });
-        }
+        const gap = await complianceProfileGap(db, orgId, id);
+        complianceProfile = {
+          complete: gap.missing.length === 0,
+          missing: gap.missing.length,
+          recorded: gap.matched.length,
+        };
       } catch (cause) {
-        console.error("[/api/sites] compliance profile repair failed", cause);
+        console.error("[/api/sites] compliance profile check failed", cause);
       }
 
       const [jobs, assets, documents, groups, files, activity, allGroups, allAliases] =
@@ -869,6 +889,12 @@ export async function GET(request: Request) {
         jobCount: jobs.length,
         units: assets,
         compliance: documents,
+        /*
+         * Whether this site's profile is complete, reported rather than fixed.
+         * `null` when the check itself failed — which is not the same as
+         * "complete", and a screen must not read it as one.
+         */
+        complianceProfile,
         files,
         activity,
         groupIds: groups.map((entry) => entry.siteGroupId),

@@ -89,18 +89,25 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     /*
-     * `board.edit`, the same capability the responsibility queue writes under.
-     * This creates rows in the register, and the register IS the Store
-     * Documentation board read another way — a separate capability over the
-     * same rows would be one more thing an administrator has to keep in step.
+     * `sites.edit` — the capability this product defines as "Change the site
+     * register, units and COMPLIANCE RECORDS", which is precisely what this
+     * writes and, on a revert, deletes.
      *
-     * Deliberately NOT `data.delete`, even for the reversal. `data.delete` is
-     * the permanent purge of somebody's real data and is withheld from `admin`
-     * on purpose; undoing a batch of empty placeholder rows this same endpoint
-     * created minutes ago is not that, and requiring it would mean the only
-     * people who can run a backfill cannot undo one.
+     * It shipped as `board.edit` on the argument that the register IS the Store
+     * Documentation board read another way. That is true of where the numbers
+     * come FROM and untrue of what this endpoint touches: `compliance_documents`
+     * is the annotation layer over the board, not a board row, and every other
+     * writer of it — `WORKSPACE_CAPABILITY.compliance` and the three site
+     * routes — already takes `sites.edit`.
+     *
+     * The reversal stays out of `data.delete`, and that reasoning is unchanged:
+     * `data.delete` is the permanent purge of somebody's real data and is
+     * withheld from `admin` deliberately, while undoing a batch of empty
+     * placeholder rows this same endpoint created minutes ago is not that.
+     * Requiring it would mean the only people who can run a backfill cannot
+     * undo one.
      */
-    const guard = await scopedDbWithCapability(request, "board.edit");
+    const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { db, orgId, actor } = guard.scope;
 

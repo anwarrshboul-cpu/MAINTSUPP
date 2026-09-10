@@ -363,10 +363,53 @@ test("the reader still does not write; the repair lives on the site's own read",
   assert.doesNotMatch(register, /ensureComplianceProfile/);
   assert.match(register, /Nothing here writes, and nothing here drops a row/);
 
+  /*
+   * RE-POINTED. The half of this test about `readComplianceRegister` is
+   * unchanged and still the important one. The half about the SITE read has
+   * moved, and moved because the original arrangement was wrong.
+   *
+   * It used to assert that the site's own read called `ensureComplianceProfile`
+   * and logged `compliance_profile_created` — "one site, on the request that
+   * opened it", which was a real improvement on repairing during the portfolio
+   * read. But that handler resolves `scopedDb` with NO capability, so the
+   * caller causing those inserts could be a `client` holding only `board.view`
+   * and `data.export`, and the audit row named them as the author. A GET that
+   * writes was also invisible to the preview-and-revert machinery the backfill
+   * endpoint exists to provide.
+   *
+   * So the claim is now stronger, not weaker: the read writes NOTHING AT ALL,
+   * and the repair has an authorised home. Both halves are asserted, because
+   * "does not write" on its own would also pass if the repair had simply been
+   * deleted — and deleting it would leave every pre-existing site invisible to
+   * the register for ever, which is the outcome this whole area exists to
+   * prevent.
+   */
   const sites = await read("app/api/sites/route.ts");
-  const detail = sites.slice(sites.indexOf('const id = url.searchParams.get("id")'));
-  assert.match(detail, /ensureComplianceProfile\(db, orgId, id\)/, "one site, on the request that opened it");
-  assert.match(detail, /compliance_profile_created/, "and the repair is logged");
+  const get = sites.slice(
+    sites.indexOf("export async function GET("),
+    sites.indexOf("export async function POST("),
+  );
+  assert.ok(get.length > 0, "the sites GET must still be findable");
+  assert.doesNotMatch(
+    get,
+    /ensureComplianceProfile\(/,
+    "the read must not repair — a caller with no write capability reaches it",
+  );
+  assert.doesNotMatch(get, /logChange\(/, "and must not write an audit row either");
+  assert.match(
+    get,
+    /complianceProfileGap\(db, orgId, id\)/,
+    "it reports the gap instead, through the read-only matcher",
+  );
+
+  /* The repair still exists, behind a capability, with a preview and an undo. */
+  const backfill = await read("app/api/compliance/backfill/route.ts");
+  assert.match(
+    backfill,
+    /scopedDbWithCapability\(request, "sites\.edit"\)/,
+    "the authorised repair path is the backfill, gated on sites.edit",
+  );
+  assert.match(backfill, /ensureComplianceProfile\(/, "and it is the one that writes");
 });
 
 /* ── The write half, and the naming it must not collide with ─────────────── */
