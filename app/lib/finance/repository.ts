@@ -422,6 +422,22 @@ export type InvoicePatch = Partial<
  * second caller cannot quietly permit a different subset. The rule is §15.14
  * and §16: "corrections go through credit notes, never edits", and it is
  * enforced on the SERVER — a disabled form field is not immutability.
+ *
+ * ── THE LIST WAS NARROWER THAN THIS COMMENT CLAIMED ───────────────────────
+ *
+ * Seven fields sat in `InvoicePatch` and not here, so a finalised invoice
+ * still accepted edits to its PO number, its received and sent dates, its
+ * retention release date, the departments it is attributed between, and who
+ * it is addressed to — with nothing but `board.edit`. Every one of those is
+ * part of the document or of how the money is attributed, which is precisely
+ * what "corrections go through credit notes" is about. Freezing
+ * `retentionPence` while leaving `retentionReleaseDate` editable was the
+ * clearest of them: the amount held was immutable and the date it fell due
+ * was not.
+ *
+ * `notes` and `status` stay OUT deliberately. A note added after the fact is
+ * an annotation, not a correction, and the status has to keep moving —
+ * approving, scheduling and paying a finalised invoice is the normal path.
  */
 export const ACCOUNTING_FIELDS: readonly (keyof InvoicePatch)[] = [
   "netPence",
@@ -430,6 +446,8 @@ export const ACCOUNTING_FIELDS: readonly (keyof InvoicePatch)[] = [
   "currency",
   "invoiceNumber",
   "invoiceDate",
+  "receivedDate",
+  "sentDate",
   "dueAt",
   "paymentTermsDays",
   "counterpartyId",
@@ -437,10 +455,15 @@ export const ACCOUNTING_FIELDS: readonly (keyof InvoicePatch)[] = [
   "counterpartyName",
   "contractorId",
   "quoteId",
+  "poNumber",
   "siteId",
   "category",
   "costCentre",
+  "fromDepartment",
+  "toDepartment",
+  "faoContact",
   "retentionPence",
+  "retentionReleaseDate",
 ];
 
 export function accountingFieldsIn(patch: InvoicePatch): string[] {

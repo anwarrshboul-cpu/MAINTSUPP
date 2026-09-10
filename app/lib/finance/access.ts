@@ -95,7 +95,44 @@ export async function guardFinance(
   operation: FinanceOperation,
 ): Promise<{ denied: Response; scope?: never } | { denied?: never; scope: ScopedDatabase }> {
   await ensureDatabase();
-  return scopedDbWithCapability(request, FINANCE_CAPABILITIES[operation]);
+  const guard = await scopedDbWithCapability(request, FINANCE_CAPABILITIES[operation]);
+  if (guard.denied) return guard;
+
+  /*
+   * THE INVOICE TRACKER IS INTERNAL, AND `board.view` IS NOT ENOUGH TO SAY SO.
+   *
+   * `ledger.read` maps to `board.view`, and the external `client` role holds
+   * `board.view` by default. So a client identity could read the whole
+   * PAYABLES ledger — what this business pays its contractors — along with the
+   * unbilled list and §8's margin. Proven in review: a client read a payables
+   * page and a `marginPercent` of 85 on their own jobs. Writes were correctly
+   * refused throughout; it was reads that were open.
+   *
+   * That is not a product decision that happened to look odd. `permissions.ts`
+   * states the intent directly — "`client` is an external contact reading their
+   * own operational data. They can see and export their boards and nothing
+   * else" — so the capability table and the intent disagreed, and the
+   * capability table won by accident.
+   *
+   * Refused HERE rather than by moving `ledger.read` onto a stronger
+   * capability, because every internal role that should read this module holds
+   * `board.view` and nothing narrower fits without inventing a capability. A
+   * role check at the single door every finance route already passes through
+   * is the smaller and more legible change.
+   */
+  if (guard.scope.actor.role === "client") {
+    return {
+      denied: Response.json(
+        {
+          error: "The invoice tracker is internal to this workspace.",
+          consequence: "Your boards and their documents are unaffected.",
+        },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return guard;
 }
 
 /**
@@ -142,9 +179,19 @@ export function financeConflict(message: string, extra: Record<string, unknown> 
   return Response.json({ error: message, ...extra }, { status: 409 });
 }
 
+/**
+ * Development, POSITIVELY identified — not "anything that is not production".
+ *
+ * This used to read `!== "production"`, which is a fail-OPEN test: an unset or
+ * misspelled `NODE_ENV` is not production, so a deployment that lost the
+ * variable would start returning raw driver messages — `Failed query: <sql>`,
+ * naming tables and columns — to anyone who could make a finance request fail.
+ * `dashboard-route.ts` already uses the strict form for the same reason, and
+ * the two disagreeing was how this survived review.
+ */
 function isDevelopment(): boolean {
   try {
-    return process.env.NODE_ENV !== "production";
+    return process.env.NODE_ENV === "development";
   } catch {
     return false;
   }
