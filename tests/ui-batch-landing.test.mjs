@@ -355,29 +355,97 @@ test("the pricing band buttons do not move under the thumb that pressed them", a
    * 722 and 384, not 700 and 360: both breakpoints were set from those two
    * measurements alone, and a 320-800px sweep in both engines against the
    * preview found the row still moving +21px wherever the reservation was a
-   * line short of what the longest note actually wraps to — 361-384px (which
-   * includes 375px: iPhone SE 2/3, 6/7/8, X/XS and 13 mini, the phone the
-   * report came from) and 701-722px (tablet portrait). Three lines to 384,
-   * two to 722, one above.
+   * line short of what the longest note actually wraps to.
+   *
+   * RE-POINTED, AND THE RULE IS NOW STRONGER THAN THE ONE IT REPLACES.
+   *
+   * That is twice the reservation has been measured against the copy of the
+   * day, and the pricing rebuild broke it a third time: new sentences, a
+   * fourth band, and a fresh 320-900px sweep showing +21px at 390px and 768px
+   * because what the notes now need is three lines to 407px and two to 789px.
+   *
+   * Chasing the numbers a third time would leave the same trap set for the
+   * next copy change, so the reservation is no longer measured. All four band
+   * notes render into one grid cell with three of them hidden, and a grid row
+   * is as tall as its tallest item — the height reserved is therefore exactly
+   * the height the longest note needs, at every width, derived rather than
+   * typed. This test now pins THAT, which is the property the two media
+   * queries were only ever approximating, and it took both bespoke
+   * breakpoints out of the stylesheet.
+   *
+   * Re-measured after the change: 0px of movement across all four bands at
+   * 320/360/375/384/390/414/430/700/722/768/1440.
    */
   const css = await read("app/(marketing)/marketing.css");
-  /* 3.2em is two lines at the note's line-height of 1.6 — not 2.4em, which
-     is two lines of glyphs and not two lines of text. */
-  assert.match(css, /\.pricing__band-note\{[^}]*line-height:1\.6\}/);
-  assert.match(css, /@media \(max-width:722px\)\{\.pricing__band-note\{min-height:3\.2em\}\}/);
-  /* 384, not 360 — the widths in between are where the note takes a third
-     line, and they are the common iPhone widths. */
-  assert.match(css, /@media \(max-width:384px\)\{\.pricing__band-note\{min-height:4\.8em\}\}/);
+  assert.match(css, /\.pricing__band-note\{display:grid;[^}]*line-height:1\.6;/,
+    "one grid cell, so the row is as tall as the tallest note in it");
+  /* The count changes the wrap as well as the band does, so the twins carry
+     each band's highest count and the digits are fixed-width — without which
+     a twin at the top of its band does not cover the counts below it. */
+  assert.match(css, /\.pricing__band-note\{[^}]*font-variant-numeric:tabular-nums\}/,
+    "fixed-width digits, or a two-digit count is wider than the twin reserving for it");
+  assert.match(css, /\.pricing__band-note>span\{grid-area:1\/1;visibility:hidden\}/,
+    "every band's note is stacked in that cell and hidden by default");
+  assert.match(css, /\.pricing__band-note>span\[data-active\]\{visibility:visible\}/,
+    "and exactly the current one is shown");
+  /* visibility, never display — a hidden note that takes no space reserves
+     nothing, which is the defect this test exists for. */
+  assert.doesNotMatch(css, /\.pricing__band-note>span\{[^}]*display:none/);
+  /* The two hand-measured breakpoints are gone, not merely bypassed. */
+  assert.doesNotMatch(css, /\.pricing__band-note\{min-height/);
+  assert.doesNotMatch(css, /max-width:(722|384|407|789)px\)\{\.pricing__band-note/);
   assert.match(css, /\.switcher button\{touch-action:manipulation\}/, "a tap is a tap, not half a double-tap");
 
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  assert.match(pricing, /you are on the \$\{band\.label\} rate`\}/, "one sentence shape for every band");
+  assert.match(
+    pricing,
+    /you are on the \$\{entry\.label\} rate`;/,
+    "one sentence shape for every band, built for whichever band it is given",
+  );
+  assert.match(
+    pricing,
+    /<span data-active="true">\{noteForBand\(band, storeCount\)\}<\/span>/,
+    "exactly one sentence is shown, and it is the reader's own band and count",
+  );
+  assert.match(
+    pricing,
+    /\{BANDS\.map\(\(entry\) => \(/,
+    "and a twin of every band's is rendered, to reserve the height",
+  );
+  assert.match(
+    pricing,
+    /noteForBand\(entry, Math\.min\(entry\.max, SLIDER_MAX\)\)/,
+    "each twin at the highest count its band can reach, because the count wraps too",
+  );
+  assert.match(
+    pricing,
+    /<span key=\{entry\.id\} aria-hidden="true">/,
+    "with the twins kept out of the accessibility tree",
+  );
   assert.ok(!pricing.includes("You have unlocked"), "the contradictory 'save £N' note is gone");
-  assert.match(pricing, /below the \$\{entryBand\.label\} rate on Total Care/, "the figure says what it is");
-  /* The approved numbers, untouched. */
-  assert.match(pricing, /coordination: 65, compliance: 55, total: 100/);
-  assert.match(pricing, /coordination: 58, compliance: 48, total: 88/);
-  assert.match(pricing, /coordination: 52, compliance: 42, total: 78/);
+  /* RE-POINTED: Total Care is called Complete since the pricing rebuild. The
+     claim — the figure in the note says which rate it is below — is unchanged. */
+  assert.match(pricing, /below the \$\{entryBand\.label\} rate on Complete\./, "the figure says what it is");
+
+  /*
+   * RE-POINTED to the approved rates and the new plan names, and extended to
+   * the fourth band. The reason this list is here is unchanged: the note above
+   * the buttons quotes a difference against the entry band, so a rate change
+   * that misses this test is a note that contradicts the cards below it.
+   *
+   * THE FOURTH BAND IS THE NEW RISK and is pinned deliberately. 51+ carries no
+   * rate, so `entryBand.complete - band.complete` is arithmetic on `null`. The
+   * note has to ask before it subtracts, and the assertion below is what makes
+   * that a contract rather than a coincidence.
+   */
+  assert.match(pricing, /essential: 55, compliance: 50, complete: 85/);
+  assert.match(pricing, /essential: 50, compliance: 48, complete: 78/);
+  assert.match(pricing, /essential: 45, compliance: 45, complete: 70/);
+  assert.match(
+    pricing,
+    /if \(entry\.complete === null\) \{/,
+    "the note asks whether the band has a rate before it subtracts one",
+  );
 });
 
 test("the hero feed keeps one height, so the page below it stops jumping", async () => {

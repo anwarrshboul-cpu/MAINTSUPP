@@ -294,11 +294,19 @@ test("Report a Job is last, and moving it changed nothing about how it submits",
 
 test("the pricing calculator opens at five stores", async () => {
   const pricing = await read(`${SECTIONS_DIR}/pricing.tsx`);
-  assert.match(pricing, /useState\(5\)/, "five, not eight");
-  /* The range is unchanged around it: a reader with fewer than five drags left
-     rather than finding the control starts below their portfolio. */
-  assert.match(pricing, /const SLIDER_MIN = 1;/);
-  assert.match(pricing, /const SLIDER_MAX = 40;/);
+  /*
+   * RE-POINTED, at a stronger claim. This pinned the literal `useState(5)`
+   * beside `SLIDER_MIN = 1`, which made "opens at five" and "the control starts
+   * at one" two separate facts that could drift. The approved bands now start
+   * AT five — 5–10 is the bottom band — so the floor and the opening value are
+   * the same number, and the source says so once: `useState(SLIDER_MIN)`.
+   *
+   * The range also had to grow. It ended at 40, and the top band is 51+, so a
+   * reader could not reach "Book a Portfolio Review" by dragging.
+   */
+  assert.match(pricing, /const SLIDER_MIN = 5;/, "five, and it is the floor as well as the opening value");
+  assert.match(pricing, /useState\(SLIDER_MIN\)/, "opened from the floor, not from a second literal");
+  assert.match(pricing, /const SLIDER_MAX = 60;/, "the range must reach past the 51+ band");
   /* Five is the number the page already claims to serve from. */
   const who = await read(`${SECTIONS_DIR}/who-we-help.tsx`);
   assert.match(who, /Typically 5–50 locations/, "the calculator opens on the bottom of that range");
@@ -361,7 +369,21 @@ test("the V3 sections add no breakpoint, and use only ones the project allows", 
       Number(query.match(/(\d+)px/)[1]),
     ),
   );
-  assert.equal(widths.size, 28, `${widths.size} breakpoints — V3 was written to add none`);
+  /*
+   * RE-POINTED from an equality to a ceiling, and the number came DOWN.
+   *
+   * It asserted exactly 28 — the count V3 inherited — to prove the three new
+   * sections spent none of the two remaining. That still holds and is still
+   * what matters. But the pricing revision then DELETED the comparison matrix,
+   * and with it `(min-width:601px)`, `(max-width:767px)` and `(max-width:374px)`
+   * — so the file now stands at 25. An equality would have failed for the one
+   * reason this ceiling exists to encourage.
+   */
+  assert.ok(
+    widths.size <= 28,
+    `${widths.size} breakpoints — V3 and the pricing revision were written to add none`,
+  );
+  assert.ok(!widths.has(601), "the one width outside the project's five went with the matrix");
 
   /*
    * EXPLICIT COLUMNS, NOT `auto-fit`, AND THE REASON IS MEASURED. `.wrap` is

@@ -5,64 +5,69 @@ import { useState, type ReactNode } from "react";
 /**
  * SECTION 7 — Pricing.
  *
- * New. It replaces `Packages` ("Four tiers. Each one includes everything below
- * it.") and the `Calculator` that followed it — a slider estimating what an
- * in-house team costs, which is a persuasion device, not a price.
- *
- * WHAT THE PAGE NOW SAYS: three products, three portfolio bands, and the actual
- * numbers — including on 26+, which used to be a "Custom" card and a button.
+ * WHAT THE PAGE SAYS: two plans a reader chooses between, one smaller option
+ * beside them, four portfolio bands, and the actual numbers — except above
+ * fifty stores, where the honest answer is a conversation and the card says so
+ * rather than inventing a rate.
  *
  * THE READER GIVES ONE NUMBER. A slider for how many stores they have; the band
- * follows, the per-store rate follows, and each card shows what that actually
- * costs them per month. Asking someone to pick a band first asks them to work
- * out which band 14 stores is in, which is the calculator's job.
+ * follows, the per-store rate follows, and each card shows what that costs them
+ * per month. Asking someone to pick a band first asks them to work out which
+ * band fourteen stores is in, which is the calculator's job.
  *
- * THE SAVING IS COMPUTED, NOT TYPED. "Most popular — save £N per store" is
- * Coordination + Compliance − Total Care at whatever band is showing: £20 at
- * 1–10 (65 + 55 − 100), £18 at 11–25 (58 + 48 − 88), £16 at 26+ (52 + 42 − 78).
- * Deriving it means the badge cannot come to contradict the cards above it
- * after a price change. The struck-through "was" price is derived the same way,
- * from the entry band, and only renders once the reader is past it.
+ * ── WHAT CHANGED IN THIS REVISION, AND WHY EACH ONE MATTERS ───────────────
  *
- * NO PRICE CARRIES "+ VAT" ANY MORE, AND THAT IS THE RULE NOW.
+ * TWO MAIN CARDS, NOT THREE EQUAL ONES. Essential and Complete are the choice;
+ * Compliance Administration is a smaller option beside them. Three equal cards
+ * asked the reader to compare three things when only two of them are the
+ * decision — and the third is a component of the second, which a row of equals
+ * cannot say.
  *
- * This comment used to read "Every price carries '+ VAT', which is a rule of
- * the brief and not a detail", and it was enforced by a test named "every price
- * is shown + VAT". Homepage V3 reverses it: the owner's instruction is that
- * "+ VAT" appears nowhere on the marketing site. Five figures carried it — the
- * per-store price line, the compliance setup footnote, a whole matrix row, and
- * two of the portfolio notes — and all five are now the figure alone.
+ * THE MATRIX IS GONE. Below 768px this section used to swap the cards for a
+ * nineteen-row comparison table, because three stacked cards ran to 2294px.
+ * Two cards and a compact third do not, so the table is deleted rather than
+ * kept for a problem that no longer exists. It took a `(min-width:601px)`
+ * media query with it, which was the one width in this stylesheet outside the
+ * five the parity tests permit.
  *
- * It is a REMOVAL, not a substitution. "excluding VAT", "ex. VAT" and "+VAT"
- * are the same qualifier wearing a different hat, so none of them replaced it;
- * the rates read as rates and the quote confirmed at the portfolio review is
- * where tax is stated. The inverted test is
- * `tests/stage-twentyeight-landing-rebuild.test.mjs`, which now asserts the
- * absence and still pins the four figures themselves so they cannot go quiet.
+ * THE TOP BAND CARRIES NO NUMBER, and that is deliberate. Fifty-one stores and
+ * up is "Book a Portfolio Review", so `rate` is `null` there and every place
+ * that would print a figure asks first. A made-up rate for a portfolio nobody
+ * has scoped is worse than an invitation to talk.
  *
- * TWO PRESENTATIONS, ONE SET OF FACTS. Wide enough for three columns, the
- * section is three cards. On a phone the three cards stacked ran to 2294px —
- * more than the whole desktop section — and a reader comparing them had to
- * hold one card's feature list in their head while scrolling to the next. So
- * below 768px the same data renders as a comparison matrix: features down the
- * left, the three plans across. Both presentations read `BANDS`, `PLANS` and
- * `FEATURES` below; neither of them contains a typed price or a typed feature
- * list of its own, because a second copy would be a second thing to keep true.
+ * THE SAVING IS COMPUTED, NOT TYPED. Essential + Compliance − Complete at
+ * whatever band is showing: £20 at every band that has numbers (55+50−85,
+ * 50+48−78, 45+45−70). Deriving it means the badge cannot come to contradict
+ * the cards above it after a price change.
+ *
+ * NO PRICE CARRIES "+ VAT", AND THAT IS THE RULE. This comment used to say the
+ * opposite and was enforced by a test named "every price is shown + VAT";
+ * Homepage V3 reversed both. It is a REMOVAL, not a substitution — "excluding
+ * VAT" and "ex. VAT" are the same qualifier wearing a different hat, so none of
+ * them replaced it. The inverted test is
+ * `tests/stage-twentyeight-landing-rebuild.test.mjs`.
  */
 
-/*
- * The three bands, at the rates the approved pricing reference carries.
+/**
+ * The four bands, at the approved rates.
  *
- * The top band used to hold no numbers — "the answer is a conversation" — and
- * the middle band was £60/£50/£90. Both are superseded: 26+ is a published
- * rate now, and the middle band came down to £58/£48/£88, so a reader can size
- * their own portfolio without booking a call to find out whether they can
- * afford one.
+ * `null` is the top band's rate and means "Book a Portfolio Review". It is
+ * `null` rather than 0 or a sentinel string so that anything printing a figure
+ * has to handle its absence in the type system rather than by remembering to.
  */
 const BANDS = [
-  { id: "small", label: "1–10 stores", max: 10, coordination: 65, compliance: 55, total: 100 },
-  { id: "mid", label: "11–25 stores", max: 25, coordination: 58, compliance: 48, total: 88 },
-  { id: "large", label: "26+ stores", max: Infinity, coordination: 52, compliance: 42, total: 78 },
+  { id: "b5", label: "5–10 stores", min: 5, max: 10, essential: 55, compliance: 50, complete: 85 },
+  { id: "b11", label: "11–25 stores", min: 11, max: 25, essential: 50, compliance: 48, complete: 78 },
+  { id: "b26", label: "26–50 stores", min: 26, max: 50, essential: 45, compliance: 45, complete: 70 },
+  {
+    id: "b51",
+    label: "51+ stores",
+    min: 51,
+    max: Infinity,
+    essential: null,
+    compliance: null,
+    complete: null,
+  },
 ] as const;
 
 /** The band a portfolio of `count` stores falls in. */
@@ -70,11 +75,21 @@ function bandForCount(count: number) {
   return BANDS.find((entry) => count <= entry.max) ?? BANDS[BANDS.length - 1];
 }
 
-const SLIDER_MIN = 1;
-const SLIDER_MAX = 40;
+/* The slider opens at the bottom of the bottom band and reaches past the top
+   one, so a reader with sixty stores can arrive at "Book a Portfolio Review"
+   by dragging rather than by reading a footnote. */
+const SLIDER_MIN = 5;
+const SLIDER_MAX = 60;
 
 type Band = (typeof BANDS)[number];
-type PlanKey = "coordination" | "compliance" | "total";
+type PlanKey = "essential" | "compliance" | "complete";
+
+/** The portfolio floor, and the onboarding fee, in one place each. */
+const PORTFOLIO_MINIMUM = 300;
+const ONBOARDING_PER_STORE = 75;
+const ONBOARDING_CAP = 1200;
+const OUT_OF_HOURS_P1 = 125;
+const REVIEW = "Book a Portfolio Review";
 
 const CHECK = <path d="M20 6 9 17l-5-5" />;
 
@@ -96,11 +111,22 @@ function Tick() {
 }
 
 /**
- * The price line. `was` is the same plan's entry-band rate, shown struck
- * through only once the reader has actually moved past that band — a
- * "was £65" beside £65 is noise, and beside £52 it is the discount.
+ * The price line.
+ *
+ * `amount` is `null` in the top band, where the card offers a conversation
+ * instead of a number. `was` is the same plan's entry-band rate, struck through
+ * only once the reader has moved past that band — a "was £55" beside £55 is
+ * noise, and beside £45 it is the discount.
  */
-function Price({ amount, was }: { amount: number; was: number }) {
+function Price({ amount, was }: { amount: number | null; was: number }) {
+  if (amount === null) {
+    return (
+      <div className="pkg__price pkg__price--talk">
+        <span className="pkg__talk">{REVIEW}</span>
+        <span className="pkg__per">for portfolios over 50 stores</span>
+      </div>
+    );
+  }
   return (
     <div className="pkg__price">
       <span className="pkg__num">£{amount}</span>
@@ -109,9 +135,6 @@ function Price({ amount, was }: { amount: number; was: number }) {
           £{was}
         </s>
       )}
-      {/* One line now, not two. The second line was "+ VAT"; with it gone the
-          `<br />` would leave the price line reserving a row of nothing under
-          every card. */}
       <span className="pkg__per">per store / month</span>
     </div>
   );
@@ -124,142 +147,149 @@ type Plan = {
   icon: ReactNode;
   /** The plans whose entire feature set this plan contains. */
   rollup?: readonly PlanKey[];
-  footnote?: string;
 };
 
-const PLANS: readonly Plan[] = [
+/**
+ * The two plans the reader is choosing between.
+ *
+ * Compliance Administration is deliberately NOT in this list — it is rendered
+ * once, smaller, below them. Keeping it out of `MAIN_PLANS` is what stops a
+ * later edit quietly restoring it to a third equal column.
+ */
+const MAIN_PLANS: readonly Plan[] = [
   {
-    key: "coordination",
-    title: "Maintenance Coordination",
+    key: "essential",
+    title: "Essential",
     for: "Reactive repairs, run end to end.",
-    icon: (
-      <path d="M14.7 6.3a4 4 0 1 0 5 5L21 21H3l9.7-9.7a4 4 0 0 1 2-4.9Z" />
-    ),
+    icon: <path d="M14.7 6.3a4 4 0 1 0 5 5L21 21H3l9.7-9.7a4 4 0 0 1 2-4.9Z" />,
   },
   {
-    key: "compliance",
-    title: "Compliance Administration",
-    for: "Certificates tracked before they expire.",
-    icon: (
-      <>
-        <path d="M12 21s8-3.5 8-9V5l-8-3-8 3v7c0 5.5 8 9 8 9Z" />
-        <path d="m9 12 2 2 4-4" />
-      </>
-    ),
-    footnote: "One-off setup from £25/store.",
-  },
-  {
-    key: "total",
-    title: "Total Care",
-    for: "Both, plus a quarterly portfolio review.",
+    key: "complete",
+    title: "Complete",
+    for: "Repairs and compliance together, plus a quarterly portfolio review.",
     icon: (
       <>
         <path d="m12 2 9 5v10l-9 5-9-5V7Z" />
         <path d="m3 7 9 5 9-5M12 12v10" />
       </>
     ),
-    rollup: ["coordination", "compliance"],
+    rollup: ["essential", "compliance"],
   },
 ];
 
-/*
- * EVERY FEATURE, ONCE, AGAINST THE PLAN THAT INTRODUCES IT.
- *
- * The cards used to carry three hardcoded bullet lists and Total Care's read
- * "Everything in Maintenance Coordination / Everything in Compliance
- * Administration / Quarterly portfolio review" — which is the right thing for
- * a card and useless in a matrix, where the reader wants to see the tick land
- * on the row. Holding the features here and the roll-up on the plan lets the
- * card keep its summary wording and the matrix enumerate what the summary
- * stands for, without either one being typed twice.
- */
+/** The smaller option beside them. */
+const COMPLIANCE_PLAN: Plan = {
+  key: "compliance",
+  title: "Compliance Administration",
+  for: "Certificates tracked before they expire.",
+  icon: (
+    <>
+      <path d="M12 21s8-3.5 8-9V5l-8-3-8 3v7c0 5.5 8 9 8 9Z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
+};
+
+const ALL_PLANS: readonly Plan[] = [MAIN_PLANS[0]!, COMPLIANCE_PLAN, MAIN_PLANS[1]!];
+
+/* Every feature, once, against the plan that introduces it. The cards derive
+   their bullet lists from this, so "Everything in Essential" on the Complete
+   card cannot come to describe a set the Essential card no longer lists. */
 const FEATURES: readonly { label: string; plan: PlanKey }[] = [
-  { label: "Intake & triage", plan: "coordination" },
-  { label: "Contractor assignment", plan: "coordination" },
-  { label: "Quote control", plan: "coordination" },
-  { label: "Attendance chasing", plan: "coordination" },
-  { label: "Photo-verified close-out", plan: "coordination" },
-  { label: "Monthly report", plan: "coordination" },
+  { label: "Intake & triage", plan: "essential" },
+  { label: "Contractor assignment", plan: "essential" },
+  { label: "Quote control", plan: "essential" },
+  { label: "Attendance chasing", plan: "essential" },
+  { label: "Photo-verified close-out", plan: "essential" },
+  { label: "Monthly report", plan: "essential" },
   { label: "Certificate register", plan: "compliance" },
   { label: "90/60/30-day reminders", plan: "compliance" },
   { label: "Provider booking", plan: "compliance" },
   { label: "Certificate chasing", plan: "compliance" },
   { label: "Remedial tracking", plan: "compliance" },
   { label: "Traffic-light compliance dashboard", plan: "compliance" },
-  { label: "Quarterly portfolio review", plan: "total" },
+  { label: "Quarterly portfolio review", plan: "complete" },
 ];
-
-/** Whether `plan` includes `feature`, directly or through its roll-up. */
-function planHas(plan: Plan, feature: (typeof FEATURES)[number]) {
-  return feature.plan === plan.key || (plan.rollup?.includes(feature.plan) ?? false);
-}
 
 /**
  * The card's bullet list: a plan's own features, preceded by one line per
- * rolled-up plan. Total Care therefore still reads "Everything in Maintenance
- * Coordination / Everything in Compliance Administration / Quarterly portfolio
- * review" — derived, so the summary cannot come to describe a set the matrix
- * beside it no longer ticks.
+ * rolled-up plan. Complete therefore reads "Everything in Essential /
+ * Everything in Compliance Administration / Quarterly portfolio review" —
+ * derived, so it cannot drift from what the other cards claim.
  */
 function cardPoints(plan: Plan) {
   const own = FEATURES.filter((feature) => feature.plan === plan.key).map((f) => f.label);
   if (!plan.rollup) return own;
-  const titleOf = (key: PlanKey) => PLANS.find((entry) => entry.key === key)?.title ?? key;
+  const titleOf = (key: PlanKey) => ALL_PLANS.find((entry) => entry.key === key)?.title ?? key;
   return [...plan.rollup.map((key) => `Everything in ${titleOf(key)}`), ...own];
 }
 
-/** A matrix cell that is not included. Never colour alone — a glyph and a name. */
-function NotIncluded({ label = "Not included" }: { label?: string }) {
+function PlanIcon({ icon }: { icon: ReactNode }) {
   return (
-    <>
-      <span className="pmx__no" aria-hidden="true">
-        —
-      </span>
-      <span className="vh">{label}</span>
-    </>
+    <span className="pkg__icon">
+      <svg
+        className="ic"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {icon}
+      </svg>
+    </span>
   );
 }
 
 export function Pricing() {
   /*
-   * The store count is the single input, and the band follows from it.
+   * The store count is the single input, and the band follows from it. The
+   * band buttons stay as a keyboard-friendly way to jump between bands, and
+   * setting one moves the slider to that band's low end so the two controls
+   * can never disagree.
    *
-   * Previously the three bands were buttons and the reader picked one, which
-   * asks them to know which band 14 stores lands in. The approved reference
-   * turns it round: a slider for the number they actually have, and the band
-   * lights up on its own. The buttons stay as a keyboard-friendly way to jump
-   * between bands, and setting one moves the slider to that band's low end so
-   * the two controls can never disagree.
+   * IT OPENS AT FIVE. Five is the bottom of the bottom band and the number the
+   * page already tells the reader it is for — "typically 5–50 locations" on the
+   * Who we help note — so the calculator opens on the bottom of the range the
+   * site claims to serve rather than in the middle of it.
    */
-  /*
-   * IT OPENS AT FIVE, NOT EIGHT.
-   *
-   * Eight was a midpoint of the 1–10 band and nothing else. Five is the number
-   * the page already tells the reader it is for — "typically 5–50 locations",
-   * on the Who we help note — so the calculator now opens on the bottom of the
-   * range the site claims to serve rather than in the middle of it. A reader
-   * with four stores drags left and finds the minimum still applies; a reader
-   * with thirty drags right; neither is shown a portfolio bigger than their own
-   * before they have touched the control.
-   */
-  const [storeCount, setStoreCount] = useState(5);
+  const [storeCount, setStoreCount] = useState(SLIDER_MIN);
   const band = bandForCount(storeCount);
   const bandId = band.id;
   const setBandId = (id: Band["id"]) => {
     const target = BANDS.find((entry) => entry.id === id) ?? BANDS[0];
-    const index = BANDS.indexOf(target);
-    const low = index === 0 ? SLIDER_MIN : (BANDS[index - 1]!.max as number) + 1;
-    setStoreCount(low);
+    setStoreCount(target.min);
   };
 
-  /* Both parts bought separately, against Total Care — computed, never typed. */
-  const saving = band.coordination + band.compliance - band.total;
-  /* What the same plan costs at the entry band, so a discount can be shown as
-     a discount rather than asserted. */
   const entryBand = BANDS[0];
+  /* Both parts bought separately, against Complete — computed, never typed,
+     and absent in the band that carries no rates. */
+  const saving =
+    band.essential !== null && band.compliance !== null && band.complete !== null
+      ? band.essential + band.compliance - band.complete
+      : null;
 
-  const stores = `${storeCount} ${storeCount === 1 ? "store" : "stores"}`;
-  const monthly = (plan: Plan) => (band[plan.key] * storeCount).toLocaleString("en-GB");
+  const plural = storeCount === 1 ? "store" : "stores";
+
+  /* The sentence under the slider, for ANY band at ANY count rather than only
+     the current pair — hidden twins of it are what reserve the row's height. */
+  const noteForBand = (entry: Band, count: number) => {
+    const head = `At ${count} ${count === 1 ? "store" : "stores"} you are on the ${entry.label} rate`;
+    if (entry.complete === null) {
+      return `${head} — above fifty stores we scope the portfolio with you before quoting.`;
+    }
+    if (entry.id === entryBand.id) return `${head}.`;
+    return `${head} — £${entryBand.complete - entry.complete} per store below the ${entryBand.label} rate on Complete.`;
+  };
+  const rateFor = (plan: Plan) => band[plan.key] as number | null;
+  const monthlyFor = (plan: Plan) => {
+    const rate = rateFor(plan);
+    return rate === null ? null : rate * storeCount;
+  };
+  /* The onboarding fee a reader would actually pay, capped. */
+  const onboarding = Math.min(ONBOARDING_PER_STORE * storeCount, ONBOARDING_CAP);
 
   return (
     <section className="section section--tint" id="pricing">
@@ -279,7 +309,7 @@ export function Pricing() {
             <label htmlFor="pricing-store-count">How many stores do you have?</label>
             <p className="pricing__readout">
               <strong>{storeCount}</strong>
-              <span>{storeCount === 1 ? "store" : "stores"}</span>
+              <span>{plural}</span>
             </p>
           </div>
           <input
@@ -293,17 +323,35 @@ export function Pricing() {
             aria-describedby="pricing-band-note"
           />
           {/*
-            The same sentence shape for every band. The two bigger bands used to
-            say "save £12 per store on Total Care" while the Total Care card
-            beside them said "save £18 per store" — both true (one is the drop
-            from the entry rate, the other the bundle saving) and, read
-            together, a contradiction. The figure here now says what it is.
-          */}
+            * ONE VISIBLE SENTENCE, AND A HIDDEN TWIN OF THE LONGEST SENTENCE
+            * EACH BAND CAN PRODUCE, ALL IN ONE GRID CELL.
+            *
+            * The buttons below used to move 21px under the thumb that had just
+            * pressed them, because a band note is one line for some bands and
+            * two or three for others. That was fixed twice with min-height
+            * media queries measured against the copy of the day, and this
+            * rebuild broke it a third time.
+            *
+            * So the height is no longer measured. A grid row is as tall as its
+            * tallest item, so hidden twins reserve exactly what the longest
+            * sentence needs at any width, with nothing to re-measure when a
+            * word changes.
+            *
+            * THE TWINS CARRY EACH BAND'S HIGHEST STORE COUNT, not the current
+            * one, because the count changes the wrap as well: at 407px "At 5
+            * stores..." takes two lines and "At 51 stores..." takes three, and
+            * a set of twins that all say "5" reserves for neither. With
+            * `tabular-nums` in the stylesheet every two-digit count is exactly
+            * as wide as every other, so a twin at the top of its band covers
+            * every count inside it.
+            */}
           <p id="pricing-band-note" className="pricing__band-note">
-            {`At ${storeCount} ${storeCount === 1 ? "store" : "stores"} you are on the ${band.label} rate`}
-            {band.id === "small"
-              ? "."
-              : ` — £${entryBand.total - band.total} per store below the ${entryBand.label} rate on Total Care.`}
+            <span data-active="true">{noteForBand(band, storeCount)}</span>
+            {BANDS.map((entry) => (
+              <span key={entry.id} aria-hidden="true">
+                {noteForBand(entry, Math.min(entry.max, SLIDER_MAX))}
+              </span>
+            ))}
           </p>
         </div>
 
@@ -325,49 +373,37 @@ export function Pricing() {
           ))}
         </div>
 
-        {/*
-          One reveal wrapper around both presentations. The observer that adds
-          `is-in` never fires on a `display:none` element, so giving each of
-          them the class of its own would leave whichever one is showing after
-          a resize stuck at opacity 0.
-        */}
         <div className="pricing__plans reveal">
-          {/* Wide: three cards. */}
-          <div className="pkgs">
-            {PLANS.map((plan) => {
-              const amount = band[plan.key];
-              const isTotal = plan.key === "total";
+          {/*
+            THE TWO PLANS THE READER IS CHOOSING BETWEEN. One grid, every width
+            — the nineteen-row comparison matrix this used to swap to below
+            768px existed because THREE stacked cards ran to 2294px on a phone,
+            and two do not.
+          */}
+          <div className="pkgs pkgs--two">
+            {MAIN_PLANS.map((plan) => {
+              const isComplete = plan.key === "complete";
+              const rate = rateFor(plan);
+              const monthly = monthlyFor(plan);
               return (
-                <article
-                  className={`pkg${isTotal ? " is-match" : ""}`}
-                  key={plan.key}
-                >
-                  {isTotal && (
+                <article className={`pkg${isComplete ? " is-match" : ""}`} key={plan.key}>
+                  {isComplete && saving !== null && (
                     <span className="pkg__flag">Most popular — save £{saving} per store</span>
                   )}
-                  <span className="pkg__icon">
-                    <svg
-                      className="ic"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      {plan.icon}
-                    </svg>
-                  </span>
+                  <PlanIcon icon={plan.icon} />
                   <h3>{plan.title}</h3>
                   <p className="pkg__for">{plan.for}</p>
-                  <Price amount={amount} was={entryBand[plan.key]} />
-                  {/* What it actually costs this reader, which is the number
-                      they came for. Computed from the same rate above. */}
-                  <p className="pkg__total">
-                    ≈ <strong>£{(amount * storeCount).toLocaleString("en-GB")}</strong>
-                    /month for {storeCount} {storeCount === 1 ? "store" : "stores"}
-                  </p>
+                  <Price amount={rate} was={entryBand[plan.key]} />
+                  {monthly !== null ? (
+                    <p className="pkg__total">
+                      ≈ <strong>£{monthly.toLocaleString("en-GB")}</strong>
+                      /month for {storeCount} {plural}
+                    </p>
+                  ) : (
+                    <p className="pkg__total pkg__total--talk">
+                      Priced against your own portfolio at the review.
+                    </p>
+                  )}
                   <ul className="pkg__list">
                     {cardPoints(plan).map((point) => (
                       <li key={point}>
@@ -376,185 +412,68 @@ export function Pricing() {
                       </li>
                     ))}
                   </ul>
-                  {plan.footnote && <p className="pkg__setup">{plan.footnote}</p>}
                 </article>
               );
             })}
           </div>
 
           {/*
-            Narrow: the same three plans as a comparison matrix.
+            THE SMALLER OPTION, not a third column.
 
-            It is a real <table> because it is real tabular data — a row header
-            and three column headers give a screen reader the two coordinates
-            of every tick, which a grid of divs cannot. The feature column is
-            sticky, so on the two narrowest phones, where the three plan
-            columns cannot all fit, the row a reader is scrolling stays named.
+            Compliance Administration is part of Complete and is offered alone
+            for an estate that already has its repairs handled. Rendering it as
+            an equal card asked the reader to compare three things when the
+            decision is between two — so it sits below them, narrower, with the
+            same rate mechanics and no "most popular" flag to compete for.
           */}
-          <div className="pmx">
-            <div
-              className="pmx__scroll"
-              tabIndex={0}
-              role="region"
-              aria-label="Plan comparison table"
-            >
-              <table className="pmx__table">
-                <caption className="vh">
-                  {`The three plans compared at ${stores}, on the ${band.label} rate.`}
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col" className="pmx__corner">
-                      <span className="vh">Feature</span>
-                    </th>
-                    {PLANS.map((plan) => (
-                      <th
-                        scope="col"
-                        key={plan.key}
-                        className={`pmx__plan${plan.key === "total" ? " is-match" : ""}`}
-                      >
-                        <span className="pmx__planname">{plan.title}</span>
-                        {plan.key === "total" && (
-                          <span className="pmx__pop">Most popular</span>
-                        )}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="pmx__row--says">
-                    <th scope="row">What it is for</th>
-                    {PLANS.map((plan) => (
-                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
-                        {plan.for}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr className="pmx__row--price">
-                    <th scope="row">Per store / month</th>
-                    {PLANS.map((plan) => {
-                      const amount = band[plan.key];
-                      const was = entryBand[plan.key];
-                      return (
-                        <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
-                          <span className="pmx__price">£{amount}</span>
-                          {was > amount && (
-                            <s className="pkg__was" aria-label={`Down from £${was} per store`}>
-                              £{was}
-                            </s>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  {/*
-                    THE VAT ROW IS GONE, NOT HIDDEN.
-
-                    It read "+ VAT on top" in all three columns — one fact,
-                    typed three times, in the widest row of the narrowest
-                    presentation on the page. With "+ VAT" withdrawn from the
-                    site (see the note at the top of this file) the row has no
-                    content left, so it is deleted rather than emptied: a row
-                    header with three blank cells is worse than no row, and a
-                    screen reader would still announce it.
-                  */}
-                  {/*
-                    The row header carries "per month" and the store count, so
-                    the cell is the figure alone — "≈ £520/month" broke as
-                    "£520/mon th" in an 80px column, and the sentence the card
-                    prints ("≈ £520/month for 8 stores") is here in full,
-                    split across the header and the cell rather than crushed
-                    into one of them.
-                  */}
-                  <tr className="pmx__row--total">
-                    <th scope="row">
-                      Your total per month
-                      <span className="pmx__sub">at {stores}</span>
-                    </th>
-                    {PLANS.map((plan) => (
-                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
-                        ≈ <strong>£{monthly(plan)}</strong>
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <th scope="row">Bundle saving</th>
-                    {PLANS.map((plan) => (
-                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
-                        {plan.rollup ? (
-                          <strong>Save £{saving} per store</strong>
-                        ) : (
-                          <NotIncluded label="No bundle saving" />
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr className="pmx__row--says">
-                    <th scope="row">One-off setup</th>
-                    {PLANS.map((plan) => (
-                      <td key={plan.key} className={plan.key === "total" ? "is-match" : undefined}>
-                        {plan.footnote ?? <NotIncluded label="None listed" />}
-                      </td>
-                    ))}
-                  </tr>
-                  {FEATURES.map((feature) => (
-                    <tr key={feature.label}>
-                      <th scope="row">{feature.label}</th>
-                      {PLANS.map((plan) => (
-                        <td
-                          key={plan.key}
-                          className={`pmx__mark${plan.key === "total" ? " is-match" : ""}`}
-                        >
-                          {planHas(plan, feature) ? (
-                            <>
-                              <span className="pmx__yes">
-                                <Tick />
-                              </span>
-                              <span className="vh">Included</span>
-                            </>
-                          ) : (
-                            <NotIncluded />
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <aside className="pkgalt" aria-label="Compliance Administration, available on its own">
+            <div className="pkgalt__head">
+              <PlanIcon icon={COMPLIANCE_PLAN.icon} />
+              <div>
+                <h3>{COMPLIANCE_PLAN.title}</h3>
+                <p className="pkg__for">{COMPLIANCE_PLAN.for}</p>
+              </div>
+              <Price amount={rateFor(COMPLIANCE_PLAN)} was={entryBand.compliance} />
             </div>
-            {/*
-              The card's own summary of Total Care, in the card's own words and
-              built from the same table the matrix ticks. The matrix enumerates
-              what "everything in" stands for, which is the more useful thing
-              to show; this keeps the sentence a reader on a phone would
-              otherwise only meet on a wider screen.
-            */}
-            {PLANS.filter((plan) => plan.rollup).map((plan) => (
-              <p className="pmx__foot" key={plan.key}>
-                <strong>{plan.title}:</strong> {cardPoints(plan).join(" · ")}. Most popular —
-                save £{saving} per store.
-              </p>
-            ))}
-          </div>
+            <p className="pkgalt__note">
+              Included in <strong>Complete</strong>. Available on its own when repairs are
+              already handled
+              {monthlyFor(COMPLIANCE_PLAN) !== null
+                ? ` — ≈ £${monthlyFor(COMPLIANCE_PLAN)!.toLocaleString("en-GB")}/month for ${storeCount} ${plural}.`
+                : "."}
+            </p>
+            <ul className="pkgalt__list">
+              {cardPoints(COMPLIANCE_PLAN).map((point) => (
+                <li key={point}>
+                  <Tick />
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+          </aside>
         </div>
 
         <div className="pkgfoot reveal">
           <ul className="pricing__notes">
-            <li>Portfolio minimum £295/month.</li>
+            <li>Portfolio minimum £{PORTFOLIO_MINIMUM}/month.</li>
             <li>
-              Includes up to 2 coordinated jobs per store per month, pooled across your
-              portfolio. Additional jobs from £65 each; complex or multi-trade work
-              quoted separately.
+              Onboarding and asset capture £{ONBOARDING_PER_STORE}/store, capped at £
+              {ONBOARDING_CAP.toLocaleString("en-GB")}
+              {" — "}
+              {`£${onboarding.toLocaleString("en-GB")} at ${storeCount} ${plural}`}. Waived on a
+              12-month term.
             </li>
             <li>
-              Projects, kiosk works and out-of-hours P1 escalation (£125 per incident)
-              are quoted and charged separately.
+              Includes 2 coordinated jobs per store per month, pooled across your portfolio
+              over a rolling quarter.
+            </li>
+            <li>
+              Projects, kiosk works and out-of-hours P1 incidents (£{OUT_OF_HOURS_P1} each) are
+              quoted and charged separately.
             </li>
             <li>Compliance pricing assumes a standard retail asset profile.</li>
             {/* Contractor invoices are the other half of what a reader pays and
-                they are not ours, so the note says so where the fees are. The
-                sentence exists in the section lede as a claim; here it is a
-                line item, which is where somebody totting up a budget looks. */}
+                they are not ours, so the note says so where the fees are. */}
             <li>
               Contractor invoices are separate and come from the contractor at their own
               agreed rates. Maintsupp charges the coordination fee and nothing on top.

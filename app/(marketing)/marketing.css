@@ -1327,27 +1327,39 @@ fieldset.field:focus{outline:none}
 /* A 26px target is below the 44px touch floor on its own, so the padding on the
    card carries the rest of it; the thumb itself is what a finger aims at. */
 .pricing__slider::-webkit-slider-thumb{width:22px;height:22px}
-/* Two lines are reserved on a phone whatever the band says. The 1–10 note is
-   one line and the other two bands' notes are two, so without the reservation
-   the calculator card grew by a line the moment 11–25 or 26+ was pressed and
-   the band buttons moved 21px down under the thumb that had just pressed them
-   (measured in WebKit on an iPhone 14 descriptor: 390px and 430px both +21px,
-   320px +24px).
+/* THE BUTTON ROW MUST NOT MOVE UNDER THE THUMB THAT PRESSED IT.
 
-   Both breakpoints came from those two measurements and both sat one step too
-   low; a 320-800px sweep in both engines found the row still moving +21px in
-   two windows, because what a band note actually needs is three lines to 384px,
-   two lines to 722px, and one above that:
+   A band note is one line for some bands and two or three for others, so
+   without a reservation the calculator card grew by a line the moment another
+   band was pressed and the buttons moved 21px down under the finger that had
+   just pressed them (measured in WebKit on an iPhone 14 descriptor: 390px and
+   430px both +21px, 320px +24px).
 
-     361-384px  reserved two lines, needed three  — 375px is iPhone SE 2/3,
-                6/7/8, X/XS and 13 mini, the phone the report came from
-     701-722px  reserved one line, needed two     — tablet portrait, split view
+   That was fixed twice with min-height media queries, and both times the
+   figures came from measuring the copy of the day — three lines to 384px, two
+   to 722px, one above. The pricing rebuild changed the copy and added a fourth
+   band, and a 320-900px sweep found the reservation a line short again in two
+   new windows (390px and 768px, +21px each): what the sentences now need is
+   three lines to 407px and two to 789px.
 
-   0px at every other width from 320 to 800. Reserve by what the longest note
-   wraps to at that width, not by what it wraps to at 390. */
-.pricing__band-note{margin:0;font-size:.82rem;color:var(--slate);min-height:1.6em;line-height:1.6}
-@media (max-width:722px){.pricing__band-note{min-height:3.2em}}
-@media (max-width:384px){.pricing__band-note{min-height:4.8em}}
+   So the reservation is no longer measured at all. Every band's note is
+   rendered into the SAME grid cell and three of the four are hidden; a grid
+   row is as tall as its tallest item, so the height reserved is exactly the
+   height the longest note needs, at every width, and there is nothing left to
+   re-measure the next time a word changes. It takes two bespoke breakpoints
+   out of this stylesheet with it.
+
+   `visibility:hidden` rather than `display:none` — the hidden twins still have
+   to take up their space to do their job — and it keeps them out of the
+   accessibility tree, so a screen reader is read one sentence, not five.
+
+   `tabular-nums` because the STORE COUNT changes the wrap too, not only the
+   band: at 407px "At 5 stores..." is two lines and "At 51 stores..." is three.
+   Each twin carries the highest count in its band, and fixed-width digits make
+   that twin cover every other count in the band exactly rather than nearly. */
+.pricing__band-note{display:grid;margin:0;font-size:.82rem;color:var(--slate);line-height:1.6;font-variant-numeric:tabular-nums}
+.pricing__band-note>span{grid-area:1/1;visibility:hidden}
+.pricing__band-note>span[data-active]{visibility:visible}
 /* A horizontal drag must reach the slider; vertical swipes still scroll. */
 .pricing__slider{touch-action:pan-y}
 
@@ -1369,118 +1381,48 @@ fieldset.field:focus{outline:none}
 .pkgfoot p{margin:0;font-size:.82rem;color:var(--slate);line-height:1.6}
 .pkgfoot strong{color:var(--navy)}
 
-/* ------------------------------------- the plan comparison matrix (phones)
-   THREE STACKED CARDS ARE NOT A COMPARISON. On a phone the `.pkg` cards run
-   one per row, and the section measured 2294px at 390 and 2510px at 320 —
-   more than the whole desktop section — while a reader trying to answer "what
-   does Total Care add?" had to hold six bullets in their head and scroll past
-   a price to check. Below 768px the same PLANS/FEATURES/BANDS data renders as
-   a matrix instead: features down the left, the three plans across, one
-   screenful of rows a reader can run their eye along.
+/* --------------------------------------- the smaller option (Compliance)
+   NOT A THIRD COLUMN. Essential and Complete are the choice a reader makes;
+   Compliance Administration is a component of Complete offered on its own,
+   so it sits below them, narrower, with no "most popular" flag to compete
+   for. Three equal cards asked the reader to compare three things when only
+   two of them are the decision.
 
-   IT FITS WITHOUT SCROLLING ON MOST PHONES. `min-width` is 340px, which is
-   under the content box at 375px and above (343px at 375, 358px at 390,
-   390px at 430), so no scrollbar appears at all there. At 360 and 320 the
-   table scrolls sideways INSIDE `.pmx__scroll` only — the page body never
-   moves — and the feature column is sticky so the row stays named while the
-   plan columns pass under it.
+   THE NINETEEN-ROW COMPARISON MATRIX THAT LIVED HERE IS GONE. It existed
+   because THREE stacked `.pkg` cards measured 2294px at 390 and 2510px at
+   320 — more than the whole desktop section — so below 768px the section
+   swapped them for a scrollable table. Two cards and this compact third do
+   not run that long, so the table is deleted rather than kept for a problem
+   it no longer has. It took `(min-width:601px)` with it, which was the one
+   width in this stylesheet outside the five the parity tests permit. */
+.pkgalt{margin-top:16px;background:#fff;border:1.5px solid var(--border);
+  border-radius:var(--r-lg);padding:var(--gap-pad);display:grid;gap:10px}
+.pkgalt__head{display:grid;gap:10px;align-items:start}
+@media(min-width:768px){
+  .pkgalt{max-width:none}
+  .pkgalt__head{grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center}
+}
+.pkgalt__head h3{font-size:1.02rem;margin:0 0 3px}
+.pkgalt__head .pkg__for{margin:0}
+/* The price sits flush right of the row on a wide screen and under the name
+   on a phone, which is what `grid-template-columns` above switches. */
+.pkgalt__head .pkg__price{margin:0;text-align:left}
+@media(min-width:768px){.pkgalt__head .pkg__price{text-align:right}}
+.pkgalt__note{margin:0;font-size:.84rem;line-height:1.5;color:var(--slate)}
+.pkgalt__note strong{color:var(--navy)}
+/* Two columns of bullets where there is room, one where there is not — the
+   list is six items and a single column of six pushes the section long on a
+   phone for no gain. */
+.pkgalt__list{list-style:none;margin:0;padding:0;display:grid;gap:7px;font-size:.84rem}
+@media(min-width:640px){.pkgalt__list{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 18px}}
+.pkgalt__list li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;
+  align-items:start;color:var(--slate)}
+.pkgalt__list .ic{color:var(--teal-text);margin-top:2px}
 
-   AVAILABILITY IS NEVER COLOUR ALONE. An included cell is a tick glyph in a
-   ringed badge plus a visually-hidden "Included"; an excluded one is an em
-   dash plus "Not included". The Total Care tint and the "Most popular" pill
-   are emphasis on top of that, never the message itself. */
-.pmx{display:none}
-.pmx__scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
-  background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
-  /* `overflow-x:auto` alone clips the table's paint but still let its layout
-     width reach the document: at 320px, where the 340px table is the widest
-     thing on the page, `documentElement.scrollWidth` went to 332 and Chrome's
-     mobile layout viewport widened with it, so the whole page could be dragged
-     12px sideways. `contain:paint` keeps the overflow inside this box, which
-     is what the scroll container was for. Measured: 320px body scrollWidth
-     back to 320 with the table still scrolling normally inside it. */
-  contain:paint}
-.pmx__scroll:focus-visible{outline:3px solid var(--amber-strong);outline-offset:2px}
-.pmx__table{width:100%;min-width:340px;table-layout:fixed;border-collapse:separate;
-  border-spacing:0;font-size:.78rem;line-height:1.35}
-.pmx__table th,.pmx__table td{padding:8px 6px;text-align:center;vertical-align:middle;
-  border-top:1px solid var(--border-soft);overflow-wrap:break-word}
-/* No `hyphens:auto` here, deliberately. It broke the cells that carry a
-   sentence rather than a label — "Reactive re-pairs, run end to end" and
-   "Certificates tracked be-fore they expire" — which reads as a typo in a
-   pricing table. `overflow-wrap` still stops a long word overflowing, which
-   is the only thing hyphenation was needed for. */
-.pmx__table thead th{border-top:0}
-/* The row header carries the feature name and stays put while the plan
-   columns scroll under it, so it needs an opaque background of its own. */
-.pmx__table th[scope=row]{width:29%;position:sticky;left:0;z-index:2;background:#fff;
-  text-align:left;padding-left:10px;border-right:1px solid var(--border);
-  font-family:var(--font-body);font-size:.76rem;font-weight:600;color:var(--navy);
-  hyphens:manual}
-.pmx__table td{width:23.667%;color:var(--slate)}
-.pmx__corner{position:sticky;left:0;z-index:3;width:29%;background:var(--cloud);
-  border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
-/* COLUMN GEOMETRY IS MEASURED, NOT GUESSED. "Administration" is the widest
-   unbreakable word in the table, and at 375px — the narrowest width the table
-   still fits without scrolling — a 24-column at .62rem left it 4px short, so
-   it broke as "Administratio/n". A sweep of label-column width (28-31%),
-   header size (.58-.62rem) and table min-width (340/348/356) at 430/390/375/
-   360/320 gives one combination that fits every plan name at every width AND
-   keeps 375, 390 and 430 free of any sideways scroll: 29% / .58rem / 340px.
-   The shorter alternatives all bought their 60px back by making 375 scroll. */
-.pmx__plan{width:23.667%;background:var(--cloud);border-bottom:1px solid var(--border);
-  padding:9px 3px;vertical-align:top;font-family:var(--font-display);font-size:.58rem;
-  font-weight:800;line-height:1.24;letter-spacing:-.012em;color:var(--navy)}
-.pmx__plan.is-match{background:var(--steel-soft)}
-.pmx__planname{display:block}
-.pmx__pop{display:inline-block;margin-top:5px;padding:3px 6px;border-radius:var(--r-pill);
-  background:var(--teal-text);color:#fff;font-family:var(--font-body);font-size:.56rem;
-  font-weight:700;letter-spacing:.02em;line-height:1.3;hyphens:none}
-/* The recommended column is tinted the whole way down so the eye can follow
-   it; every cell in it still states its own value in words. */
-.pmx__table td.is-match{background:rgba(230,245,246,.5)}
-.pmx__price{font-family:var(--font-display);font-size:1.02rem;font-weight:800;color:var(--navy)}
-.pmx__row--price td{padding-block:10px}
-.pmx .pkg__was{margin-left:4px;font-size:.74rem}
-.pmx__sub{display:block;font-family:var(--font-body);font-size:.68rem;font-weight:400;
-  color:var(--slate)}
-.pmx__row--total td strong{color:var(--navy);font-weight:700}
-/* Long prose in an 80px column: the sentence rows drop a step so they wrap to
-   fewer lines. Nothing is shortened — "One-off setup from £25/store." is the
-   card's sentence, verbatim. (It ended "+ VAT" until Homepage V3 withdrew that
-   qualifier from the whole site; the sentence is still the card's, still
-   whole, and still not summarised to fit.) */
-.pmx__row--says td{font-size:.72rem;line-height:1.3}
-.pmx__yes{display:inline-grid;place-items:center;width:25px;height:25px;border-radius:50%;
-  background:var(--success-bg);color:var(--success)}
-.pmx__yes .ic{width:15px;height:15px}
-.pmx__no{display:inline-block;font-size:1rem;font-weight:700;color:var(--slate)}
-.pmx__mark{padding-block:6px}
-.pmx__foot{margin:10px 0 0;font-size:.76rem;line-height:1.45;color:var(--slate)}
-.pmx__foot strong{color:var(--navy)}
-@media (max-width:767px){
-  .pkgs{display:none}
-  .pmx{display:block}
-}
-/* Between a large phone and the card breakpoint the table has 560-720px to
-   work with, so the type that a 356px column forced down comes back up. */
-@media (min-width:601px) and (max-width:767px){
-  .pmx__table{font-size:.86rem}
-  .pmx__table th,.pmx__table td{padding:10px 10px}
-  .pmx__table th[scope=row]{font-size:.85rem;padding-left:14px}
-  .pmx__plan{font-size:.82rem;padding:12px 10px}
-  .pmx__pop{font-size:.66rem;padding:3px 9px}
-  .pmx__price{font-size:1.15rem}
-  .pmx__row--says td{font-size:.82rem}
-  .pmx__sub{font-size:.76rem}
-}
-@media (max-width:374px){
-  .pmx__table{font-size:.74rem}
-  .pmx__table th,.pmx__table td{padding:7px 5px}
-  .pmx__table th[scope=row]{font-size:.73rem;padding-left:9px}
-  .pmx__plan{padding:9px 3px}
-  .pmx__price{font-size:.95rem}
-}
+/* The two main cards never collapse to one column above 640px: two abreast is
+   the comparison, and `auto-fit` would drop them to one the moment the track
+   fell under its floor. */
+@media(min-width:640px){.pkgs--two{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ------------------------------------------------------------ calculator */
 .calc{display:grid;gap:26px}
