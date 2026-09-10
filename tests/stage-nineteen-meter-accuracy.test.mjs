@@ -337,7 +337,7 @@ test("Avg SLA target averages the board's own due dates", () => {
   assert.notEqual(result.sla.averageHours, 4);
 });
 
-test("SLA met counts closed jobs against their own due date, and judges nothing else", () => {
+test("SLA met measures the promise that was made, and judges nothing else", async () => {
   /*
    * §4.4 of the dashboard master prompt: the old card averaged the TARGETS on
    * the rows, so a portfolio three months late reported the same figure as one
@@ -395,6 +395,58 @@ test("SLA met counts closed jobs against their own due date, and judges nothing 
     ),
     true,
     "a bare due date is met by closing on that day",
+  );
+
+  /*
+   * THE PROMISE IS `target_completion_date` FIRST, `due_at` SECOND — §4.4 asks
+   * this meter to report "the figure from the Overview card's source", and the
+   * Overview has always measured `coalesce(target_completion_date, due_at)`.
+   *
+   * This function read `dueAt` alone, so a job carrying an explicit target was
+   * judged against the board's deadline instead of the commitment somebody
+   * made, and a job with a target and NO due date fell out of the denominator
+   * altogether — a smaller, easier population than the card it is supposed to
+   * agree with. Both directions are pinned below.
+   */
+  const targetDay = new Date(NOW - 4 * DAY).toISOString().slice(0, 10);
+  assert.equal(
+    meters.slaMet(
+      row({
+        status: "Job Completed",
+        requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+        dueAt: null,
+        targetCompletionDate: targetDay,
+        completedAt: `${targetDay}T09:00:00.000Z`,
+      }),
+    ),
+    true,
+    "a target date with no due date is a promise, not an absence",
+  );
+  assert.equal(
+    meters.slaMet(
+      row({
+        status: "Job Completed",
+        requestedAt: new Date(NOW - 10 * DAY).toISOString(),
+        /* The board says late, the commitment says early: the commitment wins,
+           because that is the one the Overview measures. */
+        dueAt: new Date(NOW - 1 * DAY).toISOString(),
+        targetCompletionDate: new Date(NOW - 8 * DAY).toISOString().slice(0, 10),
+        completedAt: new Date(NOW - 3 * DAY).toISOString(),
+      }),
+    ),
+    false,
+    "the explicit target beats the board deadline, in both directions",
+  );
+
+  /* And the SQL it has to agree with still says the same thing. */
+  const aggregates = await readFile(
+    new URL("../app/lib/overview-aggregates.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    aggregates,
+    /coalesce\(nullif\(\$\{dayOnly\(maintenanceRequests\.targetCompletionDate\)\}/,
+    "the Overview still coalesces the target date ahead of the due date",
   );
 
   const result = compute([closedOnTime, closedLate, stillOpen, noDueDate], "90");

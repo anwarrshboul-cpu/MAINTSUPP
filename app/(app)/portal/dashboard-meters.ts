@@ -307,8 +307,25 @@ export function slaTargetHours(request: MaintenanceRequest) {
  */
 export function slaMet(request: MaintenanceRequest): boolean | null {
   if (!isClosedRequest(request)) return null;
-  if (!request.dueAt || !request.completedAt) return null;
-  const due = String(request.dueAt).trim();
+  /*
+   * THE PROMISE IS THE TARGET DATE FIRST, THE BOARD'S DEADLINE SECOND.
+   *
+   * This read `request.dueAt` alone, while the Overview's SQL has always
+   * measured against `coalesce(target_completion_date, due_at)`. Two
+   * consequences, both wrong in the same direction: a job carrying an explicit
+   * target was judged against the board's deadline instead of the commitment
+   * somebody actually made, and a job with a target and NO due date was
+   * dropped from the denominator entirely — so the Jobs meter quietly measured
+   * a smaller, easier population than the card §4.4 asked it to agree with.
+   *
+   * `target_completion_date` is the explicit commitment; `due_at` is the
+   * board's deadline. First one present wins, per row, exactly as the SQL
+   * does it.
+   */
+  const promised = String(request.targetCompletionDate ?? "").trim()
+    || String(request.dueAt ?? "").trim();
+  if (!promised || !request.completedAt) return null;
+  const due = promised;
   const closed = String(request.completedAt).trim();
   if (!due || !closed) return null;
   /* Ten characters or fewer is a DAY: compare days, so closing on the due day
