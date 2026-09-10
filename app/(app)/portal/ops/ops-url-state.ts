@@ -44,7 +44,22 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
  * so a component that only listened to `popstate` would update the address bar
  * and not the page.
  */
-const URL_CHANGED = "maintsupp:urlstate";
+/**
+ * Exported because a caller that changes the address bar WITHOUT `setParams` —
+ * the shell's drill-through pushes a different pathname, which `setParams`
+ * cannot do — has to announce it. Neither `pushState` nor `replaceState` fires
+ * an event of its own, so a subscriber that is not told simply never re-reads.
+ */
+export const URL_CHANGED = "maintsupp:urlstate";
+
+/**
+ * "Re-read every aggregate on screen." Dispatched by the topbar's Refresh.
+ *
+ * Exported so the shell dispatches the same string this listens for; a literal
+ * on each side is one typo away from a button that silently does nothing, which
+ * is what it was already doing for these cards.
+ */
+export const OPS_REFRESH = "maintsupp:refresh-ops";
 
 function subscribe(onChange: () => void): () => void {
   window.addEventListener("popstate", onChange);
@@ -233,6 +248,27 @@ export function useOpsQuery<T>(
   }, [enabled, key, path, search]);
 
   const reload = useCallback(() => setNonce((value) => value + 1), []);
+
+  /*
+   * THE TOPBAR'S REFRESH BUTTON, WHICH THIS CARD CANNOT SEE.
+   *
+   * The shell's Refresh re-reads the job list and tells the board to re-read
+   * its snapshot; it had nothing to say to a card that reads an aggregate
+   * endpoint instead. On the Overview — which no longer waits for the job list
+   * at all — that left the one control labelled "Refresh the figures on screen"
+   * refreshing none of the figures on screen.
+   *
+   * A window event rather than a prop threaded through five section components:
+   * the shell does not know which cards exist, and every card that wants to
+   * answer already has the hook.
+   */
+  useEffect(() => {
+    if (!enabled) return;
+    const listener = () => setNonce((value) => value + 1);
+    window.addEventListener(OPS_REFRESH, listener);
+    return () => window.removeEventListener(OPS_REFRESH, listener);
+  }, [enabled]);
+
   return {
     data: result?.data ?? null,
     loading: enabled && result?.key !== key,

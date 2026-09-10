@@ -270,6 +270,74 @@ export function slaTargetHours(request: MaintenanceRequest) {
 }
 
 /**
+ * DID THIS JOB MEET ITS TARGET — the question `slaTargetHours` does not answer.
+ *
+ * The dashboard brief §4.4 puts it bluntly: the Jobs page meter "Avg SLA target
+ * 64.8 hrs" is "an average of the targets themselves and measures nothing about
+ * performance". A portfolio whose every job is three months late reports the
+ * same 64.8 as one where every job closed on time. The number was honest about
+ * what it measured and useless for what a reader wanted from it.
+ *
+ * So this is the performance question instead: of the jobs that CLOSED and
+ * carried a due date, how many closed on or before it.
+ *
+ * Three decisions, each of which changes the figure:
+ *
+ *   · only CLOSED jobs count. An open job has not missed its target, it has not
+ *     met it either, and counting it as a miss would make the figure fall every
+ *     day nobody did anything — including the day the work was booked;
+ *   · a job with no due date is EXCLUDED rather than counted as met. There is
+ *     nothing to have met. The sample is returned beside the percentage so a
+ *     reader can see how thin it is — on the monday export it was 1 due date
+ *     across 745 rows;
+ *   · a BARE `YYYY-MM-DD` due date is met if the job closed on that DAY, not by
+ *     midnight at its start. This is the same rule `duePassed` encodes in
+ *     `app/lib/job-metrics.ts` and the same one `overdueOpenSql` encodes in
+ *     SQL: treating a bare date as UTC midnight marks work delivered on the due
+ *     day as late for everyone west of Greenwich.
+ *
+ * `null` for a job that cannot be judged, so the caller filters rather than
+ * having a boolean stand in for "unknown".
+ *
+ * THE OVERVIEW COMPUTES THE SAME RULE IN SQL, and this file is the definition
+ * of record because it cannot import: seven suites transpile it alone and load
+ * it from a `data:` URL, so it has no runtime imports and nothing here can be
+ * shared by reference. `tests/stage-nineteen-meter-accuracy` holds the two
+ * together.
+ */
+export function slaMet(request: MaintenanceRequest): boolean | null {
+  if (!isClosedRequest(request)) return null;
+  /*
+   * THE PROMISE IS THE TARGET DATE FIRST, THE BOARD'S DEADLINE SECOND.
+   *
+   * This read `request.dueAt` alone, while the Overview's SQL has always
+   * measured against `coalesce(target_completion_date, due_at)`. Two
+   * consequences, both wrong in the same direction: a job carrying an explicit
+   * target was judged against the board's deadline instead of the commitment
+   * somebody actually made, and a job with a target and NO due date was
+   * dropped from the denominator entirely — so the Jobs meter quietly measured
+   * a smaller, easier population than the card §4.4 asked it to agree with.
+   *
+   * `target_completion_date` is the explicit commitment; `due_at` is the
+   * board's deadline. First one present wins, per row, exactly as the SQL
+   * does it.
+   */
+  const promised = String(request.targetCompletionDate ?? "").trim()
+    || String(request.dueAt ?? "").trim();
+  if (!promised || !request.completedAt) return null;
+  const due = promised;
+  const closed = String(request.completedAt).trim();
+  if (!due || !closed) return null;
+  /* Ten characters or fewer is a DAY: compare days, so closing on the due day
+     counts as met. Longer is an instant: compare instants. */
+  if (due.length <= 10) return closed.slice(0, 10) <= due.slice(0, 10);
+  const dueAt = new Date(due).getTime();
+  const closedAt = new Date(closed).getTime();
+  if (!Number.isFinite(dueAt) || !Number.isFinite(closedAt)) return null;
+  return closedAt <= dueAt;
+}
+
+/**
  * The window the period selector describes, as a pair of timestamps.
  *
  * The one-day grace on the end exists because a request can carry a due or
@@ -372,6 +440,41 @@ function averageTrend(
 }
 
 /**
+ * The SLA-met percentage per bucket, so the sparkline plots what the number
+ * above it says.
+ *
+ * Bucketed by COMPLETION rather than by request date, unlike every other trend
+ * here, and the difference is the point: a job raised in March and closed in
+ * September was met or missed in September. Bucketing it in March would move
+ * this quarter's performance into last quarter's column.
+ *
+ * A bucket with nothing to judge reads zero rather than being dropped, which is
+ * the same convention `averageTrend` uses and the same caveat its label
+ * carries: these lines are what is TRUE OF THE ROWS IN VIEW, sliced by date.
+ * They are not a history, because nothing records what a job's state was last
+ * week.
+ */
+function metTrend(
+  requests: MaintenanceRequest[],
+  span: { start: number; end: number },
+) {
+  const met = new Array<number>(meterTrendBuckets).fill(0);
+  const judged = new Array<number>(meterTrendBuckets).fill(0);
+  for (const request of requests) {
+    const outcome = slaMet(request);
+    if (outcome === null) continue;
+    const stamp = requestStamp(request, true);
+    if (!Number.isFinite(stamp)) continue;
+    const index = bucketIndex(stamp, span);
+    judged[index] += 1;
+    if (outcome) met[index] += 1;
+  }
+  return met.map((count, index) =>
+    judged[index] ? Math.round((count / judged[index]) * 100) : 0,
+  );
+}
+
+/**
  * What each sparkline actually plots, in the card's own words.
  *
  * Every one of them ends by saying it is not a history, because that is the
@@ -388,7 +491,7 @@ export const jobMeterTrendLabels = {
     "Jobs awaiting sign-off by the week they were raised, across the selected period. Not a history of the awaiting count.",
   closed:
     "Completions by the week the job was closed, across the selected period.",
-  sla: "Mean request-to-due window of the jobs raised in each bucket, across the selected period. Empty buckets read zero.",
+  sla: "Share of the jobs CLOSED in each bucket that closed on or before their due date, across the selected period. Buckets with nothing to judge read zero.",
 } as const;
 
 export interface JobMeter {
@@ -415,6 +518,17 @@ export interface JobMeters {
      */
     sample: number;
     trend: number[];
+    /**
+     * THE PERFORMANCE FIGURE — the share of closed, due-dated jobs that closed
+     * on or before their due date. See `slaMet`.
+     *
+     * `null` when nothing in view can be judged, which is a different fact from
+     * 0%: it means no closed job carried a due date, not that none of them met
+     * it. The card must print a dash for one and a number for the other.
+     */
+    metPercent: number | null;
+    /** How many jobs the percentage is built from. Always printed beside it. */
+    metSample: number;
   };
 }
 
@@ -454,6 +568,12 @@ export function computeJobMeters(
     .map(slaTargetHours)
     .filter((hours): hours is number => hours !== null);
 
+  /* The performance question, beside the target one. See `slaMet`. */
+  const judged = requests
+    .map(slaMet)
+    .filter((met): met is boolean => met !== null);
+  const metCount = judged.filter(Boolean).length;
+
   return {
     open: meter(isOpenRequest),
     critical: meter(isCriticalRequest),
@@ -465,7 +585,11 @@ export function computeJobMeters(
         ? slaHours.reduce((sum, hours) => sum + hours, 0) / slaHours.length
         : null,
       sample: slaHours.length,
-      trend: averageTrend(requests, span),
+      trend: metTrend(requests, span),
+      /* `null` rather than 0 when nothing can be judged: no closed job carried
+         a due date, which is not the same fact as "none of them met it". */
+      metPercent: judged.length ? Math.round((metCount / judged.length) * 100) : null,
+      metSample: judged.length,
     },
   };
 }

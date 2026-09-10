@@ -182,11 +182,23 @@ export const CAPABILITY_CATALOGUE = [
   },
   {
     key: "billing.manage",
-    label: "Manage billing and plans",
+    label: "Manage billing and bank details",
     group: "Owner",
+    /*
+     * ENFORCED NOW, and the flag is cleared in the same edit that gave it
+     * something to guard.
+     *
+     * Module 5 §16: "Bank details appear only in settings, never in code."
+     * `/api/finance/settings` reads this capability twice — once to decide
+     * whether a sort code and an account number come back in full or masked to
+     * their last four digits, and once to refuse a write of either. It is the
+     * narrowest door the product has, which is the right one for the detail
+     * that moves money: `contractors` deliberately carries no account number at
+     * all because this repository is public, and these are the workspace's own
+     * accounts, typed into a form by an owner.
+     */
     description:
-      "Change a workspace's plan tier and billing arrangements. No billing screen exists yet, so this grants nothing today.",
-    unenforced: true,
+      "See and change the workspace's bank details, and its plan tier. Without it the finance settings screen masks every account number to its last four digits and refuses a change.",
   },
 ] as const satisfies readonly CapabilityDefinition[];
 

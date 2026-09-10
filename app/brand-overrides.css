@@ -9716,3 +9716,64 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   color: var(--ink-muted, #8fa3b8);
   text-align: left;
 }
+
+/*
+ * THE DRILL-THROUGH BANNER above the Jobs board.
+ *
+ * Every chart on the Overview navigates here carrying its filter state, and the
+ * shell applies it to the rows before the board sees them — see
+ * `app/(app)/portal/board-drill-filter.ts` for why it is applied there rather
+ * than inside a file held under a line cap. This row is what says so: a board
+ * holding 17 of 981 rows with no explanation is worse than no filter at all.
+ *
+ * Tokens only, and the same widths the rest of the product is held to.
+ */
+.board-drill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brand-bright);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  font-size: 0.82rem;
+}
+
+.board-drill__lead {
+  color: var(--muted);
+}
+
+.board-drill__chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
+}
+
+.board-drill__chip strong {
+  font-weight: 600;
+}
+
+.board-drill__clear {
+  min-height: 44px;
+  padding: 0 12px;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--control-fg-strong);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.board-drill__clear:focus-visible {
+  /* `--brand-bright` measured 2.59:1 here, below SC 1.4.11's 3:1 floor for a
+     focus indicator. Every other ring on this row already uses `--accent-fg`,
+     which measures 6.02:1 light and 8.65:1 dark. */
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}

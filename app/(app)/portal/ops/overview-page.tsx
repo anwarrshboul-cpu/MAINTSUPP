@@ -1,231 +1,108 @@
 "use client";
 
 /**
- * THE OVERVIEW — six cards, all of them server-counted.
+ * OPERATIONS CENTRE → OVERVIEW.
  *
- * Nine cards became six. The three that went were duplicates of ones that
- * stayed, which is why removing them loses nothing:
+ * The page is a shell: one filter state, one cohort, and six bands that each
+ * read one endpoint. Every figure is counted in Postgres — `/api/dashboard/*`
+ * issues one aggregate per card — and the browser receives bucket rows, never
+ * job rows. `requests.filter(...)` appears nowhere on this page and cannot: the
+ * component is not given a job list.
  *
- *   • "Jobs by status" drew a donut from a taxonomy no job on this board uses —
- *     Open / In progress / Awaiting parts / On hold / Scheduled — with three
- *     permanent zeros and four fifths of the work in a bucket labelled "On
- *     hold". Deleted, not remapped; the Status dimension of the Job breakdown
- *     shows the real statuses.
- *   • "Units requiring attention" was the same open jobs as "Sites needing
- *     attention", shown as a flat feed. Merged into the site rows, which is
- *     where a job is answerable.
- *   • "Open job ageing" was that same set again. Its distribution bar is now
- *     the header of the attention card and its "waiting longest" list is the
- *     first site row.
+ * ── THE ORDER, AND WHY IT CHANGED ─────────────────────────────────────────
  *
- * Card order is deliberate and it is the reading order on a phone: what is on
- * fire, where it is, what the work is made of, how we are doing, what it costs.
+ * Pulse → At a glance → Financial status → Performance over time → Job
+ * breakdown → Sites needing attention.
  *
- * ── EVERY NUMBER COMES FROM `/api/dashboard/*` ────────────────────────────
+ * Two moves from the old layout, both from §0 of the brief: Sites needing
+ * attention drops BELOW Job breakdown, and Cost and Performance rise ABOVE
+ * both. The page now reads as a question sequence — how much work is there,
+ * what is it costing, is it getting faster, what kind of work is it, and only
+ * then which places need attention.
  *
- * Not one figure on this page is computed in the browser. The previous version
- * filtered the whole job list plus a 432 KB workspace snapshot on every render,
- * which is why its filters could only narrow what had already been downloaded.
- * Five endpoints, five payloads sized by the card.
+ * ── ONE STATE, IN THE URL ─────────────────────────────────────────────────
+ *
+ * Filters, the date range and the cohort axis are one object, parsed by the
+ * same `parseFilters` the route handlers use, and encoded in the address bar.
+ * A filtered Overview is therefore a link, and the link means the same thing to
+ * the person who receives it. Nothing here touches `localStorage`: a preference
+ * kept in one browser makes the same operator read two differently-configured
+ * pages on a phone and a laptop, and neither is wrong. The two genuine
+ * PREFERENCES — the cohort axis and the split-by-priority toggle — are stored
+ * per user on the server, and the URL still overrides them.
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Icon } from "../../../components";
+import opsTokensCss from "./ops-tokens.css?url";
 import opsCss from "./ops.css?url";
-import {
-  CompactJobRow,
-  EmptyState,
-  ErrorState,
-  HiddenDataTable,
-  OpsCard,
-  ProgressMeter,
-  RadialMeter,
-  SegmentedMeter,
-  SkeletonRow,
-  StatusChip,
-  money,
-  plural,
-} from "./ops-primitives";
+import overviewCss from "./overview.css?url";
+import glanceCss from "./overview-glance.css?url";
+import analysisCss from "./overview-analysis.css?url";
+import portfolioCss from "./overview-portfolio.css?url";
+import toolsCss from "./overview-tools.css?url";
 import { OpsFilterBar, PeriodControl, type FilterGroup } from "./ops-filter-bar";
 import { useOpsQuery, useQueryState } from "./ops-url-state";
+import { AtAGlanceCard, PulseRow } from "./overview-glance";
+import { FinancialStatusCard } from "./overview-financial";
+import { PerformanceCard } from "./overview-performance";
+import { JobBreakdownCard } from "./overview-breakdown";
+import { SitesAttentionCard } from "./overview-sites";
+import { OverviewRecordsPanel } from "./overview-records";
+import { MeterSettings } from "./meter-settings";
+import { ResolveNames } from "./resolve-names";
+import { BulkSiteAssign } from "./bulk-site-assign";
+/*
+ * FROM `overview-meters.ts`, NEVER FROM `dashboard-filters.ts`.
+ *
+ * This is a client component. `dashboard-filters.ts` imports drizzle and
+ * `db/schema`, so two words taken from it would drag the entire query builder
+ * into the browser bundle to render the string "Date completed" —
+ * `tests/ops-rebuild-foundations.test.mjs` pins the absence of that import for
+ * exactly this reason, and it caught it here.
+ *
+ * The full period preset list comes off the wire from `/api/dashboard/filters`
+ * for the same reason; `FALLBACK_PERIODS` below is what the control shows in
+ * the moment before that answers.
+ */
 import {
-  AGEING_BANDS,
-  FAMILY_COLOUR,
-  FAMILY_LABEL,
-  NOT_RECORDED_COLOUR,
-  PRIORITY_BANDS,
-  UNASSIGNED_SITE_ID,
-  type AgeingBandKey,
-  type JobStatusFamily,
-  type PriorityKey,
+  DEFAULT_MEASURE,
+  DEFAULT_PERIOD_KEY,
+  type CohortMeasure,
+} from "../../../lib/overview-meters";
+import {
   NATURE_KEYS,
   NATURE_LABEL,
   NATURE_COLOUR,
   type NatureKey,
 } from "../../../lib/job-metrics";
-import { complianceBandColour } from "../../../lib/compliance-status";
 
-/* ── Payload shapes, mirroring the endpoints ─────────────────────────────── */
-
-type Period = {
-  key: string;
-  label: string;
-  start: string | null;
-  endExclusive: string;
-  days: number;
-  hasPrevious: boolean;
-};
-
-type Totals = {
-  inPeriod: number;
-  open: number;
-  closed: number;
-  attention: number;
-  urgentOpen: number;
-  unassignedOpen: number;
-};
-
-type SummaryPayload = {
-  period: Period;
-  totals: Totals;
-  oldestOpenDays: number | null;
-  oldestOpenId: string | null;
-  previous: Totals | null;
-  unmappedStatuses: string[];
-};
-
-type AttentionPayload = {
-  period: Period;
-  ageing: Array<{
-    key: AgeingBandKey;
-    label: string;
-    colour: string;
-    range: string;
-    count: number;
-  }>;
-  siteCount: number;
-  sites: Array<{
-    siteId: string;
-    siteName: string;
-    unassigned: boolean;
-    openCount: number;
-    urgentCount: number;
-    oldestDays: number;
-    oldestBand: AgeingBandKey;
-    priorities: PriorityKey[];
-    jobs: Array<{
-      id: string;
-      reference: string | null;
-      title: string;
-      priority: PriorityKey;
-      priorityLabel: string;
-      status: string;
-      family: JobStatusFamily;
-      daysOpen: number;
-      band: AgeingBandKey;
-    }>;
-    compliance: {
-      satisfied: number;
-      applicable: number;
-      notRequired: number;
-      total: number;
-      percent: number;
-      scored: boolean;
-    };
-  }>;
-};
-
-type Bucket = {
-  key: string;
-  label: string;
-  value: number;
-  colour: string;
-  notRecorded: boolean;
-  family?: JobStatusFamily;
-};
-
-type BreakdownPayload = {
-  period: Period;
-  total: number;
-  dimensions: Record<string, { recorded: number; total: number; buckets: Bucket[] }>;
-};
-
-type PerformancePayload = {
-  period: Period;
-  sla: {
-    closed: number;
-    overdueOpen: number;
-    measured: number;
-    met: number;
-    percent: number | null;
-    coveragePercent: number;
-    targetField: "target_completion_date" | "due_at" | null;
-    averageCloseDays: number | null;
-    byPriority: Array<{
-      key: PriorityKey;
-      label: string;
-      measured: number;
-      met: number;
-      percent: number | null;
-    }>;
-  };
-  mix: {
-    buckets: Array<{
-      label: string;
-      start: string;
-      endExclusive: string;
-      endInclusive: string;
-      reactive: number;
-      planned: number;
-      partial: boolean;
-    }>;
-    reactivePercent: number | null;
-  };
-};
-
-type CostPayload = {
-  period: Period;
-  totalSpend: number;
-  costedJobs: number;
-  sites: Array<{
-    siteId: string;
-    siteName: string;
-    unassigned: boolean;
-    spend: number;
-    annualBudget: number | null;
-    proRatedBudget: number | null;
-    utilisation: number | null;
-  }>;
-  unattributedSiteSpend: number;
-  sitesWithoutBudget: number;
-  periodDays: number;
-  contractors: Array<{ key: string; name: string; spend: number; jobs: number; linked: boolean }>;
-  contractorAttributed: number;
-  contractorLinked: number;
-};
-
-type FiltersPayload = {
-  sites: Array<{ value: string; label: string; count: number }>;
-  contractors: Array<{ value: string; label: string; count: number }>;
-  statuses: Array<{ value: string; label: string; count: number }>;
-  engineers: Array<{ value: string; label: string; count: number }>;
-  labels: Array<{ value: string; label: string; count: number }>;
-  tiers: Array<{ value: string; label: string; count: number }>;
-  periods: ReadonlyArray<{ key: string; label: string }>;
-  priorities: ReadonlyArray<{ key: string; label: string; colour: string }>;
-  families: ReadonlyArray<{ value: string; label: string; colour: string }>;
-};
+/* Kept in the import for the pinned shape below; the nature chips take their
+   colour from the severity ramp on this page rather than from this constant. */
+void NATURE_COLOUR;
+import type {
+  BreakdownPayload,
+  CostPayload,
+  MetersPayload,
+  PerformancePayload,
+  RecordsQuery,
+  SitesAttentionPayload,
+  StuckPayload,
+} from "./overview-contract";
 
 /**
- * The parameters this page owns.
+ * The parameters this page owns. `clearAll` deletes exactly these and nothing
+ * else, so a deep-link parameter another screen put in the URL survives a
+ * "Clear all" it was never part of.
  *
- * Named so `Clear all` clears exactly these and leaves anything else in the URL
- * alone — the section router, a deep link into a job, a preview token.
+ * `measure` is here so that clearing filters also returns the axis to its
+ * default — a reader who has cleared everything expects to be looking at the
+ * page as it opens.
  */
 const FILTER_KEYS = [
   "period",
   "from",
   "to",
+  "measure",
   "site",
   "priority",
   "family",
@@ -237,8 +114,41 @@ const FILTER_KEYS = [
   "contractor",
 ] as const;
 
-/** Coverage below this is drawn muted rather than as a headline. */
-const COVERAGE_CONFIDENCE = 70;
+/**
+ * The three the control shows before `/api/dashboard/filters` answers.
+ *
+ * Deliberately the short list rather than a copy of all eight: a fallback that
+ * looks complete is one nobody notices has gone stale, and these three cover
+ * every default the page can open with.
+ */
+const FALLBACK_PERIODS = [
+  { key: "7", label: "7 days" },
+  { key: "30", label: "30 days" },
+  { key: "90", label: "90 days" },
+] as const;
+
+type FiltersPayload = {
+  periods?: ReadonlyArray<{ key: string; label: string }>;
+  sites: Array<{ value: string; label: string; count: number }>;
+  contractors: Array<{ value: string; label: string; count: number }>;
+  statuses: Array<{ value: string; label: string; count: number }>;
+  engineers: Array<{ value: string; label: string; count: number }>;
+  labels: Array<{ value: string; label: string; count: number }>;
+  tiers: Array<{ value: string; label: string; count: number }>;
+  families: Array<{ value: string; label: string; count: number }>;
+  priorities: Array<{ value: string; label: string; count: number }>;
+};
+
+type PreferencesPayload = { measure: string; split: string };
+
+/** The five destinations of the sticky jump bar — §1.8. */
+const SECTIONS = [
+  { id: "ovw-glance-title", label: "At a glance" },
+  { id: "ovw-money-title", label: "Cost" },
+  { id: "ovw-performance-title", label: "Performance" },
+  { id: "ovw-breakdown-title", label: "Jobs" },
+  { id: "ovw-sites-title", label: "Sites" },
+] as const;
 
 export function OverviewPage({
   onNavigateToJobs,
@@ -246,1477 +156,528 @@ export function OverviewPage({
   onNavigateToCompliance,
   onNavigateToSites,
 }: {
-  /** Deep-links into the Jobs list with equivalent parameters. */
   onNavigateToJobs: (query: string) => void;
   onOpenJob: (id: string) => void;
   onNavigateToCompliance: () => void;
-  onNavigateToSites: (query?: string) => void;
+  onNavigateToSites: (query: string) => void;
 }) {
-  const { params, setParams, search } = useQueryState();
+  const { params, setParams, search: urlSearch } = useQueryState();
+  const preferences = useOpsQuery<PreferencesPayload>("/api/dashboard/preferences", "");
 
   /*
-   * The query string the endpoints are called with is the page's own, minus
-   * nothing. There is deliberately no client-side massaging: the browser sends
-   * what is in the address bar and the server parses it with the SAME parser
-   * that serialises it, so a link can never mean one thing to each.
+   * THE SEARCH THE AGGREGATES ACTUALLY GET — the URL, plus the stored axis
+   * when the URL is silent about it.
+   *
+   * Every `/api/dashboard/*` route resolves the axis through `parseFilters`,
+   * which reads the QUERY STRING and has no route to a per-user preference. So
+   * a saved axis of `completed` reached the CONTROL and never reached a single
+   * aggregate: the select read "Date completed" while all six cards counted on
+   * `requested_at`. Making each card state what its own payload measured
+   * stopped them asserting something false — but it left the control
+   * contradicting the page it controls, which is a smaller lie rather than
+   * none.
+   *
+   * Merging it into the search the FETCHES use is what makes a stored
+   * preference behave the way `app/api/dashboard/preferences/route.ts`
+   * documents it: "a stored preference SEEDS the page". The URL still wins
+   * whenever it says anything, so a shared link means the same thing to
+   * everyone who opens it — which is the property the note that used to stand
+   * here was protecting when it refused to write the preference INTO the
+   * address bar. Nothing is written to the address bar now either.
+   *
+   * The cost is one refetch for a reader whose saved axis is not the default:
+   * the preference arrives from its own request, so the first render fetches
+   * on the URL alone. Nobody who has never changed the setting pays it.
    */
-  const summary = useOpsQuery<SummaryPayload>("/api/dashboard/summary", search);
-  const attention = useOpsQuery<AttentionPayload>("/api/dashboard/sites-attention", search);
-  const breakdown = useOpsQuery<BreakdownPayload>("/api/dashboard/job-breakdown", search);
-  const performance = useOpsQuery<PerformancePayload>("/api/dashboard/performance", search);
+  const search = useMemo(() => {
+    const stored = preferences.data;
+    if (!stored) return urlSearch;
+    const next = new URLSearchParams(urlSearch);
+    if (!next.has("measure") && stored.measure) next.set("measure", stored.measure);
+    if (!next.has("split") && stored.split) next.set("split", stored.split);
+    const merged = next.toString();
+    /* Returned unchanged when nothing was added, so the six queries below keep
+       the same key and do not refetch for a reader on the defaults. */
+    return merged === urlSearch ? urlSearch : merged;
+  }, [urlSearch, preferences.data]);
+
+  /*
+   * ONE ROUND TRIP PER CARD — §1.6. Seven cards, seven aggregates, and the
+   * options list, which is deliberately unfiltered so a reader can WIDEN a
+   * filter rather than only narrow one.
+   */
+  const meters = useOpsQuery<MetersPayload>("/api/dashboard/meters", search);
+  const stuck = useOpsQuery<StuckPayload>("/api/dashboard/stuck", search);
   const cost = useOpsQuery<CostPayload>("/api/dashboard/cost", search);
+  const performance = useOpsQuery<PerformancePayload>("/api/dashboard/performance", search);
+  const breakdown = useOpsQuery<BreakdownPayload>("/api/dashboard/job-breakdown", search);
+  const attention = useOpsQuery<SitesAttentionPayload>("/api/dashboard/sites-attention", search);
   const options = useOpsQuery<FiltersPayload>("/api/dashboard/filters", "");
 
-  const setPeriod = useCallback(
-    (next: { period?: string; from?: string; to?: string }) => {
-      const updated = new URLSearchParams(window.location.search);
-      if (next.period !== undefined) {
-        if (next.period === "90") updated.delete("period");
-        else updated.set("period", next.period);
-        if (next.period !== "custom") {
-          updated.delete("from");
-          updated.delete("to");
-        }
-      }
-      if (next.from !== undefined) updated.set("from", next.from);
-      if (next.to !== undefined) updated.set("to", next.to);
-      setParams(updated);
+  /*
+   * THE AXIS: the URL first, the stored preference second, the default last.
+   *
+   * Derived rather than written back into the address bar. Seeding the URL from
+   * a fetch would mean a link copied a second after the page opened carried a
+   * parameter the sender never chose, and it would need a setState in an effect
+   * to do it — which the React Compiler rejects and which costs a render pass.
+   *
+   * ── THIS IS AN INTENT. IT IS NOT A MEASUREMENT. ───────────────────────────
+   *
+   * Every `/api/dashboard/*` route resolves the axis through `parseFilters`,
+   * which reads the QUERY STRING and has no route to a stored per-user
+   * preference. So the middle arm of this expression — the preference — reaches
+   * the CONTROL below and never reaches the aggregate: a reader whose saved
+   * axis is `completed`, arriving at a bare `/dashboard`, gets a cohort the
+   * server cut on `requested_at`.
+   *
+   * Printing `cohortWording(measure, total)` over that was a wrong statement of
+   * fact about the data, in the largest sentence on every card. Each card now
+   * takes its wording from the `measure` field ITS OWN payload returned, and
+   * none of them draws a cohort sentence before that payload exists. This value
+   * is what the reader has asked for and what the next fetch will carry once it
+   * reaches the URL; it no longer describes a figure anywhere.
+   *
+   * The remaining seam is visible rather than hidden: with a saved preference
+   * and a bare URL the control below reads "Date completed" while the cards
+   * read "requested". Closing it means making the preference reach the server —
+   * either by sending it with the fetch or by seeding the URL from it — and
+   * both are written up in the report rather than decided here.
+   */
+  const measure: CohortMeasure =
+    params.get("measure") === "completed"
+      ? "completed"
+      : params.get("measure") === "requested"
+        ? "requested"
+        : preferences.data?.measure === "completed"
+          ? "completed"
+          : DEFAULT_MEASURE;
+
+  const splitByPriority =
+    params.get("split") === "priority"
+      ? true
+      : params.get("split") === "off"
+        ? false
+        : preferences.data?.split === "on";
+
+  const [records, setRecords] = useState<RecordsQuery | null>(null);
+  const [tool, setTool] = useState<"meters" | "contractors" | "sites" | null>(null);
+
+  const setFilterParams = useCallback(
+    (mutate: (next: URLSearchParams) => void) => {
+      const next = new URLSearchParams(window.location.search);
+      mutate(next);
+      setParams(next);
     },
     [setParams],
   );
 
   const clearAll = useCallback(() => {
-    const updated = new URLSearchParams(window.location.search);
-    for (const key of FILTER_KEYS) updated.delete(key);
-    setParams(updated);
-  }, [setParams]);
+    setFilterParams((next) => {
+      for (const key of FILTER_KEYS) next.delete(key);
+      next.delete("split");
+    });
+  }, [setFilterParams]);
 
   /**
-   * Add or remove one value of one dimension — what a chart segment does when
-   * it is tapped. Tapping the same segment again clears it, which is what makes
-   * cross-filtering explorable rather than a one-way door.
+   * Cross-filter: tapping a segment adds a chip, tapping it again removes one.
+   * Values are sorted on the way in so two identical filter states serialise
+   * identically and cannot put duplicate entries in the back stack.
    */
   const toggleFilter = useCallback(
     (key: string, value: string) => {
-      const updated = new URLSearchParams(window.location.search);
-      const existing = updated.getAll(key);
-      const next = existing.includes(value)
-        ? existing.filter((entry) => entry !== value)
-        : [...existing, value];
-      updated.delete(key);
-      for (const entry of [...new Set(next)].sort()) updated.append(key, entry);
-      setParams(updated);
+      setFilterParams((next) => {
+        const existing = next.getAll(key);
+        next.delete(key);
+        const updated = existing.includes(value)
+          ? existing.filter((entry) => entry !== value)
+          : [...existing, value];
+        for (const entry of updated.sort()) next.append(key, entry);
+      });
     },
-    [setParams],
+    [setFilterParams],
   );
 
-  const removeFilter = useCallback(
-    (key: string, value: string) => toggleFilter(key, value),
-    [toggleFilter],
+  /**
+   * Through to the Jobs list, carrying this page's whole state plus whatever
+   * the caller adds.
+   *
+   * "What the board does not read is inert rather than misleading" used to
+   * stand here as the licence for sending anything. It was wrong twice over.
+   * `readDrillFilter` draws its CHIPS from the same parameters it filters on,
+   * so an unread parameter that happens to be `meter` names a chip over an
+   * unfiltered board — the reader is shown evidence that a narrowing happened
+   * when none did. And a parameter outside `DRILL_KEYS` — `group`, `sort` —
+   * survives the board's own Clear, so it is not even inert in the address bar.
+   *
+   * Every caller on this page now sends parameters the filter actually reads,
+   * or sends none and means the whole cohort. An empty value is still deleted
+   * rather than set, which is why `status: ""` silently produced an unfiltered
+   * board from the Pulse row until it was corrected.
+   */
+  const drill = useCallback(
+    (extra: Record<string, string>) => {
+      /* The EFFECTIVE search, not `window.location.search`: a drill has to
+         carry the axis the figures were counted on, and that is not always in
+         the address bar — see the `search` memo above. */
+      const next = new URLSearchParams(search);
+      for (const [key, value] of Object.entries(extra)) {
+        if (!value) next.delete(key);
+        else next.set(key, value);
+      }
+      /*
+       * THE DEFAULT PERIOD HAS TO BE MADE EXPLICIT ON THE WAY OUT.
+       *
+       * `PeriodControl` reads `params.get("period") ?? DEFAULT_PERIOD_KEY`, and
+       * the default is deliberately never written into this page's address bar
+       * because a URL full of parameters nobody chose teaches people to stop
+       * copying it. A drill-through is not this page's URL though — it is a
+       * FILTER — and `resolveDays("")` in `board-drill-filter.ts` produces no
+       * window at all from an absent period, so a drill from an untouched
+       * Overview handed the board the whole history beneath a figure that had
+       * been counted over ninety days. Measured on this estate: "P1 / Urgent
+       * open" reads 15 and the board opened 20 rows.
+       *
+       * AFTER the loop, so a caller that sets its own window wins: the spend
+       * trend drills with `period: "custom"` and two dates, and defaulting
+       * before the loop would have been overwritten anyway while defaulting a
+       * caller-supplied empty period would not. Anything the reader chose is
+       * already in `next` and is left exactly as it is.
+       */
+      if (!next.get("period")) next.set("period", DEFAULT_PERIOD_KEY);
+      onNavigateToJobs(next.toString());
+    },
+    [onNavigateToJobs, search],
   );
 
-  const groups: FilterGroup[] = useMemo(() => {
-    const data = options.data;
-    if (!data) return [];
-    return [
-      { key: "site", label: "Site", options: data.sites, searchable: true },
+  /** Persisted per user, and reflected in the URL so the current view is linkable. */
+  const savePreference = useCallback((body: Record<string, string>) => {
+    void fetch("/api/dashboard/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => undefined);
+  }, []);
+
+  const setMeasure = useCallback(
+    (next: CohortMeasure) => {
+      setFilterParams((params_) => params_.set("measure", next));
+      savePreference({ measure: next });
+    },
+    [savePreference, setFilterParams],
+  );
+
+  /*
+   * THE TOGGLE FLIPS WHAT IS ON SCREEN, WHICH IS WHAT THE URL SAYS.
+   *
+   * It used to flip `splitByPriority` — the preference-resolved intent — while
+   * the cards drew, and now report, the split the SERVER performed, which comes
+   * from the query string alone. With a saved preference of `on` and a bare
+   * URL the two disagreed, so the first tap computed `!true` and wrote
+   * `split=off` over a page that was already unsplit: a control that visibly
+   * did nothing until it was pressed twice.
+   *
+   * Reading the parameter here is the same expression the routes evaluate, so
+   * the flip is always against the state the reader can see.
+   */
+  const toggleSplit = useCallback(() => {
+    const next = new URLSearchParams(window.location.search).get("split") !== "priority";
+    setFilterParams((params_) => params_.set("split", next ? "priority" : "off"));
+    savePreference({ split: next ? "on" : "off" });
+  }, [savePreference, setFilterParams]);
+
+  /* ── The filter bar ────────────────────────────────────────────────────── */
+
+  const data = options.data;
+  const groups: FilterGroup[] = useMemo(
+    () => [
+      { key: "site", label: "Site", options: data?.sites ?? [], searchable: true },
+      { key: "priority", label: "Priority", options: data?.priorities ?? [] },
+      { key: "family", label: "Status family", options: data?.families ?? [] },
+      { key: "status", label: "Status", options: data?.statuses ?? [], searchable: true },
       {
-        key: "priority",
-        label: "Priority",
-        options: data.priorities.map((band) => ({ value: band.key, label: band.label })),
+        key: "engineer",
+        label: "Engineer required",
+        options: data?.engineers ?? [],
+        searchable: true,
       },
-      {
-        key: "family",
-        label: "Status family",
-        options: data.families.map((family) => ({ value: family.value, label: family.label })),
-      },
-      { key: "status", label: "Status", options: data.statuses, searchable: true },
-      { key: "engineer", label: "Engineer required", options: data.engineers, searchable: true },
-      { key: "label", label: "Label", options: data.labels, searchable: true },
-      { key: "tier", label: "Tier", options: data.tiers },
+      { key: "label", label: "Label", options: data?.labels ?? [], searchable: true },
+      { key: "tier", label: "Tier", options: data?.tiers ?? [] },
       {
         key: "nature",
         label: "Nature",
-        options: NATURE_KEYS.map((key) => ({ value: key, label: NATURE_LABEL[key] })),
+        /* Nature is derived, not stored, so it has no option list to count —
+           see `plannedCondition` in dashboard-filters.ts for the rule. */
+        options: NATURE_KEYS.map((key: NatureKey) => ({
+          value: key,
+          label: NATURE_LABEL[key],
+        })),
       },
-      { key: "contractor", label: "Contractor", options: data.contractors, searchable: true },
-    ];
-  }, [options.data]);
+      { key: "contractor", label: "Contractor", options: data?.contractors ?? [], searchable: true },
+    ],
+    [data],
+  );
 
-  const chips = useMemo(() => {
-    const labelFor = (key: string, value: string) => {
-      const group = groups.find((entry) => entry.key === key);
-      return group?.options.find((option) => option.value === value)?.label ?? value;
-    };
-    const out: Array<{ key: string; label: string; value: string; onRemove: () => void }> = [];
-    for (const key of FILTER_KEYS) {
-      if (key === "period" || key === "from" || key === "to") continue;
-      for (const value of params.getAll(key)) {
-        const group = groups.find((entry) => entry.key === key);
-        out.push({
-          key,
-          label: group?.label ?? key,
-          value: labelFor(key, value),
-          onRemove: () => removeFilter(key, value),
+  const activeChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; value: string; onRemove: () => void }> = [];
+    for (const group of groups) {
+      for (const value of params.getAll(group.key)) {
+        const option = group.options.find((entry) => entry.value === value);
+        chips.push({
+          key: group.key,
+          label: group.label,
+          value: option?.label ?? value,
+          onRemove: () => toggleFilter(group.key, value),
         });
       }
     }
-    return out;
-  }, [groups, params, removeFilter]);
+    return chips;
+  }, [groups, params, toggleFilter]);
 
-  /** Jump to the Jobs list carrying the equivalent parameters. */
-  const drill = useCallback(
-    (extra: Record<string, string | string[]> = {}) => {
-      const query = new URLSearchParams(window.location.search);
-      for (const [key, value] of Object.entries(extra)) {
-        query.delete(key);
-        for (const entry of Array.isArray(value) ? value : [value]) query.append(key, entry);
-      }
-      onNavigateToJobs(query.toString());
-    },
-    [onNavigateToJobs],
+  /** What every card header appends — §1.2's `· Filtered: Site = Aldgate`. */
+  const filterChips = useMemo(
+    () =>
+      activeChips.map((chip, index) => ({
+        key: `${chip.key}:${chip.value}:${index}`,
+        label: `${chip.label} = ${chip.value}`,
+        onRemove: chip.onRemove,
+      })),
+    [activeChips],
   );
 
-  const period = summary.data?.period ?? attention.data?.period ?? null;
+  const periodControl = (
+    <PeriodControl
+      periods={options.data?.periods ?? FALLBACK_PERIODS}
+      value={params.get("period") ?? DEFAULT_PERIOD_KEY}
+      from={params.get("from") ?? ""}
+      to={params.get("to") ?? ""}
+      onChange={(next) =>
+        setFilterParams((params_) => {
+          if (next.period !== undefined) params_.set("period", next.period);
+          if (next.from !== undefined) params_.set("from", next.from);
+          if (next.to !== undefined) params_.set("to", next.to);
+        })
+      }
+    />
+  );
+
+  const measureControl = (
+    <label className="ovw-measure">
+      <span className="ovw-measure__label">Measure by</span>
+      <select
+        value={measure}
+        onChange={(event) => setMeasure(event.target.value as CohortMeasure)}
+      >
+        <option value="requested">Date requested</option>
+        <option value="completed">Date completed</option>
+      </select>
+    </label>
+  );
+
+  const jump = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  };
 
   return (
-    <div className="ops-page">
+    <>
+      {/* Tokens first: a rule cannot read a custom property that is not there yet. */}
+      <link rel="stylesheet" href={opsTokensCss} precedence="default" />
       <link rel="stylesheet" href={opsCss} precedence="default" />
+      <link rel="stylesheet" href={overviewCss} precedence="default" />
+      <link rel="stylesheet" href={glanceCss} precedence="default" />
+      <link rel="stylesheet" href={analysisCss} precedence="default" />
+      <link rel="stylesheet" href={portfolioCss} precedence="default" />
+      <link rel="stylesheet" href={toolsCss} precedence="default" />
 
-      <header className="ops-page__head">
-        <div>
-          <span className="ops-page__eyebrow">Live operations</span>
+      <section className="ops-page">
+        <header className="ops-page__head">
+          <p className="ops-page__eyebrow">Live operations</p>
           <h1>Overview</h1>
-        </div>
-      </header>
+        </header>
 
-      <OpsFilterBar
-        periodControl={
-          <PeriodControl
-            periods={
-              options.data?.periods ?? [
-                { key: "7", label: "7 days" },
-                { key: "30", label: "30 days" },
-                { key: "90", label: "90 days" },
-              ]
-            }
-            value={params.get("period") ?? "90"}
-            from={params.get("from") ?? ""}
-            to={params.get("to") ?? ""}
-            onChange={setPeriod}
-          />
-        }
-        groups={groups}
-        onClearAll={clearAll}
-        activeChips={chips}
-      />
-
-      {summary.data?.unmappedStatuses.length ? (
-        /*
-         * An unmapped status is SHOWN, never swallowed. Adding a label in monday
-         * changes what these charts mean, and a page that absorbed it silently
-         * is how the fake taxonomy survived for as long as it did.
-         */
-        <p className="ops-card__note" role="status">
-          {plural(summary.data.unmappedStatuses.length, "job status is", "job statuses are")} not
-          mapped to a family and {summary.data.unmappedStatuses.length === 1 ? "is" : "are"} counted
-          as in progress: {summary.data.unmappedStatuses.join(", ")}.
-        </p>
-      ) : null}
-
-      <AtAGlance
-        state={summary}
-        onDrill={drill}
-        onScrollToAttention={() => {
-          document.getElementById("ops-attention")?.scrollIntoView({
-            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-              ? "auto"
-              : "smooth",
-            block: "start",
-          });
-        }}
-      />
-
-      <SitesNeedingAttention
-        state={attention}
-        onDrill={drill}
-        onOpenJob={onOpenJob}
-        onNavigateToSites={onNavigateToSites}
-      />
-
-      <div className="ops-grid-2">
-        <JobBreakdown
-          state={breakdown}
-          onToggle={toggleFilter}
-          onDrill={(key, value) => drill({ [key]: value })}
+        <OpsFilterBar
+          periodControl={periodControl}
+          groups={groups}
+          extra={measureControl}
+          /* §1.8: the date range and the axis live at the top of the same sheet. */
+          sheetLead={
+            <>
+              <div className="ops-sheet__period">{periodControl}</div>
+              {measureControl}
+            </>
+          }
+          onClearAll={clearAll}
+          activeChips={activeChips}
         />
+
+        {/*
+          The jump bar. Five destinations, sticky under the filter bar, because
+          this page is long and the alternative on a phone is a thumb.
+        */}
+        <nav className="ovw-jump" aria-label="Jump to a section">
+          <ul>
+            {SECTIONS.map((section) => (
+              <li key={section.id}>
+                <button type="button" onClick={() => jump(section.id)}>
+                  {section.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <PulseRow state={meters} onDrill={drill} onOpenRecords={(query) => setRecords(query as RecordsQuery)} />
+
+        <AtAGlanceCard
+          meters={meters}
+          stuck={stuck}
+          measure={measure}
+          filterChips={filterChips}
+          onToggle={toggleFilter}
+          onDrill={drill}
+          onOpenRecords={(query) => setRecords(query as RecordsQuery)}
+          onOpenJob={onOpenJob}
+        />
+
+        <FinancialStatusCard
+          state={cost}
+          measure={measure}
+          filterChips={filterChips}
+          onToggle={toggleFilter}
+          onDrill={drill}
+          onOpenRecords={(query) => setRecords(query as RecordsQuery)}
+          onOpenResolveNames={() => setTool("contractors")}
+          onOpenJob={onOpenJob}
+        />
+
         <PerformanceCard
           state={performance}
-          period={period}
+          measure={measure}
+          filterChips={filterChips}
           onToggle={toggleFilter}
           onDrill={drill}
-          onSelectWindow={(from, to) => setPeriod({ period: "custom", from, to })}
+          onSelectWindow={(from, toInclusive) =>
+            setFilterParams((params_) => {
+              params_.set("period", "custom");
+              params_.set("from", from);
+              params_.set("to", toInclusive);
+            })
+          }
+          splitByPriority={splitByPriority}
+          onToggleSplit={toggleSplit}
         />
-        <CostCard
-          state={cost}
+
+        <JobBreakdownCard
+          state={breakdown}
+          measure={measure}
+          filterChips={filterChips}
+          splitByPriority={splitByPriority}
+          onToggleSplit={toggleSplit}
+          onToggle={toggleFilter}
+          onDrill={drill}
+          onOpenRecords={(query) => setRecords(query as RecordsQuery)}
+        />
+
+        <SitesAttentionCard
+          state={attention}
+          measure={measure}
+          filterChips={filterChips}
+          onToggle={toggleFilter}
+          onDrill={drill}
+          onOpenRecords={(query) => setRecords(query as RecordsQuery)}
+          onOpenBulkAssign={() => setTool("sites")}
           onNavigateToSites={onNavigateToSites}
           onNavigateToCompliance={onNavigateToCompliance}
-          onToggle={toggleFilter}
-          onDrill={drill}
         />
-      </div>
-    </div>
-  );
-}
 
-/* ── 1. At a glance ───────────────────────────────────────────────────────── */
-
-type QueryState<T> = { data: T | null; loading: boolean; error: string | null; reload: () => void };
-
-function AtAGlance({
-  state,
-  onDrill,
-  onScrollToAttention,
-}: {
-  state: QueryState<SummaryPayload>;
-  onDrill: (extra?: Record<string, string | string[]>) => void;
-  onScrollToAttention: () => void;
-}) {
-  if (state.error) {
-    return (
-      <OpsCard title="At a glance">
-        <ErrorState what={state.error} onRetry={state.reload} />
-      </OpsCard>
-    );
-  }
-  if (!state.data) {
-    return (
-      <OpsCard title="At a glance">
-        <SkeletonRow lines={4} height={110} />
-      </OpsCard>
-    );
-  }
-
-  const { totals, previous, oldestOpenDays } = state.data;
-  const oldestBand = AGEING_BANDS.find(
-    (band) => band.to === null || (oldestOpenDays ?? 0) <= band.to,
-  )!;
-
-  const tiles = [
-    {
-      key: "open",
-      value: totals.open,
-      label: "Open jobs",
-      delta: previous ? totals.open - previous.open : null,
-      meter: (
-        <RadialMeter
-          value={totals.open}
-          max={Math.max(totals.inPeriod, 1)}
-          tone={FAMILY_COLOUR.in_progress}
-          centre={`${totals.open}`}
-          caption={`of ${totals.inPeriod}`}
-          label={`${totals.open} open of ${totals.inPeriod} jobs raised in this period`}
-          size={78}
-        />
-      ),
-      onClick: () => onDrill({ family: ["in_progress", "attention"] }),
-    },
-    {
-      key: "attention",
-      value: totals.attention,
-      label: "Needs attention",
-      delta: previous ? totals.attention - previous.attention : null,
-      meter: (
-        <ProgressMeter
-          value={totals.attention}
-          max={Math.max(totals.open, 1)}
-          tone={FAMILY_COLOUR.attention}
-          label={`${totals.attention} of ${totals.open} open jobs need attention`}
-        />
-      ),
-      onClick: onScrollToAttention,
-    },
-    {
-      key: "oldest",
-      value: oldestOpenDays ?? 0,
-      unit: "days",
-      label: "Oldest open",
-      delta: null,
-      meter: (
-        <ProgressMeter
-          value={Math.min(oldestOpenDays ?? 0, 120)}
-          max={120}
-          tone={oldestBand.colour}
-          label={`Oldest open job is ${oldestOpenDays ?? 0} days old — ${oldestBand.label}, ${oldestBand.range}`}
-        />
-      ),
-      onClick: () => onDrill({ sort: "age" }),
-    },
-    {
-      key: "urgent",
-      value: totals.urgentOpen,
-      label: "Urgent open",
-      delta: previous ? totals.urgentOpen - previous.urgentOpen : null,
-      meter: (
-        <ProgressMeter
-          value={totals.urgentOpen}
-          max={Math.max(totals.open, 1)}
-          tone="#E5484D"
-          label={`${totals.urgentOpen} of ${totals.open} open jobs are urgent`}
-        />
-      ),
-      onClick: () => onDrill({ priority: "urgent", family: ["in_progress", "attention"] }),
-    },
-    {
-      key: "unassigned",
-      value: totals.unassignedOpen,
-      label: "Unassigned site",
-      delta: previous ? totals.unassignedOpen - previous.unassignedOpen : null,
-      meter: (
-        <ProgressMeter
-          value={totals.unassignedOpen}
-          max={Math.max(totals.open, 1)}
-          tone={totals.unassignedOpen > 0 ? "#E5484D" : NOT_RECORDED_COLOUR}
-          label={`${totals.unassignedOpen} of ${totals.open} open jobs have no site`}
-        />
-      ),
-      onClick: () => onDrill({ site: UNASSIGNED_SITE_ID }),
-    },
-  ];
-
-  return (
-    <OpsCard title="At a glance" subtitle={state.data.period.label}>
-      <div className="ops-tiles">
-        {tiles.map((tile) => (
-          <button key={tile.key} type="button" className="ops-tile" onClick={tile.onClick}>
-            <span className="ops-tile__value">
-              {tile.value}
-              {tile.unit ? <span className="ops-tile__unit">{tile.unit}</span> : null}
-            </span>
-            <span className="ops-tile__label">{tile.label}</span>
-            {tile.meter}
-            {/*
-              The delta is OMITTED when there is nothing to compare against,
-              rather than printed as a zero. "No change" over a period that does
-              not exist is a claim the data cannot support.
-            */}
-            {tile.delta === null ? null : (
-              <span className="ops-tile__delta">
-                {tile.delta === 0
-                  ? "No change on previous period"
-                  : `${tile.delta > 0 ? "▲" : "▼"} ${Math.abs(tile.delta)} on previous period`}
-              </span>
-            )}
+        {/*
+          The three write-side tools, opened from the cards that name the
+          problem they solve. §8: nothing on this page changes a job record
+          except these, and each states what it will do before it does it.
+        */}
+        <div className="ovw-tools">
+          <button type="button" className="ops-link" onClick={() => setTool("meters")}>
+            Settings → Dashboard meters
           </button>
-        ))}
-      </div>
-      <HiddenDataTable
-        caption="At a glance"
-        columns={["Measure", "Value", "Change on previous period"]}
-        rows={tiles.map((tile) => [
-          tile.label,
-          `${tile.value}${tile.unit ? ` ${tile.unit}` : ""}`,
-          tile.delta === null ? "Not comparable" : String(tile.delta),
-        ])}
-      />
-    </OpsCard>
-  );
-}
-
-/* ── 2. Sites needing attention ───────────────────────────────────────────── */
-
-function SitesNeedingAttention({
-  state,
-  onDrill,
-  onOpenJob,
-  onNavigateToSites,
-}: {
-  state: QueryState<AttentionPayload>;
-  onDrill: (extra?: Record<string, string | string[]>) => void;
-  onOpenJob: (id: string) => void;
-  onNavigateToSites: (query?: string) => void;
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
-
-  if (state.error) {
-    return (
-      <OpsCard title="Sites needing attention" id="ops-attention">
-        <ErrorState what={state.error} onRetry={state.reload} />
-      </OpsCard>
-    );
-  }
-  if (!state.data) {
-    return (
-      <OpsCard title="Sites needing attention" id="ops-attention">
-        <SkeletonRow lines={5} height={200} />
-      </OpsCard>
-    );
-  }
-
-  const { ageing, sites, siteCount } = state.data;
-  const totalOpen = ageing.reduce((sum, band) => sum + band.count, 0);
-
-  if (!sites.length) {
-    return (
-      <OpsCard title="Sites needing attention" id="ops-attention">
-        <EmptyState>Every job in this period is completed or scheduled.</EmptyState>
-      </OpsCard>
-    );
-  }
-
-  const maxOpen = Math.max(...sites.map((site) => site.openCount), 1);
-  const maxDays = Math.max(...sites.map((site) => site.oldestDays), 1);
-  /*
-   * Sites with no open work and complete compliance are behind the toggle. A
-   * card called "needing attention" that lists ten stores where nine need
-   * nothing has taught the reader to scroll past it.
-   */
-  const quiet = sites.filter(
-    (site) => site.openCount === 0 && site.compliance.scored && site.compliance.percent === 100,
-  );
-  const visible = showAll ? sites : sites.filter((site) => !quiet.includes(site));
-
-  return (
-    <OpsCard
-      title="Sites needing attention"
-      id="ops-attention"
-      subtitle={`${plural(totalOpen, "open job")} across ${plural(siteCount, "site")}`}
-      action={
-        <button type="button" className="ops-link" onClick={() => onDrill({ family: ["attention"] })}>
-          View all <Icon name="chevron" size={14} />
-        </button>
-      }
-    >
-      <div>
-        <p className="ops-section-title">Age of open work</p>
-        <SegmentedMeter
-          segments={ageing.map((band) => ({
-            key: band.key,
-            label: `${band.label} (${band.range})`,
-            value: band.count,
-            colour: band.colour,
-          }))}
-          height={12}
-          label="Open jobs by age"
-        />
-        <ul className="ops-legend" style={{ marginTop: 6 }}>
-          {ageing.map((band) => (
-            <li key={band.key}>
-              <span className="ops-swatch" style={{ background: band.colour }} aria-hidden="true" />
-              {band.label} <strong>{band.count}</strong> <span>({band.range})</span>
-            </li>
-          ))}
-        </ul>
-        <HiddenDataTable
-          caption="Open jobs by age band"
-          columns={["Band", "Days open", "Jobs"]}
-          rows={ageing.map((band) => [band.label, band.range, band.count])}
-        />
-      </div>
-
-      <div className="ops-rows">
-        {visible.map((site) => {
-          const band = AGEING_BANDS.find((entry) => entry.key === site.oldestBand)!;
-          const isOpen = expanded === site.siteId;
-          return (
-            <div
-              key={site.siteId}
-              className={`ops-row${site.unassigned ? " ops-row--unassigned" : ""}`}
-              style={{ ["--ops-edge" as string]: site.urgentCount > 0 ? "#E5484D" : band.colour }}
-            >
-              <div className="ops-row__top">
-                <button
-                  type="button"
-                  className="ops-row__name"
-                  style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer", padding: 0 }}
-                  aria-expanded={isOpen}
-                  onClick={() => setExpanded(isOpen ? null : site.siteId)}
-                >
-                  {site.siteName}
-                </button>
-                <span className="ops-group__count">{plural(site.openCount, "job")}</span>
-                <Icon name="chevron" size={15} />
-              </div>
-
-              <div className="ops-row__secondary">
-                <span className="ops-dots">
-                  {site.priorities.slice(0, 10).map((priority, index) => (
-                    <span
-                      key={index}
-                      style={{
-                        background:
-                          PRIORITY_BANDS.find((entry) => entry.key === priority)?.colour ??
-                          NOT_RECORDED_COLOUR,
-                      }}
-                    />
-                  ))}
-                  {site.priorities.length > 10 ? <small>+{site.priorities.length - 10}</small> : null}
-                  <small>
-                    {site.urgentCount > 0 ? `${site.urgentCount} urgent` : "None urgent"}
-                  </small>
-                </span>
-              </div>
-
-              <div className="ops-row__meters">
-                <div className="ops-row__meter">
-                  <span className="ops-row__meter-label">
-                    Oldest <strong>{site.oldestDays} days</strong>
-                  </span>
-                  <ProgressMeter
-                    value={site.oldestDays}
-                    max={maxDays}
-                    tone={band.colour}
-                    label={`Oldest open job at ${site.siteName}: ${site.oldestDays} days, ${band.label}`}
-                  />
-                </div>
-                <div className="ops-row__meter">
-                  <span className="ops-row__meter-label">
-                    Share of open <strong>{site.openCount}</strong>
-                  </span>
-                  <ProgressMeter
-                    value={site.openCount}
-                    max={maxOpen}
-                    tone={FAMILY_COLOUR.in_progress}
-                    label={`${site.openCount} open jobs at ${site.siteName}`}
-                  />
-                </div>
-                <div className="ops-row__meter">
-                  <span className="ops-row__meter-label">
-                    Compliance{" "}
-                    <strong>
-                      {site.compliance.scored
-                        ? `${site.compliance.satisfied} of ${site.compliance.applicable}`
-                        : "Not set up"}
-                    </strong>
-                  </span>
-                  <ProgressMeter
-                    value={site.compliance.satisfied}
-                    max={Math.max(site.compliance.applicable, 1)}
-                    tone={
-                      site.compliance.scored
-                        ? complianceBandColour(site.compliance.percent)
-                        : NOT_RECORDED_COLOUR
-                    }
-                    label={
-                      site.compliance.scored
-                        ? `Compliance at ${site.siteName}: ${site.compliance.satisfied} of ${site.compliance.applicable} applicable requirements met, ${site.compliance.percent}%${
-                            site.compliance.notRequired
-                              ? `, ${site.compliance.notRequired} not required`
-                              : ""
-                          }`
-                        : `No compliance requirements set up for ${site.siteName}`
-                    }
-                  />
-                </div>
-              </div>
-
-              {site.unassigned ? (
-                <div className="ops-actions">
-                  <button
-                    type="button"
-                    className="ops-link"
-                    onClick={() => onDrill({ site: UNASSIGNED_SITE_ID })}
-                  >
-                    Fix these <Icon name="chevron" size={14} />
-                  </button>
-                  <span className="ops-card__note">
-                    These jobs point at no site in the register.
-                  </span>
-                </div>
-              ) : null}
-
-              {isOpen ? (
-                <div className="ops-job-rows">
-                  {site.jobs.map((job) => (
-                    <CompactJobRow
-                      key={job.id}
-                      title={job.title}
-                      reference={job.reference}
-                      priorityLabel={job.priorityLabel}
-                      priorityColour={
-                        PRIORITY_BANDS.find((entry) => entry.key === job.priority)?.colour ??
-                        NOT_RECORDED_COLOUR
-                      }
-                      status={job.status}
-                      statusColour={FAMILY_COLOUR[job.family]}
-                      daysOpen={job.daysOpen}
-                      bandColour={AGEING_BANDS.find((entry) => entry.key === job.band)!.colour}
-                      onOpen={() => onOpenJob(job.id)}
-                    />
-                  ))}
-                  {site.openCount > site.jobs.length ? (
-                    <button
-                      type="button"
-                      className="ops-link"
-                      onClick={() =>
-                        site.unassigned
-                          ? onDrill({ site: UNASSIGNED_SITE_ID })
-                          : onDrill({ site: site.siteId })
-                      }
-                    >
-                      View all {site.openCount} at this site <Icon name="chevron" size={14} />
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-
-      {quiet.length ? (
-        <button type="button" className="ops-link" onClick={() => setShowAll((value) => !value)}>
-          {showAll ? "Hide sites needing nothing" : `Show all ${sites.length} sites`}
-        </button>
-      ) : null}
-
-      <button type="button" className="ops-link" onClick={() => onNavigateToSites()}>
-        Open the sites register <Icon name="chevron" size={14} />
-      </button>
-    </OpsCard>
-  );
-}
-
-/* ── 3. Job breakdown ─────────────────────────────────────────────────────── */
-
-const DIMENSION_META: Array<{
-  key: string;
-  title: string;
-  /** The query key a bucket cross-filters on. */
-  param: string;
-  shape: "radial" | "donut" | "stacked" | "bars" | "status";
-}> = [
-  { key: "tier", title: "Tier level", param: "tier", shape: "radial" },
-  { key: "engineer", title: "Engineer required", param: "engineer", shape: "donut" },
-  { key: "priority", title: "Priority", param: "priority", shape: "stacked" },
-  { key: "label", title: "Label", param: "label", shape: "bars" },
-  { key: "status", title: "Status", param: "status", shape: "status" },
-];
-
-function JobBreakdown({
-  state,
-  onToggle,
-  onDrill,
-}: {
-  state: QueryState<BreakdownPayload>;
-  onToggle: (key: string, value: string) => void;
-  onDrill: (key: string, value: string) => void;
-}) {
-  if (state.error) {
-    return (
-      <OpsCard title="Job breakdown" className="ops-span-2">
-        <ErrorState what={state.error} onRetry={state.reload} />
-      </OpsCard>
-    );
-  }
-  if (!state.data) {
-    return (
-      <OpsCard title="Job breakdown" className="ops-span-2">
-        <SkeletonRow lines={6} height={260} />
-      </OpsCard>
-    );
-  }
-  if (state.data.total === 0) {
-    return (
-      <OpsCard title="Job breakdown" className="ops-span-2">
-        <EmptyState>No jobs in this period. Widen the period to see more.</EmptyState>
-      </OpsCard>
-    );
-  }
-
-  return (
-    <OpsCard
-      title="Job breakdown"
-      className="ops-span-2"
-      subtitle={`${plural(state.data.total, "job")} in this period`}
-    >
-      {DIMENSION_META.map((meta) => {
-        const dimension = state.data!.dimensions[meta.key];
-        if (!dimension) return null;
-        return (
-          <div key={meta.key}>
-            <div className="ops-card__head">
-              <p className="ops-section-title">{meta.title}</p>
-              <span className="ops-card__note">
-                {dimension.recorded} of {dimension.total} recorded
-              </span>
-            </div>
-            <DimensionBody
-              shape={meta.shape}
-              param={meta.param}
-              dimension={dimension}
-              onToggle={onToggle}
-              onDrill={onDrill}
-            />
-            <HiddenDataTable
-              caption={`${meta.title}, jobs in this period`}
-              columns={[meta.title, "Jobs", "Share"]}
-              rows={dimension.buckets.map((bucket) => [
-                bucket.label,
-                bucket.value,
-                `${Math.round((bucket.value / Math.max(dimension.total, 1)) * 100)}%`,
-              ])}
-            />
-          </div>
-        );
-      })}
-    </OpsCard>
-  );
-}
-
-function DimensionBody({
-  shape,
-  param,
-  dimension,
-  onToggle,
-  onDrill,
-}: {
-  shape: "radial" | "donut" | "stacked" | "bars" | "status";
-  param: string;
-  dimension: { recorded: number; total: number; buckets: Bucket[] };
-  onToggle: (key: string, value: string) => void;
-  onDrill: (key: string, value: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (shape === "radial" || shape === "donut") {
-    const dominant = [...dimension.buckets]
-      .filter((bucket) => !bucket.notRecorded)
-      .sort((left, right) => right.value - left.value)[0];
-    return (
-      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <RadialMeter
-          value={dominant?.value ?? 0}
-          max={Math.max(dimension.total, 1)}
-          tone={dominant?.colour ?? NOT_RECORDED_COLOUR}
-          centre={String(shape === "donut" ? dimension.total : dominant?.value ?? 0)}
-          caption={shape === "donut" ? "jobs" : dominant?.label}
-          label={`${dominant?.label ?? "Nothing recorded"}: ${dominant?.value ?? 0} of ${dimension.total}`}
-        />
-        <ul className="ops-legend" style={{ flex: "1 1 160px" }}>
-          {dimension.buckets.map((bucket) => (
-            <li key={bucket.key}>
-              <span className="ops-swatch" style={{ background: bucket.colour }} aria-hidden="true" />
-              <button
-                type="button"
-                className="ops-link"
-                onClick={() => onToggle(param, bucket.key)}
-                title={`Filter this page to ${bucket.label}`}
-              >
-                {bucket.label}
-              </button>
-              <strong>{bucket.value}</strong>
-              <span>{Math.round((bucket.value / Math.max(dimension.total, 1)) * 100)}%</span>
-              <button
-                type="button"
-                className="ops-bar__drill"
-                onClick={() => onDrill(param, bucket.key)}
-                aria-label={`View the ${bucket.value} ${bucket.label} jobs`}
-                title={`View ${bucket.label} jobs`}
-              >
-                <Icon name="chevron" size={13} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
-
-  if (shape === "stacked") {
-    return (
-      <>
-        <SegmentedMeter
-          segments={dimension.buckets.map((bucket) => ({
-            key: bucket.key,
-            label: bucket.label,
-            value: bucket.value,
-            colour: bucket.colour,
-          }))}
-          height={20}
-          label="Jobs by priority"
-          onSelect={(segment) => onToggle(param, segment.key)}
-        />
-        <ul className="ops-legend" style={{ marginTop: 6 }}>
-          {dimension.buckets.map((bucket) => (
-            <li key={bucket.key}>
-              <span className="ops-swatch" style={{ background: bucket.colour }} aria-hidden="true" />
-              {bucket.label} <strong>{bucket.value}</strong>
-              <button
-                type="button"
-                className="ops-bar__drill"
-                onClick={() => onDrill(param, bucket.key)}
-                aria-label={`View the ${bucket.value} ${bucket.label} jobs`}
-                title={`View ${bucket.label} jobs`}
-              >
-                <Icon name="chevron" size={13} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      </>
-    );
-  }
-
-  if (shape === "status") {
-    /*
-     * Two levels. Nine statuses with a long tail would waste the whole width on
-     * one green block, so the family bar goes on top and the individual
-     * statuses beneath it, grouped by family and never rolled up: a status with
-     * a count of one is often the one that matters.
-     */
-    const families: JobStatusFamily[] = ["completed", "in_progress", "attention"];
-    const totals = families.map((family) => ({
-      key: family,
-      label: FAMILY_LABEL[family],
-      value: dimension.buckets
-        .filter((bucket) => bucket.family === family)
-        .reduce((sum, bucket) => sum + bucket.value, 0),
-      colour: FAMILY_COLOUR[family],
-    }));
-    return (
-      <>
-        <SegmentedMeter
-          segments={totals}
-          height={18}
-          label="Jobs by status family"
-          onSelect={(segment) => onToggle("family", segment.key)}
-        />
-        <ul className="ops-legend" style={{ margin: "6px 0 10px" }}>
-          {totals.map((family) => (
-            <li key={family.key}>
-              <span className="ops-swatch" style={{ background: family.colour }} aria-hidden="true" />
-              {family.label} <strong>{family.value}</strong>
-              <span>{Math.round((family.value / Math.max(dimension.total, 1)) * 100)}%</span>
-            </li>
-          ))}
-        </ul>
-        <div className="ops-bars">
-          {dimension.buckets.map((bucket) => (
-            <BarRow
-              key={bucket.key}
-              bucket={bucket}
-              max={Math.max(...dimension.buckets.map((entry) => entry.value), 1)}
-              onClick={() => onToggle(bucket.notRecorded ? param : "status", bucket.key)}
-              onDrill={() => onDrill(bucket.notRecorded ? param : "status", bucket.key)}
-            />
-          ))}
         </div>
-      </>
-    );
-  }
 
-  /* bars — horizontal only. These are word labels, and rotated axis text is
-     unreadable on a phone. */
-  const ranked = dimension.buckets.filter((bucket) => !bucket.notRecorded);
-  const missing = dimension.buckets.filter((bucket) => bucket.notRecorded);
-  const top = expanded ? ranked : ranked.slice(0, 8);
-  const rest = ranked.length - top.length;
-  const max = Math.max(...dimension.buckets.map((bucket) => bucket.value), 1);
-  return (
-    <div className="ops-bars">
-      {top.map((bucket) => (
-        <BarRow
-          key={bucket.key}
-          bucket={bucket}
-          max={max}
-          onClick={() => onToggle(param, bucket.key)}
-          onDrill={() => onDrill(param, bucket.key)}
-        />
-      ))}
-      {rest > 0 ? (
-        <button type="button" className="ops-link" onClick={() => setExpanded(true)}>
-          +{rest} more
-        </button>
-      ) : null}
-      {expanded && ranked.length > 8 ? (
-        <button type="button" className="ops-link" onClick={() => setExpanded(false)}>
-          Show fewer
-        </button>
-      ) : null}
-      {/* Not recorded sits at the bottom, outside the ranking — it is a
-          coverage figure, not a category competing for a place in the top 8. */}
-      {missing.map((bucket) => (
-        <BarRow
-          key={bucket.key}
-          bucket={bucket}
-          max={max}
-          onClick={() => onToggle(param, bucket.key)}
-          onDrill={() => onDrill(param, bucket.key)}
-        />
-      ))}
-    </div>
+        {tool === "meters" ? (
+          <OverviewTool title="Dashboard meters" onClose={() => setTool(null)}>
+            <MeterSettings onSaved={() => meters.reload()} />
+          </OverviewTool>
+        ) : null}
+        {tool === "contractors" ? (
+          <OverviewTool title="Resolve contractor names" onClose={() => setTool(null)}>
+            <ResolveNames onChanged={() => cost.reload()} />
+          </OverviewTool>
+        ) : null}
+        {tool === "sites" ? (
+          <OverviewTool title="Assign jobs to a site" onClose={() => setTool(null)}>
+            <BulkSiteAssign
+              onAssigned={() => {
+                attention.reload();
+                meters.reload();
+              }}
+            />
+          </OverviewTool>
+        ) : null}
+
+        {records ? (
+          <OverviewRecordsPanel
+            query={records}
+            search={search}
+            onClose={() => setRecords(null)}
+            onOpenJob={onOpenJob}
+          />
+        ) : null}
+      </section>
+    </>
   );
 }
 
 /**
- * One bar, and the two things a reader can do with it.
+ * One dialog shell for the three tools.
  *
- * CROSS-FILTER is the primary action: tapping the bar adds this bucket to the
- * filter bar as a chip and every card on the page recomputes. Tapping it again
- * clears it, which is what makes exploring reversible.
- *
- * DRILL THROUGH is the second, and it is a real button rather than a hover
- * affordance — a hover cannot be reached on a touchscreen, which is where this
- * page is mostly read. It carries the bucket's name and its count in its
- * accessible name and navigates to the jobs list with the same parameters, so
- * the link is shareable and survives a refresh.
+ * A dialog rather than a route because each is opened from the sentence that
+ * names the problem it fixes, and sending the reader to another screen loses
+ * that context — which is most of why "31 jobs point at no site" went unfixed
+ * for as long as it did.
  */
-function BarRow({
-  bucket,
-  max,
-  onClick,
-  onDrill,
+function OverviewTool({
+  title,
+  onClose,
+  children,
 }: {
-  bucket: Bucket;
-  max: number;
-  onClick: () => void;
-  onDrill?: () => void;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="ops-bar-row">
-      <button
-        type="button"
-        className="ops-bar"
-        onClick={onClick}
-        title={`Filter this page to ${bucket.label}`}
-      >
-        <span className="ops-bar__label">{bucket.label}</span>
-        <ProgressMeter
-          value={bucket.value}
-          max={max}
-          tone={bucket.colour}
-          label={`${bucket.label}: ${bucket.value}`}
-          height={9}
-        />
-        <span className="ops-bar__value">{bucket.value}</span>
-      </button>
-      {onDrill ? (
-        <button
-          type="button"
-          className="ops-bar__drill"
-          onClick={onDrill}
-          aria-label={`View the ${bucket.value} ${bucket.label} jobs`}
-          title={`View ${bucket.label} jobs`}
-        >
-          <Icon name="chevron" size={14} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-/* ── 4. Performance over time ─────────────────────────────────────────────── */
-
-function PerformanceCard({
-  state,
-  period,
-  onToggle,
-  onDrill,
-  onSelectWindow,
-}: {
-  state: QueryState<PerformancePayload>;
-  period: Period | null;
-  onToggle: (key: string, value: string) => void;
-  onDrill: (extra: Record<string, string | string[]>) => void;
-  /** Cross-filters the whole page to one trend bucket's days. */
-  onSelectWindow: (from: string, to: string) => void;
-}) {
-  if (state.error) {
-    return (
-      <OpsCard title="Performance over time">
-        <ErrorState what={state.error} onRetry={state.reload} />
-      </OpsCard>
-    );
-  }
-  if (!state.data) {
-    return (
-      <OpsCard title="Performance over time">
-        <SkeletonRow lines={5} height={200} />
-      </OpsCard>
-    );
-  }
-
-  const { sla, mix } = state.data;
-  const unearned = sla.coveragePercent < COVERAGE_CONFIDENCE;
-  const maxBucket = Math.max(
-    ...mix.buckets.map((bucket) => bucket.reactive + bucket.planned),
-    1,
-  );
-
-  return (
-    <OpsCard title="Performance over time" subtitle={period?.label}>
-      <div>
-        <p className="ops-section-title">Past target date</p>
-        {/*
-          The figure the old Overview carried as an "Overdue" tile. It is here
-          rather than in the tile strip because a count of work that has already
-          missed its promise belongs beside the percentage that says how often
-          promises are kept — and because nothing on this page may lose a number
-          the previous one printed.
-        */}
-        <p className={`ops-headline${sla.overdueOpen === 0 ? " ops-headline--unearned" : ""}`}>
-          {sla.overdueOpen}
-        </p>
-        <p className="ops-coverage__text">
-          {sla.overdueOpen === 0
-            ? "No open job is past its due date."
-            : `${plural(sla.overdueOpen, "open job is", "open jobs are")} past the due date on the job.`}
-        </p>
-      </div>
-
-      <div>
-        <p className="ops-section-title">SLA performance</p>
-        {sla.measured === 0 ? (
-          <EmptyState>
-            None of the {plural(sla.closed, "closed job")} in this period carries both a target
-            date and a completion date, so nothing can be measured. Set target dates to make this
-            meaningful.
-          </EmptyState>
-        ) : (
-          <>
-            <p className={`ops-headline${unearned ? " ops-headline--unearned" : ""}`}>
-              {sla.percent}% of {sla.measured} measured
-            </p>
-            <p className="ops-coverage__text">
-              {sla.closed - sla.measured} of {plural(sla.closed, "closed job")} had no target date.
-            </p>
-            <div className="ops-coverage">
-              <ProgressMeter
-                value={sla.met}
-                max={Math.max(sla.measured, 1)}
-                tone={unearned ? NOT_RECORDED_COLOUR : FAMILY_COLOUR.completed}
-                label={`${sla.met} of ${sla.measured} measured jobs met their target`}
-              />
-              <ProgressMeter
-                value={sla.measured}
-                max={Math.max(sla.closed, 1)}
-                tone={NOT_RECORDED_COLOUR}
-                height={6}
-                label={`Coverage: ${sla.measured} of ${sla.closed} closed jobs measured`}
-              />
-              <span className="ops-coverage__text">
-                Coverage {sla.measured} of {sla.closed} closed jobs ({sla.coveragePercent}%)
-                {sla.targetField === "due_at"
-                  ? " · measured against the job's due date, because no target completion date is recorded"
-                  : ""}
-              </span>
-              {unearned ? (
-                <span className="ops-coverage__text">Set target dates to make this meaningful.</span>
-              ) : null}
-            </div>
-            <div className="ops-bars" style={{ marginTop: 10 }}>
-              {sla.byPriority
-                .filter((row) => row.measured > 0)
-                .map((row) => (
-                  <div key={row.key} className="ops-bar-row">
-                    <button
-                      type="button"
-                      className="ops-bar"
-                      onClick={() => onToggle("priority", row.key)}
-                      title={`Filter this page to ${row.label}`}
-                    >
-                      <span className="ops-bar__label">{row.label}</span>
-                      <ProgressMeter
-                        value={row.met}
-                        max={Math.max(row.measured, 1)}
-                        tone={FAMILY_COLOUR.completed}
-                        label={`${row.label}: ${row.met} of ${row.measured} met target`}
-                        height={9}
-                      />
-                      {/* A percentage without its denominator is not a metric. */}
-                      <span className="ops-bar__value">
-                        {row.percent}% · {row.measured} measured
-                      </span>
-                    </button>
-                    {/*
-                      Drills to the CLOSED jobs of this priority, not to all of
-                      them: the bar measures work that finished, so a link that
-                      returned the open ones too would not add up to the number
-                      the reader tapped.
-                    */}
-                    <button
-                      type="button"
-                      className="ops-bar__drill"
-                      onClick={() => onDrill({ priority: row.key, family: "completed" })}
-                      aria-label={`View the ${row.measured} closed ${row.label} jobs`}
-                      title={`View closed ${row.label} jobs`}
-                    >
-                      <Icon name="chevron" size={14} />
-                    </button>
-                  </div>
-                ))}
-            </div>
-            {sla.averageCloseDays !== null ? (
-              <p className="ops-card__note">
-                Average time to close {sla.averageCloseDays} days over {plural(sla.measured, "job")}.
-              </p>
-            ) : null}
-          </>
-        )}
-        <HiddenDataTable
-          caption="SLA performance by priority"
-          columns={["Priority", "Measured", "Met target", "Percentage"]}
-          rows={sla.byPriority.map((row) => [
-            row.label,
-            row.measured,
-            row.met,
-            row.percent === null ? "Not measured" : `${row.percent}%`,
-          ])}
-        />
-      </div>
-
-      <div>
-        <p className="ops-section-title">Reactive vs planned</p>
-        <p className="ops-card__note">
-          {mix.reactivePercent === null
-            ? "No jobs were raised in this period."
-            : `${mix.reactivePercent}% of the work raised in this period is reactive.`}
-        </p>
-        {/*
-          THE THREE THINGS A BUCKET DOES, and why they are three.
-
-          A stacked bar carries two questions at once — "when?" and "what kind
-          of work?" — so one tap target cannot answer both. The segments
-          cross-filter the KIND (`nature`), the label under the bar
-          cross-filters the WHEN (a custom range over the bucket's own days),
-          and the chevron drills the pair through to the jobs list.
-
-          A segment is only rendered when its count is non-zero, and it carries
-          a floor height so that a bucket of 1 beside a bucket of 300 is still
-          a target a finger can hit. A zero has no segment because there is
-          nothing to filter to — an invisible button that silently returns
-          nothing is worse than an honest gap.
-        */}
-        <div className="ops-series">
-          {mix.buckets.map((bucket) => {
-            const total = bucket.reactive + bucket.planned;
-            const height = (value: number) => `${(value / maxBucket) * 100}%`;
-            const part = (nature: NatureKey, value: number) =>
-              value === 0 ? null : (
-                <button
-                  type="button"
-                  className={`ops-series__part${bucket.partial ? " is-hatched" : ""}`}
-                  style={{ height: height(value), background: NATURE_COLOUR[nature] }}
-                  onClick={() => onToggle("nature", nature)}
-                  aria-label={`${value} ${NATURE_LABEL[nature].toLowerCase()} in ${
-                    bucket.label
-                  } — filter this page to ${NATURE_LABEL[nature].toLowerCase()} work`}
-                  title={`Filter to ${NATURE_LABEL[nature].toLowerCase()} work`}
-                />
-              );
-            return (
-              <div key={bucket.start} className="ops-series__bucket">
-                <span className="ops-series__total">
-                  {total}
-                  {bucket.partial ? <small> in progress</small> : null}
-                </span>
-                <div className="ops-series__stack">
-                  {part("reactive", bucket.reactive)}
-                  {part("planned", bucket.planned)}
-                </div>
-                <div className="ops-series__foot">
-                  <button
-                    type="button"
-                    className="ops-series__label"
-                    onClick={() => onSelectWindow(bucket.start, bucket.endInclusive)}
-                    aria-label={`Filter this page to ${bucket.label}: ${bucket.reactive} reactive, ${
-                      bucket.planned
-                    } planned${bucket.partial ? ", period still in progress" : ""}`}
-                    title={`Filter this page to ${bucket.label}`}
-                  >
-                    {bucket.label}
-                  </button>
-                  <button
-                    type="button"
-                    className="ops-bar__drill"
-                    onClick={() =>
-                      onDrill({ period: "custom", from: bucket.start, to: bucket.endInclusive })
-                    }
-                    aria-label={`View the ${plural(total, "job")} raised in ${bucket.label}`}
-                    title={`View jobs raised in ${bucket.label}`}
-                  >
-                    <Icon name="chevron" size={13} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {/* The legend is the second route to the same cross-filter, and on a
-            phone it is the reliable one: a full-width row rather than a slice
-            of a 74px column. */}
-        <ul className="ops-legend">
-          {NATURE_KEYS.map((nature) => (
-            <li key={nature}>
-              <span
-                className="ops-swatch"
-                style={{ background: NATURE_COLOUR[nature] }}
-                aria-hidden="true"
-              />
-              <button
-                type="button"
-                className="ops-link"
-                onClick={() => onToggle("nature", nature)}
-                title={`Filter this page to ${NATURE_LABEL[nature].toLowerCase()} work`}
-              >
-                {NATURE_LABEL[nature]}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <HiddenDataTable
-          caption="Reactive and planned work by period"
-          columns={["Period", "Reactive", "Planned", "Status"]}
-          rows={mix.buckets.map((bucket) => [
-            bucket.label,
-            bucket.reactive,
-            bucket.planned,
-            bucket.partial ? "In progress" : "Complete",
-          ])}
-        />
-      </div>
-    </OpsCard>
-  );
-}
-
-/* ── 5. Cost ──────────────────────────────────────────────────────────────── */
-
-function CostCard({
-  state,
-  onNavigateToSites,
-  onNavigateToCompliance,
-  onToggle,
-  onDrill,
-}: {
-  state: QueryState<CostPayload>;
-  onNavigateToSites: (query?: string) => void;
-  onNavigateToCompliance: () => void;
-  onToggle: (key: string, value: string) => void;
-  onDrill: (extra: Record<string, string | string[]>) => void;
-}) {
-  const [basis, setBasis] = useState<"period" | "annual">("period");
-
-  if (state.error) {
-    return (
-      <OpsCard title="Cost">
-        <ErrorState what={state.error} onRetry={state.reload} />
-      </OpsCard>
-    );
-  }
-  if (!state.data) {
-    return (
-      <OpsCard title="Cost">
-        <SkeletonRow lines={5} height={200} />
-      </OpsCard>
-    );
-  }
-
-  const data = state.data;
-  const budgeted = data.sites.filter((site) => site.annualBudget !== null);
-  const attributionPercent = data.totalSpend
-    ? Math.round((data.contractorAttributed / data.totalSpend) * 100)
-    : 0;
-  const maxContractor = Math.max(...data.contractors.map((row) => row.spend), 1);
-
-  return (
-    <OpsCard
-      title="Cost"
-      subtitle={`${money(data.totalSpend)} recorded across ${plural(data.costedJobs, "job")}`}
-      action={
-        <div className="ops-actions">
-          <button
-            type="button"
-            className="ops-option"
-            aria-pressed={basis === "period"}
-            onClick={() => setBasis("period")}
-          >
-            Period
-          </button>
-          <button
-            type="button"
-            className="ops-option"
-            aria-pressed={basis === "annual"}
-            onClick={() => setBasis("annual")}
-          >
-            Annual
-          </button>
-        </div>
-      }
+    <div
+      className="ops-sheet ovw-tool"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
-      <div>
-        <p className="ops-section-title">Spend against budget</p>
-        {budgeted.length === 0 ? (
-          <EmptyState>
-            No site has an annual budget set, so spend cannot be compared with one.{" "}
-            <button type="button" className="ops-link" onClick={() => onNavigateToSites()}>
-              Set budgets in the sites register
-            </button>
-          </EmptyState>
-        ) : (
-          <div className="ops-bars">
-            {budgeted.map((site) => {
-              const budget = basis === "period" ? site.proRatedBudget : site.annualBudget;
-              const utilisation = budget && budget > 0 ? Math.round((site.spend / budget) * 100) : null;
-              const tone =
-                utilisation === null
-                  ? NOT_RECORDED_COLOUR
-                  : utilisation > 100
-                    ? "#E5484D"
-                    : utilisation >= 80
-                      ? "#E8A33D"
-                      : "#22C55E";
-              return (
-                <div key={site.siteId} className="ops-bar-row">
-                  <button
-                    type="button"
-                    className="ops-bar"
-                    onClick={() => onToggle("site", site.siteId)}
-                    title={`Filter this page to ${site.siteName}`}
-                  >
-                    <span className="ops-bar__label">{site.siteName}</span>
-                    <ProgressMeter
-                      value={Math.min(utilisation ?? 0, 100)}
-                      max={100}
-                      tone={tone}
-                      label={`${site.siteName}: ${money(site.spend)} against ${money(budget ?? 0)} ${
-                        basis === "period" ? "pro-rated" : "annual"
-                      }`}
-                      height={9}
-                    />
-                    <span className="ops-bar__value">
-                      {utilisation === null ? "No budget" : `${utilisation}%`}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="ops-bar__drill"
-                    onClick={() => onDrill({ site: site.siteId })}
-                    aria-label={`View the jobs at ${site.siteName}`}
-                    title={`View ${site.siteName} jobs`}
-                  >
-                    <Icon name="chevron" size={14} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {/*
-          The like-for-like sentence, spelled out. The card this replaces put
-          "Spend is Last 90 days; budgets are annual" in its subtitle and left
-          the arithmetic wrong underneath it.
-        */}
-        <p className="ops-card__note">
-          {basis === "period"
-            ? `Budgets pro-rated to ${plural(data.periodDays, "day")} — annual budget × ${data.periodDays} ÷ 365.`
-            : "Annual budgets shown in full. Spend is for the selected period only, so these are not like for like."}
-        </p>
-        {data.sitesWithoutBudget > 0 ? (
-          <button
-            type="button"
-            className="ops-link"
-            onClick={() => onNavigateToSites("budget=none")}
-          >
-            {plural(data.sitesWithoutBudget, "site has", "sites have")} no budget set{" "}
-            <Icon name="chevron" size={14} />
+      <div className="ops-sheet__panel ovw-tool__panel">
+        <div className="ops-sheet__head">
+          <h2>{title}</h2>
+          <button type="button" className="ops-menu__button" onClick={onClose} aria-label="Close">
+            ✕
           </button>
-        ) : null}
-        {data.unattributedSiteSpend > 0 ? (
-          <p className="ops-card__note">
-            {money(data.unattributedSiteSpend)} is recorded against jobs with no site in the
-            register, and is shown as unattributed rather than assigned to a store.
-          </p>
-        ) : null}
-      </div>
-
-      <div>
-        <p className="ops-section-title">Contractor spend</p>
-        {/* Coverage first. 87% of cost naming no contractor is the finding; a
-            bar chart of the attributed slice alone hides it. */}
-        <div className="ops-coverage">
-          <p className="ops-headline">
-            {money(data.contractorAttributed)} of {money(data.totalSpend)}
-          </p>
-          <ProgressMeter
-            value={data.contractorAttributed}
-            max={Math.max(data.totalSpend, 1)}
-            tone="#2DD4BF"
-            label={`${money(data.contractorAttributed)} of ${money(data.totalSpend)} attributed to a contractor`}
-          />
-          <span className="ops-coverage__text">
-            {attributionPercent}% of recorded cost names a contractor.{" "}
-            {money(data.contractorLinked)} of that resolves to a contractor record.
-          </span>
         </div>
-        <div className="ops-bars" style={{ marginTop: 10 }}>
-          {data.contractors.slice(0, 8).map((row) => (
-            <div key={row.key} className="ops-bar-row">
-              <button
-                type="button"
-                className="ops-bar"
-                onClick={() => onToggle("contractor", row.key)}
-                title={`Filter this page to ${row.name}`}
-              >
-                {/* Names wrap to two lines rather than truncating mid-word. */}
-                <span className="ops-bar__label" title={row.name} style={{ whiteSpace: "normal" }}>
-                  {row.name}
-                  {row.linked ? null : (
-                    <StatusChip tone={NOT_RECORDED_COLOUR} size="small" title="No contractor record">
-                      Not linked
-                    </StatusChip>
-                  )}
-                </span>
-                <ProgressMeter
-                  value={row.spend}
-                  max={maxContractor}
-                  tone="#2DD4BF"
-                  label={`${row.name}: ${money(row.spend)} across ${plural(row.jobs, "job")}`}
-                  height={9}
-                />
-                <span className="ops-bar__value">{money(row.spend)}</span>
-              </button>
-              {/*
-                An unlinked contractor filters by the NAME it was typed as, and
-                the value carries a `name:` prefix so it cannot collide with a
-                contractor id. That is the same key `loadCost` grouped by, so
-                the bar and the filtered page count the same jobs.
-              */}
-              <button
-                type="button"
-                className="ops-bar__drill"
-                onClick={() => onDrill({ contractor: row.key })}
-                aria-label={`View the ${plural(row.jobs, "job")} costed to ${row.name}`}
-                title={`View ${row.name} jobs`}
-              >
-                <Icon name="chevron" size={14} />
-              </button>
-            </div>
-          ))}
-          {data.contractors.length === 0 ? (
-            <EmptyState>No costed job in this period names a contractor.</EmptyState>
-          ) : null}
-        </div>
-        <p className="ops-card__note">
-          Spend is the cost recorded on each job, not an invoiced amount. A job with no cost
-          recorded contributes nothing.
-        </p>
-        <HiddenDataTable
-          caption="Contractor spend in this period"
-          columns={["Contractor", "Spend", "Jobs", "Linked to a record"]}
-          rows={data.contractors.map((row) => [
-            row.name,
-            money(row.spend),
-            row.jobs,
-            row.linked ? "Yes" : "No",
-          ])}
-        />
+        {children}
       </div>
-
-      <button type="button" className="ops-link" onClick={onNavigateToCompliance}>
-        Open the compliance register <Icon name="chevron" size={14} />
-      </button>
-    </OpsCard>
+    </div>
   );
 }

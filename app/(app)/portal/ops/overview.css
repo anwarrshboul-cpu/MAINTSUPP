@@ -1,0 +1,1416 @@
+/*
+ * THE REBUILT OVERVIEW — the shared components' stylesheet.
+ *
+ * Sits beside `ops.css` rather than inside it. `ops.css` is the four
+ * Operations pages' common shell and is already 35KB; these rules belong to one
+ * page's rebuild and to the components in `overview-shared.tsx` and
+ * `overview-charts.tsx`, so they are separable and are separated.
+ *
+ * ── THREE RULES THIS FILE IS HELD TO ──────────────────────────────────────
+ *
+ * 1. BREAKPOINTS ARE 640 / 767 / 768 / 1024 / 1280 AND NOTHING ELSE. Several
+ *    stage tests fail on any other width, and `tests/overview-components.test.mjs`
+ *    asserts it over this file. Mobile is the base case; every rule widens from
+ *    it, never the other way round.
+ *
+ * 2. NO HEX LITERAL APPEARS HERE — no raw colour of any kind. Every colour is
+ *    either a `--ms-*` token from `ops-tokens.css` or one of the product's own
+ *    (`--surface-card`, `--canvas`, `--ink`, `--muted`, `--line`), so the
+ *    light/dark toggle works on every rule without a second palette. Colours
+ *    that come from DATA — a meter's colour, a severity band, a rank on the
+ *    teal scale — arrive as an inline `style` from JavaScript, which is the
+ *    only place they can come from and the only place they do.
+ *
+ * 3. FIGURES ARE TABULAR. `font-variant-numeric: tabular-nums` on everything
+ *    that holds a number, because §1.9 asks for it and because a count that
+ *    changes width on refresh makes a whole column jump.
+ *
+ * ── TOUCH ─────────────────────────────────────────────────────────────────
+ *
+ * §1.8 sets a 44px floor on tap targets with 8px between them. Where the target
+ * is a chart segment whose width is its DATA — a 2% slice is seven pixels wide
+ * and cannot be widened without lying about the number — the legend button
+ * beneath is the equivalent full-size target, which is why every chart in this
+ * page has one and why the legend is never decoration.
+ */
+
+/* ── The cohort header ────────────────────────────────────────────────────── */
+
+.ovw-cohort {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ovw-cohort__titles {
+  min-width: 0;
+}
+
+.ovw-cohort__title {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.25;
+  color: var(--ms-ink);
+}
+
+.ovw-cohort__count {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-cohort__subtitle {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--ms-ink-muted);
+}
+
+.ovw-cohort__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * `FilterChip` renders its label and value as two spans. A chip built from a
+ * string with no separator has no label half, and an empty span still takes the
+ * gap — so it is removed here rather than by changing a primitive four other
+ * pages draw.
+ */
+.ovw-cohort .ops-filter-chip__label:empty {
+  display: none;
+}
+
+.ovw-cohort__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--ms-line);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  font-size: 0.76rem;
+  color: var(--ms-ink);
+}
+
+.ovw-cohort__action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── The severity bar, with numbers on the segments ───────────────────────── */
+
+.ovw-severity {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--line-soft, var(--ms-line));
+  /*
+   * THE SEAM ROUND THE TRACK. It is a seam and nothing more, and the paragraph
+   * that used to stand here claimed otherwise on both of its counts.
+   *
+   * It claimed this hairline made "the BAR's edge unambiguous". Measured, this
+   * rule draws `--ms-line` at 1.12:1 against the track it sits on and 1.29:1
+   * against the card behind it, in light and dark alike. At those numbers it
+   * separates the bar from the card by a hair a sighted reader can just make
+   * out at rest; it cannot carry a boundary and it never did. What carries the
+   * boundary is the two-tone divider on `.ovw-severity__segment` below, which
+   * has an arithmetic guarantee against a fill of any colour.
+   *
+   * It also claimed "ink on each fill measures 4.96 to 11.13 across both
+   * themes — comfortably AA", and that dark clears 3:1 on every fill. Neither
+   * is true. Both were computed against the dark ramp in `ops-tokens.css`,
+   * which nothing reads: the fill is data, the same hex in both themes. White
+   * on the real fills measures 3.14, 2.22 and 3.05 for fresh, ageing and
+   * overdue, and near-black measures 3.61 on critical — so every theme had a
+   * failing number, and different ones. `.ovw-severity__count` answers that.
+   */
+  box-shadow: inset 0 0 0 1px var(--ms-line);
+}
+
+.ovw-severity--small {
+  height: 16px;
+}
+
+.ovw-severity__segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2px;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  /*
+   * WHERE ONE SEGMENT ENDS, against a colour nobody has chosen yet.
+   *
+   * A meter's fill comes from `dashboard_meters.colour` and a user may set it
+   * to anything, so two neighbouring segments can be any pair of colours at
+   * all, including two that a reader cannot tell apart. No single divider
+   * colour survives that. A white line beside a black one does: contrast to
+   * white times contrast to black is 21 for every possible colour, so if one
+   * of the pair falls under 3:1 the other is over 7:1, and the worst case is
+   * √21 = 4.58:1. Over the eight seeded fills the weaker line still measured
+   * 4.62:1. `ops-tokens.css` holds the two values and says why they are the
+   * only tokens there that must not follow the theme.
+   *
+   * It is a box-shadow rather than a border because the segment's width is an
+   * inline percentage; a border would take it out of the total.
+   */
+  box-shadow:
+    inset -1px 0 0 0 var(--ms-fill-edge-hi),
+    inset -2px 0 0 0 var(--ms-fill-edge-lo);
+}
+
+button.ovw-severity__segment {
+  cursor: pointer;
+}
+
+button.ovw-severity__segment:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
+
+/*
+ * THE NUMBER BRINGS ITS OWN GROUND.
+ *
+ * This renders at 11.2px/600, which is normal text under 1.4.3, so 4.5:1
+ * applies. It used to inherit `--ms-on-fill` — white in light, near-black in
+ * dark — and sit straight on the fill. Measured on the fills the API actually
+ * sends: white gives 3.14 on fresh, 2.22 on ageing, 3.05 on overdue and 5.03
+ * on critical; near-black gives 5.78, 8.16, 5.95 and 3.61. Three failures in
+ * light, one in dark, and no single ink fixes both because the fill does not
+ * change with the theme.
+ *
+ * Nor could a cleverer ink fix it in general: a meter's colour is a value a
+ * user types into Meter Settings, so the ground under this number is unknown
+ * until it renders. The only reliable answer is to stop rendering on it. The
+ * chip is `--ms-surface` under `--ms-ink`, which is the card's own pairing and
+ * measures 15.58:1 in light and 12.94:1 in dark whatever the fill behind it.
+ *
+ * The chip can be clipped on a very narrow segment — `overflow: hidden` above
+ * takes care of that, as it already did for the bare number — and the count is
+ * carried losslessly by the segment's `aria-label` and by the visually-hidden
+ * data table, so nothing is only in the chip.
+ */
+.ovw-severity__count {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--ms-surface);
+  color: var(--ms-ink);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-severity--small .ovw-severity__count {
+  padding: 0 4px;
+  font-size: 0.62rem;
+}
+
+.ovw-severity__empty {
+  display: flex;
+  align-items: center;
+  padding-inline: 8px;
+  font-size: 0.7rem;
+  color: var(--ms-ink-muted);
+}
+
+/* ── The metric tile ──────────────────────────────────────────────────────── */
+
+.ovw-tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ovw-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 12px;
+  background: var(--ms-surface);
+  text-align: left;
+  color: var(--ms-ink);
+}
+
+.ovw-tile--button {
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.ovw-tile--button:hover {
+  background: var(--surface-hover);
+  border-color: var(--line-strong, var(--ms-line));
+}
+
+.ovw-tile--button:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ovw-tile__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* §2.3 — the 4px rule that ties a tile to its segment in the bar above it. */
+.ovw-tile__rule {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+}
+
+.ovw-tile__label {
+  font-size: 0.78rem;
+  color: var(--ms-ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ovw-tile__value {
+  font-size: 1.5rem;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* §1.5 — an em dash is not a zero, and it must not be read as one. */
+.ovw-tile__value--missing {
+  color: var(--ms-ink-muted);
+  font-weight: 500;
+}
+
+.ovw-tile__missing,
+.ovw-tile__share,
+.ovw-tile__footnote {
+  font-size: 0.74rem;
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-tile__delta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * These two are TEXT — 11.84px, so 4.5:1 — and they used to read the severity
+ * FILLS. Measured on the white card, `--ms-sev-fresh` gave 3.14:1 and
+ * `--ms-sev-overdue` 3.05:1; dark was already fine at 6.89 and 6.35. The fills
+ * are pinned to `overview-meters.ts` and cannot move, so the ink ramp exists
+ * instead: same hues, 6.27:1 and 5.91:1 in light, 6.89:1 and 6.35:1 in dark.
+ * The direction is never colour alone — each delta also carries a ▲/▼ and the
+ * word "Up" or "Down".
+ */
+.ovw-tile__delta--up {
+  color: var(--ms-sev-fresh-ink);
+}
+
+.ovw-tile__delta--down {
+  color: var(--ms-sev-overdue-ink);
+}
+
+.ovw-tile__previous {
+  color: var(--ms-ink-muted);
+}
+
+/* ── The chart frame ──────────────────────────────────────────────────────── */
+
+.ovw-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-frame__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-frame__title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ms-ink-muted);
+}
+
+.ovw-frame__toggle,
+.ovw-breakdown__split,
+.ovw-breakdown__more,
+.ovw-breakdown__fix,
+.ovw-coverage__action,
+.ovw-dq__action,
+.ovw-tip__action {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 8px;
+  background: var(--surface-hover);
+  color: var(--ms-ink);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.ovw-frame__toggle[aria-pressed="true"],
+.ovw-breakdown__split[aria-pressed="true"] {
+  border-color: var(--accent-fg);
+  background: var(--surface-active);
+}
+
+.ovw-frame__toggle:focus-visible,
+.ovw-breakdown__split:focus-visible,
+.ovw-breakdown__more:focus-visible,
+.ovw-breakdown__fix:focus-visible,
+.ovw-coverage__action:focus-visible,
+.ovw-dq__action:focus-visible,
+.ovw-tip__action:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+/*
+ * The three states are three different pictures — §1.5. They share this box so
+ * the reserved height is identical in all three and nothing moves when the
+ * answer lands (§9.44).
+ */
+.ovw-frame__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.ovw-frame__state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+}
+
+.ovw-frame__state--loading {
+  background: var(--ms-surface-sunken);
+}
+
+.ovw-frame__state--empty {
+  border: 1px dashed var(--ms-line);
+  background: transparent;
+}
+
+/* The border is the only thing marking this state as an error, so 1.4.11's
+   3:1 applies to it. The fill it used to read measured 4.75:1 in light and
+   4.93:1 in dark — passing, but the ink ramp is what every other severity line
+   on this page now draws with, and it measures 6.24:1 and 5.68:1. */
+.ovw-frame__state--error {
+  border: 1px solid var(--ms-sev-critical-ink);
+  background: var(--ms-surface-sunken);
+}
+
+.ovw-frame__table {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.ovw-frame__table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-frame__table caption {
+  text-align: left;
+  padding-bottom: 6px;
+  color: var(--ms-ink-muted);
+  font-size: 0.74rem;
+}
+
+.ovw-frame__table th,
+.ovw-frame__table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--ms-line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* ── Legends ──────────────────────────────────────────────────────────────── */
+
+.ovw-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ovw-legend__item {
+  min-width: 0;
+}
+
+.ovw-legend__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 4px 10px;
+  border: 1px solid var(--ms-line);
+  border-radius: 999px;
+  background: var(--ms-surface);
+  color: var(--ms-ink);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.ovw-legend__button--static {
+  cursor: default;
+}
+
+.ovw-legend__button:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ovw-legend__swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.ovw-legend__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ovw-legend__value {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-legend__share {
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* §1.4 — the grey bucket says the words instead of showing a percentage. */
+.ovw-legend__share--none {
+  font-style: italic;
+}
+
+/* ── The tooltip ──────────────────────────────────────────────────────────── */
+
+.ovw-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 132px;
+  /* Never wider than the plot it is anchored inside, whatever 220px would be
+     at this width. The plot is the containing block, so `100%` is its width. */
+  max-width: min(220px, 100%);
+  padding: 8px 10px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+  background: var(--ms-surface);
+  box-shadow: var(--shadow-md);
+  color: var(--ms-ink);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* A pinned tooltip can be interacted with; a hovered one must not steal the
+   pointer from the segment underneath it. */
+.ovw-tip--pinned {
+  pointer-events: auto;
+  border-color: var(--accent-fg);
+}
+
+.ovw-tip__title {
+  font-size: 0.78rem;
+}
+
+.ovw-tip__line {
+  color: var(--ms-ink-muted);
+}
+
+.ovw-tip__action {
+  margin-top: 4px;
+  min-height: 44px;
+}
+
+/*
+ * THE TIP CANNOT PUSH THE PAGE SIDEWAYS ON A PHONE.
+ *
+ * It is absolutely positioned inside `.ovw-segbar__plot`, which is `position:
+ * relative` and has no clipping ancestor, and it is centred on its segment:
+ * `left` is an inline percentage (clamped to 8–92 by `overview-charts.tsx`)
+ * with `transform: translateX(-50%)`. At 320px the plot is about 288px wide, so
+ * a tip on the first segment centres near 23px and its own 110px half-width
+ * reaches past the left edge of the document. It is opened by TAP, not hover,
+ * so this is a state a phone reader reaches on purpose.
+ *
+ * Below 768 the tip stops being anchored and becomes a panel the width of the
+ * plot, which is both the fix and the better shape at that size. `left` has to
+ * be `!important` because the value it is overriding is an inline style, and
+ * that is what `!important` is for; the alternative is a `.tsx` change, and
+ * `left` is the only declaration that needs it.
+ */
+@media (max-width: 767px) {
+  .ovw-tip {
+    left: 0 !important;
+    right: 0;
+    transform: none;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+/* ── The segmented bar ────────────────────────────────────────────────────── */
+
+.ovw-segbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ovw-segbar__plot {
+  position: relative;
+  min-width: 0;
+}
+
+.ovw-segbar__track {
+  display: flex;
+  width: 100%;
+  /* Tall on touch: the segment IS the tap target, and §1.8 keeps this bar on
+     mobile because it is the fastest read on a small screen. */
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--line-soft, var(--ms-line));
+  /*
+   * The seam that separates the bar from the card. The copy of this comment on
+   * `.ovw-severity` used to claim it made the bar's edge unambiguous and that
+   * ink on the fills was "comfortably AA"; both were wrong, both are corrected
+   * there, and the same numbers apply here because it is the same track colour
+   * and the same data-driven fills. Measured: `--ms-line` at 1.12:1 against the
+   * track and 1.29:1 against the card, in both themes. The boundary that has to
+   * be readable is the one BETWEEN segments, and `.ovw-segbar__fill` draws it.
+   */
+  box-shadow: inset 0 0 0 1px var(--ms-line);
+}
+
+.ovw-segbar__fill {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  /* The two-tone divider — see `.ovw-severity__segment` for the arithmetic
+     that makes one pixel of white beside one of black legible on any fill. */
+  box-shadow:
+    inset -1px 0 0 0 var(--ms-fill-edge-hi),
+    inset -2px 0 0 0 var(--ms-fill-edge-lo);
+}
+
+.ovw-segbar__fill:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -3px;
+}
+
+.ovw-segbar__fill--active {
+  filter: brightness(1.12);
+}
+
+.ovw-segbar__empty {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── The donut ────────────────────────────────────────────────────────────── */
+
+.ovw-donut {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  justify-items: center;
+  min-width: 0;
+}
+
+.ovw-donut__plot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.ovw-donut__svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.ovw-donut__wedge {
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.ovw-donut__wedge--active {
+  opacity: 0.82;
+}
+
+.ovw-donut__centre {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+  pointer-events: none;
+}
+
+.ovw-donut__centre strong {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-ink);
+}
+
+.ovw-donut__centre small {
+  font-size: 0.68rem;
+  color: var(--ms-ink-muted);
+}
+
+/* §1.8 — the legend sits BENEATH the donut, full width, until there is room
+   beside it. That room arrives at 768 and not before. */
+.ovw-legend--donut {
+  justify-content: center;
+}
+
+/* ── Ranked bars ──────────────────────────────────────────────────────────── */
+
+.ovw-ranked {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-ranked__marker-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ms-ink-muted);
+}
+
+.ovw-ranked__marker-swatch {
+  display: inline-block;
+  width: 2px;
+  height: 12px;
+  background: var(--ms-ink);
+}
+
+.ovw-ranked__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * THE ROW WRAPS, AND THE SUFFIX IS WHAT WRAPS.
+ *
+ * Measured at 375px: the row was 321px wide with a scrollWidth of 510, and the
+ * drill button ended up at x=537 against a 375px viewport — the page scrolled
+ * sideways, which §1.8 forbids at every breakpoint. The cause was
+ * `.ovw-ranked__suffix { flex: 0 0 auto }` around the Financial card's
+ * per-row facts, which are several figures wide and cannot shrink.
+ *
+ * The fix is the one §1.8 already prescribes for a wide table — the same
+ * fields, stacked. Below 768 the suffix takes a full row of its own UNDERNEATH
+ * the bar and the drill (`order: 3`, so it falls after the button that sits
+ * after it in the DOM); from 768 up it goes back beside them.
+ */
+.ovw-ranked__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+/*
+ * DE-EMPHASIS THAT DOES NOT COST LEGIBILITY.
+ *
+ * This was `opacity: 0.75`, and opacity does not care what it is dimming. The
+ * row's `.ovw-ranked__share` is already `--ms-ink-muted`; at 75% on the white
+ * card it measured 3.67:1, against AA's 4.5:1 for normal text. Raising the
+ * figure does not help much either — `--ms-ink-muted` only reaches 4.5:1 at
+ * about 85%, by which point the de-emphasis has stopped being visible, so the
+ * rule would be paying a contrast cost for an effect nobody can see.
+ *
+ * A row is muted when it is a site with no costed jobs or a contractor nobody
+ * has linked — rows a reader is meant to read and then discount, not skip. So
+ * the emphasis comes off the label and the weight instead, at full strength:
+ * `--ms-ink-muted` measures 6.58:1 in light and 6.61:1 in dark, and the value
+ * keeps the card's ink at 15.58:1 and 12.94:1 while losing its bold.
+ */
+.ovw-ranked__row--muted .ovw-ranked__label {
+  color: var(--ms-ink-muted);
+}
+
+.ovw-ranked__row--muted .ovw-ranked__value {
+  font-weight: 500;
+}
+
+.ovw-ranked__hit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "label value share"
+    "bar bar bar";
+  align-items: center;
+  gap: 4px 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ms-ink);
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+button.ovw-ranked__hit {
+  cursor: pointer;
+}
+
+button.ovw-ranked__hit:hover {
+  background: var(--surface-hover);
+  border-color: var(--ms-line);
+}
+
+button.ovw-ranked__hit:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+.ovw-ranked__label {
+  grid-area: label;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ovw-ranked__value {
+  grid-area: value;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-ranked__share {
+  grid-area: share;
+  color: var(--ms-ink-muted);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-ranked__share--none {
+  font-style: italic;
+}
+
+.ovw-ranked__bar {
+  position: relative;
+  grid-area: bar;
+  display: block;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line-soft, var(--ms-line));
+  /* The third stacked bar on this page, and the only one that had no seam at
+     all: `--line-soft` on `--surface-card` measures 1.15:1 in light and 1.13:1
+     in dark, so an empty or nearly-empty track was invisible rather than empty.
+     Same seam as the other two tracks — 1.29:1 and 1.27:1, a seam, not a
+     boundary; the boundary between stacks is on `.ovw-ranked__stack`. */
+  box-shadow: inset 0 0 0 1px var(--ms-line);
+}
+
+.ovw-ranked__fill {
+  display: flex;
+  height: 100%;
+  border-radius: 999px;
+}
+
+/* §3.6 — a row that names a contractor nobody has linked gets no fill, so it
+   never reads as verified performance. The outline says "measured, unproven". */
+.ovw-ranked__fill--muted {
+  background: transparent;
+  border: 1px dashed var(--ms-ink-muted);
+}
+
+.ovw-ranked__stack {
+  display: block;
+  height: 100%;
+  /* Stacked by priority, one colour per priority, straight from the same data
+     as every other bar here — so the same two-tone divider, for the same
+     reason. See `.ovw-severity__segment`. */
+  box-shadow:
+    inset -1px 0 0 0 var(--ms-fill-edge-hi),
+    inset -2px 0 0 0 var(--ms-fill-edge-lo);
+}
+
+/* §3.4 — the portfolio median, since there are no budgets to compare against. */
+.ovw-ranked__marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ms-ink);
+}
+
+.ovw-ranked__suffix {
+  /* Its own line beneath the bar on a phone — see `.ovw-ranked__row`. */
+  flex: 1 1 100%;
+  order: 3;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-ranked__drill {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+  background: var(--ms-surface);
+  color: var(--ms-ink);
+  cursor: pointer;
+}
+
+.ovw-ranked__drill:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+}
+
+/* ── The time series ──────────────────────────────────────────────────────── */
+
+.ovw-ts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-ts__scales {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * THE ONLY HORIZONTALLY SCROLLABLE THING ON THE PAGE — §1.8.
+ *
+ * A daily bucketing over a 31-day range needs 31 slots, and 31 legible slots do
+ * not fit 320px. The page itself must never scroll sideways, so the plot and
+ * its ticks scroll together inside this one container, with a dashed edge and a
+ * visible scrollbar as the affordance the rule requires.
+ */
+.ovw-ts__scroller,
+.ovw-grouped__scroller {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  border-inline-end: 2px dashed var(--ms-line);
+  padding-inline-end: 6px;
+}
+
+.ovw-ts__plot {
+  position: relative;
+  height: 168px;
+  min-width: 100%;
+  border-bottom: 1px solid var(--ms-line);
+}
+
+.ovw-ts__columns {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+}
+
+.ovw-ts__slot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  flex: 1 1 0;
+  min-width: 16px;
+  height: 100%;
+}
+
+.ovw-ts__slot--active {
+  background: var(--surface-hover);
+}
+
+.ovw-ts__bar {
+  display: block;
+  flex: 1 1 0;
+  min-width: 4px;
+  border-radius: 3px 3px 0 0;
+}
+
+/* A measured zero still needs a mark, or the column reads as missing data. */
+.ovw-ts__bar--none {
+  height: 2px;
+  background: var(--ms-line);
+}
+
+/* A period still running, hatched rather than blank — a short bar with no
+   explanation at the right edge reads as a charting failure. */
+.ovw-ts__bar--partial {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--ms-surface) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+.ovw-ts__lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/*
+ * The scrub surface. `pan-y` keeps a vertical page scroll working THROUGH the
+ * chart — without it a finger that starts on the plot cannot scroll the page,
+ * which is the classic way a chart traps a phone reader.
+ */
+.ovw-ts__scrub {
+  position: absolute;
+  inset: 0;
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+
+.ovw-ts__ticks {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 100%;
+}
+
+.ovw-ts__tick {
+  flex: 1 1 0;
+  min-width: 16px;
+  text-align: center;
+}
+
+.ovw-ts__tick-button {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--ms-ink-muted);
+  font-size: 0.66rem;
+  line-height: 1.2;
+  cursor: pointer;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.ovw-ts__tick-button:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
+
+/* ── Grouped columns ──────────────────────────────────────────────────────── */
+
+.ovw-grouped {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-grouped__plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 100%;
+  height: 200px;
+  border-bottom: 1px solid var(--ms-line);
+}
+
+.ovw-grouped__group {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 56px;
+  height: 100%;
+}
+
+.ovw-grouped__group--active {
+  background: var(--surface-hover);
+}
+
+.ovw-grouped__hit {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ms-ink-muted);
+  cursor: pointer;
+}
+
+.ovw-grouped__hit:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
+
+.ovw-grouped__columns {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.ovw-grouped__column {
+  display: block;
+  flex: 1 1 0;
+  min-width: 5px;
+  border-radius: 3px 3px 0 0;
+}
+
+/*
+ * §4.4 — "Not measured", never a zero column. A dashed outline the full height
+ * of the plot says the stage exists and was not measured; a 0%-high bar says
+ * the team missed every target.
+ */
+.ovw-grouped__unmeasured {
+  display: block;
+  flex: 1 1 0;
+  min-width: 5px;
+  height: 100%;
+  border: 1px dashed var(--ms-line);
+  border-radius: 3px;
+}
+
+.ovw-grouped__label {
+  font-size: 0.66rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* ── The breakdown section ────────────────────────────────────────────────── */
+
+.ovw-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ovw-breakdown__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-breakdown__title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ms-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-breakdown__more {
+  align-self: flex-start;
+}
+
+.ovw-breakdown__not-recorded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ovw-breakdown__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+/* No percentage sits beside this count, by construction — §1.4. */
+.ovw-breakdown__grey-count {
+  color: var(--ms-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovw-breakdown__note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ms-ink-muted);
+}
+
+/* The 3px rule is the only thing that says "warning" — the text is the card's
+   own ink and there is no icon — so 1.4.11's 3:1 applies. `--ms-sev-ageing` is
+   a fill and measured 2.10:1 on the sunken card in light; the ink of the same
+   hue measures 5.60:1 there, and 8.94:1 in dark. */
+.ovw-breakdown__warning {
+  margin: 0;
+  padding: 8px 10px;
+  border-inline-start: 3px solid var(--ms-sev-ageing-ink);
+  border-radius: 0 8px 8px 0;
+  background: var(--ms-surface-sunken);
+  font-size: 0.78rem;
+  color: var(--ms-ink);
+}
+
+/* ── The data-quality row ─────────────────────────────────────────────────── */
+
+.ovw-dq {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ovw-dq__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--ms-line);
+  border-radius: 10px;
+  background: var(--ms-surface-sunken);
+}
+
+.ovw-dq__count {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-ink);
+}
+
+.ovw-dq__sentence {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--ms-ink-muted);
+}
+
+/* ── The coverage strip ───────────────────────────────────────────────────── */
+
+.ovw-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ovw-coverage__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ovw-coverage__sentence {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ms-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* §3.2 — under 40% coverage this is the most important element on the card,
+   and its border was the same 2.10:1 fill as the breakdown warning above. The
+   ink of that hue measures 5.60:1 on the sunken card in light, 8.94:1 dark. */
+.ovw-coverage__banner {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ms-sev-ageing-ink);
+  border-inline-start-width: 4px;
+  border-radius: 0 10px 10px 0;
+  background: var(--ms-surface-sunken);
+  font-size: 0.8rem;
+  color: var(--ms-ink);
+}
+
+/* 40–75% — the quieter inline note §3.2 asks for, in the muted ink. */
+.ovw-coverage__note {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--ms-ink-muted);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 640px) {
+  .ovw-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  /* Back beside the bar once there is room for it. */
+  .ovw-ranked__suffix {
+    flex: 0 0 auto;
+    order: 0;
+  }
+
+  /* The bar no longer has to be a touch target, so it stops being one. */
+  .ovw-segbar__track {
+    height: 26px;
+  }
+
+  /* §1.8's rule read forwards: the donut's legend moves beside it only when
+     there is room, and full width beneath it everywhere else. */
+  .ovw-donut {
+    grid-template-columns: 168px minmax(0, 1fr);
+    justify-items: start;
+    align-items: center;
+  }
+
+  .ovw-legend--donut {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .ovw-legend--donut .ovw-legend__button {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .ovw-legend--donut .ovw-legend__label {
+    flex: 1 1 auto;
+  }
+
+  .ovw-ranked__hit {
+    grid-template-columns: minmax(0, 8rem) minmax(0, 1fr) auto auto;
+    grid-template-areas: "label bar value share";
+  }
+
+  .ovw-ts__plot {
+    height: 200px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ovw-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ovw-ranked__hit {
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) auto auto;
+  }
+}
+
+@media (min-width: 1280px) {
+  .ovw-ts__plot {
+    height: 232px;
+  }
+
+  .ovw-grouped__plot {
+    height: 240px;
+  }
+}
+
+/*
+ * TICK DENSITY, NOT TYPE SIZE — §1.8: "Charts remain legible by reducing tick
+ * density, never by shrinking below readable type." Above eight buckets every
+ * other label is hidden on a phone; the button stays in the tab order and its
+ * accessible name is unchanged, so nothing is lost, only unprinted.
+ */
+@media (max-width: 767px) {
+  .ovw-ts__plot--dense + .ovw-ts__ticks .ovw-ts__tick:nth-child(even) .ovw-ts__tick-button {
+    color: transparent;
+  }
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .ovw-tile--button,
+  .ovw-donut__wedge {
+    transition: none;
+  }
+}

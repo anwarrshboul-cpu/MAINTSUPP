@@ -95,6 +95,17 @@ async function initialize() {
   /* Pre-W14 — reminder engine, status map, bank holidays, number sequence. */
   await ensurePreW14Foundation(d1);
 
+  /* W15 — the Overview's eight meters and the timestamps its cards read.
+     After Pre-W14 because that stage creates `job_status_map`, and `addColumn`
+     silently no-ops on a table that does not exist yet. */
+  await ensureOverviewFoundation(d1);
+
+  /* Module 5 — the Invoice Tracker's ledger. After the Overview stage for no
+     reason but reading order; it depends only on `organisations`, `invoices`,
+     `quotations`, `billing_settings` and `attachments`, all of which exist by
+     `ensureOwnerFixesAndBilling`. */
+  await ensureInvoiceTracker(d1);
+
   await repairOrphanedSectionBoards(d1);
 }
 
@@ -5205,5 +5216,934 @@ async function seedReminderDefaults(d1: D1DatabaseLike) {
         ),
     );
     await d1.batch(statements);
+  }
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE OVERVIEW'S FOUNDATION — eight meters, and the timestamps its cards read.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Runs after `ensurePreW14Foundation`, which is where `job_status_map` is
+ * created and seeded. `addColumn` silently no-ops on a table that does not
+ * exist yet, so a `meter_key` added any earlier would be a permanent silent
+ * gap rather than an error — the ordering here is load-bearing.
+ */
+
+/**
+ * THE EIGHT METERS, in workflow order — the master prompt §2.1.
+ *
+ * The colours are the meter ramp from §1.3: one progression from moving to
+ * stuck, so the At-a-glance bar reads left to right as a story rather than as a
+ * rainbow. They are seeded as DATA because §2.5 makes the display name, the
+ * order, the visibility and the colour editable per workspace, and a constant
+ * cannot be edited without a deploy.
+ */
+const DASHBOARD_METER_SEED: ReadonlyArray<{
+  key: string;
+  label: string;
+  colour: string;
+  catchAll?: boolean;
+}> = [
+  { key: "completed", label: "Completed", colour: "#0B6E63" },
+  { key: "scheduled", label: "Scheduled", colour: "#0DA1A9" },
+  { key: "in_progress", label: "In progress", colour: "#4FC3C0" },
+  { key: "waiting_approval", label: "Waiting for approval", colour: "#E8C468" },
+  { key: "waiting_parts", label: "Waiting for parts", colour: "#E0A32E" },
+  { key: "waiting_payment", label: "Waiting for payment", colour: "#DC7A3C" },
+  { key: "needs_attention", label: "Needs attention", colour: "#C24437" },
+  { key: "other", label: "Other", colour: "#9AAFB2", catchAll: true },
+];
+
+/**
+ * WHICH METER EACH STATUS STARTS IN.
+ *
+ * The first twenty-three rows are §2.1's table verbatim — monday's Status
+ * labels, in monday's wording. The rows after them are the labels this estate
+ * actually writes, mapped to the same meters, for exactly the reason
+ * `JOB_STATUS_MAP_SEED` above gives about its own second half: the data says
+ * "Job Scheduled" where a specification says "Scheduled", and leaving the real
+ * label unassigned would file live work under `other` on the first render.
+ *
+ * `Cancelled` and `Quote rejected` both sit in `other` on purpose. They are
+ * dead ends, not finished work, and putting them in `completed` would inflate
+ * the one figure a client reads first.
+ *
+ * Anything not named here needs no row: `other` is the catch-all and
+ * `app/lib/overview-meters.ts` resolves an unassigned status to it, so a status
+ * invented tomorrow lands somewhere real with no code change. That property is
+ * §9.9's acceptance test.
+ */
+const JOB_STATUS_METER_SEED: ReadonlyArray<{ label: string; meter: string }> = [
+  /* ── §2.1, exactly as written ─────────────────────────────────────────── */
+  { label: "Job Completed", meter: "completed" },
+  { label: "Completion Invoice Paid", meter: "completed" },
+  { label: "Pending Scheduling", meter: "scheduled" },
+  { label: "Job Scheduled", meter: "scheduled" },
+  { label: "Awaiting Access", meter: "scheduled" },
+  { label: "Job In Progress", meter: "in_progress" },
+  { label: "Major works", meter: "in_progress" },
+  { label: "Pending Approval", meter: "waiting_approval" },
+  { label: "Quote requested", meter: "waiting_approval" },
+  { label: "Quote Received (waiting for Approval)", meter: "waiting_approval" },
+  { label: "Quote approved", meter: "waiting_approval" },
+  { label: "Awaiting Landlord Approval", meter: "waiting_approval" },
+  { label: "Waiting for parts", meter: "waiting_parts" },
+  { label: "Waiting for payment", meter: "waiting_payment" },
+  { label: "Deposit Invoice Received", meter: "waiting_payment" },
+  { label: "Deposit Invoice Paid", meter: "waiting_payment" },
+  { label: "Completion Invoice Received", meter: "waiting_payment" },
+  { label: "Escalated", meter: "needs_attention" },
+  { label: "Health And Safety Hold", meter: "needs_attention" },
+  { label: "Blocked – Awaiting Response", meter: "needs_attention" },
+  { label: "Third Party Delay", meter: "needs_attention" },
+  { label: "Waiting for decisions", meter: "needs_attention" },
+  { label: "Quote rejected", meter: "other" },
+
+  /* ── The same states, in the words this estate uses ───────────────────── */
+  { label: "New", meter: "scheduled" },
+  { label: "Reported", meter: "scheduled" },
+  { label: "Scheduled", meter: "scheduled" },
+  { label: "Booked", meter: "scheduled" },
+  { label: "No access", meter: "scheduled" },
+  { label: "In progress", meter: "in_progress" },
+  { label: "Quote required", meter: "waiting_approval" },
+  { label: "Awaiting approval", meter: "waiting_approval" },
+  { label: "Awaiting parts", meter: "waiting_parts" },
+  { label: "On hold", meter: "needs_attention" },
+  { label: "Blocked - Awaiting Response", meter: "needs_attention" },
+  { label: "Completed", meter: "completed" },
+  { label: "Cancelled", meter: "other" },
+];
+
+/**
+ * THE ACKNOWLEDGEMENT LADDER, from the service definition (§4.4).
+ *
+ * Only `acknowledged` is seeded, and that is deliberate. §4.4 gives four
+ * acknowledgement targets — "P1 acknowledged within 30 minutes; P2 within 1
+ * business hour; P3 same working day; P4 within 1 working day" — and gives no
+ * target at all for assigned, attended or resolved. `sla_rules` set the
+ * precedent for what to do about that: it is seeded EMPTY on purpose, because a
+ * target nobody agreed puts a number on a client's SLA report that no agreement
+ * supports. So the other three stages report "no target configured" until
+ * somebody sets one in Settings, rather than being measured against an invented
+ * one.
+ *
+ * P3 and P4 both land on 480 business minutes because a working day is eight
+ * hours and "same working day" and "within 1 working day" are the same bound
+ * once the clock only runs during business hours. They are separate rows so
+ * they can diverge the moment the agreement does.
+ */
+const SLA_TARGET_SEED: ReadonlyArray<{
+  stage: string;
+  priority: string;
+  minutes: number;
+  note: string;
+}> = [
+  { stage: "acknowledged", priority: "urgent", minutes: 30, note: "P1 — acknowledged within 30 minutes" },
+  { stage: "acknowledged", priority: "medium", minutes: 60, note: "P2 — acknowledged within 1 business hour" },
+  { stage: "acknowledged", priority: "low", minutes: 480, note: "P3 — acknowledged the same working day" },
+  { stage: "acknowledged", priority: "not_recorded", minutes: 480, note: "P4 — acknowledged within 1 working day" },
+];
+
+async function ensureOverviewFoundation(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS dashboard_meters (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         meter_key TEXT NOT NULL,
+         display_label TEXT NOT NULL,
+         colour_hex TEXT NOT NULL,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         visible INTEGER NOT NULL DEFAULT 1,
+         is_catch_all INTEGER NOT NULL DEFAULT 0,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS dashboard_meters_key_idx ON dashboard_meters(organisation_id, meter_key)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS sla_targets (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         stage TEXT NOT NULL,
+         priority_key TEXT NOT NULL,
+         target_minutes INTEGER NOT NULL,
+         basis TEXT NOT NULL DEFAULT 'business',
+         version INTEGER NOT NULL DEFAULT 1,
+         effective_from TEXT NOT NULL,
+         superseded_at TEXT,
+         note TEXT,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS sla_targets_lookup_idx ON sla_targets(organisation_id, stage, superseded_at)",
+    ),
+  ]);
+
+  /* Which meter a status belongs to. One column on the table that already holds
+     one row per (organisation, status) behind a UNIQUE index, so "exactly one
+     meter" is a property of the schema rather than of the code that reads it. */
+  await addColumn(d1, "job_status_map", "meter_key", "TEXT");
+
+  /*
+   * THE FOUR STAGE TIMESTAMPS §2.4 and §4.4 measure.
+   *
+   * `status_changed_at` is "when this job entered the status it is in now" —
+   * §2.4's "Held for". It is NULLABLE and there is NO boot-path backfill:
+   * `loadStuckWork` reads the most recent status change out of `item_activity`
+   * and falls back to this column and then to `updated_at`, which is always
+   * current and costs nothing on a boot path every API route awaits. What this
+   * column adds is authority for changes made from here on, written by
+   * `app/lib/board-mutations.ts` at the moment the status moves.
+   *
+   * The other three are empty on every existing row and will stay that way.
+   * That is the honest outcome and the SLA tab says so per stage rather than
+   * drawing 0% or 100% against a timestamp that was never recorded.
+   */
+  const overviewJobColumns: Array<[string, string]> = [
+    ["status_changed_at", "TEXT"],
+    ["acknowledged_at", "TEXT"],
+    ["assigned_at", "TEXT"],
+    ["attended_at", "TEXT"],
+  ];
+  for (const [column, definition] of overviewJobColumns) {
+    await addColumn(d1, "maintenance_requests", column, definition);
+  }
+
+  /*
+   * WHAT THE OVERVIEW FILTERS AND SORTS ON — §1.6 names these by hand.
+   *
+   * Each in its own try/catch and after the `addColumn` calls above, never
+   * inside a batch beside them. `CREATE INDEX IF NOT EXISTS` guards the INDEX
+   * and not the COLUMN: on a database that predates a column, the guard passes,
+   * the statement runs, and the whole bootstrap — and therefore every API
+   * route — goes down with "column does not exist". That is the 2026-09-08
+   * Production outage, and this is the shape that avoids repeating it.
+   */
+  const overviewIndexes: Array<[string, string]> = [
+    ["maintenance_status_idx", "maintenance_requests(organisation_id, status)"],
+    ["maintenance_requested_idx", "maintenance_requests(organisation_id, requested_at)"],
+    ["maintenance_completed_idx", "maintenance_requests(organisation_id, completed_at)"],
+    ["maintenance_category_idx", "maintenance_requests(organisation_id, category)"],
+    ["maintenance_status_changed_idx", "maintenance_requests(organisation_id, status_changed_at)"],
+    ["item_activity_status_idx", "item_activity(request_id, column_key)"],
+  ];
+  for (const [name, target] of overviewIndexes) {
+    try {
+      await d1.prepare(`CREATE INDEX IF NOT EXISTS ${name} ON ${target}`).run();
+    } catch (error) {
+      console.warn(`[init] index ${name} skipped`, error);
+    }
+  }
+
+  await seedDashboardMeters(d1);
+  await seedSlaTargets(d1);
+}
+
+async function seedDashboardMeters(d1: D1DatabaseLike) {
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    await d1.batch(
+      DASHBOARD_METER_SEED.map((entry, index) =>
+        d1
+          .prepare(
+            `INSERT OR IGNORE INTO dashboard_meters (
+               id, organisation_id, meter_key, display_label, colour_hex,
+               sort_order, visible, is_catch_all
+             ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+          )
+          .bind(
+            `dm_${row.id}_${entry.key}`,
+            row.id,
+            entry.key,
+            entry.label,
+            entry.colour,
+            index,
+            entry.catchAll ? 1 : 0,
+          ),
+      ),
+    );
+    /*
+     * The status assignments, applied to rows `seedJobStatusMap` may not have
+     * created — an estate carries labels no seed knows about. `INSERT OR IGNORE`
+     * first so the row exists, then `UPDATE … WHERE meter_key IS NULL` so an
+     * operator who has already moved a status in Settings keeps their choice
+     * across a redeploy. That second clause is what makes this idempotent
+     * rather than an every-boot reset of somebody's configuration.
+     */
+    await d1.batch(
+      JOB_STATUS_METER_SEED.flatMap((entry) => [
+        d1
+          .prepare(
+            `INSERT OR IGNORE INTO job_status_map (
+               id, organisation_id, source_status_label, display_label, colour_hex,
+               icon, chip_style, counts_as_open, counts_as_overdue_eligible,
+               sort_order, active, meter_key
+             ) VALUES (?, ?, ?, ?, '#9AAFB2', 'dot', 'outline', 1, 1, 900, 1, ?)`,
+          )
+          .bind(
+            `jsm_${row.id}_${entry.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+            row.id,
+            entry.label,
+            entry.label,
+            entry.meter,
+          ),
+        d1
+          .prepare(
+            `UPDATE job_status_map SET meter_key = ?
+              WHERE organisation_id = ? AND source_status_label = ? AND meter_key IS NULL`,
+          )
+          .bind(entry.meter, row.id, entry.label),
+      ]),
+    );
+  }
+}
+
+async function seedSlaTargets(d1: D1DatabaseLike) {
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    await d1.batch(
+      SLA_TARGET_SEED.map((entry) =>
+        d1
+          .prepare(
+            `INSERT OR IGNORE INTO sla_targets (
+               id, organisation_id, stage, priority_key, target_minutes,
+               basis, version, effective_from, note
+             ) VALUES (?, ?, ?, ?, ?, 'business', 1, '2020-01-01', ?)`,
+          )
+          .bind(
+            `slat_${row.id}_${entry.stage}_${entry.priority}`,
+            row.id,
+            entry.stage,
+            entry.priority,
+            entry.minutes,
+            entry.note,
+          ),
+      ),
+    );
+  }
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * MODULE 5 — THE INVOICE TRACKER
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Every table Module 5 §14 names, plus the supporting ones §15 asks for. The
+ * two the specification calls `quotes` and `invoices` are the EXISTING
+ * `quotations` and `invoices` tables extended in place — the argument is in
+ * `db/schema.ts` at the head of the Module 5 block and comes down to this:
+ * both were already there, both were empty, and a second table meaning
+ * "invoice" beside a dead one is how a ledger ends up with two answers.
+ *
+ * Nothing here stores a balance. §6: "always compute it."
+ */
+
+/** §5's two status ladders, with §5's colours. Editable per workspace afterwards. */
+const INVOICE_STATUS_SEED: ReadonlyArray<{
+  direction: string;
+  key: string;
+  label: string;
+  colour: string;
+  icon: string;
+  open: number;
+  overdue: number;
+  terminal: number;
+}> = [
+  /* Payable — §5. */
+  { direction: "payable", key: "draft", label: "Draft", colour: "#64748B", icon: "pencil", open: 1, overdue: 0, terminal: 0 },
+  { direction: "payable", key: "received", label: "Received", colour: "#64748B", icon: "inbox", open: 1, overdue: 1, terminal: 0 },
+  { direction: "payable", key: "under_review", label: "Under review", colour: "#F59E0B", icon: "search", open: 1, overdue: 1, terminal: 0 },
+  { direction: "payable", key: "query_raised", label: "Query raised", colour: "#F59E0B", icon: "question", open: 1, overdue: 1, terminal: 0 },
+  { direction: "payable", key: "approved", label: "Approved for payment", colour: "#14B8A6", icon: "check", open: 1, overdue: 1, terminal: 0 },
+  { direction: "payable", key: "scheduled", label: "Scheduled for payment", colour: "#14B8A6", icon: "calendar", open: 1, overdue: 1, terminal: 0 },
+  { direction: "payable", key: "part_paid", label: "Partially paid", colour: "#EAB308", icon: "half", open: 1, overdue: 1, terminal: 0 },
+  { direction: "payable", key: "paid", label: "Paid", colour: "#22C55E", icon: "check", open: 0, overdue: 0, terminal: 1 },
+  { direction: "payable", key: "disputed", label: "Disputed", colour: "#8B5CF6", icon: "flag", open: 1, overdue: 0, terminal: 0 },
+  { direction: "payable", key: "voided", label: "Voided", colour: "#475569", icon: "cross", open: 0, overdue: 0, terminal: 1 },
+  { direction: "payable", key: "credited", label: "Credit note issued", colour: "#475569", icon: "receipt", open: 0, overdue: 0, terminal: 1 },
+
+  /* Receivable — §5. */
+  { direction: "receivable", key: "draft", label: "Draft", colour: "#64748B", icon: "pencil", open: 1, overdue: 0, terminal: 0 },
+  { direction: "receivable", key: "issued", label: "Issued", colour: "#64748B", icon: "receipt", open: 1, overdue: 1, terminal: 0 },
+  { direction: "receivable", key: "sent", label: "Sent", colour: "#14B8A6", icon: "send", open: 1, overdue: 1, terminal: 0 },
+  { direction: "receivable", key: "viewed", label: "Viewed", colour: "#14B8A6", icon: "eye", open: 1, overdue: 1, terminal: 0 },
+  { direction: "receivable", key: "overdue", label: "Overdue", colour: "#F97316", icon: "clock", open: 1, overdue: 1, terminal: 0 },
+  { direction: "receivable", key: "part_paid", label: "Part paid", colour: "#EAB308", icon: "half", open: 1, overdue: 1, terminal: 0 },
+  { direction: "receivable", key: "paid", label: "Paid", colour: "#22C55E", icon: "check", open: 0, overdue: 0, terminal: 1 },
+  { direction: "receivable", key: "disputed", label: "Disputed", colour: "#8B5CF6", icon: "flag", open: 1, overdue: 0, terminal: 0 },
+  { direction: "receivable", key: "written_off", label: "Written off", colour: "#475569", icon: "cross", open: 0, overdue: 0, terminal: 1 },
+  { direction: "receivable", key: "voided", label: "Voided", colour: "#475569", icon: "cross", open: 0, overdue: 0, terminal: 1 },
+  { direction: "receivable", key: "credited", label: "Credited", colour: "#475569", icon: "receipt", open: 0, overdue: 0, terminal: 1 },
+];
+
+/**
+ * §13's worked example, as rows.
+ *
+ * "under £250 auto-approve on match, £250–£1,000 one approver, above £1,000 two
+ * approvers, above £5,000 requires client sign-off recorded against the quote."
+ * `approvers_required = 0` is what "auto-approve on match" means: no signature,
+ * but the three-way match still has to be clean, which is enforced by the flags
+ * and not by this table.
+ */
+const APPROVAL_RULE_SEED: ReadonlyArray<{
+  min: number;
+  max: number | null;
+  approvers: number;
+  client: number;
+}> = [
+  { min: 0, max: 25000, approvers: 0, client: 0 },
+  { min: 25000, max: 100000, approvers: 1, client: 0 },
+  { min: 100000, max: 500000, approvers: 2, client: 0 },
+  { min: 500000, max: null, approvers: 2, client: 1 },
+];
+
+async function ensureInvoiceTracker(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_job_alloc (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         request_id TEXT NOT NULL,
+         amount_pence INTEGER NOT NULL DEFAULT 0,
+         note TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS invoice_job_alloc_invoice_idx ON invoice_job_alloc(invoice_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS invoice_job_alloc_job_idx ON invoice_job_alloc(request_id)"),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS invoice_job_alloc_once_idx ON invoice_job_alloc(invoice_id, request_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS payments (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         reference TEXT,
+         direction TEXT NOT NULL,
+         amount_pence INTEGER NOT NULL DEFAULT 0,
+         payment_date TEXT NOT NULL,
+         method TEXT NOT NULL DEFAULT 'bank_transfer',
+         payment_source_id TEXT,
+         payment_run_id TEXT,
+         attachment_id TEXT,
+         note TEXT,
+         recorded_by TEXT,
+         recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payments_org_idx ON payments(organisation_id, payment_date)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payments_run_idx ON payments(payment_run_id)"),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS payment_alloc (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         payment_id TEXT NOT NULL,
+         invoice_id TEXT NOT NULL,
+         amount_pence INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payment_alloc_payment_idx ON payment_alloc(payment_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payment_alloc_invoice_idx ON payment_alloc(invoice_id)"),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS payment_alloc_once_idx ON payment_alloc(payment_id, invoice_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS credit_notes (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         reference TEXT,
+         invoice_id TEXT NOT NULL,
+         amount_pence INTEGER NOT NULL DEFAULT 0,
+         reason TEXT NOT NULL,
+         issued_date TEXT NOT NULL,
+         attachment_id TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS credit_notes_invoice_idx ON credit_notes(invoice_id)"),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_flags (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         flag_type TEXT NOT NULL,
+         severity TEXT NOT NULL DEFAULT 'blocking',
+         detail TEXT,
+         status TEXT NOT NULL DEFAULT 'open',
+         waived_by TEXT,
+         waive_reason TEXT,
+         waived_at TEXT,
+         cleared_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS invoice_flags_invoice_idx ON invoice_flags(invoice_id, status)"),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS invoice_flags_once_idx ON invoice_flags(invoice_id, flag_type)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_status_map (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         direction TEXT NOT NULL,
+         status_key TEXT NOT NULL,
+         display_label TEXT NOT NULL,
+         colour_hex TEXT NOT NULL,
+         icon TEXT,
+         counts_as_open INTEGER NOT NULL DEFAULT 1,
+         counts_as_overdue_eligible INTEGER NOT NULL DEFAULT 1,
+         is_terminal INTEGER NOT NULL DEFAULT 0,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         active INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS invoice_status_map_key_idx ON invoice_status_map(organisation_id, direction, status_key)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS approval_rules (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         direction TEXT NOT NULL DEFAULT 'payable',
+         min_amount_pence INTEGER NOT NULL DEFAULT 0,
+         max_amount_pence INTEGER,
+         approvers_required INTEGER NOT NULL DEFAULT 1,
+         requires_client INTEGER NOT NULL DEFAULT 0,
+         maker_checker_from_pence INTEGER,
+         active INTEGER NOT NULL DEFAULT 1,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS approval_rules_band_idx ON approval_rules(organisation_id, direction)"),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_status_history (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         from_status TEXT,
+         to_status TEXT NOT NULL,
+         actor_email TEXT,
+         actor_user_id TEXT,
+         reason TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS invoice_status_history_invoice_idx ON invoice_status_history(invoice_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_approval_records (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         approver_email TEXT NOT NULL,
+         approver_user_id TEXT,
+         decision TEXT NOT NULL,
+         basis TEXT,
+         rule_id TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS invoice_approval_records_invoice_idx ON invoice_approval_records(invoice_id)",
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS invoice_approval_records_once_idx ON invoice_approval_records(invoice_id, approver_email)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS payment_runs (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         reference TEXT NOT NULL,
+         payment_date TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'draft',
+         payment_source_id TEXT,
+         total_pence INTEGER NOT NULL DEFAULT 0,
+         invoice_count INTEGER NOT NULL DEFAULT 0,
+         exported_at TEXT,
+         export_filename TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payment_runs_org_idx ON payment_runs(organisation_id, payment_date)"),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS payment_sources (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         label TEXT NOT NULL,
+         account_name TEXT,
+         accounting_reference TEXT,
+         reference_prefix TEXT,
+         active INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS payment_sources_org_idx ON payment_sources(organisation_id)"),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_disputes (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         invoice_id TEXT NOT NULL,
+         reason TEXT NOT NULL,
+         detail TEXT,
+         status TEXT NOT NULL DEFAULT 'open',
+         raised_by TEXT,
+         raised_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         resolution TEXT,
+         resolved_by TEXT,
+         resolved_at TEXT
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS invoice_disputes_invoice_idx ON invoice_disputes(invoice_id, status)"),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS supplier_statements (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         counterparty_id TEXT,
+         counterparty_name TEXT,
+         statement_date TEXT NOT NULL,
+         claimed_total_pence INTEGER NOT NULL DEFAULT 0,
+         source_filename TEXT,
+         uploaded_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS supplier_statements_org_idx ON supplier_statements(organisation_id, statement_date)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS supplier_statement_lines (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         statement_id TEXT NOT NULL,
+         supplier_ref TEXT,
+         invoice_date TEXT,
+         amount_pence INTEGER NOT NULL DEFAULT 0,
+         matched_invoice_id TEXT,
+         match_state TEXT NOT NULL DEFAULT 'supplier_only',
+         note TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS supplier_statement_lines_statement_idx ON supplier_statement_lines(statement_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS recurring_invoice_rules (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         direction TEXT NOT NULL DEFAULT 'receivable',
+         counterparty_id TEXT,
+         description TEXT,
+         net_pence INTEGER NOT NULL DEFAULT 0,
+         category TEXT,
+         frequency TEXT NOT NULL DEFAULT 'monthly',
+         day_of_month INTEGER NOT NULL DEFAULT 1,
+         payment_terms_days INTEGER,
+         next_run_date TEXT,
+         last_run_at TEXT,
+         active INTEGER NOT NULL DEFAULT 1,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS recurring_invoice_rules_due_idx ON recurring_invoice_rules(next_run_date, active)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS invoice_extractions (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         attachment_id TEXT,
+         invoice_id TEXT,
+         engine TEXT NOT NULL DEFAULT 'heuristic',
+         fields_json TEXT NOT NULL DEFAULT '{}',
+         confidence_json TEXT NOT NULL DEFAULT '{}',
+         status TEXT NOT NULL DEFAULT 'suggested',
+         accepted_by TEXT,
+         accepted_at TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS invoice_extractions_attachment_idx ON invoice_extractions(attachment_id)",
+    ),
+
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS finance_inbox (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         message_id TEXT,
+         sender TEXT,
+         subject TEXT,
+         received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         attachment_id TEXT,
+         invoice_id TEXT,
+         status TEXT NOT NULL DEFAULT 'received',
+         error TEXT
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS finance_inbox_org_idx ON finance_inbox(organisation_id, status)"),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS finance_inbox_message_idx ON finance_inbox(organisation_id, message_id)",
+    ),
+  ]);
+
+  /* §3 — the quote, extended in place. */
+  const quoteColumns: Array<[string, string]> = [
+    ["internal_ref", "TEXT"],
+    ["supplier_ref", "TEXT"],
+    ["site_id", "TEXT"],
+    ["description", "TEXT"],
+    ["net_pence", "INTEGER"],
+    ["vat_pence", "INTEGER"],
+    ["gross_pence", "INTEGER"],
+    ["quote_date", "TEXT"],
+    ["valid_until", "TEXT"],
+    ["approved_by", "TEXT"],
+    ["rejected_reason", "TEXT"],
+    ["rejected_by", "TEXT"],
+    ["rejected_at", "TEXT"],
+    ["client_approval_required", "INTEGER NOT NULL DEFAULT 0"],
+    ["client_approved_by", "TEXT"],
+    ["client_approved_at", "TEXT"],
+    ["po_number", "TEXT"],
+    ["superseded_by_id", "TEXT"],
+    ["created_by", "TEXT"],
+    ["created_at", "TEXT"],
+    ["updated_at", "TEXT"],
+  ];
+  for (const [column, definition] of quoteColumns) {
+    await addColumn(d1, "quotations", column, definition);
+  }
+
+  /* §4 — the ledger, extended in place. */
+  const invoiceColumns: Array<[string, string]> = [
+    ["direction", "TEXT NOT NULL DEFAULT 'payable'"],
+    ["internal_ref", "TEXT"],
+    ["counterparty_type", "TEXT"],
+    ["counterparty_id", "TEXT"],
+    ["counterparty_name", "TEXT"],
+    ["from_department", "TEXT"],
+    ["to_department", "TEXT"],
+    ["fao_contact", "TEXT"],
+    ["quote_id", "TEXT"],
+    ["po_number", "TEXT"],
+    ["site_id", "TEXT"],
+    ["invoice_date", "TEXT"],
+    ["received_date", "TEXT"],
+    ["sent_date", "TEXT"],
+    ["payment_terms_days", "INTEGER"],
+    ["net_pence", "INTEGER"],
+    ["vat_pence", "INTEGER"],
+    ["gross_pence", "INTEGER"],
+    ["currency", "TEXT NOT NULL DEFAULT 'GBP'"],
+    ["cost_centre", "TEXT"],
+    ["category", "TEXT"],
+    ["notes", "TEXT"],
+    ["retention_pence", "INTEGER"],
+    ["retention_release_date", "TEXT"],
+    ["retention_released_at", "TEXT"],
+    ["source", "TEXT NOT NULL DEFAULT 'manual'"],
+    ["service_invoice_id", "TEXT"],
+    ["created_by", "TEXT"],
+    ["finalised_at", "TEXT"],
+    ["finalised_by", "TEXT"],
+    /* §13 membership — see the column comment in `db/schema.ts`. Without it
+       the export re-derived its rows and re-sent invoices another run had
+       already put in a bank file. */
+    ["payment_run_id", "TEXT"],
+    ["voided_at", "TEXT"],
+    ["voided_by", "TEXT"],
+    ["void_reason", "TEXT"],
+    ["updated_at", "TEXT"],
+  ];
+  for (const [column, definition] of invoiceColumns) {
+    await addColumn(d1, "invoices", column, definition);
+  }
+
+  /*
+   * THREE MORE GAPLESS COUNTERS, beside the one Module 4 already has.
+   *
+   * `billing_settings.invoice_sequence` is a compare-and-swap counter with a
+   * UNIQUE index behind it and it belongs to `MS-YYYY-NNN`. Module 5 needs
+   * three more series — `QT-`, `AP-` and `AR-` — and they are separate counters
+   * for the same reason the note beside `invoice_sequence_year` gives about not
+   * adding a second one for `MS-`: two documents that share a number is the
+   * failure, so each series gets exactly one counter and no series shares.
+   *
+   * The tolerance and window settings live here too rather than in code,
+   * because §7 says the over-quote tolerance is "configurable" and §7's
+   * duplicate rule names a 30-day window that an operator may want to widen.
+   */
+  const billingColumns: Array<[string, string]> = [
+    ["quote_sequence", "INTEGER NOT NULL DEFAULT 0"],
+    ["quote_sequence_year", "INTEGER"],
+    ["payable_sequence", "INTEGER NOT NULL DEFAULT 0"],
+    ["payable_sequence_year", "INTEGER"],
+    ["receivable_sequence", "INTEGER NOT NULL DEFAULT 0"],
+    ["receivable_sequence_year", "INTEGER"],
+    /* §7 — "default 5% or £50, whichever is greater". Basis points and pence. */
+    ["over_quote_tolerance_bp", "INTEGER NOT NULL DEFAULT 500"],
+    ["over_quote_tolerance_pence", "INTEGER NOT NULL DEFAULT 5000"],
+    ["duplicate_window_days", "INTEGER NOT NULL DEFAULT 30"],
+    ["payable_terms_days", "INTEGER NOT NULL DEFAULT 30"],
+    /* §12 — the address a payable may arrive at. Never a credential. */
+    ["finance_inbox_address", "TEXT"],
+  ];
+  for (const [column, definition] of billingColumns) {
+    await addColumn(d1, "billing_settings", column, definition);
+  }
+
+  /*
+   * A FIFTH ANCHOR ON `attachments`.
+   *
+   * The table already anchors on request, site, unit and contractor, and
+   * `contractor_id` was added exactly this way. An invoice document has none of
+   * those as its subject — a multi-job invoice has four jobs and one supplier —
+   * so it needs its own, and `app/api/files/route.ts` refuses an upload with no
+   * anchor at all.
+   */
+  /*
+   * THE RENAMED COLUMN, ADDED RATHER THAN RENAMED.
+   *
+   * `bank_accounts` became `payment_sources` when the payment credentials came
+   * out of it (W06-09), and the two tables that point at it renamed their
+   * foreign key with it. `CREATE TABLE IF NOT EXISTS` does NOTHING to a table
+   * that already exists, so on any database that has already booted once,
+   * `payments` and `payment_runs` still carry only `bank_account_id` — and
+   * every `select()` drizzle builds from the schema names `payment_source_id`,
+   * so both routes answered 503. Measured on the Preview immediately after
+   * deploying the rename, which is exactly the legacy-schema trap this file's
+   * own notes warn about.
+   *
+   * Added, never renamed: `db/init.ts` performs no destructive ALTER. The old
+   * column stays where it is, unread — both tables held no rows carrying one
+   * on any estate, so there is nothing to copy across.
+   */
+  await addColumn(d1, "payments", "payment_source_id", "TEXT");
+  await addColumn(d1, "payment_runs", "payment_source_id", "TEXT");
+
+  await addColumn(d1, "attachments", "invoice_id", "TEXT");
+  await addColumn(d1, "attachments", "quote_id", "TEXT");
+  try {
+    await d1
+      .prepare("CREATE INDEX IF NOT EXISTS attachments_invoice_idx ON attachments(invoice_id)")
+      .run();
+  } catch (error) {
+    console.warn("[init] attachments_invoice_idx skipped", error);
+  }
+
+  /* Its own try/catch AFTER the `addColumn` above, because
+     `CREATE INDEX IF NOT EXISTS` guards the INDEX and not the column: on a
+     database that predates `payment_run_id` this statement is what fails. */
+  try {
+    await d1
+      .prepare("CREATE INDEX IF NOT EXISTS invoices_payment_run_idx ON invoices(payment_run_id)")
+      .run();
+  } catch (error) {
+    console.warn("[init] invoices_payment_run_idx skipped", error);
+  }
+
+  await seedInvoiceStatusMap(d1);
+  await seedApprovalRules(d1);
+}
+
+async function seedInvoiceStatusMap(d1: D1DatabaseLike) {
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    await d1.batch(
+      INVOICE_STATUS_SEED.map((entry, index) =>
+        d1
+          .prepare(
+            `INSERT OR IGNORE INTO invoice_status_map (
+               id, organisation_id, direction, status_key, display_label, colour_hex,
+               icon, counts_as_open, counts_as_overdue_eligible, is_terminal, sort_order, active
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          )
+          .bind(
+            `ism_${row.id}_${entry.direction}_${entry.key}`,
+            row.id,
+            entry.direction,
+            entry.key,
+            entry.label,
+            entry.colour,
+            entry.icon,
+            entry.open,
+            entry.overdue,
+            entry.terminal,
+            index,
+          ),
+      ),
+    );
+  }
+}
+
+async function seedApprovalRules(d1: D1DatabaseLike) {
+  const organisations = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+    if (!row.id) continue;
+    await d1.batch(
+      APPROVAL_RULE_SEED.map((entry, index) =>
+        d1
+          .prepare(
+            `INSERT OR IGNORE INTO approval_rules (
+               id, organisation_id, direction, min_amount_pence, max_amount_pence,
+               approvers_required, requires_client, maker_checker_from_pence, active, sort_order
+             ) VALUES (?, ?, 'payable', ?, ?, ?, ?, 100000, 1, ?)`,
+          )
+          .bind(
+            `apr_${row.id}_payable_${entry.min}`,
+            row.id,
+            entry.min,
+            entry.max,
+            entry.approvers,
+            entry.client,
+            index,
+          ),
+      ),
+    );
   }
 }

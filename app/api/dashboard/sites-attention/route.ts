@@ -1,22 +1,25 @@
 /**
- * GET /api/dashboard/sites-attention — the merged attention card.
+ * GET /api/dashboard/sites-attention — §6, real sites only.
  *
- * Three things the Overview used to draw as three separate panels, in one
- * payload: the whole-estate ageing distribution that was "Open job ageing", the
- * per-site rows that were "Sites needing attention", and the job feed that was
- * "Units requiring attention". They were the same open jobs, three times over.
+ * REBUILT. The card read "57 open jobs across 2 sites" over a portfolio of ten,
+ * and one of the two was *Unassigned site*, which is not a location — it is a
+ * broken foreign key, and ranking it against real stores distorted every row.
+ * §6.1 moves it out of the list and into `dataQuality.jobsWithNoSite`, where a
+ * bulk site-assign view can act on it.
  *
- * The top jobs for each site come back INLINE. Expanding a row is then free,
- * which is the difference between a card that feels instant on a phone and one
- * that spins every time somebody opens a site.
+ * `shareOfOpen` is a PERCENTAGE (§6.3 — the old card printed a count beside a
+ * bar and called it "Share of open 26"), and `score` weights critical-aged and
+ * urgent work highest so the ranking is a judgement rather than a row count.
  *
- * Compliance per site is joined on here rather than left to the browser,
- * because the register is derived from the Store Documentation board and the
- * browser has no way to compute it without the 432 KB workspace snapshot this
- * rebuild exists to stop downloading.
+ * COMPLIANCE STILL COMES FROM THE SHARED REGISTER, and that is deliberate and
+ * pinned: `readComplianceRegister` is the same function the Compliance page
+ * reads and `complianceCompletion` is the same rule it counts with, keyed by
+ * the register's own `bySite` index so nothing here re-groups it. The old
+ * defect was two panels on one page disagreeing about one store, and it must
+ * not come back through a rebuild.
  */
 
-import { loadAgeing, loadSitesAttention } from "../../../lib/dashboard-aggregates";
+import { loadSitesAttention } from "../../../lib/overview-aggregates";
 import { readComplianceRegister } from "../../../lib/compliance-register";
 import { complianceCompletion } from "../../../lib/compliance-status";
 import type { ComplianceState } from "../../../lib/types";
@@ -25,6 +28,7 @@ import {
   dashboardScope,
   windowPayload,
 } from "../../../lib/dashboard-route";
+import type { SitesAttentionPayload } from "../../../(app)/portal/ops/overview-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -62,14 +66,10 @@ export async function GET(request: Request) {
   try {
     const resolved = await dashboardScope(request);
     if (!resolved.ok) return resolved.response;
-    const { scope, filters, window, now, url } = resolved.value;
+    const { scope, filters, window, now } = resolved.value;
 
-    const jobLimit = Math.min(Math.max(Number(url.searchParams.get("jobs")) || 10, 1), 25);
-    const siteLimit = Math.min(Math.max(Number(url.searchParams.get("sites")) || 12, 1), 60);
-
-    const [ageing, attention, register] = await Promise.all([
-      loadAgeing(scope.db, scope.orgId, filters, window, now),
-      loadSitesAttention(scope.db, scope.orgId, filters, window, now, { siteLimit, jobLimit }),
+    const [attention, register] = await Promise.all([
+      loadSitesAttention(scope.db, scope.orgId, filters, window, now),
       readComplianceRegister(scope.db, scope.orgId, { today: now }),
     ]);
 
@@ -88,15 +88,38 @@ export async function GET(request: Request) {
       ]),
     );
 
-    return Response.json({
+    const payload: SitesAttentionPayload = {
       period: windowPayload(window),
-      ageing,
-      siteCount: attention.siteCount,
-      sites: attention.sites.map((site) => ({
-        ...site,
-        compliance: complianceBySite.get(site.siteId) ?? NO_REGISTER,
-      })),
-    });
+      ...attention,
+      sites: attention.sites.map((site) => {
+        const completion = complianceBySite.get(site.siteId);
+        return {
+          ...site,
+          compliance: completion
+            ? {
+                satisfied: completion.satisfied,
+                applicable: completion.applicable,
+                scored: completion.scored,
+              }
+            : { satisfied: NO_REGISTER.satisfied, applicable: NO_REGISTER.applicable, scored: NO_REGISTER.scored },
+        };
+      }),
+      dataQuality: {
+        ...attention.dataQuality,
+        /*
+         * "N sites have no compliance profile" — §6.4. Counted here rather than
+         * in the aggregate because the register is what knows: a site with no
+         * entry in `bySite` has no requirements set up at all, which is the
+         * same distinction `scored: false` draws one row down.
+         */
+        sitesWithoutComplianceProfile: Math.max(
+          0,
+          attention.portfolioSiteCount -
+            [...complianceBySite.values()].filter((entry) => entry.scored).length,
+        ),
+      },
+    };
+    return Response.json(payload);
   } catch (error) {
     return dashboardFailure(error);
   }

@@ -456,20 +456,37 @@ test("W06-12: the Dashboard has a contractor cost panel of its own", async () =>
    * the finding the original panel buried; and it is fed by the register, since
    * an id means nothing without the record that names it.
    */
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
-  assert.match(page, /<p className="ops-section-title">Contractor spend<\/p>/,
+  /*
+   * RE-POINTED at the rebuilt Financial status card. Three things moved and
+   * none of them weakened:
+   *
+   *   · the panel is a `<h3>` inside its own section rather than a `<p
+   *     className="ops-section-title">` — it is a heading, so it is one;
+   *   · the fields are `…Pence` now. Money crosses the wire as integer pence,
+   *     because a float that has been through JSON twice is not the number
+   *     anybody typed;
+   *   · the top-eight slice moved into `RankedBars`, which every ranked list on
+   *     the page shares, so the card no longer says `.slice(0, 8)` — and a card
+   *     can no longer forget to.
+   *
+   * The contract is exactly what it was: the Overview carries a contractor
+   * spend panel, it leads with the COVERAGE rather than with the attributed
+   * slice alone, and every row says whether it resolves to a record.
+   */
+  const page = await read("app/(app)/portal/ops/overview-financial.tsx");
+  assert.match(page, /<h3 className="ova-section__title">Contractor spend<\/h3>/,
     "the Overview carries a contractor spend panel");
   assert.match(
     page,
-    /money\(data\.contractorAttributed\)\} of \{money\(data\.totalSpend\)/,
+    /\{exact\(data\.contractorAttributedPence\)\} of \{exact\(data\.totalSpendPence\)\}/,
     "and it leads with the coverage, not with the attributed slice alone",
   );
   assert.match(
     page,
-    /data\.contractors\.slice\(0, 8\)\.map/,
+    /data\.contractors\.map/,
     "with the per-contractor bars beneath it",
   );
-  assert.match(page, /row\.linked \?/, "each row saying whether it resolves to a record");
+  assert.match(page, /row\.linked/, "each row saying whether it resolves to a record");
 
   const cost = await read("app/lib/dashboard-aggregates.ts");
   const fn = cost.slice(cost.indexOf("export async function loadCost"));
@@ -595,11 +612,23 @@ test("W06-12: contractor spend names its operational date basis on the screen", 
     /export function withinWindowCondition[\s\S]{0,600}maintenanceRequests\.requestedAt/,
     "the dashboard window is the raised date too",
   );
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  /*
+   * RE-POINTED, and the sentence is longer than it was because §3.1 asks it to
+   * be: the definition now names all three things spend is NOT — an invoiced
+   * amount, a quoted amount, and a Maintsupp fee — since the card's whole
+   * subject is a client's trade spend and the confusion it exists to prevent is
+   * that it might be read as ours.
+   */
+  const page = await read("app/(app)/portal/ops/overview-financial.tsx");
   assert.match(
     page,
-    /Spend is the cost recorded on each job, not an invoiced amount\./,
+    /Spend is the Cost of Works value recorded on a job — not an invoiced amount/,
     "and the card keeps the caveat about what kind of money this is",
+  );
+  assert.match(
+    page,
+    /Maintsupp coordination fees are not included here/,
+    "…including the one that says whose money it is",
   );
 });
 

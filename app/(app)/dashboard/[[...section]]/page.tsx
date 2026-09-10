@@ -25,6 +25,7 @@ const routes: Record<string, Section> = {
   contractors: "contractors",
   compliance: "compliance",
   documents: "documents",
+  "invoice-tracker": "invoice-tracker",
   reports: "reports",
   settings: "settings",
   team: "team",

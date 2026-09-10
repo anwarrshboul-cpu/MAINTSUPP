@@ -189,6 +189,9 @@ import {
   JobVolumeTrend,
 } from "./dashboard-insights";
 import { OverviewPage } from "./ops/overview-page";
+import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
+import { OPS_REFRESH, URL_CHANGED, useQueryState } from "./ops/ops-url-state";
+import { DRILL_KEYS, readDrillFilter } from "./board-drill-filter";
 import { CompliancePage } from "./ops/compliance-page";
 import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 /*
@@ -263,6 +266,14 @@ export type Section =
   | "compliance"
   | "calendar"
   | "documents"
+  /*
+   * Module 5 — the Invoice Tracker. Payable and receivable in one ledger, plus
+   * quotes, payments, credit notes and the three-way match. It is its own
+   * section rather than a Reports tab because Reports is where MAINTSUPP's own
+   * coordination-fee document is generated, and the two answer opposite
+   * questions: one is what we invoiced, this is what everybody owes everybody.
+   */
+  | "invoice-tracker"
   | "reports"
   | "team"
   | "settings"
@@ -486,6 +497,12 @@ const sectionMeta: Record<
     title: "Documents & evidence",
     icon: "folder",
   },
+  "invoice-tracker": {
+    label: "Invoice Tracker",
+    eyebrow: "Money in and money out",
+    title: "Invoice Tracker",
+    icon: "inbox",
+  },
   reports: {
     label: "Reports",
     eyebrow: "Portfolio intelligence",
@@ -554,6 +571,9 @@ const navPrimary: Section[] = [
   "stores",
   "contractors",
   "documents",
+  // Module 5, between Documents and Reports. Kept level with `BUILT_IN_ORDER`
+  // in app/api/navigation/layout.ts by tests/stage-twenty-navigation.
+  "invoice-tracker",
   "reports",
   "settings",
 ];
@@ -601,6 +621,14 @@ const navSecondary: Section[] = [
  */
 const navExcluded: ReadonlySet<string> = new Set<string>(["units"]);
 
+const JOB_LIST_SURFACES: ReadonlySet<Section> = new Set<Section>([
+  "maintenance",
+  "calendar",
+  "contractors",
+  "reports",
+  "units",
+]);
+
 const sectionRoutes: Record<Section, string> = {
   overview: "",
   maintenance: "jobs",
@@ -611,6 +639,7 @@ const sectionRoutes: Record<Section, string> = {
   contractors: "contractors",
   compliance: "compliance",
   documents: "documents",
+  "invoice-tracker": "invoice-tracker",
   reports: "reports",
   settings: "settings",
   team: "team",
@@ -1579,72 +1608,30 @@ export default function PortalApp({
    */
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  /*
+   * WHETHER ANY SURFACE HAS ASKED FOR THE JOB LIST YET.
+   *
+   * The paged `/api/maintenance` read below is the shell's single job snapshot:
+   * the board, the calendar, the contractor screen, the reporting tabs and the
+   * job side panel all draw from it. It used to run on mount for every section
+   * without exception, so opening the Overview downloaded every job in the
+   * estate — 776 rows in one page and more behind it — to compute nothing at
+   * all. Every figure on that page comes from `/api/dashboard/*`, each of which
+   * is one aggregate in Postgres.
+   *
+   * §1.6 of the dashboard brief states the requirement as a network-tab
+   * observation: "the network tab must show no bulk job fetch for the Overview
+   * page." So the fetch is deferred rather than removed. It starts the moment a
+   * surface that genuinely reads the list becomes active, and once started it
+   * stays loaded — moving between sections must not re-download the estate.
+   *
+   * Latched in state rather than derived per render because "has ever been
+   * wanted" is the question, not "is wanted now".
+   */
+  const jobListWanted = useRef(false);
   /** When the figures on screen were last successfully read. Null until then. */
   const [dataUpdatedAt, setDataUpdatedAt] = useState<Date | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    async function loadRequests() {
-      /*
-       * Every page of the board, not just the first.
-       *
-       * `/api/maintenance` was paged in Stage 16 after a bare `.limit(250)` made
-       * the board show 250 of 744 jobs while every total agreed with every other
-       * total. The server side was fixed; this caller was not — it asked for no
-       * limit, took the default 1000, and never read `hasMore`. Past 1000 jobs
-       * the dashboards would have gone quietly wrong in exactly the same way,
-       * and the oldest work — the overdue backlog — is what falls off the end.
-       */
-      try {
-        const collected: MaintenanceRequest[] = [];
-        let offset = 0;
-        for (;;) {
-          const response = await fetch(
-            `/api/maintenance?limit=1000&offset=${offset}`,
-            { headers: { Accept: "application/json" } },
-          );
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const payload = (await response.json()) as {
-            requests?: MaintenanceRequest[];
-            hasMore?: boolean;
-            nextOffset?: number | null;
-          };
-          if (!active) return;
-          collected.push(...(payload.requests ?? []));
-          if (!payload.hasMore || typeof payload.nextOffset !== "number") break;
-          offset = payload.nextOffset;
-        }
-        if (active) {
-          setRequests(collected);
-          setDataMode("live");
-          // Stamped only on success, so the time on screen is when the figures
-          // were last actually read — not when someone last pressed the button.
-          setDataUpdatedAt(new Date());
-        }
-      } catch {
-        /*
-         * Say so, and show nothing.
-         *
-         * Two rounds of this. First the chip said "Loading workspace" for ever,
-         * so a 503 from D1 presented `mock-data.ts` as the customer's own
-         * figures. Then the chip was made honest — but the invented rows stayed
-         * underneath it, and every dashboard on the screen went on computing
-         * spend, compliance and SLA from them. The rows are gone now: the state
-         * starts empty and a failure leaves it empty.
-         */
-        if (active) {
-          setRequests([]);
-          setDataMode("unavailable");
-        }
-      } finally {
-        if (active) setRefreshing(false);
-      }
-    }
-    loadRequests();
-    return () => {
-      active = false;
-    };
-  }, [refreshToken]);
 
   useEffect(() => {
     let active = true;
@@ -1986,6 +1973,136 @@ export default function PortalApp({
         ? "__pending"
         : "overview"
   ) as Section;
+
+  /*
+   * Whether THIS surface reads the job list, and therefore whether the
+   * freshness chip and the "Updated" stamp have anything to report.
+   *
+   * Derived rather than read off `jobListWanted`, which is a ref: a ref does
+   * not re-render, so the chip would never appear, and reading `.current`
+   * during render is exactly the impurity the compiler rule above objects
+   * to. The surface is already reactive and is the honest question anyway —
+   * the age of figures nobody on this screen is reading is not a fact worth
+   * a line of chrome.
+   */
+  const surfaceReadsJobList = JOB_LIST_SURFACES.has(activeSurface);
+
+  /*
+   * THE DRILL-THROUGH, APPLIED — see `board-drill-filter.ts` for why it is
+   * applied to the rows on their way into the board rather than inside it.
+   *
+   * Every chart on the Overview navigates here carrying its own filter state,
+   * and until now the board read none of it: `live-board.tsx` touches
+   * `searchParams` exactly once, to set `?item=`. So tapping a meter tile —
+   * "the whole tile is a button -> Jobs list filtered to that meter's
+   * statuses" — landed on the unfiltered board.
+   *
+   * The board is HANDED its rows, so filtering the list here produces exactly
+   * the same screen with none of the board's own code touched: its meters, its
+   * groups, its views and its search all operate on the rows they are given,
+   * which is what makes the filtered board internally consistent rather than a
+   * board with a caption contradicting it.
+   */
+  /* The address bar as reactive state. `useQueryState` subscribes to
+     `popstate` AND to the private event the ops pages dispatch after a
+     `replaceState`, because neither push nor replace fires anything on its
+     own — so a drill-through arriving by `pushState` is seen here. */
+  const { search: routeSearch } = useQueryState();
+  const drill = useMemo(
+    () => readDrillFilter(new URLSearchParams(routeSearch)),
+    [routeSearch],
+  );
+  const boardRequests = useMemo(
+    () => (drill.empty ? requests : requests.filter(drill.matches)),
+    [drill, requests],
+  );
+
+  /*
+   * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
+   *
+   * Everything here is passed `requests` and computes from it: the board draws
+   * the rows, the calendar places them on dates, the contractor screen scores
+   * them, and the reporting tabs derive every panel from them. `overview` is
+   * NOT here — every figure on it comes from `/api/dashboard/*` — and neither
+   * is `invoice-tracker`, which reads `/api/finance/*`.
+   *
+   * A custom `section:` register resolves to the `maintenance` surface, so a
+   * section bound to its own board is covered by the first entry.
+   */
+  useEffect(() => {
+    /*
+     * The latch, inside the effect rather than in a second one beside it.
+     *
+     * A `setJobListWanted(true)` in its own effect is a synchronous setState
+     * in an effect, which the React Compiler rejects outright
+     * (`react-hooks/set-state-in-effect`) and which costs a second render
+     * pass on every section change for a value nothing paints. A ref carries
+     * "has ever been wanted" without one.
+     */
+    if (!JOB_LIST_SURFACES.has(activeSurface) && !jobListWanted.current) return;
+    jobListWanted.current = true;
+    let active = true;
+    async function loadRequests() {
+      /*
+       * Every page of the board, not just the first.
+       *
+       * `/api/maintenance` was paged in Stage 16 after a bare `.limit(250)` made
+       * the board show 250 of 744 jobs while every total agreed with every other
+       * total. The server side was fixed; this caller was not — it asked for no
+       * limit, took the default 1000, and never read `hasMore`. Past 1000 jobs
+       * the dashboards would have gone quietly wrong in exactly the same way,
+       * and the oldest work — the overdue backlog — is what falls off the end.
+       */
+      try {
+        const collected: MaintenanceRequest[] = [];
+        let offset = 0;
+        for (;;) {
+          const response = await fetch(
+            `/api/maintenance?limit=1000&offset=${offset}`,
+            { headers: { Accept: "application/json" } },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = (await response.json()) as {
+            requests?: MaintenanceRequest[];
+            hasMore?: boolean;
+            nextOffset?: number | null;
+          };
+          if (!active) return;
+          collected.push(...(payload.requests ?? []));
+          if (!payload.hasMore || typeof payload.nextOffset !== "number") break;
+          offset = payload.nextOffset;
+        }
+        if (active) {
+          setRequests(collected);
+          setDataMode("live");
+          // Stamped only on success, so the time on screen is when the figures
+          // were last actually read — not when someone last pressed the button.
+          setDataUpdatedAt(new Date());
+        }
+      } catch {
+        /*
+         * Say so, and show nothing.
+         *
+         * Two rounds of this. First the chip said "Loading workspace" for ever,
+         * so a 503 from D1 presented `mock-data.ts` as the customer's own
+         * figures. Then the chip was made honest — but the invented rows stayed
+         * underneath it, and every dashboard on the screen went on computing
+         * spend, compliance and SLA from them. The rows are gone now: the state
+         * starts empty and a failure leaves it empty.
+         */
+        if (active) {
+          setRequests([]);
+          setDataMode("unavailable");
+        }
+      } finally {
+        if (active) setRefreshing(false);
+      }
+    }
+    loadRequests();
+    return () => {
+      active = false;
+    };
+  }, [activeSurface, refreshToken]);
 
   /*
    * A `section:` URL that resolved to nothing, once we know it resolved to
@@ -2703,21 +2820,35 @@ export default function PortalApp({
 
           <div className="topbar-actions">
             <ThemeToggle />
-            <span
-              className={`data-indicator data-indicator--${dataMode}`}
-              title={
-                dataMode === "unavailable"
-                  ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
-                  : undefined
-              }
-            >
-              <span />
-              {dataMode === "live"
-                ? "Live workspace"
-                : dataMode === "unavailable"
-                  ? "Workspace unavailable"
-                  : "Loading workspace"}
-            </span>
+            {/*
+              THE CHIP REPORTS THE JOB LIST, so it says nothing on a surface
+              that does not read one.
+
+              It used to be unconditional because the list was unconditional.
+              Now that the Overview and the Invoice Tracker draw from aggregate
+              endpoints instead, leaving it in place would have printed
+              "Loading workspace" beside a fully loaded page, for ever — the
+              exact dishonesty the chip was made honest to avoid. Hidden rather
+              than reworded: the age of figures nobody on this screen is reading
+              is not a fact worth a line of chrome.
+            */}
+            {surfaceReadsJobList && (
+              <span
+                className={`data-indicator data-indicator--${dataMode}`}
+                title={
+                  dataMode === "unavailable"
+                    ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
+                    : undefined
+                }
+              >
+                <span />
+                {dataMode === "live"
+                  ? "Live workspace"
+                  : dataMode === "unavailable"
+                    ? "Workspace unavailable"
+                    : "Loading workspace"}
+              </span>
+            )}
             {/*
               Refresh, and when the figures were last read.
 
@@ -2741,6 +2872,16 @@ export default function PortalApp({
                 // The board keeps its own snapshot, so it is told to re-read
                 // rather than left a version behind the meters above it.
                 window.dispatchEvent(new Event("maintsupp:refresh-board"));
+                /*
+                 * And so do the aggregate cards. The Overview and the Invoice
+                 * Tracker read `/api/dashboard/*` and `/api/finance/*` rather
+                 * than the job list, so a button labelled "Refresh the figures
+                 * on screen" was refreshing none of the figures on screen there.
+                 * `useOpsQuery` listens for this. */
+                window.dispatchEvent(new Event(OPS_REFRESH));
+                // Nothing is in flight when no surface has asked for the job
+                // list, so the spinner would never be cleared by the effect.
+                if (!surfaceReadsJobList) setRefreshing(false);
               }}
               disabled={refreshing}
               aria-label="Refresh the figures on screen"
@@ -2748,11 +2889,13 @@ export default function PortalApp({
               <Icon name="refresh" size={17} />
               <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
             </button>
-            <span className="topbar-updated" aria-live="polite">
-              {dataUpdatedAt
-                ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
-                : "Not yet loaded"}
-            </span>
+            {surfaceReadsJobList && (
+              <span className="topbar-updated" aria-live="polite">
+                {dataUpdatedAt
+                  ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
+                  : "Not yet loaded"}
+              </span>
+            )}
             <button
               className="secondary-button topbar-data-button"
               type="button"
@@ -2992,6 +3135,42 @@ export default function PortalApp({
             </div>
           )}
 
+          {/*
+            WHAT THE BOARD IS SHOWING, when it arrived from a drill-through.
+
+            §2.3 asks the meter tile to land on "the Jobs list filtered to that
+            meter's statuses ... showing one chip named after the meter, not five
+            status names". The chip is that sentence: without it a reader sees a
+            board holding 17 of 981 rows and no explanation, which is worse than
+            no filter at all.
+          */}
+          {activeSurface === "maintenance" && !drill.empty ? (
+            <div className="board-drill" role="status">
+              <span className="board-drill__lead">Filtered from the Overview:</span>
+              {drill.chips.map((chip) => (
+                <span key={chip.key} className="board-drill__chip">
+                  <strong>{chip.label}</strong> {chip.value}
+                </span>
+              ))}
+              <button
+                type="button"
+                className="board-drill__clear"
+                onClick={() => {
+                  const next = new URLSearchParams(window.location.search);
+                  for (const key of DRILL_KEYS) next.delete(key);
+                  const query = next.toString();
+                  window.history.replaceState(
+                    {},
+                    "",
+                    `${window.location.pathname}${query ? `?${query}` : ""}`,
+                  );
+                  window.dispatchEvent(new Event(URL_CHANGED));
+                }}
+              >
+                Show every job
+              </button>
+            </div>
+          ) : null}
           {activeSurface === "maintenance" && !sectionDetached && (
             <LiveMaintenanceBoard
               /*
@@ -3019,7 +3198,7 @@ export default function PortalApp({
                  board's own heading. */
               sectionLabel={activeCustom?.label ?? null}
               sectionDescription={activeCustom?.description ?? null}
-              requests={requests}
+              requests={boardRequests}
               onCreateDetailed={() => setShowCreateRequest(true)}
               onOpenRequest={openRequest}
               onRequestChange={(updated) => {
@@ -3230,6 +3409,31 @@ export default function PortalApp({
               truncated={documentsTruncated}
               onNotify={setToast}
               onChanged={() => void loadDocuments()}
+            />
+          )}
+          {/*
+            Module 5. No `dataMode` gate and no `requests` prop, deliberately:
+            the ledger reads `/api/finance/*` and nothing else, so it must not
+            be held behind the shell's job download the way Reports is. A
+            finance screen that says "workspace unavailable" because the job
+            board is still paging would be reporting a fault it does not have.
+          */}
+          {activeSurface === "invoice-tracker" && (
+            <InvoiceTrackerPage
+              key={activeSection}
+              onNavigate={setSection}
+              onOpenJob={(id) => {
+                /*
+                 * The shell's job list is the only place a full record lives,
+                 * and it may still be paging. A miss therefore navigates to the
+                 * board rather than doing nothing — an invoice line naming a
+                 * job the reader cannot reach is worse than a second click.
+                 */
+                const match = requests.find((request) => request.id === id);
+                if (match) openRequest(match);
+                else setSection("maintenance");
+              }}
+              onNotify={setToast}
             />
           )}
           {activeSurface === "reports" && dataMode === "unavailable" && (
@@ -3603,44 +3807,94 @@ function OverviewView({
   onNavigate: (section: Section) => void;
   onOpenRequest: (request: MaintenanceRequest) => void;
 }) {
+  /*
+   * Drill-through carries the page's own filter state across to the job list,
+   * so a link built from a chart segment means the same thing there. The board
+   * does not yet read every one of these parameters; what it does read it reads
+   * from the URL, and the ones it does not are inert rather than misleading —
+   * they are visible in the address bar, which is where the reader can see
+   * exactly what was asked for.
+   *
+   * A named function rather than an inline prop because `onOpenJob` below now
+   * calls it too, as the fallback for a job the shell has not downloaded.
+   *
+   * The jobs route comes from the SECTION ROUTE MAP rather than from trimming
+   * the current path: `pathname.replace(/\/[^/]*$/, "")` gives "" for a bare
+   * "/dashboard", which would push "/jobs" — outside the portal entirely.
+   * `sectionRoutes` is the one map that says what a section's address is, and
+   * the server copy in `[[...section]]/page.tsx` reads the same slugs, so a
+   * reload of the link lands where the click did.
+   */
+  const goToJobs = (query: string) => {
+    const target = `/dashboard/${sectionRoutes.maintenance}`;
+    /*
+     * ORDER IS LOAD-BEARING. `setSection` ends with its own
+     * `pushState('/dashboard/jobs')`, which carries no query — correct when a
+     * reader clicks Jobs in the sidebar, fatal here. Pushing the drill first
+     * and navigating second meant every meter tile arrived unfiltered: traced
+     * on the Preview, the click pushed
+     * `/dashboard/jobs?meter=waiting_approval&status=…` and then `/dashboard/jobs`
+     * a moment later, so the chips drew and the board still showed all 12 rows.
+     *
+     * So navigate FIRST and let the section write its bare route, then replace
+     * that entry with the one that carries the filter. `replaceState` rather
+     * than a second `pushState` keeps it to a single history entry, so Back
+     * returns to the Overview instead of an unfiltered board.
+     */
+    onNavigate("maintenance");
+    window.history.replaceState({}, "", `${target}${query ? `?${query}` : ""}`);
+    /* `pushState`/`replaceState` fire nothing. Without this the shell's URL
+       subscriber never re-reads, so the board would be handed the unfiltered
+       list even though the address bar says otherwise. */
+    window.dispatchEvent(new Event(URL_CHANGED));
+  };
+
   return (
     <OverviewPage
-      /*
-       * Drill-through carries the page's own filter state across to the job
-       * list, so a link built from a chart segment means the same thing there.
-       * The board does not yet read every one of these parameters; what it does
-       * read it reads from the URL, and the ones it does not are inert rather
-       * than misleading — they are visible in the address bar, which is where
-       * the reader can see exactly what was asked for.
-       */
-      onNavigateToJobs={(query) => {
-        /*
-         * The jobs route, derived from the SECTION ROUTE MAP rather than by
-         * trimming the current path.
-         *
-         * `pathname.replace(/\/[^/]*$/, "")` gives "" for a bare "/dashboard",
-         * which would push "/jobs" — outside the portal entirely. `sectionRoutes`
-         * is the one map that says what a section’s address is, and the server
-         * copy in `[[...section]]/page.tsx` reads the same slugs, so a reload of
-         * the link lands where the click did.
-         */
-        const target = `/dashboard/${sectionRoutes.maintenance}`;
-        window.history.pushState({}, "", `${target}${query ? `?${query}` : ""}`);
-        onNavigate("maintenance");
-      }}
+      onNavigateToJobs={goToJobs}
       onOpenJob={(id) => {
+        /*
+         * A MISS IS NOW THE NORMAL CASE, AND MUST NOT BE A DEAD CLICK.
+         *
+         * This used to `return` on a miss, which was harmless when the shell
+         * downloaded every job before the page painted. It no longer does —
+         * the Overview reads aggregates and the job list is deferred until a
+         * surface that needs it is opened — so `requests` is legitimately
+         * empty here, and a silent return would make every job link on the
+         * page do nothing at all.
+         *
+         * The board is the fallback rather than a one-off fetch: it is the
+         * screen that owns job records, it opens the row itself, and it is one
+         * click from where the reader already wanted to go.
+         */
         const request = requests.find((row) => row.id === id);
-        if (!request) return;
-        onOpenRequest(request);
+        if (request) {
+          onOpenRequest(request);
+          return;
+        }
+        goToJobs(`id=${encodeURIComponent(id)}`);
       }}
       onNavigateToCompliance={() => onNavigate("compliance")}
       onNavigateToSites={(query) => {
-        if (query) {
-          const params = new URLSearchParams(window.location.search);
-          for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
-          window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-        }
+        /*
+         * Same ordering trap as `goToJobs`, and it was losing the `site=`
+         * filter the same way: this wrote the query onto the CURRENT path
+         * (still `/dashboard`) and then `setSection` pushed `/dashboard/sites`
+         * without it. The existing search is captured before navigating
+         * because the section push is what clears it.
+         */
+        const carried = window.location.search;
         onNavigate("stores");
+        if (query) {
+          const params = new URLSearchParams(carried);
+          for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
+          window.history.replaceState(
+            {},
+            "",
+            `/dashboard/${sectionRoutes.stores}?${params.toString()}`,
+          );
+          window.dispatchEvent(new Event(URL_CHANGED));
+        }
       }}
     />
   );

@@ -36,6 +36,7 @@
 
 import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { maintenanceRequests, sites } from "../../db/schema";
+import { DEFAULT_MEASURE, type CohortMeasure } from "./overview-meters";
 import {
   NATURE_KEYS,
   UNASSIGNED_SITE_ID,
@@ -204,10 +205,34 @@ export const NOT_RECORDED_KEY = "__not_recorded__";
  */
 export const plannedCondition = sql`(lower(coalesce(${maintenanceRequests.category}, '')) like '%compliance%' or ${maintenanceRequests.tier} >= 4)`;
 
+/**
+ * WHICH DATE PUTS A JOB IN THE COHORT — the master prompt §1.1.
+ *
+ * Not a filter. A filter narrows a cohort; this chooses the axis the cohort is
+ * cut along, and every card on the page follows it: with `completed` selected,
+ * "226 jobs requested in this period" becomes "226 jobs completed in this
+ * period" and every breakdown regroups those jobs. That is why it lives beside
+ * the filters in one state object and in one URL, and why `activeFilterCount`
+ * deliberately does NOT count it — a reader who has switched axis has not
+ * filtered anything, and a `Filters (1)` badge over an unfiltered page is a
+ * lie the mobile sheet would repeat.
+ */
+/*
+ * DECLARED IN `overview-meters.ts` AND RE-EXPORTED HERE, not the other way
+ * round. This module imports drizzle and `db/schema`; a client component that
+ * needed the type would have pulled the whole query builder into the browser
+ * bundle to render the words "Date completed". Server callers keep importing it
+ * from here, where the rest of the filter state is.
+ */
+export { DEFAULT_MEASURE, type CohortMeasure } from "./overview-meters";
+const MEASURE_KEYS: CohortMeasure[] = ["requested", "completed"];
+
 export type DashboardFilters = {
   period: PeriodKey;
   from: string | null;
   to: string | null;
+  /** `requested` (default) or `completed` — see `CohortMeasure`. */
+  measure: CohortMeasure;
   sites: string[];
   priorities: PriorityKey[];
   families: JobStatusFamily[];
@@ -229,6 +254,7 @@ export const EMPTY_FILTERS: DashboardFilters = {
   period: DEFAULT_PERIOD,
   from: null,
   to: null,
+  measure: DEFAULT_MEASURE,
   sites: [],
   priorities: [],
   families: [],
@@ -267,10 +293,14 @@ export function parseFilters(url: URL | string): DashboardFilters {
     const value = (params.get(key) ?? "").trim();
     return DAY_PATTERN.test(value) ? value : null;
   };
+  const measureRaw = (params.get("measure") ?? "").trim();
   return {
     period,
     from: day("from"),
     to: day("to"),
+    measure: (MEASURE_KEYS as string[]).includes(measureRaw)
+      ? (measureRaw as CohortMeasure)
+      : DEFAULT_MEASURE,
     sites: readList(params, "site"),
     priorities: readList(params, "priority").filter((value): value is PriorityKey =>
       (PRIORITY_KEYS as string[]).includes(value),
@@ -304,6 +334,7 @@ export function serialiseFilters(filters: DashboardFilters): string {
     if (filters.from) params.set("from", filters.from);
     if (filters.to) params.set("to", filters.to);
   }
+  if (filters.measure !== DEFAULT_MEASURE) params.set("measure", filters.measure);
   const append = (key: string, values: readonly string[]) => {
     for (const value of [...values].sort()) params.append(key, value);
   };
@@ -403,8 +434,65 @@ export function liveWorkOrderCondition(orgId: string): SQL {
   )!;
 }
 
-/** `requested_at` inside a window, compared date-only. See the module note. */
-export function withinWindowCondition(window: PeriodWindow): SQL {
+/**
+ * A DATE-ISH COLUMN AS ISO-COMPARABLE TEXT, ON EITHER DIALECT.
+ *
+ * DELIBERATELY THE SAME EXPRESSION as `dateText` in `dashboard-aggregates.ts`,
+ * and deliberately a second copy of it. That module imports this one, so this
+ * one cannot import it back; a cycle between the filter vocabulary and the
+ * aggregates that consume it is a worse problem than one duplicated line, and
+ * `tests/ops-rebuild-foundations.test.mjs` pins the two renderings identical so
+ * they cannot drift apart unnoticed.
+ *
+ * The reasoning is written out in full over there. In short: Production's
+ * `completed_at` and `due_at` are real Postgres `date` columns, Postgres has no
+ * `trim(date)`, and the Overview answered "temporarily unavailable" for a day
+ * with `function pg_catalog.btrim(date) does not exist` as the reason —
+ * something nothing on Staging, where those columns are `text`, could ever have
+ * shown.
+ */
+function dayTextSql(column: SQL | ReturnType<typeof sql>): SQL {
+  return sql`replace(trim(cast(${column} as text)), ' ', 'T')`;
+}
+
+/** The column a cohort measure is cut along. */
+function measureColumn(measure: CohortMeasure) {
+  return measure === "completed"
+    ? maintenanceRequests.completedAt
+    : maintenanceRequests.requestedAt;
+}
+
+/**
+ * `requested_at` inside a window, compared date-only. See the module note.
+ *
+ * With `measure = "completed"` the axis becomes `completed_at` and the cohort
+ * is "jobs completed in this range" (§1.1). Two differences follow and both
+ * matter:
+ *
+ *   · a job with no completion date is EXCLUDED rather than swept in. Without
+ *     the emptiness guard an all-time window — which has no lower bound — would
+ *     match every blank string, because `'' < '2026-09-11'` is true;
+ *   · the column goes through `dayTextSql` before any text operation, because
+ *     `completed_at` is a real `date` on Production.
+ *
+ * `requested_at` keeps the bare comparison it has always had: it is NOT NULL
+ * with a default on every database `db/init.ts` created, and the existing
+ * expectation is pinned.
+ */
+export function withinWindowCondition(
+  window: PeriodWindow,
+  measure: CohortMeasure = DEFAULT_MEASURE,
+): SQL {
+  if (measure === "completed") {
+    const day = dayTextSql(sql`${maintenanceRequests.completedAt}`);
+    const clauses: SQL[] = [
+      sql`${maintenanceRequests.completedAt} is not null`,
+      sql`${day} <> ''`,
+      sql`substr(${day}, 1, 10) < ${window.endExclusive}`,
+    ];
+    if (window.start) clauses.push(sql`substr(${day}, 1, 10) >= ${window.start}`);
+    return and(...clauses)!;
+  }
   const clauses: SQL[] = [
     sql`${maintenanceRequests.requestedAt} < ${window.endExclusive}`,
   ];
@@ -412,6 +500,33 @@ export function withinWindowCondition(window: PeriodWindow): SQL {
     clauses.push(sql`${maintenanceRequests.requestedAt} >= ${window.start}`);
   }
   return and(...clauses)!;
+}
+
+/**
+ * THE JOBS THE COHORT LEAVES OUT, AND WHY — §1.1's footnote.
+ *
+ * "Jobs with no Date Requested are excluded from the cohort and reported in a
+ * footnote — *14 jobs excluded — no request date recorded* — linking to those
+ * records. Never impute a date."
+ *
+ * Scoped to the live estate and to the page's dimensional filters, but NOT to
+ * the window: a row with no date on the axis cannot be inside a window on that
+ * axis, so windowing the count would always answer zero. That is the whole
+ * point of the footnote — these are the records the period cannot see.
+ */
+export function measureMissingCondition(
+  orgId: string,
+  filters: DashboardFilters,
+): SQL {
+  const column = measureColumn(filters.measure);
+  /* NOT `blank()`: that spells emptiness with `trim(column)`, and `completed_at`
+     is a real `date` on Production where `trim` throws. Same test, cast first. */
+  const day = dayTextSql(sql`${column}`);
+  return and(
+    liveWorkOrderCondition(orgId),
+    sql`(${column} is null or ${day} = '')`,
+    ...dimensionConditions(filters, orgId),
+  )!;
 }
 
 /**
@@ -597,12 +712,17 @@ export function jobScopeCondition(
 ): SQL {
   return and(
     liveWorkOrderCondition(orgId),
-    withinWindowCondition(window),
+    withinWindowCondition(window, filters.measure),
     ...dimensionConditions(filters, orgId),
   )!;
 }
 
-/** The same scope over an arbitrary window — used for the previous-period delta. */
+/**
+ * The same scope over an arbitrary window — used for the previous-period delta.
+ *
+ * Follows the same axis as the page, because a delta between a cohort cut on
+ * one date and a cohort cut on another is not a comparison of anything.
+ */
 export function jobScopeConditionForWindow(
   orgId: string,
   filters: DashboardFilters,
@@ -611,8 +731,10 @@ export function jobScopeConditionForWindow(
 ): SQL {
   return and(
     liveWorkOrderCondition(orgId),
-    sql`${maintenanceRequests.requestedAt} >= ${start}`,
-    sql`${maintenanceRequests.requestedAt} < ${endExclusive}`,
+    withinWindowCondition(
+      { key: filters.period, start, endExclusive, days: 0, label: "", previous: null },
+      filters.measure,
+    ),
     ...dimensionConditions(filters, orgId),
   )!;
 }

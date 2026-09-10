@@ -1,0 +1,249 @@
+/*
+ * THE OVERVIEW'S TOKENS — the master prompt §1.3.
+ *
+ * ── WHY THESE NAMES, AND WHY THEY ARE MOSTLY ALIASES ──────────────────────
+ *
+ * §1.3 asks for eight `--ms-*` tokens and adds: "Match the existing portal
+ * system; where these conflict with existing tokens, keep the existing names
+ * and update the values."
+ *
+ * They conflict almost entirely. `app/globals.css` already defines `--ink`,
+ * `--muted`, `--line`, `--surface-card` and `--brand-solid`, in both themes,
+ * and every other portal surface is written against them. Repointing those five
+ * to the brief's hexes would restyle the Jobs board, Compliance, Sites,
+ * Contractors, Reports and the sidebar — six pages nobody asked to change — and
+ * would break the contrast pins in `tests/stage-twentysix-contrast.test.mjs`
+ * that hold the product to AA in both themes.
+ *
+ * So the structural tokens below are ALIASES onto the product's own, and a rule
+ * written against an `--ms-*` name is spec-shaped without forking the palette.
+ *
+ * ── AN ALIAS IS ONLY THEME-AWARE IF WHAT IT POINTS AT IS ──────────────────
+ *
+ * This header used to end that paragraph with "and the value is whatever the
+ * current theme says". Measured in Chrome against the local dev server, that
+ * was false for two of the nine, and both were carrying meaning:
+ *
+ *   - `globals.css` declares `--brand-solid` (#0b7a72) once, on bare `:root`,
+ *     and never redefines it for dark. `--ms-teal-700` therefore held one value
+ *     in both themes. It paints `.ova-action` — the only control that opens
+ *     "Resolve names" — which measured 2.92:1 on the dark card and 2.40:1 on
+ *     its hover, against AA's 4.5:1 for normal text;
+ *   - `--brand-bright` (#12b4a8) is declared once for the same reason, so
+ *     `--ms-teal-500` measured 2.59:1 on the white card and 2.44:1 on the
+ *     sunken one, against SC 1.4.11's 3:1 for a focus ring or a state border.
+ *     It is the finance page's only focus ring as well as this page's.
+ *
+ * Both now carry an explicit value in each block. `--ms-teal-500`'s dark value
+ * is `--brand-bright` unchanged, so the default theme renders exactly as it did
+ * and only the light theme moves; its light value is a darker mid-teal that
+ * measures 4.12:1 on the card, 3.89:1 on the sunken card and 3.63:1 on
+ * `--surface-active`, and it is still lighter than `--ms-teal-700` (5.20:1), so
+ * the 500/700 order the names promise still holds.
+ *
+ * ── THE RAMPS ARE A MIRROR OF DATA, NOT A SOURCE OF COLOUR ────────────────
+ *
+ * This is the thing to understand before editing anything below, because the
+ * shape of the file argues otherwise and the previous version of this header
+ * argued otherwise too.
+ *
+ * NOTHING IN THE REPOSITORY READS `--ms-meter-*` OR `--ms-sev-*` THROUGH
+ * `var()`. Checked with an unfiltered search over every `var(--ms-` in the
+ * tree. A meter's fill is per-row DATA: it lives in `dashboard_meters.colour`,
+ * seeded from §1.3's palette by `db/init.ts`, editable by a user in Meter
+ * Settings, served by `/api/dashboard/meters`, and applied by the components as
+ * an inline `style={{ background: … }}`. The severity ramp is the same shape
+ * one step earlier — `SEVERITY_COLOUR` in `app/lib/overview-meters.ts`, also
+ * reaching the DOM as an inline style.
+ *
+ * An inline style beats any rule that is not `!important`, so no stylesheet can
+ * repaint a fill, and a theme swap cannot touch one either. Confirmed against
+ * the running app: with `data-theme="dark"` forced, every segment still painted
+ * the light-palette hex the API had sent — `rgb(11, 110, 99)` for Completed.
+ *
+ * The values below therefore MIRROR the data; they do not produce it. They earn
+ * their place because `tests/overview-foundations.test.mjs` compares them, name
+ * by name, against `app/lib/overview-meters.ts`, so the two copies of the
+ * palette cannot drift — CSS cannot import TypeScript, and a duplicate nobody
+ * checks is how this page came to have two answers for one question.
+ *
+ * That test also requires every ramp name to appear in BOTH blocks (its "no
+ * ramp colour is defined only inside a theme block" rule, which exists because
+ * a colour declared only under `[data-theme]` once shipped headings at 1.03:1
+ * in the other state), and it requires at least twenty `--ms-*` declarations in
+ * the dark block. So the ramps are repeated below rather than deleted. What has
+ * been deleted is the pretence that repeating them does anything: the dark
+ * ramps used to hold LIFTED hexes, chosen to clear AA on a #182830 card, and a
+ * commit on this branch then read those hexes back and concluded "dark is above
+ * 3:1 on every fill". It is not. Measured against the real track behind the
+ * real fills, the DATA hexes give 2.18:1 for Completed and 2.66:1 for Needs
+ * attention on dark, and 1.46:1 for Waiting-for-approval and 1.93:1 for
+ * Waiting-for-parts on light. Each theme has sub-3:1 fills and they are
+ * different ones, which is what you would expect from one palette shown on two
+ * canvases. The dark ramps now repeat the light values exactly, because that is
+ * what renders, and reading a number out of this file can no longer produce an
+ * answer the browser disagrees with.
+ *
+ * Legibility on a bar is therefore NOT carried by these values, and it cannot
+ * be: a user may set a meter to any colour at all. It is carried by structure —
+ * `--ms-fill-edge-*` below, the count chip in `overview.css`, the per-segment
+ * `aria-label`, and the visually-hidden data table.
+ *
+ * ── WHAT CSS ACTUALLY PAINTS WITH: THE `-ink` RAMP ────────────────────────
+ *
+ * Every rule that draws a severity as TEXT or as a LINE now reads an
+ * `--ms-sev-*-ink` token instead of the fill. Same four hues, at a lightness
+ * that clears AA on the card it is drawn on, per theme. The fills stayed at
+ * §1.3's literal values because the test pins them to the data; the ink values
+ * are free, so they are the ones that had to move.
+ *
+ * The `--ms-scale-*` teal scale and `--ms-on-pale-fill` used to sit here too.
+ * They are gone: neither was ever read, by CSS or by anything else, and neither
+ * was pinned, so nothing was holding them honest and nothing needed them.
+ */
+
+:root {
+  /* Structural — aliases onto the product's own tokens. See the note above. */
+  --ms-ink: var(--ink);
+  --ms-ink-muted: var(--muted);
+  --ms-line: var(--line);
+  --ms-surface: var(--surface-card);
+  --ms-surface-sunken: var(--surface-card-lo);
+  --ms-teal-700: var(--brand-solid);
+  --ms-teal-050: var(--surface-active);
+  --ms-sidebar: var(--rail-bg);
+
+  /* Not an alias, and the header says why: `--brand-bright` has no dark value,
+     so on the white card this measured 2.59:1 as a focus ring. 4.12:1 here. */
+  --ms-teal-500: #0e8c84;
+
+  /*
+   * The meter ramp — §1.3's literal values, and a MIRROR of
+   * `METER_SEED_COLOUR` in `app/lib/overview-meters.ts`. No rule reads these;
+   * the fill arrives from `dashboard_meters.colour` as an inline style. Read
+   * the header before adding a rule that expects one of these to paint.
+   */
+  --ms-meter-completed: #0b6e63;
+  --ms-meter-scheduled: #0da1a9;
+  --ms-meter-in-progress: #4fc3c0;
+  --ms-meter-waiting-approval: #e8c468;
+  --ms-meter-waiting-parts: #e0a32e;
+  --ms-meter-waiting-payment: #dc7a3c;
+  --ms-meter-needs-attention: #c24437;
+  --ms-meter-other: #9aafb2;
+
+  /* The severity ramp — the same arrangement one module earlier: these mirror
+     `SEVERITY_COLOUR`, which reaches the bar as an inline style. Fills only. */
+  --ms-sev-fresh: #0da1a9;
+  --ms-sev-ageing: #e0a32e;
+  --ms-sev-overdue: #dc7a3c;
+  --ms-sev-critical: #c24437;
+
+  /*
+   * The severity ramp as INK — the four hues at a lightness a reader can
+   * actually read on this theme's card. These are what the stylesheets use.
+   *
+   * Measured on the white card / the sunken card: fresh 6.27 and 5.93, ageing
+   * 5.92 and 5.60, overdue 5.91 and 5.59, critical 6.60 and 6.24. The fills
+   * they replace measured 3.14 and 2.97, 2.22 and 2.10, 3.05 and 2.88, 5.03
+   * and 4.75 — three of the four under AA as text, two under 3:1 as a line.
+   */
+  --ms-sev-fresh-ink: #0a6b70;
+  --ms-sev-ageing-ink: #8a5a06;
+  --ms-sev-overdue-ink: #a24b12;
+  --ms-sev-critical-ink: #a5372b;
+
+  /* Never a colour that could pass for a real category. It is drawn as the 4px
+     rule that separates a measurable stage from an unmeasurable one, so it is
+     that state's only signal and 1.4.11 applies: §1.3's #9aafb2 measured
+     2.17:1 on the sunken card; this measures 3.81:1 and is still plainly grey. */
+  --ms-not-recorded: #6e8287;
+
+  /* Ink that is legible ON a ramp fill, for the few places one is still used as
+     a ground. `finance.css` reads it; `overview.css` no longer does, because
+     neither white nor near-black can clear AA on an arbitrary user-chosen fill
+     — see the count chip there. */
+  --ms-on-fill: #ffffff;
+
+  /*
+   * THE ONLY TWO TOKENS HERE THAT MUST NOT FOLLOW THE THEME.
+   *
+   * They draw the divider between two stacked segments, and a segment's colour
+   * is data: it does not change with the theme, so neither may its divider.
+   * They are white and black on purpose, one pixel each, because that pair is
+   * the only edge that is guaranteed against a colour nobody has chosen yet.
+   *
+   * The guarantee is arithmetic rather than a swatch. Contrast against white is
+   * 1.05/(L+0.05) and against black is (L+0.05)/0.05, so their PRODUCT is 21
+   * for every possible colour; if one side falls under 3:1 the other is over
+   * 7:1, and the worst case — where the two are equal — is √21 = 4.58:1.
+   * Computed across all eight seeded fills, the weaker of the two lines still
+   * measured 4.62:1, on #C24437.
+   */
+  --ms-fill-edge-hi: #ffffff;
+  --ms-fill-edge-lo: #000000;
+}
+
+/*
+ * THE DARK BLOCK.
+ *
+ * `app/globals.css` puts the LIGHT palette on bare `:root` and the dark one on
+ * `:root:not([data-theme="light"]), body[data-theme="dark"]`, with
+ * `html { color-scheme: dark }`. So dark is what a reader sees unless they have
+ * chosen light, and this block is the default, not the exception.
+ *
+ * Two kinds of declaration live here and they are not the same kind of thing:
+ *
+ *   - the ones that MOVE — `--ms-teal-700`, `--ms-teal-500`, the four
+ *     `--ms-sev-*-ink` and `--ms-not-recorded` — are ink and lines this page
+ *     paints, so each takes the value that clears its threshold on a #182830
+ *     card. Those are the load-bearing entries;
+ *   - the ramps do NOT move, because the fills they mirror are data and data
+ *     has one value in both themes. They repeat the light hexes exactly, which
+ *     is the whole of what they can honestly say. They are here because
+ *     `tests/overview-foundations.test.mjs` requires every ramp name to be
+ *     declared in both blocks and requires at least twenty `--ms-*`
+ *     declarations in this one; trim them and that test fails, so a change that
+ *     needs one gone has to re-point the pin in the same commit.
+ */
+:root:not([data-theme="light"]),
+body[data-theme="dark"] {
+  /* `--accent-fg`, which is the ring and accent colour the rest of this page
+     already uses: 8.65:1 on the card and 7.13:1 on its hover, against the 2.92
+     and 2.40 the theme-invariant `--brand-solid` was giving. */
+  --ms-teal-700: var(--accent-fg);
+
+  /* Unchanged in this theme — `--brand-bright` measures 5.86:1 on the dark
+     card, so only the light value needed to move. Named here rather than left
+     to `:root` so the two themes read as a deliberate pair. */
+  --ms-teal-500: var(--brand-bright);
+
+  /* The mirrors. Identical to `:root` on purpose — see the note above. */
+  --ms-meter-completed: #0b6e63;
+  --ms-meter-scheduled: #0da1a9;
+  --ms-meter-in-progress: #4fc3c0;
+  --ms-meter-waiting-approval: #e8c468;
+  --ms-meter-waiting-parts: #e0a32e;
+  --ms-meter-waiting-payment: #dc7a3c;
+  --ms-meter-needs-attention: #c24437;
+  --ms-meter-other: #9aafb2;
+
+  --ms-sev-fresh: #0da1a9;
+  --ms-sev-ageing: #e0a32e;
+  --ms-sev-overdue: #dc7a3c;
+  --ms-sev-critical: #c24437;
+
+  /* The same four hues, lifted for the dark card. Measured there and on the
+     sunken card: fresh 6.89 and 7.94, ageing 7.76 and 8.94, overdue 6.35 and
+     7.31, critical 4.93 and 5.68. Dark was already the theme these hues suited,
+     so these are §1.3's hues raised in lightness rather than re-chosen. */
+  --ms-sev-fresh-ink: #3cc0c6;
+  --ms-sev-ageing-ink: #e5b155;
+  --ms-sev-overdue-ink: #e69465;
+  --ms-sev-critical-ink: #e0736a;
+
+  /* 7.98:1 on the sunken card — the pale grey already worked in this theme. */
+  --ms-not-recorded: #9fb3b6;
+
+  --ms-on-fill: #08181c;
+}

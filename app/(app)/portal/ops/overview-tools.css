@@ -1,0 +1,641 @@
+/*
+ * THE OVERVIEW'S THREE WRITE TOOLS — Dashboard meters (§2.5), Resolve names
+ * (§3.6) and Bulk site assign (§6.4).
+ *
+ * ── WHY A FOURTH STYLESHEET AND NOT MORE OF `ops.css` ─────────────────────
+ *
+ * The same reason `compliance-setup.css` and `compliance-responsibility.css`
+ * exist: `ops.css` is one file for the four operations PAGES, and these are
+ * three sets of CONTROLS that appear inside them. Every `.ovt-*` class below
+ * composes with `.ops-*` on the same element rather than restating the card,
+ * the border or the focus ring.
+ *
+ * ── NO HEX, ANYWHERE ──────────────────────────────────────────────────────
+ *
+ * Not one literal colour. Every value is a token from `app/globals.css` or from
+ * `ops-tokens.css`, which is what makes these three surfaces follow the
+ * light/dark toggle without a second set of rules. The two colours that ARE
+ * data — a meter's swatch and its bar segment — arrive as inline styles from
+ * the payload, because a `<div>` whose width comes from the database needs its
+ * colour from there too.
+ *
+ * ── BREAKPOINTS ───────────────────────────────────────────────────────────
+ *
+ * 768 and 1024, from the agreed set 640 / 767 / 768 / 1024 / 1280. Several
+ * stage tests fail on any other width (CLAUDE.md). 375px is the BASE case:
+ * every rule is written for the phone first and widens from there, which is
+ * also §1.8's requirement — no feature is desktop-only.
+ *
+ * ── 44px ──────────────────────────────────────────────────────────────────
+ *
+ * Every button, grip, select and checkbox row below is at least 44px on its
+ * short edge with 8px of separation, per §1.8's absolute rules. The grip is the
+ * one that would otherwise fail: a drag handle wants to be small, and small is
+ * exactly what a thumb cannot hit.
+ */
+
+.ovt {
+  display: grid;
+  gap: 1rem;
+}
+
+.ovt__notice,
+.ovt__error {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  border: 1px solid var(--line);
+  background: var(--surface-card-lo);
+  color: var(--muted);
+}
+
+.ovt__error {
+  border-color: var(--danger-solid);
+  color: var(--ink);
+}
+
+/* ── The preview bar ───────────────────────────────────────────────────────
+ *
+ * §2.5: "Live preview of the segmented bar updates as changes are made, using
+ * the current period's real counts." It is drawn from the STAGED configuration,
+ * so it shows what Save would do rather than what the page currently does —
+ * which is the only version of a preview worth having.
+ */
+
+.ovt-preview {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.ovt-preview__title {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+}
+
+.ovt-preview__legend {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
+.ovt-preview__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ovt-preview__legend b {
+  font-variant-numeric: tabular-nums;
+}
+
+.ovt-preview__swatch,
+.ovt-meter__swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+  flex: none;
+}
+
+.ovt-preview__hidden {
+  margin: 0.55rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* ── The meter columns ─────────────────────────────────────────────────────
+ *
+ * One column on a phone, two from 768 and three from 1024. §2.5 asks for "two
+ * columns: statuses grouped by their current meter on the left, the eight
+ * meters as targets". With eight meters that reads better as a grid of meter
+ * cards, each holding its own statuses, than as two lists facing each other:
+ * the second layout puts the drop target off-screen on a phone, which is the
+ * one thing §1.8 forbids outright.
+ */
+
+.ovt-grid {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+  .ovt-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .ovt-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.ovt-meter {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+/* The drop target under the pointer. A border alone is too quiet to find
+   mid-drag on a phone, so the surface changes as well. */
+.ovt-meter.is-over {
+  border-color: var(--brand-solid);
+  background: var(--surface-active);
+}
+
+/* Hidden from the bar is not hidden from this screen — the statuses still have
+   to be reachable, and their work still counts. */
+.ovt-meter.is-hidden {
+  border-style: dashed;
+}
+
+.ovt-meter__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ovt-meter__name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ovt-meter__name input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+}
+
+.ovt-meter__count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.ovt-meter__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ovt-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ovt-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.ovt-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ovt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ovt-toggle input {
+  width: 20px;
+  height: 20px;
+}
+
+.ovt-meter__pin {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Status rows ───────────────────────────────────────────────────────────
+ *
+ * A row is a grip, a label with its count, and the "Move to…" select. The
+ * select is deliberately full width below the label on a phone rather than
+ * squeezed beside it: a picker narrow enough to sit on one line at 375px shows
+ * about four characters of "Waiting for approval".
+ */
+
+.ovt-statuses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ovt-statuses__empty {
+  margin: 0;
+  padding: 0.6rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ovt-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+/*
+ * The row a pointer is currently carrying to another meter. It is ghosted so a
+ * reader can see where the drag started, which means it is live content being
+ * read during the drag — not a disabled control, and 1.4.3 does not exempt it.
+ *
+ * At `opacity: 0.55` its `.ovt-status__label`, which is `--ink`, measured
+ * 3.65:1 on the white card and 4.95:1 on the dark one: the default theme
+ * passed and the light theme did not. 0.7 measures 5.86:1 and 7.10:1 and is
+ * still visibly a ghost. The only `--muted` thing under this rule is
+ * `.ovt-status__dots`, which is `aria-hidden` decoration.
+ */
+.ovt-status.is-carried {
+  opacity: 0.7;
+  border-color: var(--brand-solid);
+}
+
+.ovt-status__grip {
+  /* 44px, and `touch-action: none` so a press that becomes a drag is not also a
+     scroll. Only on the grip — the list itself must still scroll on a phone. */
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  cursor: grab;
+  touch-action: none;
+}
+
+.ovt-status__grip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ovt-status__dots {
+  width: 10px;
+  height: 16px;
+  background-image: radial-gradient(currentColor 1px, transparent 1.2px);
+  background-size: 5px 5px;
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.ovt-status__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.ovt-status__label b {
+  font-variant-numeric: tabular-nums;
+}
+
+.ovt-status__move {
+  grid-column: 1 / -1;
+}
+
+.ovt-status__move select,
+.ovt-picker select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+@media (min-width: 1024px) {
+  .ovt-status {
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 11rem);
+  }
+
+  .ovt-status__move {
+    grid-column: auto;
+  }
+}
+
+/* ── The action bar ────────────────────────────────────────────────────────── */
+
+.ovt-actions {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ovt-actions__state {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ovt-actions__confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--danger-solid);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+/* ── Resolve names (§3.6) ──────────────────────────────────────────────────
+ *
+ * Wide table on a desktop, stacked cards on a phone — §1.8's "one record per
+ * card, same fields, primary value first". Built the other way round: the card
+ * IS the layout, and 1024 widens it into columns.
+ */
+
+.ovt-names {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ovt-name {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-lo);
+}
+
+.ovt-name__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+}
+
+.ovt-name__text {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.ovt-name__figures {
+  display: inline-flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ovt-name__why {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ovt-name__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ovt-suggestion {
+  min-height: 44px;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ovt-suggestion:hover:not(:disabled) {
+  border-color: var(--brand-solid);
+  background: var(--surface-active);
+}
+
+.ovt-suggestion b {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ovt-name__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ovt-picker {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/*
+ * The preview. §3.6: "Shows the jobs and spend each action will affect BEFORE
+ * applying." It is a separate block with its own border because it is a claim
+ * about what is going to happen, and a claim that looks like a label gets
+ * skipped.
+ */
+.ovt-preview-panel {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--brand-solid);
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+
+.ovt-preview-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.ovt-preview-panel li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ovt-preview-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ovt-attribution {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ovt-attribution b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Existing aliases — the reversal path, and the proof an action was reversible. */
+.ovt-aliases {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ovt-alias {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+/* ── Bulk site assign (§6.4) ───────────────────────────────────────────────── */
+
+.ovt-jobs {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.ovt-job {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.ovt-job__check {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+
+.ovt-job__check input {
+  width: 20px;
+  height: 20px;
+}
+
+.ovt-job__title {
+  font-size: 0.85rem;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.ovt-job__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ovt-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.ovt-bar__count {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ovt-status,
+  .ovt-meter {
+    transition: none;
+  }
+}

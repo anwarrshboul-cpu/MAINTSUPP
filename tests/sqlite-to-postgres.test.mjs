@@ -418,10 +418,23 @@ test("a 0/1 inside a string literal is never a boolean", () => {
 test("the boolean name set and the per-table map agree", () => {
   const flat = Object.values(BOOLEAN_COLUMNS).flat();
   /*
-   * 52, across 26 tables. It was 28 at Workstream 7 and had not been re-pointed
-   * since; the pre-W14 foundation alone added fourteen (`is_seed` on seven
-   * tables, `job_status_map`'s three, `reminder_defaults`' two and
-   * `reminder_rules`' two), and earlier workstreams the rest.
+   * 63, across 32 tables. It was 28 at Workstream 7, 52 after pre-W14, and the
+   * Overview rebuild plus Module 5 added the eleven that take it to 63:
+   * `dashboard_meters` two (`visible`, `is_catch_all`), `invoice_status_map`
+   * four, `approval_rules` two, `payment_sources` one, `recurring_invoice_rules`
+   * one, and `quotations.client_approval_required`.
+   *
+   * That last one is the only one worth a second look, and it was given one.
+   * Every other new entry belongs to a table this release CREATEs, so
+   * `rewriteBooleanColumnTypes` retypes it to BOOLEAN on the way in and rule 10
+   * has a real boolean to compare against. `quotations` already exists on both
+   * deployed estates, so the column arrives by `ALTER TABLE … ADD COLUMN` —
+   * which that same rule also matches, deliberately (`\bALTER\s+TABLE …
+   * ADD\s+(?:COLUMN\s+)?`), so `INTEGER NOT NULL DEFAULT 0` still lands as
+   * `BOOLEAN NOT NULL DEFAULT false`. Had it not, rule 10 would have rewritten
+   * `client_approval_required = 1` to `= true` against an integer column and
+   * Postgres would have answered 42883 — the failure `scripts/repair-postgres-
+   * boolean-columns.sql` exists to undo.
    *
    * The count is a tripwire, not the contract: an entry added without thought
    * is how a column that merely SOUNDS boolean — `position`, `sends_count` —
@@ -437,7 +450,7 @@ test("the boolean name set and the per-table map agree", () => {
    * handed `1`/`0` and a boolean one `t`/`f`. Verified on the deployed Preview,
    * where the calendar, sites and reports routes all answer 200.
    */
-  assert.equal(flat.length, 52, "the migration converted 52 columns");
+  assert.equal(flat.length, 63, "the migration converted 63 columns");
   for (const name of flat) assert.ok(BOOLEAN_COLUMN_NAMES.has(name));
 });
 

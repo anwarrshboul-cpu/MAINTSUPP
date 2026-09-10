@@ -105,6 +105,26 @@ test("no configurable list has reappeared as a code constant", async () => {
      */
     ["app/lib/reminders/schedule.ts", /export const TERMINAL_REMINDER_STATUSES = \["acknowledged", "cancelled", "superseded"\] as const;/],
     /*
+     * A FLAG'S OWN LIFECYCLE, and the same shape as the reminder statuses above.
+     *
+     * §7 raises a flag against an invoice; a person then either clears it (the
+     * condition went away) or waives it with a typed reason (they are accepting
+     * it deliberately). Those three are the states the WAIVER FLOW is built out
+     * of, not a vocabulary an admin picks from: a fourth would need a fourth
+     * route, a fourth button and a fourth thing for `blockingFlags` to decide
+     * about, so nobody is adding one from a settings screen.
+     *
+     * The vocabulary this module genuinely has — the invoice STATUSES — is in
+     * the database exactly as the rule demands. `invoice_status_map` owns every
+     * label, colour and sort order for all 22 statuses in both directions, is
+     * seeded by `db/init.ts` and is editable in Settings. What
+     * `app/lib/finance/model.ts` keeps as constants is the KEY LADDER — the
+     * order a status moves through — so a route can decide whether a transition
+     * is legal without a second read, and so an unmapped status has somewhere
+     * to fall back to instead of vanishing. The file's own header says so.
+     */
+    ["app/lib/finance/model.ts", /export const FLAG_STATUSES = \["open", "cleared", "waived"\] as const;/],
+    /*
      * THE HONEST EDGE CASE, AND IT IS ADMITTED RATHER THAN HIDDEN.
      *
      * This is not a list an admin chooses from either — it is a CLASSIFICATION

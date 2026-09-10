@@ -249,7 +249,30 @@ test("the Overview's overdue figure uses the rule, on the server", async () => {
  * tests were protecting moved with the page, and each assertion below moved
  * with the contract it was protecting rather than being deleted.
  */
-const overviewPage = () => read("app/(app)/portal/ops/overview-page.tsx");
+/**
+ * THE OVERVIEW IS A FAMILY OF FILES NOW.
+ *
+ * `overview-page.tsx` was 1,722 lines carrying six cards; it is a shell now —
+ * filter state, the cohort axis, the section order — with each band beside it,
+ * the same split `live-board.tsx` took. Every assertion below is about THE
+ * OVERVIEW, so it reads the Overview. What each one requires is unchanged; only
+ * where it looks has moved, and for the `doesNotMatch` checks the family read is
+ * strictly stronger — there is more source that could violate them.
+ */
+const OVERVIEW_FAMILY = [
+  "app/(app)/portal/ops/overview-page.tsx",
+  "app/(app)/portal/ops/overview-glance.tsx",
+  "app/(app)/portal/ops/overview-financial.tsx",
+  "app/(app)/portal/ops/overview-performance.tsx",
+  "app/(app)/portal/ops/overview-breakdown.tsx",
+  "app/(app)/portal/ops/overview-sites.tsx",
+  "app/(app)/portal/ops/overview-records.tsx",
+  "app/(app)/portal/ops/overview-shared.tsx",
+  "app/(app)/portal/ops/overview-charts.tsx",
+];
+
+const overviewPage = async () =>
+  (await Promise.all(OVERVIEW_FAMILY.map((file) => read(file)))).join("\n");
 
 test("the attention figure and the attention worklist are one predicate", async () => {
   /*
@@ -293,22 +316,35 @@ test("every Overview tile carries its own words and its own numbers", async () =
    * hidden data table — which is also what a screen reader gets.
    */
   const page = await overviewPage();
-  const tiles = page.slice(page.indexOf("const tiles = ["), page.indexOf('caption="At a glance"'));
-  const labels = tiles.match(/\n      label: "/g) ?? [];
-  assert.equal(labels.length, 5, "the five tiles the brief specifies");
-  const meterLabels = tiles.match(/\n          label=\{/g) ?? [];
-  assert.ok(
-    meterLabels.length >= 5,
-    "each tile's meter states its numbers in words, not only in colour",
-  );
+  /*
+   * RE-POINTED AGAIN, and the COUNT changed because the brief changed.
+   *
+   * Five hard-coded tiles became four Pulse figures (§2.2) plus EIGHT meters
+   * (§2.3) rendered from `data.meters`. There is no `const tiles = [` left to
+   * slice, and that is the improvement rather than the loss: the old array was
+   * five literals a card could quietly get wrong, and the grid is now whatever
+   * the workspace has configured in Settings.
+   *
+   * The contract this assertion has always been about survives intact — a
+   * reader must never have to guess what a tile is measuring. Every tile takes
+   * a label and a full accessible value, the meter grid is built from the
+   * payload rather than from constants, the same numbers are reachable as a
+   * table, and a delta with nothing to compare against is omitted rather than
+   * printed as a zero.
+   */
+  assert.match(page, /const figures = \[/, "the Pulse row is built from a list");
+  const pulseLabels = page.match(/\n      label: "/g) ?? [];
+  assert.equal(pulseLabels.length, 4, "the four Pulse figures §2.2 specifies");
   assert.match(
     page,
-    /<HiddenDataTable\s*\n?\s*caption="At a glance"/,
-    "and the same numbers are reachable as a table",
+    /visible\.map\(\(meter\) => \(/,
+    "and the meter tiles come from the payload, not from a literal",
   );
+  assert.match(page, /accessibleValue=\{/, "every tile states its full value in words");
+  assert.match(page, /caption: "At a glance"/, "and the same numbers are reachable as a table");
   assert.match(
     page,
-    /tile\.delta === null[\s\S]{0,240}Not comparable/,
+    /previous !== null[\s\S]{0,260}delta !== null/,
     "a delta with nothing to compare against is omitted, never printed as zero",
   );
 });
@@ -398,10 +434,23 @@ test("a figure that has not loaded is never printed as a definitive zero", async
     "no card falls back to a printed zero while it is loading",
   );
   assert.match(page, /<EmptyState>/, "and an empty answer says so in words");
+  /*
+   * RE-POINTED: the sentence is measure-aware now. "No jobs in this period" was
+   * true when the cohort could only ever be jobs REQUESTED in the period; §1.1
+   * added the second axis, and a card showing nothing under "Measure by: Date
+   * completed" is saying something different from the same card under "Date
+   * requested". The contract — an empty answer is a sentence, never a blank
+   * axis — is unchanged, and it now says which question came back empty.
+   */
   assert.match(
     page,
-    /No jobs in this period/,
+    /No job was requested in this period/,
     "with an honest sentence rather than a blank axis",
+  );
+  assert.match(
+    page,
+    /No job was completed in this period/,
+    "and the sentence follows the cohort axis, because they are different facts",
   );
 
   /*
@@ -409,7 +458,15 @@ test("a figure that has not loaded is never printed as a definitive zero", async
    * requirements set up is NOT a site scoring zero, and rendering the first as
    * the second is the more dangerous of the two.
    */
-  assert.match(page, /site\.compliance\.scored/);
+  /*
+   * RE-POINTED at the helper the rule moved into. `complianceReadout` is now
+   * the one function that decides what a site's compliance cell says, and it is
+   * exported so it can be called rather than only matched — which is a stronger
+   * hold on the same contract than reading `site.compliance.scored` off the
+   * markup ever was.
+   */
+  assert.match(page, /complianceReadout\(site\.compliance\)/, "one function decides the cell");
+  assert.match(page, /if \(!compliance\.scored\)/, "and an unset profile is its own branch");
   assert.match(page, /Not set up/);
 
   const route = await read("app/api/dashboard/sites-attention/route.ts");

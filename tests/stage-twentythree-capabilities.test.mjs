@@ -64,12 +64,34 @@ test("every capability is either enforced or labelled as not yet enforced", asyn
   assert.ok(capabilities.length >= 16, "the catalogue was not parsed");
 
   const sources = await routeSources();
-  const sites = (key) =>
-    sources.filter((source) =>
+  /*
+   * THREE ENFORCEMENT SHAPES NOW, and the third is not a loophole.
+   *
+   * `requireCapability` and `scopedDbWithCapability` both REFUSE a request:
+   * they decide whether the route runs at all. `can(...)` decides something
+   * narrower and just as real — whether part of a payload comes back, or
+   * whether one field in a body may be written.
+   *
+   * `billing.manage` is the capability that made this necessary.
+   * `/api/finance/settings` cannot gate the whole route on it: a reader who may
+   * plan a payment run needs to see WHICH account it will debit, so the route
+   * answers everyone and calls `can` twice — once to decide whether a sort code
+   * comes back in full or masked to its last four digits, and once to refuse a
+   * write of either with a 403. Gating the route instead would have hidden the
+   * approval bands and the status map from everyone but an owner.
+   *
+   * The contract this test holds is unchanged: a capability that appears in the
+   * matrix must DECIDE something somewhere. What has widened is the set of ways
+   * a route is allowed to decide.
+   */
+  const sites = (key) => {
+    const escaped = key.replace(".", "\\.");
+    return sources.filter((source) =>
       new RegExp(
-        `(requireCapability\\([^)]*|scopedDbWithCapability\\(request, )"${key.replace(".", "\\.")}"`,
+        `(requireCapability\\([^)]*|scopedDbWithCapability\\(request, |can\\([^)]*, )"${escaped}"`,
       ).test(source),
     ).length;
+  };
 
   const decorative = [];
   const mislabelled = [];

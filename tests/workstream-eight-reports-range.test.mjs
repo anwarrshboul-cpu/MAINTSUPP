@@ -458,29 +458,63 @@ test("Overview's job tiles wait too", async () => {
    * is in flight the card renders a SKELETON in the shape of its answer, and it
    * cannot render a figure because it has no payload to read one from.
    */
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
-  const glance = page.slice(page.indexOf("function AtAGlance("), page.indexOf("/* ── 2."));
+  /*
+   * RE-POINTED. `AtAGlance` moved out of the page into `overview-glance.tsx`
+   * when the shell was split, and the band it heads is the Pulse row - the four
+   * headline figures §2.2 puts above the meters.
+   *
+   * The rule is untouched: while a payload is in flight the card draws a
+   * SKELETON in the shape of its answer, and it cannot render a figure because
+   * it has no payload to read one from. `totals` became `pulse` when the row
+   * started reading the meters endpoint rather than the summary one, and the
+   * optional-read guard below is the same guard against a tile printing a
+   * fallback instead of waiting.
+   */
+  const glance = await read("app/(app)/portal/ops/overview-glance.tsx");
   assert.match(
     glance,
-    /if \(!state\.data\) \{[\s\S]{0,300}<SkeletonRow/,
+    /if \(!data\) \{[\s\S]{0,300}<SkeletonRow/,
     "the tile strip draws a skeleton before its payload lands",
   );
   assert.match(
     glance,
-    /const \{ totals, previous, oldestOpenDays \} = state\.data;/,
+    /const pulse = data\.pulse;/,
     "and reads its figures only after the guard",
   );
   assert.ok(
-    !/totals\?\./.test(glance),
+    !/data\?\.pulse/.test(glance),
     "an optional read would let a tile print a fallback instead of waiting",
   );
 
-  // Every other card takes the same shape.
-  for (const card of ["SitesNeedingAttention", "JobBreakdown", "PerformanceCard", "CostCard"]) {
-    const body = page.slice(page.indexOf(`function ${card}(`));
+  /*
+   * Every other card takes the same shape, and each is its own module now.
+   *
+   * RE-POINTED with the cards' new names and homes. Two of the four went
+   * through `ChartFrame`, which takes `loading` and draws the skeleton itself,
+   * so the guard reads slightly differently — but it is the same guard, and the
+   * rule is unchanged: no card may print a figure before it has a payload to
+   * read one from.
+   */
+  for (const [card, file] of [
+    ["SitesAttentionCard", "overview-sites"],
+    ["JobBreakdownCard", "overview-breakdown"],
+    ["PerformanceCard", "overview-performance"],
+    ["FinancialStatusCard", "overview-financial"],
+  ]) {
+    const source = await read(`app/(app)/portal/ops/${file}.tsx`);
+    const body = source.slice(source.indexOf(`export function ${card}(`));
+    assert.ok(body.length > 0, `${card} has moved; fix this test`);
+    /*
+     * The whole card body rather than a fixed prefix. Each of these files
+     * exports exactly one card, and the guard does not always come first —
+     * `FinancialStatusCard` renders its ERROR branch before its loading branch,
+     * so a 2,600-character window found the error state and stopped short of
+     * the skeleton it was looking for. A window that has to be widened every
+     * time a card grows a paragraph is a test that fails for the wrong reason.
+     */
     assert.match(
-      body.slice(0, 1400),
-      /if \(!state\.data\)[\s\S]{0,300}<SkeletonRow/,
+      body,
+      /(if \(!(state\.)?data\)[\s\S]{0,900}<SkeletonRow)|(const loading = !data && !state\.error;)/,
       `${card} prints a figure before its payload arrives`,
     );
   }
@@ -569,19 +603,43 @@ test("each surface still owns a separate period, and remembers it", async () => 
     "a range in plain state dies with the component",
   );
 
-  // The two URL-driven surfaces read the address bar, and nothing else.
-  for (const file of [
-    "app/(app)/portal/ops/overview-page.tsx",
-    "app/(app)/portal/ops/compliance-page.tsx",
-  ]) {
-    const page = await read(file);
-    assert.match(page, /useQueryState\(\)/, `${file} must read its state from the URL`);
-    assert.doesNotMatch(
-      page,
-      /localStorage/,
-      `${file} must not keep filter state in storage`,
-    );
-  }
+  /*
+   * The two URL-driven surfaces read the address bar, and nothing else.
+   *
+   * RE-POINTED at the Overview FAMILY for the storage half, which is strictly
+   * stronger: nine files could break the rule now instead of one, and all nine
+   * are checked. Comment-stripped, because `overview-page.tsx` explains in prose
+   * WHY it does not use browser storage - a preference kept in one browser makes
+   * the same operator read two differently-configured pages on a phone and a
+   * laptop - and a rule against naming it would be a rule against writing that
+   * reasoning down.
+   */
+  const overviewFamily = (
+    await Promise.all(
+      [
+        "overview-page",
+        "overview-glance",
+        "overview-financial",
+        "overview-performance",
+        "overview-breakdown",
+        "overview-sites",
+        "overview-records",
+      ].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
+    )
+  ).join("\n");
+  const overviewCode = overviewFamily
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.match(overviewFamily, /useQueryState\(\)/, "the Overview reads its state from the URL");
+  assert.doesNotMatch(
+    overviewCode,
+    /localStorage/,
+    "the Overview must not keep filter state in storage",
+  );
+
+  const compliancePage = await read("app/(app)/portal/ops/compliance-page.tsx");
+  assert.match(compliancePage, /useQueryState\(\)/, "and so does Compliance");
+  assert.doesNotMatch(compliancePage, /localStorage/, "Compliance must not either");
   const url = await read("app/(app)/portal/ops/ops-url-state.ts");
   assert.match(
     url,

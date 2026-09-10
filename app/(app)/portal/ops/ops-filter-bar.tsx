@@ -49,12 +49,27 @@ export function OpsFilterBar({
   periodControl,
   groups,
   extra,
+  sheetLead,
   onClearAll,
   activeChips,
 }: {
   periodControl: ReactNode;
   groups: FilterGroup[];
   extra?: ReactNode;
+  /**
+   * WHAT SITS AT THE TOP OF THE MOBILE SHEET, ABOVE THE FILTER GROUPS.
+   *
+   * §1.8's table is explicit about this row: "Date range + Measure-by controls
+   * → Inside the same bottom sheet, at the top." The sheet used to render the
+   * groups and nothing else, so on a phone the period selector was reachable
+   * (it stays on the bar) but the cohort axis was not reachable at all — and
+   * §1.8's opening sentence is that no feature is desktop-only.
+   *
+   * A separate slot from `extra` rather than the same one, because the two
+   * appear in different places and a control can legitimately want both: the
+   * caller passes the same node twice and each surface gets its own instance.
+   */
+  sheetLead?: ReactNode;
   onClearAll: () => void;
   activeChips: Array<{ key: string; label: string; value: string; onRemove: () => void }>;
 }) {
@@ -152,6 +167,7 @@ export function OpsFilterBar({
                 <Icon name="close" size={16} />
               </button>
             </div>
+            {sheetLead ? <div className="ops-sheet__lead">{sheetLead}</div> : null}
             {groups.map((group) => (
               <SheetGroup key={group.key} group={group} />
             ))}

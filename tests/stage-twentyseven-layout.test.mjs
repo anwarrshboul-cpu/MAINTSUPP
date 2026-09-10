@@ -331,7 +331,13 @@ test("the strip removes nothing: six cards, and one control that is new", async 
     "Awaiting parts",
     "Awaiting approval",
     "Closed in period",
-    "Avg SLA target",
+    /*
+     * Was "Avg SLA target". Re-pointed rather than removed: the contract here
+     * is that all six meters still render in both pinned states, and there are
+     * still six. The label changed because the old one averaged the TARGETS on
+     * the rows and measured nothing about performance — dashboard brief §4.4.
+     */
+    "SLA met",
   ]) {
     assert.ok(section.includes(`label="${label}"`), `${label} must still be one of the meters`);
   }
