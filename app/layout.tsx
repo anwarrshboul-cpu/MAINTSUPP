@@ -35,16 +35,22 @@ export const metadata: Metadata = {
    *
    * `sizes: "32x32"` on the .ico rather than "any" is deliberate — with "any"
    * a browser treats it as an equal candidate to the vector and may take it.
+   *
+   * THEY ARE <link> TAGS AND NOT `metadata.icons`, WHICH IS THE WHOLE POINT.
+   *
+   * `metadataBase` below is required for Open Graph and resolves every
+   * RELATIVE metadata URL against https://maintsupp.com — icons included. So
+   * through `metadata.icons` these came out as absolute production URLs on
+   * every host, and a deployment served its tab icon from a different origin
+   * than the one it was built from. Measured on the branch Preview: three of
+   * the four 404ed, because those files only exist on production once this
+   * release lands, and the fourth served production's OLD mark.
+   *
+   * A <link> is emitted verbatim, so each host serves its own. Nothing else
+   * changes: `metadataBase`, `alternates`, `openGraph`, `twitter` and the
+   * Search Console verification are untouched and still absolute, which is
+   * what a crawler and a share card need.
    */
-  icons: {
-    icon: [
-      { url: "/favicon.ico", sizes: "32x32" },
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon-96.png", type: "image/png", sizes: "96x96" },
-    ],
-    shortcut: "/favicon.ico",
-    apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
-  },
   /*
    * metadataBase is what turns the relative image path below into the absolute
    * URL that Open Graph requires. Without it Next warns and the image is
@@ -100,6 +106,14 @@ export default function RootLayout({
      * these two elements only; it does not reach any child.
      */
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Host-relative on purpose — see the icon note above `metadata`. */}
+        <link rel="icon" href="/favicon.ico" sizes="32x32" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/favicon-96.png" type="image/png" sizes="96x96" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" type="image/png" />
+      </head>
       <body suppressHydrationWarning>{children}</body>
     </html>
   );
