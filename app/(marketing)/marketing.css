@@ -1421,7 +1421,16 @@ fieldset.field:focus{outline:none}
 
 /* The two main cards never collapse to one column above 640px: two abreast is
    the comparison, and `auto-fit` would drop them to one the moment the track
-   fell under its floor. */
+   fell under its floor.
+
+   AND THEY ARE THE SAME HEIGHT. `.pkgs` sets `align-items:start`, which is
+   right for three cards of similar length and wrong for these two: Essential
+   lists six features and Complete lists three roll-up lines, so the card
+   carrying "Most popular" ended 100px shorter than the one beside it and read
+   as the lesser of the two. Stretching is a no-op in one column — each grid
+   row is sized by its only item — so it needs no breakpoint of its own. */
+.pkgs--two{align-items:stretch}
+.pkgs--two>.pkg{display:flex;flex-direction:column}
 @media(min-width:640px){.pkgs--two{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ------------------------------------------------------------ calculator */
