@@ -383,6 +383,21 @@
     align-items: center;
   }
 
+  /*
+   * The open-jobs figure is a button whose label is a single digit, so at
+   * 375px it measured 8px wide against its 44px height -- the only control
+   * on this page that is undersized AND has no equivalent elsewhere. The
+   * bar segments and timeline ticks are narrow because their width IS the
+   * datum, and each already has a full-size route to the same place (the
+   * meter tile, the pinned tip's action), so widening those would falsify
+   * the chart. Widening a number costs nothing and lies about nothing.
+   */
+  .ovp-site__count {
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
   .ovp-footer {
     gap: 4px;
     flex-direction: column;
