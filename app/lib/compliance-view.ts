@@ -27,6 +27,7 @@
 
 import { storeDocumentationResponsibility } from "../../db/monday-board-spec";
 import {
+  countsTowardCompliance,
   responsibilityCoverage,
   type ResponsibilityCoverage,
 } from "./compliance-duty-holder";
@@ -34,12 +35,14 @@ import {
   complianceCompletion,
   complianceUrgency,
   compareDueDates,
+  expiryStatus,
   isDueWindow,
   outstandingCount,
   withinDueWindow,
   type ComplianceCompletion,
   type DueWindowKey,
 } from "./compliance-status";
+import { dateOnlyValue } from "./expiry-status";
 import type { ComplianceState } from "./types";
 
 /** One row of the register, flattened for the wire. */
@@ -119,6 +122,31 @@ export type ComplianceFilters = {
   responsibilities: string[];
   due: DueWindowKey[];
   search: string;
+  /**
+   * ONLY THE REQUIREMENTS INSIDE THE SCORE — `?scored=1`.
+   *
+   * The Compliance dashboard block counts the score's population: not "Not
+   * required", and not a requirement whose responsibility is unconfirmed or
+   * somebody else's (`countsTowardCompliance`). The register lists every record.
+   * So a segment reading "Missing 250" opened a register of 1,229 Missing
+   * records — the list wider than the figure, the defect every drill here is
+   * written to avoid. With this, the register opens on exactly the rows the
+   * figure counted.
+   */
+  scored: boolean;
+  /**
+   * Days-remaining bands — `?due=band:0-20` — the countdown rings' windows.
+   * They are thirds of `EXPIRY_DUE_SOON_DAYS`, so they cannot be fixed keys in
+   * `DUE_WINDOWS`; they travel as their own bounds. OR'd with `due`.
+   */
+  dueBands: Array<{ from: number; to: number }>;
+  /**
+   * A DUE-DATE RANGE — `?from=&to=`, inclusive. The block's date picker filters
+   * the register by due date, per its brief; a record with no due date is
+   * outside any range. Null bounds are open.
+   */
+  dueFrom: string | null;
+  dueTo: string | null;
 };
 
 export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
@@ -128,7 +156,45 @@ export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
   responsibilities: [],
   due: [],
   search: "",
+  scored: false,
+  dueBands: [],
+  dueFrom: null,
+  dueTo: null,
 };
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const BAND = /^band:(\d{1,4})-(\d{1,4})$/;
+
+/**
+ * The `?who=` value for "nobody is recorded as chasing this". Empty values are
+ * dropped by the parser, so the absence needs a name of its own; a real
+ * responsibility can never be spelled like this.
+ */
+export const NO_RESPONSIBILITY = "__none__";
+
+/** A `?due=band:a-b` token as its bounds, or null for anything else. */
+export function parseDueBand(value: string): { from: number; to: number } | null {
+  const match = BAND.exec(value.trim());
+  if (!match) return null;
+  const from = Number(match[1]);
+  const to = Number(match[2]);
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
+/** The token a band travels as — the inverse of `parseDueBand`. */
+export function dueBandToken(from: number, to: number): string {
+  return `band:${from}-${to}`;
+}
+
+/**
+ * Whether a record is inside the compliance SCORE — the population
+ * `complianceCompletion` divides by. Not marked not required, and owned by the
+ * client (or never asked). One predicate, read by the register's `scored`
+ * filter and by the dashboard block, so the two count the same rows.
+ */
+export function isScoredRow(row: { state: ComplianceState; dutyHolder?: string | null }): boolean {
+  return row.state !== "Not required" && countsTowardCompliance(row.dutyHolder);
+}
 
 const STATES: ComplianceState[] = [
   "Compliant",
@@ -151,6 +217,11 @@ function list(params: URLSearchParams, key: string, max = 60): string[] {
 /** The same parser on both sides of the wire, for the same reason as everywhere. */
 export function parseComplianceFilters(url: URL): ComplianceFilters {
   const params = url.searchParams;
+  const dueValues = list(params, "due");
+  const from = (params.get("from") ?? "").trim();
+  const to = (params.get("to") ?? "").trim();
+  const [dueFrom, dueTo] =
+    DAY.test(from) && DAY.test(to) && from > to ? [to, from] : [from, to];
   return {
     sites: list(params, "site"),
     states: list(params, "state").filter((value): value is ComplianceState =>
@@ -158,9 +229,50 @@ export function parseComplianceFilters(url: URL): ComplianceFilters {
     ),
     kinds: list(params, "kind"),
     responsibilities: list(params, "who"),
-    due: list(params, "due").filter(isDueWindow),
+    due: dueValues.filter(isDueWindow),
     search: (params.get("q") ?? "").trim().slice(0, 120),
+    scored: params.get("scored") === "1",
+    dueBands: dueValues
+      .map(parseDueBand)
+      .filter((band): band is { from: number; to: number } => band !== null),
+    dueFrom: DAY.test(dueFrom) ? dueFrom : null,
+    dueTo: DAY.test(dueTo) ? dueTo : null,
   };
+}
+
+/**
+ * The register's rows from a register read — ONE builder, so the dashboard
+ * block and the register it drills into describe the same records the same
+ * way. `responsibility` is `responsibilityFor` over the site's manager, exactly
+ * as `/api/compliance/summary` and `/api/compliance/records` build it.
+ */
+export function complianceRowsFrom(
+  entries: ReadonlyArray<{
+    id: string;
+    siteId: string;
+    siteName: string;
+    kind: string;
+    dutyHolder: string | null;
+    state: ComplianceState;
+    expiry: string | null;
+    fileCount: number;
+    itemId: string | null;
+    slotKey: string | null;
+  }>,
+  managerById: ReadonlyMap<string, string>,
+): ComplianceRow[] {
+  return entries.map((entry) => ({
+    id: entry.id,
+    siteId: entry.siteId,
+    siteName: entry.siteName,
+    kind: entry.kind,
+    responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
+    dutyHolder: entry.dutyHolder,
+    state: entry.state,
+    expiry: entry.expiry,
+    fileCount: entry.fileCount,
+    editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
+  }));
 }
 
 /**
@@ -193,14 +305,35 @@ export function filterComplianceRows(
   const states = new Set(filters.states);
   const kinds = new Set(filters.kinds);
   const who = new Set(filters.responsibilities);
+  const bands = filters.dueBands ?? [];
+  const dueFrom = filters.dueFrom ?? null;
+  const dueTo = filters.dueTo ?? null;
   return rows.filter((row) => {
     if (sites.size && !sites.has(row.siteId)) return false;
     if (states.size && !states.has(row.state)) return false;
     if (kinds.size && !kinds.has(row.kind)) return false;
-    if (who.size && !who.has(row.responsibility)) return false;
-    if (filters.due.length) {
-      const matches = filters.due.some((window) => withinDueWindow(row, window, today));
+    if (
+      who.size &&
+      !who.has(row.responsibility) &&
+      !(who.has(NO_RESPONSIBILITY) && !row.responsibility.trim())
+    ) {
+      return false;
+    }
+    if (filters.scored && !isScoredRow(row)) return false;
+    if (filters.due.length || bands.length) {
+      const matches =
+        filters.due.some((window) => withinDueWindow(row, window, today)) ||
+        bands.some((band) => {
+          const days = expiryStatus(row.expiry, today).daysRemaining;
+          return days !== null && days >= band.from && days <= band.to;
+        });
       if (!matches) return false;
+    }
+    if (dueFrom || dueTo) {
+      const due = dateOnlyValue(row.expiry);
+      if (!due) return false;
+      if (dueFrom && due < dueFrom) return false;
+      if (dueTo && due > dueTo) return false;
     }
     if (needle) {
       const haystack = `${row.kind} ${row.siteName} ${row.responsibility}`.toLowerCase();

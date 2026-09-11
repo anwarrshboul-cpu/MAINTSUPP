@@ -39,6 +39,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { announceDataChanged } from "./ops-url-state";
 import setupCss from "./compliance-setup.css?url";
 import { EmptyState, ErrorState, OpsCard, SkeletonRow, plural } from "./ops-primitives";
 import {
@@ -112,12 +113,20 @@ export function ComplianceSetup({ onChanged }: { onChanged?: () => void }) {
 
   const reload = useCallback(() => setNonce((value) => value + 1), []);
 
+  /* A created site or an applied backfill changes the register — and so the
+     Compliance dashboard block above it, which re-reads through the same
+     signal every aggregate on the page answers. */
+  const changed = useCallback(() => {
+    onChanged?.();
+    announceDataChanged();
+  }, [onChanged]);
+
   return (
     <div className="ops-rows">
       {/* Hoisted once however many of the three cards render, the same way every
           other ops surface loads its stylesheet. */}
       <link rel="stylesheet" href={setupCss} precedence="default" />
-      <AddSiteInline onCreated={onChanged} />
+      <AddSiteInline onCreated={changed} />
       {error ? (
         <OpsCard title="Requirement template">
           <ErrorState what={error} onRetry={reload} />
@@ -129,7 +138,7 @@ export function ComplianceSetup({ onChanged }: { onChanged?: () => void }) {
       ) : (
         <>
           <TemplateEditor payload={payload} onSaved={reload} />
-          <BackfillPanel onApplied={onChanged} />
+          <BackfillPanel onApplied={changed} />
         </>
       )}
     </div>
