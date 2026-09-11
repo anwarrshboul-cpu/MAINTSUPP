@@ -25,9 +25,8 @@ const read = async (file) => (await readFile(path.join(root, file), "utf8")).rep
 
 const { buildReportsDashboard, reconcileReportsDashboard, resolveReportsRange, dayOf, shiftDays, shiftMonth } =
   await import("../app/lib/reports-dash.ts");
-const { analyseRepeats, spendLineOf, spendTypeOf, REPEAT_WINDOW_DAYS, recurrenceBandOf, medianOf } = await import(
-  "../app/lib/job-metrics.ts"
-);
+const jobMetrics = await import("../app/lib/job-metrics.ts");
+const { analyseRepeats, spendLineOf, spendTypeOf, REPEAT_WINDOW_DAYS, recurrenceBandOf, medianOf } = jobMetrics;
 const { readDrillFilter } = await import("../app/(app)/portal/board-drill-filter.ts");
 const { dayString, shiftDay } = await import("../app/lib/dashboard-filters.ts");
 
@@ -113,7 +112,7 @@ function build(jobs = JOBS, over = {}) {
     sitesRange: over.sitesRange ?? "page",
     portfolio: { id: "all", name: "All portfolios", siteIds: [] },
     portfolios: [],
-    activeSiteCount: 3,
+    siteCount: 3,
   });
 }
 
@@ -255,7 +254,7 @@ test("each reconciliation rule fails on its own, and says which", () => {
   const broken = (mutate) => {
     const copy = structuredClone(good);
     mutate(copy);
-    return reconcileReportsDashboard(copy, { activeSiteCount: 3 }).join(" | ");
+    return reconcileReportsDashboard(copy, { siteCount: 3 }).join(" | ");
   };
   assert.match(broken((m) => { m.kpis[1].pence += 1; }), /types \d+ != total/);
   assert.match(broken((m) => { m.kpis[0].spark[0].pence += 1; }), /total sparkline/);
@@ -265,7 +264,89 @@ test("each reconciliation rule fails on its own, and says which", () => {
   assert.match(broken((m) => { m.repeat.bySite[0].value += 1; }), /repeat by site/);
   assert.match(broken((m) => { m.repeat.bands[2].value += 1; }), /recurrence rings/);
   assert.match(broken((m) => { m.repeat.repeatJobs = m.repeat.jobsInRange + 1; }), /repeat jobs \d+ > jobs raised/);
-  assert.match(broken((m) => { m.repeat.sitesAffected = 9; }), /sites with repeats 9 > active sites 3/);
+  /* The ceiling is every site in scope, closed ones included — see the test
+     "a closed or vanished site's repeats" below for why it is not active sites. */
+  assert.match(broken((m) => { m.repeat.sitesAffected = 9; }), /sites with repeats 9 > sites in scope 3/);
+});
+
+test("a long custom range keeps every pound on its sparkline", () => {
+  /*
+   * The spark used to stop at 400 buckets, so a custom range past ~7½ years of
+   * weeks drew a line that no longer summed to the figure above it. Now the
+   * bucket coarsens instead: daily to 45 days, weekly to two years, monthly to
+   * 400 months, yearly beyond — and nothing is dropped at any length.
+   */
+  const at = (from, to) => build(JOBS, { range: resolveReportsRange({ from, to }, NOW) });
+  assert.equal(at("2026-07-01", "2026-08-14").sparkUnit, "day", "45 days is daily");
+  assert.equal(at("2026-07-01", "2026-08-15").sparkUnit, "week", "46 days is weekly");
+  const decade = at("2015-01-01", "2026-08-31");
+  assert.equal(decade.sparkUnit, "month");
+  assert.equal(kpi(decade, "total").spark.length, 140, "Jan 2015 to Aug 2026 is 140 months");
+  assert.equal(kpi(decade, "total").jobs, 7, "J10 is inside this range");
+  const millennium = at("1026-01-01", "2026-08-31");
+  assert.equal(millennium.sparkUnit, "year");
+  assert.equal(kpi(millennium, "total").spark.length, 1001);
+  for (const metrics of [decade, millennium]) {
+    for (const entry of metrics.kpis) {
+      assert.equal(entry.spark.reduce((sum, point) => sum + point.pence, 0), entry.pence, `${entry.key} sums over ${metrics.sparkUnit}s`);
+    }
+    assert.deepEqual(metrics.reconciliation, []);
+  }
+});
+
+test("a closed or vanished site's repeats: named in the drill, never a false alarm", () => {
+  /*
+   * Two repeats at a site id no site row carries (a store deleted since). The
+   * by-site donut draws them as "No site", and that slice's drill has to name
+   * the dangling id as well as `__unassigned__`, or the board lists fewer jobs
+   * than the slice counted. They are not "sites affected" — the sentence under
+   * the gauge and the donut agree — and one real site with repeats against a
+   * scope of one site (closed or not) is no reconciliation failure.
+   */
+  const rows = [
+    ...JOBS,
+    job("G1", { siteId: "s-gone", category: "Doors", cost: 10, completedAt: "2026-06-12", requestedAt: "2026-06-10T09:00:00.000Z" }),
+    job("G2", { siteId: "s-gone", category: "Doors", cost: 20, completedAt: "2026-06-22", requestedAt: "2026-06-20T09:00:00.000Z" }),
+  ];
+  const range = resolveReportsRange({ from: "2026-06-01", to: "2026-08-31" }, NOW);
+  const metrics = buildReportsDashboard({
+    jobs: rows,
+    siteNames: SITES,
+    monthlySpend: monthlyOf(rows),
+    now: NOW,
+    range,
+    trendRange: "3m",
+    sitesRange: "page",
+    portfolio: { id: "all", name: "All portfolios", siteIds: [] },
+    portfolios: [],
+    siteCount: 1,
+  });
+  const noSite = metrics.repeat.bySite.find((slice) => slice.label === "No site");
+  assert.ok(noSite, "the dangling repeat is drawn as No site");
+  assert.deepEqual(noSite.labels.sort(), ["__unassigned__", "s-gone"]);
+  const filter = readDrillFilter(
+    new URLSearchParams(`repeat=1&period=custom&from=${range.from}&to=${range.to}&site=${encodeURIComponent(noSite.labels.join("|"))}`),
+    NOW,
+    { population: rows },
+  );
+  const opened = rows.filter((row) => filter.matches(row));
+  assert.deepEqual(
+    [opened.length, opened.reduce((sum, row) => sum + (spendLineOf(row)?.pence ?? 0), 0)],
+    [noSite.jobs, noSite.value],
+    "the No-site slice opens exactly the jobs and pounds it counted",
+  );
+  assert.equal(metrics.repeat.sitesAffected, 1, "s1 only; the vanished site is No site");
+  assert.deepEqual(metrics.reconciliation, [], "one real site affected in a scope of one is no fault");
+});
+
+test("a scope with no sites drills to nothing, not to the whole estate", () => {
+  const { drillSiteIds, NO_SITE_IN_SCOPE } = jobMetrics;
+  assert.deepEqual(drillSiteIds(null), [], "nothing to narrow sends no site=");
+  assert.deepEqual(drillSiteIds([]), [NO_SITE_IN_SCOPE], "an empty scope sends the sentinel");
+  assert.deepEqual(drillSiteIds(["s1", "s2"]), ["s1", "s2"]);
+  const filter = readDrillFilter(new URLSearchParams(`site=${NO_SITE_IN_SCOPE}`), NOW, { population: JOBS });
+  assert.equal(JOBS.filter((row) => filter.matches(row)).length, 0, "the sentinel matches no job, blank-site ones included");
+  assert.equal(filter.chips.find((chip) => chip.key === "site")?.value, "No sites in scope", "and the banner says so in words");
 });
 
 test("changing a job's cost, type, site or issue moves every widget and still reconciles", () => {

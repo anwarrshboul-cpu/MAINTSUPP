@@ -40,7 +40,13 @@ import {
   shiftMonth,
   type ReportsJob,
 } from "../../../lib/reports-dash";
-import { SPEND_TYPE_LABEL, analyseRepeats, spendLineOf, spendTypeOf } from "../../../lib/job-metrics";
+import {
+  SPEND_TYPE_LABEL,
+  analyseRepeats,
+  drillSiteIds,
+  spendLineOf,
+  spendTypeOf,
+} from "../../../lib/job-metrics";
 import type { RpSitesRange, RpTrendRange } from "../../../lib/reports-dash-contract";
 import { csvCell, csvDownload, poundsText } from "../../../lib/finance/exports";
 
@@ -102,19 +108,19 @@ export async function GET(request: Request) {
         .from(maintenanceRequests)
         .where(scope),
       db
-        .select({ id: sites.id, name: sites.name, status: sites.status })
+        .select({ id: sites.id, name: sites.name })
         .from(sites)
         .where(eq(sites.organisationId, orgId)),
       loadSpendByMonth(db, scope, `${firstMonth}-01`, shiftDays(range.to, 1)),
     ]);
 
     const jobs = jobRows as unknown as ReportsJob[];
-    const siteList = siteRows as Array<{ id: string; name: string; status: string | null }>;
+    const siteList = siteRows as Array<{ id: string; name: string }>;
     const siteNames = new Map(siteList.map((site) => [site.id, site.name]));
     const allowed = portfolio.siteIds ? new Set(portfolio.siteIds) : null;
-    const activeSiteCount = siteList.filter(
-      (site) => site.status !== "closed" && (!allowed || allowed.has(site.id)),
-    ).length;
+    /* Every site in scope, closed ones included: the ceiling "sites with
+       repeats" is reconciled against (see `siteCount` in reports-dash). */
+    const siteCount = siteList.filter((site) => !allowed || allowed.has(site.id)).length;
 
     const metrics = buildReportsDashboard({
       jobs,
@@ -125,10 +131,10 @@ export async function GET(request: Request) {
       trendRange,
       sitesRange,
       portfolio: portfolio.chosen
-        ? { ...portfolio.chosen, siteIds: portfolio.siteIds ?? [] }
-        : { id: "all", name: "All portfolios", siteIds: portfolio.siteIds ?? [] },
+        ? { ...portfolio.chosen, siteIds: drillSiteIds(portfolio.siteIds) }
+        : { id: "all", name: "All portfolios", siteIds: drillSiteIds(portfolio.siteIds) },
       portfolios: portfolio.portfolios,
-      activeSiteCount,
+      siteCount,
     });
 
     if (metrics.reconciliation.length > 0) {

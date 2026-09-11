@@ -28,7 +28,7 @@ export type RpDelta = {
 export type RpSparkPoint = {
   /** `YYYY-MM-DD` — the first day of the bucket. */
   key: string;
-  /** "12 May" or "w/c 12 May". */
+  /** "12 May", "w/c 12 May", "May 2024" or "2024" — see `sparkUnit`. */
   label: string;
   pence: number;
   jobs: number;
@@ -123,7 +123,8 @@ export type RpMetrics = {
   kpis: RpKpi[];
   /** Jobs no type rule claims. Reactive + Planned + Projects + this = total. */
   unclassified: { pence: number; jobs: number };
-  sparkUnit: "day" | "week";
+  /** Daily to 45 days, weekly to two years, monthly to 400 months, then yearly. */
+  sparkUnit: "day" | "week" | "month" | "year";
   trend: {
     range: RpTrendRange;
     label: string;

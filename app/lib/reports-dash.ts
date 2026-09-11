@@ -89,7 +89,7 @@ function monthEnd(month: string): string {
 export function shiftMonth(month: string, by: number): string {
   const [year, number] = month.split("-").map(Number);
   const index = year * 12 + (number - 1) + by;
-  return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
+  return `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}`;
 }
 
 const MONTH_SHORT = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" });
@@ -210,8 +210,13 @@ export type ReportsDashInput = {
   sitesRange: RpSitesRange;
   portfolio: { id: string; name: string; siteIds: string[] };
   portfolios: { id: string; name: string }[];
-  /** Active sites in scope — the ceiling "sites with repeats" is checked against. */
-  activeSiteCount: number;
+  /**
+   * EVERY site in scope, closed ones included — the ceiling "sites with
+   * repeats" is checked against. It used to be ACTIVE sites, and a closed store
+   * with a repeat still on its books then raised a reconciliation failure that
+   * described no fault: history does not stop being history when a shop shuts.
+   */
+  siteCount: number;
 };
 
 /* ── Colour: the brief's tokens, restated for a server ────────────────────── */
@@ -314,16 +319,47 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
   const inRange = lines.filter((line) => inWindow(line.day, range.from, range.to));
   const inPrevious = lines.filter((line) => inWindow(line.day, range.previous.from, range.previous.to));
   const length = daysBetween(range.from, range.to) + 1;
-  const sparkUnit: "day" | "week" = length <= 45 ? "day" : "week";
-  const bucketStarts: string[] = [];
-  for (let day = range.from; day <= range.to; day = shiftDays(day, sparkUnit === "day" ? 1 : 7)) {
-    bucketStarts.push(day);
-    if (bucketStarts.length > 400) break;
+  /*
+   * THE BRIEF'S 45-DAY RULE — daily up to 45 days, weekly beyond — and then
+   * coarser still, so a long custom range keeps every pound on the line rather
+   * than stopping at a bucket cap. Weekly to two years, monthly to 400 months,
+   * yearly after that. A cap that dropped the tail would draw a sparkline that
+   * no longer summed to the figure above it.
+   */
+  const monthsSpanned =
+    (Number(range.to.slice(0, 4)) - Number(range.from.slice(0, 4))) * 12 +
+    (Number(range.to.slice(5, 7)) - Number(range.from.slice(5, 7))) + 1;
+  const sparkUnit: RpMetrics["sparkUnit"] =
+    length <= 45 ? "day" : length <= 728 ? "week" : monthsSpanned <= 400 ? "month" : "year";
+  const bucketStarts: string[] = [range.from];
+  for (;;) {
+    const last = bucketStarts[bucketStarts.length - 1];
+    const next =
+      sparkUnit === "day"
+        ? shiftDays(last, 1)
+        : sparkUnit === "week"
+          ? shiftDays(last, 7)
+          : sparkUnit === "month"
+            ? `${shiftMonth(last.slice(0, 7), 1)}-01`
+            : `${String(Number(last.slice(0, 4)) + 1).padStart(4, "0")}-01-01`;
+    if (next > range.to) break;
+    bucketStarts.push(next);
   }
   const bucketOf = (day: string) => {
-    const offset = daysBetween(range.from, day);
-    return sparkUnit === "day" ? offset : Math.floor(offset / 7);
+    if (sparkUnit === "day") return daysBetween(range.from, day);
+    if (sparkUnit === "week") return Math.floor(daysBetween(range.from, day) / 7);
+    const years = Number(day.slice(0, 4)) - Number(range.from.slice(0, 4));
+    if (sparkUnit === "year") return years;
+    return years * 12 + (Number(day.slice(5, 7)) - Number(range.from.slice(5, 7)));
   };
+  const sparkLabel = (start: string) =>
+    sparkUnit === "day"
+      ? DAY_SHORT.format(at(start))
+      : sparkUnit === "week"
+        ? `w/c ${DAY_SHORT.format(at(start))}`
+        : sparkUnit === "month"
+          ? MONTH_LONG.format(at(start))
+          : start.slice(0, 4);
 
   const kpiFor = (key: RpKpi["key"], label: string, pick: (line: SpendLine) => boolean): RpKpi => {
     const current = inRange.filter(pick);
@@ -332,7 +368,7 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
     const previousPence = previous.reduce((sum, line) => sum + line.pence, 0);
     const spark: RpSparkPoint[] = bucketStarts.map((start) => ({
       key: start,
-      label: sparkUnit === "day" ? DAY_SHORT.format(at(start)) : `w/c ${DAY_SHORT.format(at(start))}`,
+      label: sparkLabel(start),
       pence: 0,
       jobs: 0,
     }));
@@ -434,7 +470,12 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
   const repeatJobs = input.jobs.filter((job) => analysis.inRange.has(job.id));
   const spendOf = (job: ReportsJob) => spendLineOf(job)?.pence ?? 0;
   const repeatSpend = repeatJobs.reduce((sum, job) => sum + spendOf(job), 0);
-  const sitesAffected = new Set(repeatJobs.map((job) => (job.siteId ?? "").trim())).size;
+  /* Real sites only. A repeat whose site id names no site row is drawn in the
+     by-site donut as "No site" (`spendSiteOf`), so "across N sites" does not
+     count it as one either — the sentence and the donut say the same thing. */
+  const sitesAffected = new Set(
+    repeatJobs.map((job) => spendSiteOf(job, siteNames)).filter((key) => key !== NO_SITE_KEY),
+  ).size;
 
   const issueGroups = new Map<string, { key: string; label: string; value: number; jobs: number; labels: Set<string> }>();
   for (const job of repeatJobs) {
@@ -460,6 +501,13 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
       (key === NO_SITE_KEY
         ? { key, label: "No site", value: 0, jobs: 0, labels: [NO_SITE_KEY] }
         : { key, label: siteNames.get(siteId) ?? siteId, value: 0, jobs: 0, labels: [siteId] });
+    /* A DANGLING id — a site row that no longer exists — is "No site" too, and
+       the slice's drill must name it: `__unassigned__` alone matches only a
+       blank or placeholder site, so the board would list fewer jobs than the
+       slice counted. */
+    if (key === NO_SITE_KEY && siteId && siteId !== "site-unassigned" && !group.labels.includes(siteId)) {
+      group.labels.push(siteId);
+    }
     group.value += spendOf(job);
     group.jobs += 1;
     siteGroups.set(key, group);
@@ -554,7 +602,7 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
     reconciliation: [],
   };
   metrics.reconciliation = reconcileReportsDashboard(metrics, {
-    activeSiteCount: input.activeSiteCount,
+    siteCount: input.siteCount,
   });
   return metrics;
 }
@@ -564,7 +612,7 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
 /** The brief's §5.3 identities, as a function the tests and the route both run. */
 export function reconcileReportsDashboard(
   metrics: RpMetrics,
-  context: { activeSiteCount?: number } = {},
+  context: { siteCount?: number } = {},
 ): string[] {
   const failures: string[] = [];
   const [total, ...typed] = metrics.kpis;
@@ -601,8 +649,8 @@ export function reconcileReportsDashboard(
   if (repeat.sitesAffected > repeat.repeatJobs) {
     failures.push(`sites with repeats ${repeat.sitesAffected} > repeat jobs ${repeat.repeatJobs}`);
   }
-  if (context.activeSiteCount !== undefined && repeat.sitesAffected > context.activeSiteCount) {
-    failures.push(`sites with repeats ${repeat.sitesAffected} > active sites ${context.activeSiteCount}`);
+  if (context.siteCount !== undefined && repeat.sitesAffected > context.siteCount) {
+    failures.push(`sites with repeats ${repeat.sitesAffected} > sites in scope ${context.siteCount}`);
   }
   return failures;
 }
