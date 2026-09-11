@@ -268,6 +268,29 @@ export async function DELETE(request: Request) {
     }
 
     if (items > 0) {
+      /*
+       * THE DESTINATION MUST BE A LIVE GROUP ON THE SAME BOARD.
+       *
+       * `moveTo` was written straight into every placement unchecked, so a stale
+       * id, a binned group or another board's group re-parented the rows into a
+       * group this board never draws — and the board, which draws only its own
+       * live groups, lost them (see `board-group-fallback.ts`). Refused here, the
+       * same way the 409 above offers only this board's live groups to choose.
+       */
+      const [destination] = await db
+        .select({ id: maintenanceGroups.id })
+        .from(maintenanceGroups)
+        .where(
+          and(
+            eq(maintenanceGroups.id, moveTo),
+            eq(maintenanceGroups.organisationId, orgId),
+            eq(maintenanceGroups.boardId, existing.boardId),
+            isNull(maintenanceGroups.deletedAt),
+          ),
+        );
+      if (!destination || moveTo === id) {
+        return bad("Choose a group on this board for its items.", 400);
+      }
       await db
         .update(maintenanceGroupItems)
         .set({ groupId: moveTo, updatedAt: sql`CURRENT_TIMESTAMP` })

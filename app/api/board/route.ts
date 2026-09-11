@@ -2256,13 +2256,29 @@ export async function POST(request: Request) {
         );
       }
 
+      /*
+       * A TARGET GROUP ON THIS BOARD, NOT BINNED. The lookup used to check the
+       * organisation alone, so a group from another board — or one in the
+       * recycle bin — was accepted, and the rows moved into it vanished from a
+       * board that draws only its own live groups (reproduced: a job moved into
+       * a Store Documentation group answered 200 and left the Jobs board). The
+       * board now files such a row where it can (`board-group-fallback.ts`);
+       * this stops a new one being made.
+       */
       const group =
         action === "move_items"
           ? (
               await db
                 .select()
                 .from(maintenanceGroups)
-                .where(and(eq(maintenanceGroups.id, trimString(payload.groupId, 80)), eq(maintenanceGroups.organisationId, orgId)))
+                .where(
+                  and(
+                    eq(maintenanceGroups.id, trimString(payload.groupId, 80)),
+                    eq(maintenanceGroups.organisationId, orgId),
+                    eq(maintenanceGroups.boardId, boardId),
+                    isNull(maintenanceGroups.deletedAt),
+                  ),
+                )
                 .limit(1)
             )[0]
           : await findOrCreateArchivedGroup(db, orgId, boardId);

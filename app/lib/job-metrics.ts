@@ -573,3 +573,318 @@ export function categoricalColour(key: string): string {
   }
   return CATEGORICAL_COLOURS[hash % CATEGORICAL_COLOURS.length];
 }
+
+/* ── The Jobs board population ────────────────────────────────────────────── */
+
+/**
+ * THE BOARD A JOB LIVES ON, AND THE ONLY ONE THE JOBS FIGURES MAY COUNT.
+ *
+ * `maintenance_requests` holds every row on every board, not only jobs. A Store
+ * Documentation register row ("New store", 12 certificate slots) is a request
+ * row placed on the `store-documentation` board, and a workspace section's rows
+ * are request rows placed on a `sec-…` board. The Jobs board draws only the
+ * rows placed on `maintenance` — `live-board.tsx` narrows the shell's list to
+ * its own placements, and its comment records why: without that "every meter
+ * counted stores as work orders".
+ *
+ * The aggregates did not make the same cut, and that was the defect behind "the
+ * Overview says 98 open jobs and the board draws 82": the 16 were Store
+ * Documentation rows — status "Pending Approval", `site-unassigned` — that the
+ * aggregate counted as open jobs and the board, correctly, did not draw. So a
+ * job is a live row that is NOT placed on any board other than this one. An
+ * UNPLACED row counts, because the board files it into its own stage group the
+ * first time it is read (`ensureBoardState`), so it is drawn.
+ *
+ * Twinned with `jobsBoardCondition` in `dashboard-filters.ts`, which is the same
+ * test in SQL; `tests/jobs-board-population.test.mjs` pins the two together.
+ * The value is `DEFAULT_BOARD_KEY` in `board-registry.ts`, restated rather than
+ * imported because that module reaches the database.
+ */
+export const JOBS_BOARD_KEY = "maintenance";
+
+/** Whether a row belongs to the Jobs board's population. `boardId` is the row's placement. */
+export function isOnJobsBoard(request: { boardId?: string | null }): boolean {
+  const board = (request.boardId ?? "").trim();
+  return !board || board === JOBS_BOARD_KEY;
+}
+
+/* ── Spend ────────────────────────────────────────────────────────────────── */
+
+/**
+ * THE THREE SPEND TYPES — Reactive, Planned, Projects.
+ *
+ * This schema has no job-type column. The split the Reports page has always
+ * shown is the one `classifySpend` in `dashboard-insights.tsx` computed, and it
+ * moves HERE so the server's metrics, the Jobs page's `type=` filter and that
+ * page all read one rule rather than three copies:
+ *
+ *   · Planned  — the category mentions compliance, or the job is tier 4 or
+ *                above (the same inference `plannedCondition` makes in SQL);
+ *   · Projects — otherwise, a job costing £1,000 or more ("higher-value works");
+ *   · Reactive — everything else.
+ *
+ * Tested in that ORDER, which matters: a £5,000 compliance job is Planned, not
+ * Projects. Every job lands in exactly one type, which is why the Reports
+ * block's "Unclassified" bucket reads £0 under this rule — the bucket is still
+ * computed and reconciled, so a future rule that can leave a job untyped is
+ * caught rather than silently dropped.
+ */
+export const SPEND_TYPES = ["reactive", "planned", "projects"] as const;
+export type SpendType = (typeof SPEND_TYPES)[number];
+
+export const SPEND_TYPE_LABEL: Record<SpendType, string> = {
+  reactive: "Reactive",
+  planned: "Planned",
+  projects: "Projects",
+};
+
+/** "Higher-value works" — the Projects threshold, in POUNDS like the column it reads. */
+export const PROJECT_COST_THRESHOLD_POUNDS = 1000;
+
+export function spendTypeOf(job: {
+  category?: string | null;
+  tier?: number | string | null;
+  cost?: number | null;
+}): SpendType {
+  const category = String(job.category ?? "").toLowerCase();
+  const tier = Number(job.tier ?? 0);
+  if (category.includes("compliance") || (Number.isFinite(tier) && tier >= 4)) return "planned";
+  if (Number(job.cost ?? 0) >= PROJECT_COST_THRESHOLD_POUNDS) return "projects";
+  return "reactive";
+}
+
+/**
+ * ONE JOB'S SPEND, ON THE BASIS EVERY SPEND FIGURE USES.
+ *
+ * `maintenance_requests.cost` in POUNDS, counted once the job is COMPLETED and
+ * dated by its completion day — the basis the Overview's spend trend has used
+ * since it shipped (`overview-metrics.ts`), and the one the Reports block reuses
+ * so the two pages cannot disagree about a month. Null when the job has no cost
+ * or no completion date: an open job has not been spent yet, whatever a quote
+ * says.
+ *
+ * `day` is the first ten characters of the stored completion value, which is
+ * what `substr(dateText(completed_at), 1, 10)` yields in SQL on both dialects.
+ * Pence are rounded once, here, and never handled as a float again.
+ */
+export function spendLineOf(job: {
+  cost?: number | null;
+  completedAt?: string | null;
+}): { pence: number; day: string } | null {
+  if (job.cost === null || job.cost === undefined) return null;
+  const pounds = Number(job.cost);
+  if (!Number.isFinite(pounds)) return null;
+  const day = String(job.completedAt ?? "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  return { pence: Math.round(pounds * 100), day };
+}
+
+/* ── Repeat jobs ──────────────────────────────────────────────────────────── */
+
+/**
+ * THE REPEAT WINDOW: how close two jobs must be to be the same problem back.
+ *
+ * Ninety days, the Reports brief's default. A policy number like
+ * `EXPIRY_DUE_SOON_DAYS`, kept here so the Reports metrics and the Jobs page's
+ * `repeat=` filter read one value.
+ */
+export const REPEAT_WINDOW_DAYS = 90;
+
+export type RecurrenceBandKey = "weekly" | "fortnightly" | "monthly" | "less-often";
+
+/**
+ * How often a repeat pattern recurs, by the MEDIAN days between its consecutive
+ * occurrences: ≤ 10 weekly, 11–21 fortnightly, 22–45 monthly, > 45 less often.
+ * The brief's boundaries, as data rather than as comparisons in a component.
+ */
+export const RECURRENCE_BANDS: ReadonlyArray<{
+  key: RecurrenceBandKey;
+  label: string;
+  /** Inclusive upper bound in days, or null for the open-ended band. */
+  maxDays: number | null;
+}> = [
+  { key: "weekly", label: "Weekly", maxDays: 10 },
+  { key: "fortnightly", label: "Fortnightly", maxDays: 21 },
+  { key: "monthly", label: "Monthly", maxDays: 45 },
+  { key: "less-often", label: "Less often", maxDays: null },
+];
+
+export function recurrenceBandOf(medianDays: number): RecurrenceBandKey {
+  const days = Number.isFinite(medianDays) ? medianDays : 0;
+  for (const band of RECURRENCE_BANDS) {
+    if (band.maxDays === null || days <= band.maxDays) return band.key;
+  }
+  return "less-often";
+}
+
+export function isRecurrenceBand(value: string): value is RecurrenceBandKey {
+  return RECURRENCE_BANDS.some((band) => band.key === value);
+}
+
+/** The middle value; the mean of the middle two for an even count; 0 for none. */
+export function medianOf(values: readonly number[]): number {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/**
+ * The site a repeat is counted against, or null when there is none.
+ *
+ * "Issues coming back to the SAME SITE" needs a site: two jobs filed with no
+ * site are not the same place, so neither can repeat the other. Blank and the
+ * `site-unassigned` placeholder are the two shapes an unassigned job wears in
+ * the browser — the same two `readDrillFilter`'s `__unassigned__` catches.
+ */
+export function repeatSiteKey(siteId: string | null | undefined): string | null {
+  const id = (siteId ?? "").trim();
+  return !id || id === "site-unassigned" ? null : id;
+}
+
+/**
+ * The issue a repeat is counted against, or null when none is recorded.
+ * Normalised like every other label comparison here; the legacy importer's
+ * "[object Object]" is missing data, not an issue.
+ */
+export function repeatIssueKey(category: string | null | undefined): string | null {
+  const key = statusKey(category);
+  return !key || key === "[object object]" ? null : key;
+}
+
+export type RepeatJobInput = {
+  id: string;
+  siteId?: string | null;
+  category?: string | null;
+  requestedAt?: string | null;
+};
+
+export type RepeatVerdict = {
+  /** A later job at the same site with the same issue, inside the window. */
+  repeat: boolean;
+  /** The occurrence it repeats, when it does. */
+  previousId: string | null;
+  /** Whole days since that occurrence, when it repeats. */
+  gapDays: number | null;
+  /** Site and issue joined, or null for a job that cannot repeat anything. */
+  patternKey: string | null;
+  /** The `YYYY-MM-DD` the job was raised. */
+  day: string;
+};
+
+export type RepeatPattern = {
+  key: string;
+  siteId: string;
+  /** The issue as first written, for display. */
+  issue: string;
+  /** Repeat jobs of this pattern raised inside the range. */
+  repeatIds: string[];
+  /** Days from each of those to the occurrence before it. */
+  gaps: number[];
+  medianDays: number;
+  band: RecurrenceBandKey;
+};
+
+export type RepeatAnalysis = {
+  verdicts: Map<string, RepeatVerdict>;
+  /** Only patterns with at least one repeat job raised in the range. */
+  patterns: Map<string, RepeatPattern>;
+  /** Ids of the repeat jobs raised in the range. */
+  inRange: Set<string>;
+};
+
+function dayIndexOf(day: string): number {
+  const [year, month, date] = day.split("-").map(Number);
+  return Date.UTC(year, month - 1, date) / 86_400_000;
+}
+
+/**
+ * THE REPEAT RULE — one definition, used by the Reports metrics AND the Jobs
+ * page's `repeat=` and `recurrence=` filters.
+ *
+ * A job is a REPEAT when an earlier job at the same site, for the same issue,
+ * was raised no more than `windowDays` before it. Jobs are chained per site and
+ * issue in the order they were raised; each job is compared with the one
+ * immediately before it in its chain, so the first job in a chain is never a
+ * repeat, and a job whose predecessor is older than the window starts the chain
+ * again rather than repeating it.
+ *
+ * `from` / `toExclusive` bound which repeats are REPORTED — "a job in the range"
+ * — but the comparison looks back past `from`, because the job being repeated
+ * may have been raised before the range began. That is why the caller hands over
+ * every job it has, not only the ones in range.
+ *
+ * Ordering is by raised day, then by the stored timestamp, then by id, so two
+ * jobs raised on the same day are ordered the same way on the server and in the
+ * browser, which receive the same stored values.
+ *
+ * Pure: no clock, no database, no React. `node --test` calls it directly.
+ */
+export function analyseRepeats(
+  jobs: readonly RepeatJobInput[],
+  options: { from: string; toExclusive: string; windowDays?: number },
+): RepeatAnalysis {
+  const windowDays = options.windowDays ?? REPEAT_WINDOW_DAYS;
+  const verdicts = new Map<string, RepeatVerdict>();
+  const chains = new Map<string, { job: RepeatJobInput; day: string; stamp: string; issue: string; siteId: string }[]>();
+
+  for (const job of jobs) {
+    /* `requested_at` holds `2026-09-04 15:27:14` (SQLite) beside ISO
+       `2026-06-25T09:00:00.000Z` (the importer). A space sorts before a `T`, so
+       the separator is normalised before two stamps from one day are ordered. */
+    const stamp = String(job.requestedAt ?? "").trim().replace(" ", "T");
+    const day = stamp.slice(0, 10);
+    const siteId = repeatSiteKey(job.siteId);
+    const issue = repeatIssueKey(job.category);
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(day);
+    const patternKey = valid && siteId && issue ? `${siteId}\u001f${issue}` : null;
+    verdicts.set(job.id, { repeat: false, previousId: null, gapDays: null, patternKey, day });
+    if (!patternKey || !siteId) continue;
+    const chain = chains.get(patternKey) ?? [];
+    chain.push({ job, day, stamp, issue: String(job.category ?? "").trim(), siteId });
+    chains.set(patternKey, chain);
+  }
+
+  const patterns = new Map<string, RepeatPattern>();
+  const inRange = new Set<string>();
+  for (const [patternKey, chain] of chains) {
+    chain.sort(
+      (left, right) =>
+        (left.day < right.day ? -1 : left.day > right.day ? 1 : 0) ||
+        (left.stamp < right.stamp ? -1 : left.stamp > right.stamp ? 1 : 0) ||
+        (left.job.id < right.job.id ? -1 : left.job.id > right.job.id ? 1 : 0),
+    );
+    for (let index = 1; index < chain.length; index += 1) {
+      const current = chain[index];
+      const previous = chain[index - 1];
+      const gap = dayIndexOf(current.day) - dayIndexOf(previous.day);
+      if (gap < 0 || gap > windowDays) continue;
+      verdicts.set(current.job.id, {
+        repeat: true,
+        previousId: previous.job.id,
+        gapDays: gap,
+        patternKey,
+        day: current.day,
+      });
+      if (current.day < options.from || current.day >= options.toExclusive) continue;
+      inRange.add(current.job.id);
+      const pattern = patterns.get(patternKey) ?? {
+        key: patternKey,
+        siteId: current.siteId,
+        issue: chain[0].issue,
+        repeatIds: [],
+        gaps: [],
+        medianDays: 0,
+        band: "less-often" as RecurrenceBandKey,
+      };
+      pattern.repeatIds.push(current.job.id);
+      pattern.gaps.push(gap);
+      patterns.set(patternKey, pattern);
+    }
+  }
+  for (const pattern of patterns.values()) {
+    pattern.medianDays = medianOf(pattern.gaps);
+    pattern.band = recurrenceBandOf(pattern.medianDays);
+  }
+  return { verdicts, patterns, inRange };
+}

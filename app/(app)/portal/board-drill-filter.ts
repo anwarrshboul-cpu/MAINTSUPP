@@ -38,7 +38,20 @@
  * spreadsheet and a form, so "In Progress" and "in  progress" are one status.
  */
 
-import { statusFamily, statusKey } from "../../lib/job-metrics.ts";
+import {
+  analyseRepeats,
+  isOnJobsBoard,
+  isRecurrenceBand,
+  RECURRENCE_BANDS,
+  SPEND_TYPE_LABEL,
+  SPEND_TYPES,
+  spendLineOf,
+  spendTypeOf,
+  statusFamily,
+  statusKey,
+  type RecurrenceBandKey,
+  type SpendType,
+} from "../../lib/job-metrics.ts";
 import { COMPLETED_STAGE, completedStatuses } from "./dashboard-meters.ts";
 import type { MaintenanceRequest } from "../../lib/types";
 
@@ -130,7 +143,10 @@ function isOverdue(request: MaintenanceRequest, now: Date): boolean {
 }
 
 function countsAsWork(request: MaintenanceRequest): boolean {
-  return request.archived !== true && !request.parentId;
+  /* And on the Jobs board — the fourth exclusion `liveWorkOrderCondition` makes
+     through `jobsBoardCondition`. Without it a drill counted Store
+     Documentation stores the board will never draw: "98 open" over 82 rows. */
+  return request.archived !== true && !request.parentId && isOnJobsBoard(request);
 }
 
 export type DrillChip = { key: string; label: string; value: string };
@@ -216,6 +232,15 @@ function resolveDays(period: string, from: string, to: string, now: Date) {
 export function readDrillFilter(
   searchParams: URLSearchParams,
   now: Date = new Date(),
+  /**
+   * Every row the shell holds, for the dimensions a single row cannot answer on
+   * its own. "Is this a repeat?" is a question about the job BEFORE it at the
+   * same site, which may be outside the list being filtered and outside the
+   * window — so `repeat=` and `recurrence=` need the whole population, exactly
+   * as the Reports metrics do. Omitted, those two dimensions match nothing
+   * rather than everything.
+   */
+  context: { population?: readonly MaintenanceRequest[] } = {},
 ): DrillFilter {
   const list = (name: string) =>
     searchParams
@@ -266,6 +291,26 @@ export function readDrillFilter(
    */
   const overdueOnly = searchParams.get("overdue") === "1";
   const meterLabel = (searchParams.get("meter") ?? "").trim();
+  /*
+   * THE REPORTS BLOCK'S FOUR DIMENSIONS, each on the rule its figure used.
+   *
+   *   · `type`       — Reactive / Planned / Projects through `spendTypeOf`, the
+   *                    one classifier the metrics and the Reports page share;
+   *   · `hasCost=1`  — a job that is a SPEND LINE (`spendLineOf`): a cost and a
+   *                    completion date, the basis every spend figure counts;
+   *   · `repeat=1`   — a repeat job raised inside the window, by
+   *                    `analyseRepeats` over the whole population;
+   *   · `recurrence` — repeat jobs whose pattern falls in that band.
+   *
+   * Issue category needs no new key: it is `label`, which already reads
+   * `maintenance_requests.category`.
+   */
+  const types = new Set(
+    list("type").filter((value): value is SpendType => (SPEND_TYPES as readonly string[]).includes(value)),
+  );
+  const costedOnly = searchParams.get("hasCost") === "1";
+  const bands = new Set(list("recurrence").filter(isRecurrenceBand)) as Set<RecurrenceBandKey>;
+  const repeatOnly = searchParams.get("repeat") === "1" || bands.size > 0;
 
   const measure = searchParams.get("measure") === "completed" ? "completed" : "requested";
   const window = resolveDays(
@@ -293,6 +338,19 @@ export function readDrillFilter(
     });
   }
   if (overdueOnly) chips.push({ key: "overdue", label: "Overdue", value: "past its date" });
+  if (types.size) {
+    chips.push({ key: "type", label: "Type", value: [...types].map((type) => SPEND_TYPE_LABEL[type]).join(", ") });
+  }
+  if (costedOnly) chips.push({ key: "hasCost", label: "Cost", value: "recorded" });
+  if (repeatOnly) {
+    chips.push({
+      key: bands.size ? "recurrence" : "repeat",
+      label: "Repeat",
+      value: bands.size
+        ? RECURRENCE_BANDS.filter((band) => bands.has(band.key)).map((band) => band.label).join(", ")
+        : "yes",
+    });
+  }
   if (window) {
     chips.push({
       key: "period",
@@ -302,6 +360,19 @@ export function readDrillFilter(
   }
 
   if (chips.length === 0) return EMPTY;
+
+  /*
+   * The repeat verdicts, computed ONCE for the filter rather than per row, over
+   * the rows that count as work — the same population the server analyses. The
+   * window is the requested-date window the drill carries; without one, every
+   * repeat on record is in range.
+   */
+  const repeats = repeatOnly
+    ? analyseRepeats((context.population ?? []).filter(countsAsWork), {
+        from: window?.start ?? "0000-01-01",
+        toExclusive: window?.endExclusive ?? "9999-12-31",
+      })
+    : null;
 
   return {
     empty: false,
@@ -351,6 +422,15 @@ export function readDrillFilter(
         if (!natures.has(nature)) return false;
       }
       if (overdueOnly && !isOverdue(request, now)) return false;
+      if (types.size && !types.has(spendTypeOf(request))) return false;
+      if (costedOnly && spendLineOf(request) === null) return false;
+      if (repeats) {
+        if (!repeats.inRange.has(request.id)) return false;
+        if (bands.size) {
+          const pattern = repeats.patterns.get(repeats.verdicts.get(request.id)?.patternKey ?? "");
+          if (!pattern || !bands.has(pattern.band)) return false;
+        }
+      }
       if (families.size) {
         /* `warn: false` — an unmapped status is a data condition the Overview
            already reports in its own words; it must not also spray the
@@ -387,6 +467,10 @@ export const DRILL_KEYS = [
   "nature",
   "family",
   "overdue",
+  "type",
+  "hasCost",
+  "repeat",
+  "recurrence",
   "period",
   "from",
   "to",

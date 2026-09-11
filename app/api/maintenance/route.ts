@@ -19,6 +19,7 @@ import {
   activityLog,
   attachments,
   itemActivity,
+  maintenanceGroupItems,
   maintenanceRequests,
   sites,
   workspaceSettings,
@@ -344,10 +345,35 @@ export async function GET(request: Request) {
       pictureColumns,
     );
 
+    /*
+     * WHICH BOARD EACH ROW LIVES ON.
+     *
+     * This feed carries every board's rows — the Jobs board's, a Store
+     * Documentation register's stores, a workspace section's — because each
+     * board narrows the shell's one list to its own placements. The counters
+     * that read the list directly (the sidebar's open-jobs badge, the drill
+     * filter, the analytics screens) had no way to make the same cut, so they
+     * counted stores as open jobs. `boardId` is what lets them apply
+     * `isOnJobsBoard`, the browser twin of `jobsBoardCondition`.
+     *
+     * One organisation-scoped read with no `IN` list, so the page size never
+     * brushes D1's variable ceiling. Null means the row has no placement yet.
+     */
+    const placements = page.length
+      ? await db
+          .select({ requestId: maintenanceGroupItems.requestId, boardId: maintenanceGroupItems.boardId })
+          .from(maintenanceGroupItems)
+          .where(eq(maintenanceGroupItems.organisationId, orgId))
+      : [];
+    const boardByRequest = new Map(
+      placements.map((row: { requestId: string; boardId: string }) => [row.requestId, row.boardId]),
+    );
+
     return Response.json({
-      requests: page.map((row) =>
-        exposeRequest(withCountedAttachments(row, counted, row.id)),
-      ),
+      requests: page.map((row) => ({
+        ...exposeRequest(withCountedAttachments(row, counted, row.id)),
+        boardId: boardByRequest.get(row.id) ?? null,
+      })),
       hasMore,
       nextOffset: hasMore ? offset + limit : null,
     });

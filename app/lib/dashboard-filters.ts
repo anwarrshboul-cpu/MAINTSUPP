@@ -35,9 +35,10 @@
  */
 
 import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
-import { maintenanceRequests, sites } from "../../db/schema";
+import { maintenanceGroupItems, maintenanceRequests, sites } from "../../db/schema";
 import { DEFAULT_MEASURE, type CohortMeasure } from "./overview-meters";
 import {
+  JOBS_BOARD_KEY,
   NATURE_KEYS,
   UNASSIGNED_SITE_ID,
   normalisePriority,
@@ -421,9 +422,38 @@ function anyOf(clauses: SQL[]): SQL | undefined {
 }
 
 /**
+ * ON THE JOBS BOARD — or on no board yet — and on no other.
+ *
+ * `maintenance_requests` holds every board's rows, not only jobs: a Store
+ * Documentation register row is a request row placed on `store-documentation`,
+ * and a workspace section's rows are placed on a `sec-…` board. The Jobs board
+ * draws only its own placements, so an aggregate that counted every live row
+ * reported jobs the board it drills into could never show — measured on the
+ * development estate, "98 open jobs" over a board drawing 82, the 16 being
+ * Store Documentation rows at `Pending Approval` and `site-unassigned`.
+ *
+ * `not exists`, correlated, for the reason `unassignedSiteCondition` gives: a
+ * `NOT IN` over a subquery is a NULL trapdoor in both dialects. The organisation
+ * is matched against the OUTER row and the board key is a constant written into
+ * the statement, so this adds no bound variable at all — every statement that
+ * reaches it through `liveWorkOrderCondition` keeps its distance from D1's
+ * ~100-variable ceiling, which several of them chunk right up against.
+ *
+ * The browser twin is `isOnJobsBoard` in `job-metrics.ts`.
+ */
+export function jobsBoardCondition(): SQL {
+  return sql`not exists (select 1 from ${maintenanceGroupItems} where ${
+    maintenanceGroupItems.requestId
+  } = ${maintenanceRequests.id} and ${maintenanceGroupItems.organisationId} = ${
+    maintenanceRequests.organisationId
+  } and ${maintenanceGroupItems.boardId} <> ${sql.raw(`'${JOBS_BOARD_KEY}'`)})`;
+}
+
+/**
  * The rows that count as work at all — the same three exclusions
  * `liveWorkOrder` applies in `/api/workspace` and `countsAsWorkOrder` applies
- * in the browser. A binned job, an archived one and a subitem are not work.
+ * in the browser. A binned job, an archived one and a subitem are not work —
+ * and neither is a row that lives on another board (see `jobsBoardCondition`).
  */
 export function liveWorkOrderCondition(orgId: string): SQL {
   return and(
@@ -431,6 +461,7 @@ export function liveWorkOrderCondition(orgId: string): SQL {
     isNull(maintenanceRequests.deletedAt),
     eq(maintenanceRequests.archived, false),
     isNull(maintenanceRequests.parentId),
+    jobsBoardCondition(),
   )!;
 }
 

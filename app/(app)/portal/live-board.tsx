@@ -95,6 +95,7 @@ import {
   moveBoardItemPlacement,
   systemColumnSortValue,
 } from "./board-ordering";
+import { drawnGroupId } from "./board-group-fallback";
 import { useBoardRowDrag } from "./board-row-drag-gesture";
 /*
  * The phone opens every board on the TABLE, and the file that knows why lives
@@ -1320,10 +1321,9 @@ export function LiveMaintenanceBoard({
     }
   };
 
+  /* A placement in a binned or foreign group falls back like a missing one — see board-group-fallback.ts. */
   const groupForRequest = (request: MaintenanceRequest) =>
-    placement.get(request.id)?.groupId ??
-    groups.find((group) => group.stageKey === request.stage)?.id ??
-    groups[0]?.id;
+    drawnGroupId(placement.get(request.id)?.groupId, request.stage, groups);
 
   const visible = (key: string) => !hiddenColumns.has(key);
   const visibleBoardColumns = allBoardColumns
@@ -1437,9 +1437,7 @@ export function LiveMaintenanceBoard({
                   ),
             ).trim() || "(empty)"
           }`
-        : placement.get(request.id)?.groupId ??
-          groups.find((group) => group.stageKey === request.stage)?.id ??
-          groups[0]?.id;
+        : drawnGroupId(placement.get(request.id)?.groupId, request.stage, groups);
       if (!groupId) continue;
       const rows = rowsByGroup.get(groupId) ?? [];
       rows.push(request);
