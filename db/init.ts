@@ -234,12 +234,28 @@ async function ensureJobTypesAndComplianceProvider(d1: D1DatabaseLike) {
     console.warn("[init] maintenance_requests_job_type_idx skipped", error);
   }
 
-  const organisationRows = await d1
-    .prepare("SELECT id FROM organisations WHERE status = 'active'")
-    .all();
-  for (const row of (organisationRows.results ?? []) as Array<{ id?: string }>) {
-    if (row.id) await seedJobTypes(d1, row.id);
-  }
+  /*
+   * SEEDED IN THREE STATEMENTS, NOT THREE PER ORGANISATION.
+   *
+   * This runs on the first request of every instance, and `db/init.ts` is on
+   * that path for every route — so the cost has to be independent of how many
+   * tenants exist. One `INSERT OR IGNORE … SELECT` per default type covers
+   * every active organisation at once, with no read first, and it is idempotent
+   * on the fixed `jt_<org>_<code>` ids. `seedJobTypes` stays for the one case
+   * this cannot cover: an organisation created mid-instance.
+   */
+  await d1.batch(
+    DEFAULT_JOB_TYPES.map((type) =>
+      d1
+        .prepare(
+          `INSERT OR IGNORE INTO job_type_config (id, organisation_id, code, label, sort_order)
+           SELECT 'jt_' || o.id || '_' || ?, o.id, ?, ?, ?
+             FROM organisations o
+            WHERE o.status = 'active'`,
+        )
+        .bind(type.code, type.code, type.label, type.sortOrder),
+    ),
+  );
 
   await addColumn(
     d1,

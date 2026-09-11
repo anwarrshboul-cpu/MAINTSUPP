@@ -3,6 +3,8 @@ import { getD1 } from "../../../../db";
 import { ensureDatabase, seedStoreDocumentationGroups } from "../../../../db/init";
 import { siteGroupMembers, siteGroups } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { can, resolvePermissions } from "../../../lib/permissions";
+import type { WorkspaceRole } from "../../../lib/workspace-actor";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { listOptionValues } from "../../../lib/options-repository";
 import { claimedGroupSlugs, listSiteGroups, toSlug } from "../../../lib/sites-repository";
@@ -27,7 +29,7 @@ function colour(value: unknown, fallback: string) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId, siteScope } = await scopedDb(request);
+    const { actor, db, orgId, siteScope } = await scopedDb(request);
     const resolved = await resolveRegisterScope(
       db,
       orgId,
@@ -49,7 +51,19 @@ export async function GET(request: Request) {
      * owner asked to be EMPTY with four groups and the canonical sites'
      * membership, which is the copy-the-live-board mistake W02-06 rules out.
      */
-    if (scope === CANONICAL_REGISTER) {
+    /*
+     * A READ THAT WRITES, NOW ONLY FOR SOMEBODY WHO MAY WRITE.
+     *
+     * This rebuild creates and updates `site_groups` rows, and it sat in a GET
+     * guarded by `scopedDb` with no capability — so a `client`, whose whole
+     * permission set is `board.view` and `data.export`, caused writes by opening
+     * a page. `GET /api/sites` documents removing exactly this from its own
+     * handler for the same reason. The seed still runs for anybody holding
+     * `sites.edit` (which is every administrator, and how the groups get built
+     * at all); a reader without it is simply served what exists.
+     */
+    const subject = await resolvePermissions(db, orgId, actor.role as WorkspaceRole);
+    if (scope === CANONICAL_REGISTER && can(subject, "sites.edit")) {
       await seedStoreDocumentationGroups(await getD1(), orgId);
     }
     const [groups, kinds] = await Promise.all([

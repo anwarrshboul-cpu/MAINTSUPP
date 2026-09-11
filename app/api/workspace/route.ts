@@ -103,6 +103,7 @@ import { isUnreachableEmail } from "../../lib/site-metrics";
 import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
+import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 import { mergeWorkspaceSettingsBlob } from "../../lib/workspace-settings";
 import {
   DUTY_HOLDERS,
@@ -1307,6 +1308,47 @@ const WORKSPACE_CAPABILITY: Record<string, Capability> = {
  * unauthenticated stranger reached this route as a client of the live tenant
  * and these writes answered 200. Deactivating the owner was among them.
  */
+/**
+ * A COMPLIANCE RECORD OUTSIDE THE MEMBER'S SITES IS NOT FOUND — on a write.
+ *
+ * `POST /api/compliance/responsibilities` and `POST /api/compliance/provider`
+ * both confine themselves to `memberships.site_scope`, and this route addresses
+ * a record by `compliance_documents.id` with only an organisation filter — so a
+ * site-restricted editor could set the duty holder, state, expiry or renewal
+ * contractor of a requirement at a store they may not see. Nothing in the
+ * product sets a site scope today, so it was an incomplete boundary rather than
+ * a live hole; it is closed here with the same predicate the read paths use,
+ * rather than a second rule.
+ *
+ * The SUPPLIED site is checked as well as the stored one: moving a record onto
+ * a site outside the scope is the same escape in the other direction. "Not
+ * found" rather than "forbidden", because the id is not a capability and the
+ * answer must not confirm the record exists.
+ */
+async function complianceScopeRefusal(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  siteScope: string[] | null,
+  recordId: string | null,
+  suppliedSiteId: string | null,
+): Promise<Response | null> {
+  const allowed = memberSiteSet(siteScope);
+  if (!allowed) return null;
+  if (suppliedSiteId && !withinMemberScope(allowed, suppliedSiteId)) {
+    return Response.json({ error: "Site not found." }, { status: 404 });
+  }
+  if (!recordId) return null;
+  const [row] = await db
+    .select({ siteId: complianceDocuments.siteId })
+    .from(complianceDocuments)
+    .where(and(eq(complianceDocuments.id, recordId), eq(complianceDocuments.organisationId, orgId)))
+    .limit(1);
+  if (!row || !withinMemberScope(allowed, row.siteId)) {
+    return Response.json({ error: "Compliance record not found." }, { status: 404 });
+  }
+  return null;
+}
+
 async function authoriseWorkspaceWrite(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
@@ -1332,7 +1374,7 @@ async function authoriseWorkspaceWrite(
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId } = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; data?: Record<string, unknown> };
     const entity = payload.entity;
@@ -1429,6 +1471,9 @@ export async function POST(request: Request) {
       /* The renewal contractor, optional on create: a contractor record of THIS
          organisation, or nothing. See `/api/compliance/provider`. */
       const providerContractorId = visibleText(data.providerContractorId, 200);
+      /* A member confined to some sites may not file a requirement against another. */
+      const outOfScope = await complianceScopeRefusal(db, orgId, memberSiteScope, null, siteId);
+      if (outOfScope) return outOfScope;
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
@@ -2839,7 +2884,10 @@ function contractorResurrectionRefusal(
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId } = await scopedDb(request);
+    /* `memberSiteScope`, not `siteScope`: this module already has a FUNCTION of
+       that name — the register-scope resolver this handler calls a few lines
+       below — and destructuring over it would shadow it into a string array. */
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string; data?: Record<string, unknown> };
     const entity = payload.entity;
@@ -3073,6 +3121,9 @@ export async function PATCH(request: Request) {
        */
       const providerSent = "providerContractorId" in data;
       const providerContractorId = providerSent ? visibleText(data.providerContractorId, 200) : "";
+      /* Before the UPDATE, so a refusal writes nothing. */
+      const outOfScope = await complianceScopeRefusal(db, orgId, memberSiteScope, id, siteId);
+      if (outOfScope) return outOfScope;
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
         { kind: "contractor", value: providerContractorId || null },
@@ -3432,7 +3483,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId } = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string };
     const entity = payload.entity;
@@ -3510,7 +3561,11 @@ export async function DELETE(request: Request) {
           registerScopeFilter(sites.boardId, archiveScope.scope),
         ),
       );
-    } else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+    } else if (entity === "compliance") {
+      const outOfScope = await complianceScopeRefusal(db, orgId, memberSiteScope, id, null);
+      if (outOfScope) return outOfScope;
+      await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+    }
     else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
     else if (entity === "contractor") {
       /* Same register check as the edit, and for the same reason: inactivating

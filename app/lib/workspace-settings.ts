@@ -34,6 +34,17 @@ function storedObject(raw: unknown): Record<string, unknown> {
 }
 
 /**
+ * A ceiling on the stored document.
+ *
+ * The three sections this route copies are taken as sent, and the blob is now
+ * read on the path of every compliance screen (`readCompliancePolicy` inside
+ * `readComplianceRegister`). A settings holder inflating their own
+ * organisation's row would make every one of those reads carry it. Generous —
+ * the real document is a few hundred bytes — and refused rather than truncated.
+ */
+const MAX_SETTINGS_BYTES = 64_000;
+
+/**
  * The blob after one Settings save: the sections this screen owns are replaced
  * when sent, the warning window is validated and written or cleared, and every
  * other key is kept exactly as stored. A malformed window is refused — never
@@ -53,5 +64,9 @@ export function mergeWorkspaceSettingsBlob(
     if (policy.section) blob[COMPLIANCE_POLICY_KEY] = policy.section;
     else delete blob[COMPLIANCE_POLICY_KEY];
   }
-  return { ok: true, settings: JSON.stringify(blob) };
+  const settings = JSON.stringify(blob);
+  if (settings.length > MAX_SETTINGS_BYTES) {
+    return { ok: false, error: "These settings are too large to save. Remove some entries and try again." };
+  }
+  return { ok: true, settings };
 }

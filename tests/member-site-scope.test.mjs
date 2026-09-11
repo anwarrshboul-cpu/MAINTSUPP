@@ -84,7 +84,7 @@ test("the Sites export, the groups read and the register's two reads are confine
 
   const groups = await read("app/api/sites/groups/route.ts");
   const groupsGet = groups.slice(groups.indexOf("export async function GET"), groups.indexOf("export async function POST"));
-  assert.match(groupsGet, /const \{ db, orgId, siteScope \} = await scopedDb\(request\);/);
+  assert.match(groupsGet, /const \{ actor, db, orgId, siteScope \} = await scopedDb\(request\);/);
   assert.match(groupsGet, /siteIds: group\.siteIds\.filter\(\(siteId\) => withinMemberScope\(allowed, siteId\)\)/);
 
   /*
@@ -108,6 +108,44 @@ test("the Sites export, the groups read and the register's two reads are confine
     assert.match(source, /complianceRowsFrom\(scopedEntries, managerById, providerNames\)/, `${file} builds its rows from the confined entries`);
     assert.doesNotMatch(source, /register\.entries\.map\(/, `${file} never maps the unconfined register`);
   }
+});
+
+test("a compliance WRITE cannot reach a site outside the member's scope, on any verb", async () => {
+  /*
+   * The read paths were confined first; the writes address a record by
+   * `compliance_documents.id` with only an organisation filter, so a
+   * site-restricted editor could still set a duty holder, state, expiry or
+   * renewal contractor at a store they may not see. Independent security review
+   * finding, closed with the same predicate the reads use. (Not exploitable
+   * today: nothing in the product sets a site scope.)
+   */
+  const route = await read("app/api/workspace/route.ts");
+  assert.match(route, /async function complianceScopeRefusal\(/);
+  assert.match(route, /const allowed = memberSiteSet\(siteScope\);\s*if \(!allowed\) return null;/, "unrestricted members are unaffected");
+  assert.match(route, /if \(suppliedSiteId && !withinMemberScope\(allowed, suppliedSiteId\)\)/, "and a record cannot be moved to a site outside the scope");
+  assert.match(route, /error: "Compliance record not found\." \}, \{ status: 404 \}/, "not found, never forbidden — the id is not a capability");
+  /* Create, edit and archive each refuse before they write. */
+  assert.equal((route.match(/await complianceScopeRefusal\(db, orgId, memberSiteScope,/g) ?? []).length, 3, "POST, PATCH and DELETE");
+  for (const verb of ["export async function POST", "export async function PATCH", "export async function DELETE"]) {
+    const handler = route.slice(route.indexOf(verb));
+    const branch = handler.slice(handler.indexOf('entity === "compliance"'));
+    const refusal = branch.indexOf("complianceScopeRefusal");
+    const write = Math.min(
+      ...[branch.indexOf(".insert(complianceDocuments)"), branch.indexOf(".update(complianceDocuments)")].filter((at) => at > 0),
+    );
+    assert.ok(refusal > 0 && refusal < write, `${verb}: the refusal comes before the write`);
+  }
+  /* The register-scope resolver of the same name must not be shadowed. */
+  assert.doesNotMatch(route, /const \{ actor, authenticated, db, orgId, siteScope \} = await scopedDb/, "destructured as memberSiteScope — `siteScope` here is a function");
+});
+
+test("the site-groups read no longer writes for somebody who may not write", async () => {
+  /* `seedStoreDocumentationGroups` creates and rebuilds site_groups rows inside
+     a GET that took no capability, so a client caused writes by opening a page —
+     the same defect GET /api/sites documents removing from its own handler. */
+  const groups = await read("app/api/sites/groups/route.ts");
+  assert.match(groups, /const subject = await resolvePermissions\(db, orgId, actor\.role as WorkspaceRole\);/);
+  assert.match(groups, /if \(scope === CANONICAL_REGISTER && can\(subject, "sites\.edit"\)\) \{\s*await seedStoreDocumentationGroups\(/);
 });
 
 /* ── 3. Against the running estate ────────────────────────────────────────── */
