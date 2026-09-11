@@ -40,38 +40,42 @@
 /* ── The Reports accents ──────────────────────────────────────────────────── */
 
 .ov-dash.rp-dash {
-  /* Spend-type accents, sampled from the reference's icon tiles and sparklines. */
-  --rp-total: #46a2ad;
-  --rp-reactive: #e0a050;
-  --rp-planned: #5c8ec3;
-  --rp-projects: #6e9f7f;
+  /*
+   * Spend-type accents, on the approved dark palette: total turquoise,
+   * reactive orange, planned blue, projects the light turquoise.
+   */
+  --rp-total: #12b4a8;
+  --rp-reactive: #ff8a3d;
+  --rp-planned: #38bdf8;
+  --rp-projects: #55e8d8;
 
-  /* Charts. */
-  --rp-bar: #4c98a4;
-  --rp-line: #6fc3cc;
+  /* Charts — the turquoise primary series and its bright line. */
+  --rp-bar: #12b4a8;
+  --rp-line: #20d8c6;
   /*
    * The brief's area wash. Declared for completeness; the shared `AreaTrend`
    * derives its wash from its line colour (`--rp-line` at 34% to nothing), and
    * taking these two would need a prop that file does not have.
    */
-  --rp-area-top: rgba(70, 162, 173, 0.35);
-  --rp-area-bottom: rgba(70, 162, 173, 0.03);
+  --rp-area-top: rgba(18, 180, 168, 0.35);
+  --rp-area-bottom: rgba(18, 180, 168, 0.03);
 
   /* Repeat activity — the shared status scale. */
-  --rp-weekly: #d34e49;
-  --rp-fortnightly: #e09438;
-  --rp-monthly: #5878a4;
-  --rp-less-often: #44546c;
+  --rp-weekly: #ff4d5e;
+  --rp-fortnightly: #ffd447;
+  --rp-monthly: #38bdf8;
+  --rp-less-often: #64707b;
 
   /*
    * THE ONE TOKEN THE BRIEF DOES NOT LIST.
    *
-   * A falling delta is `--ov-red` in the brief, and `--ov-red` (#D34E49)
-   * measures 4.26:1 on `--ov-card` — under AA for 11px text, which is why the
-   * shared palette keeps it for fills. This is the same red lifted just far
-   * enough: #E0605B measures 5.15:1. §7's 4.5:1 floor outranks a sampled hex.
+   * A falling delta is `--ov-red` in the brief, and `--ov-red` (#FF4D5E)
+   * measures 4.83:1 on `--ov-card` but 4.22:1 on its hover ground, which is
+   * why the shared palette keeps it for fills. This is the approved red TEXT
+   * value, #FF6B77: 5.68:1 on the card and 4.97:1 on the hover ground. §7's
+   * 4.5:1 floor outranks a sampled hex.
    */
-  --rp-down: #e0605b;
+  --rp-down: #ff6b77;
 
   /*
    * Buttons inside the block take the block's ink. The dark app theme paints

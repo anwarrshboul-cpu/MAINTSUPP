@@ -113,7 +113,9 @@ test("A: its colours come from one place, so the dark block has nothing to add",
    * `body[data-theme="dark"] {` opens the token block near the top as well, and
    * slicing from the first one reads the whole stylesheet.
    */
-  const shared = css.indexOf("background: #243641;");
+  // The approved colour system moved this rule's #243641 / #79bfff to
+  // var(--surface-hover) / var(--accent-fg); the pair is still unique to it.
+  const shared = css.indexOf("background: var(--surface-hover);\n    color: var(--accent-fg);");
   assert.ok(shared > 0, "the shared dark hover rule is still there for the controls that still need it");
   const selectors = css.slice(css.lastIndexOf("\n\n", shared), shared);
   assert.match(selectors, /\.sheet-row-more:hover/, "the row trigger still uses it");
@@ -155,7 +157,10 @@ test("C: the keyboard keeps its indication, and the mouse stops leaving blocks",
 
   assert.match(
     css,
-    /\n:focus-visible \{\n\s*outline: 3px solid var\(--accent-fg\);/,
+    // The approved colour system gave focus its own token, --focus-ring
+    // (#20d8c6 dark, #009b8c light — the spec's bright turquoise, darkened in
+    // light to keep 3:1 on white). Same global ring, same 3px width, new colour.
+    /\n:focus-visible \{\n\s*outline: 3px solid var\(--focus-ring\);/,
     "the tuned global ring is still there",
   );
   for (const control of [

@@ -263,7 +263,10 @@ test("C: the keyboard ring is the global one, not a local copy of it", async () 
   const css = await load(GLOBALS);
   assert.match(
     css,
-    /\n:focus-visible \{\n\s*outline: 3px solid var\(--accent-fg\);/,
+    // The approved colour system gave focus its own token, --focus-ring
+    // (#20d8c6 dark, #009b8c light — the spec's bright turquoise, darkened in
+    // light to keep 3:1 on white). Same global ring, same 3px width, new colour.
+    /\n:focus-visible \{\n\s*outline: 3px solid var\(--focus-ring\);/,
     "the tuned, themed ring is still there",
   );
   assert.doesNotMatch(

@@ -126,13 +126,14 @@ export const DEFAULT_THEME_CHOICE = "dark" as const;
  * The `<meta name="theme-color">` pair, and the one selector that finds the
  * switchable half of it.
  *
- * The values are the two `--canvas` grounds from `globals.css` — #0b1218 dark,
+ * The values are the two `--canvas` grounds from `globals.css` — #07131c dark
+ * (the approved --background-primary, which is the sidebar's own ground),
  * #f4f7f8 light — because the browser paints this behind the address bar and
  * the overscroll area, which is the page's ground and not the topbar's. They
  * live here rather than in the layout so the layout, `theme.ts` and the boot
  * script are all reading one declaration.
  */
-export const THEME_COLOR_DARK = "#0b1218";
+export const THEME_COLOR_DARK = "#07131c";
 export const THEME_COLOR_LIGHT = "#f4f7f8";
 
 /**

@@ -66,12 +66,19 @@ const DEFAULT_PANEL_PERIOD = "6m";
 /** Single-hue ordinal ramp. Validated light→dark on the dark surface. */
 export const TEAL_RAMP = ["#8fe3dc", "#4fcfc4", "#12b4a8", "#0a7d74"] as const;
 
-/** Brand identity hues. Never more than three in one chart. */
+/**
+ * Brand identity hues. Never more than three in one chart.
+ *
+ * The approved colour system's fill tokens, so every bar follows the theme:
+ * turquoise the default series, yellow due soon, orange reactive work and
+ * missing certificates, red urgent, blue planned work and information.
+ */
 const BRAND = {
-  teal: "#12b4a8",
-  amber: "#f0a91f",
-  red: "#e2445c",
-  blue: "#3899e8",
+  teal: "var(--brand-fill)",
+  amber: "var(--status-yellow)",
+  orange: "var(--status-orange)",
+  red: "var(--status-red)",
+  blue: "var(--status-blue)",
   slate: "#5c82af",
 } as const;
 
@@ -1069,13 +1076,13 @@ export function ReactiveVsPlanned({
                 <i
                   style={{
                     height: `${total ? (slot.planned / maximum) * 100 : 0}%`,
-                    background: BRAND.teal,
+                    background: BRAND.blue,
                   }}
                 />
                 <i
                   style={{
                     height: `${total ? (slot.reactive / maximum) * 100 : 0}%`,
-                    background: BRAND.amber,
+                    background: BRAND.orange,
                   }}
                 />
               </div>
@@ -1085,9 +1092,9 @@ export function ReactiveVsPlanned({
         })}
       </div>
       <p className="insight-note">
-        <i style={{ background: BRAND.amber }} aria-hidden="true" />
+        <i style={{ background: BRAND.orange }} aria-hidden="true" />
         Reactive
-        <i style={{ background: BRAND.teal }} aria-hidden="true" />
+        <i style={{ background: BRAND.blue }} aria-hidden="true" />
         Planned / project
       </p>
     </InsightPanel>
@@ -1561,7 +1568,7 @@ export function SiteAttention({
                     <i
                       style={{
                         width: `${Math.max((row.gaps / peakGaps) * 100, row.gaps ? 4 : 0)}%`,
-                        background: row.gaps ? BRAND.amber : MUTED,
+                        background: row.gaps ? BRAND.orange : MUTED,
                       }}
                     />
                   </div>

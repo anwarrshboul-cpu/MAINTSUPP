@@ -34,12 +34,13 @@
  *     sunken one, against SC 1.4.11's 3:1 for a focus ring or a state border.
  *     It is the finance page's only focus ring as well as this page's.
  *
- * Both now carry an explicit value in each block. `--ms-teal-500`'s dark value
- * is `--brand-bright` unchanged, so the default theme renders exactly as it did
- * and only the light theme moves; its light value is a darker mid-teal that
- * measures 4.12:1 on the card, 3.89:1 on the sunken card and 3.63:1 on
- * `--surface-active`, and it is still lighter than `--ms-teal-700` (5.20:1), so
- * the 500/700 order the names promise still holds.
+ * Both now carry an explicit value in each block, on the approved colour
+ * system: `--ms-teal-700` is the turquoise TEXT token (`--brand-fg`) and
+ * `--ms-teal-500` the active border (`--border-active` in light, the
+ * `--brand-primary` fill in dark). The light 500 measures 3.41:1 on the card,
+ * 3.22:1 on the sunken card and 3.00:1 on `--surface-active`, and it is still
+ * lighter than `--ms-teal-700` (5.67:1), so the 500/700 order the names promise
+ * still holds.
  *
  * ── THE RAMPS ARE A MIRROR OF DATA, NOT A SOURCE OF COLOUR ────────────────
  *
@@ -109,13 +110,16 @@
   --ms-line: var(--line);
   --ms-surface: var(--surface-card);
   --ms-surface-sunken: var(--surface-card-lo);
-  --ms-teal-700: var(--brand-solid);
+  /* Turquoise TEXT: `--brand-solid` is now the #12b4a8 fill in both themes
+     (2.59:1 on white), so the light value reads the text token instead. */
+  --ms-teal-700: var(--brand-fg);
   --ms-teal-050: var(--surface-active);
   --ms-sidebar: var(--rail-bg);
 
-  /* Not an alias, and the header says why: `--brand-bright` has no dark value,
-     so on the white card this measured 2.59:1 as a focus ring. 4.12:1 here. */
-  --ms-teal-500: #0e8c84;
+  /* The approved active border (#009c91 in light): 3.41:1 on the white card,
+     3.22:1 on the sunken one and 3.00:1 on `--surface-active`, still lighter
+     than `--ms-teal-700`. */
+  --ms-teal-500: var(--border-active);
 
   /*
    * The meter ramp — §1.3's literal values, and a MIRROR of
@@ -133,25 +137,25 @@
   --ms-meter-other: #9aafb2;
 
   /* The severity ramp — the same arrangement one module earlier: these mirror
-     `SEVERITY_COLOUR`, which reaches the bar as an inline style. Fills only. */
-  --ms-sev-fresh: #0da1a9;
-  --ms-sev-ageing: #e0a32e;
-  --ms-sev-overdue: #dc7a3c;
-  --ms-sev-critical: #c24437;
+     `SEVERITY_COLOUR`, which reaches the bar as an inline style. Fills only.
+     Fresh turquoise, ageing orange, overdue red, critical a deeper red. */
+  --ms-sev-fresh: #009c91;
+  --ms-sev-ageing: #dc6a0d;
+  --ms-sev-overdue: #fb495a;
+  --ms-sev-critical: #d63a4a;
 
   /*
    * The severity ramp as INK — the four hues at a lightness a reader can
    * actually read on this theme's card. These are what the stylesheets use.
    *
-   * Measured on the white card / the sunken card: fresh 6.27 and 5.93, ageing
-   * 5.92 and 5.60, overdue 5.91 and 5.59, critical 6.60 and 6.24. The fills
-   * they replace measured 3.14 and 2.97, 2.22 and 2.10, 3.05 and 2.88, 5.03
-   * and 4.75 — three of the four under AA as text, two under 3:1 as a line.
+   * The approved text tokens. Measured on the white card / the sunken card:
+   * fresh 5.67 and 5.36, ageing 5.61 and 5.30, overdue and critical 5.89 and
+   * 5.57.
    */
-  --ms-sev-fresh-ink: #0a6b70;
-  --ms-sev-ageing-ink: #8a5a06;
-  --ms-sev-overdue-ink: #a24b12;
-  --ms-sev-critical-ink: #a5372b;
+  --ms-sev-fresh-ink: var(--brand-fg);
+  --ms-sev-ageing-ink: var(--status-orange-fg);
+  --ms-sev-overdue-ink: var(--status-red-fg);
+  --ms-sev-critical-ink: var(--danger-solid);
 
   /* Never a colour that could pass for a real category. It is drawn as the 4px
      rule that separates a measurable stage from an unmeasurable one, so it is
@@ -213,10 +217,10 @@ body[data-theme="dark"] {
      and 2.40 the theme-invariant `--brand-solid` was giving. */
   --ms-teal-700: var(--accent-fg);
 
-  /* Unchanged in this theme — `--brand-bright` measures 5.86:1 on the dark
-     card, so only the light value needed to move. Named here rather than left
-     to `:root` so the two themes read as a deliberate pair. */
-  --ms-teal-500: var(--brand-bright);
+  /* The approved turquoise fill — `--brand-primary` measures 6.05:1 on the
+     dark card. Named here rather than left to `:root` so the two themes read
+     as a deliberate pair. */
+  --ms-teal-500: var(--brand-primary);
 
   /* The mirrors. Identical to `:root` on purpose — see the note above. */
   --ms-meter-completed: #0b6e63;
@@ -228,19 +232,18 @@ body[data-theme="dark"] {
   --ms-meter-needs-attention: #c24437;
   --ms-meter-other: #9aafb2;
 
-  --ms-sev-fresh: #0da1a9;
-  --ms-sev-ageing: #e0a32e;
-  --ms-sev-overdue: #dc7a3c;
-  --ms-sev-critical: #c24437;
+  --ms-sev-fresh: #009c91;
+  --ms-sev-ageing: #dc6a0d;
+  --ms-sev-overdue: #fb495a;
+  --ms-sev-critical: #d63a4a;
 
-  /* The same four hues, lifted for the dark card. Measured there and on the
-     sunken card: fresh 6.89 and 7.94, ageing 7.76 and 8.94, overdue 6.35 and
-     7.31, critical 4.93 and 5.68. Dark was already the theme these hues suited,
-     so these are §1.3's hues raised in lightness rather than re-chosen. */
-  --ms-sev-fresh-ink: #3cc0c6;
-  --ms-sev-ageing-ink: #e5b155;
-  --ms-sev-overdue-ink: #e69465;
-  --ms-sev-critical-ink: #e0736a;
+  /* The same four hues as the approved dark text tokens. Measured on the dark
+     card (which is also this theme's sunken card): fresh 8.72, ageing 6.67,
+     overdue 5.68, critical (the deeper red) 4.83. */
+  --ms-sev-fresh-ink: var(--brand-fg);
+  --ms-sev-ageing-ink: var(--status-orange-fg);
+  --ms-sev-overdue-ink: var(--status-red-fg);
+  --ms-sev-critical-ink: var(--danger-solid);
 
   /* 7.98:1 on the sunken card — the pale grey already worked in this theme. */
   --ms-not-recorded: #9fb3b6;

@@ -521,7 +521,7 @@ button.ops-meter__fill:focus-visible {
 }
 
 .ops-row__missing {
-  color: var(--amber-600);
+  color: var(--orange-600);
 }
 
 /*

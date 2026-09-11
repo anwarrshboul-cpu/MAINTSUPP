@@ -557,7 +557,9 @@ test("UX-1/UX-4 the frozen lane sits on a tier token and is opaque in both theme
     /box-shadow: 1px 0 0 var\(--register-lane-edge\)/,
     "a hard 1px shadow beside the border is the double line this replaced",
   );
-  assert.match(lanes, /--register-lane-edge: #2b414b;/, "a dark edge colour");
+  // The approved colour system moved the dark edge from #2b414b (the old dark
+  // --line) to var(--line) itself, so it follows the dark palette.
+  assert.match(lanes, /--register-lane-edge: var\(--line\);/, "a dark edge colour");
 
   /*
    * NOTHING IS PINNED ON A PHONE — `.analytics-table--mobile-cards` has already

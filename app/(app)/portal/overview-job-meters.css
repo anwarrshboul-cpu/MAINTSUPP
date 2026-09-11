@@ -58,7 +58,7 @@
   font-size: 13px;
   font-weight: 600;
   letter-spacing: .01em;
-  color: var(--ink-strong, #eaf1f8);
+  color: var(--ink-strong, var(--text-primary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -67,7 +67,7 @@
 .job-meter__count {
   flex: none;
   font-size: 11px;
-  color: var(--ink-muted, #8fa3b8);
+  color: var(--ink-muted, var(--muted));
   font-variant-numeric: tabular-nums;
 }
 
@@ -124,7 +124,7 @@
 }
 
 .job-meter__chip:focus-visible {
-  outline: 2px solid var(--accent, #12b4a8);
+  outline: 2px solid var(--accent, var(--focus-ring));
   outline-offset: 2px;
 }
 
@@ -154,7 +154,7 @@
 .job-meter__chip strong {
   flex: none;
   font-variant-numeric: tabular-nums;
-  color: var(--ink-strong, #eaf1f8);
+  color: var(--ink-strong, var(--text-primary));
 }
 
 /*

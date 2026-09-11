@@ -103,8 +103,8 @@ const SORTS = [
 ] as const;
 
 const AVAILABILITY_COLOUR: Record<string, string> = {
-  Available: "#22C55E",
-  Busy: "#E8A33D",
+  Available: "var(--status-green)",
+  Busy: "var(--status-yellow)",
   Unavailable: NOT_RECORDED_COLOUR,
 };
 
@@ -547,7 +547,7 @@ function ContractorRowView({
       className="ops-row"
       style={{
         ["--ops-edge" as string]: expired
-          ? "#E5484D"
+          ? "var(--status-red)"
           : AVAILABILITY_COLOUR[row.availability] ?? NOT_RECORDED_COLOUR,
       }}
     >
@@ -691,7 +691,7 @@ function ContractorRowView({
             <ProgressMeter
               value={row.completedJobs}
               max={Math.max(row.assignedJobs, 1)}
-              tone="#22C55E"
+              tone="var(--status-green)"
               height={6}
               label={`${row.name}: ${row.completedJobs} of ${row.assignedJobs} jobs completed`}
             />
@@ -951,7 +951,7 @@ function LinkRow({
       <span className="ops-record__top">
         <span className="ops-record__name">{entry.name}</span>
         <StatusChip
-          tone={entry.reason === "ambiguous" ? "#E8A33D" : NOT_RECORDED_COLOUR}
+          tone={entry.reason === "ambiguous" ? "var(--status-yellow)" : NOT_RECORDED_COLOUR}
           size="small"
           title={
             entry.reason === "ambiguous"

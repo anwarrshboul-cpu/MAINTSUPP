@@ -202,11 +202,17 @@ export type SeverityKey = "fresh" | "ageing" | "overdue" | "critical";
 /** §1.3's severity ramp, used only where a value is judged good or bad. */
 export const SEVERITY_KEYS: readonly SeverityKey[] = ["fresh", "ageing", "overdue", "critical"];
 
+/*
+ * The approved colour system: fresh turquoise, ageing orange, overdue red and
+ * critical a deeper red of the same hue. One hex serves both themes (it is an
+ * inline style), so these are the mid-tone fills — each clears 3:1 on the white
+ * card and on the dark one, and critical stays visibly darker than overdue.
+ */
 export const SEVERITY_COLOUR: Record<SeverityKey, string> = {
-  fresh: "#0DA1A9",
-  ageing: "#E0A32E",
-  overdue: "#DC7A3C",
-  critical: "#C24437",
+  fresh: "#009C91",
+  ageing: "#DC6A0D",
+  overdue: "#FB495A",
+  critical: "#D63A4A",
 };
 
 export const SEVERITY_LABEL: Record<SeverityKey, string> = {
@@ -223,11 +229,13 @@ export const SEVERITY_RANGE: Record<SeverityKey, string> = {
   critical: "60+ days",
 };
 
-/** §5.4 — the priority bar is a severity judgement, so it takes that ramp. */
+/** §5.4 — the priority bar, on the approved priority colours: urgent red,
+    medium yellow, low blue; the mid-tone fills, because one hex serves both
+    themes. */
 export const OVERVIEW_PRIORITY_COLOUR: Record<string, string> = {
-  urgent: "#C24437",
-  medium: "#E0A32E",
-  low: "#0DA1A9",
+  urgent: "#FB495A",
+  medium: "#AE8500",
+  low: "#0095CE",
   not_recorded: "#9AAFB2",
 };
 
@@ -255,12 +263,12 @@ export const NOT_RECORDED_INK = "#9AAFB2";
  */
 const TEAL_SCALE = [
   "#075E63",
-  "#077E85",
-  "#0A929A",
-  "#0DA1A9",
-  "#35B4BA",
-  "#5FC6CB",
-  "#8AD8DB",
+  "#00746A",
+  "#147D77",
+  "#009C91",
+  "#12B4A8",
+  "#20D8C6",
+  "#55E8D8",
 ] as const;
 
 export function tealScale(rank: number): string {

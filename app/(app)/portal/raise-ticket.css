@@ -228,10 +228,10 @@
 .raise-ticket__error {
   margin: 0;
   padding: 9px 11px;
-  border: 1px solid rgba(214, 69, 69, 0.45);
+  border: 1px solid color-mix(in srgb, var(--status-red) 45%, transparent);
   border-radius: 9px;
-  background: rgba(214, 69, 69, 0.1);
-  color: #d64545;
+  background: var(--status-red-bg);
+  color: var(--status-red-fg);
   font-size: 13px;
   line-height: 1.45;
 }

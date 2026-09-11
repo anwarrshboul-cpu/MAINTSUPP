@@ -168,14 +168,14 @@ export type CalendarExpiryBand = {
 
 export function certificateExpiryBand(daysRemaining: number): CalendarExpiryBand {
   if (daysRemaining < 0) {
-    return { colour: "#7f1d1d", label: "Expired", badge: "EXPIRED" };
+    return { colour: "#c8283a", label: "Expired", badge: "EXPIRED" };
   }
   const badge = `${daysRemaining}d`;
-  if (daysRemaining <= 14) return { colour: "#991b1b", label: "Urgent", badge };
-  if (daysRemaining <= 30) return { colour: "#ef4444", label: "30-day window", badge };
-  if (daysRemaining <= 60) return { colour: "#f97316", label: "60-day window", badge };
-  if (daysRemaining <= 90) return { colour: "#eab308", label: "90-day window", badge };
-  return { colour: "#64748b", label: "Valid", badge };
+  if (daysRemaining <= 14) return { colour: "#ff4d5e", label: "Urgent", badge };
+  if (daysRemaining <= 30) return { colour: "#ff8a3d", label: "30-day window", badge };
+  if (daysRemaining <= 60) return { colour: "#ffd447", label: "60-day window", badge };
+  if (daysRemaining <= 90) return { colour: "#d9ae1f", label: "90-day window", badge };
+  return { colour: "#25d98b", label: "Valid", badge };
 }
 
 /**

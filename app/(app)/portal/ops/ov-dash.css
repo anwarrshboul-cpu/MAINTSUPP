@@ -23,20 +23,23 @@
  *
  * ── CONTRAST, MEASURED ────────────────────────────────────────────────────
  *
- * Against `--ov-card` (#0E1721), which is what every text colour here actually
- * sits on: `--ov-text` 16.79:1, `--ov-text-2` 11.88:1, `--ov-text-nav` 7.39:1,
- * `--ov-text-muted` 5.10:1, `--ov-teal` 6.05:1, `--ov-amber` 8.11:1,
- * `--ov-orange` 5.00:1 and `--ov-green` 5.10:1 — all clear of WCAG AA's 4.5:1.
+ * The values are the approved colour system's DARK palette (grounds, borders,
+ * text, and the turquoise / green / yellow / orange / red / blue accents).
+ * Against `--ov-card` (#102630), which is what every text colour here actually
+ * sits on: `--ov-text` 14.88:1, `--ov-text-2` and `--ov-text-nav` 9.08:1,
+ * `--ov-text-muted` 5.22:1, `--ov-teal` 6.05:1, `--ov-amber` 11.00:1,
+ * `--ov-orange` 6.67:1, `--ov-green` 8.48:1 and `--ov-blue` 7.30:1 — all clear
+ * of WCAG AA's 4.5:1.
  *
- * `--ov-blue` (3.66:1), `--ov-red` (4.26:1) and `--ov-grey` (3.27:1) do NOT,
- * and are therefore FILLS ONLY — an arc, a swatch, a KPI tile — where the
- * non-text threshold of 3:1 applies and all three clear it. No rule in this
- * file paints text in them, and a value is never printed in its own category's
+ * `--ov-red` (4.83:1 on the card, 4.22:1 on the hover ground) and `--ov-grey`
+ * (3.09:1) are kept as FILLS ONLY — an arc, a swatch, a KPI tile — where the
+ * non-text threshold of 3:1 applies and both clear it. No rule in this file
+ * paints text in them, and a value is never printed in its own category's
  * colour, which is also why every legend value is `--ov-text`.
  *
  * `--ov-nav-active` is the hover ground under a legend row. `--ov-text-muted`
- * on it measures 4.14:1, below AA, so nothing muted is ever placed there: a
- * legend row's ink is `--ov-text-2` (9.65:1) and `--ov-text` (13.64:1).
+ * on it measures 4.56:1; a legend row's ink is still `--ov-text-2` (7.95:1)
+ * and `--ov-text` (13.01:1).
  *
  * ── BREAKPOINTS ARE 640 / 767 / 768 / 1024 / 1280 AND NOTHING ELSE ────────
  *
@@ -72,24 +75,24 @@
 .ov-dash {
   color-scheme: dark;
 
-  --ov-frame: #05121b;
-  --ov-bg: #081018;
-  --ov-card: #0e1721;
-  --ov-card-border: #1a2632;
-  --ov-divider: #16212b;
-  --ov-track: #1f2b36;
-  --ov-nav-active: #112c33;
-  --ov-text: #f4f7fa;
-  --ov-text-2: #c9d3db;
-  --ov-text-nav: #9ea7ae;
-  --ov-text-muted: #7c8a96;
-  --ov-teal: #46a2ad;
-  --ov-orange: #d8652b;
-  --ov-amber: #e3a140;
-  --ov-blue: #5a7293;
-  --ov-green: #5e946e;
-  --ov-red: #d34e49;
-  --ov-grey: #5e697e;
+  --ov-frame: #07131c;
+  --ov-bg: #07131c;
+  --ov-card: #102630;
+  --ov-card-border: #163640;
+  --ov-divider: #163640;
+  --ov-track: #1b4650;
+  --ov-nav-active: #14313c;
+  --ov-text: #f5fafc;
+  --ov-text-2: #b8c8ce;
+  --ov-text-nav: #b8c8ce;
+  --ov-text-muted: #8099a3;
+  --ov-teal: #12b4a8;
+  --ov-orange: #ff8a3d;
+  --ov-amber: #ffd447;
+  --ov-blue: #38bdf8;
+  --ov-green: #25d98b;
+  --ov-red: #ff4d5e;
+  --ov-grey: #64707b;
 
   display: grid;
   gap: 12px;

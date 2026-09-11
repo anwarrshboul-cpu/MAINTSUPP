@@ -157,7 +157,7 @@
 /* The drop target under the pointer. A border alone is too quiet to find
    mid-drag on a phone, so the surface changes as well. */
 .ovt-meter.is-over {
-  border-color: var(--brand-solid);
+  border-color: var(--border-active);
   background: var(--surface-active);
 }
 
@@ -298,7 +298,7 @@
  */
 .ovt-status.is-carried {
   opacity: 0.7;
-  border-color: var(--brand-solid);
+  border-color: var(--border-active);
 }
 
 .ovt-status__grip {
@@ -472,7 +472,7 @@
 }
 
 .ovt-suggestion:hover:not(:disabled) {
-  border-color: var(--brand-solid);
+  border-color: var(--border-active);
   background: var(--surface-active);
 }
 
@@ -504,7 +504,7 @@
   display: grid;
   gap: 0.5rem;
   padding: 0.6rem 0.7rem;
-  border: 1px solid var(--brand-solid);
+  border: 1px solid var(--border-active);
   border-radius: var(--radius-sm);
   background: var(--surface-active);
   font-size: 0.82rem;

@@ -222,16 +222,16 @@ export type ReportsDashInput = {
 /* ── Colour: the brief's tokens, restated for a server ────────────────────── */
 
 export const RP_COLOURS = {
-  teal: "#46A2AD",
-  orange: "#D8652B",
-  amber: "#E3A140",
-  blue: "#5A7293",
-  green: "#5E946E",
-  grey: "#5E697E",
-  weekly: "#D34E49",
-  fortnightly: "#E09438",
-  monthly: "#5878A4",
-  lessOften: "#44546C",
+  teal: "#12B4A8",
+  orange: "#FF8A3D",
+  amber: "#FFD447",
+  blue: "#38BDF8",
+  green: "#25D98B",
+  grey: "#64707B",
+  weekly: "#FF4D5E",
+  fortnightly: "#FFD447",
+  monthly: "#38BDF8",
+  lessOften: "#64707B",
 } as const;
 
 /** "Colours in default order: teal, orange, amber, blue, green, grey." */

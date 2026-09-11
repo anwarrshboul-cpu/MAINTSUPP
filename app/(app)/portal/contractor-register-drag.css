@@ -9,7 +9,7 @@
  * block wherever they are, and `contractor-register.tsx` imports this beside
  * the component that needs it.
  *
- * THE VISUAL LANGUAGE IS THE BOARD'S, DELIBERATELY. `#0073ea` at 3px inset, a
+ * THE VISUAL LANGUAGE IS THE BOARD'S, DELIBERATELY. `--brand-fill` at 3px inset, a
  * `grab` cursor on the header, `grabbing` on the body while the pointer is
  * captured, and the carried column faded to 0.45 — every one of those is copied
  * from `.live-sheet th.is-column-drop-before` and its neighbours in
@@ -62,11 +62,11 @@
 
 /* Where it would land. Drawn inside the cell so it cannot widen the table. */
 .contractor-register__table th.is-register-column-drop-before {
-  box-shadow: inset 3px 0 0 #0073ea;
+  box-shadow: inset 3px 0 0 var(--brand-fill);
 }
 
 .contractor-register__table th.is-register-column-drop-after {
-  box-shadow: inset -3px 0 0 #0073ea;
+  box-shadow: inset -3px 0 0 var(--brand-fill);
 }
 
 /*

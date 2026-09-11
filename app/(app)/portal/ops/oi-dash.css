@@ -1,7 +1,7 @@
 /*
  * THE OVERVIEW — Job Intelligence, Spend & Reporting, Compliance.
  *
- * ── A COMPANION OF `.ov-dash`, ON THE NEON PALETTE ────────────────────────
+ * ── A COMPANION OF `.ov-dash`, ON THE APPROVED DARK PALETTE ──────────────
  *
  * The page mounts as `.ov-dash.oi-dash`. `.ov-dash` is the design system's
  * root (see `ov-dash.css`) and supplies the shared chart chrome — the donut,
@@ -39,37 +39,45 @@
 /* ── The palette ──────────────────────────────────────────────────────────── */
 
 .ov-dash.oi-dash {
-  /* The brief's neon palette, aligned to the logo teal. */
-  --accent-primary: #22e6c5;
-  --accent-secondary: #c74fff;
-  --accent-amber: #ffc24b;
-  --accent-critical: #ff4d7a;
-  --accent-blue: #3fa9f5;
-  --accent-teal-light: #7af5db;
-  --muted: #4a5b72;
-  --text-primary: #f4faf8;
-  --text-secondary: #b9c8d6;
-  --text-tertiary: #6c8397;
+  /*
+   * The approved colour system's DARK palette. Turquoise is the primary
+   * series; `--accent-secondary` is the light turquoise and
+   * `--accent-teal-light` the muted (deep) turquoise, so the ranked series
+   * stays in the brand family. On the card: primary 6.05:1, secondary
+   * 10.37:1, amber 11.00:1, critical 4.83:1, blue 7.30:1, green 8.48:1,
+   * orange 6.67:1; `--accent-teal-light` (3.15:1) is a fill only.
+   */
+  --accent-primary: #12b4a8;
+  --accent-secondary: #55e8d8;
+  --accent-amber: #ffd447;
+  --accent-critical: #ff4d5e;
+  --accent-blue: #38bdf8;
+  --accent-teal-light: #147d77;
+  --accent-green: #25d98b;
+  --accent-orange: #ff8a3d;
+  --muted: #8099a3;
+  --text-primary: #f5fafc;
+  --text-secondary: #b8c8ce;
+  --text-tertiary: #8099a3;
 
   /*
-   * "Missing" on the compliance donut — the critical hue dimmed, so it reads
-   * as the same family as Expired and a step quieter. 3.3:1 on the card, over
-   * the 3:1 a graphical object needs; it is a fill only, never text.
+   * "Missing" on the compliance donut — orange, the approved colour for a
+   * missing document, as it is on the Compliance page. A fill only.
    */
-  --oi-missing: #a8466e;
+  --oi-missing: var(--accent-orange);
 
-  /* A week-bar at rest: `--muted` at a little over half, over the card. */
-  --oi-bar-rest: #22304a;
+  /* A week-bar at rest: the muted turquoise, the latest week the full one. */
+  --oi-bar-rest: #147d77;
 
-  /* The shared tokens, repointed at the brief's surfaces and inks. */
-  --ov-frame: #04080f;
-  --ov-bg: #070c16;
-  --ov-card: #0d1526;
-  --ov-card-border: #182338;
-  --ov-divider: #152036;
-  /* `--muted` at about a fifth, over the card — the brief's "track at low opacity". */
-  --ov-track: #1a2538;
-  --ov-nav-active: #132139;
+  /* The shared tokens, repointed at the approved dark surfaces and inks. */
+  --ov-frame: #07131c;
+  --ov-bg: #07131c;
+  --ov-card: #102630;
+  --ov-card-border: #163640;
+  --ov-divider: #163640;
+  /* The approved default border, over the card — a track at low contrast. */
+  --ov-track: #1b4650;
+  --ov-nav-active: #14313c;
   --ov-text: var(--text-primary);
   --ov-text-2: var(--text-secondary);
   --ov-text-nav: var(--text-tertiary);
@@ -282,19 +290,14 @@ body[data-theme] .ov-dash.oi-dash .oi-section__subtitle {
   text-decoration: none;
 }
 
-/* The soft corner glow the reference draws, in the tile's own accent. */
-.ov-dash.oi-dash .oi-kpi::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  top: -38px;
-  right: -34px;
-  width: 104px;
-  height: 104px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--oi-accent) 34%, transparent) 0%, transparent 70%);
-  pointer-events: none;
-}
+/*
+ * No corner decoration. The tile used to paint a blurred radial glow in its
+ * upper-right corner through `::after`; the approved colour system removes it
+ * and asks for nothing in its place, so the corner is the same flat --ov-card
+ * as the rest of the tile. `position`, `isolation` and `overflow` above are
+ * left exactly as they were: they held the glow, and removing them is a layout
+ * change the colour work is not allowed to make.
+ */
 
 .ov-dash.oi-dash a.oi-kpi {
   cursor: pointer;
@@ -595,7 +598,7 @@ body[data-theme] .ov-dash.oi-dash .oi-legend__value {
 
 /* The trend is a stretched box, so it glows as a box, in CSS pixels. */
 .ov-dash.oi-dash .ov-trend__svg {
-  filter: drop-shadow(0 0 3px rgba(34, 230, 197, 0.55));
+  filter: drop-shadow(0 0 3px rgba(18, 180, 168, 0.55));
   overflow: visible;
 }
 

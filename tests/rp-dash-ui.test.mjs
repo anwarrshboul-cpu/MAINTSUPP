@@ -316,19 +316,28 @@ test("the stylesheet branches only at the agreed widths", async () => {
 
 test("it adds the brief's --rp-* tokens and restates none of the shared palette", async () => {
   const css = await read(STYLES);
+  /*
+   * RE-POINTED: the approved colour system's dark palette — total and bars
+   * turquoise #12b4a8 (was #46a2ad / #4c98a4) with the bright line #20d8c6
+   * (was #6fc3cc) and its wash at rgb(18 180 168), reactive orange #ff8a3d
+   * (was #e0a050), planned blue #38bdf8 (was #5c8ec3), projects light
+   * turquoise #55e8d8 (was #6e9f7f), and the repeat scale red / yellow / blue
+   * / grey #ff4d5e / #ffd447 / #38bdf8 / #64707b (was #d34e49 / #e09438 /
+   * #5878a4 / #44546c).
+   */
   for (const [token, value] of [
-    ["--rp-total", "#46a2ad"],
-    ["--rp-reactive", "#e0a050"],
-    ["--rp-planned", "#5c8ec3"],
-    ["--rp-projects", "#6e9f7f"],
-    ["--rp-bar", "#4c98a4"],
-    ["--rp-line", "#6fc3cc"],
-    ["--rp-area-top", "rgba(70, 162, 173, 0.35)"],
-    ["--rp-area-bottom", "rgba(70, 162, 173, 0.03)"],
-    ["--rp-weekly", "#d34e49"],
-    ["--rp-fortnightly", "#e09438"],
-    ["--rp-monthly", "#5878a4"],
-    ["--rp-less-often", "#44546c"],
+    ["--rp-total", "#12b4a8"],
+    ["--rp-reactive", "#ff8a3d"],
+    ["--rp-planned", "#38bdf8"],
+    ["--rp-projects", "#55e8d8"],
+    ["--rp-bar", "#12b4a8"],
+    ["--rp-line", "#20d8c6"],
+    ["--rp-area-top", "rgba(18, 180, 168, 0.35)"],
+    ["--rp-area-bottom", "rgba(18, 180, 168, 0.03)"],
+    ["--rp-weekly", "#ff4d5e"],
+    ["--rp-fortnightly", "#ffd447"],
+    ["--rp-monthly", "#38bdf8"],
+    ["--rp-less-often", "#64707b"],
   ]) {
     assert.ok(css.includes(`${token}: ${value};`), `${token} is ${value}`);
   }
@@ -349,8 +358,15 @@ test("a falling delta's red clears 4.5:1 on the card", async () => {
     const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
     return (hi + 0.05) / (lo + 0.05);
   };
-  assert.ok(ratio(hex, "#0e1721") >= 4.5, `${hex} is ${ratio(hex, "#0e1721").toFixed(2)}:1 on --ov-card`);
-  assert.ok(ratio("#d34e49", "#0e1721") < 4.5, "and the reason it exists: --ov-red is not");
+  /*
+   * RE-POINTED: the approved colour system moved `--ov-card` from #0e1721 to
+   * #102630 and `--ov-red` from #d34e49 to #ff4d5e. The new red clears 4.5:1
+   * on the card itself (4.83) but not on the hover ground `--ov-nav-active`
+   * #14313c (4.22), so the delta ink is now held to BOTH grounds.
+   */
+  assert.ok(ratio(hex, "#102630") >= 4.5, `${hex} is ${ratio(hex, "#102630").toFixed(2)}:1 on --ov-card`);
+  assert.ok(ratio(hex, "#14313c") >= 4.5, `${hex} is ${ratio(hex, "#14313c").toFixed(2)}:1 on --ov-nav-active`);
+  assert.ok(ratio("#ff4d5e", "#14313c") < 4.5, "and the reason it exists: --ov-red is not, on the hover ground");
 });
 
 test("every rule is scoped to the block, and calc() keeps its spaces", async () => {

@@ -187,8 +187,8 @@ function ghostSkin(): GhostSkin {
   return dark
     ? {
         dark,
-        surface: "#223244",
-        ink: "#eaf1f9",
+        surface: "#182830",
+        ink: "#f5fafc",
         muted: "rgba(213, 228, 243, 0.62)",
         ring: "rgba(255, 255, 255, 0.14)",
         shadow:

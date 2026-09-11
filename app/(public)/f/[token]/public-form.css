@@ -43,7 +43,7 @@ body:has(.pf) {
   --pf-line: #dce4e9;
   --pf-accent: #0b7a72;
   --pf-on-accent: #ffffff;
-  --pf-danger: #bc3a3a;
+  --pf-danger: #ca0134;
   --pf-font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
   min-height: 100vh;
@@ -66,14 +66,14 @@ body:has(.pf) {
  */
 @media (prefers-color-scheme: dark) {
   .pf {
-    --pf-canvas: #0b1218;
-    --pf-card: #182830;
-    --pf-ink: #e7eef3;
-    --pf-muted: #9baeb9;
-    --pf-line: #2a3943;
+    --pf-canvas: #07131c;
+    --pf-card: #102630;
+    --pf-ink: #f5fafc;
+    --pf-muted: #b8c8ce;
+    --pf-line: #163640;
     --pf-accent: #12b4a8;
-    --pf-on-accent: #06191a;
-    --pf-danger: #d97a7a;
+    --pf-on-accent: #06221f;
+    --pf-danger: #ff6b77;
   }
 }
 

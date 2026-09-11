@@ -83,18 +83,18 @@ const SITE_TYPE_APPLICABILITY = "missing" as const;
 /* ── Colours: the brief's tokens, restated for a server that cannot read CSS ─ */
 
 export const CP_COLOURS = {
-  compliant: "#48A0A8",
-  expiring: "#E09438",
-  expired: "#C0442E",
-  missing: "#5C7CA8",
-  due30: "#C85024",
-  due60: "#D88C38",
-  due90: "#5878A4",
-  other: "#44546C",
-  teal: "#46A2AD",
-  orange: "#D8652B",
-  amber: "#E3A140",
-  blue: "#5A7293",
+  compliant: "#25D98B",
+  expiring: "#FFD447",
+  expired: "#FF4D5E",
+  missing: "#FF8A3D",
+  due30: "#FF8A3D",
+  due60: "#FFD447",
+  due90: "#38BDF8",
+  other: "#64707B",
+  teal: "#12B4A8",
+  orange: "#FF8A3D",
+  amber: "#FFD447",
+  blue: "#38BDF8",
 } as const;
 
 /** "Default colour order: teal, orange, amber, blue, --cp-missing, then grey." */
@@ -103,7 +103,9 @@ const RENEWAL_SERIES = [
   CP_COLOURS.orange,
   CP_COLOURS.amber,
   CP_COLOURS.blue,
-  CP_COLOURS.missing,
+  // The fifth slice was the old red `missing`; missing is orange now, which
+  // would repeat slice two, so the fifth keeps its red through `expired`.
+  CP_COLOURS.expired,
 ] as const;
 
 const STATUS_OF: Record<string, CpStateKey | undefined> = {

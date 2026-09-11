@@ -39,12 +39,12 @@ body:has(.reminder-action) {
 .reminder-action {
   --ra-canvas: #f4f7f8;
   --ra-card: #ffffff;
-  --ra-ink: #10231f;
-  --ra-muted: #4a5f5b;
-  --ra-line: #d5e0dd;
-  --ra-accent: #0b7a72;
-  --ra-accent-fg: #ffffff;
-  --ra-danger: #b3261e;
+  --ra-ink: #132537;
+  --ra-muted: #4e5f6f;
+  --ra-line: #c8d3da;
+  --ra-accent: #12b4a8;
+  --ra-accent-fg: #06221f;
+  --ra-danger: #ca0134;
 
   max-width: 34rem;
   margin: 0 auto;
@@ -59,14 +59,14 @@ body:has(.reminder-action) {
 
 @media (prefers-color-scheme: dark) {
   .reminder-action {
-    --ra-canvas: #0e1b1e;
-    --ra-card: #12212a;
-    --ra-ink: #eef5f3;
-    --ra-muted: #a9bcb8;
-    --ra-line: #24363c;
-    --ra-accent: #14b8a6;
-    --ra-accent-fg: #04201d;
-    --ra-danger: #ff8a80;
+    --ra-canvas: #07131c;
+    --ra-card: #102630;
+    --ra-ink: #f5fafc;
+    --ra-muted: #b8c8ce;
+    --ra-line: #1b4650;
+    --ra-accent: #12b4a8;
+    --ra-accent-fg: #06221f;
+    --ra-danger: #ff6b77;
   }
 }
 

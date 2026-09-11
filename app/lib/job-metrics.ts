@@ -86,11 +86,14 @@ export const FAMILY_LABEL: Record<JobStatusFamily, string> = {
 /**
  * Semantic colours, fixed. These three are never reassigned to anything else on
  * any surface, which is what lets a reader learn them once.
+ *
+ * The approved colour system: completed green, in progress blue, needs
+ * attention red — the mid-tone fills, because one hex serves both themes.
  */
 export const FAMILY_COLOUR: Record<JobStatusFamily, string> = {
-  completed: "#22C55E",
-  in_progress: "#3B82F6",
-  attention: "#E5484D",
+  completed: "#00A056",
+  in_progress: "#0095CE",
+  attention: "#FB495A",
 };
 
 /**
@@ -345,10 +348,10 @@ export type AgeingBand = {
  * screen and "fresh" on another.
  */
 export const AGEING_BANDS: readonly AgeingBand[] = [
-  { key: "fresh", label: "Fresh", from: 0, to: 14, colour: "#4ADE80", range: "0–14 days" },
-  { key: "ageing", label: "Ageing", from: 15, to: 30, colour: "#E8A33D", range: "15–30 days" },
-  { key: "overdue", label: "Overdue", from: 31, to: 60, colour: "#F97316", range: "31–60 days" },
-  { key: "critical", label: "Critical", from: 61, to: null, colour: "#E5484D", range: "60+ days" },
+  { key: "fresh", label: "Fresh", from: 0, to: 14, colour: "#009C91", range: "0–14 days" },
+  { key: "ageing", label: "Ageing", from: 15, to: 30, colour: "#DC6A0D", range: "15–30 days" },
+  { key: "overdue", label: "Overdue", from: 31, to: 60, colour: "#FB495A", range: "31–60 days" },
+  { key: "critical", label: "Critical", from: 61, to: null, colour: "#D63A4A", range: "60+ days" },
 ] as const;
 
 /** The band a number of days open falls in. Never returns undefined. */
@@ -443,9 +446,9 @@ export type PriorityBand = { key: PriorityKey; label: string; colour: string };
  * that omits it reports a cleaner board than exists.
  */
 export const PRIORITY_BANDS: readonly PriorityBand[] = [
-  { key: "urgent", label: "Urgent", colour: "#E5484D" },
-  { key: "medium", label: "Medium", colour: "#E8A33D" },
-  { key: "low", label: "Low", colour: "#4ADE80" },
+  { key: "urgent", label: "Urgent", colour: "#FB495A" },
+  { key: "medium", label: "Medium", colour: "#AE8500" },
+  { key: "low", label: "Low", colour: "#0095CE" },
   { key: "not_recorded", label: "Not recorded", colour: "#64748B" },
 ] as const;
 
@@ -510,9 +513,10 @@ export const NATURE_LABEL: Record<NatureKey, string> = {
   planned: "Planned",
 };
 
+/** The approved colour system: reactive orange, planned blue (mid-tone fills). */
 export const NATURE_COLOUR: Record<NatureKey, string> = {
-  reactive: "#E8A33D",
-  planned: "#3B82F6",
+  reactive: "#DC6A0D",
+  planned: "#0095CE",
 };
 
 export const UNASSIGNED_SITE_ID = "__unassigned__";
@@ -575,14 +579,17 @@ export const DIMENSION_LABEL: Record<BreakdownDimension, string> = {
  * not have that unlearned by picking 30 days instead of 90.
  */
 export const CATEGORICAL_COLOURS = [
-  "#E8A33D",
-  "#4ADE80",
-  "#3B82F6",
-  "#F5D547",
-  "#A78BFA",
-  "#EC4899",
-  "#22D3EE",
-  "#C4B04A",
+  // The approved palette only — no colours picked for variety. These render on
+  // both themes as a single hex, so they are the fill shades that hold 3:1 on
+  // white and on the dark card; turquoise leads and has three steps.
+  "#009C91",
+  "#0095CE",
+  "#00A056",
+  "#AE8500",
+  "#DC6A0D",
+  "#FB495A",
+  "#147D77",
+  "#20D8C6",
 ] as const;
 
 /** A stable colour for a bucket key. Same key, same colour, every session. */

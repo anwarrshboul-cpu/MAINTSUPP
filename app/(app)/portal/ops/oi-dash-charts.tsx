@@ -6,7 +6,7 @@
  *
  * Everything else the Overview draws — every donut, every ring, the spend trend
  * — is the shared chart from `ov-dash-charts.tsx`, reused as it shipped, with
- * the neon palette passed in as `var(--accent-…)`. These are new SHAPES, not new
+ * the approved dark palette passed in as `var(--accent-…)`. These are new SHAPES, not new
  * mechanisms: they sweep with `useOvSweep`, so they grow in, re-ease on a
  * refetch and honour reduced motion exactly as the rings beside them do.
  *
@@ -26,8 +26,9 @@
  * Every colour this file hands out is `var(--accent-…)`; the values live in
  * `oi-dash.css`, scoped to `.ov-dash.oi-dash`. No number is printed in its own
  * slice's colour except where the colour carries the meaning (a KPI caption, a
- * delta line), and every accent measures above 4.5:1 on `--ov-card` (#0D1526)
- * — the lowest, `--accent-critical`, at about 5.7:1.
+ * delta line), and every accent a caption or delta can take measures above
+ * 4.5:1 on `--ov-card` (#102630) — the lowest, `--accent-critical`, at 4.83:1.
+ * `--accent-teal-light` is a fill only (3.15:1).
  */
 
 import { useState, type CSSProperties, type JSX, type ReactNode } from "react";
@@ -35,7 +36,7 @@ import { ovFraction, ovPercent, useOvHoverCapable, useOvSweep } from "./ov-dash-
 
 /* ── The palette, by name ─────────────────────────────────────────────────── */
 
-/** The brief's neon tokens, as the CSS custom properties `oi-dash.css` declares. */
+/** The approved dark palette, as the CSS custom properties `oi-dash.css` declares. */
 export const OI_COLOUR = {
   primary: "var(--accent-primary)",
   secondary: "var(--accent-secondary)",
@@ -43,8 +44,12 @@ export const OI_COLOUR = {
   critical: "var(--accent-critical)",
   blue: "var(--accent-blue)",
   tealLight: "var(--accent-teal-light)",
+  /** Done and compliant — the approved green. */
+  green: "var(--accent-green)",
+  /** Reactive work and anything needing attention — the approved orange. */
+  orange: "var(--accent-orange)",
   muted: "var(--muted)",
-  /** "Missing" on the compliance donut: the critical hue, dimmed. */
+  /** "Missing" on the compliance donut: the approved orange. */
   missing: "var(--oi-missing)",
 } as const;
 
@@ -87,7 +92,7 @@ export function oiSeriesColours(keys: readonly string[]): string[] {
   return colours;
 }
 
-/** A shared-policy tone (`qualityTone` / `rateTone`) as the neon colour that means it. */
+/** A shared-policy tone (`qualityTone` / `rateTone`) as the palette colour that means it. */
 export function oiToneColour(tone: "good" | "warn" | "poor"): string {
   if (tone === "good") return OI_COLOUR.primary;
   if (tone === "warn") return OI_COLOUR.amber;
@@ -204,7 +209,7 @@ export function OiCard({
 
 /**
  * ONE FIGURE: a small-caps label, the number, and a caption in the tile's
- * accent — with the soft glow in the top-right corner the reference draws.
+ * accent, on a flat card (the corner glow was removed with the colour system).
  *
  * The whole tile is the link when the figure has a list behind it, so there is
  * nothing interactive inside it; a figure with no single list (a completion

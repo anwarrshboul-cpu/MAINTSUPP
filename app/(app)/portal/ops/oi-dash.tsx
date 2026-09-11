@@ -125,7 +125,7 @@ const ROUTE = {
 const PRIORITY_COLOUR: Record<OiPriorityKey, string> = {
   urgent: OI_COLOUR.critical,
   medium: OI_COLOUR.amber,
-  low: OI_COLOUR.primary,
+  low: OI_COLOUR.blue,
   not_recorded: OI_COLOUR.muted,
 };
 
@@ -142,8 +142,8 @@ const TIER_COLOURS: readonly string[] = [
 
 const KPI_TONE: Record<RpKpi["key"], OiTone> = {
   total: "primary",
-  reactive: "critical",
-  planned: "amber",
+  reactive: "orange",
+  planned: "blue",
   projects: "secondary",
 };
 
@@ -165,7 +165,7 @@ const STATUS_LABEL: Record<CpStateKey, string> = {
 };
 
 const STATUS_COLOUR: Record<CpStateKey, string> = {
-  compliant: OI_COLOUR.primary,
+  compliant: OI_COLOUR.green,
   expiring: OI_COLOUR.amber,
   expired: OI_COLOUR.critical,
   missing: OI_COLOUR.missing,
@@ -557,7 +557,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
   const labelSlices = toOvSlices(intel.labels, oiSeriesColours(intel.labels.map((slice) => slice.key)));
   const engineerColours = oiSeriesColours(intel.engineers.map((slice) => slice.key));
   const completionSlices: OvSlice[] = [
-    { key: "completed", label: "Completed", value: intel.completed, colour: OI_COLOUR.primary, labels: [] },
+    { key: "completed", label: "Completed", value: intel.completed, colour: OI_COLOUR.green, labels: [] },
     { key: "open", label: "Still open", value: intel.open, colour: OI_COLOUR.muted, labels: [] },
   ];
   const bySlice = <T extends { key: string }>(list: readonly T[], key: string) =>
@@ -762,7 +762,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
                     key: "completed",
                     label: "Completed",
                     valueText: oiCount(intel.completed),
-                    colour: OI_COLOUR.primary,
+                    colour: OI_COLOUR.green,
                     href: completedDrill.href,
                     onActivate: completedDrill.go,
                     ariaLabel: `Completed: ${plural(intel.completed, "job", "jobs")} closed in ${range.label}. Opens those jobs.`,
@@ -947,7 +947,9 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
 
 /** `qualityTone`'s three words as the palette's names. */
 function toneName(tone: "good" | "warn" | "poor"): OiTone {
-  return tone === "good" ? "primary" : tone === "warn" ? "amber" : "critical";
+  // Good is the approved green (on target, healthy, SLA met); turquoise stays
+  // the brand and the default series, not a verdict.
+  return tone === "good" ? "green" : tone === "warn" ? "amber" : "critical";
 }
 
 /* ── Section 2 — Spend & Reporting ────────────────────────────────────────── */

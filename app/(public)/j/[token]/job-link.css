@@ -23,7 +23,7 @@
 
 body {
   background: #ffffff;
-  color: #101820;
+  color: #132537;
 }
 
 .job-link {
@@ -31,7 +31,7 @@ body {
   margin: 0 auto;
   padding: 16px 16px 48px;
   font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-  color: #101820;
+  color: #132537;
 }
 
 /*
@@ -68,13 +68,13 @@ body {
   letter-spacing: 0.02em;
 }
 
-.job-link__brand span { font-weight: 700; }
+.job-link__brand span { font-weight: 700; color: #101820; } /* the logo keeps its own colour; the page text around it moved to the colour system */
 .job-link__brand strong { color: #12b4a8; }
 
 .job-link__ref {
   margin: 0 0 4px;
   font-size: 13px;
-  color: #6b7a83;
+  color: #64707b;
   font-variant-numeric: tabular-nums;
 }
 
@@ -93,21 +93,21 @@ body {
   font-weight: 600;
 }
 
-.job-link__priority.is-urgent { background: #e2445c; color: #fff; }
-.job-link__priority.is-medium { background: #fdab3d; color: #101820; }
-.job-link__priority.is-low    { background: #579bfc; color: #fff; }
+.job-link__priority.is-urgent { background: #ffeaec; color: #ca0134; }
+.job-link__priority.is-medium { background: #fffae9; color: #8d6400; }
+.job-link__priority.is-low    { background: #e7f7fe; color: #006fa6; }
 
 .job-link__card {
   margin: 0 0 14px;
   padding: 16px;
-  border: 1px solid #dde4e8;
+  border: 1px solid #dce4e9;
   border-radius: 14px;
   background: #fff;
 }
 
 .job-link__card--done {
-  border-color: #12b4a8;
-  background: #f0fbfa;
+  border-color: #009c91;
+  background: #e3f6f5;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,10 +148,10 @@ body {
   display: inline-block;
   margin-left: 8px;
   padding: 4px 12px;
-  border: 1px solid #dde4e8;
+  border: 1px solid #dce4e9;
   border-radius: 999px;
   background: #fff;
-  color: #6b7a83;
+  color: #64707b;
   font-size: 13px;
   font-weight: 600;
 }
@@ -206,7 +206,7 @@ body {
 .job-link select:focus-visible,
 .job-link textarea:focus-visible,
 .job-link canvas:focus-visible {
-  outline: 2px solid #0b8f7f;
+  outline: 2px solid #009b8c;
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -216,21 +216,21 @@ body {
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #6b7a83;
+  color: #64707b;
 }
 
 .job-link__site { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
-.job-link__muted { margin: 0 0 4px; color: #6b7a83; font-size: 14px; }
-.job-link__hint { margin: 0 0 8px; color: #6b7a83; font-size: 13px; }
+.job-link__muted { margin: 0 0 4px; color: #64707b; font-size: 14px; }
+.job-link__hint { margin: 0 0 8px; color: #64707b; font-size: 13px; }
 
 .job-link__map {
   display: inline-block;
   margin-top: 8px;
   min-height: 44px;
   padding: 11px 16px;
-  border: 1px solid #dde4e8;
+  border: 1px solid #c8d3da;
   border-radius: 9px;
-  color: #101820;
+  color: #132537;
   text-decoration: none;
   font-size: 14px;
   font-weight: 600;
@@ -244,7 +244,7 @@ body {
   font-size: 14px;
 }
 
-.job-link__facts dt { color: #6b7a83; }
+.job-link__facts dt { color: #64707b; }
 .job-link__facts dd { margin: 0; }
 
 /* A photo grid, not a list of filenames. The engineer is looking for the
@@ -278,7 +278,7 @@ body {
   border-radius: 10px;
   overflow: hidden;
   background: #eef2f4;
-  color: #101820;
+  color: #132537;
   font: inherit;
   text-align: left;
   text-decoration: none;
@@ -291,7 +291,7 @@ body {
  * ring behind on a phone.
  */
 .job-link__photos button:focus-visible {
-  outline: 3px solid #0f766e;
+  outline: 3px solid #009b8c;
   outline-offset: 2px;
 }
 
@@ -357,7 +357,7 @@ body {
   min-height: 44px;
   margin-bottom: 14px;
   padding: 11px 12px;
-  border: 1px solid #dde4e8;
+  border: 1px solid #c8d3da;
   border-radius: 9px;
   /* 16px minimum — below this iOS zooms on focus and will not zoom back. */
   font: inherit;
@@ -371,9 +371,9 @@ body {
   font-size: 13px;
 }
 
-.job-link__uploads li { padding: 3px 0; color: #6b7a83; }
-.job-link__uploads li.is-done { color: #0b8f7f; }
-.job-link__uploads li.is-failed { color: #c0304a; }
+.job-link__uploads li { padding: 3px 0; color: #64707b; }
+.job-link__uploads li.is-done { color: #007a34; }
+.job-link__uploads li.is-failed { color: #ca0134; }
 
 .job-link__actions {
   display: flex;
@@ -396,13 +396,13 @@ body {
 .job-link__primary {
   border: 0;
   background: #12b4a8;
-  color: #06231f;
+  color: #06221f;
 }
 
 .job-link__secondary {
-  border: 1px solid #dde4e8;
+  border: 1px solid #c8d3da;
   background: #fff;
-  color: #101820;
+  color: #132537;
 }
 
 .job-link__primary:disabled,
@@ -412,8 +412,8 @@ body {
   margin: 0 0 12px;
   padding: 12px 14px;
   border-radius: 9px;
-  background: #fdeaed;
-  color: #c0304a;
+  background: #ffeaec;
+  color: #ca0134;
   font-size: 14px;
 }
 
@@ -424,14 +424,14 @@ body {
   text-align: center;
   font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
   /* The one screen that inherited nothing. See the note at the top. */
-  color: #101820;
+  color: #132537;
 }
 
 .job-link__status--error h1 { font-size: 20px; }
 
 .job-link__foot {
   margin-top: 28px;
-  color: #6b7a83;
+  color: #64707b;
   font-size: 13px;
   text-align: center;
 }
@@ -488,10 +488,10 @@ body {
 .signature__head button {
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid #dde4e8;
+  border: 1px solid #c8d3da;
   border-radius: 8px;
   background: #fff;
-  color: #101820;
+  color: #132537;
   font: inherit;
   font-size: 0.82rem;
   cursor: pointer;
@@ -516,7 +516,7 @@ body {
 }
 
 .signature small {
-  color: #6b7a83;
+  color: #64707b;
   font-size: 0.78rem;
 }
 
@@ -553,7 +553,7 @@ body {
 }
 
 .arrival__toggle small {
-  color: #6b7a83;
+  color: #64707b;
   font-size: 0.8rem;
 }
 
@@ -585,9 +585,9 @@ body {
   display: grid;
   gap: 6px;
   padding: 12px;
-  border: 1px solid rgba(226, 68, 92, 0.45);
+  border: 1px solid rgba(251, 73, 90, 0.45);
   border-radius: 10px;
-  background: #fdeaed;
+  background: #ffeaec;
 }
 
 .arrival__warning ul {
@@ -598,16 +598,16 @@ body {
 }
 
 .arrival__warning strong {
-  color: #a3213a;
+  color: #ca0134;
 }
 
 .arrival__warning em {
-  color: #6b7a83;
+  color: #4e5f6f;
   font-style: normal;
 }
 
 .arrival__warning small {
-  color: #6b7a83;
+  color: #4e5f6f;
   font-size: 0.76rem;
 }
 
@@ -618,7 +618,7 @@ body {
 }
 
 .arrival__fact dt {
-  color: #6b7a83;
+  color: #64707b;
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -649,7 +649,7 @@ body {
  * answer anyway — colour alone should not have been carrying it.
  */
 .arrival__fact dd.is-missing {
-  color: #68767e;
+  color: #64707b;
   font-style: italic;
 }
 
@@ -662,7 +662,7 @@ body {
 
 .arrival__empty {
   margin: 0;
-  color: #6b7a83;
+  color: #64707b;
   font-size: 0.86rem;
 }
 

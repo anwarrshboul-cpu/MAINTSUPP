@@ -1015,7 +1015,9 @@ test("the words are browser-safe and the SQL is not", async () => {
   // heading names them, so the legend cannot read backwards from the chart.
   assert.equal(metrics.NATURE_KEYS.join(","), "reactive,planned");
   assert.equal(metrics.NATURE_LABEL.planned, "Planned");
-  assert.equal(metrics.NATURE_COLOUR.reactive, "#E8A33D");
+  // The approved colour system moved reactive from amber #E8A33D to the
+  // orange mid-tone fill #DC6A0D (reactive = orange, planned = blue).
+  assert.equal(metrics.NATURE_COLOUR.reactive, "#DC6A0D");
 
   /*
    * RE-POINTED 2026-09-11. The rebuilt Overview draws no nature chips, so it no

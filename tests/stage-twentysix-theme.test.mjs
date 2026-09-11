@@ -760,7 +760,10 @@ test("the address bar is told what colour the page is", async () => {
   const boot = await read(BOOT);
   const theme = await read(THEME);
 
-  assert.match(boot, /export const THEME_COLOR_DARK = "#0b1218";/);
+  // The dark ground moved with the approved colour system: --background-primary
+  // is #07131c, the sidebar's own colour, and the browser chrome must follow the
+  // page it sits above. Same contract, the new value.
+  assert.match(boot, /export const THEME_COLOR_DARK = "#07131c";/);
   assert.match(boot, /export const THEME_COLOR_LIGHT = "#f4f7f8";/);
   assert.match(
     boot,

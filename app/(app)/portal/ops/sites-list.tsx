@@ -498,7 +498,7 @@ export function SitesList({
       >
         <SegmentedMeter
           segments={[
-            { key: "active", label: "Active", value: totals.active, colour: "#22C55E" },
+            { key: "active", label: "Active", value: totals.active, colour: "var(--status-green)" },
             { key: "inactive", label: "Inactive", value: totals.inactive, colour: NOT_RECORDED_COLOUR },
           ]}
           height={12}
@@ -761,9 +761,9 @@ function SiteRow({
    */
   const edge =
     (metrics?.urgentOpen ?? 0) > 0 || (compliance?.counts.Expired ?? 0) > 0
-      ? "#E5484D"
+      ? "var(--status-red)"
       : compliance?.scored && compliance.percent < 80
-        ? "#E8A33D"
+        ? "var(--status-yellow)"
         : "var(--line)";
 
   return (
@@ -786,7 +786,7 @@ function SiteRow({
           {site.name}
         </button>
         <StatusChip
-          tone={active ? "#22C55E" : NOT_RECORDED_COLOUR}
+          tone={active ? "var(--status-green)" : NOT_RECORDED_COLOUR}
           size="small"
           title={statusLabel(site.status)}
         >
@@ -804,7 +804,7 @@ function SiteRow({
            * it, because the chip is small and a tooltip that only restates a
            * truncation helps nobody.
            */
-          <StatusChip tone="#8B5CF6" size="small" title="A demonstration store, not a real one">
+          <StatusChip tone="var(--status-blue)" size="small" title="A demonstration store, not a real one">
             Demo
           </StatusChip>
         ) : null}
@@ -899,7 +899,7 @@ function SiteRow({
           <ProgressMeter
             value={metrics?.openJobs ?? 0}
             max={maxOpen}
-            tone={(metrics?.urgentOpen ?? 0) > 0 ? "#E5484D" : "#3B82F6"}
+            tone={(metrics?.urgentOpen ?? 0) > 0 ? "var(--status-red)" : "var(--status-blue)"}
             label={
               metrics
                 ? `${site.name}: ${plural(metrics.openJobs, "open job")}${

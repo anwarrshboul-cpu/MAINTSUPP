@@ -130,8 +130,8 @@
 .update-composer__send {
   padding: 0 14px !important;
   border-color: transparent !important;
-  background: var(--teal-500, #12b5aa) !important;
-  color: #04231f !important;
+  background: var(--brand-primary) !important;
+  color: var(--on-brand-primary) !important;
   font-size: 13px !important;
 }
 

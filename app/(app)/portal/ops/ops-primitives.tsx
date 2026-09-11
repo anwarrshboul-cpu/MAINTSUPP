@@ -317,7 +317,10 @@ export function CompactJobRow({
       <StatusChip tone={statusColour} size="small">
         {status}
       </StatusChip>
-      <span className="ops-job-row__age" style={{ color: bandColour, borderColor: bandColour }}>
+      {/* The band colour is one hex for both themes; as TEXT it is mixed toward the
+          theme's own ink so the age reads at 4.5:1 on light and dark cards alike.
+          The border keeps the band colour itself. */}
+      <span className="ops-job-row__age" style={{ color: `color-mix(in srgb, ${bandColour} 65%, var(--ink))`, borderColor: bandColour }}>
         {daysOpen}d<span className="visually-hidden"> open</span>
       </span>
     </>

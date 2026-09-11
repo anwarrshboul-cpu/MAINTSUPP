@@ -36,8 +36,8 @@
 }
 
 :root:not([data-theme="light"]) .fix-tracker {
-  --fix-alarm: #ff8079;
-  --fix-warn: #e8b13c;
+  --fix-alarm: var(--status-red-fg);
+  --fix-warn: var(--status-yellow-fg);
 }
 
 /* ── Tabs ─────────────────────────────────────────────────────────────────

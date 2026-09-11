@@ -66,7 +66,7 @@
 }
 
 .account-topbar__back:hover {
-  border-color: var(--brand-bright);
+  border-color: var(--brand-primary);
   color: var(--ink);
 }
 
@@ -196,7 +196,7 @@
 }
 
 .account-card--notice {
-  border-color: rgba(240, 139, 35, 0.4);
+  border-color: color-mix(in srgb, var(--status-orange) 40%, transparent);
   background: linear-gradient(180deg, var(--orange-100), var(--surface-card) 60%);
 }
 
@@ -312,7 +312,7 @@
   gap: 9px;
   margin: 0;
   padding: 12px 14px;
-  border: 1px solid rgba(218, 70, 70, 0.5);
+  border: 1px solid color-mix(in srgb, var(--status-red) 50%, transparent);
   border-radius: 10px;
   background: var(--red-100);
   color: var(--red-600);
@@ -362,8 +362,8 @@
  * state at a glance — and the ink is taken down to the dark end of the same
  * hue, which passes AA and still says teal-for-fine and red-for-urgent.
  */
-.account-tag--on { background: rgba(18, 180, 168, 0.2); color: #0b5049; }
-.account-tag--off { background: rgba(218, 70, 70, 0.16); color: #8a1f1f; }
+.account-tag--on { background: var(--teal-100); color: var(--accent-fg); }
+.account-tag--off { background: var(--red-100); color: var(--red-600); }
 
 /* ── Stats, lists, tables, definitions ──────────────────────────────────── */
 
@@ -399,8 +399,8 @@
  * hierarchy still reads, because size and weight were doing most of that work
  * anyway.
  */
-.account-stats span { color: #566370; font-size: 11.5px; }
-.account-stats small { color: #4f6570; font-size: 10.5px; }
+.account-stats span { color: var(--muted); font-size: 11.5px; }
+.account-stats small { color: var(--muted); font-size: 10.5px; }
 
 .account-list {
   display: grid;
@@ -606,7 +606,7 @@
 .account-field input:focus,
 .account-field select:focus,
 .account-field textarea:focus {
-  border-color: var(--brand-bright);
+  border-color: var(--brand-primary);
   outline: none;
 }
 
@@ -656,7 +656,7 @@
 
 .account-swatches button.is-active {
   border-color: var(--ink);
-  box-shadow: 0 0 0 2px #182830, 0 0 0 4px #12b4a8;
+  box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 4px var(--border-active);
 }
 
 .account-swatches__clear {
@@ -673,7 +673,7 @@
 }
 
 .account-swatches__clear.is-active {
-  border-color: var(--brand-bright) !important;
+  border-color: var(--brand-primary) !important;
   color: var(--accent-fg);
   box-shadow: none !important;
 }
@@ -719,10 +719,10 @@
   font-size: 13px;
 }
 
-.account-theme small { color: #8d9aa7; font-size: 11.5px; line-height: 1.5; }
+.account-theme small { color: var(--muted-2); font-size: 11.5px; line-height: 1.5; }
 
 .account-theme.is-active {
-  border-color: var(--brand-bright);
+  border-color: var(--brand-primary);
   box-shadow: inset 0 0 0 1px rgba(18, 180, 168, 0.5);
 }
 
@@ -741,7 +741,7 @@
    side in the picker, so each must keep painting its own theme whichever one
    is currently applied. Tokenising them would make both swatches identical. */
 .account-theme__swatch--dark {
-  background: linear-gradient(140deg, #101820 0 55%, #182830 55% 100%);
+  background: linear-gradient(140deg, #07131c 0 55%, #102630 55% 100%);
 }
 
 .account-theme__swatch--light {
