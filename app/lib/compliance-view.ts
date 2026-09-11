@@ -204,7 +204,14 @@ const STATES: ComplianceState[] = [
   "Not required",
 ];
 
-function list(params: URLSearchParams, key: string, max = 60): string[] {
+/*
+ * 1,000, not 60. The dashboard's drills send every value a figure counted —
+ * each requirement behind "Other types", each member of a portfolio — and a
+ * cap below the estate's own size silently dropped the tail, so the register
+ * listed fewer records than the figure said. The per-value 160-character trim
+ * still bounds what one parameter can carry.
+ */
+function list(params: URLSearchParams, key: string, max = 1000): string[] {
   const seen = new Set<string>();
   for (const raw of params.getAll(key)) {
     const value = raw.trim().slice(0, 160);

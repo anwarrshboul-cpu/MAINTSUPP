@@ -42,6 +42,8 @@ import {
   analyseRepeats,
   isOnJobsBoard,
   isRecurrenceBand,
+  NO_SITE_IN_SCOPE,
+  NO_SITE_IN_SCOPE_LABEL,
   RECURRENCE_BANDS,
   SPEND_TYPE_LABEL,
   SPEND_TYPES,
@@ -323,7 +325,10 @@ export function readDrillFilter(
   const chips: DrillChip[] = [];
   if (meterLabel) chips.push({ key: "meter", label: "Meter", value: meterLabel.replace(/_/g, " ") });
   else if (statuses.size) chips.push({ key: "status", label: "Status", value: `${statuses.size} selected` });
-  if (sites.size) chips.push({ key: "site", label: "Site", value: [...sites].join(", ") });
+  if (sites.size) {
+    const named = [...sites].map((id) => (id === NO_SITE_IN_SCOPE ? NO_SITE_IN_SCOPE_LABEL : id));
+    chips.push({ key: "site", label: "Site", value: named.join(", ") });
+  }
   if (priorities.size) chips.push({ key: "priority", label: "Priority", value: [...priorities].join(", ") });
   if (tiers.size) chips.push({ key: "tier", label: "Tier", value: [...tiers].join(", ") });
   if (engineers.size) chips.push({ key: "engineer", label: "Engineer", value: [...engineers].join(", ") });

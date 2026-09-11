@@ -29,9 +29,9 @@ export type CpSlice = {
 };
 
 /** The four states that make up the score. "Not required" is outside it. */
-export type CpStatusKey = "compliant" | "expiring" | "expired" | "missing";
+export type CpStateKey = "compliant" | "expiring" | "expired" | "missing";
 
-export type CpStatusCounts = Record<CpStatusKey, number>;
+export type CpStatusCounts = Record<CpStateKey, number>;
 
 /**
  * A register filter, as query parameters the Compliance register ALREADY
@@ -117,7 +117,7 @@ export type CpMetrics = {
     /** Records whose responsibility is unconfirmed or not the client's: outside the score. */
     excluded: number;
     /** A register filter per status, for the donut's segments and legend rows. */
-    filters: Record<CpStatusKey, CpRegisterFilter>;
+    filters: Record<CpStateKey, CpRegisterFilter>;
   };
   /** Worst compliant percentage first; at most eight, the eighth aggregating the rest. */
   types: CpTypeRing[];

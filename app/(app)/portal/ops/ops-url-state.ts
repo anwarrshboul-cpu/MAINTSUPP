@@ -120,7 +120,10 @@ export function useQueryState(): {
   const setParams = useCallback(
     (next: URLSearchParams, options: { push?: boolean } = {}) => {
       const query = next.toString();
-      const url = `${window.location.pathname}${query ? `?${query}` : ""}`;
+      /* The HASH travels too. Reports addresses its tabs by it (`#overview`),
+         and a filter change that dropped it turned a shared link to one tab
+         into a link to whichever tab the reader's browser remembered. */
+      const url = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
       if (options.push) window.history.pushState({}, "", url);
       else window.history.replaceState({}, "", url);
       window.dispatchEvent(new Event(URL_CHANGED));

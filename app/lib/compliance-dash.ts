@@ -54,7 +54,7 @@ import type {
   CpRegisterFilter,
   CpRenewalSlice,
   CpStatusCounts,
-  CpStatusKey,
+  CpStateKey,
   CpTypeRing,
 } from "./compliance-dash-contract";
 import { complianceCompletion, expiryStatus } from "./compliance-status";
@@ -65,6 +65,7 @@ import {
   type ComplianceRow,
 } from "./compliance-view";
 import { QUALITY_ARC } from "./dashboard-policy";
+import { drillSiteIds } from "./job-metrics";
 
 /**
  * WHETHER THE PRODUCT KNOWS WHICH REQUIREMENTS APPLY TO WHICH SITE TYPE.
@@ -105,14 +106,14 @@ const RENEWAL_SERIES = [
   CP_COLOURS.missing,
 ] as const;
 
-const STATUS_OF: Record<string, CpStatusKey | undefined> = {
+const STATUS_OF: Record<string, CpStateKey | undefined> = {
   Compliant: "compliant",
   "Expiring soon": "expiring",
   Expired: "expired",
   Missing: "missing",
 };
 
-const STATE_OF: Record<CpStatusKey, string> = {
+const STATE_OF: Record<CpStateKey, string> = {
   compliant: "Compliant",
   expiring: "Expiring soon",
   expired: "Expired",
@@ -184,7 +185,7 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     const key = STATUS_OF[row.state];
     if (key) counts[key] += 1;
   }
-  const scoreFilters: Record<CpStatusKey, CpRegisterFilter> = {
+  const scoreFilters: Record<CpStateKey, CpRegisterFilter> = {
     compliant: { ...SCORED, state: [STATE_OF.compliant] },
     expiring: { ...SCORED, state: [STATE_OF.expiring] },
     expired: { ...SCORED, state: [STATE_OF.expired] },
@@ -387,7 +388,9 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     portfolio: {
       id: input.portfolio.id,
       name: input.portfolio.name,
-      siteIds: input.portfolio.siteIds ?? [],
+      /* The drills' copy: an empty scope is `NO_SITE_IN_SCOPE`, not "no
+         narrowing", so a figure counted over no sites opens no rows. */
+      siteIds: drillSiteIds(input.portfolio.siteIds),
     },
     portfolios: input.portfolios,
     range: input.range,

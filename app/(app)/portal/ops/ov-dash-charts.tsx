@@ -227,7 +227,18 @@ export function ovSafeId(prefix: string, raw: string): string {
  * browser with a touch screen.
  */
 function useOvMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
+  /*
+   * Read synchronously where a window exists. Every chart here mounts on the
+   * client, after its block's payload arrives, so there is no server render to
+   * disagree with — and starting from `false` drew one frame of a 0% arc for a
+   * reader who has asked for no motion at all, before the effect caught up.
+   */
+  const [matches, setMatches] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(query).matches,
+  );
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const media = window.matchMedia(query);
@@ -1426,13 +1437,16 @@ export function AreaTrend({
   onSelect,
   ariaLabel,
   lineColour = "var(--ov-teal)",
+  areaColour,
   tipLines,
 }: {
   points: { label: string; pence: number }[];
   onSelect?: (point: { label: string; pence: number }, index: number) => void;
   ariaLabel: string;
-  /** The line, dots and wash colour — the Overview's teal unless a block names its own. */
+  /** The line and dot colour — the Overview's teal unless a block names its own. */
   lineColour?: string;
+  /** The wash under the line; the line's own colour unless a block names another. */
+  areaColour?: string;
   /** The tooltip's lines for a point, when the pounds and a share are not enough. */
   tipLines?: (point: { label: string; pence: number }, index: number, share: number) => string[];
 }): JSX.Element {
@@ -1500,8 +1514,8 @@ export function AreaTrend({
         >
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={lineColour} stopOpacity={0.34} />
-              <stop offset="100%" stopColor={lineColour} stopOpacity={0} />
+              <stop offset="0%" stopColor={areaColour ?? lineColour} stopOpacity={0.34} />
+              <stop offset="100%" stopColor={areaColour ?? lineColour} stopOpacity={0} />
             </linearGradient>
           </defs>
           {ticks.map((tick) => (

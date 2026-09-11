@@ -161,7 +161,12 @@ export async function GET(request: Request) {
     const { db, orgId } = guard.scope;
 
     const url = new URL(request.url);
-    const filters = parseComplianceFilters(url);
+    /* `scored` is cleared, whatever the address says. The dashboard's drills
+       add `scored=1` to confine the register to the score, and the score
+       leaves out every requirement whose duty holder is unconfirmed — which
+       is exactly, and only, what this queue lists. Honoured here it would
+       empty the queue the moment anyone arrived from a dashboard figure. */
+    const filters = { ...parseComplianceFilters(url), scored: false };
     const today = new Date();
     const rows = await registerRows(db, orgId, today);
     const filtered = filterComplianceRows(rows, filters, today);

@@ -59,7 +59,7 @@ import {
 } from "../../db/schema";
 import { closedJobSql, dateText, overdueOpenSql } from "./dashboard-aggregates";
 import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters";
-import { normalisePriority } from "./job-metrics";
+import { drillSiteIds, normalisePriority } from "./job-metrics";
 import { complianceCompletion } from "./compliance-status";
 import { readComplianceRegister } from "./compliance-register";
 
@@ -755,10 +755,11 @@ export async function loadOverviewMetrics(
     },
     /* For "All portfolios" the list is empty — nothing to narrow — unless the
        membership is site-restricted, when it is the scope, so a drill opens
-       the member's stores rather than the whole estate. */
+       the member's stores rather than the whole estate. A scope that resolved
+       to no sites at all is `NO_SITE_IN_SCOPE`, so its drills open nothing. */
     portfolio: chosen
-      ? { ...chosen, siteIds: siteIds ?? [] }
-      : { id: "all", name: "All portfolios", siteIds: siteIds ?? [] },
+      ? { ...chosen, siteIds: drillSiteIds(siteIds) }
+      : { id: "all", name: "All portfolios", siteIds: drillSiteIds(siteIds) },
     portfolios,
     openJobs,
     attentionSiteIds,

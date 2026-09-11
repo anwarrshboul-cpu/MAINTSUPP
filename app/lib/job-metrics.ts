@@ -518,6 +518,26 @@ export const NATURE_COLOUR: Record<NatureKey, string> = {
 export const UNASSIGNED_SITE_ID = "__unassigned__";
 export const UNASSIGNED_SITE_LABEL = "Unassigned site";
 
+/**
+ * A SITE ID NO SITE HAS — what a dashboard's drills carry when the portfolio
+ * its figures were counted over resolved to NO sites: a portfolio with no
+ * members, or none inside the member's site scope. Every figure is then zero,
+ * and a drill with no `site=` at all would open the whole estate under it.
+ * Unlike `UNASSIGNED_SITE_ID` it matches nothing, which is the point.
+ */
+export const NO_SITE_IN_SCOPE = "__no_site_in_scope__";
+export const NO_SITE_IN_SCOPE_LABEL = "No sites in scope";
+
+/**
+ * The `site=` values a dashboard payload hands its drills, from a resolved
+ * portfolio: `null` (nothing to narrow) is none, an empty list is the
+ * sentinel above, anything else is itself.
+ */
+export function drillSiteIds(siteIds: readonly string[] | null): string[] {
+  if (!siteIds) return [];
+  return siteIds.length ? [...siteIds] : [NO_SITE_IN_SCOPE];
+}
+
 /** The site key a job groups under, never null. */
 export function siteKeyOf(
   request: Pick<MaintenanceRequest, "siteId">,

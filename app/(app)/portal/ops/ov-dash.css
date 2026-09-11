@@ -646,6 +646,53 @@ body[data-theme] .ov-dash .ov-dash__control--select > select {
   cursor: pointer;
 }
 
+/*
+ * THE LIGHT SKIN'S FIELD RULE, OUT-RANKED RATHER THAN FOUGHT.
+ *
+ * `brand-overrides.css` carries `body[data-theme="light"] :is(.portal-main, …)
+ * :is(input, select, textarea):not([type="checkbox"]):not([type="radio"])
+ * :not(.live-board-toolbar *)` — (0,5,2) — and writes `background`, a
+ * shorthand, so on a light profile the header's portfolio select and the
+ * spend-window select lost their chevrons and took a light edge. The three
+ * `:not()`s here are always true of these selects, so they narrow nothing;
+ * they only make this (0,6,2), which wins in both themes whatever order the
+ * stylesheets load in. The Reports block's card selects use the same device.
+ */
+body[data-theme] .ov-dash :is(.ov-dash__control--select, .ov-card__link) > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
+  border-color: var(--ov-card-border);
+  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
+    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+}
+
+body[data-theme] .ov-dash .ov-dash__control--select > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
+  border: 0;
+  background-position: calc(100% - 8px) 50%, calc(100% - 3px) 50%;
+}
+
+/*
+ * On a phone the header wraps, and a panel anchored to the date pill's right
+ * edge opened past the screen's left edge (measured 4px at 390). Below 768 the
+ * panel anchors to the whole controls row instead, so it can never be wider
+ * than the block it opens in.
+ */
+@media (max-width: 767px) {
+  body[data-theme] .ov-dash .ov-dash__controls {
+    position: relative;
+  }
+
+  body[data-theme] .ov-dash .ov-dash__head .ov-dash__range {
+    position: static;
+  }
+
+  .ov-dash .ov-dash__range-panel {
+    inset-inline: 0;
+    min-inline-size: 0;
+  }
+}
+
 .ov-dash .ov-dash__icon {
   flex: none;
   color: var(--ov-text-2);
@@ -674,6 +721,13 @@ body[data-theme] .ov-dash .ov-dash__control--select > select {
 
 .ov-dash .ov-dash__range-label {
   font-variant-numeric: tabular-nums;
+}
+
+/* Out of layout while closed, in every engine. Chromium keeps a box for a
+   closed disclosure's content (never painted, but measured), and an engine
+   that let it reach the scroll width would push a phone page sideways. */
+.ov-dash .ov-dash__range:not([open]) > .ov-dash__range-panel {
+  display: none;
 }
 
 .ov-dash .ov-dash__range-panel {
