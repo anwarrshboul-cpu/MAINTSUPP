@@ -12,12 +12,17 @@
  *     sub-item, on the Jobs board — the population every dashboard counts;
  *   · SPEND is `spendLineOf`: `maintenance_requests.cost`, counted once the job
  *     is completed and dated by its completion day — the Overview spend trend's
- *     basis. The trend's monthly points are the Overview's own query
- *     (`loadSpendByMonth`, handed in by the route), so a month cannot read one
- *     figure there and another here;
- *   · the TYPE split is `spendTypeOf`, the rule the Reports page has always
- *     shown (Planned: compliance or tier ≥ 4; Projects: otherwise ≥ £1,000;
- *     Reactive: the rest). The schema has no job-type column;
+ *     basis — and converted to pence per job through `poundsToPence`. The
+ *     trend's monthly points are the Overview's own query (`loadSpendByMonth`,
+ *     handed in by the route), which adds the same per-job pence, so a month
+ *     cannot read one figure there and another here, not even by a penny;
+ *   · the TYPE split is the job's CANONICAL job type (`jobTypeBucketOf` over
+ *     `maintenance_requests.job_type_id` and the organisation's
+ *     `job_type_config`): one KPI per default type by its stable CODE —
+ *     reactive, planned, project — labelled with the type's current name;
+ *     custom types together as Other; no type as Unclassified. The inference
+ *     this replaced (compliance or tier ≥ 4 was "planned", £1,000 or more a
+ *     "project") was ruled out by the owner and is gone;
  *   · the ISSUE is `maintenance_requests.category`, the configured label set;
  *   · a REPEAT is `analyseRepeats` — the same function the Jobs page's `repeat=`
  *     and `recurrence=` filters run, so a drill lists exactly what was counted.
@@ -43,17 +48,24 @@ import type {
   RpSpendType,
   RpTrendPoint,
   RpTrendRange,
+  RpTypeBucket,
 } from "./reports-dash-contract";
 import {
   RECURRENCE_BANDS,
   REPEAT_WINDOW_DAYS,
-  SPEND_TYPES,
-  SPEND_TYPE_LABEL,
   analyseRepeats,
+  jobTypeBucketOf,
   repeatIssueKey,
   spendLineOf,
-  spendTypeOf,
 } from "./job-metrics";
+import {
+  JOB_TYPE_CODES,
+  OTHER_JOB_TYPES,
+  OTHER_JOB_TYPES_LABEL,
+  UNCLASSIFIED_JOB_TYPE,
+  UNCLASSIFIED_LABEL,
+  type JobType,
+} from "./job-type-contract";
 import { REPEAT_RATE_ARC } from "./dashboard-policy";
 
 /* ── Day arithmetic, on the calendar and in UTC ───────────────────────────── */
@@ -187,6 +199,8 @@ export type ReportsJob = {
   siteId: string | null;
   category: string | null;
   tier: number | null;
+  /** `maintenance_requests.job_type_id` — a `job_type_config` id, or null for Unclassified. */
+  jobTypeId?: string | null;
   /** Pounds, as the column holds it. */
   cost: number | null;
   /** `substr(dateText(completed_at), 1, 10)` — the Overview's own day expression. */
@@ -202,6 +216,12 @@ export type ReportsDashInput = {
   jobs: readonly ReportsJob[];
   /** Site names by id, for every site the organisation holds. */
   siteNames: ReadonlyMap<string, string>;
+  /**
+   * EVERY job type the organisation holds, deactivated ones included
+   * (`listJobTypes`) — so a retired type keeps its meaning, and its card is
+   * kept while it still has spend in the range.
+   */
+  jobTypes: readonly JobType[];
   /** The trend's monthly pence, from `loadSpendByMonth` — the Overview's query. */
   monthlySpend: ReadonlyMap<string, number>;
   now: Date;
@@ -305,13 +325,17 @@ function topFive(
 
 export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
   const { range, siteNames } = input;
+  /* Defended rather than trusted: an absent list is an organisation with no
+     types, where every typed job is "other" and nothing is dropped. */
+  const jobTypes: readonly JobType[] = input.jobTypes ?? [];
 
-  /* Every spend line, once — the basis of every pound below. */
+  /* Every spend line, once — the basis of every pound below — each in exactly
+     one of the five type buckets, by the job's canonical type. */
   const lines: SpendLine[] = [];
   for (const job of input.jobs) {
     const line = spendLineOf(job);
     if (!line) continue;
-    lines.push({ job, pence: line.pence, day: line.day, type: spendTypeOf(job) });
+    lines.push({ job, pence: line.pence, day: line.day, type: jobTypeBucketOf(job.jobTypeId, jobTypes) });
   }
 
   /* ── KPIs ───────────────────────────────────────────────────────────────── */
@@ -361,7 +385,12 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
           ? MONTH_LONG.format(at(start))
           : start.slice(0, 4);
 
-  const kpiFor = (key: RpKpi["key"], label: string, pick: (line: SpendLine) => boolean): RpKpi => {
+  const kpiFor = (
+    key: RpKpi["key"],
+    label: string,
+    pick: (line: SpendLine) => boolean,
+    type: JobType | null = null,
+  ): RpKpi => {
     const current = inRange.filter(pick);
     const previous = inPrevious.filter(pick);
     const pence = current.reduce((sum, line) => sum + line.pence, 0);
@@ -381,6 +410,12 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
     return {
       key,
       label,
+      jobTypeId: type?.id ?? null,
+      code: type?.code ?? null,
+      /* The drill names the type by its stable ID, never its words: a rename
+         must not break a link somebody bookmarked. */
+      drillType: type?.id ?? null,
+      active: type?.active ?? true,
       pence,
       jobs: current.length,
       previousPence,
@@ -389,16 +424,62 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
     };
   };
 
-  const kpis: RpKpi[] = [
-    kpiFor("total", range.currentMonth ? "This month" : "Total spend", () => true),
-    ...SPEND_TYPES.map((type) => kpiFor(type, SPEND_TYPE_LABEL[type], (line) => line.type === type)),
-  ];
-  const total = kpis[0];
-  const typed = kpis.slice(1);
-  const unclassified = {
-    pence: total.pence - typed.reduce((sum, kpi) => sum + kpi.pence, 0),
-    jobs: total.jobs - typed.reduce((sum, kpi) => sum + kpi.jobs, 0),
+  /*
+   * ONE CARD PER DEFAULT TYPE, IN CODE ORDER — reactive, planned, project —
+   * labelled with the type's CURRENT label, so a rename shows on the next read.
+   * `(organisation_id, code)` is unique, so a code names one type at most; the
+   * sort is only there to make that choice deterministic if it ever did not.
+   *
+   * A DEACTIVATED default type keeps its card while it has spend in the range:
+   * retiring a type hides it from new jobs, it does not delete the history filed
+   * under it. With nothing in the range its card is dropped, and the identity
+   * below still holds, because a card with no lines carries no pence.
+   */
+  const typeKpis: RpKpi[] = [];
+  for (const code of JOB_TYPE_CODES) {
+    const type = jobTypes
+      .filter((candidate) => candidate.code === code)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))[0];
+    if (!type) continue;
+    const kpi = kpiFor(code, type.label, (line) => line.type === code, type);
+    if (!type.active && kpi.jobs === 0) continue;
+    typeKpis.push(kpi);
+  }
+  const kpis: RpKpi[] = [kpiFor("total", range.currentMonth ? "This month" : "Total spend", () => true), ...typeKpis];
+
+  /*
+   * THE SPEND NO CARD CLAIMS, counted rather than derived by subtraction — so
+   * the identity Reactive + Planned + Project + Other + Unclassified = total is
+   * a CHECK, not an equation that holds by construction and proves nothing.
+   */
+  const bucketFor = (key: RpTypeBucket["key"]): RpTypeBucket => {
+    const current = inRange.filter((line) => line.type === key);
+    const previous = inPrevious.filter((line) => line.type === key);
+    const pence = current.reduce((sum, line) => sum + line.pence, 0);
+    const previousPence = previous.reduce((sum, line) => sum + line.pence, 0);
+    const typeLabels =
+      key === "other"
+        ? [
+            ...new Set(
+              current
+                .map((line) => jobTypes.find((type) => type.id === (line.job.jobTypeId ?? "").trim())?.label)
+                .filter((label): label is string => Boolean(label)),
+            ),
+          ].sort((left, right) => left.localeCompare(right, "en-GB"))
+        : [];
+    return {
+      key,
+      label: key === "other" ? OTHER_JOB_TYPES_LABEL : UNCLASSIFIED_LABEL,
+      drillType: key === "other" ? OTHER_JOB_TYPES : UNCLASSIFIED_JOB_TYPE,
+      pence,
+      jobs: current.length,
+      previousPence,
+      delta: deltaOf(pence, previousPence, range.comparedWith),
+      typeLabels,
+    };
   };
+  const other = bucketFor("other");
+  const unclassified = bucketFor("unclassified");
 
   /* ── Spend trend ────────────────────────────────────────────────────────── */
 
@@ -559,6 +640,7 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
       recurrenceBands: RECURRENCE_BANDS.map((band) => ({ key: band.key, label: band.label, maxDays: band.maxDays })),
     },
     kpis,
+    other,
     unclassified,
     sparkUnit,
     trend: {
@@ -593,9 +675,13 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
     },
     dataGaps: {
       costedJobs: inRange.length,
-      /* Zero under the shipped rule, which types every job — computed rather
-         than asserted, so a rule that can leave a job untyped shows here. */
+      /* Every job raised before job types existed is one of these, and nothing
+         guesses its type: the gap is reported, in jobs and in pounds, until
+         somebody classifies the work. */
       withoutType: unclassified.jobs,
+      withoutTypePence: unclassified.pence,
+      otherType: other.jobs,
+      otherTypePence: other.pence,
       withoutSite,
       withoutIssue,
     },
@@ -617,9 +703,12 @@ export function reconcileReportsDashboard(
   const failures: string[] = [];
   const [total, ...typed] = metrics.kpis;
   if (total) {
-    const typedPence = typed.reduce((sum, kpi) => sum + kpi.pence, 0) + metrics.unclassified.pence;
+    /* Reactive + Planned + Project + Other + Unclassified = total, to the penny. */
+    const typedPence =
+      typed.reduce((sum, kpi) => sum + kpi.pence, 0) + metrics.other.pence + metrics.unclassified.pence;
     if (typedPence !== total.pence) failures.push(`types ${typedPence} != total ${total.pence}`);
-    const typedJobs = typed.reduce((sum, kpi) => sum + kpi.jobs, 0) + metrics.unclassified.jobs;
+    const typedJobs =
+      typed.reduce((sum, kpi) => sum + kpi.jobs, 0) + metrics.other.jobs + metrics.unclassified.jobs;
     if (typedJobs !== total.jobs) failures.push(`typed jobs ${typedJobs} != total jobs ${total.jobs}`);
   }
   for (const kpi of metrics.kpis) {

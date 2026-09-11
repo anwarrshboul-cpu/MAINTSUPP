@@ -35,8 +35,9 @@
  */
 
 import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
-import { maintenanceGroupItems, maintenanceRequests, sites } from "../../db/schema";
+import { jobTypeConfig, maintenanceGroupItems, maintenanceRequests, sites } from "../../db/schema";
 import { DEFAULT_MEASURE, type CohortMeasure } from "./overview-meters";
+import { isJobTypeCode, type JobTypeCode } from "./job-type-contract";
 import {
   JOBS_BOARD_KEY,
   NATURE_KEYS,
@@ -194,17 +195,46 @@ export function resolveWindow(
 export const NOT_RECORDED_KEY = "__not_recorded__";
 
 /**
- * PLANNED VERSUS REACTIVE, DEFINED ONCE.
+ * A JOB OF ONE CANONICAL TYPE, BY THE TYPE'S STABLE CODE — in SQL.
  *
- * The board has no "is this planned?" column, so planned work is inferred:
- * anything whose category names compliance, or anything at tier 4 or above.
- * That inference lives HERE rather than in the aggregate that draws the chart,
- * because the chart's segments are now tappable — a reader who taps `Planned`
- * gets a filtered page, and the rule that decided the segment's height has to
- * be the same rule that decides which jobs come back. Two copies of it would
- * mean a bar of 30 that filters to 27 with no explanation.
+ * A job's type is `maintenance_requests.job_type_id`, the id of one of its
+ * organisation's `job_type_config` rows. This asks the CONFIGURATION which
+ * type carries the code rather than spelling out the seeded `jt_<org>_<code>`
+ * id, so it holds for any row that carries the code, and a renamed type is
+ * still the same type. Correlated on the OUTER row's organisation, so another
+ * tenant's type can never vouch for this one's job, and `exists` rather than
+ * `in (select …)` for the NULL trapdoor `unassignedSiteCondition` describes.
+ *
+ * The code reaches the statement as a literal, not a bound variable — the same
+ * arrangement as `jobsBoardCondition`, so the ~100-variable ceiling several
+ * statements chunk against is not moved — and it is checked against the three
+ * known codes first, so nothing but `reactive`, `planned` or `project` can
+ * ever be written into the SQL that way. A job with no type matches no code.
  */
-export const plannedCondition = sql`(lower(coalesce(${maintenanceRequests.category}, '')) like '%compliance%' or ${maintenanceRequests.tier} >= 4)`;
+export function jobTypeCodeCondition(code: JobTypeCode): SQL {
+  if (!isJobTypeCode(code)) throw new Error(`Unknown job type code: ${String(code)}`);
+  return sql`exists (select 1 from ${jobTypeConfig} where ${jobTypeConfig.id} = ${
+    maintenanceRequests.jobTypeId
+  } and ${jobTypeConfig.organisationId} = ${maintenanceRequests.organisationId} and ${
+    jobTypeConfig.code
+  } = ${sql.raw(`'${code}'`)})`;
+}
+
+/**
+ * PLANNED VERSUS REACTIVE, DEFINED ONCE — AND NO LONGER GUESSED.
+ *
+ * Planned is the job type whose stable code is `planned`; reactive is the one
+ * whose code is `reactive`. They used to be an inference — a category naming
+ * compliance, or tier 4 and above, was "planned" and everything else
+ * "reactive" — and the owner ruled that out: a job's type is now a real field,
+ * and a job with no type is Unclassified, which is neither. The rule lives
+ * HERE rather than in the aggregate that draws the chart, because the chart's
+ * segments are tappable — a reader who taps `Planned` gets a filtered page, and
+ * the rule that decided the segment's height has to be the rule that decides
+ * which jobs come back. Two copies would mean a bar of 30 that filters to 27.
+ */
+export const plannedCondition = jobTypeCodeCondition("planned");
+export const reactiveCondition = jobTypeCodeCondition("reactive");
 
 /**
  * WHICH DATE PUTS A JOB IN THE COHORT — the master prompt §1.1.
@@ -660,14 +690,18 @@ export function dimensionConditions(
   }
 
   /*
-   * Nature. Selecting both is the same question as selecting neither, so the
-   * pair collapses to no condition rather than to `planned AND reactive`,
-   * which would return nothing and read as a broken filter.
+   * Nature — the job's canonical TYPE, by code. OR within the dimension, like
+   * every other: both selected is "planned or reactive", never `planned AND
+   * reactive`, which would return nothing and read as a broken filter. It is
+   * no longer "no condition", because the two are no longer a partition: a
+   * Project, a custom type or an Unclassified job is neither, and reading
+   * "reactive" as "not planned" would have classified every untyped job.
    */
-  if (filters.natures.length === 1) {
-    conditions.push(
-      filters.natures[0] === "planned" ? plannedCondition : sql`not ${plannedCondition}`,
+  if (filters.natures.length) {
+    const clause = anyOf(
+      filters.natures.map((nature) => (nature === "planned" ? plannedCondition : reactiveCondition)),
     );
+    if (clause) conditions.push(clause);
   }
 
   /*

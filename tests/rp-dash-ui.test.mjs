@@ -65,15 +65,26 @@ const money = await importSlice(chartsSource, "const RP_POUNDS_WHOLE", "/* ─�
 
 test("a spend drill sends exactly the window and keys its figure was counted with", () => {
   const range = { from: "2026-09-01", to: "2026-09-30" };
+  /*
+   * RE-POINTED 2026-09-12. `rpKpiQuery`'s first argument is now the figure's
+   * stable job type TOKEN (the payload's `drillType`) rather than the KPI key:
+   * null for the total, which names no type, and the type's id for a card —
+   * so renaming a type cannot change, or break, the link.
+   */
   assert.equal(
-    drills.rpKpiQuery("total", range),
+    drills.rpKpiQuery(null, range),
     "hasCost=1&measure=completed&period=custom&from=2026-09-01&to=2026-09-30",
     "the total card: completed cost inside the range, and nothing else",
   );
   assert.equal(
-    drills.rpKpiQuery("reactive", range),
-    "hasCost=1&measure=completed&period=custom&from=2026-09-01&to=2026-09-30&type=reactive",
-    "a type card adds its type",
+    drills.rpKpiQuery("jt_org-1_reactive", range),
+    "hasCost=1&measure=completed&period=custom&from=2026-09-01&to=2026-09-30&type=jt_org-1_reactive",
+    "a type card adds its type's stable id",
+  );
+  assert.equal(
+    drills.rpKpiQuery("__unclassified__", range),
+    "hasCost=1&measure=completed&period=custom&from=2026-09-01&to=2026-09-30&type=__unclassified__",
+    "and the Unclassified link its token",
   );
   assert.equal(
     drills.rpTrendQuery({ from: "2026-08-01", to: "2026-08-31" }),
@@ -114,11 +125,12 @@ test("a repeat drill sends the raised-in-range window and its one dimension", ()
 test("the portfolio rides along as its sites, unless the figure names a site itself", () => {
   const range = { from: "2026-09-01", to: "2026-09-30" };
   const sites = ["store-a", "store-b"];
-  assert.match(drills.rpKpiQuery("total", range, sites), /&site=store-a%7Cstore-b$/);
+  /* RE-POINTED 2026-09-12: the total card's type token is null (see above). */
+  assert.match(drills.rpKpiQuery(null, range, sites), /&site=store-a%7Cstore-b$/);
   assert.match(drills.rpRepeatQuery(range, sites), /&site=store-a%7Cstore-b$/);
   assert.match(drills.rpRecurrenceQuery("weekly", range, sites), /&site=store-a%7Cstore-b$/);
   assert.match(drills.rpRepeatIssueQuery(["HVAC"], range, sites), /&site=store-a%7Cstore-b$/);
-  assert.equal(drills.rpKpiQuery("total", range, []), drills.rpKpiQuery("total", range), "All portfolios sends no site at all");
+  assert.equal(drills.rpKpiQuery(null, range, []), drills.rpKpiQuery(null, range), "All portfolios sends no site at all");
   assert.doesNotMatch(drills.rpSiteBarQuery("store-a", range), /store-b/, "a site bar is never widened to the portfolio");
   assert.equal(drills.rpJobsQuery([["from", ""], ["to", "2026-09-30"]]), "to=2026-09-30", "an empty value is dropped, not sent blank");
 });
@@ -126,8 +138,12 @@ test("the portfolio rides along as its sites, unless the figure names a site its
 test("every key a drill sends is one the Jobs board reads — and it reads them as meant", async () => {
   const { readDrillFilter, DRILL_KEYS } = await import("../app/(app)/portal/board-drill-filter.ts");
   const range = { from: "2026-09-01", to: "2026-09-30" };
+  /* RE-POINTED 2026-09-12: a type card now sends its type's id, and the two
+     buckets no card draws send their tokens — each still a `type=` the board reads. */
   const queries = [
-    drills.rpKpiQuery("planned", range, ["store-a"]),
+    drills.rpKpiQuery("jt_org-1_planned", range, ["store-a"]),
+    drills.rpKpiQuery("__other__", range),
+    drills.rpKpiQuery("__unclassified__", range),
     drills.rpTrendQuery(range),
     drills.rpSiteBarQuery("store-a", range),
     drills.rpRepeatQuery(range),
@@ -144,7 +160,7 @@ test("every key a drill sends is one the Jobs board reads — and it reads them 
   }
   const chips = (query) =>
     readDrillFilter(new URLSearchParams(query), new Date("2026-09-11T12:00:00Z")).chips.map((chip) => chip.key);
-  assert.deepEqual(chips(drills.rpKpiQuery("planned", range)), ["type", "hasCost", "period"]);
+  assert.deepEqual(chips(drills.rpKpiQuery("jt_org-1_planned", range)), ["type", "hasCost", "period"]);
   assert.deepEqual(chips(drills.rpRecurrenceQuery("monthly", range)), ["recurrence", "period"]);
   assert.deepEqual(chips(drills.rpRepeatIssueQuery(["HVAC"], range)), ["label", "repeat", "period"]);
 });
@@ -273,6 +289,18 @@ test("the total card names what the four types and Unclassified add up to", () =
   const code = codeOnly(blockSource);
   assert.match(code, /Unclassified \$\{rpPounds\(unclassified\.pence\)\}/);
   assert.match(code, /title=\{isTotal \? breakdown : ovPoundsExact\(kpi\.pence\)\}/);
+  /* 2026-09-12: the type cards are named by their CURRENT labels, and Other
+     joins the breakdown — the five figures shown add up to the one on the card. */
+  assert.match(code, /\.map\(\(kpi\) => `\$\{kpi\.label\} \$\{rpPounds\(kpi\.pence\)\}`\)/);
+  assert.match(code, /\$\{other\.label\} \$\{rpPounds\(other\.pence\)\}/);
+});
+
+test("Other and Unclassified are never dropped: each is drillable under the KPI row", () => {
+  const code = codeOnly(blockSource);
+  assert.match(code, /const typeGaps = \[unclassified, other\]\.filter\(\(bucket\) => bucket\.jobs > 0\);/);
+  assert.match(code, /const query = rpKpiQuery\(bucket\.drillType, scope, portfolioSites\);/, "by the bucket's stable token");
+  assert.match(code, /const query = rpKpiQuery\(kpi\.drillType, scope, portfolioSites\);/, "and each card by its type's id");
+  assert.match(code, /project: "var\(--rp-projects\)"/, "the accent follows the stable code, not the label");
 });
 
 test("no table, no text list, no sample figure", () => {
@@ -447,8 +475,11 @@ test("every drill opens exactly the jobs, and the pounds, its figure counted", a
     const metrics = await (await fetch(`${BASE}/api/reports/metrics${search ? `?${search}` : ""}`, { headers })).json();
     const scope = { from: metrics.range.from, to: metrics.range.to };
     const sites = metrics.portfolio.siteIds;
+    /* RE-POINTED 2026-09-12: each card drills by its payload `drillType`, and
+       the Other / Unclassified buckets are figures with drills of their own. */
     const cases = [
-      ...metrics.kpis.map((kpi) => [`KPI ${kpi.key}`, drills.rpKpiQuery(kpi.key, scope, sites), kpi.jobs, kpi.pence]),
+      ...metrics.kpis.map((kpi) => [`KPI ${kpi.key}`, drills.rpKpiQuery(kpi.drillType, scope, sites), kpi.jobs, kpi.pence]),
+      ...[metrics.other, metrics.unclassified].map((bucket) => [`type ${bucket.key}`, drills.rpKpiQuery(bucket.drillType, scope, sites), bucket.jobs, bucket.pence]),
       ...metrics.trend.points.map((point) => [`trend ${point.month}`, drills.rpTrendQuery(point, sites), point.jobs, point.pence]),
       ...metrics.topSites.rows.map((row) => [`site ${row.name}`, drills.rpSiteBarQuery(row.siteId, metrics.topSites), row.jobs, row.pence]),
       ["repeat", drills.rpRepeatQuery(scope, sites), metrics.repeat.repeatJobs, metrics.repeat.spendPence],

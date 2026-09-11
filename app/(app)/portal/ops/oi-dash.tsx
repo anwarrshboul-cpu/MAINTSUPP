@@ -140,11 +140,13 @@ const TIER_COLOURS: readonly string[] = [
 ];
 
 
+/* By the job type's stable CODE, as the Reports block colours them — a renamed
+   type keeps its tone. */
 const KPI_TONE: Record<RpKpi["key"], OiTone> = {
   total: "primary",
   reactive: "orange",
   planned: "blue",
-  projects: "secondary",
+  project: "secondary",
 };
 
 /** Recurrence by urgency: a weekly repeat needs attention, a rare one does not. */
@@ -958,7 +960,7 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
   const { data, error, reload } = query;
   const titleId = "oi-section-spend";
   const subtitle =
-    "Completed spend from the Reports page — the Reactive / Planned / Projects split, where it goes, and the issues that keep coming back.";
+    "Completed spend from the Reports page — split by job type, where it goes, and the issues that keep coming back.";
 
   if (!data) {
     return (
@@ -977,6 +979,14 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
     go: () => onJobs(jobsQuery),
   });
   const totalPence = kpis.find((kpi) => kpi.key === "total")?.pence ?? 0;
+  /* The total tile's hover names all five buckets, as the Reports block's does:
+     the type tiles by their current labels, then Other and Unclassified, which
+     have no tile of their own and are never dropped from the sum. */
+  const typeBreakdown = [
+    ...kpis.filter((kpi) => kpi.key !== "total").map((kpi) => `${kpi.label} ${ovPoundsExact(kpi.pence)}`),
+    `${data.other.label} ${ovPoundsExact(data.other.pence)}`,
+    `${data.unclassified.label} ${ovPoundsExact(data.unclassified.pence)}`,
+  ].join(" · ");
 
   /* ── The trend ─────────────────────────────────────────────────────────── */
 
@@ -1068,7 +1078,8 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
 
       <div className="oi-kpis">
         {kpis.map((kpi) => {
-          const destination = drillTo(rpKpiQuery(kpi.key, scope, sites));
+          /* The Reports block's own drill: the type's stable id, never its words. */
+          const destination = drillTo(rpKpiQuery(kpi.drillType, scope, sites));
           const caption =
             kpi.key === "total"
               ? range.label
@@ -1080,12 +1091,14 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
               key={kpi.key}
               label={kpi.label}
               value={rpPounds(kpi.pence)}
-              title={ovPoundsExact(kpi.pence)}
+              title={kpi.key === "total" ? `${ovPoundsExact(kpi.pence)} — ${typeBreakdown}` : ovPoundsExact(kpi.pence)}
               caption={caption}
               tone={KPI_TONE[kpi.key]}
               href={destination.href}
               onActivate={destination.go}
-              ariaLabel={`${kpi.label}: ${rpPounds(kpi.pence)} from ${rpJobs(kpi.jobs)} in ${range.label}. Opens the jobs with completed cost behind it.`}
+              ariaLabel={`${kpi.label}: ${rpPounds(kpi.pence)} from ${rpJobs(kpi.jobs)} in ${range.label}.${
+                kpi.key === "total" ? ` ${typeBreakdown}.` : ""
+              } Opens the jobs with completed cost behind it.`}
             />
           );
         })}

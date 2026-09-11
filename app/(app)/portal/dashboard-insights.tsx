@@ -42,7 +42,8 @@ import {
 } from "./period-model";
 import { isClosedRequest, isOpenRequest } from "./dashboard-meters";
 import { TrendChart } from "./dashboard-analytics";
-import { spendTypeOf, type SpendType } from "../../lib/job-metrics";
+import { jobTypeBucketOf, type JobTypeBucket } from "../../lib/job-metrics";
+import type { JobType } from "../../lib/job-type-contract";
 import {
   CONTRACTOR_SPEND_BASIS,
   attributeContractorWork,
@@ -101,21 +102,26 @@ const TONE_TEXT = {
 /** De-emphasis only — too low in chroma to identify anything. */
 const MUTED = "#6f8793";
 
-export type SpendClass = SpendType;
+export type SpendClass = JobTypeBucket;
 
 /**
- * How a job's spend is classified.
+ * How a job's spend is classified — by its CANONICAL job type.
  *
  * Exported and shared, because the Reports page shows the same split in more
  * than one place. Two copies of this rule would drift, and a page that
  * contradicts itself is worse than one that only tells you half the story.
  *
- * The rule itself now lives in `spendTypeOf` (`app/lib/job-metrics.ts`), so the
- * server's Reports metrics and the Jobs page's `type=` filter read the very
- * same one; this name survives for the widgets that already call it.
+ * The rule itself is `jobTypeBucketOf` (`app/lib/job-metrics.ts`) — the job's
+ * `jobTypeId` read against the organisation's job types: reactive / planned /
+ * project by the type's stable code, "other" for a custom type, "unclassified"
+ * for none — so the server's Reports metrics, the Jobs page's `type=` filter
+ * and these widgets read the very same one. It used to be an inference
+ * (compliance or tier 4+ was planned, £1,000+ a project); the owner ruled that
+ * out, and nothing here guesses a type any more. Without `types`, the three
+ * defaults are still recognised by their deterministic ids.
  */
-export function classifySpend(request: MaintenanceRequest): SpendClass {
-  return spendTypeOf(request);
+export function classifySpend(request: MaintenanceRequest, types?: readonly JobType[] | null): SpendClass {
+  return jobTypeBucketOf((request as MaintenanceRequest & { jobTypeId?: string | null }).jobTypeId, types);
 }
 
 /**
@@ -973,15 +979,28 @@ export function ComplianceExpiryTimeline({
  * Two series, so a legend plus a value label on each stack — colour never
  * carries the distinction on its own. A rising reactive share is the clearest
  * single signal that maintenance is slipping out of control.
+ *
+ * BY THE JOB'S CANONICAL TYPE (`classifySpend`): the orange stack is jobs whose
+ * type is Reactive, the blue one jobs whose type is Planned or Project. A job
+ * with no type, or a custom one, is in NEITHER — it is counted and said in the
+ * hint and each column's hover, never drawn as reactive by elimination, which
+ * is what the old compliance-or-tier inference did to every untyped job.
  */
 export function ReactiveVsPlanned({
   requests,
   now: clock,
   period = DEFAULT_PANEL_PERIOD,
   loading = false,
+  jobTypes = null,
 }: {
   requests: MaintenanceRequest[];
   now: number;
+  /**
+   * The organisation's job types, so a job is read against the current
+   * configuration. Optional: without them the three default types are still
+   * recognised by their deterministic ids.
+   */
+  jobTypes?: readonly JobType[] | null;
   /**
    * Whether the rows have arrived yet. `InsightPanel` has rendered a
    * "Loading…" state since it was written; the panels simply were not told,
@@ -1011,24 +1030,26 @@ export function ReactiveVsPlanned({
       label: column.label,
       reactive: 0,
       planned: 0,
+      unclassified: 0,
     }));
 
     requests.forEach((request, index) => {
       const at = bucketFor(columns, stamps[index]);
       if (at < 0) return;
       // The same rule the spend tiles use, so the two cannot disagree. Note
-      // the non-reactive stack HOLDS TWO CLASSES: "planned" (compliance work,
-      // tier 4+) and "projects" (£1,000-plus jobs). The legend and the hover
-      // text say so — a £1,142 emergency repair is in the teal stack because
-      // it is large, not because anyone scheduled it, and a bar labelled
-      // simply "planned" would claim otherwise.
-      if (classifySpend(request) === "reactive") slots[at].reactive += 1;
-      else slots[at].planned += 1;
+      // the non-reactive stack HOLDS TWO TYPES — Planned and Project — and the
+      // legend and the hover text say so. A job with no type, or a custom
+      // type, is neither: it is counted apart and named, never drawn.
+      const type = classifySpend(request, jobTypes);
+      if (type === "reactive") slots[at].reactive += 1;
+      else if (type === "planned" || type === "project") slots[at].planned += 1;
+      else slots[at].unclassified += 1;
     });
     return slots;
-  }, [clock, period, requests]);
+  }, [clock, period, requests, jobTypes]);
 
   const hasData = months.some((slot) => slot.reactive + slot.planned > 0);
+  const untyped = months.reduce((sum, slot) => sum + slot.unclassified, 0);
 
   if (!hasData) {
     return (
@@ -1037,17 +1058,22 @@ export function ReactiveVsPlanned({
         title="Reactive vs planned"
         hint="The share of work that was not scheduled"
         /*
-         * Two situations, two sentences. A period the control cannot read is
-         * not an empty period; one message for both would tell one of the two
-         * readers something untrue.
+         * Three situations, three sentences. A period the control cannot read
+         * is not an empty period, and a period full of jobs nobody has given a
+         * type is not an empty one either; one message for all three would
+         * tell two of the readers something untrue.
          */
         empty={{
-          message: window.recognised
-            ? `Nothing in this period — ${window.label}`
-            : "No period selected",
-          hint: window.recognised
-            ? "Once work is logged in this window, this shows whether the reactive share is rising."
-            : window.reason,
+          message: !window.recognised
+            ? "No period selected"
+            : untyped > 0
+              ? `No job type recorded — ${window.label}`
+              : `Nothing in this period — ${window.label}`,
+          hint: !window.recognised
+            ? window.reason
+            : untyped > 0
+              ? `${plural(untyped, "job")} in this window ${untyped === 1 ? "has" : "have"} no reactive, planned or project type yet. Once jobs are given a type, this shows whether the reactive share is rising.`
+              : "Once work is logged in this window, this shows whether the reactive share is rising.",
         }}
       >
         <span />
@@ -1070,7 +1096,9 @@ export function ReactiveVsPlanned({
   return (
     <InsightPanel
       title="Reactive vs planned"
-      hint={`${reactiveShare}% of the work in ${window.label} was reactive`}
+      hint={`${reactiveShare}% of the typed work in ${window.label} was reactive${
+        untyped > 0 ? ` · ${plural(untyped, "job")} with no reactive, planned or project type not shown` : ""
+      }`}
     >
       <div className="insight-columns insight-columns--stacked">
         {months.map((slot) => {
@@ -1079,7 +1107,9 @@ export function ReactiveVsPlanned({
             <div
               key={slot.key}
               className="insight-columns__slot"
-              title={`${slot.label}: ${plural(slot.reactive, "reactive job")}, ${plural(slot.planned, "planned or project job")}`}
+              title={`${slot.label}: ${plural(slot.reactive, "reactive job")}, ${plural(slot.planned, "planned or project job")}${
+                slot.unclassified ? `, ${plural(slot.unclassified, "job")} with no reactive, planned or project type` : ""
+              }`}
             >
               <span className="insight-columns__value">{total || ""}</span>
               <div className="insight-columns__track">
@@ -1605,9 +1635,9 @@ export function SiteAttention({
  * stores, would be invention.
  *
  * UNITS. `annualBudgetPence` is pence, as all money in `sites` is;
- * `request.cost` is POUNDS, which is why `classifySpend` compares it against
- * 1000 for "projects" and why the helper named `money()` takes pounds. The
- * conversion happens once, here, rather than being repeated at each use.
+ * `request.cost` is POUNDS, which is why the helper named `money()` takes
+ * pounds. The conversion happens once, here, rather than being repeated at
+ * each use.
  *
  * A site with no budget set is NOT treated as a budget of zero — that would
  * report every unbudgeted site as infinitely over. It is counted separately and

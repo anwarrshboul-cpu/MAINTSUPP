@@ -67,6 +67,7 @@ import {
   jobScopeConditionForWindow,
   liveWorkOrderCondition,
   plannedCondition,
+  reactiveCondition,
   NOT_RECORDED_KEY,
   type PeriodWindow,
   shiftDay,
@@ -1038,16 +1039,21 @@ export type TrendBucket = {
 };
 
 /**
- * PLANNED WORK IS A CATEGORY OR A TIER, NOT A GUESS.
+ * PLANNED AND REACTIVE ARE JOB TYPES, NOT A GUESS.
  *
- * The same rule `classifySpend` applies on the Reports page: a job whose
- * category mentions compliance, or whose tier is 4 or above, is planned. Kept
- * as SQL here so the buckets are counted rather than downloaded, and named in
- * one place so the two pages cannot disagree.
+ * The same rule `classifySpend` applies on the Reports page: the job's
+ * canonical type, by its stable code — `planned`, `reactive`. It used to be an
+ * inference from the category (compliance) or the tier (4 and above), with
+ * "reactive" meaning "everything else"; the owner ruled that out, so a job
+ * with no type, a Project or a custom type is in NEITHER stack rather than
+ * being counted as reactive by elimination. Kept as SQL here so the buckets are
+ * counted rather than downloaded, and named in one place so the pages cannot
+ * disagree.
  */
 /* The rule itself lives in `dashboard-filters`, because tapping the segment now
    filters by it and a second copy could drift from the one the chart drew. */
 const plannedSql = plannedCondition;
+const reactiveSql = reactiveCondition;
 
 /**
  * Five buckets across the selected period, boundaries following the period
@@ -1086,7 +1092,7 @@ export async function loadReactiveVsPlanned(
       maintenanceRequests.requestedAt
     } < ${bucket.endExclusive})`;
     selection[`p${index}`] = sql<number>`sum(case when ${inBucket} and ${plannedSql} then 1 else 0 end)`;
-    selection[`r${index}`] = sql<number>`sum(case when ${inBucket} and not ${plannedSql} then 1 else 0 end)`;
+    selection[`r${index}`] = sql<number>`sum(case when ${inBucket} and ${reactiveSql} then 1 else 0 end)`;
   });
 
   const [row] = bounds.length

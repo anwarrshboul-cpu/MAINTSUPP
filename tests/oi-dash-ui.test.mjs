@@ -298,7 +298,10 @@ test("section 2 reuses the Reports block's own drill builders, exactly as it cal
     page,
     /import \{\s*rpJobsQuery,\s*rpKpiQuery,\s*rpRecurrenceQuery,\s*rpRepeatIssueQuery,\s*rpRepeatQuery,\s*rpRepeatSiteQuery,\s*rpSiteBarQuery,\s*rpTrendQuery,\s*\} from "\.\/rp-dash";/,
   );
-  assert.match(page, /rpKpiQuery\(kpi\.key, scope, sites\)/);
+  /* RE-POINTED 2026-09-12: the Reports block's KPI drill now takes the
+     figure's stable job type token (`drillType` — the type's id, null for the
+     total), so section 2 passes exactly that, as the block does. */
+  assert.match(page, /rpKpiQuery\(kpi\.drillType, scope, sites\)/);
   assert.match(page, /rpTrendQuery\(source, sites\)/);
   assert.match(page, /rpSiteBarQuery\(row\.siteId, topSites\)/);
   assert.match(page, /rpSiteBarQuery\("__unassigned__", topSites\)/, "No site, in the View all");

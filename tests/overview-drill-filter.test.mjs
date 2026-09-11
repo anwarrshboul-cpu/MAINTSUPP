@@ -131,28 +131,47 @@ test("a contractor filter accepts both shapes the Overview keys by", () => {
   assert.equal(byName.matches(job({ contractor: "Saed Electrical" })), false);
 });
 
-test("nature is the same inference the server makes", async () => {
+test("nature is the same rule the server applies", async () => {
   /*
-   * The rule, from `plannedCondition`: a category naming compliance, or tier 4
-   * and above. Pinned against the server's own source so the two cannot drift —
-   * a board that disagreed with the chart segment that filtered it is exactly
-   * the class of defect this whole page was rebuilt to remove.
+   * RE-POINTED 2026-09-12. The rule was an INFERENCE — a category naming
+   * compliance, or tier 4 and above, was "planned", everything else
+   * "reactive" — and the owner ruled it out. Nature is now the job's canonical
+   * TYPE by its stable code: `plannedCondition` / `reactiveCondition` ask the
+   * organisation's `job_type_config` which type carries the code, and the board
+   * reads the same code off the job's `jobTypeId`. The contract this test
+   * exists for is unchanged — the board and the server's rule cannot drift —
+   * so it is still pinned against the server's own source, and the retired
+   * inference is pinned OUT: a board that disagreed with the chart segment that
+   * filtered it is exactly the class of defect this page was rebuilt to remove.
    */
   const filters = await read("app/lib/dashboard-filters.ts");
+  assert.match(filters, /export const plannedCondition = jobTypeCodeCondition\("planned"\);/);
+  assert.match(filters, /export const reactiveCondition = jobTypeCodeCondition\("reactive"\);/);
   assert.match(
     filters,
-    /export const plannedCondition = sql`\(lower\(coalesce\(\$\{maintenanceRequests\.category\}, ''\)\) like '%compliance%' or \$\{maintenanceRequests\.tier\} >= 4\)`/,
-    "the server rule is still category-like-compliance OR tier >= 4",
+    /\$\{jobTypeConfig\.id\} = \$\{\s*maintenanceRequests\.jobTypeId\s*\} and \$\{jobTypeConfig\.organisationId\} = \$\{maintenanceRequests\.organisationId\} and \$\{\s*jobTypeConfig\.code\s*\} = \$\{sql\.raw\(`'\$\{code\}'`\)\}/,
+    "the server rule is the job's type, by code, inside its own organisation",
   );
+  assert.doesNotMatch(filters, /like '%compliance%'/, "and the category inference is gone");
 
+  const PLANNED = "jt_org-1_planned";
+  const REACTIVE = "jt_org-1_reactive";
   const planned = q("nature=planned");
-  assert.equal(planned.matches(job({ category: "Fire compliance" })), true);
-  assert.equal(planned.matches(job({ category: "Lights", tier: 4 })), true);
-  assert.equal(planned.matches(job({ category: "Lights", tier: 2 })), false);
+  assert.equal(planned.matches(job({ jobTypeId: PLANNED })), true);
+  assert.equal(planned.matches(job({ category: "Fire compliance" })), false, "a compliance category with no type is not planned");
+  assert.equal(planned.matches(job({ category: "Lights", tier: 4 })), false, "nor is a tier-4 job");
+  assert.equal(planned.matches(job({ jobTypeId: REACTIVE, tier: 4 })), false, "the type decides, not the tier");
 
   const reactive = q("nature=reactive");
-  assert.equal(reactive.matches(job({ category: "Lights", tier: 2 })), true);
-  assert.equal(reactive.matches(job({ category: "Compliance check" })), false);
+  assert.equal(reactive.matches(job({ jobTypeId: REACTIVE })), true);
+  assert.equal(reactive.matches(job({ category: "Lights", tier: 2 })), false, "an untyped job is Unclassified, not reactive by elimination");
+  assert.equal(reactive.matches(job({ jobTypeId: "jt_org-1_project" })), false, "a Project is neither");
+
+  /* With the organisation's types handed in, a type is read by its row, so a
+     planned type keeps its meaning whatever it is called. */
+  const types = [{ id: "jt_custom", code: "planned", label: "Scheduled works", colourHex: null, sortOrder: 1, active: true }];
+  const configured = readDrillFilter(new URLSearchParams("nature=planned"), NOW, { jobTypes: types });
+  assert.equal(configured.matches(job({ jobTypeId: "jt_custom" })), true);
 });
 
 test("the stage axis filters, and `open` is not a synonym for in progress", () => {

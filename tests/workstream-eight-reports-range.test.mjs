@@ -388,8 +388,17 @@ test("the Reports spend split is classified in exactly one place", async () => {
    * runs where the figure is counted.
    */
   const metrics = await read("app/lib/reports-dash.ts");
-  assert.match(metrics, /type: spendTypeOf\(job\)/);
-  assert.match(metrics, /SPEND_TYPES\.map\(\(type\) => kpiFor\(type, SPEND_TYPE_LABEL\[type\], \(line\) => line\.type === type\)\)/,
+  /*
+   * RE-POINTED 2026-09-12. The shared classifier is now the job's CANONICAL
+   * job type — `jobTypeBucketOf(job.jobTypeId, jobTypes)` — since the owner
+   * ruled the inference (and with it `spendTypeOf` / `SPEND_TYPES`) out. Each
+   * type KPI is still cut by that one classifier: one card per default type
+   * CODE, labelled from the configuration, picking exactly the lines the
+   * classifier put in that code.
+   */
+  assert.match(metrics, /type: jobTypeBucketOf\(job\.jobTypeId, jobTypes\)/);
+  assert.match(metrics, /for \(const code of JOB_TYPE_CODES\) \{/);
+  assert.match(metrics, /kpiFor\(code, type\.label, \(line\) => line\.type === code, type\)/,
     "each type KPI is cut by the shared classifier");
 
   /*

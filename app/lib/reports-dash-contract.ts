@@ -12,9 +12,22 @@
  * query — so a month reads the same on both pages. Every job it counts is a
  * live row on the Jobs board (`liveWorkOrderCondition`). Money is integer PENCE
  * throughout; the component formats, it never divides.
+ *
+ * ── THE TYPE SPLIT IS THE JOB'S CANONICAL JOB TYPE ───────────────────────
+ *
+ * Reactive / Planned / Project are the three DEFAULT job types, matched by
+ * their stable `code` (`job-type-contract.ts`), never inferred from a
+ * category, a tier or a cost. Custom types are grouped as Other, and a job with
+ * no type is Unclassified; the five together are the total, to the penny. Each
+ * figure's drill sends a stable `type=` token — the type's id, or `__other__` /
+ * `__unclassified__` — so renaming a type moves the words and never a link.
  */
 
-export type RpSpendType = "reactive" | "planned" | "projects";
+/** The three stable codes a type KPI is drawn for — `JOB_TYPE_CODES`, restated because this module imports nothing. */
+export type RpTypeCode = "reactive" | "planned" | "project";
+
+/** Every bucket a pound of spend falls in, by its job's canonical type (`jobTypeBucketOf`). */
+export type RpSpendType = RpTypeCode | "other" | "unclassified";
 
 export type RpDelta = {
   /** "new" when the previous period was £0 and this one is not; "none" when both were £0. */
@@ -35,9 +48,29 @@ export type RpSparkPoint = {
 };
 
 export type RpKpi = {
-  key: "total" | RpSpendType;
-  /** "This month" when the range is the current calendar month, else "Total spend"; or the type's name. */
+  /** "total", or the default type's stable code. Keys the card's accent and icon — never its words. */
+  key: "total" | RpTypeCode;
+  /**
+   * "This month" when the range is the current calendar month, else "Total
+   * spend"; or the job type's CURRENT label from its configuration, so a
+   * renamed type shows its new name on the next read.
+   */
   label: string;
+  /** The job type's stable id; null for the total. */
+  jobTypeId: string | null;
+  /** The default type's stable code; null for the total. */
+  code: RpTypeCode | null;
+  /**
+   * The `type=` token this card's drill sends — the type's id — or null for
+   * the total, which sends no type at all.
+   */
+  drillType: string | null;
+  /**
+   * False for a DEACTIVATED default type. Its card is kept while it still has
+   * spend in the range — retiring a type hides it from new jobs, it does not
+   * delete the history filed under it — and is dropped once it has none.
+   */
+  active: boolean;
   pence: number;
   /** Jobs whose completed cost is counted in `pence`. */
   jobs: number;
@@ -45,6 +78,25 @@ export type RpKpi = {
   delta: RpDelta;
   /** Daily (range ≤ 45 days) or weekly buckets; the points sum to `pence`. */
   spark: RpSparkPoint[];
+};
+
+/**
+ * The spend NO type card claims — carried beside the KPIs, named in the total
+ * card's tooltip and the data gaps, and drillable, so it is never silently
+ * dropped. Reactive + Planned + Project + Other + Unclassified = the total.
+ */
+export type RpTypeBucket = {
+  key: "other" | "unclassified";
+  /** "Other" / "Unclassified". */
+  label: string;
+  /** The `type=` token its drill sends: `__other__` or `__unclassified__`. */
+  drillType: string;
+  pence: number;
+  jobs: number;
+  previousPence: number;
+  delta: RpDelta;
+  /** For Other: the labels of the custom types in the range, for a tooltip. Empty for Unclassified. */
+  typeLabels: string[];
 };
 
 export type RpTrendPoint = {
@@ -119,10 +171,16 @@ export type RpMetrics = {
     repeatThresholds: { good: number; warn: number };
     recurrenceBands: { key: RpBand["key"]; label: string; maxDays: number | null }[];
   };
-  /** Total first, then Reactive, Planned, Projects. */
+  /**
+   * Total first, then one card per DEFAULT job type in code order — reactive,
+   * planned, project — each labelled from the configuration. A deactivated
+   * default type's card is present only while it has spend in the range.
+   */
   kpis: RpKpi[];
-  /** Jobs no type rule claims. Reactive + Planned + Projects + this = total. */
-  unclassified: { pence: number; jobs: number };
+  /** Every custom (code-less) job type together. */
+  other: RpTypeBucket;
+  /** Jobs with no job type. Reactive + Planned + Project + Other + this = total. */
+  unclassified: RpTypeBucket;
   /** Daily to 45 days, weekly to two years, monthly to 400 months, then yearly. */
   sparkUnit: "day" | "week" | "month" | "year";
   trend: {
@@ -166,7 +224,12 @@ export type RpMetrics = {
   /** The brief's §10.1 data-gap report, over the costed jobs in range. */
   dataGaps: {
     costedJobs: number;
+    /** Costed jobs with no job type — the Unclassified bucket. */
     withoutType: number;
+    withoutTypePence: number;
+    /** Costed jobs of a custom type — the Other bucket. */
+    otherType: number;
+    otherTypePence: number;
     withoutSite: number;
     withoutIssue: number;
   };

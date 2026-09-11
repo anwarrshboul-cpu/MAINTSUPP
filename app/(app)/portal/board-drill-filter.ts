@@ -40,20 +40,30 @@
 
 import {
   analyseRepeats,
+  defaultJobTypeCodeOf,
   isOnJobsBoard,
   isRecurrenceBand,
+  JOB_TYPE_BUCKET_LABEL,
+  jobTypeBucketOf,
   NO_SITE_IN_SCOPE,
   NO_SITE_IN_SCOPE_LABEL,
   RECURRENCE_BANDS,
-  SPEND_TYPE_LABEL,
-  SPEND_TYPES,
   spendLineOf,
-  spendTypeOf,
   statusFamily,
   statusKey,
+  type JobTypeBucket,
   type RecurrenceBandKey,
-  type SpendType,
 } from "../../lib/job-metrics.ts";
+/* Import-free, so the `.ts` specifier loads under `node --test` as the two above do. */
+import {
+  OTHER_JOB_TYPES,
+  OTHER_JOB_TYPES_LABEL,
+  UNCLASSIFIED_JOB_TYPE,
+  UNCLASSIFIED_LABEL,
+  jobTypeIdsForToken,
+  legacyJobTypeCode,
+  type JobType,
+} from "../../lib/job-type-contract.ts";
 import { COMPLETED_STAGE, completedStatuses } from "./dashboard-meters.ts";
 import type { MaintenanceRequest } from "../../lib/types";
 
@@ -82,16 +92,76 @@ function priorityKey(value: string | null | undefined): string {
 }
 
 /**
- * PLANNED VERSUS REACTIVE — the same inference `plannedCondition` makes in SQL.
- *
- * Duplicated deliberately and narrowly: `dashboard-filters.ts` expresses the
- * rule as a drizzle `sql` fragment, which cannot be evaluated against a plain
- * object, and importing that module here would pull drizzle into the shell's
- * bundle. `tests/overview-drill-filter.test.mjs` pins the two to the same
- * answer so they cannot drift.
+ * A JOB'S TYPE ID, as `/api/maintenance` sends it — blank and absent are both
+ * "no type". Read through a widened shape so this compiles whether or not the
+ * browser's `MaintenanceRequest` has declared the field yet.
  */
-function isPlanned(request: MaintenanceRequest): boolean {
-  return key(request.category).includes("compliance") || (request.tier ?? 0) >= 4;
+function jobTypeIdOf(request: MaintenanceRequest): string | null {
+  const value = (request as MaintenanceRequest & { jobTypeId?: string | null }).jobTypeId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * THE `type=` DIMENSION — a job's CANONICAL job type, by stable token.
+ *
+ * What the Reports figures send, and what an old bookmark sent before types
+ * had ids. Each token is resolved against the organisation's types with
+ * `jobTypeIdsForToken` when the page was handed them:
+ *
+ *   · a type's id                 → that type (a rename changes nothing);
+ *   · reactive / planned / project, and the old plural `projects`
+ *                                 → the type with that stable code;
+ *   · `__unclassified__`          → jobs with no type;
+ *   · `__other__`                 → every custom (code-less) type — and an id
+ *                                   that names no type, because the Reports
+ *                                   figure groups one there too
+ *                                   (`jobTypeBucketOf`) and the list must hold
+ *                                   exactly what the figure counted;
+ *   · anything else               → nothing. A stale or hand-edited URL can
+ *                                   never widen a list.
+ *
+ * Without the types, the three defaults are still recognised — by their
+ * deterministic `jt_<organisationId>_<code>` ids and by their codes — an id is
+ * matched as itself, and `__other__` is every other id.
+ *
+ * `nature=planned|reactive` reads the same rule: the canonical code, never the
+ * old compliance-or-tier-4 inference (`plannedCondition` is the SQL twin).
+ */
+function jobTypeMatcher(
+  tokens: readonly string[],
+  types: readonly JobType[] | null,
+): ((request: MaintenanceRequest) => boolean) | null {
+  if (tokens.length === 0) return null;
+  const ids = new Set<string>();
+  const buckets = new Set<JobTypeBucket>();
+  for (const token of tokens) {
+    if (token === UNCLASSIFIED_JOB_TYPE) buckets.add("unclassified");
+    else if (token === OTHER_JOB_TYPES) buckets.add("other");
+    else if (types) {
+      for (const id of jobTypeIdsForToken(token, types)) if (id) ids.add(id);
+    } else {
+      const code = legacyJobTypeCode(token);
+      if (code) buckets.add(code);
+      else ids.add(token);
+    }
+  }
+  return (request) => {
+    const id = jobTypeIdOf(request);
+    if (id && ids.has(id)) return true;
+    return buckets.size > 0 && buckets.has(jobTypeBucketOf(id, types));
+  };
+}
+
+/** The words a `type=` token is shown with in the chip row — the type's current label where it is known. */
+function jobTypeTokenLabel(token: string, types: readonly JobType[] | null): string {
+  if (token === UNCLASSIFIED_JOB_TYPE) return UNCLASSIFIED_LABEL;
+  if (token === OTHER_JOB_TYPES) return OTHER_JOB_TYPES_LABEL;
+  const byId = types?.find((type) => type.id === token);
+  if (byId) return byId.label;
+  const code = legacyJobTypeCode(token) ?? defaultJobTypeCodeOf(token);
+  if (code) return types?.find((type) => type.code === code)?.label ?? JOB_TYPE_BUCKET_LABEL[code];
+  /* Unknown: shown as written, so the reader can see what was asked for. */
+  return token;
 }
 
 /**
@@ -267,9 +337,16 @@ export function readDrillFilter(
    * window — so `repeat=` and `recurrence=` need the whole population, exactly
    * as the Reports metrics do. Omitted, those two dimensions match nothing
    * rather than everything.
+   *
+   * `jobTypes` — the organisation's job types, deactivated ones included —
+   * lets `type=` and `nature=` resolve a token exactly as the server's figures
+   * did (`jobTypeIdsForToken`) and name each chip with the type's current
+   * label. Omitted, the three default types are still recognised by their
+   * deterministic ids; see `jobTypeMatcher`.
    */
-  context: { population?: readonly MaintenanceRequest[] } = {},
+  context: { population?: readonly MaintenanceRequest[]; jobTypes?: readonly JobType[] } = {},
 ): DrillFilter {
+  const jobTypes = context.jobTypes ?? null;
   const list = (name: string) =>
     searchParams
       .getAll(name)
@@ -324,8 +401,10 @@ export function readDrillFilter(
   /*
    * THE REPORTS BLOCK'S FOUR DIMENSIONS, each on the rule its figure used.
    *
-   *   · `type`       — Reactive / Planned / Projects through `spendTypeOf`, the
-   *                    one classifier the metrics and the Reports page share;
+   *   · `type`       — the job's CANONICAL job type, by a stable token (a type
+   *                    id, `__other__`, `__unclassified__`, or an old
+   *                    `reactive|planned|projects` link) — `jobTypeMatcher`,
+   *                    over `jobTypeBucketOf`, the rule the metrics count by;
    *   · `hasCost=1`  — a job that is a SPEND LINE (`spendLineOf`): a cost and a
    *                    completion date, the basis every spend figure counts;
    *   · `repeat=1`   — a repeat job raised inside the window, by
@@ -335,9 +414,8 @@ export function readDrillFilter(
    * Issue category needs no new key: it is `label`, which already reads
    * `maintenance_requests.category`.
    */
-  const types = new Set(
-    list("type").filter((value): value is SpendType => (SPEND_TYPES as readonly string[]).includes(value)),
-  );
+  const typeTokens = [...new Set(list("type"))];
+  const matchesType = jobTypeMatcher(typeTokens, jobTypes);
   const costedOnly = searchParams.get("hasCost") === "1";
   const bands = new Set(list("recurrence").filter(isRecurrenceBand)) as Set<RecurrenceBandKey>;
   const repeatOnly = searchParams.get("repeat") === "1" || bands.size > 0;
@@ -372,8 +450,12 @@ export function readDrillFilter(
   }
   if (overdueOnly) chips.push({ key: "overdue", label: "Overdue", value: "past its date" });
   if (breachOnly) chips.push({ key: "risk", label: "Breach risk", value: "High or Tier 1, due within 48h" });
-  if (types.size) {
-    chips.push({ key: "type", label: "Type", value: [...types].map((type) => SPEND_TYPE_LABEL[type]).join(", ") });
+  if (typeTokens.length) {
+    chips.push({
+      key: "type",
+      label: "Type",
+      value: typeTokens.map((token) => jobTypeTokenLabel(token, jobTypes)).join(", "),
+    });
   }
   if (costedOnly) chips.push({ key: "hasCost", label: "Cost", value: "recorded" });
   if (repeatOnly) {
@@ -452,12 +534,13 @@ export function readDrillFilter(
         if (!contractors.has(key(id)) && !contractors.has(named)) return false;
       }
       if (natures.size) {
-        const nature = isPlanned(request) ? "planned" : "reactive";
-        if (!natures.has(nature)) return false;
+        /* The canonical code, as `plannedCondition` / `reactiveCondition` ask
+           it in SQL: a Project, a custom type or an untyped job is neither. */
+        if (!natures.has(jobTypeBucketOf(jobTypeIdOf(request), jobTypes))) return false;
       }
       if (overdueOnly && !isOverdue(request, now)) return false;
       if (breachOnly && !isBreachRisk(request, now)) return false;
-      if (types.size && !types.has(spendTypeOf(request))) return false;
+      if (matchesType && !matchesType(request)) return false;
       if (costedOnly && spendLineOf(request) === null) return false;
       if (repeats) {
         if (!repeats.inRange.has(request.id)) return false;

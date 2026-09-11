@@ -26,12 +26,27 @@ const read = async (file) => (await readFile(path.join(root, file), "utf8")).rep
 const { buildReportsDashboard, reconcileReportsDashboard, resolveReportsRange, dayOf, shiftDays, shiftMonth } =
   await import("../app/lib/reports-dash.ts");
 const jobMetrics = await import("../app/lib/job-metrics.ts");
-const { analyseRepeats, spendLineOf, spendTypeOf, REPEAT_WINDOW_DAYS, recurrenceBandOf, medianOf } = jobMetrics;
+/*
+ * RE-POINTED 2026-09-12: `spendTypeOf` — the compliance-or-tier-4 / £1,000
+ * inference — is gone; the owner ruled it out. The type split is now the job's
+ * canonical job type through `jobTypeBucketOf`, so the fixture's jobs carry
+ * `jobTypeId`s and the builder is handed the organisation's `JOB_TYPES`.
+ */
+const { analyseRepeats, spendLineOf, jobTypeBucketOf, REPEAT_WINDOW_DAYS, recurrenceBandOf, medianOf } = jobMetrics;
+const { poundsToPence } = await import("../app/lib/reporting/money.ts");
 const { readDrillFilter } = await import("../app/(app)/portal/board-drill-filter.ts");
 const { dayString, shiftDay } = await import("../app/lib/dashboard-filters.ts");
 
 const NOW = new Date("2026-09-11T10:00:00Z");
 const SITES = new Map([["s1", "Aldgate"], ["s2", "Bluewater"], ["s3", "Cabot Circus"]]);
+
+/* The organisation's three seeded defaults, with the ids `seedJobTypes` gives them. */
+const TYPE = { reactive: "jt_org-t_reactive", planned: "jt_org-t_planned", project: "jt_org-t_project" };
+const JOB_TYPES = [
+  { id: TYPE.reactive, code: "reactive", label: "Reactive", colourHex: null, sortOrder: 10, active: true },
+  { id: TYPE.planned, code: "planned", label: "Planned", colourHex: null, sortOrder: 20, active: true },
+  { id: TYPE.project, code: "project", label: "Project", colourHex: null, sortOrder: 30, active: true },
+];
 
 /** A job row, as the route selects it and as `/api/maintenance` sends it. */
 function job(id, over = {}) {
@@ -57,45 +72,67 @@ function job(id, over = {}) {
 }
 
 /*
- * THE FIXTURE, worked by hand. Range 1 Jun – 31 Aug 2026.
+ * THE FIXTURE, worked by hand. Range 1 Jun – 31 Aug 2026. The TYPE column is
+ * the job's `jobTypeId` — set on the job, never inferred from its category,
+ * tier or cost.
  *
- *   J1  s1 Electrical  raised 1 Jun   £120.50 completed 10 Jun   reactive
+ *   J1  s1 Electrical  raised 1 Jun   £120.50 completed 10 Jun   Reactive
  *   J2  s1 Electrical  raised 1 Jul   no cost                     → repeat of J1 (30 days)
- *   J3  s1 Electrical  raised 31 Jul  £1,500 completed 5 Aug     → repeat of J2 (30 days), projects
- *   J4  s2 Plumbing    raised 1 Mar   £50 completed 15 Jun        reactive
+ *   J3  s1 Electrical  raised 31 Jul  £1,500 completed 5 Aug     → repeat of J2 (30 days), Project
+ *   J4  s2 Plumbing    raised 1 Mar   £50 completed 15 Jun        Reactive
  *   J5  s2 Plumbing    raised 1 Jun   —                            92 days after J4: NOT a repeat
- *   J6  s2 Compliance… raised 10 Jul  £300 completed 20 Jul       planned (compliance)
- *   J7  NO SITE Glass  raised 20 Jun  £80 completed 2 Jul          reactive, No site
- *   J8  s3 NO ISSUE    raised 25 Jul  £40 completed 1 Aug          reactive, never a repeat
+ *   J6  s2 Compliance… raised 10 Jul  £300 completed 20 Jul       Planned
+ *   J7  NO SITE Glass  raised 20 Jun  £80 completed 2 Jul          Reactive, No site
+ *   J8  s3 NO ISSUE    raised 25 Jul  £40 completed 1 Aug          Reactive, never a repeat
  *   J9  s3 NO ISSUE    raised 2 Aug   —                            8 days later, but no issue: not a repeat
- *   J10 s1 Electrical  raised 1 Jan 2025 £99 completed 10 Jan 2025 tier 5 — outside everything
+ *   J10 s1 Electrical  raised 1 Jan 2025 £99 completed 10 Jan 2025 Planned — outside everything
  *
  *   Spend in range: 120.50 + 1500 + 50 + 300 + 80 + 40 = £2,090.50 over 6 jobs
- *     reactive 120.50 + 50 + 80 + 40 = £290.50 (4) · planned £300 (1) · projects £1,500 (1)
+ *     reactive 120.50 + 50 + 80 + 40 = £290.50 (4) · planned £300 (1) · project £1,500 (1)
  *   Raised in range: J1 J2 J3 J5 J6 J7 J8 J9 = 8; repeats J2 J3 = 2 → 25%
  *   Repeat spend: J3 £1,500 (J2 has no cost) · one pattern, gaps 30 and 30 → median 30 → Monthly
  */
 const JOBS = [
-  job("J1", { cost: 120.5, completedAt: "2026-06-10", requestedAt: "2026-06-01T09:00:00.000Z" }),
-  job("J2", { requestedAt: "2026-07-01T09:00:00.000Z", status: "New", stage: "Incoming" }),
-  job("J3", { cost: 1500, completedAt: "2026-08-05", requestedAt: "2026-07-31T09:00:00.000Z" }),
-  job("J4", { siteId: "s2", category: "Plumbing", cost: 50, completedAt: "2026-06-15", requestedAt: "2026-03-01T09:00:00.000Z" }),
+  job("J1", { jobTypeId: TYPE.reactive, cost: 120.5, completedAt: "2026-06-10", requestedAt: "2026-06-01T09:00:00.000Z" }),
+  job("J2", { jobTypeId: TYPE.reactive, requestedAt: "2026-07-01T09:00:00.000Z", status: "New", stage: "Incoming" }),
+  job("J3", { jobTypeId: TYPE.project, cost: 1500, completedAt: "2026-08-05", requestedAt: "2026-07-31T09:00:00.000Z" }),
+  job("J4", { jobTypeId: TYPE.reactive, siteId: "s2", category: "Plumbing", cost: 50, completedAt: "2026-06-15", requestedAt: "2026-03-01T09:00:00.000Z" }),
   job("J5", { siteId: "s2", category: "Plumbing", requestedAt: "2026-06-01T09:00:00.000Z", status: "New", stage: "Incoming" }),
-  job("J6", { siteId: "s2", category: "Compliance inspection", tier: 2, cost: 300, completedAt: "2026-07-20", requestedAt: "2026-07-10T09:00:00.000Z" }),
-  job("J7", { siteId: "", category: "Glass", cost: 80, completedAt: "2026-07-02", requestedAt: "2026-06-20T09:00:00.000Z" }),
-  job("J8", { siteId: "s3", category: "", cost: 40, completedAt: "2026-08-01", requestedAt: "2026-07-25T09:00:00.000Z" }),
+  job("J6", { jobTypeId: TYPE.planned, siteId: "s2", category: "Compliance inspection", tier: 2, cost: 300, completedAt: "2026-07-20", requestedAt: "2026-07-10T09:00:00.000Z" }),
+  job("J7", { jobTypeId: TYPE.reactive, siteId: "", category: "Glass", cost: 80, completedAt: "2026-07-02", requestedAt: "2026-06-20T09:00:00.000Z" }),
+  job("J8", { jobTypeId: TYPE.reactive, siteId: "s3", category: "", cost: 40, completedAt: "2026-08-01", requestedAt: "2026-07-25T09:00:00.000Z" }),
   job("J9", { siteId: "s3", category: "", requestedAt: "2026-08-02T09:00:00.000Z", status: "New", stage: "Incoming" }),
-  job("J10", { tier: 5, cost: 99, completedAt: "2025-01-10", requestedAt: "2025-01-01T09:00:00.000Z" }),
+  job("J10", { jobTypeId: TYPE.planned, tier: 5, cost: 99, completedAt: "2025-01-10", requestedAt: "2025-01-01T09:00:00.000Z" }),
 ];
 
-/** What `loadSpendByMonth` returns for these rows: completed cost by month, in pence. */
+/**
+ * What `loadSpendByMonth` returns for these rows, by ITS rule: the database
+ * groups completed jobs by (month, cost) and counts them, and each distinct
+ * cost is converted once through `poundsToPence` and multiplied by its count.
+ *
+ * RE-POINTED 2026-09-12. This stand-in used to add `spendLineOf` per job,
+ * which is what the trend SHOULD equal, while the real query summed the float
+ * column in SQL and rounded each month once — so the stand-in could not see
+ * the two disagree. It now mirrors the real grouped rule, which makes "the
+ * trend equals the sum of its jobs' lines" a property the tests below check
+ * rather than one this helper assumes.
+ */
 function monthlyOf(jobs) {
-  const months = new Map();
+  const groups = new Map();
   for (const row of jobs) {
-    const line = spendLineOf(row);
-    if (!line) continue;
-    const month = line.day.slice(0, 7);
-    months.set(month, (months.get(month) ?? 0) + line.pence);
+    if (row.cost === null || row.cost === undefined) continue;
+    const day = String(row.completedAt ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    const key = `${day.slice(0, 7)}|${row.cost}`;
+    const group = groups.get(key) ?? { month: day.slice(0, 7), cost: row.cost, jobs: 0 };
+    group.jobs += 1;
+    groups.set(key, group);
+  }
+  const months = new Map();
+  for (const group of groups.values()) {
+    const pence = poundsToPence(Number(group.cost));
+    if (pence === null) continue;
+    months.set(group.month, (months.get(group.month) ?? 0) + pence * group.jobs);
   }
   return months;
 }
@@ -105,6 +142,7 @@ function build(jobs = JOBS, over = {}) {
   return buildReportsDashboard({
     jobs,
     siteNames: SITES,
+    jobTypes: over.jobTypes ?? JOB_TYPES,
     monthlySpend: monthlyOf(jobs),
     now: NOW,
     range,
@@ -188,15 +226,39 @@ test("the KPIs split by type and reconcile to the total, to the penny", () => {
   const metrics = build();
   assert.equal(kpi(metrics, "total").pence, 209050);
   assert.equal(kpi(metrics, "total").jobs, 6, "J2, J5 and J9 have no cost; J10 is outside the range");
+  /*
+   * RE-POINTED 2026-09-12. The split is the jobs' canonical TYPE now, not the
+   * inference: J6 is Planned because its type is Planned, J3 a Project because
+   * its type is Project — the `projects` key is the stable code `project`.
+   * Unclassified is a counted bucket, not `{ pence, jobs }` derived by
+   * subtraction, and Other joins it; every costed fixture job is typed, so
+   * both read nothing, and the five still add up to the total.
+   */
   assert.equal(kpi(metrics, "reactive").pence, 29050);
-  assert.equal(kpi(metrics, "planned").pence, 30000, "a compliance category is planned");
-  assert.equal(kpi(metrics, "projects").pence, 150000, "£1,500 of non-planned work is a project");
-  assert.deepEqual(metrics.unclassified, { pence: 0, jobs: 0 }, "the shipped rule types every job");
+  assert.equal(kpi(metrics, "planned").pence, 30000, "J6's type is Planned");
+  assert.equal(kpi(metrics, "project").pence, 150000, "J3's type is Project");
+  assert.deepEqual(
+    [metrics.unclassified.pence, metrics.unclassified.jobs, metrics.other.pence, metrics.other.jobs],
+    [0, 0, 0, 0],
+    "every costed fixture job carries a default type",
+  );
   assert.equal(
-    kpi(metrics, "reactive").pence + kpi(metrics, "planned").pence + kpi(metrics, "projects").pence + metrics.unclassified.pence,
+    kpi(metrics, "reactive").pence + kpi(metrics, "planned").pence + kpi(metrics, "project").pence +
+      metrics.other.pence + metrics.unclassified.pence,
     kpi(metrics, "total").pence,
   );
-  assert.equal(spendTypeOf({ category: "Compliance", cost: 5000 }), "planned", "a £5,000 compliance job is planned, not a project");
+  /*
+   * RE-POINTED 2026-09-12. This asserted the inference's ORDER — "a £5,000
+   * compliance job is planned, not a project". The owner ruled the inference
+   * out, so the contract that replaces it is stated on the same job: its
+   * category and cost decide nothing. Untyped it is Unclassified; typed
+   * Planned it is Planned, however large.
+   */
+  const compliance = job("C1", { category: "Compliance", cost: 5000, completedAt: "2026-06-05" });
+  assert.equal(jobTypeBucketOf(compliance.jobTypeId, JOB_TYPES), "unclassified", "no type is never guessed from a category");
+  const typedLater = build([compliance, { ...compliance, id: "C2", jobTypeId: TYPE.planned }]);
+  assert.deepEqual([kpi(typedLater, "planned").pence, kpi(typedLater, "project").pence, typedLater.unclassified.pence], [500000, 0, 500000],
+    "a £5,000 Planned job is Planned, not a Project; the untyped one is Unclassified");
   for (const entry of metrics.kpis) {
     assert.equal(entry.spark.reduce((sum, point) => sum + point.pence, 0), entry.pence, `${entry.key} sparkline sums to its KPI`);
   }
@@ -312,6 +374,7 @@ test("a closed or vanished site's repeats: named in the drill, never a false ala
   const metrics = buildReportsDashboard({
     jobs: rows,
     siteNames: SITES,
+    jobTypes: JOB_TYPES,
     monthlySpend: monthlyOf(rows),
     now: NOW,
     range,
@@ -359,8 +422,13 @@ test("changing a job's cost, type, site or issue moves every widget and still re
   assert.equal(dearer.trend.points[0].pence, before.trend.points[0].pence + 10000, "the trend moves");
   assert.equal(dearer.topSites.rows.find((row) => row.name === "Aldgate").pence, 172050, "the site bar moves: J1 £220.50 + J3 £1,500");
 
-  const retyped = build(change("J1", { tier: 4 }));
-  assert.equal(kpi(retyped, "planned").pence, kpi(before, "planned").pence + 12050, "tier 4 is planned");
+  /* RE-POINTED 2026-09-12: a job's type changes when its TYPE changes — its
+     tier no longer makes it planned. */
+  const retyped = build(change("J1", { jobTypeId: TYPE.planned }));
+  assert.equal(kpi(retyped, "planned").pence, kpi(before, "planned").pence + 12050, "retyped Planned moves to Planned");
+  assert.equal(kpi(retyped, "reactive").pence, kpi(before, "reactive").pence - 12050, "and leaves Reactive");
+  assert.equal(build(change("J1", { tier: 4 })).kpis.find((entry) => entry.key === "planned").pence, kpi(before, "planned").pence,
+    "a tier-4 job is not planned by inference");
 
   const moved = build(change("J3", { siteId: "s2" }));
   assert.equal(moved.repeat.repeatJobs, 1, "J3 at another site no longer repeats J2");
@@ -388,7 +456,7 @@ test("J3 still repeats J1 when J2 is re-categorised, because 60 days is inside t
 /* ── Every drill selects what it counted ──────────────────────────────────── */
 
 function drill(query) {
-  const filter = readDrillFilter(new URLSearchParams(query), NOW, { population: JOBS });
+  const filter = readDrillFilter(new URLSearchParams(query), NOW, { population: JOBS, jobTypes: JOB_TYPES });
   const rows = JOBS.filter((row) => filter.matches(row));
   return { jobs: rows.length, pence: rows.reduce((sum, row) => sum + (spendLineOf(row)?.pence ?? 0), 0) };
 }
@@ -398,8 +466,18 @@ test("every element's drill opens the jobs and the pounds it counted", () => {
   const window = `period=custom&from=${metrics.range.from}&to=${metrics.range.to}`;
   const costed = `hasCost=1&measure=completed&${window}`;
   assert.deepEqual(drill(costed), { jobs: kpi(metrics, "total").jobs, pence: kpi(metrics, "total").pence }, "total KPI");
-  for (const key of ["reactive", "planned", "projects"]) {
-    assert.deepEqual(drill(`${costed}&type=${key}`), { jobs: kpi(metrics, key).jobs, pence: kpi(metrics, key).pence }, `${key} KPI`);
+  /*
+   * RE-POINTED 2026-09-12: each type card drills by its type's stable ID (the
+   * payload's `drillType`), not a hard-coded `reactive|planned|projects` word,
+   * and the two buckets no card claims drill by their tokens — so all five
+   * figures, not three, open exactly what they counted.
+   */
+  assert.deepEqual(metrics.kpis.slice(1).map((entry) => entry.drillType), [TYPE.reactive, TYPE.planned, TYPE.project]);
+  for (const entry of metrics.kpis.slice(1)) {
+    assert.deepEqual(drill(`${costed}&type=${entry.drillType}`), { jobs: entry.jobs, pence: entry.pence }, `${entry.key} KPI`);
+  }
+  for (const bucket of [metrics.other, metrics.unclassified]) {
+    assert.deepEqual(drill(`${costed}&type=${bucket.drillType}`), { jobs: bucket.jobs, pence: bucket.pence }, `${bucket.key} bucket`);
   }
   for (const point of metrics.trend.points) {
     assert.deepEqual(drill(`hasCost=1&measure=completed&period=custom&from=${point.from}&to=${point.to}`), { jobs: point.jobs, pence: point.pence }, `trend ${point.month}`);
@@ -514,8 +592,13 @@ test("the live job feed reproduces every clicked figure", async (t) => {
   const window = `period=custom&from=${metrics.range.from}&to=${metrics.range.to}`;
   const total = metrics.kpis[0];
   assert.deepEqual(live(`hasCost=1&measure=completed&${window}`), { jobs: total.jobs, pence: total.pence }, "total");
+  /* RE-POINTED 2026-09-12: by each card's stable `drillType` (its job type's
+     id), plus the Other and Unclassified buckets no card draws. */
   for (const entry of metrics.kpis.slice(1)) {
-    assert.deepEqual(live(`hasCost=1&measure=completed&${window}&type=${entry.key}`), { jobs: entry.jobs, pence: entry.pence }, entry.key);
+    assert.deepEqual(live(`hasCost=1&measure=completed&${window}&type=${entry.drillType}`), { jobs: entry.jobs, pence: entry.pence }, entry.key);
+  }
+  for (const bucket of [metrics.other, metrics.unclassified]) {
+    assert.deepEqual(live(`hasCost=1&measure=completed&${window}&type=${bucket.drillType}`), { jobs: bucket.jobs, pence: bucket.pence }, bucket.key);
   }
   for (const point of metrics.trend.points) {
     assert.deepEqual(live(`hasCost=1&measure=completed&period=custom&from=${point.from}&to=${point.to}`), { jobs: point.jobs, pence: point.pence }, point.month);
