@@ -193,9 +193,14 @@ export function ovPoundsShort(pence: number): string {
  * rather than declared: 26px is a ceiling, not a promise, and the floor of
  * 14px is where the digits stop being legible at all. Nothing overlaps a ring,
  * at any category count, without this.
+ *
+ * `characters` shrinks it further for a long centre — "£133,460" is eight
+ * glyphs where "45" is two, and a centre sized for two overflows its own hole.
  */
-function ovCentreSize(clearDiameter: number): number {
-  return Math.max(14, Math.min(26, clearDiameter * 0.35));
+export function ovCentreSize(clearDiameter: number, characters = 3): number {
+  const byHole = clearDiameter * 0.35;
+  const byWidth = characters > 3 ? (clearDiameter * 0.9) / (characters * 0.62) : byHole;
+  return Math.max(14, Math.min(26, byHole, byWidth));
 }
 
 /**
@@ -207,7 +212,7 @@ function ovCentreSize(clearDiameter: number): number {
  * the tree position between the delimiters — and drops what makes it risky, so
  * two KPI sparklines on one page still get two different gradients.
  */
-function ovSafeId(prefix: string, raw: string): string {
+export function ovSafeId(prefix: string, raw: string): string {
   return `${prefix}-${raw.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 }
 
@@ -234,8 +239,19 @@ function useOvMediaQuery(query: string): boolean {
   return matches;
 }
 
+/*
+ * ── SHARED WITH THE COMPANION BLOCKS ──────────────────────────────────────
+ *
+ * The hooks and the arc below are exported for `cp-dash-charts.tsx` and
+ * `rp-dash-charts.tsx`, which draw the Compliance and Reports blocks' own
+ * shapes (a segmented ring, a bar list, a dotted sparkline). Each of those is a
+ * new SHAPE, not a new animation, tooltip or arc model — so they are built from
+ * these rather than beside them, and the three blocks sweep, pin, dismiss and
+ * honour reduced motion identically.
+ */
+
 /** True only where a real pointer can hover. Decides tooltip versus tap-to-pin. */
-function useOvHoverCapable(): boolean {
+export function useOvHoverCapable(): boolean {
   return useOvMediaQuery("(hover: hover) and (pointer: fine)");
 }
 
@@ -269,7 +285,7 @@ const ovEaseOut = (progress: number) => 1 - (1 - progress) ** 3;
  * as they arrived, which is what makes the reduced-motion rendering identical
  * to the end of the animation rather than an approximation of it.
  */
-function useOvSweep(fractions: number[]): number[] {
+export function useOvSweep(fractions: number[]): number[] {
   const reduced = useOvReducedMotion();
   const signature = fractions
     .map((fraction) => (Number.isFinite(fraction) ? Math.round(fraction * 10_000) / 10_000 : 0))
@@ -333,7 +349,7 @@ function useOvSweep(fractions: number[]): number[] {
  * always-on document listener on a page with six charts is six listeners doing
  * nothing.
  */
-function useOvPin<Key extends string | number>() {
+export function useOvPin<Key extends string | number>() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pinned, setPinned] = useState<Key | null>(null);
   const [hovered, setHovered] = useState<Key | null>(null);
@@ -374,7 +390,7 @@ function useOvPin<Key extends string | number>() {
  * off the left of a 390px screen, and a chart that explains itself by pushing
  * the page sideways has not explained itself.
  */
-function OvTip({
+export function OvTip({
   at,
   title,
   lines,
@@ -421,7 +437,7 @@ function OvTip({
  * that a reader would read as a value, and every arc in the block would flash
  * one at the first frame of its own sweep.
  */
-function OvArc({
+export function OvArc({
   cx,
   cy,
   radius,
@@ -485,13 +501,14 @@ function OvArc({
  *
  * Enter and Space activate them exactly as they activate any button.
  */
-function OvSliceKeys({
+export function OvSliceKeys({
   slices,
   denominator,
   activeKey,
   onFocusSlice,
   onBlurSlice,
   onActivate,
+  formatValue = String,
 }: {
   slices: OvSlice[];
   denominator: number;
@@ -499,6 +516,8 @@ function OvSliceKeys({
   onFocusSlice: (key: string) => void;
   onBlurSlice: () => void;
   onActivate?: (slice: OvSlice) => void;
+  /** How a slice's value is spoken — a count by default, pounds for a spend donut. */
+  formatValue?: (value: number) => string;
 }) {
   return (
     <ul className="ov-keys">
@@ -507,12 +526,12 @@ function OvSliceKeys({
           <button
             type="button"
             className={`ov-keys__button${activeKey === slice.key ? " ov-keys__button--active" : ""}`}
-            aria-label={`${slice.label}: ${slice.value}, ${ovPercent(slice.value, denominator)}%`}
+            aria-label={`${slice.label}: ${formatValue(slice.value)}, ${ovPercent(slice.value, denominator)}%`}
             onFocus={() => onFocusSlice(slice.key)}
             onBlur={onBlurSlice}
             onClick={() => onActivate?.(slice)}
           >
-            {slice.label} {slice.value}
+            {slice.label} {formatValue(slice.value)}
           </button>
         </li>
       ))}
@@ -521,7 +540,7 @@ function OvSliceKeys({
 }
 
 /** The drill action a pinned tooltip carries on touch, where there is no hover. */
-function OvTipAction({ onClick }: { onClick: () => void }) {
+export function OvTipAction({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" className="ov-tip__action" onClick={onClick}>
       View these →
@@ -637,21 +656,54 @@ const DONUT_STROKE = 24;
  * values: the values are appended here, so a screen-reader user hears the
  * numbers whether or not the caller remembered them.
  */
+/**
+ * A donut's geometry. The default is the Overview's status donut (176px box,
+ * 24px ring); the companion blocks' smaller donuts — "Who's renewing", the two
+ * repeat-spend donuts — pass their own, per their briefs (~150px, 18px stroke).
+ */
+export type DonutGeometry = { box: number; radius: number; stroke: number };
+
+const DONUT_DEFAULT: DonutGeometry = { box: DONUT_BOX, radius: DONUT_RADIUS, stroke: DONUT_STROKE };
+
 export function Donut({
   slices,
   total,
   caption,
   onSelect,
   ariaLabel,
+  geometry = DONUT_DEFAULT,
+  centreValue,
+  formatValue,
+  tipLines,
+  gapPx = 0,
 }: {
   slices: OvSlice[];
   total: number;
   caption: string;
   onSelect?: (slice: OvSlice) => void;
   ariaLabel: string;
+  /** Box, radius and stroke width, in CSS pixels at natural size. */
+  geometry?: DonutGeometry;
+  /**
+   * What the centre PRINTS, when that is not the bare total — "21%" on the
+   * compliance score, "£133,460" on a spend donut. The total still reaches the
+   * accessible name, so nothing is lost to a screen reader.
+   */
+  centreValue?: string;
+  /** How a slice's value is written in the tooltip and the accessible name. */
+  formatValue?: (value: number) => string;
+  /** The tooltip's lines for a slice, when "x of y" and a percentage is not enough. */
+  tipLines?: (slice: OvSlice, share: number) => string[];
+  /**
+   * A gap between segments, in pixels along the ring — the companion briefs'
+   * "2px segment gaps". Zero keeps the Overview donut exactly as it shipped.
+   */
+  gapPx?: number;
 }): JSX.Element {
   const hoverCapable = useOvHoverCapable();
   const { rootRef, pinned, setHovered, togglePin, active } = useOvPin<string>();
+  const { box, radius, stroke } = geometry;
+  const write = formatValue ?? ((value: number) => String(value));
 
   const values = slices.map((slice) => Math.max(0, Number.isFinite(slice.value) ? slice.value : 0));
   const sum = values.reduce((running, value) => running + value, 0);
@@ -669,11 +721,22 @@ export function Donut({
     cursor += eased[index];
   }
 
+  /*
+   * THE GAP IS TAKEN FROM EACH SEGMENT, NOT ADDED BETWEEN THEM, so the ring
+   * still closes on itself and the shares still read true. Only drawn when two
+   * or more segments are present — a single full ring with a notch in it would
+   * look like a missing sliver of data.
+   */
+  const circumference = 2 * Math.PI * radius;
+  const drawnSegments = values.filter((value) => value > 0).length;
+  const gapTurn = gapPx > 0 && drawnSegments > 1 ? gapPx / circumference : 0;
+
   const readout = slices
-    .map((slice, index) => `${slice.label} ${values[index]} (${ovPercent(values[index], sum)}%)`)
+    .map((slice, index) => `${slice.label} ${write(values[index])} (${ovPercent(values[index], sum)}%)`)
     .join(", ");
   const activeIndex = slices.findIndex((slice) => slice.key === active);
-  const centre = ovCentreSize(2 * (DONUT_RADIUS - DONUT_STROKE / 2) - 8);
+  const printed = centreValue ?? String(Number.isFinite(total) ? total : 0);
+  const centre = ovCentreSize(2 * (radius - stroke / 2) - 8, printed.length);
 
   return (
     <div className="ov-chart" ref={rootRef}>
@@ -686,22 +749,22 @@ export function Donut({
       <div
         className="ov-chart__plot"
         role={onSelect ? "group" : "img"}
-        aria-label={`${ariaLabel}: ${readout || "no data"}. ${total} ${caption}`}
+        aria-label={`${ariaLabel}: ${readout || "no data"}. ${printed} ${caption}`}
       >
         <svg
           className="ov-chart__svg"
-          viewBox={`0 0 ${DONUT_BOX} ${DONUT_BOX}`}
-          width={DONUT_BOX}
-          height={DONUT_BOX}
+          viewBox={`0 0 ${box} ${box}`}
+          width={box}
+          height={box}
           aria-hidden="true"
           focusable="false"
         >
-          <g transform={`rotate(-90 ${DONUT_BOX / 2} ${DONUT_BOX / 2})`}>
+          <g transform={`rotate(-90 ${box / 2} ${box / 2})`}>
             <OvArc
-              cx={DONUT_BOX / 2}
-              cy={DONUT_BOX / 2}
-              radius={DONUT_RADIUS}
-              width={DONUT_STROKE}
+              cx={box / 2}
+              cy={box / 2}
+              radius={radius}
+              width={stroke}
               colour="var(--ov-track)"
               from={0}
               sweep={1}
@@ -709,13 +772,13 @@ export function Donut({
             {slices.map((slice, index) => (
               <OvArc
                 key={slice.key}
-                cx={DONUT_BOX / 2}
-                cy={DONUT_BOX / 2}
-                radius={DONUT_RADIUS}
-                width={DONUT_STROKE}
+                cx={box / 2}
+                cy={box / 2}
+                radius={radius}
+                width={stroke}
                 colour={slice.colour}
-                from={starts[index] ?? 0}
-                sweep={eased[index] ?? 0}
+                from={(starts[index] ?? 0) + gapTurn / 2}
+                sweep={Math.max(0, (eased[index] ?? 0) - gapTurn)}
                 className={`ov-arc${active === slice.key ? " ov-arc--active" : ""}`}
                 onPointerEnter={() => {
                   if (hoverCapable) setHovered(slice.key);
@@ -730,7 +793,7 @@ export function Donut({
           </g>
         </svg>
         <span className="ov-chart__centre" style={{ fontSize: `${centre}px` }} aria-hidden="true">
-          <strong className="ov-chart__centre-value">{Number.isFinite(total) ? total : 0}</strong>
+          <strong className="ov-chart__centre-value">{printed}</strong>
           <small className="ov-chart__centre-caption">{caption}</small>
         </span>
         {onSelect ? (
@@ -741,6 +804,7 @@ export function Donut({
             onFocusSlice={setHovered}
             onBlurSlice={() => setHovered(null)}
             onActivate={onSelect}
+            formatValue={write}
           />
         ) : null}
         {activeIndex >= 0 ? (
@@ -748,10 +812,14 @@ export function Donut({
             at={50}
             pinned={pinned === slices[activeIndex].key}
             title={slices[activeIndex].label}
-            lines={[
-              `${values[activeIndex]} of ${sum}`,
-              `${ovPercent(values[activeIndex], sum)}%`,
-            ]}
+            lines={
+              tipLines
+                ? tipLines(slices[activeIndex], ovFraction(values[activeIndex], sum))
+                : [
+                    `${write(values[activeIndex])} of ${write(sum)}`,
+                    `${ovPercent(values[activeIndex], sum)}%`,
+                  ]
+            }
             action={
               onSelect && pinned === slices[activeIndex].key ? (
                 <OvTipAction onClick={() => onSelect(slices[activeIndex])} />
@@ -795,12 +863,19 @@ export function Speedometer({
   colour,
   onSelect,
   ariaLabel,
+  sub,
 }: {
   percent: number;
   caption: string;
   colour: string;
   onSelect?: () => void;
   ariaLabel: string;
+  /**
+   * A sentence beneath the gauge — "22 of 30 sites fully compliant", "46 repeat
+   * jobs across 12 sites" — styled as the horseshoe's. Absent on the Overview's
+   * SLA gauge, which draws exactly as it shipped.
+   */
+  sub?: string;
 }): JSX.Element {
   const safe = Math.max(0, Math.min(100, Number.isFinite(percent) ? Math.round(percent) : 0));
   const [eased] = useOvSweep([safe / 100]);
@@ -818,79 +893,88 @@ export function Speedometer({
 
   const body = (
     <span className="ov-gauge__body">
-      <svg
-        className="ov-chart__svg"
-        viewBox={`0 0 ${SPEEDO_WIDTH} ${SPEEDO_HEIGHT}`}
-        width={SPEEDO_WIDTH}
-        height={SPEEDO_HEIGHT}
-        aria-hidden="true"
-        focusable="false"
-      >
-        {/*
-          Rotating the group by 180° puts the circle's start point at nine
-          o'clock, so the first half of the path is exactly the top semicircle
-          and the track is a dasharray of half the circumference.
-        */}
-        <g transform={`rotate(180 ${SPEEDO_CX} ${SPEEDO_CY})`}>
-          <OvArc
-            cx={SPEEDO_CX}
-            cy={SPEEDO_CY}
-            radius={SPEEDO_RADIUS}
-            width={SPEEDO_STROKE}
-            colour="var(--ov-track)"
-            from={0}
-            sweep={0.5}
-            rounded
-          />
-          <OvArc
-            cx={SPEEDO_CX}
-            cy={SPEEDO_CY}
-            radius={SPEEDO_RADIUS}
-            width={SPEEDO_STROKE}
-            colour={colour}
-            from={0}
-            sweep={fraction * 0.5}
-            rounded
-          />
-        </g>
-        {[0, 0.25, 0.5, 0.75, 1].map((turn) => {
-          const inner = pointAt(turn, SPEEDO_RADIUS + 8);
-          const outer = pointAt(turn, SPEEDO_RADIUS + 13);
-          return (
-            <line
-              key={turn}
-              x1={inner.x}
-              y1={inner.y}
-              x2={outer.x}
-              y2={outer.y}
-              stroke="var(--ov-text-muted)"
-              strokeWidth={1.5}
-              strokeLinecap="round"
+      {/* The dial is its own positioned box so the readout stays anchored to
+          the arc's pivot whether or not a sub-caption sits beneath it. */}
+      <span className="ov-gauge__dial">
+        <svg
+          className="ov-chart__svg"
+          viewBox={`0 0 ${SPEEDO_WIDTH} ${SPEEDO_HEIGHT}`}
+          width={SPEEDO_WIDTH}
+          height={SPEEDO_HEIGHT}
+          aria-hidden="true"
+          focusable="false"
+        >
+          {/*
+            Rotating the group by 180° puts the circle's start point at nine
+            o'clock, so the first half of the path is exactly the top semicircle
+            and the track is a dasharray of half the circumference.
+          */}
+          <g transform={`rotate(180 ${SPEEDO_CX} ${SPEEDO_CY})`}>
+            <OvArc
+              cx={SPEEDO_CX}
+              cy={SPEEDO_CY}
+              radius={SPEEDO_RADIUS}
+              width={SPEEDO_STROKE}
+              colour="var(--ov-track)"
+              from={0}
+              sweep={0.5}
+              rounded
             />
-          );
-        })}
-        <line
-          x1={SPEEDO_CX}
-          y1={SPEEDO_CY}
-          x2={tip.x}
-          y2={tip.y}
-          stroke="var(--ov-text)"
-          strokeOpacity={0.85}
-          strokeWidth={2}
-          strokeLinecap="round"
-        />
-        <circle cx={SPEEDO_CX} cy={SPEEDO_CY} r={5} fill="var(--ov-text)" fillOpacity={0.85} />
-      </svg>
-      <span className="ov-gauge__readout" aria-hidden="true">
-        <strong className="ov-chart__centre-value" style={{ fontSize: "26px" }}>
-          {safe}%
-        </strong>
-        <small className="ov-chart__centre-caption">{caption}</small>
+            <OvArc
+              cx={SPEEDO_CX}
+              cy={SPEEDO_CY}
+              radius={SPEEDO_RADIUS}
+              width={SPEEDO_STROKE}
+              colour={colour}
+              from={0}
+              sweep={fraction * 0.5}
+              rounded
+            />
+          </g>
+          {[0, 0.25, 0.5, 0.75, 1].map((turn) => {
+            const inner = pointAt(turn, SPEEDO_RADIUS + 8);
+            const outer = pointAt(turn, SPEEDO_RADIUS + 13);
+            return (
+              <line
+                key={turn}
+                x1={inner.x}
+                y1={inner.y}
+                x2={outer.x}
+                y2={outer.y}
+                stroke="var(--ov-text-muted)"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+              />
+            );
+          })}
+          <line
+            x1={SPEEDO_CX}
+            y1={SPEEDO_CY}
+            x2={tip.x}
+            y2={tip.y}
+            stroke="var(--ov-text)"
+            strokeOpacity={0.85}
+            strokeWidth={2}
+            strokeLinecap="round"
+          />
+          <circle cx={SPEEDO_CX} cy={SPEEDO_CY} r={5} fill="var(--ov-text)" fillOpacity={0.85} />
+        </svg>
+        <span className="ov-gauge__readout" aria-hidden="true">
+          <strong className="ov-chart__centre-value" style={{ fontSize: "26px" }}>
+            {safe}%
+          </strong>
+          <small className="ov-chart__centre-caption">{caption}</small>
+        </span>
       </span>
+      {sub ? (
+        <span className="ov-gauge__sub ov-gauge__sub--speedometer" aria-hidden="true">
+          {sub}
+        </span>
+      ) : null}
     </span>
   );
 
-  const label = `${ariaLabel}: ${safe}%, ${caption}`;
+  const label = `${ariaLabel}: ${safe}%, ${caption}${sub ? `. ${sub}` : ""}`;
   return (
     <div className="ov-chart ov-gauge">
       {onSelect ? (
@@ -908,9 +992,10 @@ export function Speedometer({
 
 /* ── 4. The ring meter ────────────────────────────────────────────────────── */
 
+/* The Overview's ring meter; the radius follows from these per ring now, since
+   a countdown ring (88px / 9px) and a recurrence ring (72px / 8px) differ. */
 const RING_BOX = 76;
 const RING_STROKE = 8;
-const RING_RADIUS = (RING_BOX - RING_STROKE) / 2;
 
 /**
  * WIDGET A, RIGHT HALF — one small ring per sub-count.
@@ -930,48 +1015,65 @@ export function RingMeter({
   label,
   colour,
   onSelect,
+  size = RING_BOX,
+  stroke = RING_STROKE,
+  centreText,
+  tipLines,
+  describe,
 }: {
   value: number;
   total: number;
   label: string;
   colour: string;
   onSelect?: () => void;
+  /** Box size in CSS pixels at natural size — 76 on the Overview, 88 for a countdown ring. */
+  size?: number;
+  /** Ring thickness in CSS pixels at natural size. */
+  stroke?: number;
+  /** What the centre prints, when not the bare count. */
+  centreText?: string;
+  /** The tooltip's lines, when "x of y" and a percentage is not enough. */
+  tipLines?: string[];
+  /** Appended to the accessible name — what activating the ring opens. */
+  describe?: string;
 }): JSX.Element {
   const hoverCapable = useOvHoverCapable();
   const { rootRef, pinned, setHovered, togglePin, active } = useOvPin<string>();
   const safeValue = Math.max(0, Number.isFinite(value) ? value : 0);
   const safeTotal = Math.max(0, Number.isFinite(total) ? total : 0);
   const [eased] = useOvSweep([ovFraction(safeValue, safeTotal)]);
-  const centre = ovCentreSize(2 * (RING_RADIUS - RING_STROKE / 2) - 6);
+  const radius = (size - stroke) / 2;
+  const printed = centreText ?? String(safeValue);
+  const centre = ovCentreSize(2 * (radius - stroke / 2) - 6, printed.length);
   const percent = ovPercent(safeValue, safeTotal);
-  const name = `${label}: ${safeValue} of ${safeTotal}, ${percent}%`;
+  const name = `${label}: ${safeValue} of ${safeTotal}, ${percent}%${describe ? `. ${describe}` : ""}`;
 
   const body = (
     <span className="ov-ring__body">
       <span className="ov-chart__plot">
         <svg
           className="ov-chart__svg"
-          viewBox={`0 0 ${RING_BOX} ${RING_BOX}`}
-          width={RING_BOX}
-          height={RING_BOX}
+          viewBox={`0 0 ${size} ${size}`}
+          width={size}
+          height={size}
           aria-hidden="true"
           focusable="false"
         >
-          <g transform={`rotate(-90 ${RING_BOX / 2} ${RING_BOX / 2})`}>
+          <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
             <OvArc
-              cx={RING_BOX / 2}
-              cy={RING_BOX / 2}
-              radius={RING_RADIUS}
-              width={RING_STROKE}
+              cx={size / 2}
+              cy={size / 2}
+              radius={radius}
+              width={stroke}
               colour="var(--ov-track)"
               from={0}
               sweep={1}
             />
             <OvArc
-              cx={RING_BOX / 2}
-              cy={RING_BOX / 2}
-              radius={RING_RADIUS}
-              width={RING_STROKE}
+              cx={size / 2}
+              cy={size / 2}
+              radius={radius}
+              width={stroke}
               colour={colour}
               from={0}
               sweep={eased ?? 0}
@@ -980,7 +1082,7 @@ export function RingMeter({
           </g>
         </svg>
         <span className="ov-chart__centre" style={{ fontSize: `${centre}px` }} aria-hidden="true">
-          <strong className="ov-chart__centre-value">{safeValue}</strong>
+          <strong className="ov-chart__centre-value">{printed}</strong>
         </span>
       </span>
       <span className="ov-ring__label" aria-hidden="true">
@@ -1025,7 +1127,7 @@ export function RingMeter({
           at={50}
           pinned={pinned === label}
           title={label}
-          lines={[`${safeValue} of ${safeTotal}`, `${percent}%`]}
+          lines={tipLines ?? [`${safeValue} of ${safeTotal}`, `${percent}%`]}
         />
       ) : null}
     </div>
@@ -1323,10 +1425,16 @@ export function AreaTrend({
   points,
   onSelect,
   ariaLabel,
+  lineColour = "var(--ov-teal)",
+  tipLines,
 }: {
   points: { label: string; pence: number }[];
   onSelect?: (point: { label: string; pence: number }, index: number) => void;
   ariaLabel: string;
+  /** The line, dots and wash colour — the Overview's teal unless a block names its own. */
+  lineColour?: string;
+  /** The tooltip's lines for a point, when the pounds and a share are not enough. */
+  tipLines?: (point: { label: string; pence: number }, index: number, share: number) => string[];
 }): JSX.Element {
   const hoverCapable = useOvHoverCapable();
   const { rootRef, pinned, setHovered, togglePin, active } = useOvPin<number>();
@@ -1392,8 +1500,8 @@ export function AreaTrend({
         >
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--ov-teal)" stopOpacity={0.34} />
-              <stop offset="100%" stopColor="var(--ov-teal)" stopOpacity={0} />
+              <stop offset="0%" stopColor={lineColour} stopOpacity={0.34} />
+              <stop offset="100%" stopColor={lineColour} stopOpacity={0} />
             </linearGradient>
           </defs>
           {ticks.map((tick) => (
@@ -1413,7 +1521,7 @@ export function AreaTrend({
             <polyline
               points={line}
               fill="none"
-              stroke="var(--ov-teal)"
+              stroke={lineColour}
               strokeWidth={2}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1425,7 +1533,7 @@ export function AreaTrend({
           <span
             className={`ov-trend__dot${activeIndex === index ? " ov-trend__dot--active" : ""}`}
             key={points[index].label}
-            style={{ left: `${xAt(index)}%`, top: `${yAt(fraction)}%` }}
+            style={{ left: `${xAt(index)}%`, top: `${yAt(fraction)}%`, background: lineColour }}
             aria-hidden="true"
           />
         ))}
@@ -1459,10 +1567,14 @@ export function AreaTrend({
             at={xAt(activeIndex)}
             pinned={pinned === activeIndex}
             title={points[activeIndex].label}
-            lines={[
-              ovPoundsExact(values[activeIndex]),
-              `${ovPercent(values[activeIndex], sum)}% of the period`,
-            ]}
+            lines={
+              tipLines
+                ? tipLines(points[activeIndex], activeIndex, ovFraction(values[activeIndex], sum))
+                : [
+                    ovPoundsExact(values[activeIndex]),
+                    `${ovPercent(values[activeIndex], sum)}% of the period`,
+                  ]
+            }
             action={
               onSelect && pinned === activeIndex ? (
                 <OvTipAction onClick={() => onSelect(points[activeIndex], activeIndex)} />

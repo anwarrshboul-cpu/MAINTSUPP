@@ -61,6 +61,29 @@ export const URL_CHANGED = "maintsupp:urlstate";
  */
 export const OPS_REFRESH = "maintsupp:refresh-ops";
 
+let announcing = 0;
+
+/**
+ * "SOMETHING ON THIS PAGE WAS JUST WRITTEN" — every aggregate on screen re-reads.
+ *
+ * The dashboard blocks' briefs ask for the figures to update after every
+ * relevant mutation, not only on the next 60-second poll. This product has no
+ * realtime transport, so the write paths that sit on a page carrying a block —
+ * the Overview's repair tools, the compliance register's confirmations, set-up
+ * and backfill — announce their success here, and every `useOpsQuery` card
+ * (the blocks included) refetches through the listener below, keeping its
+ * previous figures on screen while it does.
+ *
+ * Debounced, so a burst of writes — a bulk assignment, a backfill — costs one
+ * refresh rather than one per row. It is the same signal the topbar's Refresh
+ * sends, so there is still exactly one way a card is told to re-read.
+ */
+export function announceDataChanged(): void {
+  if (typeof window === "undefined") return;
+  window.clearTimeout(announcing);
+  announcing = window.setTimeout(() => window.dispatchEvent(new Event(OPS_REFRESH)), 250);
+}
+
 function subscribe(onChange: () => void): () => void {
   window.addEventListener("popstate", onChange);
   window.addEventListener(URL_CHANGED, onChange);
@@ -194,11 +217,31 @@ export function useClearQuery(keys: readonly string[]): () => void {
 export function useOpsQuery<T>(
   path: string,
   search: string,
-  options: { enabled?: boolean } = {},
+  options: {
+    enabled?: boolean;
+    /**
+     * KEEP THE LAST GOOD PAYLOAD WHEN A RE-READ OF THE SAME QUERY FAILS.
+     *
+     * The dashboard blocks poll every sixty seconds and on focus, and their
+     * briefs require the previous values to stay visible during a refetch —
+     * "no flicker to zero". Without this, one transient 503 on a poll (a pooler
+     * at capacity, a cold lambda) replaced every figure on the block with an
+     * error sentence until the next poll. With it, the figures stay and the
+     * error arrives beside them.
+     *
+     * Only for the SAME path and search: a FILTER change that fails still
+     * clears, because figures counted under the old filter shown beneath the
+     * new one would be wrong, not merely stale. Opt-in, so no existing card
+     * changes behaviour.
+     */
+    keepOnError?: boolean;
+  } = {},
 ): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
   const enabled = options.enabled !== false;
+  const keepOnError = options.keepOnError === true;
   const [nonce, setNonce] = useState(0);
-  const key = `${path}|${search}|${nonce}`;
+  const base = `${path}|${search}`;
+  const key = `${base}|${nonce}`;
   /*
    * ONE piece of state, carrying the key it was fetched for.
    *
@@ -210,6 +253,7 @@ export function useOpsQuery<T>(
    */
   const [result, setResult] = useState<{
     key: string;
+    base: string;
     data: T | null;
     error: string | null;
   } | null>(null);
@@ -218,6 +262,15 @@ export function useOpsQuery<T>(
     if (!enabled) return;
     let live = true;
     const url = `${path}${search ? (path.includes("?") ? "&" : "?") + search.replace(/^\?/, "") : ""}`;
+    /* A failure keeps the previous figures only when they answered the same
+       question — see `keepOnError`. */
+    const failed = (error: string) =>
+      setResult((previous) => ({
+        key,
+        base,
+        data: keepOnError && previous?.base === base ? previous.data : null,
+        error,
+      }));
     fetch(url, { headers: { Accept: "application/json" } })
       .then(async (response) => {
         const payload = (await response.json().catch(() => null)) as
@@ -225,27 +278,19 @@ export function useOpsQuery<T>(
           | null;
         if (!live) return;
         if (!response.ok || !payload) {
-          setResult({
-            key,
-            data: null,
-            error: payload?.error || `This did not load (${response.status}).`,
-          });
+          failed(payload?.error || `This did not load (${response.status}).`);
           return;
         }
-        setResult({ key, data: payload, error: null });
+        setResult({ key, base, data: payload, error: null });
       })
       .catch(() => {
         if (!live) return;
-        setResult({
-          key,
-          data: null,
-          error: "This did not load. Check your connection and try again.",
-        });
+        failed("This did not load. Check your connection and try again.");
       });
     return () => {
       live = false;
     };
-  }, [enabled, key, path, search]);
+  }, [base, enabled, keepOnError, key, path, search]);
 
   const reload = useCallback(() => setNonce((value) => value + 1), []);
 

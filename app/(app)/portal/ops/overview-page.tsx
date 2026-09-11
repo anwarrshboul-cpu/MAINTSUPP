@@ -41,7 +41,7 @@ import analysisCss from "./overview-analysis.css?url";
 import portfolioCss from "./overview-portfolio.css?url";
 import toolsCss from "./overview-tools.css?url";
 import { OpsFilterBar, PeriodControl, type FilterGroup } from "./ops-filter-bar";
-import { useOpsQuery, useQueryState } from "./ops-url-state";
+import { announceDataChanged, useOpsQuery, useQueryState } from "./ops-url-state";
 import { AtAGlanceCard, PulseRow } from "./overview-glance";
 import { FinancialStatusCard } from "./overview-financial";
 import { PerformanceCard } from "./overview-performance";
@@ -629,10 +629,10 @@ export function OverviewPage({
         {tool === "sites" ? (
           <OverviewTool title="Assign jobs to a site" onClose={() => setTool(null)}>
             <BulkSiteAssign
-              onAssigned={() => {
-                attention.reload();
-                meters.reload();
-              }}
+              /* Assigning jobs to a site moves figures on every card — the
+                 dashboard block's attention count and category rings as well as
+                 the cards below — so every aggregate on the page re-reads. */
+              onAssigned={announceDataChanged}
             />
           </OverviewTool>
         ) : null}

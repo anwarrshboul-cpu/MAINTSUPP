@@ -40,6 +40,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import ovDashCss from "./ov-dash.css?url";
+import { DashHeader } from "./dash-header";
 import { useOpsQuery, useQueryState } from "./ops-url-state";
 import {
   AreaTrend,
@@ -61,6 +62,8 @@ import {
  * nothing at all, so none of it reaches drizzle.
  */
 import { csvCell, poundsText, safeFilename } from "../../../lib/finance/exports";
+/* Imports nothing itself, so it cannot drag the query builder into this bundle. */
+import { QUALITY_ARC, qualityTone } from "../../../lib/dashboard-policy";
 
 /* ── The wire shape ───────────────────────────────────────────────────────── */
 
@@ -164,12 +167,14 @@ const KPI_COLOUR: Record<OvKpiKey, string> = {
 };
 
 /**
- * THE ARC THRESHOLDS, NAMED RATHER THAN INLINE.
+ * THE ARC COLOUR, FROM THE SHARED POLICY — never a threshold typed here.
  *
  * A percentage arc is teal at or above `good`, amber from `warn` up to it, and
- * red below. Named because these are a policy — the number at which somebody
- * decides service is acceptable — and a policy written as `>= 90` inside a JSX
- * expression is one nobody can find when it changes.
+ * red below. Those numbers are a policy — the point at which somebody decides
+ * service is acceptable — and the brief is explicit that they are config values,
+ * not hardcoded in the component. They live in `app/lib/dashboard-policy.ts`
+ * (`QUALITY_ARC`), the one file the Compliance block's gauges read too, so the
+ * same percentage can never be amber on one block and red on another.
  *
  * They colour the two arcs that ARE a quality percentage: the SLA speedometer
  * and the compliance horseshoe. The priority rings take `slice.colour` from the
@@ -177,11 +182,10 @@ const KPI_COLOUR: Record<OvKpiKey, string> = {
  * — a small High-priority ring is good news, and painting it red for being
  * under 75 would say the opposite.
  */
-const ARC_THRESHOLDS = { good: 90, warn: 75 } as const;
-
 function arcColour(percent: number): string {
-  if (percent >= ARC_THRESHOLDS.good) return OV_COLOURS.teal;
-  if (percent >= ARC_THRESHOLDS.warn) return OV_COLOURS.amber;
+  const tone = qualityTone(percent, QUALITY_ARC);
+  if (tone === "good") return OV_COLOURS.teal;
+  if (tone === "warn") return OV_COLOURS.amber;
   return OV_COLOURS.red;
 }
 
@@ -359,6 +363,9 @@ export function OvDash({
   const { data, loading, error, reload } = useOpsQuery<OvMetrics>(
     "/api/overview/metrics",
     search,
+    /* A failed poll keeps the figures on screen, with Retry beside them —
+       the "no flicker to zero" half of §5.4. */
+    { keepOnError: true },
   );
 
   /*
@@ -636,127 +643,51 @@ export function OvDash({
 
   /* ── The header, which is usable before the first payload lands ─────────── */
 
+  /*
+   * THE DATE RANGE — TWO BOUNDS AND A RESET, AND NO PRESET THAT NEEDS DAY
+   * ARITHMETIC.
+   *
+   * "Last 7 days" would have to be computed here, in the reader's timezone,
+   * against a `to` that is inclusive while every window in this product ends
+   * exclusive — the one piece of date maths this codebase keeps on the server
+   * precisely so the two cannot drift. So the control collects two days and the
+   * SERVER resolves, defaults and labels the window; the pill always shows
+   * `range.label`, which is the window the figures were actually counted over
+   * rather than the one that was asked for. Clearing both returns to the
+   * endpoint's own default of thirty days.
+   *
+   * The row itself is `DashHeader`, shared with the Compliance and Reports
+   * blocks so the three match their references and each other.
+   */
   const header = (
-    <div className="ov-dash__head">
-      <h2 className="ov-dash__title">Dashboard Overview</h2>
-      <div className="ov-dash__controls">
-        <label className="ov-dash__control">
-          <span className="visually-hidden">Portfolio</span>
-          <select
-            value={portfolio}
-            onChange={(event) => {
-              const next = event.target.value;
-              setFilter((query) => {
-                if (next) query.set("portfolio", next);
-                else query.delete("portfolio");
-              });
-            }}
-          >
-            <option value="">All portfolios</option>
-            {(data?.portfolios ?? []).map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {/*
-          THE DATE RANGE — TWO BOUNDS AND A RESET, AND NO PRESET THAT NEEDS
-          DAY ARITHMETIC.
-
-          "Last 7 days" would have to be computed here, in the reader's
-          timezone, against a `to` that is inclusive while every window in this
-          product ends exclusive — the one piece of date maths this codebase
-          keeps on the server precisely so the two cannot drift. So the control
-          collects two days and the SERVER resolves, defaults and labels the
-          window; the pill always shows `range.label`, which is the window the
-          figures were actually counted over rather than the one that was asked
-          for. Clearing both returns to the endpoint's own default of thirty
-          days.
-        */}
-        <details className="ov-dash__control ov-dash__range" style={{ position: "relative" }}>
-          <summary aria-label={`Date range: ${data?.range.label ?? "loading"}`}>
-            <CalendarIcon /> <span>{data?.range.label ?? "Date range"}</span>
-          </summary>
-          <div
-            className="ov-dash__range-panel"
-            style={{
-              position: "absolute",
-              insetInlineEnd: 0,
-              insetBlockStart: "calc(100% + 6px)",
-              zIndex: 30,
-              display: "grid",
-              gap: "8px",
-              padding: "12px",
-              minInlineSize: "220px",
-              borderRadius: "10px",
-              background: "var(--ops-surface, Canvas)",
-              border: "1px solid var(--ops-border, CanvasText)",
-              boxShadow: "0 12px 32px rgb(0 0 0 / 28%)",
-            }}
-          >
-            <label>
-              From{" "}
-              <input
-                type="date"
-                value={fromParam}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setFilter((query) => {
-                    if (next) query.set("from", next);
-                    else query.delete("from");
-                  });
-                }}
-              />
-            </label>
-            <label>
-              To{" "}
-              <input
-                type="date"
-                value={toParam}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setFilter((query) => {
-                    if (next) query.set("to", next);
-                    else query.delete("to");
-                  });
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() =>
-                setFilter((query) => {
-                  query.delete("from");
-                  query.delete("to");
-                })
-              }
-            >
-              Reset to the last 30 days
-            </button>
-          </div>
-        </details>
-
-        <button
-          type="button"
-          className="ov-dash__control"
-          onClick={exportCsv}
-          disabled={!data}
-        >
-          Export
-        </button>
-
-        {/* A refetch that failed while a payload is still on screen: the
-            figures stay, and the reason is one press away rather than a
-            silently stale page. */}
-        {error ? (
-          <button type="button" className="ov-dash__control" onClick={reload} title={error}>
-            Retry
-          </button>
-        ) : null}
-      </div>
-    </div>
+    <DashHeader
+      title="Dashboard Overview"
+      portfolio={portfolio}
+      portfolios={data?.portfolios ?? []}
+      onPortfolio={(next) =>
+        setFilter((query) => {
+          if (next) query.set("portfolio", next);
+          else query.delete("portfolio");
+        })
+      }
+      range={{ from: fromParam, to: toParam, label: data?.range.label ?? "Date range" }}
+      onRange={(nextFrom, nextTo) =>
+        setFilter((query) => {
+          if (nextFrom) query.set("from", nextFrom);
+          else query.delete("from");
+          if (nextTo) query.set("to", nextTo);
+          else query.delete("to");
+        })
+      }
+      resetLabel="Reset to the last 30 days"
+      onExport={exportCsv}
+      exportDisabled={!data}
+      /* A refetch that failed while a payload is still on screen: the figures
+         stay, and the reason is one press away rather than a silently stale
+         page. */
+      error={data ? error : null}
+      onRetry={reload}
+    />
   );
 
   if (!data) {
@@ -1191,15 +1122,6 @@ function OvLink({
     >
       {children}
     </a>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <rect x="3.5" y="5" width="17" height="16" rx="2" />
-      <path d="M3.5 10h17M8 3v4M16 3v4" />
-    </svg>
   );
 }
 

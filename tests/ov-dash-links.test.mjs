@@ -7,16 +7,25 @@
  * That was tried and it is the wrong instrument, for a reason worth writing
  * down because it will tempt the next person too.
  *
- * Measured on the development estate: `/api/maintenance` returns 123 rows;
- * `readDrillFilter("family=open")` keeps exactly 98 of them, which is exactly
- * what `loadOverviewMetrics` counts as open — the two agree to the row. The
- * BOARD then draws 82 of those 98. The missing 16 are all `Pending Approval`
- * sitting at `site-unassigned` with no group, and they are still missing after
- * scrolling to the bottom, so it is not virtualisation: `live-board.tsx` does
- * not draw a row whose group it cannot place. That is a pre-existing board
- * behaviour with nothing to do with this block, and a test that asserted the
- * DOM count would fail on it every run while the contract underneath was
- * perfect.
+ * Measured on the development estate when this was written: `/api/maintenance`
+ * returned 123 rows, `readDrillFilter("family=open")` kept 98, which was
+ * exactly what `loadOverviewMetrics` counted as open — and the BOARD drew 82.
+ * The missing 16 were all `Pending Approval` at `site-unassigned`, and this
+ * header first put that down to rows the board "cannot place in a group".
+ *
+ * CORRECTED 2026-09-11, after tracing it: the 16 were Store Documentation
+ * register rows — request rows placed on the `store-documentation` board, which
+ * the Jobs board narrows away on purpose because a store is not a job. The
+ * figure and the drill were BOTH wrong, and agreed with each other: every
+ * aggregate counted every live request whichever board it lived on. The fix is
+ * the population (`jobsBoardCondition` / `isOnJobsBoard`, pinned in
+ * `tests/jobs-board-population.test.mjs`), and the estate now reads 82 open,
+ * drilled 82, drawn 82. A separate, genuine render drop — a placement naming a
+ * binned or foreign group — is fixed there too.
+ *
+ * The DOM is still the wrong instrument for THIS file: the board defers rows
+ * and virtualises groups with `content-visibility`, so counting drawn rows
+ * measures the viewport rather than the contract.
  *
  * So this asserts the CONTRACT: the set of rows a link's filter selects is the
  * set of rows the figure counted. That is the property §6 actually needs — the
