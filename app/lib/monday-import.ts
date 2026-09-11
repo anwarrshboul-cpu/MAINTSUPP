@@ -87,6 +87,19 @@ function normalise(value: string) {
 export const EXTERNAL_ID_KEY = "__externalId";
 
 /**
+ * Where a "Job type" column's text is carried, when the file has one.
+ *
+ * Not a board column either: a job's type is the id of one of the
+ * organisation's job types (`maintenance_requests.job_type_id`), and turning
+ * the text a spreadsheet holds into one of those ids needs the organisation's
+ * own list, which this pure parser does not have. So the text travels here,
+ * verbatim, and `/api/import` resolves it — to an ACTIVE type whose name or
+ * code matches, or to nothing (Unclassified, and counted). Nothing here, or
+ * there, ever invents a type from a spelling.
+ */
+export const JOB_TYPE_KEY = "__jobType";
+
+/**
  * Header aliases. Monday's export writes the Name column's header as the board's
  * item noun ("Item", "Store", "Name") depending on how the board is configured,
  * and a few titles were shortened on the board after the capture.
@@ -102,6 +115,9 @@ const ALIASES: Record<string, string> = {
   "item id ": EXTERNAL_ID_KEY,
   "monday item id": EXTERNAL_ID_KEY,
   "pulse id": EXTERNAL_ID_KEY,
+  // The job's type, as text. Not a board column — see JOB_TYPE_KEY.
+  "job type": JOB_TYPE_KEY,
+  "type of job": JOB_TYPE_KEY,
   "job requested by": "requester",
   "date requested": "requested",
   "date completed": "completed",

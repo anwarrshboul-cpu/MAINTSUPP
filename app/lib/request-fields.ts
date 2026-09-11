@@ -9,10 +9,12 @@
  * rule lives here once, and both callers read it.
  *
  * Deliberately excludes `parentId`: re-parenting needs three database checks
- * (see the route) and is not something a rule does.
+ * (see the route) and is not something a rule does. And `jobTypeId`, for the
+ * reason `siteId` is excluded — see `invalidRequestFields`.
  */
 
 import type { maintenanceRequests } from "../../db/schema";
+import { penceToPounds, poundsToPence } from "./reporting/money";
 import { submissionTitle } from "./submission-title";
 
 export type RequestFieldValues = Partial<typeof maintenanceRequests.$inferInsert>;
@@ -89,6 +91,34 @@ export function optionalClockTime(value: unknown): string | null | undefined {
   if (typeof value !== "string") return undefined;
   const time = value.trim().slice(0, 5);
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : undefined;
+}
+
+/**
+ * A job's COST as it is stored — whole pence, in pounds — `null` to clear, or
+ * `undefined` when unreadable.
+ *
+ * `maintenance_requests.cost` is a REAL in pounds, and every figure built on it
+ * is integer pence through `poundsToPence` (`app/lib/reporting/money.ts`), the
+ * one conversion boundary and the one rounding rule: half away from zero, with
+ * the float representation fixed first so 1.005 is 101p the way a calculator
+ * says. A cost written as 12.345 was stored as 12.345 and counted as 1235p by
+ * one reader and printed as £12.35 or £12.34 by others, depending on who
+ * rounded. Rounding it to the penny ON THE WAY IN, by that same rule, means the
+ * stored pounds and every pence figure derived from them can no longer
+ * disagree. No schema change and no rewrite of existing rows — only new and
+ * edited costs are normalised.
+ *
+ * Negative still clamps to zero, exactly as it always has. An amount so large
+ * that its pence are not a safe integer (above roughly £90 trillion) is
+ * unreadable rather than silently stored as something else.
+ */
+export function normaliseCost(value: unknown): number | null | undefined {
+  if (value === null || value === "") return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const pounds = Math.max(0, value);
+  if (pounds * 100 > Number.MAX_SAFE_INTEGER) return undefined;
+  const pence = poundsToPence(pounds);
+  return pence === null ? undefined : penceToPounds(pence);
 }
 
 /**
@@ -196,10 +226,12 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
     const title = trimString(fields.title, 200);
     if (title) values.title = title;
   }
-  if (typeof fields.cost === "number" && Number.isFinite(fields.cost)) {
-    values.cost = Math.max(0, fields.cost);
-  } else if (fields.cost === null || fields.cost === "") {
-    values.cost = null;
+  /* Whole pence, by the one rounding rule — see `normaliseCost`. Null and ""
+     still clear it; anything unreadable is still dropped here and refused by
+     `invalidRequestFields` on a person's PATCH. */
+  if ("cost" in fields) {
+    const cost = normaliseCost(fields.cost);
+    if (cost !== undefined) values.cost = cost;
   }
 
   for (const key of ["requestedAt", "completedAt", "dueAt", "nextUpdateAt"] as const) {
@@ -300,12 +332,10 @@ export function invalidRequestFields(fields: Record<string, unknown>): string[] 
     }
   }
 
-  if (has("cost")) {
-    const cost = fields.cost;
-    const clears = cost === null || cost === "";
-    if (!clears && (typeof cost !== "number" || !Number.isFinite(cost))) {
-      note("cost", "a number, or null to clear it");
-    }
+  /* The same function the coercion uses, so the two cannot drift: what passes
+     here is exactly what `requestFieldValues` stores. */
+  if (has("cost") && normaliseCost(fields.cost) === undefined) {
+    note("cost", "a number, or null to clear it");
   }
 
   for (const key of ["requestedAt", "completedAt", "dueAt", "nextUpdateAt"]) {
@@ -358,6 +388,22 @@ export function invalidRequestFields(fields: Record<string, unknown>): string[] 
    */
   if (has("siteId") && typeof fields.siteId !== "string" && fields.siteId !== null) {
     note("siteId", "a site id, or null to leave the job unattached");
+  }
+
+  /*
+   * `jobTypeId` — the job's type — is shape-checked here and RESOLVED in the
+   * route, for exactly `siteId`'s reason: whether an id names one of THIS
+   * organisation's job types, and whether a deactivated type may stay on this
+   * particular job, needs a database read scoped to the caller's organisation
+   * (`resolveJobTypeWrite` in `app/lib/job-types.ts`).
+   *
+   * So `requestFieldValues` does NOT coerce it, and that omission is
+   * load-bearing: the automation engine calls it with no reference validation of
+   * its own, so coercing it there would let an unattended rule file a job under
+   * another tenant's type, or newly under a retired one. `null` is Unclassified.
+   */
+  if (has("jobTypeId") && typeof fields.jobTypeId !== "string" && fields.jobTypeId !== null) {
+    note("jobTypeId", "a job type id, or null for Unclassified");
   }
 
   return problems;

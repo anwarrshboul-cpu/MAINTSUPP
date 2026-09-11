@@ -204,7 +204,10 @@ import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
  * badge and the Overview both read it, which is what stops the two disagreeing
  * about the same workspace.
  */
-import { isOnJobsBoard, openJobCount, spendLineOf } from "../../lib/job-metrics";
+import { JOBS_BOARD_KEY, isOnJobsBoard, openJobCount, spendLineOf } from "../../lib/job-metrics";
+import { jobTypeChoices, jobTypeLabel, useJobTypes } from "./use-job-types";
+import { JobTypeDrawerField } from "./cells/job-type-cell";
+import { JobTypesSettings } from "./admin/job-types-settings";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AppearancePanel } from "./views/appearance-panel";
@@ -2009,12 +2012,32 @@ export default function PortalApp({
      `replaceState`, because neither push nor replace fires anything on its
      own — so a drill-through arriving by `pushState` is seen here. */
   const { search: routeSearch } = useQueryState();
-  const drill = useMemo(
+  /*
+   * THE DRILL IS FOR THE JOBS BOARD, AND ONLY THE JOBS BOARD.
+   *
+   * Every dashboard drill-through names the canonical Jobs list, and its filter
+   * keeps only rows that count as work ON that board (`countsAsWork`, through
+   * `isOnJobsBoard`). A workspace section's own register — a `sec-…` board —
+   * is the `maintenance` surface too, so the same query string applied there
+   * removed every one of its rows: the section opened empty, under a "Filtered
+   * from a dashboard" banner about a list it is not. So the drill, its totals
+   * and its banner apply only where the canonical board is on screen — the
+   * built-in Jobs page, or a legacy section bound to that board — and anywhere
+   * else the Jobs-only parameters are ignored and the board is shown whole.
+   * `countsAsWork` itself is untouched; it is right about the Jobs board.
+   */
+  const drillApplies = drillReadsThisBoard(activeSurface, activeCustom, JOBS_BOARD_KEY);
+  /* The organisation's job types name a Type chip. Fetched only when a drill
+     could carry one, not on every page load of the shell. */
+  const { jobTypes: drillJobTypes } = useJobTypes(drillApplies && routeSearch.replace(/^\?/, "") !== "");
+  const drill = useMemo(() => {
     /* The whole list goes in as the population: a repeat is judged against the
-       job before it, which the filtered list may not contain. */
-    () => readDrillFilter(new URLSearchParams(routeSearch), new Date(), { population: requests }),
-    [routeSearch, requests],
-  );
+       job before it, which the filtered list may not contain. The organisation's
+       job types go in beside it so a `type=` chip can name a type instead of
+       printing its id. */
+    const context = { population: requests, jobTypes: drillJobTypes };
+    return readDrillFilter(new URLSearchParams(drillApplies ? routeSearch : ""), new Date(), context);
+  }, [drillApplies, routeSearch, requests, drillJobTypes]);
   const boardRequests = useMemo(
     () => (drill.empty ? requests : requests.filter(drill.matches)),
     [drill, requests],
@@ -3168,8 +3191,11 @@ export default function PortalApp({
             status names". The chip is that sentence: without it a reader sees a
             board holding 17 of 981 rows and no explanation, which is worse than
             no filter at all.
+
+            Only over the canonical Jobs board — see `drillApplies`. A section's
+            own register is never "filtered from a dashboard".
           */}
-          {activeSurface === "maintenance" && !drill.empty ? (
+          {drillApplies && !drill.empty ? (
             <div className="board-drill" role="status">
               {/* Any of the three dashboard blocks can open this list, so the
                   lead names none of them; the chips say what was asked. */}
@@ -3856,6 +3882,31 @@ function keepPlacement(
     ? { ...next, boardId: previous.boardId }
     : next;
 }
+
+/* sbd:gate:start
+ *
+ * WHETHER A DASHBOARD DRILL-THROUGH APPLIES TO THE BOARD ON SCREEN.
+ *
+ * True only for the canonical Jobs board: the `maintenance` surface with no
+ * workspace section (the built-in Jobs page), or a section whose register IS
+ * that board (a legacy second door onto it). A section with a register of its
+ * own — `sec-…` — is the same surface and a different list, and a Jobs drill
+ * applied to it hides every row it holds. Every other surface has no drill.
+ *
+ * Self-contained, imports nothing and takes the Jobs board's key as an
+ * argument, so `tests/section-board-drill.test.mjs` slices this block out and
+ * runs it on its own.
+ */
+function drillReadsThisBoard(
+  surface: string,
+  section: { boardKey?: string | null } | null,
+  jobsBoardKey: string,
+): boolean {
+  if (surface !== "maintenance") return false;
+  if (!section) return true;
+  return (section.boardKey ?? "").trim() === jobsBoardKey;
+}
+/* sbd:gate:end */
 
 function countsAsWorkOrder(request: MaintenanceRequest) {
   /* And on the Jobs board: a Store Documentation store is a request row too,
@@ -6420,6 +6471,8 @@ function SettingsView({
         </label>
       </section>
 
+      <JobTypesSettings />
+
       {/*
         J — which jobs cannot be closed without a photograph of the work.
         
@@ -6726,6 +6779,44 @@ function MobileMondayColumns({
       | "options"
     > = {},
   ) => onEdit({ field, title, kind, value, ...extra });
+
+  /*
+   * THE JOB'S TYPE, as an option sheet like Priority or Status — but from the
+   * organisation's job types rather than a board option set. It offers every
+   * active type, the job's own type if that has since been deactivated (so
+   * re-saving never drops what a job was filed under), and Unclassified to
+   * clear. The server resolves `jobTypeId` against this organisation and
+   * refuses another tenant's id or a newly chosen retired type.
+   */
+  const { jobTypes, loaded: jobTypesLoaded } = useJobTypes();
+  const renderJobType = (key: string, title: string) => {
+    const currentType = request.jobTypeId ?? "";
+    const options: MobileRequestEditorOption[] = [
+      { value: "", label: "Unclassified", color: "#c4c4c4" },
+      ...jobTypeChoices(jobTypes, currentType || null).map((type) => ({
+        value: type.id,
+        label: type.active ? type.label : `${type.label} (deactivated)`,
+        color: type.colourHex ?? "#579bfc",
+      })),
+    ];
+    const background = currentType
+      ? jobTypes.find((type) => type.id === currentType)?.colourHex ?? "#579bfc"
+      : "#c4c4c4";
+    return (
+      <MobileMondayField
+        key={key}
+        label={title}
+        variant="option"
+        empty={!currentType}
+        style={{ backgroundColor: background, color: chipInk(background) }}
+        onClick={() =>
+          edit("jobTypeId", title, "option", currentType, { allowEmpty: true, options })
+        }
+      >
+        {jobTypeLabel(jobTypes, currentType || null, { loaded: jobTypesLoaded })}
+      </MobileMondayField>
+    );
+  };
 
   const renderSystemColumn = (entry: MaintenanceBoardSnapshotColumn) => {
     const column = entry.column;
@@ -7064,6 +7155,8 @@ function MobileMondayColumns({
             {currentGroup.name}
           </MobileMondayField>
         );
+      case "jobType":
+        return renderJobType(column.id, column.title);
       default:
         return null;
     }
@@ -7215,6 +7308,13 @@ function MobileMondayColumns({
           ? renderSystemColumn(entry)
           : renderCustomColumn(entry),
       )}
+      {/* No board carries a Job type column yet — it would be a built-in column
+          in the board spec, re-seeded onto every board — so a job on the Jobs
+          board draws the field here. A board that grows the column draws it in
+          place through `case "jobType"` above, and this stands down. */}
+      {!columns.some((entry) => entry.key === "jobType") && isOnJobsBoard(request)
+        ? renderJobType("job-type", "Job type")
+        : null}
       <button
         className="mobile-monday-add-column"
         type="button"
@@ -8110,6 +8210,9 @@ function RequestDrawer({
               />
             </div>
           </section>
+
+          {/* The job's type, for a job on the Jobs board — the desktop drawer's only way to change it; see cells/job-type-cell.tsx. */}
+          {isOnJobsBoard(request) ? <JobTypeDrawerField request={request} hidden={activeTab !== "columns"} onFieldsChange={onFieldsChange} onRequestChange={onRequestChange} onNotify={onNotify} /> : null}
 
           <section
             className={`drawer-section desktop-request-columns${
@@ -9411,6 +9514,11 @@ interface CreateRequestDraft {
   category: string;
   engineer: string;
   priority: Priority;
+  /**
+   * The id of one of the organisation's job types, or "" for Unclassified.
+   * Sent as-is; `POST /api/maintenance` resolves it against this workspace.
+   */
+  jobTypeId: string;
 }
 
 function CreateRequestModal({
@@ -9434,7 +9542,11 @@ function CreateRequestModal({
     category: "Lighting",
     engineer: "Electrician",
     priority: "Medium",
+    /* Unclassified until somebody says otherwise — never guessed. */
+    jobTypeId: "",
   });
+  /* Active types only: a retired type is never offered for new work. */
+  const { activeJobTypes } = useJobTypes();
   const firstField = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
@@ -9620,6 +9732,20 @@ function CreateRequestModal({
                   <option>HVAC</option>
                   <option>Plumber</option>
                   <option>Specialist</option>
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Job type</span>
+                <select
+                  value={draft.jobTypeId}
+                  onChange={(event) => update("jobTypeId", event.target.value)}
+                >
+                  <option value="">Unclassified</option>
+                  {activeJobTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <div className="triage-preview">

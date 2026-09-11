@@ -1,0 +1,162 @@
+/*
+ * Settings → Job types.
+ *
+ * Written against the palette tokens only, so the card follows the light and
+ * dark themes without a rule of its own for either — the same discipline as
+ * `views/appearance-panel.css`.
+ *
+ * One media query, at 767px (one of the five agreed widths): below it every
+ * control grows to a 44px tap target. Everything else is a wrapping flex row,
+ * so a row reflows to two lines on a phone and nothing scrolls sideways at
+ * 320px — the name field shrinks to fit (`min-width: 0`) rather than pushing
+ * the buttons out of the card.
+ */
+
+.job-types-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.job-types-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.job-types-row:last-child {
+  border-bottom: 0;
+}
+
+.job-types-row__name {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.job-types-row__name input,
+.job-types-add__row input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.job-types-row__name input:focus-visible,
+.job-types-add__row input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.job-types-row.is-inactive .job-types-row__name input {
+  color: var(--muted);
+}
+
+.job-types-row__tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.job-types-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-fg);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.job-types-tag.is-on {
+  background: var(--status-green-bg);
+  color: var(--status-green-fg);
+}
+
+.job-types-tag.is-off {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.job-types-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.job-types-row__actions button,
+.job-types-add__row button {
+  min-height: 36px;
+}
+
+.job-types-move {
+  min-width: 36px;
+  justify-content: center;
+}
+
+.job-types-add {
+  display: grid;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.job-types-add > label {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.job-types-add__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.job-types-message {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* The live region stays in the tree while empty — a region that is
+   `display: none` until it has something to say is often not announced when it
+   does — and simply takes no room. */
+.job-types-message--notice:empty {
+  margin: 0;
+}
+
+.job-types-message--error {
+  color: var(--status-red-fg);
+}
+
+@media (max-width: 767px) {
+  .job-types-row__name input,
+  .job-types-add__row input,
+  .job-types-row__actions button,
+  .job-types-add__row button {
+    min-height: 44px;
+  }
+
+  .job-types-move {
+    min-width: 44px;
+  }
+}

@@ -50,12 +50,19 @@ const fieldsModule = await (async () => {
    * `submission-title.ts` imports nothing, so it needs no rewriting of its own.
    * Same pattern as `tests/sites-compliance-link.test.mjs`; if this chain ever
    * grows a second link, it grows one here too.
+   *
+   * IT GREW ONE: `./reporting/money`. A cost is now stored as whole pence in
+   * pounds, rounded by the one rule the invoice arithmetic uses
+   * (`poundsToPence` / `penceToPounds`), so `request-fields.ts` imports that
+   * module and this loader has to rewrite it exactly as it rewrites the title.
+   * `money.ts` imports only a TYPE (`./contract`), which transpiling erases, so
+   * like `submission-title.ts` it needs no rewriting of its own.
    */
   const submissionTitle = asModule(transpile(await read("app/lib/submission-title.ts")));
-  const source = transpile(await read("app/lib/request-fields.ts")).replace(
-    /from ["']\.\/submission-title["']/g,
-    `from "${submissionTitle}"`,
-  );
+  const money = asModule(transpile(await read("app/lib/reporting/money.ts")));
+  const source = transpile(await read("app/lib/request-fields.ts"))
+    .replace(/from ["']\.\/submission-title["']/g, `from "${submissionTitle}"`)
+    .replace(/from ["']\.\/reporting\/money["']/g, `from "${money}"`);
   return import(asModule(source));
 })();
 
