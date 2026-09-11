@@ -47,6 +47,9 @@ export async function GET(request: Request) {
       portfolio: url.searchParams.get("portfolio"),
       from: url.searchParams.get("from"),
       to: url.searchParams.get("to"),
+      /* A site-restricted member reads only their stores, as on every
+         `/api/dashboard/*` route — see `resolveDashboardPortfolio`. */
+      siteScope: guard.scope.siteScope,
     });
 
     const failures = reconcile(metrics);

@@ -2256,13 +2256,33 @@ export async function POST(request: Request) {
         );
       }
 
+      /*
+       * A LIVE TARGET GROUP — not one in the recycle bin. The lookup used to
+       * check the organisation alone, and the rows moved into a binned or
+       * foreign group vanished from a board that draws only its own live groups
+       * (reproduced: a job moved into a Store Documentation group answered 200
+       * and left the Jobs board).
+       *
+       * The BOARD is not required to match `?board=` here, deliberately: the
+       * phone drawer moves a section board's row without naming the board, and
+       * requiring it broke that. What matters is that each ROW lands in a group
+       * of the board it is placed on, and `moveItemsToGroup` holds every row to
+       * exactly that — which also closes naming some other board in the query.
+       * The board draws any older stray placement anyway (`board-group-fallback.ts`).
+       */
       const group =
         action === "move_items"
           ? (
               await db
                 .select()
                 .from(maintenanceGroups)
-                .where(and(eq(maintenanceGroups.id, trimString(payload.groupId, 80)), eq(maintenanceGroups.organisationId, orgId)))
+                .where(
+                  and(
+                    eq(maintenanceGroups.id, trimString(payload.groupId, 80)),
+                    eq(maintenanceGroups.organisationId, orgId),
+                    isNull(maintenanceGroups.deletedAt),
+                  ),
+                )
                 .limit(1)
             )[0]
           : await findOrCreateArchivedGroup(db, orgId, boardId);

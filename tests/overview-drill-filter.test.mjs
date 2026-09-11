@@ -398,6 +398,15 @@ test("the shell hands the board the filtered rows, and says that it has", async 
   assert.match(shell, /requests=\{boardRequests\}/, "the board receives the filtered list");
   assert.match(shell, /className="board-drill"/, "and the reader is told why it is short");
   /*
+   * And how many it holds — "N jobs · £X", counted with the figures' own
+   * `spendLineOf` — but never before the list has landed: a "0 jobs" beside a
+   * tapped 82 is the fault this banner exists to prevent, and a list that
+   * failed says so instead of counting for ever.
+   */
+  assert.match(shell, /drillTotals && dataMode === "loading" \? \(\s*<span className="board-drill__chip board-drill__total">Counting…<\/span>/);
+  assert.match(shell, /drillTotals && dataMode === "unavailable" \? \(\s*<span className="board-drill__chip board-drill__total">Jobs didn&apos;t load<\/span>/);
+  assert.match(shell, /pence \+= spendLineOf\(request\)\?\.pence \?\? 0;/);
+  /*
    * `pushState` fires no event, so a drill-through arriving that way would be
    * invisible to the shell's URL subscriber and the board would keep the
    * unfiltered list while the address bar said otherwise.

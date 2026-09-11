@@ -29,6 +29,7 @@ import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { maintenanceRequests } from "../../db/schema";
 import { closedJobSql } from "./dashboard-aggregates";
+import { jobsBoardCondition } from "./dashboard-filters";
 import { complianceCompletion, type ComplianceCompletion } from "./compliance-status";
 import { selectInChunks } from "./sql-batching";
 import { mailtoHref } from "./contact-links";
@@ -232,6 +233,8 @@ export async function loadSiteMetrics(
           isNull(maintenanceRequests.deletedAt),
           eq(maintenanceRequests.archived, false),
           isNull(maintenanceRequests.parentId),
+          // Binds nothing (see `jobsBoardCondition`), so the count below stands.
+          jobsBoardCondition(),
           inArray(maintenanceRequests.siteId, chunk),
         ),
       )

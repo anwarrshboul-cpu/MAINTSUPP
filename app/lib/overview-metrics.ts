@@ -22,7 +22,8 @@
  *   · overdue is `overdueOpenSql`, the same expression the Jobs board and the
  *     ageing card use;
  *   · a job counts as work at all through `liveWorkOrderCondition` — not
- *     binned, not archived, not a sub-item;
+ *     binned, not archived, not a sub-item, and not a row that lives on
+ *     another board (a Store Documentation store is not a job);
  *   · priority folds through `normalisePriority`, the one classifier;
  *   · compliance is `readComplianceRegister` + `complianceCompletion`, which
  *     the Compliance page and the nightly digest already share.
@@ -47,7 +48,7 @@
  * exists to prevent.
  */
 
-import { and, count, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   jobStatusMap,
@@ -57,15 +58,18 @@ import {
   units,
 } from "../../db/schema";
 import { closedJobSql, dateText, overdueOpenSql } from "./dashboard-aggregates";
-import { dayString, shiftDay } from "./dashboard-filters";
-import { normalisePriority } from "./job-metrics";
+import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters";
+import { drillSiteIds, normalisePriority } from "./job-metrics";
 import { complianceCompletion } from "./compliance-status";
 import { readComplianceRegister } from "./compliance-register";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
-/** The first ten characters of a date-ish column: `YYYY-MM-DD`, both dialects. */
-function dayOnly(column: Parameters<typeof dateText>[0]): SQL {
+/**
+ * The first ten characters of a date-ish column: `YYYY-MM-DD`, both dialects.
+ * Exported so the Reports block buckets days with the identical expression.
+ */
+export function dayOnly(column: Parameters<typeof dateText>[0]): SQL {
   return sql`substr(${dateText(column)}, 1, 10)`;
 }
 
@@ -199,17 +203,20 @@ const PRIORITY_LABEL: Record<string, string> = {
 /**
  * The rows that count as work at all, plus the portfolio.
  *
- * `liveWorkOrderCondition`'s three exclusions are restated through the same
- * columns rather than imported, because this adds a fourth clause and drizzle
- * cannot extend an `and()` after the fact.
+ * `liveWorkOrderCondition` ITSELF, extended with the portfolio. This used to
+ * restate its three exclusions through the same columns, on the belief that
+ * drizzle could not extend an `and()` after the fact — it can, by nesting it —
+ * and the restatement is exactly how a fourth exclusion gets added in one place
+ * and missed in the other. The fourth one arrived: a row placed on another
+ * board (a Store Documentation store, a section's row) is not a job, and it is
+ * `jobsBoardCondition` that says so. See that function for the "98 open jobs
+ * over a board drawing 82" defect it ends.
+ *
+ * Exported because the Reports block counts the same jobs and must count them
+ * the same way — one scope, two dashboards.
  */
-function jobScope(orgId: string, siteIds: readonly string[] | null): SQL {
-  const base = and(
-    eq(maintenanceRequests.organisationId, orgId),
-    isNull(maintenanceRequests.deletedAt),
-    eq(maintenanceRequests.archived, false),
-    isNull(maintenanceRequests.parentId),
-  )!;
+export function dashboardJobScope(orgId: string, siteIds: readonly string[] | null): SQL {
+  const base = liveWorkOrderCondition(orgId);
   if (!siteIds) return base;
   /* An empty portfolio matches nothing rather than everything — the same trap
      `confineToSiteScope` documents on the dashboard routes. */
@@ -217,12 +224,139 @@ function jobScope(orgId: string, siteIds: readonly string[] | null): SQL {
   return and(base, inArray(maintenanceRequests.siteId, [...siteIds]))!;
 }
 
+/* ── Portfolios, shared by the three blocks ───────────────────────────────── */
+
+export type DashboardPortfolio = {
+  portfolios: { id: string; name: string }[];
+  chosen: { id: string; name: string } | null;
+  /** The chosen portfolio's member sites; null for "All portfolios". */
+  siteIds: string[] | null;
+};
+
+/**
+ * THE PORTFOLIO FILTER, resolved once, for every block that offers it.
+ *
+ * A portfolio is an active `site_groups` row and its members. An id this
+ * organisation does not hold resolves to "All portfolios" rather than to an
+ * error — every read here is already scoped to `orgId`, so a foreign id in the
+ * query string cannot reach another tenant's sites; it simply matches nothing
+ * and is ignored.
+ */
+export async function resolveDashboardPortfolio(
+  db: Database,
+  orgId: string,
+  wantedId: string | null | undefined,
+  /**
+   * THE MEMBERSHIP'S SITE RESTRICTION — `guard.scope.siteScope`.
+   *
+   * Every `/api/dashboard/*` route folds it into its site filter through
+   * `confineToSiteScope`; the dashboard block's endpoint did not, so a member
+   * confined to three stores read estate-wide totals off the top of the page —
+   * aggregate leakage, which is leakage. Applied HERE, where all three blocks
+   * resolve their portfolio, so no block can forget it: the sites a block counts
+   * are the portfolio's members INTERSECTED with the scope, or the scope itself
+   * when no portfolio is chosen. An empty intersection matches nothing.
+   */
+  siteScope: readonly string[] | null = null,
+): Promise<DashboardPortfolio> {
+  const groupRows = await db
+    .select({ id: siteGroups.id, name: siteGroups.name })
+    .from(siteGroups)
+    .where(and(eq(siteGroups.organisationId, orgId), eq(siteGroups.active, true)));
+  const portfolios = groupRows
+    .map((row) => ({ id: row.id, name: row.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const wanted = (wantedId ?? "").trim();
+  const chosen = portfolios.find((row) => row.id === wanted) ?? null;
+
+  let siteIds: string[] | null = null;
+  if (chosen) {
+    const members = await db
+      .select({ siteId: siteGroupMembers.siteId })
+      .from(siteGroupMembers)
+      .where(
+        and(
+          eq(siteGroupMembers.organisationId, orgId),
+          eq(siteGroupMembers.siteGroupId, chosen.id),
+        ),
+      );
+    siteIds = [...new Set(members.map((row) => row.siteId).filter(Boolean))];
+  }
+  if (siteScope) {
+    const allowed = new Set(siteScope);
+    siteIds = siteIds ? siteIds.filter((id) => allowed.has(id)) : [...allowed];
+  }
+  return { portfolios, chosen, siteIds };
+}
+
+/* ── Spend, shared by the Overview and Reports ───────────────────────────── */
+
+/**
+ * SPEND BY MONTH — the one query both spend trends are drawn from.
+ *
+ * `maintenance_requests.cost` is a REAL in POUNDS — the same column
+ * `/api/dashboard/cost` reads — counted when the job has a completion date and
+ * dated by it. Summed per month in SQL, converted to integer pence once, here,
+ * and never handled as a float again.
+ *
+ * Extracted from the Overview's own pass so the Reports block's trend is not a
+ * second query that happens to agree: it IS this query, over the same scope,
+ * so "Spend trend values = Overview spend trend values for the same months and
+ * portfolio" holds by construction rather than by coincidence.
+ */
+export async function loadSpendByMonth(
+  db: Database,
+  scope: SQL,
+  fromDay: string,
+  endExclusive: string,
+): Promise<Map<string, number>> {
+  const rows = await db
+    .select({
+      month: sql<string>`substr(${dayOnly(maintenanceRequests.completedAt)}, 1, 7)`.as("month"),
+      pounds: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+    })
+    .from(maintenanceRequests)
+    .where(
+      and(
+        scope,
+        isNotNull(maintenanceRequests.completedAt),
+        sql`${dayOnly(maintenanceRequests.completedAt)} >= ${fromDay}`,
+        sql`${dayOnly(maintenanceRequests.completedAt)} < ${endExclusive}`,
+        isNotNull(maintenanceRequests.cost),
+      ),
+    )
+    .groupBy(sql`month`);
+  const tally = new Map<string, number>();
+  for (const row of rows) {
+    const month = String(row.month ?? "").slice(0, 7);
+    if (!month) continue;
+    tally.set(month, (tally.get(month) ?? 0) + Math.round(Number(row.pounds ?? 0) * 100));
+  }
+  return tally;
+}
+
+/** `Sep` for `2026-09`, in Europe/London — the trend's axis label. */
+export function monthLabel(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", {
+    month: "short",
+    timeZone: "Europe/London",
+  });
+}
+
 /* ── The one pass ─────────────────────────────────────────────────────────── */
 
 export async function loadOverviewMetrics(
   db: Database,
   orgId: string,
-  options: { portfolio?: string | null; from?: string | null; to?: string | null; now?: Date } = {},
+  options: {
+    portfolio?: string | null;
+    from?: string | null;
+    to?: string | null;
+    now?: Date;
+    /** The membership's site restriction — see `resolveDashboardPortfolio`. */
+    siteScope?: readonly string[] | null;
+  } = {},
 ): Promise<OvMetrics> {
   const now = options.now ?? new Date();
   const today = dayString(now);
@@ -239,32 +373,14 @@ export async function loadOverviewMetrics(
 
   /* ── Portfolios ─────────────────────────────────────────────────────────── */
 
-  const groupRows = await db
-    .select({ id: siteGroups.id, name: siteGroups.name })
-    .from(siteGroups)
-    .where(and(eq(siteGroups.organisationId, orgId), eq(siteGroups.active, true)));
-  const portfolios = groupRows
-    .map((row) => ({ id: row.id, name: row.name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const { portfolios, chosen, siteIds } = await resolveDashboardPortfolio(
+    db,
+    orgId,
+    options.portfolio,
+    options.siteScope ?? null,
+  );
 
-  const wanted = (options.portfolio ?? "").trim();
-  const chosen = portfolios.find((row) => row.id === wanted) ?? null;
-
-  let siteIds: string[] | null = null;
-  if (chosen) {
-    const members = await db
-      .select({ siteId: siteGroupMembers.siteId })
-      .from(siteGroupMembers)
-      .where(
-        and(
-          eq(siteGroupMembers.organisationId, orgId),
-          eq(siteGroupMembers.siteGroupId, chosen.id),
-        ),
-      );
-    siteIds = [...new Set(members.map((row) => row.siteId).filter(Boolean))];
-  }
-
-  const scope = jobScope(orgId, siteIds);
+  const scope = dashboardJobScope(orgId, siteIds);
   const openScope = and(scope, sql`not ${closedJobSql}`)!;
 
   /* ── Statuses, from configuration ───────────────────────────────────────── */
@@ -302,7 +418,7 @@ export async function loadOverviewMetrics(
     categoryGrouped,
     attentionRows,
     unitRows,
-    spendRows,
+    spendTally,
     openByDay,
     overdueDueDays,
     completedByDay,
@@ -363,26 +479,10 @@ export async function loadOverviewMetrics(
           : and(eq(units.organisationId, orgId), eq(units.status, "Active"))!,
       ),
     /*
-     * Spend by month. `maintenance_requests.cost` is a REAL in POUNDS — the
-     * same column `/api/dashboard/cost` reads — so it is converted to integer
-     * pence once, here, and never handled as a float again.
+     * Spend by month — `loadSpendByMonth`, the query the Reports block's trend
+     * is also drawn from. Pounds become integer pence once, inside it.
      */
-    db
-      .select({
-        month: sql<string>`substr(${dayOnly(maintenanceRequests.completedAt)}, 1, 7)`.as("month"),
-        pounds: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
-      })
-      .from(maintenanceRequests)
-      .where(
-        and(
-          scope,
-          isNotNull(maintenanceRequests.completedAt),
-          sql`${dayOnly(maintenanceRequests.completedAt)} >= ${shiftDay(rangeTo, -364)}`,
-          sql`${dayOnly(maintenanceRequests.completedAt)} < ${endExclusive}`,
-          isNotNull(maintenanceRequests.cost),
-        ),
-      )
-      .groupBy(sql`month`),
+    loadSpendByMonth(db, scope, shiftDay(rangeTo, -364), endExclusive),
     /* The three sparkline series, each reconstructed from dates the rows
        already carry. Grouped in SQL and expanded to a dense series in JS. */
     db
@@ -556,9 +656,16 @@ export async function loadOverviewMetrics(
 
   const register = await readComplianceRegister(db, orgId, { today: now });
   const allowed = siteIds ? new Set(siteIds) : null;
+  /*
+   * `complianceCompletion` is handed the portfolio's WHOLE register, "Not
+   * required" included, and excludes those records itself — so its percent,
+   * satisfied and applicable are exactly what they were when this list was
+   * pre-filtered, and its `notRequired` is now a count rather than the 0 the
+   * pre-filtering always left for it (the export's "requirements not required"
+   * row read 0 on an estate holding 541).
+   */
   const scorable = register.entries.filter(
-    (entry) =>
-      entry.state !== "Not required" && (!allowed || allowed.has(String(entry.siteId ?? ""))),
+    (entry) => !allowed || allowed.has(String(entry.siteId ?? "")),
   );
   const completion = complianceCompletion(scorable);
 
@@ -620,12 +727,6 @@ export async function loadOverviewMetrics(
 
   /* ── Spend ──────────────────────────────────────────────────────────────── */
 
-  const spendTally = new Map<string, number>();
-  for (const row of spendRows) {
-    const month = String(row.month ?? "").slice(0, 7);
-    if (!month) continue;
-    spendTally.set(month, (spendTally.get(month) ?? 0) + Math.round(Number(row.pounds ?? 0) * 100));
-  }
   const spend: { month: string; label: string; pence: number }[] = [];
   let cursor = `${rangeTo.slice(0, 7)}-01`;
   const months: string[] = [];
@@ -636,10 +737,7 @@ export async function loadOverviewMetrics(
   for (const month of months) {
     spend.push({
       month,
-      label: new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", {
-        month: "short",
-        timeZone: "Europe/London",
-      }),
+      label: monthLabel(month),
       pence: spendTally.get(month) ?? 0,
     });
   }
@@ -653,11 +751,15 @@ export async function loadOverviewMetrics(
     range: {
       from: rangeFrom,
       to: rangeTo,
-      label: `${formatDay(rangeFrom)} – ${formatDay(rangeTo)}`,
+      label: formatDayRange(rangeFrom, rangeTo),
     },
+    /* For "All portfolios" the list is empty — nothing to narrow — unless the
+       membership is site-restricted, when it is the scope, so a drill opens
+       the member's stores rather than the whole estate. A scope that resolved
+       to no sites at all is `NO_SITE_IN_SCOPE`, so its drills open nothing. */
     portfolio: chosen
-      ? { ...chosen, siteIds: siteIds ?? [] }
-      : { id: "all", name: "All portfolios", siteIds: [] },
+      ? { ...chosen, siteIds: drillSiteIds(siteIds) }
+      : { id: "all", name: "All portfolios", siteIds: drillSiteIds(siteIds) },
     portfolios,
     openJobs,
     attentionSiteIds,
@@ -691,13 +793,28 @@ export async function loadOverviewMetrics(
 }
 
 /** `12 May 2026`, en-GB, Europe/London — the brief's date format. */
-function formatDay(day: string): string {
+export function formatDay(day: string): string {
   return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
     timeZone: "Europe/London",
   });
+}
+
+/**
+ * `12 May – 11 Jun 2026` — the three briefs' range format: the year once, at
+ * the end, when both days share it; both years when they do not. Shared by the
+ * three blocks' endpoints so their header pills read alike.
+ */
+export function formatDayRange(from: string, to: string): string {
+  if (from.slice(0, 4) !== to.slice(0, 4)) return `${formatDay(from)} – ${formatDay(to)}`;
+  const short = new Date(`${from}T12:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/London",
+  });
+  return `${short} – ${formatDay(to)}`;
 }
 
 /* ── Reconciliation, asserted rather than assumed ─────────────────────────── */

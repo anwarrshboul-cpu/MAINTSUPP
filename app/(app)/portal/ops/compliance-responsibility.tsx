@@ -51,7 +51,7 @@ import {
   type ComplianceState,
 } from "../../../lib/compliance-status";
 import { EmptyState, ErrorState, OpsCard, SkeletonRow, plural } from "./ops-primitives";
-import { useOpsQuery } from "./ops-url-state";
+import { announceDataChanged, useOpsQuery } from "./ops-url-state";
 import responsibilityCss from "./compliance-responsibility.css?url";
 
 /* ── Wire shapes ──────────────────────────────────────────────────────────── */
@@ -357,6 +357,9 @@ export function ConfirmResponsibilitiesQueue({
   const refresh = useCallback(() => {
     queue.reload();
     onSaved();
+    /* A confirmed responsibility moves a requirement into or out of the score,
+       so the Compliance dashboard block above re-reads as well. */
+    announceDataChanged();
   }, [onSaved, queue]);
 
   const apply = useCallback(

@@ -513,13 +513,23 @@ const reportsPatched = (await read("app/(app)/portal/portal-app.tsx")).includes(
 );
 
 test("Repeat activity is the last section on the reports screen", { skip: reportsPatched ? false : "portal-app.tsx patch not applied yet" }, async () => {
+  /*
+   * RE-POINTED 2026-09-11. The owner's instruction was that Repeat activity
+   * comes after the headline spend panels. The Reports brief then made it the
+   * last row of the Spend and reporting block (a gauge, two donuts and
+   * recurrence rings, replacing the table), so the order is asserted there:
+   * KPIs, then Spend trend and Top sites, then Repeat activity. The table is
+   * gone from the page below, which the second assertion holds.
+   */
+  const block = await read("app/(app)/portal/ops/rp-dash.tsx");
+  const trend = block.indexOf('<h3 className="ov-card__title">Spend trend</h3>');
+  const sites = block.indexOf('<h3 className="ov-card__title">Top sites by spend</h3>');
+  const repeat = block.indexOf('<h3 className="ov-card__title">Repeat activity</h3>');
+  assert.ok(trend > 0 && sites > trend && repeat > sites, "Repeat activity is the block's last row");
   const source = await read("app/(app)/portal/portal-app.tsx");
   const reports = source.slice(source.indexOf("function ReportsView("));
   const body = reports.slice(0, reports.indexOf("\nfunction "));
-  assert.ok(
-    body.indexOf("analytics-repeat-panel") > body.indexOf('surface="reports"'),
-    "the owner asked for Repeat activity last; it sits above the arrangeable panels",
-  );
+  assert.equal(body.indexOf("analytics-repeat-panel"), -1, "and the page no longer draws the table");
 });
 
 test("the reports screen no longer uses the fixed-window sparkline", { skip: reportsPatched ? false : "portal-app.tsx patch not applied yet" }, async () => {
@@ -527,6 +537,21 @@ test("the reports screen no longer uses the fixed-window sparkline", { skip: rep
   const reports = source.slice(source.indexOf("function ReportsView("));
   const body = reports.slice(0, reports.indexOf("\nfunction "));
   assert.doesNotMatch(body, /requestTrend\(/, "requestTrend ignores the period");
-  assert.match(body, /periodTrend\(/);
-  assert.match(body, /periodSpendSeries\(/);
+  /*
+   * RE-POINTED 2026-09-11. The tiles and the trend that called `periodTrend`
+   * and `periodSpendSeries` were replaced by the Spend and reporting block,
+   * whose sparklines and trend are cut on the SERVER over the window the reader
+   * chose — never a fixed one: daily buckets across the range (weekly past 45
+   * days), and the trend's months anchored on the range's own end.
+   *
+   * RE-POINTED AGAIN, same day: the buckets still start at `range.from` and
+   * step a day, then a week past 45 days — and now coarsen to months and years
+   * for a long custom range instead of stopping at a 400-bucket cap that
+   * dropped the tail. The window is still the reader's, never a fixed one.
+   */
+  const metrics = await read("app/lib/reports-dash.ts");
+  assert.match(metrics, /const bucketStarts: string\[\] = \[range\.from\];/);
+  assert.match(metrics, /sparkUnit === "day"\s*\? shiftDays\(last, 1\)\s*: sparkUnit === "week"\s*\? shiftDays\(last, 7\)/);
+  assert.match(metrics, /length <= 45 \? "day" : length <= 728 \? "week"/);
+  assert.match(metrics, /const anchor = range\.to\.slice\(0, 7\);/);
 });

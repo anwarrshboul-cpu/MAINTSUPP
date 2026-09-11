@@ -300,9 +300,16 @@ test("all records still means all records", () => {
 test("subitems and archived rows are not counted as work orders", async () => {
   const source = await read(PORTAL);
 
+  /*
+   * RE-POINTED, NOT WEAKENED: the rule gained a third exclusion. A Store
+   * Documentation store is a request row too, and the sidebar badge counted
+   * every one of them as open work — the "98 open over a board drawing 82"
+   * defect. `isOnJobsBoard` is the browser twin of `jobsBoardCondition`, and
+   * the two exclusions this pin has always protected are still the first two.
+   */
   assert.match(
     source,
-    /function countsAsWorkOrder\(request: MaintenanceRequest\) \{\s*return !request\.parentId && !request\.archived;/,
+    /function countsAsWorkOrder\(request: MaintenanceRequest\) \{[\s\S]{0,400}?return !request\.parentId && !request\.archived && isOnJobsBoard\(request\);/,
     "one definition of what the reporting screens count",
   );
 
@@ -335,6 +342,8 @@ test("subitems and archived rows are not counted as work orders", async () => {
     "isNull(maintenanceRequests.deletedAt)",
     "eq(maintenanceRequests.archived, false)",
     "isNull(maintenanceRequests.parentId)",
+    /* The fourth exclusion, SQL twin of `isOnJobsBoard` above. */
+    "jobsBoardCondition()",
   ]) {
     assert.ok(
       scope.slice(0, 500).includes(clause),
@@ -371,13 +380,17 @@ test("the board's own rule is the one being followed", async () => {
 test("the Reports spend split is classified in exactly one place", async () => {
   const body = componentBody(await read(PORTAL), "ReportsView");
 
-  for (const bucket of ["reactive", "planned", "projects"]) {
-    assert.match(
-      body,
-      new RegExp(`classifySpend\\(request\\) === "${bucket}"`),
-      `the ${bucket} sparkline does not use the shared classifier`,
-    );
-  }
+  /*
+   * RE-POINTED 2026-09-11. The four tiles that called `classifySpend` per
+   * bucket were replaced by the Spend and reporting block, whose split is
+   * computed on the server by `buildReportsDashboard` through `spendTypeOf` —
+   * the rule `classifySpend` now delegates to. One classifier still; it simply
+   * runs where the figure is counted.
+   */
+  const metrics = await read("app/lib/reports-dash.ts");
+  assert.match(metrics, /type: spendTypeOf\(job\)/);
+  assert.match(metrics, /SPEND_TYPES\.map\(\(type\) => kpiFor\(type, SPEND_TYPE_LABEL\[type\], \(line\) => line\.type === type\)\)/,
+    "each type KPI is cut by the shared classifier");
 
   /*
    * The three inline predicates that used to be here disagreed with the
@@ -403,11 +416,20 @@ test("every Reports tile says what its sparkline plots", async () => {
    * distinction on every card; Reports named it on none, so a sparkline under
    * a pound sign read as pounds.
    */
-  const body = componentBody(await read(PORTAL), "ReportsView");
-  assert.ok(
-    (body.match(/trendLabel="/g) ?? []).length >= 4,
-    "the Reports tiles do not say what their lines count",
-  );
+  /*
+   * RE-POINTED 2026-09-11. The tiles moved into the Spend and reporting block,
+   * where each sparkline plots MONEY — the KPI's own spend per day or week,
+   * summing to the figure above it — and its accessible name says which.
+   */
+  const block = await read("app/(app)/portal/ops/rp-dash.tsx");
+  /* The unit now has four values (day, week, month, year — see `sparkUnit`),
+     each already the word to say, so the name reads it straight through. */
+  assert.match(block, /ariaLabel=\{`\$\{kpi\.label\} by \$\{data\.sparkUnit\}: /,
+    "the Reports KPIs do not say what their lines plot");
+  const contract = await read("app/lib/reports-dash-contract.ts");
+  assert.match(contract, /sparkUnit: "day" \| "week" \| "month" \| "year";/, "and every unit is a word");
+  const metrics = await read("app/lib/reports-dash.ts");
+  assert.match(metrics, /\$\{kpi\.key\} sparkline \$\{spark\} != \$\{kpi\.pence\}/, "and the lines sum to the figure");
 });
 
 /* ── 5. Loading is not empty ─────────────────────────────────────────────── */
@@ -430,13 +452,17 @@ test("Reports waits for its rows before reporting that there are none", async ()
    * Every sentence on this screen that asserts the portfolio is empty has to
    * sit behind that flag. Before this they all printed during the first load.
    */
-  assert.match(body, /loading[\s\S]{0,40}\?[\s\S]{0,40}LOADING_NOTE/, "the panels still claim emptiness while loading");
   assert.match(body, /loading=\{loading\}/, "the caption still claims emptiness while loading");
-  assert.match(
-    body,
-    /detail=\{loading \? LOADING_NOTE :/,
-    "the headline tile still reads 'Nothing in this period' while loading",
-  );
+  /*
+   * RE-POINTED 2026-09-11. The panels and the headline tile that printed
+   * `LOADING_NOTE` were replaced by the Spend and reporting block, which draws
+   * card-shaped skeletons until its payload lands and keeps the previous
+   * figures on screen while it refetches — loading is still never presented
+   * as "nothing in this period".
+   */
+  const block = await read("app/(app)/portal/ops/rp-dash.tsx");
+  assert.match(block, /className="rp-kpi ov-skeleton"/, "the headline figures still claim emptiness while loading");
+  assert.match(block, /keepOnError: true/);
 });
 
 test("the caption tells the reader it is still counting", async () => {
@@ -899,17 +925,24 @@ test("the screens made of jobs get the failure state", async () => {
 
 test("repeat activity measures a rate against its own window", async () => {
   const source = await read(PORTAL);
-  assert.match(
-    source,
-    /function describeCadence\(orders: number, spanDays: number \| null\)/,
-    "the cadence is not measured against a span",
-  );
   assert.doesNotMatch(
     source,
     /item\.orders >= 4 \? "Weekly"/,
     "a raw count is being labelled as a rate again",
   );
-  assert.match(source, /frequency: describeCadence\(item\.orders, cadenceSpanDays\)/);
+  /*
+   * RE-POINTED 2026-09-11. The table's `describeCadence` (orders per week over
+   * the period) was replaced by the Repeat activity widget, which measures
+   * both halves against real intervals: the REPEAT RATE is repeat jobs over the
+   * jobs raised in the range, and a pattern's FREQUENCY is the median number of
+   * days between its consecutive occurrences — never a raw count labelled as
+   * a rate.
+   */
+  const metrics = await read("app/lib/reports-dash.ts");
+  assert.match(metrics, /percent: raised\.length > 0 \? Math\.round\(\(repeatJobs\.length \/ raised\.length\) \* 100\) : 0/);
+  const rules = await read("app/lib/job-metrics.ts");
+  assert.match(rules, /pattern\.medianDays = medianOf\(pattern\.gaps\);/);
+  assert.match(rules, /pattern\.band = recurrenceBandOf\(pattern\.medianDays\);/);
 });
 
 test("the invented Activity column is gone", async () => {

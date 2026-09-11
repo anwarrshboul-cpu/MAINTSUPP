@@ -366,6 +366,13 @@ export interface MaintenanceRequest {
   scheduledTime?: string | null;
   targetCompletionDate?: string | null;
   cost: number | null;
+  /**
+   * The board this row is placed on — `maintenance` for a job, a Store
+   * Documentation register's key for a store, a `sec-…` key for a section's
+   * row — or null before it has a placement. Sent by `/api/maintenance` so the
+   * browser can make the cut the Jobs board makes (`isOnJobsBoard`).
+   */
+  boardId?: string | null;
   approvedBy?: string | null;
   invoice?: string | null;
   attachmentCount: number;

@@ -319,11 +319,18 @@ test("Reports can answer the question a spend report is opened for", async () =>
   );
   assert.ok(reports.length > 0, "ReportsView must still exist");
 
-  assert.match(
-    reports,
-    /<h2>Spend trend<\/h2>/,
-    "Reports must still chart spend over time",
-  );
+  /*
+   * RE-POINTED 2026-09-11. The chart moved into the Spend and reporting
+   * dashboard block (`ops/rp-dash.tsx`), which the Reports brief placed at the
+   * top of this page and told to REPLACE the page's own copy rather than
+   * duplicate it. The contract is unchanged: Reports charts spend over time,
+   * with an honest empty state, and exactly once. So the block draws the one
+   * "Spend trend", and this surface draws none.
+   */
+  const block = await read("app/(app)/portal/ops/rp-dash.tsx");
+  const blockRendered = block.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(block, /<h3 className="ov-card__title">Spend trend<\/h3>/, "Reports must still chart spend over time");
+  assert.equal((blockRendered.match(/>Spend trend</g) ?? []).length, 1, "and the block draws it once");
   /*
    * Counted over the RENDERED source only. The comments explaining why the
    * duplicate was removed naturally say "Spend trend" several times, and a pin
@@ -333,15 +340,14 @@ test("Reports can answer the question a spend report is opened for", async () =>
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
   assert.equal(
-    (rendered.match(/Spend trend/g) ?? []).length,
-    1,
-    "and exactly once — two identical charts make a reader invent a difference",
+    (rendered.match(/<h2>Spend trend<\/h2>/g) ?? []).length,
+    0,
+    "and the page below it no longer draws a second one — two identical charts make a reader invent a difference",
   );
-  assert.match(
-    reports,
-    /spendTrend\.some\(\(point\) => point\.value > 0\)/,
-    "no spend is an empty state, not a line pinned to the axis",
-  );
+  /* No spend is an empty state, not a missing chart: the block's builder
+     returns every month of the window with its £0, and the skeleton covers
+     loading, so "nothing spent" and "not loaded yet" stay two different claims. */
+  assert.match(block, /ov-skeleton/, "loading draws the block's skeleton, not an empty trend");
 
   /*
    * The duplicate slot now carries job volume — the one candidate that is

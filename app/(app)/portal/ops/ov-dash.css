@@ -58,6 +58,17 @@
 
 /* ── The root, and the palette ────────────────────────────────────────────── */
 
+/*
+ * ONE PALETTE FOR THREE BLOCKS.
+ *
+ * The Compliance and Reports briefs are companions to this one — "same design
+ * system, same data rules" — and each says: reuse the Overview's tokens, do not
+ * create a second copy of the palette. So `.ov-dash` is the design system's
+ * ROOT, not the Overview's private scope: the companion blocks mount as
+ * `.ov-dash.cp-dash` and `.ov-dash.rp-dash`, inherit every token, card, legend,
+ * tooltip, gauge and ring rule below, and add only their own accents and grids
+ * in `cp-dash.css` / `rp-dash.css`. The Overview was first, so it holds the name.
+ */
 .ov-dash {
   color-scheme: dark;
 
@@ -121,9 +132,10 @@
   min-width: 0;
 }
 
+/* 20px / 600, as all three briefs specify the block heading. */
 .ov-dash .ov-dash__title {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.25;
   color: var(--ov-text);
@@ -580,6 +592,194 @@ body[data-theme] .ov-dash select option {
   background-color: var(--ov-card);
 }
 
+/*
+ * THE HEADER ROW'S CONTROLS — `dash-header.tsx`, shared by the three blocks.
+ *
+ * The PILL is the control and what sits inside it is bare. The rule above
+ * gives every select in the block a border of its own, which inside a bordered
+ * label drew two boxes, one inside the other — measured on the Overview against
+ * its reference. So inside a header pill the select sheds its border, padding
+ * and ground, and keeps only its chevron.
+ *
+ * "Controls: transparent background, 1px `--ov-card-border`, radius 8px, 12px
+ * text." Transparent needs `!important` for the same reason the ground above
+ * does: `brand-overrides.css` paints every control in `.portal-main` on a light
+ * profile, and this island has to win outright. Written AFTER the group rule
+ * so, at equal weight, it is the one that holds.
+ */
+body[data-theme] .ov-dash .ov-dash__head .ov-dash__control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--ov-text) !important;
+  background-color: transparent !important;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+body[data-theme] .ov-dash .ov-dash__head .ov-dash__control:hover {
+  border-color: var(--ov-text-muted);
+}
+
+body[data-theme] .ov-dash .ov-dash__control--select > select {
+  min-height: 0;
+  max-width: 180px;
+  padding: 0 18px 0 0;
+  border: 0;
+  background-color: transparent !important;
+  /* The chevron, restated: the group rule above clears `background-image` on
+     every select inside a control, at a weight the chevron rule cannot beat. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
+    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  background-position: calc(100% - 8px) 50%, calc(100% - 3px) 50%;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/*
+ * THE LIGHT SKIN'S FIELD RULE, OUT-RANKED RATHER THAN FOUGHT.
+ *
+ * `brand-overrides.css` carries `body[data-theme="light"] :is(.portal-main, …)
+ * :is(input, select, textarea):not([type="checkbox"]):not([type="radio"])
+ * :not(.live-board-toolbar *)` — (0,5,2) — and writes `background`, a
+ * shorthand, so on a light profile the header's portfolio select and the
+ * spend-window select lost their chevrons and took a light edge. The three
+ * `:not()`s here are always true of these selects, so they narrow nothing;
+ * they only make this (0,6,2), which wins in both themes whatever order the
+ * stylesheets load in. The Reports block's card selects use the same device.
+ */
+body[data-theme] .ov-dash :is(.ov-dash__control--select, .ov-card__link) > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
+  border-color: var(--ov-card-border);
+  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
+    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+}
+
+body[data-theme] .ov-dash .ov-dash__control--select > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
+  border: 0;
+  background-position: calc(100% - 8px) 50%, calc(100% - 3px) 50%;
+}
+
+/*
+ * On a phone the header wraps, and a panel anchored to the date pill's right
+ * edge opened past the screen's left edge (measured 4px at 390). Below 768 the
+ * panel anchors to the whole controls row instead, so it can never be wider
+ * than the block it opens in.
+ */
+@media (max-width: 767px) {
+  body[data-theme] .ov-dash .ov-dash__controls {
+    position: relative;
+  }
+
+  body[data-theme] .ov-dash .ov-dash__head .ov-dash__range {
+    position: static;
+  }
+
+  .ov-dash .ov-dash__range-panel {
+    inset-inline: 0;
+    min-inline-size: 0;
+  }
+}
+
+.ov-dash .ov-dash__icon {
+  flex: none;
+  color: var(--ov-text-2);
+}
+
+.ov-dash .ov-dash__icon--chevron {
+  color: var(--ov-text-muted);
+}
+
+/* The date range: a disclosure with no disclosure triangle, on one line. */
+.ov-dash .ov-dash__range > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.ov-dash .ov-dash__range > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ov-dash .ov-dash__range > summary::marker {
+  content: "";
+}
+
+.ov-dash .ov-dash__range-label {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Out of layout while closed, in every engine. Chromium keeps a box for a
+   closed disclosure's content (never painted, but measured), and an engine
+   that let it reach the scroll width would push a phone page sideways. */
+.ov-dash .ov-dash__range:not([open]) > .ov-dash__range-panel {
+  display: none;
+}
+
+.ov-dash .ov-dash__range-panel {
+  position: absolute;
+  inset-inline-end: -1px;
+  inset-block-start: calc(100% + 6px);
+  z-index: 30;
+  display: grid;
+  gap: 8px;
+  min-inline-size: 220px;
+  padding: 12px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 10px;
+  background: var(--ov-card);
+  box-shadow: 0 12px 32px var(--ov-frame);
+  white-space: normal;
+  cursor: auto;
+}
+
+.ov-dash .ov-dash__range-panel label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ov-text-2);
+}
+
+.ov-dash .ov-dash__range-caption {
+  margin: 0;
+  max-width: 240px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ov-text-muted);
+}
+
+body[data-theme] .ov-dash .ov-dash__range-reset {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 8px;
+  background: var(--ov-nav-active);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ov-text);
+  cursor: pointer;
+}
+
+.ov-dash .ov-dash__export[aria-disabled="true"],
+.ov-dash .ov-dash__export:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* The legend and caption inks, for the same reason and at the same weight. */
 body[data-theme] .ov-dash .ov-legend__label,
 body[data-theme] .ov-dash .ov-kpi__label {
@@ -839,6 +1039,16 @@ body[data-theme] .ov-dash .ov-card__link {
   display: grid;
   justify-items: center;
   gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* The speedometer's arc and readout, as one positioned box, so a sub-caption
+ * beneath the gauge cannot push the readout off the pivot. */
+.ov-dash .ov-gauge__dial {
+  position: relative;
+  display: grid;
+  justify-items: center;
   max-width: 100%;
   min-width: 0;
 }
@@ -1124,6 +1334,11 @@ body[data-theme] .ov-dash .ov-card__link {
   .ov-dash .ov-card__link,
   .ov-dash .ov-ring__hit,
   .ov-dash .ov-gauge__hit {
+    min-height: 44px;
+  }
+
+  body[data-theme] .ov-dash .ov-dash__head .ov-dash__control,
+  body[data-theme] .ov-dash .ov-dash__range-reset {
     min-height: 44px;
   }
 

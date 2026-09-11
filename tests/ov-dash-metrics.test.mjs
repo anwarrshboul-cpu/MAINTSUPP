@@ -159,10 +159,22 @@ test("the metrics reuse the product's existing definitions", async () => {
   /* Overdue is the same expression the board and the ageing card use. */
   assert.match(source, /overdueOpenSql\(now\)/);
 
-  /* A job counts as work at all by the same three exclusions as everywhere. */
-  assert.match(source, /isNull\(maintenanceRequests\.deletedAt\)/);
-  assert.match(source, /eq\(maintenanceRequests\.archived, false\)/);
-  assert.match(source, /isNull\(maintenanceRequests\.parentId\)/);
+  /*
+   * A job counts as work at all by the same exclusions as everywhere.
+   *
+   * RE-POINTED: the block's scope used to RESTATE the three exclusions, and a
+   * restatement is how a fourth gets added in one place and missed in the other
+   * — which is what happened: a Store Documentation store is not a job, and the
+   * block counted 16 of them as open. It now IS `liveWorkOrderCondition`, so the
+   * exclusions are asserted where they live, all four of them.
+   */
+  assert.match(source, /const base = liveWorkOrderCondition\(orgId\);/);
+  const filters = await read("app/lib/dashboard-filters.ts");
+  const rule = filters.slice(filters.indexOf("export function liveWorkOrderCondition")).slice(0, 400);
+  assert.match(rule, /isNull\(maintenanceRequests\.deletedAt\)/);
+  assert.match(rule, /eq\(maintenanceRequests\.archived, false\)/);
+  assert.match(rule, /isNull\(maintenanceRequests\.parentId\)/);
+  assert.match(rule, /jobsBoardCondition\(\)/);
 
   /* Priority folds through the one classifier. */
   assert.match(source, /normalisePriority\(row\.priority\)/);
@@ -180,7 +192,17 @@ test("the metrics reuse the product's existing definitions", async () => {
    */
   assert.match(source, /readComplianceRegister\(db, orgId/);
   assert.match(source, /complianceCompletion\(scorable\)/);
-  assert.match(source, /entry\.state !== "Not required"/);
+  /*
+   * RE-POINTED: "Not required" is still out of the fraction on both sides, but
+   * the exclusion is `complianceCompletion`'s own — the list is no longer
+   * pre-filtered, which is what made the export's "not required" row read 0.
+   * The rule is asserted where it lives, so the pin still fails the day
+   * somebody counts those records as satisfied.
+   */
+  const status = await read("app/lib/compliance-status.ts");
+  assert.match(status, /const applicable = total - notRequired - excluded;/);
+  assert.doesNotMatch(source, /entry\.state !== "Not required" && \(!allowed/,
+    "the pre-filter that zeroed notRequired is gone");
 });
 
 test("the metrics SQL obeys the dual-dialect rules", async () => {
@@ -321,8 +343,20 @@ test("changing a job moves the donut, the rings, the gauge and the KPIs", async 
     headers: { "x-maintsupp-identity": IDENTITY, Accept: "application/json" },
   });
   const rows = (await board.json().catch(() => null))?.requests ?? [];
+  /*
+   * A JOB, on the Jobs board. The feed carries every board's rows, and the
+   * newest one on the development estate is a section's "New store" fixture —
+   * picking it meant this test patched a row the metrics never counted, got a
+   * 400 and skipped every run. `boardId` is how the feed says where a row lives.
+   */
   const openRow = rows.find(
-    (row) => row.priority && String(row.priority).trim().toLowerCase() !== "urgent",
+    (row) =>
+      (!row.boardId || row.boardId === "maintenance") &&
+      !row.archived &&
+      !row.parentId &&
+      row.stage !== "Completed" &&
+      row.priority &&
+      String(row.priority).trim().toLowerCase() !== "urgent",
   );
   if (!openRow) {
     t.skip("no suitable open job to move");
@@ -337,7 +371,9 @@ test("changing a job moves the donut, the rings, the gauge and the KPIs", async 
         "Content-Type": "application/json",
         "x-maintsupp-identity": IDENTITY,
       },
-      body: JSON.stringify({ id: openRow.id, data: { priority } }),
+      /* `fields`, the route's contract — `data` was refused with a 400 and the
+         test skipped itself on every run. */
+      body: JSON.stringify({ id: openRow.id, fields: { priority } }),
     });
 
   const moved = await patch("Urgent");

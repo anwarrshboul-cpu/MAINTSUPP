@@ -152,6 +152,7 @@ const SORTS = [
 export function SitesList({
   sites,
   coverage,
+  portfolioCompliance = null,
   loading,
   statuses,
   types,
@@ -166,6 +167,12 @@ export function SitesList({
 }: {
   sites: SiteListRow[];
   coverage: SiteCoverage | null;
+  /**
+   * The product's compliance score for the whole register, when the payload
+   * carries it — the figure the Overview and the Compliance page print. The
+   * tile falls back to summing the per-site meters only when it is absent.
+   */
+  portfolioCompliance?: { percent: number; satisfied: number; applicable: number; scored: boolean } | null;
   loading: boolean;
   statuses: Array<{ value: string; label: string }>;
   types: Array<{ value: string; label: string }>;
@@ -453,10 +460,18 @@ export function SitesList({
       inactive: sites.length - active,
       openJobs,
       outstanding: sites.filter((site) => (site.metrics?.openJobs ?? 0) > 0).length,
-      compliancePercent: applicable ? Math.round((satisfied / applicable) * 100) : 0,
-      complianceScored: applicable > 0,
+      /* ONE compliance score across the product: the payload's, which is
+         `complianceCompletion` over the whole register. Summing the per-site
+         meters counted only rows linked to a site and read 45% where the
+         Overview and the Compliance page read 23%. */
+      compliancePercent: portfolioCompliance
+        ? portfolioCompliance.percent
+        : applicable
+          ? Math.round((satisfied / applicable) * 100)
+          : 0,
+      complianceScored: portfolioCompliance ? portfolioCompliance.scored : applicable > 0,
     };
-  }, [sites]);
+  }, [portfolioCompliance, sites]);
 
   const maxOpen = Math.max(...sites.map((site) => site.metrics?.openJobs ?? 0), 1);
 

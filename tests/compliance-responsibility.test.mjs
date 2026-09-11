@@ -80,7 +80,11 @@ const view = await (async () => {
       transpile(await read("app/lib/compliance-view.ts"))
         .replace(/from ["']\.\.\/\.\.\/db\/monday-board-spec["']/g, `from "${spec}"`)
         .replace(/from ["']\.\/compliance-status["']/g, `from "${status}"`)
-        .replace(/from ["']\.\/compliance-duty-holder["']/g, `from "${dutyHolder}"`),
+        .replace(/from ["']\.\/compliance-duty-holder["']/g, `from "${dutyHolder}"`)
+        /* The due-date filters (`due=`, `from`/`to`) compare date-only values
+           through `dateOnlyValue`, so the view now reads the same expiry module
+           the status layer does; the chain gains one link, not a new rule. */
+        .replace(/from ["']\.\/expiry-status["']/g, `from "${expiry}"`),
     )
   );
 })();
@@ -554,9 +558,13 @@ test("the queue and the register are the same page, sharing one URL state", asyn
   const page = await read("app/(app)/portal/ops/compliance-page.tsx");
   assert.match(page, /\["confirm", "Confirm responsibilities"\]/);
   assert.match(page, /view === "confirm" \? \(/);
+  /* RE-POINTED: a save now broadcasts `announceDataChanged`, which re-reads
+     every figure on the page — this summary as before, and the Compliance
+     dashboard block above it, which scores the same register and was left
+     stale by a summary-only reload. */
   assert.match(
     page,
-    /<ConfirmResponsibilitiesQueue search=\{search\} onSaved=\{summary\.reload\} \/>/,
+    /<ConfirmResponsibilitiesQueue search=\{search\} onSaved=\{announceDataChanged\} \/>/,
   );
   /* Filter state stays in the URL — a filtered page is a link — which is the
      rule every operations page is already held to. */

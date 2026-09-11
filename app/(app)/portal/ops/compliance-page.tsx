@@ -47,7 +47,7 @@ import {
   plural,
 } from "./ops-primitives";
 import { OpsFilterBar, type FilterGroup } from "./ops-filter-bar";
-import { useOpsQuery, useQueryState } from "./ops-url-state";
+import { announceDataChanged, useOpsQuery, useQueryState } from "./ops-url-state";
 import {
   COMPLIANCE_COLOUR,
   COMPLIANCE_MEANING,
@@ -55,7 +55,8 @@ import {
   complianceBandColour,
   type ComplianceState,
 } from "../../../lib/compliance-status";
-import { formatDate } from "../../../lib/format-date";
+import { formatDate, formatDayMonth, formatShortDate } from "../../../lib/format-date";
+import { NO_SITE_IN_SCOPE, NO_SITE_IN_SCOPE_LABEL } from "../../../lib/job-metrics";
 import {
   ConfirmResponsibilitiesQueue,
   ResponsibilityControl,
@@ -170,7 +171,61 @@ type RecordsPayload = {
   noDueDateLabel: string;
 };
 
-const FILTER_KEYS = ["site", "state", "kind", "who", "due", "q", "sort", "view", "open"] as const;
+/*
+ * `scored`, `from` and `to` are written by the Compliance overview block above
+ * the register (`cp-dash.tsx`): its figures count only the requirements inside
+ * the score, and its date range narrows the register by due date. They are the
+ * register's filters once they are in the address bar, so "Clear all" takes
+ * them off too. `portfolio` is deliberately NOT here — it is the block's own
+ * header control, and this page does not read it.
+ */
+const FILTER_KEYS = [
+  "site",
+  "state",
+  "kind",
+  "who",
+  "due",
+  "q",
+  "sort",
+  "view",
+  "open",
+  "scored",
+  "from",
+  "to",
+] as const;
+
+/**
+ * THE BLOCK'S NARROWINGS, IN WORDS, FOR THE CHIPS.
+ *
+ * A countdown ring sends its window as `due=band:0-20` — thirds of the amber
+ * window, so not one of the fixed `DUE_WINDOWS` keys — and the header's picker
+ * sends `from`/`to`. A chip reading "band:0-20" or "2026-05-12" would be a
+ * filter the reader cannot read, so each becomes the sentence it stands for.
+ * The server's parser (`parseComplianceFilters`) swaps a reversed range, and so
+ * does this, so the chip describes the range actually applied.
+ */
+const DUE_BAND = /^band:(\d{1,4})-(\d{1,4})$/;
+const DAY_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function dueBandText(value: string): string | null {
+  const match = DUE_BAND.exec(value.trim());
+  if (!match) return null;
+  const [low, high] = [Number(match[1]), Number(match[2])].sort((left, right) => left - right);
+  return `Due in ${low}–${high} days`;
+}
+
+function dueRangeText(from: string, to: string): string | null {
+  const start = DAY_ONLY.test(from) ? from : "";
+  const end = DAY_ONLY.test(to) ? to : "";
+  if (start && end) {
+    const [low, high] = start <= end ? [start, end] : [end, start];
+    const sameYear = low.slice(0, 4) === high.slice(0, 4);
+    return `Due between ${sameYear ? formatDayMonth(low) : formatShortDate(low)} – ${formatShortDate(high)}`;
+  }
+  if (start) return `Due from ${formatShortDate(start)}`;
+  if (end) return `Due until ${formatShortDate(end)}`;
+  return null;
+}
 
 const STATE_ORDER: ComplianceState[] = [
   "Compliant",
@@ -277,11 +332,37 @@ export function CompliancePage({
   const chips = useMemo(() => {
     const out: Array<{ key: string; label: string; value: string; onRemove: () => void }> = [];
     for (const group of groups) {
-      for (const value of params.getAll(group.key)) {
+      const values = params.getAll(group.key);
+      /* A dashboard figure can hand the register dozens of values at once —
+         "Other types" is every requirement outside the top five, a portfolio
+         is every member store — and one chip per value buried the register
+         under a wall of them. Past three they are one chip, which comes off
+         as one, since they went on as one. */
+      if (values.length > 3) {
         out.push({
           key: group.key,
           label: group.label,
-          value: group.options.find((option) => option.value === value)?.label ?? value,
+          value: `${values.length} selected`,
+          onRemove: () => {
+            const next = new URLSearchParams(window.location.search);
+            next.delete(group.key);
+            setParams(next);
+          },
+        });
+        continue;
+      }
+      for (const value of values) {
+        out.push({
+          key: group.key,
+          label: group.label,
+          value:
+            group.options.find((option) => option.value === value)?.label ??
+            (group.key === "due" ? dueBandText(value) : null) ??
+            /* The block's "Unassigned" renewal segment: nobody named at all. */
+            (group.key === "who" && value === "__none__" ? "Unassigned" : null) ??
+            /* A drill from a portfolio that holds no sites in scope. */
+            (group.key === "site" && value === NO_SITE_IN_SCOPE ? NO_SITE_IN_SCOPE_LABEL : null) ??
+            value,
           onRemove: () => {
             const next = new URLSearchParams(window.location.search);
             const rest = next.getAll(group.key).filter((entry) => entry !== value);
@@ -299,6 +380,30 @@ export function CompliancePage({
         label: "Search",
         value: query,
         onRemove: () => setValue("q", "", ""),
+      });
+    }
+    /* The Compliance block's narrowings — see `FILTER_KEYS`. Each comes off
+       like any other chip; the range comes off as one, since it went on as one. */
+    if (params.get("scored") === "1") {
+      out.push({
+        key: "scored",
+        label: "Scope",
+        value: "In the score",
+        onRemove: () => setValue("scored", "", ""),
+      });
+    }
+    const range = dueRangeText(params.get("from") ?? "", params.get("to") ?? "");
+    if (range) {
+      out.push({
+        key: "range",
+        label: "Due date",
+        value: range,
+        onRemove: () => {
+          const next = new URLSearchParams(window.location.search);
+          next.delete("from");
+          next.delete("to");
+          setParams(next);
+        },
       });
     }
     return out;
@@ -345,6 +450,22 @@ export function CompliancePage({
 
       <PortfolioBand state={summary} />
 
+      {/*
+        THE REGISTER'S SCROLL ANCHOR — where the Compliance block above lands a
+        reader after a drill ("View register ›", a segment, a ring).
+
+        It wraps the filter bar AND everything below it, not the bar alone. The
+        bar is `position: sticky`, and a sticky box can only travel inside its
+        parent: a wrapper exactly its own height would pin it in place and it
+        would stop sticking. `gap: inherit` keeps the page's own spacing at
+        every width, and `scroll-margin-top` clears the sticky topbar (71px, 64
+        on a phone) so the bar is not scrolled underneath it.
+      */}
+      <section
+        id="compliance-register"
+        aria-label="Compliance register"
+        style={{ display: "flex", flexDirection: "column", gap: "inherit", scrollMarginTop: 84 }}
+      >
       <OpsFilterBar
         periodControl={
           <>
@@ -413,7 +534,10 @@ export function CompliancePage({
           register, which is exactly the state somebody is in when they narrow to
           one store and then go to confirm its responsibilities.
         */
-        <ConfirmResponsibilitiesQueue search={search} onSaved={summary.reload} />
+        /* A confirmed duty holder moves a requirement into the score, so the
+           dashboard block above is stale too; `announceDataChanged` re-reads
+           every figure on the page, the summary included. */
+        <ConfirmResponsibilitiesQueue search={search} onSaved={announceDataChanged} />
       ) : summary.data.registerTotal === 0 ? (
         <OpsCard title="Certificate register">
           <EmptyState>
@@ -447,12 +571,14 @@ export function CompliancePage({
               onManageRecord={onManageRecord}
               onOpenStoreDocumentation={onOpenStoreDocumentation}
               /* A responsibility set on a record moves it into or out of the
-                 percentage, so the header above it has to be re-read. */
-              onSaved={summary.reload}
+                 percentage, so the header above it — and the dashboard block,
+                 which scores the same register — has to be re-read. */
+              onSaved={announceDataChanged}
             />
           ))}
         </div>
       )}
+      </section>
     </div>
   );
 }

@@ -94,6 +94,13 @@ function liveWorkOrder(organisationId: string) {
     isNull(maintenanceRequests.deletedAt),
     eq(maintenanceRequests.archived, false),
     isNull(maintenanceRequests.parentId),
+    /*
+     * DELIBERATELY WITHOUT `jobsBoardCondition`, unlike its twin in the
+     * workspace route. This population feeds generated INVOICES as well as
+     * client reports, and a row on a section's board may be chargeable work;
+     * narrowing it to the Jobs board would silently change what a client is
+     * billed for. That is an owner's decision, not a dashboard fix.
+     */
   );
 }
 
