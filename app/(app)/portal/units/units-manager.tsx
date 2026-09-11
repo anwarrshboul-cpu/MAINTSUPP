@@ -80,7 +80,31 @@ export function UnitsManager({
   sites: SiteChoice[];
   onNotify: (message: string) => void;
 }) {
-  const [siteFilter, setSiteFilter] = useState("");
+  /*
+   * THE SITE FILTER CAN ARRIVE IN THE ADDRESS BAR — §6 of the dashboard brief:
+   * "If a destination page does not yet read these filters from the URL, add
+   * that filtering to that page so the numbers it shows match the number
+   * clicked." The Overview block's "Active units" tile links here, and until
+   * now this screen read nothing, so a reader who had narrowed the dashboard to
+   * one portfolio landed on every unit in the workspace.
+   *
+   * ONE SITE, because that is what this control is. The select below holds a
+   * single site id, and the brief's instruction was to consume supported
+   * filters "without inventing semantics that do not exist" — so a caller that
+   * cannot name exactly one site sends nothing and gets the full register,
+   * rather than this screen growing a multi-select nobody asked for to service
+   * one link.
+   *
+   * Read in the initialiser rather than an effect: a `setState` in an effect is
+   * a second render pass for a value that is knowable at mount, and the React
+   * Compiler rejects it outright.
+   */
+  const [siteFilter, setSiteFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const wanted = new URLSearchParams(window.location.search).get("site") ?? "";
+    /* A pipe-joined list is more than one site, which this control cannot say. */
+    return wanted.includes("|") ? "" : wanted.trim();
+  });
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<{ id: string | null; form: Record<string, string> } | null>(null);
   const [detail, setDetail] = useState<UnitDetailPayload | null>(null);

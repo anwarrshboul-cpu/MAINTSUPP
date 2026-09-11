@@ -209,3 +209,86 @@ test("the block draws no table and no text list", async () => {
     assert.ok(!code.includes(tag), `the block renders no ${tag}> element`);
   }
 });
+
+test("the destination pages read the filters the block sends them", async () => {
+  /*
+   * §6: "If a destination page does not yet read these filters from the URL,
+   * add that filtering to that page so the numbers it shows match the number
+   * clicked." Three pages did not, and each needed a different answer.
+   */
+
+  /*
+   * SITES — the one that mattered most. "Requiring attention" counts DISTINCT
+   * SITES with at least one open job that is high or medium priority, or
+   * overdue, so no jobs filter can reproduce it: a link to the unfiltered
+   * register showed 128 rows under a figure of 7. The register now takes a
+   * `sites=` list, and measured after the change it shows exactly 7.
+   *
+   * `sites` PLURAL is deliberate: `site` is already the site DETAIL deep link
+   * in `sites-manager.tsx`, and a pipe-joined list handed to that would ask
+   * for a site whose id is "a|b|c" and open nothing.
+   */
+  const sitesList = await read("app/(app)/portal/ops/sites-list.tsx");
+  assert.match(sitesList, /params\.getAll\("sites"\)/, "the register reads a sites list");
+  assert.match(
+    sitesList,
+    /if \(onlySites\.size && !onlySites\.has\(site\.id\)\) return false;/,
+    "and filters on it",
+  );
+  assert.match(sitesList, /key: "sites",/, "with a chip, so the narrowing is visible and undoable");
+
+  const manager = await read("app/(app)/portal/sites/sites-manager.tsx");
+  assert.match(
+    manager,
+    /const SITE_PARAM = "site";/,
+    "the single-site detail deep link is left exactly as it was",
+  );
+
+  /*
+   * UNITS — one site, because that is what its control is. The brief's
+   * instruction was to consume supported filters "without inventing semantics
+   * that do not exist", and this screen's filter is a single-site select. A
+   * caller that cannot name one site sends nothing.
+   */
+  const units = await read("app/(app)/portal/units/units-manager.tsx");
+  assert.match(units, /new URLSearchParams\(window\.location\.search\)\.get\("site"\)/);
+  assert.match(units, /wanted\.includes\("\|"\) \? "" : wanted\.trim\(\)/, "a list is not one site");
+
+  /*
+   * REPORTS — a month, in the period model's own token (`month:YYYY-MM`).
+   * `reportPeriod` rather than `period` because the ops pages carry a `period`
+   * of their own under the same `/dashboard` prefix, and a collision would let
+   * one screen's window silently become another's.
+   */
+  const picker = await read("app/(app)/portal/period-picker.tsx");
+  assert.match(picker, /\.get\("reportPeriod"\)/, "Reports reads a range from the address bar");
+  assert.match(picker, /if \(wanted && isValid\(wanted\)\) return wanted;/, "and validates it");
+  assert.doesNotMatch(
+    picker,
+    /localStorage\.setItem\(key, wanted\)/,
+    "a link is a visit, not a preference — it is not written back to storage",
+  );
+
+  const block = await read("app/(app)/portal/ops/ov-dash.tsx");
+  assert.match(block, /reportPeriod=month:\$\{month\}#overview/, "and the spend point sends one");
+  assert.match(block, /ROUTE\.sites, \{ sites: pipe\(data\?\.attentionSiteIds \?\? \[\]\) \}/);
+});
+
+test("the attention figure and the ids it links to are the same set", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip("no development server");
+    return;
+  }
+  const metrics = await (await fetch(`${BASE}/api/overview/metrics`, { headers })).json();
+  const kpi = metrics.kpis.find((entry) => entry.key === "attention");
+  assert.equal(
+    kpi.value,
+    metrics.attentionSiteIds.length,
+    "the tile's number IS the length of the list it opens",
+  );
+  assert.equal(
+    new Set(metrics.attentionSiteIds).size,
+    metrics.attentionSiteIds.length,
+    "and the ids are distinct, because the figure counts distinct sites",
+  );
+});

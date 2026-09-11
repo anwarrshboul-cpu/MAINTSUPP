@@ -336,6 +336,32 @@ export function useStoredPeriod(
    * thing that section ever paints; there is no flash of the default.
    */
   const read = useCallback(() => {
+    /*
+     * A RANGE CAN ARRIVE IN THE ADDRESS BAR, AND IT WINS.
+     *
+     * §6 of the dashboard brief: "If a destination page does not yet read
+     * these filters from the URL, add that filtering to that page so the
+     * numbers it shows match the number clicked." The Overview block's spend
+     * trend links a MONTH through to Reports, and until now this hook read
+     * storage only — so tapping August opened whatever range the reader last
+     * used, which is a different question with a confident answer.
+     *
+     * `reportPeriod` rather than `period`: the ops pages already carry a
+     * `period` of their own (`90`, `month`, `ytd`) under the same `/dashboard`
+     * prefix, and a name collision would let one screen's window silently
+     * become another's. A distinct name cannot be misread, and `isValid` still
+     * has the final say — an unparseable token is ignored rather than stored.
+     *
+     * It is not written back to storage: a link is a visit, not a preference,
+     * and a shared address should not quietly re-set what the recipient had
+     * chosen for themselves. Their own next choice still persists as before.
+     */
+    try {
+      const wanted = new URLSearchParams(window.location.search).get("reportPeriod");
+      if (wanted && isValid(wanted)) return wanted;
+    } catch {
+      // No URL to read. Storage still answers below.
+    }
     try {
       const saved = window.localStorage.getItem(key);
       if (saved === null) return rangeMemory.get(key) ?? fallback;

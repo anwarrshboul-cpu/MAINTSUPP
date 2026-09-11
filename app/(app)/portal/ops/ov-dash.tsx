@@ -123,6 +123,8 @@ type OvMetrics = {
   };
   spend: { month: string; label: string; pence: number }[];
   openJobs: number;
+  /* The sites behind "Requiring attention", so its tile opens exactly them. */
+  attentionSiteIds: string[];
   /** Empty when every §5.3 identity held. Carried into the export, below. */
   reconciliation: string[];
 };
@@ -196,6 +198,7 @@ const REFRESH_INTERVAL_MS = 60_000;
 const ROUTE = {
   jobs: "/dashboard/jobs",
   units: "/dashboard/units",
+  sites: "/dashboard/sites",
   compliance: "/dashboard/compliance",
   reports: "/dashboard/reports",
 } as const;
@@ -414,6 +417,26 @@ export function OvDash({
   const goToShell = useCallback((href: string) => {
     window.history.pushState({}, "", href);
     window.dispatchEvent(new PopStateEvent("popstate"));
+  }, []);
+
+  /*
+   * A SHELL ROUTE WITH ITS FILTER ON IT.
+   *
+   * §6: "Links always carry the current portfolio and date range." The date
+   * range is deliberately absent from the point-in-time destinations below —
+   * Sites and Units both show what is true NOW, and neither reads a window, so
+   * attaching one would be a parameter nothing reads sitting in a shared link.
+   * What does travel is the narrowing: the portfolio's sites for the unit
+   * register, and the exact attention set for the site register.
+   *
+   * An empty value is omitted rather than written, so a workspace with no
+   * portfolio chosen gets a clean address rather than `?site=`.
+   */
+  const shellHref = useCallback((route: string, extra: Record<string, string>) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(extra)) if (value) next.set(key, value);
+    const query = next.toString();
+    return query ? `${route}?${query}` : route;
   }, []);
 
   /*
@@ -796,18 +819,45 @@ export function OvDash({
   const kpiTarget = (key: OvKpiKey): { href: string; go: () => void; describe: string } => {
     switch (key) {
       /*
-       * UNITS TAKES NO FILTER. `units-manager.tsx` keeps its search and its
-       * site filter in component state and reads nothing from the address bar,
-       * so "filtered to requiring attention" cannot be expressed. The link goes
-       * to the register unfiltered rather than carrying a parameter that would
-       * be silently dropped.
+       * ACTIVE UNITS opens the unit register, narrowed to the portfolio when
+       * one is chosen. `units-manager.tsx` now reads `site=` from the address
+       * bar, so the register shows the same estate the figure was counted over
+       * instead of every unit in the workspace.
        */
-      case "activeUnits":
+      case "activeUnits": {
+        /*
+         * ONE site or none. `units-manager.tsx` reads `site=` and its control
+         * is a single-site select, so a portfolio of several stores cannot be
+         * expressed there — and sending a pipe-joined list would be a
+         * parameter that screen deliberately ignores. A portfolio of exactly
+         * one store narrows it; anything else opens the full register.
+         */
+        const chosen = data?.portfolio.siteIds ?? [];
+        const only: Record<string, string> = chosen.length === 1 ? { site: chosen[0] } : {};
+        const href = shellHref(ROUTE.units, only);
+        return { href, go: () => goToShell(href), describe: "Opens the unit register." };
+      }
+      /*
+       * REQUIRING ATTENTION OPENS SITES, NOT UNITS — and the owner chose that
+       * destination for the reason the figure itself gives.
+       *
+       * §5.2 defines it as "distinct UNITS with at least one open job that is
+       * high or medium priority, or overdue". This estate does not file work
+       * against units; it files it against SITES, and the aggregate counts
+       * `site_id` accordingly — the endpoint says so where it counts them. So
+       * the truthful destination is the site register, and the truthful filter
+       * is the exact set of sites the figure counted, which the payload now
+       * carries as `attentionSiteIds`.
+       *
+       * `sites=` rather than `site=`: the latter is already taken by the site
+       * DETAIL deep link, and handing it a pipe-joined list would ask for a
+       * site whose id is "a|b|c" and open nothing.
+       */
       case "attention":
         return {
-          href: ROUTE.units,
-          go: () => goToShell(ROUTE.units),
-          describe: "Opens the unit register.",
+          href: shellHref(ROUTE.sites, { sites: pipe(data?.attentionSiteIds ?? []) }),
+          go: () => goToShell(shellHref(ROUTE.sites, { sites: pipe(data?.attentionSiteIds ?? []) })),
+          describe: "Opens the sites with work needing attention.",
         };
       case "openJobs":
         return {
@@ -991,14 +1041,27 @@ export function OvDash({
             </div>
             <AreaTrend
               points={trend}
-              /* §6: a point opens Reports for that month. Reports holds no URL
-                 filter of any kind — `reports` reads neither `searchParams` nor
-                 `useQueryState` — so the month is NOT sent as a parameter that
-                 nothing would read. Reported rather than faked. */
+              /*
+                §6: a point opens Reports FOR THAT MONTH.
+                `useStoredPeriod` now reads `reportPeriod` from the address bar
+                and prefers it over the reader's stored range, so the Spend
+                Overview opens on the month that was tapped rather than on
+                whatever window they last used. `month:YYYY-MM` is the period
+                model's own token — see `periodShape` — so this sends the
+                vocabulary Reports already speaks rather than inventing one.
+                The `#overview` hash is how that screen addresses its tabs.
+              */
               onSelect={(argument: unknown) => {
-                if (pointFrom(argument, trend)) goToShell(ROUTE.reports);
+                const point = pointFrom(argument, trend);
+                if (!point) return;
+                const month = String(point.month ?? "").slice(0, 7);
+                goToShell(
+                  month
+                    ? `${ROUTE.reports}?reportPeriod=month:${month}#overview`
+                    : ROUTE.reports,
+                );
               }}
-              ariaLabel="Spend by month. Selecting a month opens Reports."
+              ariaLabel="Spend by month. Selecting a month opens the spend report for it."
             />
           </section>
 

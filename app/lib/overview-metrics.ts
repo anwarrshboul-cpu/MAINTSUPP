@@ -139,6 +139,16 @@ export type OvMetrics = {
   };
   spend: { month: string; label: string; pence: number }[];
   openJobs: number;
+  /*
+   * THE SITES BEHIND "Requiring attention", so its tile can open exactly them.
+   *
+   * The figure is a count of DISTINCT SITES with at least one open job that is
+   * high or medium priority, or overdue — so no jobs filter can reproduce it,
+   * and a link to the unfiltered register would show the whole estate under a
+   * figure of seven. The register learned a `sites=` filter for this; these are
+   * the ids it takes.
+   */
+  attentionSiteIds: string[];
 };
 
 /* ── Colour ───────────────────────────────────────────────────────────────── */
@@ -417,7 +427,10 @@ export async function loadOverviewMetrics(
   const overdue = Math.min(Number(overdueRows[0]?.total ?? 0), openJobs);
   const completed = Number(completedRows[0]?.total ?? 0);
   const activeUnits = Number(unitRows[0]?.total ?? 0);
-  const attention = attentionRows.filter((row) => String(row.siteId ?? "").trim()).length;
+  const attentionSiteIds = [
+    ...new Set(attentionRows.map((row) => String(row.siteId ?? "").trim()).filter(Boolean)),
+  ];
+  const attention = attentionSiteIds.length;
 
   /* ── Jobs by status ─────────────────────────────────────────────────────── */
 
@@ -647,6 +660,7 @@ export async function loadOverviewMetrics(
       : { id: "all", name: "All portfolios", siteIds: [] },
     portfolios,
     openJobs,
+    attentionSiteIds,
     kpis: [
       { key: "activeUnits", label: "Active units", value: activeUnits, isPercent: false, spark: null },
       { key: "attention", label: "Requiring attention", value: attention, isPercent: false, spark: null },
