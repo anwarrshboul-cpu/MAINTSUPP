@@ -12,6 +12,7 @@ import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/te
 import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
 import { complianceCompletion } from "../../lib/compliance-status";
+import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 import {
   complianceProfileGap,
   ensureComplianceProfile,
@@ -624,8 +625,16 @@ export async function GET(request: Request) {
     await ensureDatabase();
     /* `actor` is read for one purpose: the repair below writes an activity_log
        row, and an audit entry with no author is worth very little. */
-    const { actor, db, orgId } = await scopedDb(request);
+    const { actor, db, orgId, siteScope } = await scopedDb(request);
     const url = new URL(request.url);
+    /*
+     * The member's authorised sites. Every read below — the aggregate, one
+     * site, the list, its groups and the compliance tile — answers inside this
+     * set, so a member confined to three stores is never sent a fourth, nor a
+     * score that counted one. `null` is an unrestricted member and changes
+     * nothing. See `member-site-scope.ts`.
+     */
+    const allowed = memberSiteSet(siteScope);
 
     /*
      * ── THE AGGREGATE, FOR THE MANAGEMENT SURFACE ONLY — W2C ──────────────
@@ -683,10 +692,12 @@ export async function GET(request: Request) {
         includeInactive: true,
       });
       return Response.json({
-        sites: aggregated.map((row) => ({
-          ...row,
-          register: provenance(row.id, row.boardId),
-        })),
+        sites: aggregated
+          .filter((row) => withinMemberScope(allowed, row.id))
+          .map((row) => ({
+            ...row,
+            register: provenance(row.id, row.boardId),
+          })),
         registers: instances,
         /*
          * No `groups`, `aliases`, `siteTypes` or `statuses`. Groups and aliases
@@ -706,6 +717,12 @@ export async function GET(request: Request) {
     const id = url.searchParams.get("id");
 
     if (id) {
+      /* A site outside the member's scope is "not found", the same answer as a
+         site that does not exist — before a single read, so its jobs, files and
+         compliance records are never loaded for a caller who may not see them. */
+      if (!withinMemberScope(allowed, id)) {
+        return Response.json({ error: "Site not found." }, { status: 404 });
+      }
       /* Scoped, so an id belonging to an instance is 404 through the canonical
          screen and vice versa. The id is not a capability. */
       const site = await getSite(db, orgId, id, scope);
@@ -913,7 +930,7 @@ export async function GET(request: Request) {
       });
     }
 
-    const [rows, groups, siteTypes, statuses, aliases] = await Promise.all([
+    const [listed, listedGroups, siteTypes, statuses, aliases] = await Promise.all([
       listSites(db, orgId, { includeInactive: true }, scope),
       listSiteGroups(db, orgId, scope),
       /* Option vocabularies are WORKSPACE settings, not register rows: the
@@ -924,6 +941,17 @@ export async function GET(request: Request) {
       listOptionValues(db, orgId, "site_status"),
       listAliases(db, orgId, scope),
     ]);
+    /* The member's sites, and each group's members among them. A group stays
+       listed even when none of its members are in scope — its name is workspace
+       configuration, the same list the dashboard's portfolio picker offers — but
+       it never names a site the member may not see. */
+    const rows = listed.filter((row) => withinMemberScope(allowed, row.id));
+    const groups = allowed
+      ? listedGroups.map((group) => ({
+          ...group,
+          siteIds: group.siteIds.filter((siteId) => withinMemberScope(allowed, siteId)),
+        }))
+      : listedGroups;
 
     /*
      * Every name a site also answers to, sent with the site.
@@ -978,9 +1006,22 @@ export async function GET(request: Request) {
      * number; the per-site meters are unchanged and still describe each store.
      * Only for the workspace's own register — a section's Sites register is a
      * different list of stores and keeps the per-site sum.
+     *
+     * INSIDE THE MEMBER'S SCOPE. Scoring `register.entries` whole let a member
+     * confined to three stores read a percentage whose numerator and
+     * denominator counted every store in the organisation. Filtered by the same
+     * set as the list above, it equals `/api/compliance/metrics`' score for the
+     * same member — which `resolveDashboardPortfolio` confines the same way — and
+     * an unrestricted member's tile is exactly what it was.
      */
     const portfolioCompliance =
-      scope === CANONICAL_REGISTER ? complianceCompletion(register.entries) : null;
+      scope === CANONICAL_REGISTER
+        ? complianceCompletion(
+            allowed
+              ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
+              : register.entries,
+          )
+        : null;
 
     return Response.json({
       sites: rows.map((row) => ({

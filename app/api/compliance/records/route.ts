@@ -17,6 +17,7 @@ import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { readComplianceRegister } from "../../../lib/compliance-register";
 import {
   filterComplianceRows,
@@ -37,7 +38,11 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
+    /* Inside the member's authorised sites, exactly as the summary route draws
+       the group headers these records expand. A `key=` naming a site outside
+       the scope matches nothing: the id is not a capability. */
+    const allowed = memberSiteSet(siteScope);
 
     const url = new URL(request.url);
     const filters = parseComplianceFilters(url);
@@ -71,7 +76,10 @@ export async function GET(request: Request) {
       siteRows.map((row) => [row.id, (row.managerName || row.manager || "").trim()]),
     );
 
-    const rows: ComplianceRow[] = register.entries.map((entry) => ({
+    const scopedEntries = allowed
+      ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
+      : register.entries;
+    const rows: ComplianceRow[] = scopedEntries.map((entry) => ({
       id: entry.id,
       siteId: entry.siteId,
       siteName: entry.siteName,

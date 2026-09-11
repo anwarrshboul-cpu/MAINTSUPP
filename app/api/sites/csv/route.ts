@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { csvResponse, parseCsvObjects, toCsv } from "../../../lib/csv";
 import { siteWriteFailure } from "../route";
 import { listOptionValues } from "../../../lib/options-repository";
@@ -270,7 +271,7 @@ export async function GET(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,
       orgId,
@@ -283,8 +284,13 @@ export async function GET(request: Request) {
     /* W2 — a register exports ITSELF. Without the scope an instance's export
        would hand the caller the workspace's whole estate under the instance's
        name, which is the leak of canonical data an instance exists to
-       prevent — and it leaves in a file, which cannot be recalled. */
-    const rows = await listSites(db, orgId, { includeInactive: true }, scope);
+       prevent — and it leaves in a file, which cannot be recalled. The
+       member's own site restriction applies for the same reason: the file
+       holds exactly the stores the Sites screen shows this member. */
+    const allowed = memberSiteSet(siteScope);
+    const rows = (await listSites(db, orgId, { includeInactive: true }, scope)).filter((site) =>
+      withinMemberScope(allowed, site.id),
+    );
     const body = toCsv(
       COLUMNS,
       rows.map((site) => ({

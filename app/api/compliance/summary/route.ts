@@ -18,6 +18,7 @@ import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { readComplianceRegister } from "../../../lib/compliance-register";
 import {
   complianceFilterOptions,
@@ -47,7 +48,13 @@ export async function GET(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
+    /* The member's authorised sites. The register below is the one the
+       Compliance dashboard block drills into, and that block already counts
+       inside this set (`resolveDashboardPortfolio`), so a register that did not
+       would show a restricted member more rows than the figure they clicked —
+       and every other store's certificates. See `member-site-scope.ts`. */
+    const allowed = memberSiteSet(siteScope);
 
     const url = new URL(request.url);
     const filters = parseComplianceFilters(url);
@@ -71,7 +78,10 @@ export async function GET(request: Request) {
       siteRows.map((row) => [row.id, (row.managerName || row.manager || "").trim()]),
     );
 
-    const rows: ComplianceRow[] = register.entries.map((entry) => ({
+    const scopedEntries = allowed
+      ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
+      : register.entries;
+    const rows: ComplianceRow[] = scopedEntries.map((entry) => ({
       id: entry.id,
       siteId: entry.siteId,
       siteName: entry.siteName,

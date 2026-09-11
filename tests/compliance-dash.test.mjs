@@ -435,7 +435,18 @@ test("the Sites page's portfolio compliance is the same score, not a second defi
   const list = await read("app/(app)/portal/ops/sites-list.tsx");
   assert.match(list, /compliancePercent: portfolioCompliance\s*\?\s*portfolioCompliance\.percent/);
   const route = await read("app/api/sites/route.ts");
-  assert.match(route, /scope === CANONICAL_REGISTER \? complianceCompletion\(register\.entries\) : null/);
+  /*
+   * Re-pointed, not relaxed: the tile is still `complianceCompletion` over the
+   * canonical register — the contract this pin protects — but over the entries
+   * INSIDE THE MEMBER'S SITE SCOPE. Scoring `register.entries` whole let a
+   * member confined to three stores read the organisation's score (see
+   * tests/member-site-scope.test.mjs). An unrestricted member (`allowed` null)
+   * still scores the whole register, so the live parity below is unchanged.
+   */
+  assert.match(
+    route,
+    /scope === CANONICAL_REGISTER\s*\?\s*complianceCompletion\(\s*allowed\s*\?\s*register\.entries\.filter\(\(entry\) => withinMemberScope\(allowed, entry\.siteId\)\)\s*:\s*register\.entries,?\s*\)\s*:\s*null/,
+  );
   if (!(await serverIsUp())) {
     t.skip("no development server for the live half");
     return;
