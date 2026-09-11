@@ -774,6 +774,38 @@ body[data-theme] .ov-dash .ov-dash__range-reset {
   cursor: pointer;
 }
 
+/*
+ * NAMED SPANS — "Last 30 days", "This month" — above the two dates, for the
+ * blocks whose range is a reporting period. Styled as the reset button's
+ * siblings, and the chosen one says so in its own ink rather than by colour
+ * alone (`aria-pressed` carries it for a screen reader).
+ */
+.ov-dash .ov-dash__range-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 260px;
+}
+
+body[data-theme] .ov-dash .ov-dash__range-preset {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ov-text-2);
+  cursor: pointer;
+}
+
+body[data-theme] .ov-dash .ov-dash__range-preset--active {
+  border-color: var(--ov-teal);
+  background: var(--ov-nav-active);
+  color: var(--ov-text);
+  font-weight: 600;
+}
+
 .ov-dash .ov-dash__export[aria-disabled="true"],
 .ov-dash .ov-dash__export:disabled {
   opacity: 0.55;
@@ -1338,7 +1370,8 @@ body[data-theme] .ov-dash .ov-card__link {
   }
 
   body[data-theme] .ov-dash .ov-dash__head .ov-dash__control,
-  body[data-theme] .ov-dash .ov-dash__range-reset {
+  body[data-theme] .ov-dash .ov-dash__range-reset,
+  body[data-theme] .ov-dash .ov-dash__range-preset {
     min-height: 44px;
   }
 

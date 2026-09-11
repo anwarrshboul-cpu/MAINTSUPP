@@ -3965,7 +3965,7 @@ function OverviewView({
         }
         goToJobs(`id=${encodeURIComponent(id)}`);
       }}
-      onNavigateToCompliance={() => onNavigate("compliance")}
+      onNavigateToCompliance={(query) => openSectionWithQuery(onNavigate, "compliance", query ?? "")}
       onNavigateToSites={(query) => {
         /*
          * Same ordering trap as `goToJobs`, and it was losing the `site=`

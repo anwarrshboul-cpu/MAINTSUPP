@@ -26,6 +26,9 @@ import { type ReactNode } from "react";
 
 export type DashRange = { from: string; to: string; label: string };
 
+/** A named span the range picker offers as one tap — "Last 30 days", "This month". */
+export type DashRangePreset = { key: string; label: string; from: string; to: string };
+
 export function DashHeader({
   title,
   portfolio,
@@ -35,6 +38,7 @@ export function DashHeader({
   onRange,
   resetLabel,
   rangeCaption,
+  presets,
   onExport,
   exportHref,
   exportDisabled,
@@ -54,6 +58,11 @@ export function DashHeader({
   resetLabel: string;
   /** A sentence inside the picker saying what the range filters, when that is not obvious. */
   rangeCaption?: string;
+  /**
+   * Named spans offered above the two dates. Optional: a block whose range is
+   * a due-date filter ("Any due date") has no reporting periods to offer.
+   */
+  presets?: readonly DashRangePreset[];
   /** A client-built export (the Overview's). */
   onExport?: () => void;
   /** A server-built export: a real link, so the browser's own download handles it. */
@@ -89,6 +98,28 @@ export function DashHeader({
           </summary>
           <div className="ov-dash__range-panel">
             {rangeCaption ? <p className="ov-dash__range-caption">{rangeCaption}</p> : null}
+            {presets && presets.length > 0 ? (
+              <div className="ov-dash__range-presets" role="group" aria-label="Preset ranges">
+                {presets.map((preset) => {
+                  const active = preset.from === range.from && preset.to === range.to;
+                  return (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      className={`ov-dash__range-preset${active ? " ov-dash__range-preset--active" : ""}`}
+                      aria-pressed={active}
+                      onClick={(event) => {
+                        onRange(preset.from, preset.to);
+                        /* One tap chose the span; the panel has done its job. */
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             <label>
               <span>From</span>
               <input

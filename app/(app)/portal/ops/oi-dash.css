@@ -1,0 +1,1313 @@
+/*
+ * THE OVERVIEW — Job Intelligence, Spend & Reporting, Compliance.
+ *
+ * ── A COMPANION OF `.ov-dash`, ON THE NEON PALETTE ────────────────────────
+ *
+ * The page mounts as `.ov-dash.oi-dash`. `.ov-dash` is the design system's
+ * root (see `ov-dash.css`) and supplies the shared chart chrome — the donut,
+ * the ring meter, the trend, the tooltip, the header row — so this file does
+ * two things only: it REPOINTS the shared `--ov-*` tokens at the Overview
+ * brief's palette inside this island, and it lays out the page's own sections,
+ * grids and new shapes. The brief's tokens are declared here once, by the
+ * names it gives them (`--accent-*`, `--muted`, `--text-*`), and nowhere else.
+ *
+ * ── EVERY SELECTOR IS `.ov-dash.oi-dash`, TWO CLASSES DEEP ────────────────
+ *
+ * `ov-dash.css` reaches the page twice — as this page's `<link>` and as the
+ * side-effect import in `ov-dash-charts.tsx` — so which sheet lands last is not
+ * something this file can rely on. `.ov-dash.oi-dash .x` outranks the shared
+ * `.ov-dash .x` whatever the order. Text colours sit under `body[data-theme]`,
+ * which always matches (`theme-boot.ts` stamps it in all three theme states),
+ * so the light skin's `.portal-content p` and the dark skin's heading blanket
+ * cannot repaint an always-dark island. The one rule outside the island is the
+ * tool dialog's panel, at the end, which renders outside it by design.
+ *
+ * ── THE GLOW ──────────────────────────────────────────────────────────────
+ *
+ * Every coloured ring, gauge and line stroke takes `url(#oi-glow)` — the one
+ * filter `OiGlowDefs` defines in the section — or, for the trend (an HTML-sized
+ * box) and the HTML bars, a `drop-shadow` / `box-shadow` of the same weight. A
+ * track is never glowed: it is `var(--ov-track)`, which the selectors exclude.
+ *
+ * ── BREAKPOINTS ARE 640 / 767 / 768 / 1024 / 1280 AND NOTHING ELSE ────────
+ *
+ * Mobile is the base case: below 768 every grid is ONE column. From 768 the
+ * charts and KPIs take two columns; from 1024 the charts take three and the
+ * KPIs four, as the brief lays them out.
+ */
+
+/* ── The palette ──────────────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash {
+  /* The brief's neon palette, aligned to the logo teal. */
+  --accent-primary: #22e6c5;
+  --accent-secondary: #c74fff;
+  --accent-amber: #ffc24b;
+  --accent-critical: #ff4d7a;
+  --accent-blue: #3fa9f5;
+  --accent-teal-light: #7af5db;
+  --muted: #4a5b72;
+  --text-primary: #f4faf8;
+  --text-secondary: #b9c8d6;
+  --text-tertiary: #6c8397;
+
+  /*
+   * "Missing" on the compliance donut — the critical hue dimmed, so it reads
+   * as the same family as Expired and a step quieter. 3.3:1 on the card, over
+   * the 3:1 a graphical object needs; it is a fill only, never text.
+   */
+  --oi-missing: #a8466e;
+
+  /* A week-bar at rest: `--muted` at a little over half, over the card. */
+  --oi-bar-rest: #22304a;
+
+  /* The shared tokens, repointed at the brief's surfaces and inks. */
+  --ov-frame: #04080f;
+  --ov-bg: #070c16;
+  --ov-card: #0d1526;
+  --ov-card-border: #182338;
+  --ov-divider: #152036;
+  /* `--muted` at about a fifth, over the card — the brief's "track at low opacity". */
+  --ov-track: #1a2538;
+  --ov-nav-active: #132139;
+  --ov-text: var(--text-primary);
+  --ov-text-2: var(--text-secondary);
+  --ov-text-nav: var(--text-tertiary);
+  --ov-text-muted: var(--text-tertiary);
+  --ov-teal: var(--accent-primary);
+
+  /*
+   * Buttons inside the island take its ink. The dark app theme paints
+   * `.portal-main button { color: var(--control-own-fg, var(--ink)) }`, and
+   * this is the opt-out `globals.css` provides for exactly this.
+   */
+  --control-own-fg: var(--text-primary);
+
+  gap: 36px;
+  padding-block: 20px 24px;
+  padding-inline: 16px;
+  border-radius: 16px;
+  background: var(--ov-bg);
+  color: var(--text-primary);
+}
+
+@media (min-width: 768px) {
+  .ov-dash.oi-dash {
+    gap: 40px;
+    padding-block: 24px 28px;
+    padding-inline: 24px;
+  }
+}
+
+.ov-dash.oi-dash [hidden] {
+  display: none !important;
+}
+
+.ov-dash.oi-dash .oi-glow-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* A paragraph the island does not style is still the island's ink. */
+body[data-theme] .ov-dash.oi-dash p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* ── The header row — a quiet control bar over the three sections ─────────── */
+
+body[data-theme] .ov-dash.oi-dash .ov-dash__title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-section {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-section__titles {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-section__title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-section__subtitle {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+@media (min-width: 768px) {
+  body[data-theme] .ov-dash.oi-dash .oi-section__title {
+    font-size: 23px;
+  }
+}
+
+/* ── The pill — a data-source note, tinted by what it describes ───────────── */
+
+.ov-dash.oi-dash .oi-pill {
+  --oi-pill: var(--accent-primary);
+
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid var(--ov-card-border);
+  border: 1px solid color-mix(in srgb, var(--oi-pill) 36%, transparent);
+  border-radius: 999px;
+  background: var(--ov-nav-active);
+  background: color-mix(in srgb, var(--oi-pill) 10%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--oi-pill);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-dash.oi-dash .oi-pill--secondary {
+  --oi-pill: var(--accent-secondary);
+}
+
+.ov-dash.oi-dash .oi-pill--amber {
+  --oi-pill: var(--accent-amber);
+}
+
+.ov-dash.oi-dash .oi-pill--critical {
+  --oi-pill: var(--accent-critical);
+}
+
+.ov-dash.oi-dash .oi-pill--blue {
+  --oi-pill: var(--accent-blue);
+}
+
+.ov-dash.oi-dash .oi-pill--muted {
+  --oi-pill: var(--text-tertiary);
+}
+
+.ov-dash.oi-dash .oi-section__pill {
+  padding: 4px 11px;
+  font-size: 10.5px;
+}
+
+/* ── The grids — one column below 768, then two, then three and four ──────── */
+
+.ov-dash.oi-dash .oi-kpis,
+.ov-dash.oi-dash .oi-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .ov-dash.oi-dash .oi-kpis,
+  .ov-dash.oi-dash .oi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  /* The odd card before a wide one, at two columns, spans rather than sitting
+     beside an empty half that reads as a card that failed to load. */
+  .ov-dash.oi-dash .oi-grid > .oi-span-md {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ov-dash.oi-dash .oi-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ov-dash.oi-dash .oi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ov-dash.oi-dash .oi-grid > .oi-span-md {
+    grid-column: auto;
+  }
+}
+
+.ov-dash.oi-dash .oi-grid > .oi-card--wide {
+  grid-column: 1 / -1;
+}
+
+/* ── The KPI tile ─────────────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-kpi {
+  --oi-accent: var(--accent-primary);
+
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 15px;
+  background: var(--ov-card);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+/* The soft corner glow the reference draws, in the tile's own accent. */
+.ov-dash.oi-dash .oi-kpi::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -38px;
+  right: -34px;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--oi-accent) 34%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.ov-dash.oi-dash a.oi-kpi {
+  cursor: pointer;
+  transition: border-color 140ms ease;
+}
+
+.ov-dash.oi-dash a.oi-kpi:hover {
+  border-color: var(--text-tertiary);
+  border-color: color-mix(in srgb, var(--oi-accent) 45%, var(--ov-card-border));
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-kpi__label {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-kpi__value {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-kpi__caption {
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--oi-accent);
+}
+
+@media (min-width: 1024px) {
+  body[data-theme] .ov-dash.oi-dash .oi-kpi__value {
+    font-size: 30px;
+  }
+}
+
+/* ── The card ─────────────────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px 16px 18px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 15px;
+  background: var(--ov-card);
+}
+
+@media (min-width: 768px) {
+  .ov-dash.oi-dash .oi-card {
+    padding: 18px 18px 20px;
+  }
+}
+
+.ov-dash.oi-dash .oi-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-card__link {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-card__link:hover {
+  text-decoration: underline;
+}
+
+/* ── Notes and tones ──────────────────────────────────────────────────────── */
+
+body[data-theme] .ov-dash.oi-dash .oi-note {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+.ov-dash.oi-dash .oi-note--foot {
+  margin-top: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash.oi-dash .oi-note--centre {
+  text-align: center;
+}
+
+.ov-dash.oi-dash .oi-empty-note {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  min-height: 120px;
+  text-align: center;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-tone--primary {
+  color: var(--accent-primary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-tone--amber {
+  color: var(--accent-amber);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-tone--critical {
+  color: var(--accent-critical);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-tone--blue {
+  color: var(--accent-blue);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-tone--secondary {
+  color: var(--accent-secondary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-tone--muted {
+  color: var(--text-tertiary);
+}
+
+/* ── Donuts, with the legend beside them — or below, on a narrow card ─────── */
+
+.ov-dash.oi-dash .oi-donut {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * A MINIMUM DIAMETER, NOT A PROPORTION. The ring is drawn at up to 150px and
+ * never below 120, so it stays legible on a phone rather than shrinking with
+ * the card; below 768 the legend takes its own line beneath it.
+ */
+.ov-dash.oi-dash .oi-donut > .ov-chart {
+  flex: none;
+  width: 150px;
+  min-width: 120px;
+  max-width: 100%;
+}
+
+.ov-dash.oi-dash .oi-donut > .oi-legend {
+  align-self: stretch;
+}
+
+/*
+ * From 768 the legend sits beside the ring wherever the card has room for
+ * both — 132 + 14 + 150 — and wraps beneath it where it does not: the three
+ * narrow columns between 1024 and 1279 do exactly that, by content, without a
+ * breakpoint of their own.
+ */
+@media (min-width: 768px) {
+  .ov-dash.oi-dash .oi-donut {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .ov-dash.oi-dash .oi-donut > .ov-chart {
+    flex: 0 0 132px;
+    width: 132px;
+  }
+
+  /* Capped, so a card spanning the row keeps each value near its label. */
+  .ov-dash.oi-dash .oi-donut > .oi-legend {
+    flex: 1 1 150px;
+    align-self: center;
+    max-width: 340px;
+  }
+}
+
+/* The single-site ring stands alone, centred, with its sentence beneath. */
+.ov-dash.oi-dash .oi-donut--solo > .ov-chart {
+  flex: none;
+  width: 150px;
+}
+
+body[data-theme] .ov-dash.oi-dash .ov-chart__centre-value {
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+body[data-theme] .ov-dash.oi-dash .ov-chart__centre-caption {
+  max-width: 96px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* "on track" under the compliance percentage is the good-news teal. */
+body[data-theme] .ov-dash.oi-dash .oi-score .ov-chart__centre-caption {
+  color: var(--accent-primary);
+}
+
+/* ── The legend ───────────────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-legend {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-legend__row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ov-dash.oi-dash a.oi-legend__row {
+  cursor: pointer;
+}
+
+.ov-dash.oi-dash a.oi-legend__row:hover {
+  background: var(--ov-nav-active);
+}
+
+.ov-dash.oi-dash .oi-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oi-dot, var(--muted));
+  box-shadow: 0 0 6px var(--oi-dot, transparent);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-legend__label {
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-legend__value {
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── The glow, on every coloured stroke ───────────────────────────────────── */
+
+/*
+ * The shared donuts and ring meters draw their arcs as stroked circles, and a
+ * track is always stroked `var(--ov-track)` — so "a circle with a stroke that
+ * is not the track" is exactly the set of coloured arcs, with no prop on any
+ * shared chart. An active (hovered) arc keeps the shared brighten on top.
+ */
+.ov-dash.oi-dash .ov-chart__svg circle[stroke]:not([stroke*="track"]),
+.ov-dash.oi-dash .oi-gauge__arc {
+  filter: url(#oi-glow);
+}
+
+.ov-dash.oi-dash .ov-chart__svg circle[stroke].ov-arc--active:not([stroke*="track"]) {
+  filter: url(#oi-glow) brightness(1.2);
+}
+
+/* The trend is a stretched box, so it glows as a box, in CSS pixels. */
+.ov-dash.oi-dash .ov-trend__svg {
+  filter: drop-shadow(0 0 3px rgba(34, 230, 197, 0.55));
+  overflow: visible;
+}
+
+.ov-dash.oi-dash .ov-trend__dot {
+  box-shadow: 0 0 0 2px var(--ov-card), 0 0 8px var(--accent-primary);
+}
+
+/* ── The semicircle gauge ─────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-gauge {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 4px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+}
+
+.ov-dash.oi-dash button.oi-gauge {
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.ov-dash.oi-dash button.oi-gauge:hover {
+  background: color-mix(in srgb, var(--ov-nav-active) 60%, transparent);
+}
+
+.ov-dash.oi-dash .oi-gauge__body {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-gauge__dial {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Natural size, only ever shrunk — and never below the brief's 120px floor. */
+.ov-dash.oi-dash .oi-gauge__svg {
+  display: block;
+  width: 198px;
+  min-width: 120px;
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.ov-dash.oi-dash .oi-gauge__readout {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-gauge__value {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-gauge__unit {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+/* Three narrow columns between 1024 and 1279 shrink the gauge to ~175px, so
+   its value steps down with it; the full size returns at 1280. */
+@media (min-width: 1024px) {
+  body[data-theme] .ov-dash.oi-dash .oi-gauge__value {
+    font-size: 24px;
+  }
+}
+
+@media (min-width: 1280px) {
+  body[data-theme] .ov-dash.oi-dash .oi-gauge__value {
+    font-size: 28px;
+  }
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-gauge__caption {
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-gauge__sub {
+  max-width: 260px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+/* ── Rings — priority, recurrence and the renewals countdown ──────────────── */
+
+.ov-dash.oi-dash .oi-rings {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 12px 8px;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-rings--priority {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+/* Recurrence: always two by two, as the reference draws it. */
+.ov-dash.oi-dash .oi-rings--bands {
+  flex: 1 1 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* The countdown: three to a row on a phone, then one row of however many there are. */
+.ov-dash.oi-dash .oi-rings--countdown {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (min-width: 768px) {
+  .ov-dash.oi-dash .oi-rings--countdown {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+
+.ov-dash.oi-dash .oi-rings .ov-ring__hit {
+  width: 100%;
+  min-width: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash .ov-ring__label {
+  max-width: 100%;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ── Compliance by requirement type — 4 × 2 on a phone, one row on desktop ── */
+
+.ov-dash.oi-dash .oi-types {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 6px;
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .ov-dash.oi-dash .oi-types {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+.ov-dash.oi-dash .oi-type {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-type .ov-ring__hit {
+  width: 100%;
+  min-width: 0;
+}
+
+/* A requirement name is two words or a long token; two lines, then an ellipsis. */
+body[data-theme] .ov-dash.oi-dash .oi-type .ov-ring__label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-type__count {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── The bar list ─────────────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-bars {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ov-dash.oi-dash .oi-bars--empty {
+  align-content: center;
+  justify-items: center;
+  min-height: 120px;
+  text-align: center;
+}
+
+.ov-dash.oi-dash .oi-bars__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label value"
+    "track track";
+  align-items: center;
+  gap: 5px 12px;
+  min-width: 0;
+  padding: 4px 6px 6px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ov-dash.oi-dash a.oi-bars__row {
+  cursor: pointer;
+}
+
+.ov-dash.oi-dash a.oi-bars__row:hover {
+  background: var(--ov-nav-active);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-bars__label {
+  grid-area: label;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-bars__value {
+  grid-area: value;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash.oi-dash .oi-bars__track {
+  grid-area: track;
+  position: relative;
+  display: block;
+  height: 6px;
+  min-width: 0;
+  border-radius: 999px;
+  background: var(--ov-track);
+}
+
+.ov-dash.oi-dash .oi-bars__fill,
+.ov-dash.oi-dash .oi-targets__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  border-radius: 999px;
+  background: var(--oi-bar, var(--accent-primary));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--oi-bar, var(--accent-primary)) 55%, transparent);
+}
+
+/* "View all (N)", "Show the top 6", "Try again" — one quiet pill button. */
+body[data-theme] .ov-dash.oi-dash .oi-more {
+  justify-self: start;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin-top: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--ov-card-border);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 32%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  cursor: pointer;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-more:hover {
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+/* ── Target bars — SLA compliance by priority ─────────────────────────────── */
+
+.ov-dash.oi-dash .oi-targets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 28px;
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .ov-dash.oi-dash .oi-targets {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+}
+
+.ov-dash.oi-dash .oi-targets__row {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 8px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ov-dash.oi-dash a.oi-targets__row {
+  cursor: pointer;
+}
+
+.ov-dash.oi-dash a.oi-targets__row:hover {
+  background: var(--ov-nav-active);
+}
+
+.ov-dash.oi-dash .oi-targets__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-targets__label {
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-targets__jobs {
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-targets__value {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash.oi-dash .oi-targets__track {
+  position: relative;
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ov-track);
+}
+
+/* The target line stands through the track, a little proud of it. */
+.ov-dash.oi-dash .oi-targets__marker {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-secondary);
+}
+
+/* ── Average time to close ────────────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-ttc__figure {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px;
+  margin-inline: -4px;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ov-dash.oi-dash .oi-ttc__figure:hover {
+  background: var(--ov-nav-active);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-ttc__value {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-ttc__unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.ov-dash.oi-dash .oi-ttc__delta {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.ov-dash.oi-dash .oi-weeks {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 6px;
+  height: 48px;
+  margin-top: auto;
+  min-width: 0;
+}
+
+/* A week's column: the painted bar sits on its floor. When the row is
+   interactive the column is the button, so a short bar keeps a full-height
+   target, and it borrows the card's focus ring. */
+.ov-dash.oi-dash .oi-weeks__col,
+.ov-dash.oi-dash .oi-weeks__cell {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  min-width: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash button.oi-weeks__col {
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+body[data-theme] .ov-dash.oi-dash button.oi-weeks__col:hover .oi-weeks__bar {
+  filter: brightness(1.25);
+}
+
+.ov-dash.oi-dash button.oi-weeks__col:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.ov-dash.oi-dash .oi-weeks__bar {
+  display: block;
+  justify-self: center;
+  width: 100%;
+  max-width: 40px;
+  min-height: 3px;
+  border-radius: 4px 4px 2px 2px;
+  background: var(--oi-bar-rest);
+}
+
+.ov-dash.oi-dash .oi-weeks__bar--empty {
+  height: 3px;
+  background: var(--ov-track);
+}
+
+.ov-dash.oi-dash .oi-weeks__bar--latest {
+  background: var(--accent-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent-primary) 55%, transparent);
+}
+
+/* ── Spend trend and job volume ───────────────────────────────────────────── */
+
+.ov-dash.oi-dash .oi-figure {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-figure__value {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dash.oi-dash .oi-figure__caption {
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ov-dash.oi-dash .oi-trend {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/*
+ * NO MONEY AXIS, as the reference draws the trend. In a third of a 1024 row the
+ * axis took a third of the plot and the month names collided ("AugSept"); the
+ * gridlines stay, and the exact figure for every month is in the headline, the
+ * tooltip and the chart's accessible name.
+ */
+.ov-dash.oi-dash .oi-trend .ov-trend {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ov-dash.oi-dash .oi-trend .ov-trend__axis {
+  display: none;
+}
+
+.ov-dash.oi-dash .oi-trend .ov-trend__plot,
+.ov-dash.oi-dash .oi-trend .ov-trend__ticks {
+  grid-column: 1;
+}
+
+.ov-dash.oi-dash .oi-volume__figure {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-self: flex-start;
+  gap: 4px 10px;
+  max-width: 100%;
+  padding: 2px 6px;
+  margin-inline: -6px;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ov-dash.oi-dash .oi-volume__figure:hover {
+  background: var(--ov-nav-active);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-volume__value {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-volume__unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+/* ── Loading, failure and the empty section ───────────────────────────────── */
+
+.ov-dash.oi-dash .ov-skeleton {
+  border-radius: 15px;
+  background-color: var(--ov-frame);
+}
+
+.ov-dash.oi-dash .oi-skeleton--kpi {
+  min-height: 96px;
+}
+
+.ov-dash.oi-dash .oi-skeleton--card {
+  min-height: 260px;
+}
+
+.ov-dash.oi-dash .oi-error,
+.ov-dash.oi-dash .oi-empty {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ov-dash.oi-dash .oi-error .oi-more {
+  margin-top: 0;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-error .oi-note,
+body[data-theme] .ov-dash.oi-dash .oi-empty .oi-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ── The footer — the page's data-fix tools ───────────────────────────────── */
+
+.ov-dash.oi-dash .oi-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ov-divider);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-footer__label {
+  margin-right: auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-footer__tool {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--ov-card-border);
+  border-radius: 999px;
+  background: var(--ov-card);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+body[data-theme] .ov-dash.oi-dash .oi-footer__tool:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+/* ── Touch — the 44px floor on every tap target ───────────────────────────── */
+
+@media (pointer: coarse) {
+  .ov-dash.oi-dash .oi-legend__row,
+  .ov-dash.oi-dash .oi-bars__row,
+  .ov-dash.oi-dash .oi-targets__row,
+  .ov-dash.oi-dash .oi-ttc__figure,
+  .ov-dash.oi-dash .oi-volume__figure,
+  .ov-dash.oi-dash .oi-gauge,
+  .ov-dash.oi-dash .ov-ring__hit {
+    min-height: 44px;
+  }
+
+  body[data-theme] .ov-dash.oi-dash .oi-more,
+  body[data-theme] .ov-dash.oi-dash .oi-card__link,
+  body[data-theme] .ov-dash.oi-dash .oi-footer__tool {
+    min-height: 44px;
+  }
+
+  .ov-dash.oi-dash .oi-legend__row {
+    padding-block: 8px;
+  }
+}
+
+/* The same floor on a phone, whatever the pointer claims to be. */
+@media (max-width: 767px) {
+  .ov-dash.oi-dash .oi-legend__row,
+  .ov-dash.oi-dash .oi-bars__row,
+  .ov-dash.oi-dash .oi-targets__row,
+  .ov-dash.oi-dash .oi-ttc__figure,
+  .ov-dash.oi-dash .oi-volume__figure {
+    min-height: 44px;
+  }
+
+  body[data-theme] .ov-dash.oi-dash .oi-more,
+  body[data-theme] .ov-dash.oi-dash .oi-card__link,
+  body[data-theme] .ov-dash.oi-dash .oi-footer__tool {
+    min-height: 44px;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
+/* The sweep is `useOvSweep`'s and already honours the preference; these are
+   the page's own CSS transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .ov-dash.oi-dash a.oi-kpi,
+  .ov-dash.oi-dash button.oi-gauge {
+    transition: none;
+  }
+}
+
+/* ── The tool dialog — outside the island, on the app's own theme ─────────── */
+
+/*
+ * "Resolve contractor names" and "Assign jobs to a site" open in the page's
+ * `OverviewTool` sheet, which renders beside the island rather than in it so
+ * its forms keep the app's themed controls. Centred and capped, as the sheet's
+ * panel was when the legacy Overview's stylesheet carried the rule.
+ */
+.ops-sheet.oi-tool > .ops-sheet__panel {
+  width: 100%;
+  max-width: 900px;
+  max-height: 88vh;
+  margin-inline: auto;
+  overflow-y: auto;
+}
