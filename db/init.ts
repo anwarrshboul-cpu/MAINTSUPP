@@ -106,7 +106,156 @@ async function initialize() {
      `ensureOwnerFixesAndBilling`. */
   await ensureInvoiceTracker(d1);
 
+  /* The Job Type dimension and a compliance requirement's renewal provider.
+     After every stage that creates `organisations`, `maintenance_requests`,
+     `compliance_documents` and `contractors`, which both extend. */
+  await ensureJobTypesAndComplianceProvider(d1);
+
   await repairOrphanedSectionBoards(d1);
+}
+
+/**
+ * The three job types every organisation starts with.
+ *
+ * `code` is the stable meaning Reports groups its Reactive / Planned / Projects
+ * KPIs by, and it never changes: an administrator may rename "Project" to
+ * "Capital works" and the KPI, the drill URL and every job keep pointing at the
+ * same row. The ids are fixed per organisation so a seed replay is a no-op.
+ */
+export const DEFAULT_JOB_TYPES: ReadonlyArray<{ code: string; label: string; sortOrder: number }> = [
+  { code: "reactive", label: "Reactive", sortOrder: 10 },
+  { code: "planned", label: "Planned", sortOrder: 20 },
+  { code: "project", label: "Project", sortOrder: 30 },
+];
+
+/** The fixed id of an organisation's default job type — `jt_<org>_<code>`. */
+export function defaultJobTypeId(organisationId: string, code: string) {
+  return `jt_${organisationId}_${code}`;
+}
+
+/**
+ * Seed one organisation's default job types. Idempotent (`INSERT OR IGNORE` on
+ * fixed ids), so it is safe on every boot and when a client is created. A type
+ * an administrator renamed or deactivated keeps its row and is never re-seeded
+ * over.
+ */
+export async function seedJobTypes(d1: D1DatabaseLike, organisationId: string) {
+  await d1.batch(
+    DEFAULT_JOB_TYPES.map((type) =>
+      d1
+        .prepare(
+          `INSERT OR IGNORE INTO job_type_config (id, organisation_id, code, label, sort_order)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(defaultJobTypeId(organisationId, type.code), organisationId, type.code, type.label, type.sortOrder),
+    ),
+  );
+}
+
+/**
+ * THE JOB TYPE DIMENSION, AND WHO RENEWS A COMPLIANCE REQUIREMENT.
+ *
+ * ── JOB TYPES ─────────────────────────────────────────────────────────────
+ *
+ * Reports split spend into Reactive, Planned and Projects by inference — a
+ * compliance category or tier 4 was "planned", £1,000 or more was a "project".
+ * Those are not business facts and the owner has ruled them out. A job's type is
+ * now a real, configurable dimension: `job_type_config` rows per organisation
+ * with stable ids, and `maintenance_requests.job_type_id` pointing at one.
+ *
+ * NULL IS "UNCLASSIFIED", and every existing job starts there. No field on a job
+ * ever recorded its type — not `category` (the issue), not `tier` (severity),
+ * not `source` (how it arrived), not a planned-maintenance link (none exists) —
+ * so there is nothing deterministic to backfill from and nothing is guessed.
+ * Types are deactivated, never deleted (`deactivated_at`), so a job filed under
+ * a retired type keeps its meaning.
+ *
+ * No boolean columns, on purpose: a flag declared INTEGER here and compared as
+ * boolean by the Postgres translator is the trap `BOOLEAN_COLUMNS` exists for.
+ * `deactivated_at` and a nullable `code` carry the same facts as text.
+ *
+ * ── THE RENEWAL PROVIDER ──────────────────────────────────────────────────
+ *
+ * `compliance_documents.provider_contractor_id` — an OPTIONAL link to the
+ * contractor record booked to renew a certificate, so the Compliance block's
+ * "Who's renewing" can group by a real contractor. It is not the duty holder
+ * (whose obligation it is) and not `issued_by` (free text, kept as written).
+ * NULL until somebody links one; never inferred from a matching name. The same
+ * `REFERENCES … ON DELETE SET NULL` arrangement as `maintenance_requests
+ * .contractor_id`: removing a contractor drops the link and keeps the record.
+ * The foreign key is not a tenant check — the write path proves the contractor
+ * belongs to the organisation.
+ *
+ * Additive only. Indexes each in their own try/catch, because `CREATE INDEX IF
+ * NOT EXISTS` guards the index and not the column.
+ */
+async function ensureJobTypesAndComplianceProvider(d1: D1DatabaseLike) {
+  await d1
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS job_type_config (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         code TEXT,
+         label TEXT NOT NULL,
+         colour_hex TEXT,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         deactivated_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_by_email TEXT
+       )`,
+    )
+    .run();
+  try {
+    await d1
+      .prepare("CREATE INDEX IF NOT EXISTS job_type_config_org_idx ON job_type_config(organisation_id, sort_order)")
+      .run();
+  } catch (error) {
+    console.warn("[init] job_type_config_org_idx skipped", error);
+  }
+  try {
+    await d1
+      .prepare(
+        "CREATE UNIQUE INDEX IF NOT EXISTS job_type_config_org_code_idx ON job_type_config(organisation_id, code)",
+      )
+      .run();
+  } catch (error) {
+    console.warn("[init] job_type_config_org_code_idx skipped", error);
+  }
+
+  await addColumn(d1, "maintenance_requests", "job_type_id", "TEXT");
+  try {
+    await d1
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS maintenance_requests_job_type_idx ON maintenance_requests(organisation_id, job_type_id)",
+      )
+      .run();
+  } catch (error) {
+    console.warn("[init] maintenance_requests_job_type_idx skipped", error);
+  }
+
+  const organisationRows = await d1
+    .prepare("SELECT id FROM organisations WHERE status = 'active'")
+    .all();
+  for (const row of (organisationRows.results ?? []) as Array<{ id?: string }>) {
+    if (row.id) await seedJobTypes(d1, row.id);
+  }
+
+  await addColumn(
+    d1,
+    "compliance_documents",
+    "provider_contractor_id",
+    "TEXT REFERENCES contractors(id) ON DELETE SET NULL",
+  );
+  try {
+    await d1
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS compliance_provider_idx ON compliance_documents(organisation_id, provider_contractor_id)",
+      )
+      .run();
+  } catch (error) {
+    console.warn("[init] compliance_provider_idx skipped", error);
+  }
 }
 
 /**

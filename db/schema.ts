@@ -516,6 +516,13 @@ export const maintenanceRequests = sqliteTable(
     contractorId: text("contractor_id").references(() => contractors.id, {
       onDelete: "set null",
     }),
+    /*
+     * THE JOB TYPE — Reactive, Planned, Project or an organisation's own — as
+     * the stable id of a `job_type_config` row. NULL is "Unclassified", which is
+     * what every existing job is: no field on a job ever recorded its type, so
+     * none is guessed. See `app/lib/job-types.ts`.
+     */
+    jobTypeId: text("job_type_id"),
     assignee: text("assignee"),
     /*
      * The stable identity behind the display name above, added when "Assigned
@@ -1233,6 +1240,16 @@ export const complianceDocuments = sqliteTable(
      * the certificate. Two axes, two names.
      */
     dutyHolder: text("duty_holder"),
+    /*
+     * WHO RENEWS IT — an optional link to the contractor record booked to renew
+     * this certificate. Not the duty holder above (whose obligation it is) and
+     * not `issuedBy` (free text naming whoever issued the current certificate,
+     * kept as written). Null until somebody links one; never inferred from a
+     * name. The write path proves the contractor is this organisation's.
+     */
+    providerContractorId: text("provider_contractor_id").references(() => contractors.id, {
+      onDelete: "set null",
+    }),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -1240,6 +1257,7 @@ export const complianceDocuments = sqliteTable(
     index("compliance_organisation_idx").on(table.organisationId),
     index("compliance_site_kind_idx").on(table.siteId, table.kind),
     index("compliance_expiry_idx").on(table.expiryDate),
+    index("compliance_provider_idx").on(table.organisationId, table.providerContractorId),
   ],
 );
 
@@ -2972,6 +2990,36 @@ export const reminderTokens = sqliteTable(
  * from monday and will change; an unmapped one renders grey with its raw label
  * and raises an admin notice rather than disappearing.
  */
+/**
+ * An organisation's job types — Reactive, Planned, Project and any it adds.
+ *
+ * `id` is what a job stores (`maintenance_requests.job_type_id`) and never
+ * changes; `label` is display only and may be renamed; `code` is the stable
+ * meaning of the three defaults (reactive / planned / project), null for a type
+ * an administrator added. Deactivated, never deleted: `deactivatedAt` hides a
+ * type from new selection while every job filed under it keeps its meaning.
+ * Seeded by `seedJobTypes` in `db/init.ts`.
+ */
+export const jobTypeConfig = sqliteTable(
+  "job_type_config",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code"),
+    label: text("label").notNull(),
+    colourHex: text("colour_hex"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    deactivatedAt: text("deactivated_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedByEmail: text("updated_by_email"),
+  },
+  (table) => [
+    index("job_type_config_org_idx").on(table.organisationId, table.sortOrder),
+    uniqueIndex("job_type_config_org_code_idx").on(table.organisationId, table.code),
+  ],
+);
+
 export const jobStatusMap = sqliteTable(
   "job_status_map",
   {
