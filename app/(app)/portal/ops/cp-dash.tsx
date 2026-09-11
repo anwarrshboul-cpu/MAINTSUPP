@@ -190,7 +190,7 @@ function sameRange(
  * nothing. The list is empty for "All portfolios", where there is nothing to
  * narrow.
  */
-function registerQuery(
+export function registerQuery(
   current: string | URLSearchParams,
   filter: CpRegisterFilter,
   siteIds: readonly string[],

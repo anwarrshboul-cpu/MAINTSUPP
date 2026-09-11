@@ -65,16 +65,21 @@ const codeOnly = (source) =>
  * assertions it is strictly stronger — there is more source that could violate
  * them, and all of it is now checked.
  */
+/*
+ * RE-POINTED 2026-09-11 — THE OVERVIEW WAS REBUILT.
+ *
+ * The 2026-09-11 brief replaced the page's content with three sections — Job
+ * Intelligence, Spend & Reporting, Compliance — drawn by `oi-dash.tsx` and its
+ * primitives, under the same thin `overview-page.tsx` shell. The six cards
+ * listed here before (`overview-glance.tsx` … `overview-charts.tsx`) are no
+ * longer mounted anywhere; reading them would have let every assertion below
+ * pass against code no reader sees. So the family is the page as it ships, and
+ * each assertion that followed a retired mechanism says what replaced it.
+ */
 const OVERVIEW_FAMILY = [
   "app/(app)/portal/ops/overview-page.tsx",
-  "app/(app)/portal/ops/overview-glance.tsx",
-  "app/(app)/portal/ops/overview-financial.tsx",
-  "app/(app)/portal/ops/overview-performance.tsx",
-  "app/(app)/portal/ops/overview-breakdown.tsx",
-  "app/(app)/portal/ops/overview-sites.tsx",
-  "app/(app)/portal/ops/overview-records.tsx",
-  "app/(app)/portal/ops/overview-shared.tsx",
-  "app/(app)/portal/ops/overview-charts.tsx",
+  "app/(app)/portal/ops/oi-dash.tsx",
+  "app/(app)/portal/ops/oi-dash-charts.tsx",
 ];
 
 const readOverview = async () =>
@@ -452,15 +457,15 @@ test("the Overview computes no figure of its own", async () => {
    * stuck-work band, and the records panel behind every "Fix these →" the Jobs
    * board's filter language cannot express.
    */
-  for (const endpoint of [
-    "/api/dashboard/meters",
-    "/api/dashboard/stuck",
-    "/api/dashboard/records",
-    "/api/dashboard/sites-attention",
-    "/api/dashboard/job-breakdown",
-    "/api/dashboard/performance",
-    "/api/dashboard/cost",
-  ]) {
+  /*
+   * RE-POINTED AGAIN, 2026-09-11. The rebuilt Overview reads three endpoints,
+   * one per section, each the one that already owns those figures: the
+   * Overview's own aggregate (whose `intel` block is Job Intelligence), and the
+   * Reports and Compliance blocks' metrics, so Spend and Compliance cannot
+   * disagree with the pages they summarise. The property is the same — every
+   * figure is counted on the server, one round trip per section.
+   */
+  for (const endpoint of ["/api/overview/metrics", "/api/reports/metrics", "/api/compliance/metrics"]) {
     assert.ok(page.includes(endpoint), `${endpoint} is what the page reads`);
   }
   /*
@@ -476,7 +481,9 @@ test("the Overview computes no figure of its own", async () => {
 
 test("no operations page keeps filter state in localStorage", async () => {
   for (const file of [
-    "app/(app)/portal/ops/overview-page.tsx",
+    /* RE-POINTED 2026-09-11: the Overview's URL state (`portfolio`, `from`,
+       `to`) lives in `oi-dash.tsx` now; `overview-page.tsx` is a shell. */
+    "app/(app)/portal/ops/oi-dash.tsx",
     "app/(app)/portal/ops/compliance-page.tsx",
     "app/(app)/portal/ops/sites-list.tsx",
     "app/(app)/portal/ops/contractors-list.tsx",
@@ -491,6 +498,12 @@ test("no operations page keeps filter state in localStorage", async () => {
     );
     assert.match(source, /useQueryState|useOpsQuery/, `${file} reads the URL`);
   }
+  /* And the shell around it keeps nothing in the browser either. */
+  assert.doesNotMatch(
+    codeOnly(await read("app/(app)/portal/ops/overview-page.tsx")),
+    /localStorage|sessionStorage/,
+    "the Overview shell keeps no state of its own",
+  );
 });
 
 /* ── 7. The aggregates ────────────────────────────────────────────────────── */
@@ -696,7 +709,23 @@ test("each rebuilt page ships hidden data tables beside its charts", async () =>
    * seeing it — and the family read is what keeps it honest wherever the markup
    * ends up living next.
    */
-  assert.match(await readOverview(), /<HiddenDataTable/, "the Overview makes its charts readable");
+  /*
+   * RE-POINTED 2026-09-11, to the mechanism the rebuilt Overview uses. Its
+   * charts are the dashboard blocks' primitives, which READ THEIR VALUES OUT
+   * rather than hiding a table beside the drawing: every donut is paired with
+   * a legend whose rows each carry an accessible sentence with the figure and
+   * what it opens, every gauge names its value in the label it is built from,
+   * and the weekly bars read each week out. The contract is the one it always
+   * was — every chart on the page is readable without seeing it — asserted on
+   * the code that now draws them.
+   */
+  const overview = await readOverview();
+  const donuts = (overview.match(/<Donut\b/g) ?? []).length;
+  const legends = (overview.match(/<OiLegend\b/g) ?? []).length;
+  assert.ok(donuts > 0 && legends >= donuts, `every donut has a readable legend (${donuts} donuts, ${legends} legends)`);
+  assert.match(overview, /ariaLabel: `\$\{slice\.label\}: \$\{plural\(slice\.value, "open job", "open jobs"\)\}\./, "a legend row says its figure");
+  assert.match(overview, /const label = `\$\{ariaLabel\}: \$\{value\}\$\{unit \? ` \$\{unit\}` : ""\}, \$\{caption\}/, "a gauge says its figure");
+  assert.match(overview, /aria-label=\{`\$\{ariaLabel\}\. \$\{readout\}`\}/, "the weekly bars read every week out");
   assert.match(
     await read("app/(app)/portal/ops/compliance-page.tsx"),
     /<HiddenDataTable/,
@@ -836,76 +865,37 @@ test("a reserved-TLD contact is refused on create, and only on create", async ()
   assert.equal(editCalls.length, 1, "the edit path keeps the rule it already had");
 });
 
-test("every chart element both cross-filters and drills through", async () => {
+test("every chart element drills through to the list it counted", async () => {
   /*
-   * The brief asks for two actions on every segment, bar, tile and row, and for
-   * the second to be reachable rather than hover-only — this page is mostly
-   * read on a phone, where a hover does not exist.
+   * RE-POINTED 2026-09-11, AND RENAMED — the old title was "every chart
+   * element both cross-filters and drills through".
    *
-   * Tapping a bar CROSS-FILTERS: the bucket becomes a chip in the filter bar
-   * and every card recomputes. The arrow beside it DRILLS THROUGH to the job
-   * list with the same parameters, so the link is shareable and survives a
-   * refresh.
+   * The rebuilt Overview has no filter bar: the 2026-09-11 brief replaced the
+   * cross-filtering card layout (tap a bar → a chip → every card recomputes)
+   * with three fixed sections whose only filters are the header's portfolio
+   * and date range. So the CROSS-FILTER half has no successor on this page —
+   * it went with the layout, at the owner's request — and the Jobs board and
+   * the Compliance register keep their own filtering. The DRILL half is the
+   * contract that survives, and it is asserted more strictly than before:
+   * every drill is built by ONE helper from the payload's own portfolio and
+   * window, so the list opens on exactly what the figure counted.
    */
   const page = codeOnly(await readOverview());
-  /*
-   * RE-POINTED: the affordance moved from a class written out per card
-   * (`ops-bar__drill`) to `RankedBars` in `overview-charts.tsx`, which draws it
-   * once for every ranked row on the page. The contract is the same one and is
-   * now harder to violate — a card cannot forget to add it, because it does not
-   * add it.
-   */
-  assert.match(page, /className="ovw-ranked__drill"/, "the drill affordance is a real control");
-  /*
-   * And it is still a NAMED control rather than a bare arrow. The label is
-   * built from the row it belongs to, so a screen reader hears which bucket it
-   * is about — the property the old `aria-label` template carried.
-   */
   assert.match(
     page,
-    /aria-label=\{`Open the jobs behind \$\{row\.label\}`\}/,
-    "and it names what it will show, not just an arrow",
+    /const drill = \(pairs: readonly OiPair\[\]\): Drill => \{\s*const jobsQuery = rpJobsQuery\(pairs, sites\);/,
+    "one builder turns a figure's pairs into the Jobs board's address",
   );
-  /*
-   * RE-POINTED at where "carries the page's own state" is actually decided.
-   *
-   * It used to be a generic `(key, value) => drill({ [key]: value })` threaded
-   * through every chart. Each card now calls `onDrill({ tier: key })` with the
-   * dimension it owns, and the one place that turns that into a URL is `drill`
-   * in the shell — which starts from `window.location.search`, so the period,
-   * the cohort axis and every active filter travel with it. Asserting the
-   * builder rather than one call shape is what makes this true for the next
-   * card as well as these five.
-   *
-   * RE-POINTED AGAIN, from `window.location.search` to `search`, because the
-   * address bar turned out NOT to hold the page's whole state. Every
-   * `/api/dashboard/*` route reads its axis from the query string, and a
-   * stored `measure` preference never appeared there — so a drill built from
-   * `window.location.search` carried an axis the cards had not been counted
-   * on. `search` is the URL merged with the stored axis, i.e. exactly what
-   * the six aggregates were fetched with, so this asserts something STRONGER
-   * than it did: the list opens on the cohort the figure was counted over,
-   * not merely on the same address.
-   */
-  assert.match(
-    page,
-    /const next = new URLSearchParams\(search\);\s*\n\s*for \(const \[key, value\] of Object\.entries\(extra\)\)/,
-    "drilling carries the page's own filter state across to the job list",
-  );
-  assert.match(
-    page,
-    /if \(!next\.has\("measure"\) && stored\.measure\) next\.set\("measure", stored\.measure\)/,
-    "and that state includes a stored axis the address bar never showed",
-  );
-  // And tapping the same bucket twice clears it, which is what makes exploring
-  // reversible rather than a one-way door.
-  assert.match(
-    page,
-    /existing\.includes\(value\)\s*\n?\s*\? existing\.filter\(\(entry\) => entry !== value\)/,
-    "a second tap on a segment removes the filter it added",
-  );
+  assert.match(page, /const sites = data\.portfolio\.siteIds;/, "carrying the portfolio the figure was counted over");
+  assert.match(page, /const completedDrill = drill\(oiCompletedPairs\(range\)\);/, "and the window the server echoed, not the one asked for");
+  /* Real, named controls: an `<a href>` that navigates in place, and buttons. */
+  assert.match(page, /<a\s+className=\{className\}\s+href=\{href\}/, "a legend row is a real link");
+  assert.match(page, /<button type="button" className="oi-gauge oi-gauge--button" aria-label=\{label\} onClick=\{onSelect\}>/);
+  assert.match(page, /Opens them on the jobs board\./, "and each names what it will show");
+  /* The page's own filters are reversible: the header resets both. */
+  assert.match(page, /resetLabel="Reset to the last 12 months"/);
+  assert.match(page, /if \(next\) query\.set\("portfolio", next\);\s*else query\.delete\("portfolio"\);/);
 });
-
 
 /* ── Nothing on a chart is decorative ─────────────────────────────────────── */
 
@@ -921,7 +911,14 @@ test("every chart element both cross-filters and drills through", async () => {
  * that catches the fifth.
  */
 test("no chart element is drawn like a control and left inert", async () => {
-  for (const name of ["overview-page.tsx", "compliance-page.tsx", "sites-list.tsx", "contractors-list.tsx"]) {
+  for (const name of [
+    "overview-page.tsx",
+    "oi-dash.tsx",
+    "oi-dash-charts.tsx",
+    "compliance-page.tsx",
+    "sites-list.tsx",
+    "contractors-list.tsx",
+  ]) {
     const page = await read(`app/(app)/portal/ops/${name}`);
     assert.doesNotMatch(
       page,
@@ -931,74 +928,55 @@ test("no chart element is drawn like a control and left inert", async () => {
   }
 
   const page = await readOverview();
-  // The stacked trend was the last `role="img"`; its segments are buttons now.
-  assert.doesNotMatch(
-    page,
-    /className="ops-series__stack"\s*\n\s*role="img"/,
-    "the trend stack is made of buttons, not one labelled image",
-  );
   /*
-   * RE-POINTED at the new call sites. Three of the four charts survive the
-   * rebuild and still do both things; the fourth was replaced by the
-   * specification rather than dropped by this change.
-   *
-   * "Spend against budget" is GONE from the card on purpose — §3.3 removes the
-   * whole budget block, because comparing a 90-day spend against an unreliable
-   * pro-rated annual figure with half the sites carrying no budget produced
-   * "Aldgate 898%", which is a data fault rendered as a metric. Its interactive
-   * duty passes to Spend by site, which cross-filters and drills on the same
-   * `site` key.
-   *
-   * "Reactive vs planned" is likewise gone — §4 replaces that card with Time to
-   * close and the SLA trend — and the time-axis drill it carried survives on the
-   * spend trend, which is the assertion kept below. Nature remains a filter
-   * dimension; it is simply no longer a chart on this page.
+   * RE-POINTED 2026-09-11 at the rebuilt page's call sites. The cross-filter
+   * half went with the filter bar (see "every chart element drills through");
+   * what this asserts now is that EVERY chart on the three sections opens the
+   * list behind it — each split of open work, each gauge including the breach
+   * risk that used to have no filter to express it, every week of time to
+   * close, every spend month and site bar, every repeat slice and ring, and
+   * every compliance segment.
    */
   for (const [what, pattern] of [
-    ["priority breakdown", /onToggle\("priority", key\)/],
-    ["contractor spend", /onToggle\("contractor", key\)/],
-    ["spend by site", /onToggle\("site", key\)/],
-    ["a site row", /onToggle\("site", site\.siteId\)/],
+    ["a status segment", /statusDrill\(slice\)/],
+    ["a priority ring", /priorityDrill\(/],
+    ["a tier segment", /tierDrill\(slice\)/],
+    ["an engineer bar", /engineerDrill\(slice\)/],
+    ["a label segment", /labelDrill\(slice\)/],
+    ["the SLA gauge", /onSelect=\{overdueDrill\.go\}/],
+    ["the breach-risk gauge", /onSelect=\{drill\(OI_BREACH\)\.go\}/],
+    ["a week of time to close", /drill\(oiCompletedPairs\(\{ from: week\.from, to: week\.to \}\)\)\.go\(\)/],
+    ["a spend month", /rpTrendQuery\(source, sites\)/],
+    ["a site bar", /rpSiteBarQuery\(/],
+    ["a repeat-by-issue slice", /rpRepeatIssueQuery\(slice\.labels, scope, sites\)/],
+    ["a repeat-by-site slice", /rpRepeatSiteQuery\(slice\.labels, scope\)/],
+    ["a recurrence ring", /rpRecurrenceQuery\(band\.key, scope, sites\)/],
+    ["a compliance segment", /registerQuery\(base, filter, siteIds\)/],
   ]) {
-    assert.match(page, pattern, `${what} cross-filters when it is tapped`);
+    assert.match(page, pattern, `${what} drills through`);
   }
-  for (const [what, pattern] of [
-    ["tier breakdown", /onDrill\(\{ tier: key \}\)/],
-    ["contractor spend", /onDrill\(\{ contractor: key \}\)/],
-    ["spend by site", /onDrill\(\{ site: key \}\)/],
-    ["a time bucket", /period: "custom", from: bucket\.start, to: bucket\.endInclusive/],
-  ]) {
-    assert.match(page, pattern, `${what} also drills through to the jobs list`);
-  }
+  /* A primitive falls back to a picture only when it was given nothing to open. */
+  assert.match(page, /onSelect \? \(\s*<button/, "a gauge is a button whenever it can open something");
 });
 
 test("a zero segment renders nothing, and a segment of one is still tappable", async () => {
+  /*
+   * RE-POINTED 2026-09-11 to the primitives the rebuilt Overview draws with.
+   * The two rules are the same ones: no element at all for a zero, and a way
+   * to hit everything else however small. A donut arc of zero sweep returns
+   * no element (`OvArc`); a sliver of a segment is reached through its legend
+   * row, which is a full-width link; a week that closed anything keeps a floor
+   * height inside a full-height button, and a week that closed nothing is a
+   * stub that opens nothing.
+   */
+  const primitives = await read("app/(app)/portal/ops/ov-dash-charts.tsx");
+  assert.match(primitives, /if \(drawn <= 0\.05\) return null;/, "a zero arc draws nothing to tap");
   const page = await readOverview();
-  /*
-   * Height is the datum, so a bucket of 1 beside a bucket of 300 computes to
-   * under a pixel. Two rules make that safe: no element at all for a zero, and
-   * a floor for everything else. An invisible button that returns nothing is
-   * worse than a gap, which is why the first rule is not simply the floor.
-   */
-  /*
-   * RE-POINTED: the rule moved out of the cards and into the two chart
-   * primitives that draw segments, which is why no card writes it any more.
-   * `SegmentedBar` filters zero-value segments out of the PAINT while keeping
-   * them in the legend and the readout, and `TimeSeries` draws a marked gap
-   * rather than a zero-height bar. Same rule, one implementation, and a card
-   * can no longer forget it.
-   */
-  assert.match(
-    page,
-    /\.filter\(\(segment\) => segment\.value > 0\)/,
-    "a bucket with none of that kind of work draws no segment to tap",
-  );
-  const css = await read("app/(app)/portal/ops/ops.css");
-  assert.match(
-    css,
-    /\.ops-series__part \{[^}]*min-height: 6px;/,
-    "and a non-zero segment keeps a floor height so it can be hit",
-  );
+  assert.match(page, /return row\.href && row\.onActivate \? \(\s*<OiLink/, "a legend row links to its segment's list");
+  assert.match(page, /\{ height: `\$\{Math\.max\(12, \(eased\[index\] \?\? 0\) \* 100\)\}%` \}/, "a non-empty week keeps a floor");
+  assert.match(page, /if \(onSelect && !empty\) \{/, "and only a week with something in it is a control");
+  const css = await read("app/(app)/portal/ops/oi-dash.css");
+  assert.match(css, /button\.oi-weeks__col \{/, "the week's whole column is the target");
 });
 
 /* ── Planned versus reactive is one rule, in one place ────────────────────── */
@@ -1039,13 +1017,31 @@ test("the words are browser-safe and the SQL is not", async () => {
   assert.equal(metrics.NATURE_LABEL.planned, "Planned");
   assert.equal(metrics.NATURE_COLOUR.reactive, "#E8A33D");
 
+  /*
+   * RE-POINTED 2026-09-11. The rebuilt Overview draws no nature chips, so it no
+   * longer imports the NATURE_* words; the contract that survives is the one
+   * this test is named for. The page's `lib/` imports are the browser-safe
+   * ones — the policy module and the date formatter — and the three wire
+   * contracts it reads arrive as `import type`, which erases to nothing. No
+   * server module (the query builder, the aggregates, the metrics loaders)
+   * reaches the bundle.
+   */
   const page = await readOverview();
-  assert.match(page, /NATURE_KEYS,\n\s*NATURE_LABEL,\n\s*NATURE_COLOUR,\n\s*type NatureKey,\n\} from "\.\.\/\.\.\/\.\.\/lib\/job-metrics";/);
-  assert.doesNotMatch(
+  assert.match(
     page,
-    /from "\.\.\/\.\.\/\.\.\/lib\/dashboard-filters"/,
-    "a client component must never import the query builder",
+    /import type \{ OiIntel, OiPriorityKey, OiSlice \} from "\.\.\/\.\.\/\.\.\/lib\/overview-intel-contract";/,
   );
+  for (const server of [
+    "lib/dashboard-filters",
+    "lib/dashboard-aggregates",
+    "lib/overview-metrics",
+    "lib/overview-aggregates",
+    'lib/overview-intel"',
+    'lib/reports-dash"',
+    'lib/compliance-dash"',
+  ]) {
+    assert.ok(!page.includes(server), `a client component must never import ${server.replace('"', "")}`);
+  }
 });
 
 /* ── The contractor dimension carries both shapes ─────────────────────────── */
@@ -1078,9 +1074,20 @@ test("the browser is not asked to do date arithmetic", async () => {
   assert.match(aggregates, /const endInclusive = shiftDay\(bucket\.endExclusive, -1\);/);
   assert.match(aggregates, /^\s*endInclusive,$/m);
 
+  /*
+   * RE-POINTED 2026-09-11. Every window a drill sends is one the SERVER
+   * computed: a spend month's bounds (`rpTrendQuery` over the trend point), a
+   * week of time to close (`week.from` / `week.to`), the aged backlog's cutoff
+   * and oldest day, and the range the payload echoed. The only dates the page
+   * makes are the picker's presets and its default, and those are whole UTC
+   * calendar days built with `Date.UTC` — no timezone, no millisecond sums.
+   */
   const page = await readOverview();
-  assert.match(page, /onSelectWindow\(bucket\.start, bucket\.endInclusive\)/);
-  assert.doesNotMatch(page, /setDate\(|864e5|86400000/, "no day arithmetic in the page");
+  assert.match(page, /if \(source\) onJobs\(rpTrendQuery\(source, sites\)\);/);
+  assert.match(page, /drill\(oiCompletedPairs\(\{ from: week\.from, to: week\.to \}\)\)\.go\(\)/);
+  assert.match(page, /\["from", aging\.oldestDay\],\s*\["to", aging\.cutoff\],/);
+  assert.doesNotMatch(page, /setDate\(|864e5|86400000|86_400_000/, "no day arithmetic in the page");
+  assert.doesNotMatch(page, /getTimezoneOffset|toLocaleDateString\(\)/, "and nothing in the reader's timezone");
 });
 
 test("the two new dimensions round-trip through the URL like every other one", async () => {
@@ -1096,20 +1103,17 @@ test("the two new dimensions round-trip through the URL like every other one", a
     assert.match(filters, line);
   }
 
-  // And the page owns the parameters, so `Clear all` clears them and a chip
-  // appears for each — a filter with no chip is a filter a reader cannot undo.
-  const page = await readOverview();
-  assert.match(page, /"tier",\n\s*"nature",\n\s*"contractor",\n\] as const;/);
-  assert.match(page, /key: "nature",\n\s*label: "Nature",/);
   /*
-   * The options list is optional-chained now, because the page renders its
-   * filter bar before `/api/dashboard/filters` has answered rather than holding
-   * the whole bar back for it. The contract — this dimension is one of the
-   * groups, it is searchable, and its options come from the payload rather than
-   * from a constant — is unchanged.
+   * RE-POINTED 2026-09-11. The Overview's filter bar — which owned `nature`
+   * and `contractor` as chips with a "Clear all" — went with the rebuilt
+   * layout. The dimensions did not: the Jobs board's drill filter reads both,
+   * names a chip for each, and clears them with the rest of its keys, so a
+   * link carrying either still means the same thing wherever it lands.
    */
-  assert.match(
-    page,
-    /\{ key: "contractor", label: "Contractor", options: data\?\.contractors \?\? \[\], searchable: true \}/,
-  );
+  const drill = await read("app/(app)/portal/board-drill-filter.ts");
+  assert.match(drill, /const contractors = new Set\(list\("contractor"\)\.map\(key\)\);/);
+  assert.match(drill, /const natures = new Set\(list\("nature"\)\);/);
+  assert.match(drill, /chips\.push\(\{ key: "nature", label: "Nature", value:/, "a chip for each");
+  assert.match(drill, /chips\.push\(\{ key: "contractor", label: "Contractor", value:/);
+  assert.match(drill, /"contractor",\s*\n\s*"nature",/, "and both are among the keys the board clears");
 });

@@ -144,6 +144,32 @@ function isOverdue(request: MaintenanceRequest, now: Date): boolean {
   return Number.isFinite(at) && at < now.getTime();
 }
 
+/**
+ * AT RISK OF BREACHING — the Overview's "SLA Breach Risk" figure, in the browser.
+ *
+ * Open, High priority or Tier 1, not yet overdue, and due inside the next 48
+ * hours: `dueSoonSql` in `overview-metrics.ts`, read with the same day-versus-
+ * instant rule as `isOverdue` above. A bare due DAY is due soon today or
+ * tomorrow — it is not late until its day has passed; a stamped due is due
+ * soon from this instant until 48 hours on. Without this the figure was the one
+ * chart on the page no list could reproduce.
+ */
+const BREACH_WINDOW_MS = 48 * 3_600_000;
+
+function isBreachRisk(request: MaintenanceRequest, now: Date): boolean {
+  if (isClosed(request)) return false;
+  if (priorityKey(request.priority) !== "urgent" && Number(request.tier) !== 1) return false;
+  const due = String(request.dueAt ?? "").trim();
+  if (!due) return false;
+  if (due.length <= 10) {
+    const today = isoDay(now);
+    const day = due.slice(0, 10);
+    return day >= today && day < shiftDayString(today, 2);
+  }
+  const at = Date.parse(due);
+  return Number.isFinite(at) && at >= now.getTime() && at < now.getTime() + BREACH_WINDOW_MS;
+}
+
 function countsAsWork(request: MaintenanceRequest): boolean {
   /* And on the Jobs board — the fourth exclusion `liveWorkOrderCondition` makes
      through `jobsBoardCondition`. Without it a drill counted Store
@@ -292,6 +318,8 @@ export function readDrillFilter(
    * marks everything due today as overdue for every reader west of Greenwich.
    */
   const overdueOnly = searchParams.get("overdue") === "1";
+  /* `risk=breach` — see `isBreachRisk`. */
+  const breachOnly = searchParams.get("risk") === "breach";
   const meterLabel = (searchParams.get("meter") ?? "").trim();
   /*
    * THE REPORTS BLOCK'S FOUR DIMENSIONS, each on the rule its figure used.
@@ -343,6 +371,7 @@ export function readDrillFilter(
     });
   }
   if (overdueOnly) chips.push({ key: "overdue", label: "Overdue", value: "past its date" });
+  if (breachOnly) chips.push({ key: "risk", label: "Breach risk", value: "High or Tier 1, due within 48h" });
   if (types.size) {
     chips.push({ key: "type", label: "Type", value: [...types].map((type) => SPEND_TYPE_LABEL[type]).join(", ") });
   }
@@ -427,6 +456,7 @@ export function readDrillFilter(
         if (!natures.has(nature)) return false;
       }
       if (overdueOnly && !isOverdue(request, now)) return false;
+      if (breachOnly && !isBreachRisk(request, now)) return false;
       if (types.size && !types.has(spendTypeOf(request))) return false;
       if (costedOnly && spendLineOf(request) === null) return false;
       if (repeats) {
@@ -472,6 +502,7 @@ export const DRILL_KEYS = [
   "nature",
   "family",
   "overdue",
+  "risk",
   "type",
   "hasCost",
   "repeat",

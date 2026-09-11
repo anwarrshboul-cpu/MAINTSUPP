@@ -201,7 +201,10 @@ test("Reports asks for the header slot, and the Overview no longer needs one", a
   assert.match(reports, /slotRef=\{setLayoutSlot\}/);
   assert.match(reports, /surface="reports"\s*\n\s*barSlot=\{layoutSlot\}/);
 
-  const overview = await read("app/(app)/portal/ops/overview-page.tsx");
+  /* RE-POINTED 2026-09-11: the shell renders `oi-dash.tsx`, which draws the
+     three sections, so both are read — the fixed order lives in the second. */
+  const overview =
+    (await read("app/(app)/portal/ops/overview-page.tsx")) + (await read("app/(app)/portal/ops/oi-dash.tsx"));
   assert.ok(
     !overview.includes("DashboardWidgets"),
     "the Overview's card order is fixed by the brief, not by a saved layout",

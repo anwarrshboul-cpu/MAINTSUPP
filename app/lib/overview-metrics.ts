@@ -62,6 +62,14 @@ import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters
 import { drillSiteIds, normalisePriority } from "./job-metrics";
 import { complianceCompletion } from "./compliance-status";
 import { readComplianceRegister } from "./compliance-register";
+import {
+  AGING_THRESHOLD_DAYS,
+  BREACH_WINDOW_HOURS,
+  buildJobIntel,
+  closuresFrom,
+  isCalendarDay,
+} from "./overview-intel";
+import type { OiIntel } from "./overview-intel-contract";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -153,6 +161,8 @@ export type OvMetrics = {
    * the ids it takes.
    */
   attentionSiteIds: string[];
+  /** The Overview's "Job Intelligence" section — see `overview-intel.ts`. */
+  intel: OiIntel;
 };
 
 /* ── Colour ───────────────────────────────────────────────────────────────── */
@@ -364,10 +374,10 @@ export async function loadOverviewMetrics(
   /* The window: 30 days back through today, unless asked otherwise. Ends
      EXCLUSIVE at tomorrow for the same reason every other window here does —
      a job completed an hour ago belongs to today. */
-  const from = options.from && /^\d{4}-\d{2}-\d{2}$/.test(options.from)
-    ? options.from
-    : shiftDay(today, -30);
-  const to = options.to && /^\d{4}-\d{2}-\d{2}$/.test(options.to) ? options.to : today;
+  /* A real calendar day, not merely the right shape: "2026-13-01" in a link
+     falls back to the default rather than failing the whole block. */
+  const from = isCalendarDay(options.from) ? options.from : shiftDay(today, -30);
+  const to = isCalendarDay(options.to) ? options.to : today;
   const [rangeFrom, rangeTo] = from <= to ? [from, to] : [to, from];
   const endExclusive = shiftDay(rangeTo, 1);
 
@@ -521,6 +531,66 @@ export async function loadOverviewMetrics(
         ),
       )
       .groupBy(sql`day`),
+  ]);
+
+  /* ── Job Intelligence: the splits and clocks the Overview's first section adds ──
+   *
+   * Same scope, same open-work predicate and same overdue rule as every figure
+   * above, so each split sums back to Open jobs and the per-priority SLA sums
+   * back to the headline's. See `overview-intel.ts` for the definitions.
+   */
+  const agedBefore = shiftDay(today, -AGING_THRESHOLD_DAYS);
+  const dueSoonEnd = shiftDay(today, 2);
+  const instant = now.toISOString();
+  const instantEnd = new Date(now.getTime() + BREACH_WINDOW_HOURS * 3_600_000).toISOString();
+  const dueText = dateText(maintenanceRequests.dueAt);
+  /* Not yet overdue and due inside the window, by the overdue test's own two
+     shapes: a date-only due is compared by day, a stamped one by instant. */
+  const dueDay = dayOnly(maintenanceRequests.dueAt);
+  const dueSoonSql = sql`(${maintenanceRequests.dueAt} is not null and ${dueText} <> '' and ((length(${dueText}) <= 10 and ${dueDay} >= ${today} and ${dueDay} < ${dueSoonEnd}) or (length(${dueText}) > 10 and ${dueText} >= ${instant} and ${dueText} < ${instantEnd})))`;
+  /* High is `urgent` by `normalisePriority`'s spellings; Tier 1 is the top tier. */
+  const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1"]} or ${maintenanceRequests.tier} = 1)`;
+  const requestedDay = dayOnly(maintenanceRequests.requestedAt);
+  const completedDay = dayOnly(maintenanceRequests.completedAt);
+  const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, closureRows] = await Promise.all([
+    db
+      .select({ tier: maintenanceRequests.tier, total: count() })
+      .from(maintenanceRequests)
+      .where(openScope)
+      .groupBy(maintenanceRequests.tier),
+    db
+      .select({ engineer: maintenanceRequests.engineer, total: count() })
+      .from(maintenanceRequests)
+      .where(openScope)
+      .groupBy(maintenanceRequests.engineer),
+    db
+      .select({
+        priority: maintenanceRequests.priority,
+        total: count(),
+        overdue: sql<number>`sum(case when ${overdueOpenSql(now)} then 1 else 0 end)`,
+      })
+      .from(maintenanceRequests)
+      .where(openScope)
+      .groupBy(maintenanceRequests.priority),
+    db
+      .select({ total: count(), oldest: sql<string | null>`min(${requestedDay})` })
+      .from(maintenanceRequests)
+      .where(and(openScope, sql`${requestedDay} <> ''`, sql`${requestedDay} < ${agedBefore}`)),
+    db
+      .select({ pool: count(), risk: sql<number>`sum(case when ${dueSoonSql} then 1 else 0 end)` })
+      .from(maintenanceRequests)
+      .where(and(openScope, riskPoolSql)),
+    db
+      .select({ requestedDay: sql<string>`${requestedDay}`, completedDay: sql<string>`${completedDay}` })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          scope,
+          isNotNull(maintenanceRequests.completedAt),
+          sql`${completedDay} >= ${closuresFrom({ from: rangeFrom, to: rangeTo })}`,
+          sql`${completedDay} < ${endExclusive}`,
+        ),
+      ),
   ]);
 
   const openJobs = Number(openRows[0]?.total ?? 0);
@@ -789,6 +859,33 @@ export async function loadOverviewMetrics(
       scored: completion.scored,
     },
     spend,
+    intel: buildJobIntel({
+      today,
+      range: { from: rangeFrom, to: rangeTo },
+      open: openJobs,
+      overdue,
+      completed,
+      statusSlices: jobsByStatus,
+      prioritySlices: priority,
+      categoryRows: categoryGrouped.map((row) => ({ category: row.category, total: Number(row.total ?? 0) })),
+      tierRows: tierRows.map((row) => ({ tier: row.tier === null ? null : Number(row.tier), total: Number(row.total ?? 0) })),
+      engineerRows: engineerRows.map((row) => ({ engineer: row.engineer, total: Number(row.total ?? 0) })),
+      priorityRows: priorityOverdueRows.map((row) => ({
+        priority: row.priority,
+        total: Number(row.total ?? 0),
+        overdue: Number(row.overdue ?? 0),
+      })),
+      aging: {
+        count: Number(agingRows[0]?.total ?? 0),
+        oldestDay: agingRows[0]?.oldest ? String(agingRows[0].oldest) : null,
+      },
+      breach: { pool: Number(breachRows[0]?.pool ?? 0), count: Number(breachRows[0]?.risk ?? 0) },
+      closures: closureRows.map((row) => ({
+        requestedDay: row.requestedDay ? String(row.requestedDay) : null,
+        completedDay: row.completedDay ? String(row.completedDay) : null,
+      })),
+      normalisePriority,
+    }),
   };
 }
 

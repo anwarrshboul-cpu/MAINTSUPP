@@ -43,6 +43,14 @@ export const QUALITY_ARC: HigherIsBetter = { good: 90, warn: 75 };
  */
 export const REPEAT_RATE_ARC: LowerIsBetter = { good: 10, warn: 20 };
 
+/**
+ * The Overview's "SLA Compliance by Priority Tier" bars: the share of open jobs
+ * within SLA, against the brief's 95% target line. At or above the target is
+ * good, 80–94 a warning, below 80 poor. The server draws its target marker
+ * from `good`, so the line and the colours cannot disagree.
+ */
+export const SLA_TARGET_ARC: HigherIsBetter = { good: 95, warn: 80 };
+
 export type ArcTone = "good" | "warn" | "poor";
 
 /** Where a higher-is-better percentage falls. */

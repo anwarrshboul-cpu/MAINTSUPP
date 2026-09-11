@@ -32,6 +32,7 @@
 import { scopedDbWithCapability } from "../../../lib/tenant-db";
 import { dashboardFailure } from "../../../lib/dashboard-route";
 import { loadOverviewMetrics, reconcile } from "../../../lib/overview-metrics";
+import { reconcileIntelWithOverview } from "../../../lib/overview-intel";
 import { ensureDatabase } from "../../../../db/init";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +53,8 @@ export async function GET(request: Request) {
       siteScope: guard.scope.siteScope,
     });
 
-    const failures = reconcile(metrics);
+    /* The block's identities, then the Job Intelligence section's own. */
+    const failures = [...reconcile(metrics), ...reconcileIntelWithOverview(metrics)];
     if (failures.length > 0) {
       console.error("[overview-metrics] reconciliation failed", failures);
     }
