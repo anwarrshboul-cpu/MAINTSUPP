@@ -1,0 +1,35 @@
+/*
+ * The two per-requirement controls — whose obligation it is, and which
+ * contractor renews it — stacked in ONE column beside the record.
+ *
+ * `.resp-record > .resp-control` gives a single control a fixed 200px column
+ * from 768px up; two sibling controls would take 400px of a row that also has
+ * to hold four columns. Stacked, the pair keeps the one 200px column and the
+ * record keeps its width. On a phone the column is full width under the row,
+ * exactly as the single control was.
+ */
+.resp-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-bottom: 8px;
+}
+
+.resp-controls > .resp-control {
+  padding-bottom: 0;
+}
+
+.provider-control__text {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 768px) {
+  .resp-record > .resp-controls {
+    flex: 0 0 200px;
+    padding-bottom: 0;
+  }
+}

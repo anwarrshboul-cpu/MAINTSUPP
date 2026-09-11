@@ -286,6 +286,12 @@ export type RegisterEntry = {
    * the same answer.
    */
   dutyHolder: string | null;
+  /**
+   * The contractor record linked as this requirement's renewal provider, or
+   * null. Carried from the annotation row for a board-derived requirement too —
+   * a board slot is renewed by somebody without the board growing a column.
+   */
+  providerContractorId: string | null;
   /** The last warning stage the digest sent for this document. */
   lastAlertStage: string | null;
   /**
@@ -841,6 +847,7 @@ export async function readComplianceRegister(
     attachmentId: string | null;
     notRequired: boolean;
     dutyHolder: string | null;
+    providerContractorId: string | null;
     lastAlertStage: string | null;
   };
   const rows = registerRows as RegisterRow[];
@@ -922,6 +929,7 @@ export async function readComplianceRegister(
            travel this way — a board row is itself the answer it was waiting
            for. See `boardDutyHolder`. */
         dutyHolder: boardDutyHolder(registerRow?.dutyHolder),
+        providerContractorId: registerRow?.providerContractorId ?? null,
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
@@ -1003,6 +1011,7 @@ export async function readComplianceRegister(
       fileCount,
       notRequired: row.notRequired || state === "Not required",
       dutyHolder: row.dutyHolder,
+      providerContractorId: row.providerContractorId ?? null,
       lastAlertStage: row.lastAlertStage,
       /* No board row, so no group. The site's own lifecycle is all there is. */
       boardGroup: null,

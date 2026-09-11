@@ -427,7 +427,9 @@ test("the register's new narrowings parse and apply", () => {
 test("the route reuses the register, the rows builder and the canonical classifier — and writes nothing", async () => {
   const route = await read("app/api/compliance/metrics/route.ts");
   assert.match(route, /readComplianceRegister\(db, orgId, \{ today \}\)/);
-  assert.match(route, /complianceRowsFrom\(register\.entries, managerById\)/);
+  /* Re-pointed: the one row builder now also names each linked renewal
+     contractor (`providerNames`), so "Who's renewing" can group by the record. */
+  assert.match(route, /complianceRowsFrom\(register\.entries, managerById, providerNames\)/);
   assert.match(route, /scopedDbWithCapability\(request, "board\.view"\)/);
   assert.match(route, /resolveDashboardPortfolio\(db, orgId, url\.searchParams\.get\("portfolio"\), siteScope\)/,
     "the membership's site restriction reaches the figures and the export");
@@ -529,6 +531,8 @@ test("the live export is a CSV of the same snapshot, formula-safe", async (t) =>
   assert.match(response.headers.get("content-type") ?? "", /text\/csv/);
   const body = await response.text();
   assert.match(body, /"Compliance score \(percent\)"/);
-  assert.match(body, /"Site","Requirement","Status","Due date","Responsible","In the score"/);
+  /* Re-pointed: the export gained the linked renewal contractor, beside who
+     chases it ("Responsible") and never instead of it. */
+  assert.match(body, /"Site","Requirement","Status","Due date","Responsible","Renewal contractor","In the score"/);
   assert.doesNotMatch(body, /\n"[=+@]/, "no cell starts with a formula character");
 });

@@ -30,6 +30,7 @@ import { sites } from "../../../../db/schema";
 import { scopedDbWithCapability } from "../../../lib/tenant-db";
 import { dashboardFailure } from "../../../lib/dashboard-route";
 import { readComplianceRegister } from "../../../lib/compliance-register";
+import { contractorNamesById } from "../../../lib/compliance-provider";
 import { complianceRowsFrom, isScoredRow } from "../../../lib/compliance-view";
 import { buildComplianceDashboard } from "../../../lib/compliance-dash";
 import { listSites } from "../../../lib/sites-repository";
@@ -73,7 +74,7 @@ export async function GET(request: Request) {
 
     /* One instant classifies the whole register. */
     const today = new Date();
-    const [register, managerRows, registerSites, portfolio] = await Promise.all([
+    const [register, managerRows, registerSites, portfolio, providerNames] = await Promise.all([
       readComplianceRegister(db, orgId, { today }),
       /* Managers for `responsibilityFor`'s fallback — the same read the
          register's own summary and records routes make. */
@@ -85,6 +86,9 @@ export async function GET(request: Request) {
          so "active" below is that page's `status !== "closed"`. */
       listSites(db, orgId, { includeInactive: true }),
       resolveDashboardPortfolio(db, orgId, url.searchParams.get("portfolio"), siteScope),
+      /* The linked renewal contractors' names — "Who's renewing" groups by the
+         contractor record where one is linked. */
+      contractorNamesById(db, orgId),
     ]);
 
     const managerById = new Map(
@@ -92,7 +96,7 @@ export async function GET(request: Request) {
         (row) => [row.id, (row.managerName || row.manager || "").trim()],
       ),
     );
-    const rows = complianceRowsFrom(register.entries, managerById);
+    const rows = complianceRowsFrom(register.entries, managerById, providerNames);
     const allowed = portfolio.siteIds ? new Set(portfolio.siteIds) : null;
     const activeSiteIds = (registerSites as Array<{ id: string; status: string | null }>)
       .filter((site) => site.status !== "closed" && (!allowed || allowed.has(site.id)))
@@ -150,15 +154,24 @@ export async function GET(request: Request) {
       row("Compliance by type", ring.label, `${ring.percent}% (${ring.counts.compliant} of ${ring.total})`);
     }
     for (const ring of metrics.countdown.rings) row("Renewals outlook", ring.label, ring.value);
-    for (const slice of metrics.renewals.slices) row("Who's renewing", slice.label, slice.value);
+    for (const slice of metrics.renewals.slices) {
+      row("Who's renewing", slice.linked ? `${slice.label} (contractor record)` : slice.label, slice.value);
+    }
+    row("Who's renewing", "Linked to a contractor record", metrics.renewals.linked);
     row("Who's renewing", "Unlinked to a contractor record", metrics.renewals.unlinked);
     row("Sites", "Sites fully compliant", metrics.sites.fullyCompliant);
     row("Sites", "Active sites with a requirement in the score", metrics.sites.considered);
     row("Sites", "Sites fully compliant (percent)", metrics.sites.percent);
     row("Data gaps", "Certificates held with no due date", metrics.dataGaps.heldWithoutDueDate);
-    row("Data gaps", "Site-type applicability configuration", metrics.dataGaps.siteTypeApplicability);
+    row(
+      "Requirements",
+      "Which requirements apply to a site",
+      metrics.dataGaps.siteTypeApplicability === "per-site"
+        ? "The common compliance template and each site's own requirements (by design)"
+        : metrics.dataGaps.siteTypeApplicability,
+    );
     row("");
-    row("Site", "Requirement", "Status", "Due date", "Responsible", "In the score");
+    row("Site", "Requirement", "Status", "Due date", "Responsible", "Renewal contractor", "In the score");
     const siteAllowed = allowed;
     for (const entry of rows) {
       if (siteAllowed && !siteAllowed.has(entry.siteId)) continue;
@@ -173,6 +186,7 @@ export async function GET(request: Request) {
         entry.state,
         entry.expiry ?? "No due date",
         entry.responsibility,
+        entry.providerName ?? "Not linked",
         isScoredRow(entry) ? "Yes" : entry.state === "Not required" ? "No — not required" : "No — responsibility not confirmed",
       );
     }

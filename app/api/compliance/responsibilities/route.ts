@@ -58,6 +58,8 @@ import { activityLog, complianceDocuments, sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { readComplianceRegister } from "../../../lib/compliance-register";
 import { ensureComplianceProfile } from "../../../lib/compliance-profile";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
+import { resolveDashboardPortfolio } from "../../../lib/overview-metrics";
 import {
   DUTY_HOLDERS,
   DUTY_HOLDER_UNCONFIRMED,
@@ -101,7 +103,14 @@ const pairKey = (siteId: string, kind: string) => `${siteId}::${kind}`;
  * though this screen is about the other axis, because the register's `?who=`
  * chip has to keep meaning what it means when the reader switches view.
  */
-async function registerRows(db: Database, orgId: string, today: Date) {
+async function registerRows(
+  db: Database,
+  orgId: string,
+  today: Date,
+  /** Confine to these sites (the portfolio ∩ the member's scope); null = every site. */
+  siteIds: readonly string[] | null = null,
+) {
+  const allowed = memberSiteSet(siteIds);
   const [register, siteRows] = await Promise.all([
     readComplianceRegister(db, orgId, { today }),
     db
@@ -112,7 +121,10 @@ async function registerRows(db: Database, orgId: string, today: Date) {
   const managerById = new Map(
     siteRows.map((row) => [row.id, (row.managerName || row.manager || "").trim()]),
   );
-  const rows: ComplianceRow[] = register.entries.map((entry) => ({
+  const entries = allowed
+    ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
+    : register.entries;
+  const rows: ComplianceRow[] = entries.map((entry) => ({
     id: entry.id,
     siteId: entry.siteId,
     siteName: entry.siteName,
@@ -158,9 +170,12 @@ export async function GET(request: Request) {
        permission than reading the register itself. */
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
 
     const url = new URL(request.url);
+    /* The same set the register and the block answer inside: the header's
+       portfolio ∩ the member's sites. */
+    const portfolio = await resolveDashboardPortfolio(db, orgId, url.searchParams.get("portfolio"), siteScope);
     /* `scored` is cleared, whatever the address says. The dashboard's drills
        add `scored=1` to confine the register to the score, and the score
        leaves out every requirement whose duty holder is unconfirmed — which
@@ -168,7 +183,7 @@ export async function GET(request: Request) {
        empty the queue the moment anyone arrived from a dashboard figure. */
     const filters = { ...parseComplianceFilters(url), scored: false };
     const today = new Date();
-    const rows = await registerRows(db, orgId, today);
+    const rows = await registerRows(db, orgId, today, portfolio.siteIds);
     const filtered = filterComplianceRows(rows, filters, today);
 
     const bySite = new Map<string, ComplianceRow[]>();
@@ -270,7 +285,7 @@ export async function POST(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId } = guard.scope;
+    const { actor, db, orgId, siteScope } = guard.scope;
 
     const body = (await request.json().catch(() => null)) as
       | { dutyHolder?: unknown; records?: unknown }
@@ -333,7 +348,9 @@ export async function POST(request: Request) {
     }
 
     const today = new Date();
-    const rows = await registerRows(db, orgId, today);
+    /* A member confined to some sites may only answer for those sites: a pair
+       outside the scope is "not on this register" for them, like any other. */
+    const rows = await registerRows(db, orgId, today, siteScope);
     const known = new Map(rows.map((row) => [pairKey(row.siteId, row.kind), row]));
 
     const targets: Pair[] = [];

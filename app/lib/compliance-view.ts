@@ -86,6 +86,17 @@ export type ComplianceRow = {
    * "Read-only" came off the actions row.
    */
   editable: boolean;
+  /**
+   * WHO RENEWS IT — the contractor record linked as this requirement's renewal
+   * provider (`compliance_documents.provider_contractor_id`), or null when
+   * nobody has linked one. A third axis beside `responsibility` (who chases it)
+   * and `dutyHolder` (whose obligation it is), and never inferred from either.
+   * Optional so every row built before the link existed still type-checks; a
+   * link naming a contractor that no longer exists reads as unlinked.
+   */
+  providerContractorId?: string | null;
+  /** The linked contractor's name, carried so a screen never prints a bare id. */
+  providerName?: string | null;
 };
 
 export type ComplianceGroup = {
@@ -147,6 +158,12 @@ export type ComplianceFilters = {
    */
   dueFrom: string | null;
   dueTo: string | null;
+  /**
+   * RENEWAL CONTRACTORS — `?contractor=<id>`, with `__none__` for "none linked".
+   * OR within, AND across, like every dimension. Optional so a filter object
+   * built before the link existed still type-checks.
+   */
+  providers?: string[];
 };
 
 export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
@@ -160,6 +177,7 @@ export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
   dueBands: [],
   dueFrom: null,
   dueTo: null,
+  providers: [],
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -171,6 +189,12 @@ const BAND = /^band:(\d{1,4})-(\d{1,4})$/;
  * responsibility can never be spelled like this.
  */
 export const NO_RESPONSIBILITY = "__none__";
+
+/**
+ * The `?contractor=` value for "no renewal contractor is linked". A contractor
+ * id can never be spelled like this.
+ */
+export const NO_PROVIDER = "__none__";
 
 /** A `?due=band:a-b` token as its bounds, or null for anything else. */
 export function parseDueBand(value: string): { from: number; to: number } | null {
@@ -244,6 +268,7 @@ export function parseComplianceFilters(url: URL): ComplianceFilters {
       .filter((band): band is { from: number; to: number } => band !== null),
     dueFrom: DAY.test(dueFrom) ? dueFrom : null,
     dueTo: DAY.test(dueTo) ? dueTo : null,
+    providers: list(params, "contractor"),
   };
 }
 
@@ -265,21 +290,35 @@ export function complianceRowsFrom(
     fileCount: number;
     itemId: string | null;
     slotKey: string | null;
+    providerContractorId?: string | null;
   }>,
   managerById: ReadonlyMap<string, string>,
+  /**
+   * Contractor names by id, for the renewal provider. A link whose contractor
+   * is not in the map — removed, or never this organisation's — is reported as
+   * unlinked rather than printed as an id.
+   */
+  providerNameById: ReadonlyMap<string, string> = new Map(),
 ): ComplianceRow[] {
-  return entries.map((entry) => ({
-    id: entry.id,
-    siteId: entry.siteId,
-    siteName: entry.siteName,
-    kind: entry.kind,
-    responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
-    dutyHolder: entry.dutyHolder,
-    state: entry.state,
-    expiry: entry.expiry,
-    fileCount: entry.fileCount,
-    editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
-  }));
+  return entries.map((entry) => {
+    const providerName = entry.providerContractorId
+      ? (providerNameById.get(entry.providerContractorId) ?? null)
+      : null;
+    return {
+      id: entry.id,
+      siteId: entry.siteId,
+      siteName: entry.siteName,
+      kind: entry.kind,
+      responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
+      dutyHolder: entry.dutyHolder,
+      state: entry.state,
+      expiry: entry.expiry,
+      fileCount: entry.fileCount,
+      editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
+      providerContractorId: providerName ? (entry.providerContractorId ?? null) : null,
+      providerName,
+    };
+  });
 }
 
 /**
@@ -312,6 +351,7 @@ export function filterComplianceRows(
   const states = new Set(filters.states);
   const kinds = new Set(filters.kinds);
   const who = new Set(filters.responsibilities);
+  const providers = new Set(filters.providers ?? []);
   const bands = filters.dueBands ?? [];
   const dueFrom = filters.dueFrom ?? null;
   const dueTo = filters.dueTo ?? null;
@@ -323,6 +363,13 @@ export function filterComplianceRows(
       who.size &&
       !who.has(row.responsibility) &&
       !(who.has(NO_RESPONSIBILITY) && !row.responsibility.trim())
+    ) {
+      return false;
+    }
+    if (
+      providers.size &&
+      !(row.providerContractorId && providers.has(row.providerContractorId)) &&
+      !(providers.has(NO_PROVIDER) && !row.providerContractorId)
     ) {
       return false;
     }
@@ -343,7 +390,7 @@ export function filterComplianceRows(
       if (dueTo && due > dueTo) return false;
     }
     if (needle) {
-      const haystack = `${row.kind} ${row.siteName} ${row.responsibility}`.toLowerCase();
+      const haystack = `${row.kind} ${row.siteName} ${row.responsibility} ${row.providerName ?? ""}`.toLowerCase();
       if (!haystack.includes(needle)) return false;
     }
     return true;

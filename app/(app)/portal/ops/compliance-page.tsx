@@ -53,8 +53,11 @@ import {
   complianceMeaning,
   NO_DUE_DATE,
   complianceBandColour,
+  completionBand,
   type ComplianceState,
 } from "../../../lib/compliance-status";
+import { ProviderControl, type ProviderOption } from "./compliance-provider-control";
+import providerControlCss from "./compliance-provider-control.css?url";
 import { formatDate, formatDayMonth, formatShortDate } from "../../../lib/format-date";
 import { NO_SITE_IN_SCOPE, NO_SITE_IN_SCOPE_LABEL } from "../../../lib/job-metrics";
 import {
@@ -134,6 +137,8 @@ type SummaryPayload = {
     responsibilities: Option[];
     states: Option[];
   };
+  /** This organisation's contractors a renewal can be linked to. */
+  providers?: ProviderOption[];
 };
 
 type Record_ = {
@@ -162,6 +167,9 @@ type Record_ = {
   expiry: string | null;
   fileCount: number;
   editable: boolean;
+  /** The contractor record linked as the renewal provider, and its name. */
+  providerContractorId?: string | null;
+  providerName?: string | null;
 };
 
 type RecordsPayload = {
@@ -192,6 +200,7 @@ const FILTER_KEYS = [
   "scored",
   "from",
   "to",
+  "contractor",
 ] as const;
 
 /**
@@ -392,6 +401,26 @@ export function CompliancePage({
         onRemove: () => setValue("scored", "", ""),
       });
     }
+    /* A "Who's renewing" slice drills by contractor RECORD (`contractor=<id>`),
+       or to the renewals nobody has linked (`__none__`). One chip, named. */
+    const providerIds = params.getAll("contractor");
+    if (providerIds.length) {
+      const names = providerIds.map((id) =>
+        id === "__none__"
+          ? "Not linked"
+          : (summary.data?.providers?.find((provider) => provider.id === id)?.name ?? "A contractor"),
+      );
+      out.push({
+        key: "contractor",
+        label: "Renewal contractor",
+        value: names.length > 3 ? `${names.length} selected` : names.join(", "),
+        onRemove: () => {
+          const next = new URLSearchParams(window.location.search);
+          next.delete("contractor");
+          setParams(next);
+        },
+      });
+    }
     const range = dueRangeText(params.get("from") ?? "", params.get("to") ?? "");
     if (range) {
       out.push({
@@ -407,7 +436,7 @@ export function CompliancePage({
       });
     }
     return out;
-  }, [groups, params, setParams, setValue]);
+  }, [groups, params, setParams, setValue, summary.data]);
 
   return (
     <div className="ops-page">
@@ -568,6 +597,7 @@ export function CompliancePage({
               onToggle={() => toggleOpen(group.siteId)}
               search={search}
               expiryWindowDays={summary.data!.expiryWindowDays}
+              providers={summary.data!.providers ?? []}
               onManageRecord={onManageRecord}
               onOpenStoreDocumentation={onOpenStoreDocumentation}
               /* A responsibility set on a record moves it into or out of the
@@ -717,6 +747,7 @@ function SiteGroup({
   onToggle,
   search,
   expiryWindowDays,
+  providers,
   onManageRecord,
   onOpenStoreDocumentation,
   onSaved,
@@ -726,6 +757,8 @@ function SiteGroup({
   onToggle: () => void;
   search: string;
   expiryWindowDays: number;
+  /** The contractors a renewal can be linked to. */
+  providers: readonly ProviderOption[];
   onManageRecord: (id: string | null) => void;
   onOpenStoreDocumentation: () => void;
   /** Re-read the summary after a responsibility changes on one of these rows. */
@@ -763,7 +796,18 @@ function SiteGroup({
     group.noDueDate ? `${group.noDueDate} with no due date` : null,
   ].filter(Boolean);
 
-  const tone = complianceBandColour(group.completion.percent);
+  /*
+   * THE EDGE IS THE SCORE'S BAND — and only when there is a score.
+   *
+   * A store with nothing in the score has no band: its percent is 0 by
+   * definition, which painted it the red "Largely outstanding" edge — the same
+   * "0% for a store nobody has been asked about" this header refuses to print
+   * in words. Unscored, the edge takes the card's own line colour. The band's
+   * NAME rides in the heading for a screen reader, so the colour is never the
+   * only thing that says how the store is doing.
+   */
+  const band = group.completion.scored ? completionBand(group.completion.percent) : null;
+  const tone = band ? band.colour : "var(--line)";
   const visible = records.data
     ? showAll
       ? records.data.records
@@ -789,6 +833,7 @@ function SiteGroup({
       >
         <span className="ops-group__title">
           <span className="ops-group__name">{group.siteName}</span>
+          {band ? <span className="visually-hidden">{`, ${band.label}`}</span> : null}
           {/*
             "0 of 0" IS NOT A FACT ABOUT A STORE WITH TWELVE REQUIREMENTS.
             The fraction is the compliance score's, and its denominator is only
@@ -865,6 +910,7 @@ function SiteGroup({
                 <RecordRow
                   key={record.id}
                   record={record}
+                  providers={providers}
                   onManage={onManageRecord}
                   onOpenBoard={onOpenStoreDocumentation}
                   onSaved={handleSaved}
@@ -901,11 +947,13 @@ function SiteGroup({
  */
 function RecordRow({
   record,
+  providers,
   onManage,
   onOpenBoard,
   onSaved,
 }: {
   record: Record_;
+  providers: readonly ProviderOption[];
   onManage: (id: string | null) => void;
   onOpenBoard: () => void;
   /** Re-read the meters after this row's responsibility changes. */
@@ -977,7 +1025,13 @@ function RecordRow({
       whole reason this write addresses a requirement by site × name rather
       than by a `compliance_documents` id half the register does not have.
     */}
-    <ResponsibilityControl record={record} onSaved={onSaved} compact />
+    <span className="resp-controls">
+      <link rel="stylesheet" href={providerControlCss} precedence="default" />
+      <ResponsibilityControl record={record} onSaved={onSaved} compact />
+      {/* Who RENEWS it — a contractor record, linked on purpose. Offered on a
+          board-derived row for the same reason the responsibility is. */}
+      <ProviderControl record={record} providers={providers} onSaved={onSaved} />
+    </span>
     </div>
   );
 }

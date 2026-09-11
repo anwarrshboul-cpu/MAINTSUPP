@@ -157,7 +157,13 @@ export type CpMetrics = {
     noDueDate: number;
     unlinkedResponsibility: number;
     /** Whether the product holds a site-type → requirement applicability config. */
-    siteTypeApplicability: "exists" | "missing";
+    /**
+     * How Missing is decided. "per-site": the organisation's common compliance
+     * template and each site's own requirement set, with differences recorded as
+     * responsibility or Not applicable — the owner's deliberate design, not a
+     * gap. A site-type → template mapping is a possible future feature.
+     */
+    siteTypeApplicability: "exists" | "missing" | "per-site";
   };
   /** Empty when every §5.3 identity held. */
   reconciliation: string[];

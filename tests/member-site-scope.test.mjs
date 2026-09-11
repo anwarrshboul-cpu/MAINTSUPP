@@ -87,16 +87,25 @@ test("the Sites export, the groups read and the register's two reads are confine
   assert.match(groupsGet, /const \{ db, orgId, siteScope \} = await scopedDb\(request\);/);
   assert.match(groupsGet, /siteIds: group\.siteIds\.filter\(\(siteId\) => withinMemberScope\(allowed, siteId\)\)/);
 
+  /*
+   * The register's two reads now answer inside the header's portfolio as well as
+   * the member's sites: `resolveDashboardPortfolio(…, siteScope)` returns the
+   * portfolio ∩ the scope (or the scope alone for "All portfolios"), and the
+   * rows are built from exactly that set. The scope contract this pin protects
+   * is unchanged — no row outside the member's sites — it now reaches the
+   * predicate through the portfolio resolver, the one the dashboard block uses.
+   */
   for (const file of ["app/api/compliance/summary/route.ts", "app/api/compliance/records/route.ts"]) {
     const source = await read(file);
     assert.match(source, /const \{ db, orgId, siteScope \} = guard\.scope;/, file);
-    assert.match(source, /const allowed = memberSiteSet\(siteScope\);/, file);
+    assert.match(source, /resolveDashboardPortfolio\(db, orgId, url\.searchParams\.get\("portfolio"\), siteScope\)/, file);
+    assert.match(source, /const allowed = memberSiteSet\(portfolio\.siteIds\);/, file);
     assert.match(
       source,
       /const scopedEntries = allowed\s*\?\s*register\.entries\.filter\(\(entry\) => withinMemberScope\(allowed, entry\.siteId\)\)\s*:\s*register\.entries;/,
       file,
     );
-    assert.match(source, /const rows: ComplianceRow\[\] = scopedEntries\.map\(/, `${file} builds its rows from the confined entries`);
+    assert.match(source, /complianceRowsFrom\(scopedEntries, managerById, providerNames\)/, `${file} builds its rows from the confined entries`);
     assert.doesNotMatch(source, /register\.entries\.map\(/, `${file} never maps the unconfined register`);
   }
 });

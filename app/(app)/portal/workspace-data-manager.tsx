@@ -314,6 +314,10 @@ function fieldsFor(
     },
     { key: "state", label: "Status", type: "select", options: ["Compliant", "Expiring soon", "Expired", "Missing", "Not required"].map((value) => ({ value, label: value })) },
     { key: "expiry", label: "Expiry date", type: "date" },
+    /* WHO RENEWS IT — a contractor record, linked on purpose; "No contractor"
+       leaves it unlinked. Not the duty holder, and never read from the
+       certificate's "issued by" text. See /api/compliance/provider. */
+    { key: "providerContractorId", label: "Renewal contractor", type: "select", options: contractorOptions },
   ];
   if (tab === "unit") return [
     { key: "siteId", label: "Site", type: "select", required: true, options: siteOptions },
@@ -1059,7 +1063,11 @@ export function WorkspaceDataManager({
     : fieldsFor(
         tab,
         workspace,
-        typeof form?.contractorId === "string" ? form.contractorId : null,
+        typeof form?.contractorId === "string"
+          ? form.contractorId
+          : typeof form?.providerContractorId === "string"
+            ? form.providerContractorId
+            : null,
         /*
          * The value this row already holds is kept as an option even when the
          * registry no longer offers it — otherwise a `<select>` bound to an

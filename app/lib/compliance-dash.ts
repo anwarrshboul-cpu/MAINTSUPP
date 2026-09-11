@@ -63,6 +63,7 @@ import { complianceDay } from "./expiry-status";
 import {
   dueBandToken,
   isScoredRow,
+  NO_PROVIDER,
   NO_RESPONSIBILITY,
   type ComplianceRow,
 } from "./compliance-view";
@@ -76,11 +77,15 @@ import { drillSiteIds } from "./job-metrics";
  * (`workspace_settings.settings.complianceTemplate`) holds a requirement's
  * kind, aliases, whether it is enabled and which board slot it maps to — not
  * the site types it applies to — and a board row's Store Type is a label, not
- * a rule. Applicability is recorded per requirement instead, by marking it
- * "Not required", which the score already excludes. The brief's instruction
- * was to report this rather than guess one, so the payload says so.
+ * a rule. Applicability is recorded per requirement instead — by marking it
+ * "Not required", which the score already excludes, or by its responsibility —
+ * against the common template and each site's own requirement set.
+ *
+ * THAT IS THE DESIGN, NOT A GAP. The owner decided (September 2026) not to
+ * build Site Type → requirement templates in this product yet; the payload
+ * reports "per-site" so nothing downstream lists it as missing configuration.
  */
-const SITE_TYPE_APPLICABILITY = "missing" as const;
+const SITE_TYPE_APPLICABILITY = "per-site" as const;
 
 /* ── Colours: the brief's tokens, restated for a server that cannot read CSS ─ */
 
@@ -299,26 +304,46 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
   }
 
   /*
-   * WHO'S RENEWING — by the party the register says chases each certificate.
+   * WHO'S RENEWING — the linked contractor record first, the free text second.
    *
-   * A compliance requirement carries no contractor id: the schema has none on
-   * `compliance_documents` and the board slots name a ROLE ("Fire safety
-   * partner", "Electrical contractor") or fall back to the site manager. So
-   * every renewal is grouped by that text, normalised, and every one of them is
-   * counted as unlinked — which is reported, not hidden. Matching the text to a
-   * contractor record by name would be linking silently, which the brief rules
-   * out.
+   * A requirement may now carry a renewal provider: a contractor RECORD linked
+   * on purpose (`provider_contractor_id`), never inferred. Those renewals are
+   * grouped by the record — its id is the key and the drill's filter, so two
+   * contractors that share a name are two slices, and a renamed contractor
+   * keeps its slice.
+   *
+   * Every renewal nobody has linked is grouped as before, by the party the
+   * register says chases it (`responsibilityFor`: a ROLE such as "Fire safety
+   * partner", or the site manager), normalised, and reported as UNLINKED — shown,
+   * never dropped. Its drill carries `contractor=__none__` as well as the text,
+   * so a slice reading "Fire safety partner 3" opens those three and not the
+   * linked renewals whose role happens to read the same.
    */
-  const groups = new Map<string, { label: string; raw: Set<string>; value: number }>();
+  type RenewalGroup = { label: string; raw: Set<string>; value: number; contractorId: string | null };
+  const groups = new Map<string, RenewalGroup>();
   let unassigned = 0;
+  let linkedCount = 0;
   for (const row of renewing) {
+    if (row.providerContractorId && row.providerName) {
+      linkedCount += 1;
+      const key = `contractor:${row.providerContractorId}`;
+      const group = groups.get(key) ?? {
+        label: row.providerName,
+        raw: new Set<string>(),
+        value: 0,
+        contractorId: row.providerContractorId,
+      };
+      group.value += 1;
+      groups.set(key, group);
+      continue;
+    }
     const raw = (row.responsibility ?? "").trim();
     if (!raw) {
       unassigned += 1;
       continue;
     }
-    const key = normalise(raw);
-    const group = groups.get(key) ?? { label: raw, raw: new Set<string>(), value: 0 };
+    const key = `text:${normalise(raw)}`;
+    const group = groups.get(key) ?? { label: raw, raw: new Set<string>(), value: 0, contractorId: null };
     group.raw.add(raw);
     group.value += 1;
     groups.set(key, group);
@@ -327,26 +352,40 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     (left, right) => right[1].value - left[1].value || left[1].label.localeCompare(right[1].label, "en-GB"),
   );
   const renewalState = { ...SCORED, state: ["Expired", "Expiring soon"] };
+  const sliceFilter = (group: RenewalGroup) =>
+    group.contractorId
+      ? { ...renewalState, contractor: [group.contractorId] }
+      : { ...renewalState, who: [...group.raw], contractor: [NO_PROVIDER] };
   const renewalSlices: CpRenewalSlice[] = renewalRanked.slice(0, 5).map(([key, group], index) => ({
     key,
     label: group.label,
     value: group.value,
     colour: RENEWAL_SERIES[index % RENEWAL_SERIES.length],
-    labels: [...group.raw],
-    linked: false,
-    filter: { ...renewalState, who: [...group.raw] },
+    labels: group.contractorId ? [group.label] : [...group.raw],
+    linked: Boolean(group.contractorId),
+    filter: sliceFilter(group),
   }));
   const tail = renewalRanked.slice(5);
   if (tail.length > 0) {
-    const raw = tail.flatMap(([, group]) => [...group.raw]);
+    /* "Other" is every remaining group, linked or not, so its drill is the
+       union: those contractors, OR those unlinked texts. Two dimensions cannot
+       express an OR across them, so a mixed tail drills to the contractor ids
+       plus `__none__` and the texts' own slices stay the precise way in. */
+    const contractorIds = tail.flatMap(([, group]) => (group.contractorId ? [group.contractorId] : []));
+    const texts = tail.flatMap(([, group]) => (group.contractorId ? [] : [...group.raw]));
+    const mixed = contractorIds.length > 0 && texts.length > 0;
     renewalSlices.push({
       key: "__other__",
       label: "Other",
       value: tail.reduce((sum, [, group]) => sum + group.value, 0),
       colour: CP_COLOURS.other,
-      labels: raw,
+      labels: tail.map(([, group]) => group.label),
       linked: false,
-      filter: { ...renewalState, who: raw },
+      filter: mixed
+        ? { ...renewalState, contractor: [...contractorIds, NO_PROVIDER] }
+        : contractorIds.length > 0
+          ? { ...renewalState, contractor: contractorIds }
+          : { ...renewalState, who: texts, contractor: [NO_PROVIDER] },
     });
   }
   if (unassigned > 0) {
@@ -358,7 +397,7 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
       colour: `${CP_COLOURS.other}99`,
       labels: [],
       linked: false,
-      filter: { ...renewalState, who: [NO_RESPONSIBILITY] },
+      filter: { ...renewalState, who: [NO_RESPONSIBILITY], contractor: [NO_PROVIDER] },
     });
   }
 
@@ -421,8 +460,8 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     renewals: {
       slices: renewalSlices,
       total: renewing.length,
-      unlinked: renewing.length,
-      linked: 0,
+      unlinked: renewing.length - linkedCount,
+      linked: linkedCount,
       allFilter: renewalState,
     },
     sites: {
@@ -435,7 +474,7 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     dataGaps: {
       heldWithoutDueDate,
       noDueDate: scored.filter((row) => !row.expiry).length,
-      unlinkedResponsibility: renewing.length,
+      unlinkedResponsibility: renewing.length - linkedCount,
       siteTypeApplicability: SITE_TYPE_APPLICABILITY,
     },
     reconciliation: [],

@@ -19,12 +19,13 @@ import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { readComplianceRegister } from "../../../lib/compliance-register";
+import { contractorNamesById } from "../../../lib/compliance-provider";
+import { resolveDashboardPortfolio } from "../../../lib/overview-metrics";
 import {
+  complianceRowsFrom,
   filterComplianceRows,
   parseComplianceFilters,
-  responsibilityFor,
   sortComplianceRecords,
-  type ComplianceRow,
 } from "../../../lib/compliance-view";
 import { NO_DUE_DATE } from "../../../lib/compliance-status";
 
@@ -39,11 +40,6 @@ export async function GET(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
     const { db, orgId, siteScope } = guard.scope;
-    /* Inside the member's authorised sites, exactly as the summary route draws
-       the group headers these records expand. A `key=` naming a site outside
-       the scope matches nothing: the id is not a capability. */
-    const allowed = memberSiteSet(siteScope);
-
     const url = new URL(request.url);
     const filters = parseComplianceFilters(url);
     const groupBy = url.searchParams.get("group") === "kind" ? "kind" : "site";
@@ -55,7 +51,7 @@ export async function GET(request: Request) {
     const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
 
     const today = new Date();
-    const [register, siteRows] = await Promise.all([
+    const [register, siteRows, providerNames, portfolio] = await Promise.all([
       readComplianceRegister(db, orgId, { today }),
       /*
        * Managers, for the responsibility fallback.
@@ -70,29 +66,23 @@ export async function GET(request: Request) {
         .select({ id: sites.id, manager: sites.manager, managerName: sites.managerName })
         .from(sites)
         .where(and(eq(sites.organisationId, orgId))),
+      contractorNamesById(db, orgId),
+      /* The header's portfolio ∩ the member's sites — the set the summary route
+         draws the group headers these records expand from. */
+      resolveDashboardPortfolio(db, orgId, url.searchParams.get("portfolio"), siteScope),
     ]);
 
     const managerById = new Map(
       siteRows.map((row) => [row.id, (row.managerName || row.manager || "").trim()]),
     );
 
+    /* A `key=` naming a site outside that set matches nothing: the id is not a
+       capability. See `member-site-scope.ts`. */
+    const allowed = memberSiteSet(portfolio.siteIds);
     const scopedEntries = allowed
       ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
       : register.entries;
-    const rows: ComplianceRow[] = scopedEntries.map((entry) => ({
-      id: entry.id,
-      siteId: entry.siteId,
-      siteName: entry.siteName,
-      kind: entry.kind,
-      responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
-      /* Whose obligation it is, which is a different question from who chases
-         it — and the one the percentage depends on. See ComplianceRow. */
-      dutyHolder: entry.dutyHolder,
-      state: entry.state,
-      expiry: entry.expiry,
-      fileCount: entry.fileCount,
-      editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
-    }));
+    const rows = complianceRowsFrom(scopedEntries, managerById, providerNames);
 
     const filtered = filterComplianceRows(rows, filters, today);
     const wanted = keys.length

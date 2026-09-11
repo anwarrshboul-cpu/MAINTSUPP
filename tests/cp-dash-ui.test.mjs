@@ -157,7 +157,9 @@ test("every element applies the filter the server counted it with", () => {
 test("a drill replaces the register's filters and keeps the block's own", () => {
   assert.match(
     block,
-    /const REGISTER_KEYS = \["site", "state", "kind", "who", "due", "q", "scored", "open", "view"\] as const;/,
+    /* Re-pointed: a "Who's renewing" slice now drills by contractor RECORD
+       (`contractor=`), so a drill replaces that key too. */
+    /const REGISTER_KEYS = \["site", "state", "kind", "who", "due", "q", "scored", "open", "view", "contractor"\] as const;/,
   );
   const keys = block.match(/const REGISTER_KEYS = \[([^\]]*)\]/)[1];
   for (const own of ["portfolio", "from", "to", "sort"]) {
@@ -200,8 +202,13 @@ test("a drill from a portfolio with no sites in scope says so in the register's 
 
 test("changing the portfolio takes the old portfolio's sites off the register", () => {
   const handler = block.slice(block.indexOf("onPortfolio={(next) =>"), block.indexOf("range={{"));
-  assert.match(handler, /previous\.every\(\(id\) => applied\.has\(id\)\)/, "only when they are exactly the block's narrowing");
+  /* Re-pointed from "exactly the old portfolio's sites" to "all within the old
+     portfolio": the register now intersects with the portfolio on the server, so
+     the client rule only has to stop a stale or partial list stranding the reader
+     on an empty register. A selection made under All portfolios is still kept. */
+  assert.match(handler, /applied\.every\(\(id\) => previous\.has\(id\)\)/, "every applied site belonged to the portfolio being left");
   assert.match(handler, /query\.delete\("site"\);/);
+  assert.match(handler, /query\.delete\("open"\);/);
 });
 
 test("the sites gauge opens the Sites list on the sites that are not fully compliant", async () => {

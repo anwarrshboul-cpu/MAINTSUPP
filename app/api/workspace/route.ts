@@ -992,6 +992,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       expiryColumnId: expiryColumnKey
         ? (columnIdByKey.get(expiryColumnKey) ?? null)
         : null,
+      /* The renewal contractor, so "Manage register" can show and change it. */
+      providerContractorId: entry.providerContractorId,
     };
   });
 
@@ -1424,11 +1426,17 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+      /* The renewal contractor, optional on create: a contractor record of THIS
+         organisation, or nothing. See `/api/compliance/provider`. */
+      const providerContractorId = visibleText(data.providerContractorId, 200);
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
-      const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
+      const badReference = await referencesRefusal(db, orgId, [
+        { kind: "site", value: siteId },
+        { kind: "contractor", value: providerContractorId || null },
+      ]);
       if (badReference) return badReference;
       id = newId("compliance", `${siteId}-${kind}`);
-      await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required" });
+      await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required", providerContractorId: providerContractorId || null });
     } else if (entity === "unit") {
       const name = text(data.name, 140);
       const siteId = text(data.siteId, 100);
@@ -3056,8 +3064,18 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      /*
+       * THE RENEWAL CONTRACTOR — optional exactly as `dutyHolder` is, and for
+       * the same reason: the calendar's drag never sends it, so absence means
+       * "leave it"; an explicit null or "" unlinks; anything else must be one of
+       * THIS organisation's contractors (refused below before the UPDATE). Never
+       * inferred from the requirement's `issued_by` text.
+       */
+      const providerSent = "providerContractorId" in data;
+      const providerContractorId = providerSent ? visibleText(data.providerContractorId, 200) : "";
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
+        { kind: "contractor", value: providerContractorId || null },
       ]);
       if (badReference) return badReference;
       await db.update(complianceDocuments).set({ siteId, kind, status: state, expiryDate: expiry || null, /* "Not applicable" is the duty-holder answer that means the asset is not
@@ -3065,7 +3083,7 @@ export async function PATCH(request: Request) {
            rather than a sixth state eleven suites would have to learn. Either
            route to it sets the same flag, so the register cannot show a
            requirement as applicable and not-applicable at once. */
-        notRequired: state === "Not required" || isNotApplicable(dutyHolder), ...(dutyHolderSent ? { dutyHolder: dutyHolder || null } : {}), updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+        notRequired: state === "Not required" || isNotApplicable(dutyHolder), ...(dutyHolderSent ? { dutyHolder: dutyHolder || null } : {}), ...(providerSent ? { providerContractorId: providerContractorId || null } : {}), updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     } else if (entity === "unit") {
       /*
        * Only what was sent — see `supplied`. `siteId`, `name`, `category` and

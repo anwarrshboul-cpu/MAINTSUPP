@@ -1053,6 +1053,18 @@ async function purgeInstanceRegisterRows(
         ),
       );
     await purgeAttachmentsOf(db, orgId, eq(attachments.contractorId, id));
+    /* A compliance requirement's renewal link to this contractor is cleared, not
+       left pointing at nothing. Postgres would SET NULL on its own; SQLite does
+       not enforce the key. The requirement itself keeps everything else. */
+    await db
+      .update(complianceDocuments)
+      .set({ providerContractorId: null })
+      .where(
+        and(
+          eq(complianceDocuments.organisationId, orgId),
+          eq(complianceDocuments.providerContractorId, id),
+        ),
+      );
     await db
       .delete(contractors)
       .where(and(eq(contractors.organisationId, orgId), eq(contractors.id, id)));

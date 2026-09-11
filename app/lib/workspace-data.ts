@@ -89,6 +89,12 @@ export type WorkspaceComplianceRecord = {
    * says so, rather than posting an id the route will reject.
    */
   expiryColumnId?: string | null;
+  /**
+   * The contractor record linked as this requirement's renewal provider, or
+   * null. Optional so no existing consumer has to change. See
+   * `app/lib/compliance-provider.ts`.
+   */
+  providerContractorId?: string | null;
 };
 
 export type WorkspaceContractor = {
