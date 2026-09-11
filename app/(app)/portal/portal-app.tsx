@@ -178,7 +178,6 @@ import { priorityOptions } from "./board-model";
 import { boardItemName } from "./board-ordering";
 import { attributeContractorWork } from "../../lib/contractor-attribution";
 import {
-  classifySpend,
   ComplianceExpiryTimeline,
   ContractorCostPanel,
   ContractorScorecard,
@@ -193,13 +192,15 @@ import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
 import { OPS_REFRESH, URL_CHANGED, useQueryState } from "./ops/ops-url-state";
 import { DRILL_KEYS, readDrillFilter } from "./board-drill-filter";
 import { CompliancePage } from "./ops/compliance-page";
+import { CpDash } from "./ops/cp-dash";
+import { RpDash } from "./ops/rp-dash";
 import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
 /*
  * The one definition of "open", imported rather than re-derived. The sidebar
  * badge and the Overview both read it, which is what stops the two disagreeing
  * about the same workspace.
  */
-import { openJobCount } from "../../lib/job-metrics";
+import { isOnJobsBoard, openJobCount, spendLineOf } from "../../lib/job-metrics";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AppearancePanel } from "./views/appearance-panel";
@@ -224,25 +225,17 @@ import {
   type ManagerTab,
 } from "./workspace-data-manager";
 import {
-  AnalyticsMetricCard,
   AnalyticsToolbar,
-  HorizontalBars,
-  TrendChart,
   withinAnalyticsPeriod,
 } from "./dashboard-analytics";
 import {
   PeriodCaption,
   PeriodPicker,
-  SortDirectionSelect,
   useStoredPeriod,
   useStoredSortDirection,
 } from "./period-picker";
 import {
-  parseStamp,
-  periodSpendSeries,
-  periodTrend,
   resolvePeriod,
-  sortBySpend,
   stampWithinPeriod,
 } from "./period-model";
 import {
@@ -2009,13 +2002,37 @@ export default function PortalApp({
      own — so a drill-through arriving by `pushState` is seen here. */
   const { search: routeSearch } = useQueryState();
   const drill = useMemo(
-    () => readDrillFilter(new URLSearchParams(routeSearch)),
-    [routeSearch],
+    /* The whole list goes in as the population: a repeat is judged against the
+       job before it, which the filtered list may not contain. */
+    () => readDrillFilter(new URLSearchParams(routeSearch), new Date(), { population: requests }),
+    [routeSearch, requests],
   );
   const boardRequests = useMemo(
     () => (drill.empty ? requests : requests.filter(drill.matches)),
     [drill, requests],
   );
+  /*
+   * WHAT THE DRILL OPENED, COUNTED THE WAY ITS FIGURE WAS.
+   *
+   * "Clicking any element opens a list whose count and £ total equal the number
+   * clicked." The board draws the drilled rows, but a reader has no way to check
+   * the number they tapped against it without counting — so the banner states
+   * it. Counted over the rows the Jobs board holds (`isOnJobsBoard`, which the
+   * drill already applies) and summed with `spendLineOf`, the same spend basis
+   * the Reports and Overview figures use, so a tile reading £4,210 opens a list
+   * saying £4,210.
+   */
+  const drillTotals = useMemo(() => {
+    if (drill.empty) return null;
+    let pence = 0;
+    let jobs = 0;
+    for (const request of boardRequests) {
+      if (!isOnJobsBoard(request)) continue;
+      jobs += 1;
+      pence += spendLineOf(request)?.pence ?? 0;
+    }
+    return { jobs, pence };
+  }, [boardRequests, drill.empty]);
 
   /*
    * THE SURFACES THAT ACTUALLY READ THE JOB LIST.
@@ -2233,9 +2250,9 @@ export default function PortalApp({
     }
     const updated = payload.request;
     setRequests((current) =>
-      current.map((request) => (request.id === id ? updated : request)),
+      current.map((request) => (request.id === id ? keepPlacement(updated, request) : request)),
     );
-    setSelectedRequest((current) => (current?.id === id ? updated : current));
+    setSelectedRequest((current) => (current?.id === id ? keepPlacement(updated, current) : current));
     setDataMode("live");
     return updated;
   };
@@ -3146,12 +3163,28 @@ export default function PortalApp({
           */}
           {activeSurface === "maintenance" && !drill.empty ? (
             <div className="board-drill" role="status">
-              <span className="board-drill__lead">Filtered from the Overview:</span>
+              {/* Any of the three dashboard blocks can open this list, so the
+                  lead names none of them; the chips say what was asked. */}
+              <span className="board-drill__lead">Filtered from a dashboard:</span>
               {drill.chips.map((chip) => (
                 <span key={chip.key} className="board-drill__chip">
                   <strong>{chip.label}</strong> {chip.value}
                 </span>
               ))}
+              {/* Until the job list has landed the count is of nothing, and a
+                  confident "0 jobs · £0.00" beside a figure that read 82 is the
+                  one thing this banner exists to prevent. */}
+              {drillTotals && dataMode !== "live" ? (
+                <span className="board-drill__chip board-drill__total">Counting…</span>
+              ) : drillTotals ? (
+                <span className="board-drill__chip board-drill__total">
+                  <strong>{drillTotals.jobs.toLocaleString("en-GB")}</strong>{" "}
+                  {drillTotals.jobs === 1 ? "job" : "jobs"}
+                  {drill.chips.some((chip) => chip.key === "hasCost" || chip.key === "repeat" || chip.key === "recurrence")
+                    ? ` · ${(drillTotals.pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" })}`
+                    : ""}
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="board-drill__clear"
@@ -3204,21 +3237,26 @@ export default function PortalApp({
               onRequestChange={(updated) => {
                 setRequests((current) =>
                   current.map((request) =>
-                    request.id === updated.id ? updated : request,
+                    request.id === updated.id ? keepPlacement(updated, request) : request,
                   ),
                 );
                 setSelectedRequest((current) =>
-                  current?.id === updated.id ? updated : current,
+                  current?.id === updated.id ? keepPlacement(updated, current) : current,
                 );
                 setDataMode("live");
               }}
               onRequestCreated={(created) => {
+                /* A row created ON this board is placed on it — stamped with
+                   the same key the board was mounted with, so a section's new
+                   row is not counted as a job before the next reload. */
+                const mountedBoard = activeCustom ? activeCustom.boardKey || null : "maintenance";
+                const placed = created.boardId === undefined ? { ...created, boardId: mountedBoard } : created;
                 setRequests((current) =>
-                  current.some((request) => request.id === created.id)
+                  current.some((request) => request.id === placed.id)
                     ? current.map((request) =>
-                        request.id === created.id ? created : request,
+                        request.id === placed.id ? placed : request,
                       )
-                    : [created, ...current],
+                    : [placed, ...current],
                 );
                 setDataMode("live");
               }}
@@ -3548,10 +3586,10 @@ export default function PortalApp({
           onRequestChange={(updated) => {
             setRequests((current) =>
               current.map((request) =>
-                request.id === updated.id ? updated : request,
+                request.id === updated.id ? keepPlacement(updated, request) : request,
               ),
             );
-            setSelectedRequest(updated);
+            setSelectedRequest((current) => keepPlacement(updated, current));
             setDataMode("live");
           }}
           itemActions={boardItemActions}
@@ -3761,8 +3799,58 @@ function NotificationPanel({
  * emptying rows out of the board is a different decision from leaving them out
  * of a spend total — this is the one Workstream 8 is entitled to make.
  */
+/**
+ * A DASHBOARD BLOCK'S DRILL-THROUGH TO ANOTHER SECTION, carrying ONLY its query.
+ *
+ * The ordering is `goToJobs`'s, for the reason written there: `setSection` ends
+ * with its own `pushState` of the bare route, so navigating second would strip
+ * the filter. Navigate first, then REPLACE that entry with the filtered address,
+ * so Back returns to the block rather than to an unfiltered list.
+ *
+ * Unlike the Overview's Sites link, the page's own search is NOT carried across.
+ * The Compliance register's `q`, `state` and `kind` mean nothing to the Jobs
+ * board or the Sites list — and Sites reads `q` as its own search box — so
+ * carrying them would narrow the destination by filters nobody chose there.
+ */
+function openSectionWithQuery(
+  onNavigate: (section: Section) => void,
+  section: Section,
+  query: string,
+) {
+  onNavigate(section);
+  window.history.replaceState(
+    {},
+    "",
+    `/dashboard/${sectionRoutes[section]}${query ? `?${query}` : ""}`,
+  );
+  window.dispatchEvent(new Event(URL_CHANGED));
+}
+
+/**
+ * A ROW REPLACED BY A WRITE'S ANSWER, STILL KNOWING WHICH BOARD IT LIVES ON.
+ *
+ * Only the list read (`GET /api/maintenance`) says where a row is placed; a
+ * write's answer does not. Replacing the row wholesale therefore dropped its
+ * `boardId`, and `isOnJobsBoard(undefined)` is true — so a Store Documentation
+ * store edited in the drawer, or a section row changed on its board, went back
+ * into the open-jobs badge and every drill until the next full reload: the
+ * "98 over 82" defect returning mid-session. A write never moves a row between
+ * boards, so the previous placement is carried across.
+ */
+function keepPlacement(
+  next: MaintenanceRequest,
+  previous: MaintenanceRequest | null | undefined,
+): MaintenanceRequest {
+  return next.boardId === undefined && previous?.boardId !== undefined
+    ? { ...next, boardId: previous.boardId }
+    : next;
+}
+
 function countsAsWorkOrder(request: MaintenanceRequest) {
-  return !request.parentId && !request.archived;
+  /* And on the Jobs board: a Store Documentation store is a request row too,
+     and the sidebar's open-jobs badge counted every one of them as open work
+     the board it links to never draws. See `isOnJobsBoard`. */
+  return !request.parentId && !request.archived && isOnJobsBoard(request);
 }
 
 /**
@@ -4307,6 +4395,15 @@ function ComplianceView({
   const now = useCurrentTime();
   return (
     <>
+    {/*
+      THE COMPLIANCE OVERVIEW BLOCK, AT THE TOP — everything that was on this
+      page follows it unchanged. Its figures come from `/api/compliance/metrics`
+      over the same register the page below reads; its segments filter that
+      register in place, and only the sites gauge leaves the page.
+    */}
+    <CpDash
+      onNavigateToSites={(query) => openSectionWithQuery(onNavigate, "stores", query)}
+    />
     <CompliancePage
       /*
        * A board-derived requirement is edited on its board, never here. Opening
@@ -5704,29 +5801,6 @@ function ContractorsView({
   );
 }
 
-/**
- * How often an issue recurs — measured against the window it was counted in.
- *
- * The column used to read the raw order count and nothing else: four or more
- * was "Weekly", two was "Fortnightly", one was "Monthly". Those words are
- * rates and a count is not a rate, so on "All records" — eleven years of this
- * workspace — four orders was labelled "Weekly", and on "Today" two orders was
- * labelled "Fortnightly". Both readings were wrong, in opposite directions,
- * with nothing on the screen to warn the reader.
- *
- * A span the caller cannot measure returns a dash rather than a guess: a
- * single-row window has no cadence to report, and inventing one is what this
- * replaces.
- */
-function describeCadence(orders: number, spanDays: number | null) {
-  if (!spanDays || spanDays <= 0 || orders <= 0) return "—";
-  const perWeek = orders / (spanDays / 7);
-  if (perWeek >= 1) return "Weekly";
-  if (perWeek >= 0.5) return "Fortnightly";
-  if (perWeek >= 0.2) return "Monthly";
-  if (perWeek >= 0.05) return "Quarterly";
-  return "Occasional";
-}
 
 function ReportsView({
   requests,
@@ -5794,10 +5868,9 @@ function ReportsView({
    * hidden-ness and nothing else. The same user on a second device gets the
    * default back.
    */
-  const [siteSpendOrder, setSiteSpendOrder] = useStoredSortDirection(
+  const [siteSpendOrder] = useStoredSortDirection(
     "maintsupp:reports:site-spend-order",
   );
-  const [showAllRepeat, setShowAllRepeat] = useState(false);
   /*
    * The header cell that "Edit layout" is drawn into.
    *
@@ -5845,7 +5918,6 @@ function ReportsView({
     openDocumentId,
     active: reportTab === "report" || reportTab === "invoice",
   });
-  const periodWindow = resolvePeriod(period, now);
   const scopedRequests = useMemo(
     () => requests.filter((request) =>
       countsAsWorkOrder(request) &&
@@ -5853,101 +5925,34 @@ function ReportsView({
       withinAnalyticsPeriod(request.requestedAt, period, now)),
     [now, period, portfolio, requests],
   );
-  /*
-   * The denominator the cadence needs, in days.
-   *
-   * A named period supplies its own edges. "All records" has none — its start
-   * is -Infinity — so the rows supply them instead, which is the same thing
-   * `resolveBounds` does for a sparkline over the same token.
-   */
-  const cadenceSpanDays = useMemo(() => {
-    if (Number.isFinite(periodWindow.start) && Number.isFinite(periodWindow.end)) {
-      return (periodWindow.end - periodWindow.start) / 86_400_000;
-    }
-    const stamps = scopedRequests
-      .map((request) => parseStamp(request.requestedAt))
-      .filter((stamp) => Number.isFinite(stamp));
-    if (stamps.length < 2) return null;
-    return (Math.max(...stamps) - Math.min(...stamps)) / 86_400_000;
-  }, [periodWindow.start, periodWindow.end, scopedRequests]);
-  const analytics = useMemo(() => {
-    const spendBySite = new Map<string, number>();
-    let total = 0;
-    let reactive = 0;
-    let planned = 0;
-    let projects = 0;
-    for (const request of scopedRequests) {
-      const cost = request.cost ?? 0;
-      total += cost;
-      spendBySite.set(request.siteId, (spendBySite.get(request.siteId) ?? 0) + cost);
-      // One classifier, shared with the Reactive vs planned panel below.
-      const bucket = classifySpend(request);
-      if (bucket === "planned") planned += cost;
-      else if (bucket === "projects") projects += cost;
-      else reactive += cost;
-    }
-    const repeats = Array.from(
-      scopedRequests.reduce((map, request) => {
-        const current = map.get(request.category) ?? {
-          issue: request.category,
-          sites: new Set<string>(),
-          orders: 0,
-          spend: 0,
-          latest: request.requestedAt,
-        };
-        current.sites.add(request.siteId);
-        current.orders += 1;
-        current.spend += request.cost ?? 0;
-        if (new Date(request.requestedAt) > new Date(current.latest)) current.latest = request.requestedAt;
-        map.set(request.category, current);
-        return map;
-      }, new Map<string, { issue: string; sites: Set<string>; orders: number; spend: number; latest: string }>()),
-    )
-      .map(([, item]) => ({
-        ...item,
-        frequency: describeCadence(item.orders, cadenceSpanDays),
-      }))
-      /*
-       * Orders, then spend, then name. The sort was on orders alone, which
-       * leaves every tie in whatever order the rows happened to arrive in — so
-       * the same period could list the same two categories either way round on
-       * two loads, and no SQL query could reproduce the table.
-       */
-      .sort(
-        (left, right) =>
-          right.orders - left.orders ||
-          right.spend - left.spend ||
-          left.issue.localeCompare(right.issue),
-      );
-    return {
-      total,
-      reactive,
-      planned,
-      projects,
-      bySite: sortBySpend(
-        storeRows
-          .map((store) => ({ id: store.id, label: store.name, value: spendBySite.get(store.id) ?? 0 }))
-          .filter((item) => item.value > 0),
-        siteSpendOrder,
-      ),
-      repeats,
-    };
-  }, [cadenceSpanDays, scopedRequests, siteSpendOrder, storeRows]);
-  const spendTrend = periodSpendSeries(scopedRequests, period, now);
-  /*
-   * One sentence, used wherever this screen would otherwise assert that the
-   * portfolio is empty. Kept as a constant so a later panel cannot half-adopt
-   * the distinction and go back to claiming nothing happened.
-   */
+  /* The heading's caption still says "Counting…" rather than "nothing" while
+     the job list loads; the block above has its own card-shaped skeleton. */
   const loading = !jobsReady;
-  const LOADING_NOTE = "Loading jobs…";
 
   return (
     <div className="section-stack analytics-page">
+      {/*
+        THE SPEND AND REPORTING BLOCK, AT THE TOP. Every figure in it comes from
+        `/api/reports/metrics` — completed cost dated by completion, the Overview
+        spend trend's own basis — and every element drills to the Jobs board
+        with a filter the board applies, or to a site's page.
+      */}
+      <RpDash
+        onNavigateToJobs={(query) => openSectionWithQuery(onNavigate, "maintenance", query)}
+        onNavigateToSite={(siteId) =>
+          openSectionWithQuery(onNavigate, "stores", `site=${encodeURIComponent(siteId)}`)
+        }
+      />
       <section className="analytics-page-heading">
         <div>
           <span>Decision-ready reporting</span>
-          <h1>Spend and reporting</h1>
+          {/* "Reports", not "Spend and reporting": the dashboard block above
+              now carries that title, as its brief specifies, and two identical
+              headings stacked on one page read as a rendering fault. This
+              heading introduces what follows it — the arrangeable analysis
+              panels and the Report, Invoice and Documents tabs — under the name
+              the sidebar gives the page, as the Overview's does. */}
+          <h1>Reports</h1>
           {/*
             The dates actually applied, under the heading. "Last quarter" does
             not tell anyone which three months they are reading, and every
@@ -5987,97 +5992,22 @@ function ReportsView({
 
       <ReportTabPanel tab="overview" active={reportTab === "overview"}>
 
-      {/* Focusable because it scrolls sideways at phone widths: without a tab
-          stop a keyboard user cannot reach the cards past the fold. */}
-      <section
-        className="analytics-metric-grid report-metric-grid"
-        aria-label="Report metrics"
-        tabIndex={0}
-      >
-        {/*
-          An empty period reads as a dash and says so, never as £0.
-          £0 is a result — it says the portfolio spent nothing — and on a period
-          that simply holds no work that is a different and untrue claim.
-        */}
-        {/*
-          The line under each tile counts JOBS; the figure above it sums MONEY.
-          Both are wanted — the shape of the work and the size of it — and each
-          `trendLabel` says which, because a sparkline under a pound sign reads
-          as pounds otherwise.
-
-          The three splits go through `classifySpend`, which is the whole reason
-          that function is exported. They used to restate it inline, and got it
-          wrong in a way that only showed on the chart: the classifier tests
-          compliance-or-tier-4 FIRST, so a £5,000 compliance job is "planned"
-          and its money landed on the Planned tile — while `cost >= 1000` drew
-          it under Projects and `tier >= 4 || compliance` drew it under Planned
-          as well. One job, two lines, and neither line matching its own total.
-        */}
-        <AnalyticsMetricCard label="This period" value={scopedRequests.length ? formatMoney(analytics.total) : "—"} detail={loading ? LOADING_NOTE : scopedRequests.length ? `${scopedRequests.length} work orders` : "Nothing in this period"} icon="chart" tone="teal" trend={periodTrend(scopedRequests, () => true, period, now)} trendLabel="Work orders raised per bucket across the selected period — a count of jobs, not the spend totalled above." />
-        <AnalyticsMetricCard label="Reactive" value={scopedRequests.length ? formatMoney(analytics.reactive) : "—"} detail="Day-to-day maintenance" icon="alert" tone="orange" trend={periodTrend(scopedRequests, (request) => classifySpend(request) === "reactive", period, now)} trendLabel="Reactive jobs raised per bucket, classified exactly as the figure above is." />
-        <AnalyticsMetricCard label="Planned" value={scopedRequests.length ? formatMoney(analytics.planned) : "—"} detail="Compliance and planned work" icon="calendar" tone="blue" trend={periodTrend(scopedRequests, (request) => classifySpend(request) === "planned", period, now)} trendLabel="Planned and compliance jobs raised per bucket, classified exactly as the figure above is." />
-        <AnalyticsMetricCard label="Projects" value={scopedRequests.length ? formatMoney(analytics.projects) : "—"} detail="Higher-value works" icon="document" tone="green" trend={periodTrend(scopedRequests, (request) => classifySpend(request) === "projects", period, now)} trendLabel="Project jobs raised per bucket, classified exactly as the figure above is." />
-      </section>
-
-      <section className="analytics-report-grid">
-        <article className="analytics-panel analytics-report-trend">
-          <header>
-            <div><h2>Spend trend</h2><strong>{scopedRequests.length ? formatMoney(analytics.total) : "—"}</strong><span>{periodWindow.recognised ? periodWindow.label : "No period selected"}</span></div>
-          </header>
-          {/*
-            The "Last 6 months / Last 12 months" control that sat here has gone.
-            It ignored the period above it, so a reader could set the tiles to
-            July and the chart to twelve months and be shown two different
-            windows on one screen, each labelled only "Spend trend". The period
-            IS the range now, and the buckets take their granularity from it —
-            hours across a day, days across a month, months across a year.
-          */}
-          {!periodWindow.recognised
-            ? <p className="analytics-empty">{periodWindow.reason}</p>
-            : loading
-              ? <p className="analytics-empty">{LOADING_NOTE}</p>
-              : spendTrend.some((point) => point.value > 0)
-                ? <TrendChart items={spendTrend} valueFormatter={(value) => formatMoney(Math.round(value))} />
-                : <p className="analytics-empty">{scopedRequests.length
-                    ? `None of the ${scopedRequests.length} jobs in ${periodWindow.label} carries a cost yet.`
-                    : `Nothing in this period — ${periodWindow.label}.`}</p>}
-        </article>
-
-        <article className="analytics-panel analytics-top-sites">
-          <header>
-            <h2>Top sites by spend</h2>
-            {/*
-              Highest first by default — it is a panel about the top. Reversing
-              it answers a real second question, which sites are cheap to run,
-              so it is a control rather than a hidden default.
-            */}
-            <SortDirectionSelect
-              value={siteSpendOrder}
-              onChange={setSiteSpendOrder}
-              label="Order sites by spend"
-            />
-            <button type="button" onClick={() => onNavigate("stores")}>View sites <Icon name="chevron" size={15} /></button>
-          </header>
-          {analytics.bySite.length ? (
-            <HorizontalBars
-              items={analytics.bySite.slice(0, 8)}
-              valueFormatter={(value) => formatMoney(value)}
-              onSelect={setPortfolio}
-            />
-          ) : (
-            <div className="analytics-empty">{loading
-              ? LOADING_NOTE
-              : periodWindow.recognised
-                ? `No job in ${periodWindow.label} carries a cost, so there is nothing to rank.`
-                : periodWindow.reason}</div>
-          )}
-        </article>
-      </section>
-
       {/*
-        The spend questions the four tiles above cannot answer: which sites are
-        consistently expensive rather than expensive this period, which fault
-        types keep costing money, and who is doing the work.
+        THE TILES, THE SPEND TREND, TOP SITES AND REPEAT ACTIVITY MOVED UP.
+
+        They were this screen's own copy of the dashboard the Reports brief
+        specifies, and the brief's instruction for exactly that case is "edit it
+        in place, do not duplicate it". The Spend and reporting block at the top
+        of the page is that dashboard now, live, on one metrics source — and on
+        the Overview's spend basis (completed cost, dated by completion), where
+        these tiles summed every job's cost by the date it was RAISED. Leaving
+        them here would have put two "Reactive" figures, two spend trends and
+        two top-site rankings on one screen, disagreeing with each other, which
+        is the one thing a report cannot do.
+
+        What follows is untouched: the spend questions the block does not ask —
+        which sites are consistently expensive rather than expensive this
+        period, which fault types keep costing money, and who is doing the work.
       */}
       <DashboardWidgets
         surface="reports"
@@ -6179,42 +6109,9 @@ function ReportsView({
         ] satisfies DashboardWidget[]}
       />
 
-      {/* Last on this screen, on the owner's instruction. It is a follow-up
-          list rather than a headline, and it was sitting above the panels
-          people open first. */}
-      <section className="analytics-panel analytics-repeat-panel">
-        <header><h2>Repeat activity</h2><button type="button" onClick={() => setShowAllRepeat((current) => !current)}>{showAllRepeat ? "Show summary" : "View all"}</button></header>
-        <div className="table-scroll">
-          <table className="analytics-table analytics-table--mobile-cards">
-            {/* "Activity" is gone. Every row of it printed one identical
-                authored sentence, under a column heading, in a table of
-                measurements — which is a claim about the job that nothing on
-                the record supports. There is no field to populate it from, so
-                the column goes rather than the sentence being reworded. */}
-            <thead><tr><th>Issue</th><th>Sites</th><th>Orders</th><th>Spend</th><th>Last occurred</th><th>Frequency</th></tr></thead>
-            <tbody>
-              {analytics.repeats.slice(0, showAllRepeat ? analytics.repeats.length : 6).map((item) => (
-                <tr key={item.issue}>
-                  <td data-label="Issue"><strong>{item.issue || "Unlabelled"}</strong></td>
-                  <td data-label="Sites">{item.sites.size}</td>
-                  <td data-label="Orders">{item.orders}</td>
-                  <td data-label="Spend">{item.spend ? formatMoney(item.spend) : "Not quoted"}</td>
-                  <td data-label="Last occurred">{formatDate(item.latest)}</td>
-                  <td data-label="Frequency"><span className="analytics-frequency">{item.frequency}</span></td>
-                </tr>
-              ))}
-              {!analytics.repeats.length && <tr><td className="analytics-empty" colSpan={6}>{loading
-                ? LOADING_NOTE
-                : periodWindow.recognised
-                  ? `Nothing in this period — ${periodWindow.label}.`
-                  : periodWindow.reason}</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        <button className="analytics-panel-footer" type="button" onClick={() => setShowAllRepeat((current) => !current)}>
-          {showAllRepeat ? "Show summary" : "View all repeat activity"} <Icon name="chevron" size={15} />
-        </button>
-      </section>
+      {/* Repeat activity is the block's fourth row now — a gauge, two donuts and
+          recurrence rings over the canonical repeat rule in `job-metrics.ts` —
+          rather than a table here grouping every job by category. */}
       </ReportTabPanel>
 
       <ReportTabPanel tab="report" active={reportTab === "report"}>

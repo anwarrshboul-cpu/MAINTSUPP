@@ -384,8 +384,14 @@ test("one lifecycle scope: the SQL says what `countsAsWorkOrder` says", async ()
     /eq\(maintenanceRequests\.archived, false\)/,
     /isNull\(maintenanceRequests\.parentId\)/,
     /eq\(maintenanceRequests\.organisationId, orgId\)/,
+    /*
+     * The fourth exclusion, added with the browser's below: a row placed on
+     * another board (a Store Documentation store, a section's row) is not a
+     * work order. `jobsBoardCondition` is the SQL half of `isOnJobsBoard`.
+     */
+    /jobsBoardCondition\(\)/,
   ]) {
-    assert.match(helper.slice(0, 600), clause, `liveWorkOrder applies ${clause}`);
+    assert.match(helper.slice(0, 800), clause, `liveWorkOrder applies ${clause}`);
   }
 
   /*
@@ -403,10 +409,16 @@ test("one lifecycle scope: the SQL says what `countsAsWorkOrder` says", async ()
   );
 
   const app = await read("app/(app)/portal/portal-app.tsx");
+  /*
+   * RE-POINTED, NOT LOOSENED. The browser's rule gained the same board clause
+   * the SQL gained above, in the same change, so the two still say one thing:
+   * not a sub-item, not archived, and on the Jobs board. (A comment now sits
+   * between the signature and the return, hence the comment-tolerant gap.)
+   */
   assert.match(
     app,
-    /function countsAsWorkOrder\(request: MaintenanceRequest\) \{\s*return !request\.parentId && !request\.archived;/,
-    "and the browser's rule is still the same two exclusions",
+    /function countsAsWorkOrder\(request: MaintenanceRequest\) \{\s*(?:\/\*[\s\S]*?\*\/\s*)?return !request\.parentId && !request\.archived && isOnJobsBoard\(request\);/,
+    "and the browser's rule is the same three exclusions as the SQL",
   );
 });
 

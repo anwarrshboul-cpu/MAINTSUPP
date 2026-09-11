@@ -74,9 +74,18 @@ test("the spend split is classified in exactly one place", async () => {
   // itself.
   const insights = await read("app/(app)/portal/dashboard-insights.tsx");
   assert.match(insights, /export function classifySpend/);
+  /*
+   * RE-POINTED 2026-09-11. The rule itself now lives in `spendTypeOf`
+   * (`app/lib/job-metrics.ts`) and `classifySpend` delegates to it, so the
+   * Reports dashboard block's server metrics, the Jobs page's `type=` filter
+   * and these widgets read ONE rule. The page's own tiles, which were the
+   * `classifySpend(request)` call site, were replaced by that block.
+   */
+  assert.match(insights, /return spendTypeOf\(request\);/);
+  const metrics = await read("app/lib/reports-dash.ts");
+  assert.match(metrics, /type: spendTypeOf\(job\)/, "the block's split goes through the same rule");
 
   const portal = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(portal, /classifySpend\(request\)/);
   assert.ok(
     !/category\.toLowerCase\(\)\.includes\("compliance"\) \|\| request\.tier >= 4\) planned/.test(
       portal,

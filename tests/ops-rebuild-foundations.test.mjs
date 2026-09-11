@@ -235,9 +235,13 @@ test("the fake taxonomy is gone from the codebase, not merely unused", async () 
 
 test("the sidebar badge and the Overview read one definition of open", async () => {
   const portal = await read("app/(app)/portal/portal-app.tsx");
+  /* The import line now also brings `isOnJobsBoard` (the lifecycle scope's
+     board clause) and `spendLineOf` (the Jobs drill's money line), so the pin
+     reads `openJobCount` as one named import of the shared module rather than
+     the only one. What it protects is unchanged: the count is the module's. */
   assert.match(
     portal,
-    /import \{ openJobCount \} from "\.\.\/\.\.\/lib\/job-metrics"/,
+    /import \{[^}]*\bopenJobCount\b[^}]*\} from "\.\.\/\.\.\/lib\/job-metrics"/,
     "the badge takes its count from the shared module",
   );
   assert.match(
