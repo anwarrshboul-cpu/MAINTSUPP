@@ -487,11 +487,27 @@ body[data-theme] .ov-dash.cp-dash .cp-zone__title {
 }
 
 /* A window label is two words; on a phone it may take two lines rather than
-   an ellipsis that hides the number of days. */
+   an ellipsis that hides the number of days. A WORD is never split, though:
+   at 320 `overflow-wrap: anywhere` broke "Expired" as "Expir / ed". */
 .ov-dash.cp-dash .cp-countdown .ov-ring__label {
   max-width: 100%;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+}
+
+/*
+ * Below 640 the label steps down a size AND may borrow half of the 4px gap on
+ * either side. Measured at 320: a column is 33px and "Expired" is 37px at
+ * 11px, so the size alone still clipped it. Two borrowed halves can at most
+ * meet in the middle of a gap, so neighbouring labels never overlap.
+ */
+@media (max-width: 640px) {
+  .ov-dash.cp-dash .cp-countdown .ov-ring__label {
+    width: calc(100% + 4px);
+    max-width: none;
+    justify-self: center;
+    font-size: 11px;
+  }
 }
 
 /* Zone 2 — the donut with its legend on the right, wrapping on a narrow card. */

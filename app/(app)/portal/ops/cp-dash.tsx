@@ -81,9 +81,10 @@ const REGISTER_ANCHOR = "compliance-register";
  * who had narrowed the register to one store and then taps "Expired 4" must see
  * the four, not the one of them at that store under a figure reading four.
  * `view` goes too, because "Set up" and "Confirm responsibilities" draw no
- * records at all. The block's own `portfolio`, `from` and `to` stay — they are
- * the header's state, and the date range is a deliberate narrowing of the
- * register — and so does `sort`, which orders groups and counts nothing.
+ * records at all. The block's own `portfolio` stays — it is the header's
+ * state — and so does `sort`, which orders groups and counts nothing. The
+ * header's `from`/`to` stay only on the plain "View register" link; a figure's
+ * drill drops them (see `registerQuery`).
  */
 const REGISTER_KEYS = ["site", "state", "kind", "who", "due", "q", "scored", "open", "view"] as const;
 
@@ -197,6 +198,20 @@ function registerQuery(
 ): URLSearchParams {
   const next = new URLSearchParams(current);
   for (const key of REGISTER_KEYS) next.delete(key);
+  /*
+   * A FIGURE'S DRILL DROPS THE HEADER'S DUE-DATE RANGE; "View register" keeps it.
+   *
+   * The figures are today's snapshot and ignore the range (the header's
+   * caption says so), but the register applies it — so a range left in place
+   * under a figure's filter listed fewer rows than the figure counted, and the
+   * "No due date" ring opened EMPTY under any range at all, a row with no due
+   * date being outside every one. The plain register link counts nothing, so
+   * the reader's range stays with it.
+   */
+  if (Object.keys(filter).length > 0) {
+    next.delete("from");
+    next.delete("to");
+  }
   for (const key of Object.keys(filter)) next.delete(key);
   for (const [key, values] of Object.entries(filter)) {
     for (const value of values) if (value) next.append(key, value);
@@ -560,14 +575,21 @@ export function CpDash({
     renewals.unlinked > 0
       ? `${countText(renewals.unlinked)} of ${countText(renewals.total)} name a responsibility, not a contractor record`
       : null;
-  const sitesTone = TONE_COLOUR[qualityTone(sites.percent, policy.thresholds)];
-  const sitesSub = `${countText(sites.fullyCompliant)} of ${countText(sites.considered)} sites fully compliant`;
+  /*
+   * NO SITE IN THE SCORE IS NOT A FAILING 0%. With no active site holding a
+   * scored requirement the ratio has no denominator, and a red "0%" read as
+   * every store failing — the score donut prints "—" for exactly this. And
+   * with every considered site compliant there is nothing to open, so the
+   * gauge is not a control: a drill with no sites opened the whole list.
+   */
+  const sitesScored = sites.considered > 0;
+  const sitesTone = sitesScored ? TONE_COLOUR[qualityTone(sites.percent, policy.thresholds)] : "var(--ov-text-muted)";
+  const sitesSub = sitesScored
+    ? `${countText(sites.fullyCompliant)} of ${countText(sites.considered)} sites fully compliant`
+    : "No site has a requirement in the score yet";
+  const sitesFailing = sites.notFullyCompliantIds.length > 0;
   const goToSites = () =>
-    onNavigateToSites(
-      sites.notFullyCompliantIds.length > 0
-        ? new URLSearchParams({ sites: sites.notFullyCompliantIds.join("|") }).toString()
-        : "",
-    );
+    onNavigateToSites(new URLSearchParams({ sites: sites.notFullyCompliantIds.join("|") }).toString());
 
   return (
     <>
@@ -751,11 +773,12 @@ export function CpDash({
               <h4 className="cp-zone__title">Sites fully compliant</h4>
               <Speedometer
                 percent={sites.percent}
+                readout={sitesScored ? undefined : "—"}
                 caption="Fully compliant"
                 colour={sitesTone}
                 sub={sitesSub}
-                onSelect={goToSites}
-                ariaLabel="Sites fully compliant (opens the sites that are not)"
+                onSelect={sitesFailing ? goToSites : undefined}
+                ariaLabel={sitesFailing ? "Sites fully compliant (opens the sites that are not)" : "Sites fully compliant"}
               />
             </div>
           </div>

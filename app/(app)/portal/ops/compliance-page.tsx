@@ -56,6 +56,7 @@ import {
   type ComplianceState,
 } from "../../../lib/compliance-status";
 import { formatDate, formatDayMonth, formatShortDate } from "../../../lib/format-date";
+import { NO_SITE_IN_SCOPE, NO_SITE_IN_SCOPE_LABEL } from "../../../lib/job-metrics";
 import {
   ConfirmResponsibilitiesQueue,
   ResponsibilityControl,
@@ -359,6 +360,8 @@ export function CompliancePage({
             (group.key === "due" ? dueBandText(value) : null) ??
             /* The block's "Unassigned" renewal segment: nobody named at all. */
             (group.key === "who" && value === "__none__" ? "Unassigned" : null) ??
+            /* A drill from a portfolio that holds no sites in scope. */
+            (group.key === "site" && value === NO_SITE_IN_SCOPE ? NO_SITE_IN_SCOPE_LABEL : null) ??
             value,
           onRemove: () => {
             const next = new URLSearchParams(window.location.search);

@@ -875,12 +875,19 @@ export function Speedometer({
   onSelect,
   ariaLabel,
   sub,
+  readout,
 }: {
   percent: number;
   caption: string;
   colour: string;
   onSelect?: () => void;
   ariaLabel: string;
+  /**
+   * What the dial prints in place of the percentage — "—" when there is
+   * nothing to measure, so an empty denominator never reads as a failing 0%.
+   * The needle still rests on `percent`.
+   */
+  readout?: string;
   /**
    * A sentence beneath the gauge — "22 of 30 sites fully compliant", "46 repeat
    * jobs across 12 sites" — styled as the horseshoe's. Absent on the Overview's
@@ -972,7 +979,7 @@ export function Speedometer({
         </svg>
         <span className="ov-gauge__readout" aria-hidden="true">
           <strong className="ov-chart__centre-value" style={{ fontSize: "26px" }}>
-            {safe}%
+            {readout ?? `${safe}%`}
           </strong>
           <small className="ov-chart__centre-caption">{caption}</small>
         </span>
@@ -985,7 +992,7 @@ export function Speedometer({
     </span>
   );
 
-  const label = `${ariaLabel}: ${safe}%, ${caption}${sub ? `. ${sub}` : ""}`;
+  const label = `${ariaLabel}: ${readout ?? `${safe}%`}, ${caption}${sub ? `. ${sub}` : ""}`;
   return (
     <div className="ov-chart ov-gauge">
       {onSelect ? (

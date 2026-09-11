@@ -3173,9 +3173,12 @@ export default function PortalApp({
               ))}
               {/* Until the job list has landed the count is of nothing, and a
                   confident "0 jobs · £0.00" beside a figure that read 82 is the
-                  one thing this banner exists to prevent. */}
-              {drillTotals && dataMode !== "live" ? (
+                  one thing this banner exists to prevent. A list that failed
+                  says so rather than "Counting…" for ever. */}
+              {drillTotals && dataMode === "loading" ? (
                 <span className="board-drill__chip board-drill__total">Counting…</span>
+              ) : drillTotals && dataMode === "unavailable" ? (
+                <span className="board-drill__chip board-drill__total">Jobs didn&apos;t load</span>
               ) : drillTotals ? (
                 <span className="board-drill__chip board-drill__total">
                   <strong>{drillTotals.jobs.toLocaleString("en-GB")}</strong>{" "}

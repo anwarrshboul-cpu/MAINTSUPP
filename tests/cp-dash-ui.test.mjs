@@ -161,10 +161,22 @@ test("a drill replaces the register's filters and keeps the block's own", () => 
   );
   const keys = block.match(/const REGISTER_KEYS = \[([^\]]*)\]/)[1];
   for (const own of ["portfolio", "from", "to", "sort"]) {
-    assert.ok(!keys.includes(`"${own}"`), `${own} survives a drill`);
+    assert.ok(!keys.includes(`"${own}"`), `${own} is not one of the register's keys`);
   }
   const fn = block.slice(block.indexOf("function registerQuery("), block.indexOf("function scrollToRegister"));
   assert.match(fn, /for \(const key of REGISTER_KEYS\) next\.delete\(key\);/);
+  /*
+   * NARROWED, NOT LOOSENED: `portfolio` and `sort` survive every drill, but the
+   * header's due-date range now survives only the plain "View register" link.
+   * The figures ignore the range, so a figure's drill that kept it listed
+   * fewer rows than the figure counted — the "No due date" ring opened empty
+   * under any range. Review finding, 2026-09-11.
+   */
+  assert.match(
+    fn,
+    /if \(Object\.keys\(filter\)\.length > 0\) \{\s*next\.delete\("from"\);\s*next\.delete\("to"\);\s*\}/,
+    "a figure's drill drops the range the figure never applied",
+  );
   assert.match(fn, /for \(const value of values\) if \(value\) next\.append\(key, value\);/, "repeated, never joined");
   assert.match(fn, /for \(const id of siteIds\) if \(id\) next\.append\("site", id\);/, "the portfolio travels as its sites");
 });
@@ -179,6 +191,13 @@ test("the click and the link are the same address", () => {
   assert.match(block, /if \(event\.metaKey \|\| event\.ctrlKey \|\| event\.shiftKey \|\| event\.altKey\) return;/);
 });
 
+test("a drill from a portfolio with no sites in scope says so in the register's chips", async () => {
+  /* The drill carries `NO_SITE_IN_SCOPE`, which matches nothing — correctly —
+     and the chip reads the words, not the placeholder id. */
+  const page = await read("app/(app)/portal/ops/compliance-page.tsx");
+  assert.match(page, /\(group\.key === "site" && value === NO_SITE_IN_SCOPE \? NO_SITE_IN_SCOPE_LABEL : null\)/);
+});
+
 test("changing the portfolio takes the old portfolio's sites off the register", () => {
   const handler = block.slice(block.indexOf("onPortfolio={(next) =>"), block.indexOf("range={{"));
   assert.match(handler, /previous\.every\(\(id\) => applied\.has\(id\)\)/, "only when they are exactly the block's narrowing");
@@ -187,7 +206,12 @@ test("changing the portfolio takes the old portfolio's sites off the register", 
 
 test("the sites gauge opens the Sites list on the sites that are not fully compliant", async () => {
   assert.match(block, /new URLSearchParams\(\{ sites: sites\.notFullyCompliantIds\.join\("\|"\) \}\)\.toString\(\)/);
-  assert.match(block, /onSelect=\{goToSites\}/);
+  /* RE-POINTED: the gauge is a control only when there are sites to open — a
+     drill with none opened the unfiltered list — and with no site in the score
+     it prints "—" rather than a failing 0%. Review finding, 2026-09-11. */
+  assert.match(block, /onSelect=\{sitesFailing \? goToSites : undefined\}/);
+  assert.match(block, /readout=\{sitesScored \? undefined : "—"\}/);
+  assert.match(block, /const sitesScored = sites\.considered > 0;/);
   const sitesList = await read("app/(app)/portal/ops/sites-list.tsx");
   assert.match(sitesList, /params\.getAll\("sites"\)\.flatMap\(\(value\) => value\.split\("\|"\)\)/, "which splits the list it is sent");
 });
