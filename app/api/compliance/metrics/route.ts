@@ -31,7 +31,6 @@ import { scopedDbWithCapability } from "../../../lib/tenant-db";
 import { dashboardFailure } from "../../../lib/dashboard-route";
 import { readComplianceRegister } from "../../../lib/compliance-register";
 import { complianceRowsFrom, isScoredRow } from "../../../lib/compliance-view";
-import { EXPIRY_DUE_SOON_DAYS } from "../../../lib/compliance-status";
 import { buildComplianceDashboard } from "../../../lib/compliance-dash";
 import { listSites } from "../../../lib/sites-repository";
 import {
@@ -108,7 +107,10 @@ export async function GET(request: Request) {
       portfolios: portfolio.portfolios,
       range,
       activeSiteIds,
-      warningWindowDays: EXPIRY_DUE_SOON_DAYS,
+      /* The window the register classified with — the organisation's, or the
+         product default — so the countdown splits the same window that coloured
+         the states it counts. */
+      warningWindowDays: register.windowDays,
     });
 
     if (metrics.reconciliation.length > 0) {

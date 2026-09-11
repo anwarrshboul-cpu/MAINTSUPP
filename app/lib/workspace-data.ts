@@ -323,6 +323,15 @@ export type WorkspaceSettings = {
    * recorded in the audit log like any other settings change.
    */
   completionEvidenceCategories: string[];
+  /**
+   * The compliance warning window: how many days before expiry a certificate
+   * turns amber. `warningWindowDays` is the EFFECTIVE value (the organisation's
+   * choice, or the product default of 90) and `configured` says which. Optional
+   * so a settings object built before this existed still type-checks; saving
+   * `{ warningWindowDays: null }` returns the organisation to the default.
+   * See `app/lib/compliance-policy.ts`.
+   */
+  compliancePolicy?: { warningWindowDays: number | null; configured?: boolean };
 };
 
 /**

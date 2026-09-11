@@ -50,7 +50,7 @@ import { OpsFilterBar, type FilterGroup } from "./ops-filter-bar";
 import { announceDataChanged, useOpsQuery, useQueryState } from "./ops-url-state";
 import {
   COMPLIANCE_COLOUR,
-  COMPLIANCE_MEANING,
+  complianceMeaning,
   NO_DUE_DATE,
   complianceBandColour,
   type ComplianceState,
@@ -197,9 +197,9 @@ const FILTER_KEYS = [
 /**
  * THE BLOCK'S NARROWINGS, IN WORDS, FOR THE CHIPS.
  *
- * A countdown ring sends its window as `due=band:0-20` — thirds of the amber
+ * A countdown ring sends its window as `due=band:0-30` — thirds of the amber
  * window, so not one of the fixed `DUE_WINDOWS` keys — and the header's picker
- * sends `from`/`to`. A chip reading "band:0-20" or "2026-05-12" would be a
+ * sends `from`/`to`. A chip reading "band:0-30" or "2026-05-12" would be a
  * filter the reader cannot read, so each becomes the sentence it stands for.
  * The server's parser (`parseComplianceFilters`) swaps a reversed range, and so
  * does this, so the chip describes the range actually applied.
@@ -961,7 +961,7 @@ function RecordRow({
         <StatusChip
           tone={COMPLIANCE_COLOUR[record.state]}
           size="small"
-          title={COMPLIANCE_MEANING[record.state]}
+          title={complianceMeaning(record.state)}
         >
           {record.state}
         </StatusChip>
@@ -1059,7 +1059,7 @@ function RequirementGroup({
                   <StatusChip
                     tone={COMPLIANCE_COLOUR[record.state]}
                     size="small"
-                    title={COMPLIANCE_MEANING[record.state]}
+                    title={complianceMeaning(record.state)}
                   >
                     {record.state}
                   </StatusChip>

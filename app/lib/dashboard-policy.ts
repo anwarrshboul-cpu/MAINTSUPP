@@ -9,11 +9,13 @@
  * inside a JSX expression is one nobody can find on the day it changes.
  *
  * This product keeps its analytic policy numbers as named constants in `app/lib`
- * rather than as database settings — `EXPIRY_DUE_SOON_DAYS` in
- * `expiry-status.ts` is the precedent, with its reasoning written beside it — so
- * that is what this module is: the one file to edit, read by the server (which
- * echoes the values in each payload) and by the components (which never type a
- * threshold of their own).
+ * — `EXPIRY_DUE_SOON_DAYS` in `expiry-status.ts` set the pattern, with its
+ * reasoning written beside it — so that is what this module is: the one file to
+ * edit, read by the server (which echoes the values in each payload) and by the
+ * components (which never type a threshold of their own). The compliance
+ * warning window has since become an organisation setting as its brief asks
+ * (`compliance-policy.ts`, default 90); these gauge thresholds remain product
+ * policy.
  *
  * It imports NOTHING. The components that read it are client components and
  * must not reach drizzle, and `node --test` loads it directly.

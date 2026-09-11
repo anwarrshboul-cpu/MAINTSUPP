@@ -25,18 +25,19 @@
  *     register's `?scored=1` filter applies;
  *   · "who chases it" is `responsibilityFor`, as the register's `?who=` filter
  *     reads it;
- *   · the warning window is `EXPIRY_DUE_SOON_DAYS` (60).
+ *   · the warning window is the one the register was classified with
+ *     (`register.windowDays`): the organisation's own from Settings, or the
+ *     approved default of 90 days.
  *
- * ── TWO DEFINITIONS THAT DIFFER FROM THE BRIEF, DELIBERATELY ──────────────
+ * ── THE WINDOW, AND ONE DEFINITION THAT DIFFERS FROM THE BRIEF ────────────
  *
  * The brief's warning window is "a config value in Settings (default 90
- * days)". The product's is 60, a named policy constant with its reasoning
- * written beside it, printed from the constant wherever a window is stated. The
- * countdown therefore splits 60 into thirds — 0–20, 21–40, 41–60 — which is
- * exactly the brief's rule ("three equal parts, so they always add up to
- * Expiring soon") applied to the product's window.
+ * days)", and so is the product's now. The countdown splits it into thirds —
+ * 0–30, 31–60, 61–90 at the default — which is the brief's rule ("three equal
+ * parts, so they always add up to Expiring soon"). Days are counted on the
+ * Europe/London calendar (`complianceDay`), the day a UK certificate is due on.
  *
- * And the brief says a certificate on file with no due date should be counted
+ * The brief says a certificate on file with no due date should be counted
  * as Missing "if there is no rule". There IS a rule, in `complianceStateFor`:
  * a dated slot that holds a file but no date is Expiring soon — the
  * certificate exists and nobody can say it is in date. It stays that way, and
@@ -58,6 +59,7 @@ import type {
   CpTypeRing,
 } from "./compliance-dash-contract";
 import { complianceCompletion, expiryStatus } from "./compliance-status";
+import { complianceDay } from "./expiry-status";
 import {
   dueBandToken,
   isScoredRow,
@@ -143,7 +145,7 @@ function normalise(value: string): string {
 
 /**
  * The three countdown windows: thirds of the warning window, inclusive.
- * 60 → 0–20, 21–40, 41–60; the brief's 90 would be 0–30, 31–60, 61–90.
+ * The default 90 → 0–30, 31–60, 61–90; an organisation's 60 → 0–20, 21–40, 41–60.
  */
 export function countdownBands(windowDays: number) {
   const window = Math.max(3, Math.floor(windowDays));
@@ -386,7 +388,9 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
 
   const metrics: CpMetrics = {
     generatedAt: today.toISOString(),
-    today: today.toISOString().slice(0, 10),
+    /* The day every state was classified on — the Europe/London calendar day,
+       the same day `expiryStatus` counted from, not the UTC one. */
+    today: complianceDay(today),
     portfolio: {
       id: input.portfolio.id,
       name: input.portfolio.name,

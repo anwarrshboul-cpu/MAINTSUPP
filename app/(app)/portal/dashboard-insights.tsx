@@ -32,6 +32,7 @@ import { Icon } from "../../components";
 import { chipStyle } from "./chip-ink";
 import type { MaintenanceRequest, StoreRecord } from "../../lib/types";
 import type { WorkspaceComplianceRecord } from "../../lib/workspace-data";
+import { complianceDay, expiryStatus } from "../../lib/expiry-status";
 import {
   bucketFor,
   parseStamp,
@@ -865,12 +866,21 @@ export function ComplianceExpiryTimeline({
 }) {
   const months = useMemo(() => {
     const now = new Date(clock);
+    /*
+     * THE REGISTER'S DAY AND THE REGISTER'S CLASSIFIER. This used to compare
+     * `new Date(record.expiry)` — UTC midnight — with the reader's local clock,
+     * its own rule for "expired", so a certificate due today counted as lapsed
+     * here from the first minute of the day while the register called it
+     * "Expires today". Months are now the Europe/London months and "expired" is
+     * `expiryStatus`'s verdict, the one every compliance surface prints.
+     */
+    const [thisYear, thisMonth] = complianceDay(now).split("-").map(Number);
     const slots: Array<{ key: string; label: string; count: number; overdue: boolean }> = [];
     for (let offset = 0; offset < 12; offset += 1) {
-      const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+      const date = new Date(Date.UTC(thisYear, thisMonth - 1 + offset, 1));
       slots.push({
-        key: `${date.getFullYear()}-${date.getMonth()}`,
-        label: date.toLocaleDateString("en-GB", { month: "short" }),
+        key: `${date.getUTCFullYear()}-${date.getUTCMonth()}`,
+        label: date.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }),
         count: 0,
         overdue: false,
       });
@@ -879,14 +889,14 @@ export function ComplianceExpiryTimeline({
 
     let expired = 0;
     for (const record of compliance) {
-      if (!record.expiry) continue;
-      const date = new Date(record.expiry);
-      if (Number.isNaN(date.getTime())) continue;
-      if (date.getTime() < now.getTime()) {
+      const status = expiryStatus(record.expiry, now);
+      if (status.date === null || status.daysRemaining === null) continue;
+      if (status.daysRemaining < 0) {
         expired += 1;
         continue;
       }
-      const slot = index.get(`${date.getFullYear()}-${date.getMonth()}`);
+      const [year, month] = status.date.split("-").map(Number);
+      const slot = index.get(`${year}-${month - 1}`);
       if (slot) slot.count += 1;
     }
     return { slots, expired };

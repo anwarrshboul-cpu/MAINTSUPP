@@ -58,6 +58,7 @@ import {
 } from "../../lib/contractor-linking";
 import { isUnreachableEmail } from "../../lib/site-metrics";
 import { expiryStatus } from "../../lib/expiry-status";
+import { readCompliancePolicy } from "../../lib/compliance-policy";
 import { listContractorsInRegisters } from "../../lib/contractor-repository";
 import { selectInChunks } from "../../lib/sql-batching";
 import {
@@ -258,9 +259,11 @@ export async function GET(request: Request) {
        inside the loop drifts and can bucket two certificates that expire on the
        same day differently. */
     const classifiedAt = new Date();
+    /* The organisation's warning window, as the snapshot applies it. */
+    const { warningWindowDays } = await readCompliancePolicy(db, orgId);
     const certificationsById = new Map<string, WorkspaceCertification[]>();
     for (const row of certificationRows) {
-      const status = expiryStatus(row.expiresOn, classifiedAt);
+      const status = expiryStatus(row.expiresOn, classifiedAt, warningWindowDays);
       const list = certificationsById.get(row.contractorId) ?? [];
       list.push({
         id: row.id,
@@ -304,7 +307,7 @@ export async function GET(request: Request) {
       .filter((row) => includeInactive || row.active)
       .map((contractor) => {
         const jobs = jobsById.get(contractor.id);
-        const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt);
+        const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt, warningWindowDays);
         return {
           id: contractor.id,
           name: contractor.name,

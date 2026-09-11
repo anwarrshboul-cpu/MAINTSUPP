@@ -43,7 +43,11 @@ import type {
  * `app/lib/expiry-status.ts`, and a derivation that lives inside an
  * eight-thousand-line component is a derivation nothing can test.
  */
-import { EXPIRY_DUE_SOON_DAYS } from "../../lib/expiry-status";
+import {
+  EXPIRY_DUE_SOON_DAYS,
+  activeWarningWindow,
+  setBrowserWarningWindow,
+} from "../../lib/expiry-status";
 /*
  * The one definition of "an active site", shared with the Sites register and
  * the Reports billing engine. See the comment on it: the Dashboard tile that
@@ -1287,6 +1291,10 @@ export default function PortalApp({
     if (!response.ok || !payload.workspace) {
       throw new Error(payload.error || "The shared workspace could not be loaded.");
     }
+    /* The organisation's compliance warning window, handed to the browser's
+       classifier BEFORE the snapshot renders, so every board cell, tracker and
+       calendar colours with the window the server's register uses. */
+    setBrowserWarningWindow(payload.workspace.settings?.compliancePolicy?.warningWindowDays);
     setWorkspace(payload.workspace);
     /*
      * Deliberately NOT `setDataMode("live")`.
@@ -6224,12 +6232,17 @@ function SettingsView({
   const [evidenceCategories, setEvidenceCategories] = useState<string[]>(
     settings.completionEvidenceCategories ?? [],
   );
+  /* Blank means "the product default"; a number is the organisation's choice. */
+  const configuredWindow = (policy: WorkspaceSettings["compliancePolicy"]) =>
+    policy?.configured && policy.warningWindowDays ? String(policy.warningWindowDays) : "";
+  const [warningWindow, setWarningWindow] = useState(configuredWindow(settings.compliancePolicy));
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setAlerts({ ...settings.alerts });
       setSlas({ ...settings.slas });
       setEvidenceCategories(settings.completionEvidenceCategories ?? []);
+      setWarningWindow(configuredWindow(settings.compliancePolicy));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [settings]);
@@ -6248,6 +6261,11 @@ function SettingsView({
         alerts,
         slas,
         completionEvidenceCategories: evidenceCategories,
+        /* Sent as typed; the server refuses a value outside 7–365 rather than
+           quietly saving the default under the organisation's name. */
+        compliancePolicy: {
+          warningWindowDays: warningWindow.trim() === "" ? null : Number(warningWindow.trim()),
+        },
       });
     } catch (error) {
       onNotify(error instanceof Error ? error.message : "Settings could not be saved.");
@@ -6358,6 +6376,48 @@ function SettingsView({
             </div>
           ))}
         </div>
+      </section>
+
+      {/*
+        THE COMPLIANCE WARNING WINDOW — the approved Compliance specification's
+        "config value in Settings (default 90 days)". It decides when a
+        certificate turns Expiring soon on every compliance surface, and the
+        renewal countdown splits it into thirds. See app/lib/compliance-policy.ts.
+      */}
+      <section className="panel settings-card">
+        <div className="settings-card__heading">
+          <span>
+            <Icon name="shield" size={19} />
+          </span>
+          <div>
+            <h2>Compliance warning window</h2>
+            <p>
+              How many days before its expiry date a certificate turns Expiring
+              soon. The renewal countdown splits it into three equal bands.
+            </p>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>Days before expiry</strong>
+            <small>
+              {warningWindow.trim() === ""
+                ? `Using the default of ${EXPIRY_DUE_SOON_DAYS} days. Enter a number from 7 to 365 to choose your own.`
+                : "Leave blank to use the default of " + EXPIRY_DUE_SOON_DAYS + " days."}
+            </small>
+          </span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={7}
+            max={365}
+            step={1}
+            value={warningWindow}
+            placeholder={String(EXPIRY_DUE_SOON_DAYS)}
+            aria-label="Compliance warning window in days"
+            onChange={(event) => setWarningWindow(event.target.value)}
+          />
+        </label>
       </section>
 
       {/*
@@ -8967,7 +9027,7 @@ function FileDetailDrawer({
                   */}
                   <small>
                     Leave empty if this document does not expire. Certificates
-                    turn amber {EXPIRY_DUE_SOON_DAYS} days before the date.
+                    turn amber {activeWarningWindow()} days before the date.
                   </small>
                 </label>
                 {/*

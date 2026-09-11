@@ -63,6 +63,7 @@ import {
   contractorSpendBasisNote,
 } from "../../lib/contractor-attribution";
 import { formatDate } from "../../lib/format-date";
+import { activeWarningWindow } from "../../lib/expiry-status";
 import { ContractorContact } from "./contractor-contact";
 /*
  * THE PENCE FORMATTER, under a name that says which unit it takes.
@@ -84,7 +85,7 @@ type ExpiryState = "expired" | "due-soon" | "valid" | "not-recorded";
  * One certification, exactly as `/api/workspace` sent it.
  *
  * `expiryState` and `expiryLabel` come from the platform's one classifier at
- * the platform's one 60-day amber threshold. They are carried rather than
+ * the organisation's one amber threshold. They are carried rather than
  * recomputed for the reason `compliance_documents.status` proves: a verdict
  * written down a second time is a verdict that can go stale, and "Compliant"
  * once outlived the certificate it described by months.
@@ -480,8 +481,8 @@ export function ContractorSummary({
             </ContractorRow>
           </div>
           <p className="contractor-summary__note">
-            Statuses are derived from the recorded dates, at the platform&rsquo;s 60-day
-            warning. Nothing here is a status somebody typed.
+            Statuses are derived from the recorded dates, at the workspace&rsquo;s{" "}
+            {activeWarningWindow()}-day warning. Nothing here is a status somebody typed.
           </p>
         </section>
       )}

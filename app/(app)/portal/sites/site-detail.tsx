@@ -162,7 +162,7 @@ const COMPLIANCE_TONES: Record<ComplianceState, string> = {
  * register will use in Stage 5, so the language does not change under the
  * user's feet later". The register then shipped with a DIFFERENT vocabulary —
  * Compliant / Expiring soon / Expired / Missing / Not required — and a
- * DIFFERENT threshold, `EXPIRY_DUE_SOON_DAYS = 60`, and this file was never
+ * DIFFERENT threshold, `EXPIRY_DUE_SOON_DAYS` (then 60), and this file was never
  * brought across. So the promise inverted itself: the language did change under
  * the user's feet, and this screen became the one place still speaking the old
  * one.

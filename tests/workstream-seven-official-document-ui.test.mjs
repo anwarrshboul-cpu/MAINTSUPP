@@ -116,8 +116,10 @@ test("W07-02: an empty expiry is an answer, and the form says so", async () => {
   }
   assert.match(body, /\|\| null/, "an empty box clears the field rather than storing an empty string");
 
-  // The window is printed from the constant that decides it, not from a literal.
-  assert.match(drawer, /\{EXPIRY_DUE_SOON_DAYS\} days before the date/);
+  // The window is printed from the value that decides it, not from a literal —
+  // re-pointed from the constant to `activeWarningWindow()`, the organisation's
+  // window that `expiryStatus` classifies this drawer's chip with.
+  assert.match(drawer, /\{activeWarningWindow\(\)\} days before the date/);
 });
 
 /* ── W07-03 ───────────────────────────────────────────────────────────────── */
@@ -299,9 +301,11 @@ test("W07-09: neither compliance view keeps a second due-soon window", async () 
     );
   }
 
-  // The calendar's amber hint is printed from the constant that decides it.
+  // The calendar's amber hint is printed from the window that decides it —
+  // re-pointed to a getter over `activeWarningWindow()`, read when drawn, so an
+  // organisation's own window reaches the hint as well as the bucket.
   const calendar = await read("app/(app)/portal/views/store-expiry-calendar.tsx");
-  assert.match(calendar, /hint: `within \$\{EXPIRY_DUE_SOON_DAYS\} days`/);
+  assert.match(calendar, /get hint\(\) \{\s*return `within \$\{activeWarningWindow\(\)\} days`;/);
 });
 
 test("W07-09: the verdict is read off the typed union, not sniffed out of a string", async () => {

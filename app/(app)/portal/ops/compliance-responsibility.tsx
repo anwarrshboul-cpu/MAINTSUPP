@@ -47,7 +47,7 @@ import {
 } from "../../../lib/compliance-duty-holder";
 import {
   COMPLIANCE_COLOUR,
-  COMPLIANCE_MEANING,
+  complianceMeaning,
   type ComplianceState,
 } from "../../../lib/compliance-status";
 import { EmptyState, ErrorState, OpsCard, SkeletonRow, plural } from "./ops-primitives";
@@ -542,7 +542,7 @@ export function ConfirmResponsibilitiesQueue({
                         <span
                           className="resp-row__state"
                           style={{ ["--resp-state" as string]: COMPLIANCE_COLOUR[record.state] }}
-                          title={COMPLIANCE_MEANING[record.state]}
+                          title={complianceMeaning(record.state)}
                         >
                           {record.state}
                         </span>

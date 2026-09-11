@@ -54,6 +54,7 @@ import {
 } from "../../db/schema";
 import { storeDocumentationCertificates } from "../../db/monday-board-spec";
 import { boardDutyHolder } from "./compliance-duty-holder";
+import { readCompliancePolicy } from "./compliance-policy";
 import { liveAttachmentRows } from "./attachment-counts";
 /*
  * 2A — the site↔board-row link has ONE implementation now, and it is not in
@@ -304,6 +305,13 @@ export type ComplianceRegister = {
   entries: RegisterEntry[];
   /** Documents per site id, for `StoreRecord.compliance`. */
   bySite: Map<string, ComplianceItem[]>;
+  /**
+   * The warning window every state in this register was classified with — the
+   * organisation's own (`compliance-policy.ts`) or the product default. A screen
+   * that prints "expiring within N days" or splits the countdown prints THIS,
+   * so its words can never describe a different window from its colours.
+   */
+  windowDays: number;
 };
 
 /** Slot key for a requirement name, e.g. "Fire Alarm" → `fire-alarm`. */
@@ -775,12 +783,22 @@ export async function readNotRequiredSlots(
 export async function readComplianceRegister(
   db: Database,
   orgId: string,
-  options: { today?: Date; boardIds?: readonly string[] } = {},
+  options: { today?: Date; boardIds?: readonly string[]; windowDays?: number } = {},
 ): Promise<ComplianceRegister> {
   const today = options.today ?? new Date();
   const boardIds = options.boardIds ?? headlineComplianceBoardIds();
 
-  const [siteRows, aliasRows, registerRows, boardRowsResult] = await Promise.all([
+  /*
+   * THE ORGANISATION'S WARNING WINDOW, resolved here and nowhere else.
+   *
+   * Every compliance surface — the dashboard block, the register, the Overview,
+   * the Sites tile, the digest, the exports — reads this register, so resolving
+   * the window inside it is what makes them one rule rather than seven: none of
+   * them can classify with a different window, because none of them classifies
+   * at all. Read in parallel with the register's own reads, so it costs no
+   * extra round trip.
+   */
+  const [siteRows, aliasRows, registerRows, boardRowsResult, windowDays] = await Promise.all([
     db
       .select({
         id: sites.id,
@@ -808,6 +826,9 @@ export async function readComplianceRegister(
       .where(eq(complianceDocuments.organisationId, orgId))
       .orderBy(complianceDocuments.siteId, complianceDocuments.kind),
     readStoreDocumentationRows(db, orgId, boardIds),
+    options.windowDays !== undefined
+      ? Promise.resolve(options.windowDays)
+      : readCompliancePolicy(db, orgId).then((policy) => policy.warningWindowDays),
   ]);
   const { rows: boardRows, boardIdByItemId } = boardRowsResult;
 
@@ -872,7 +893,7 @@ export async function readComplianceRegister(
     bySite.set(siteId, current);
   };
 
-  for (const store of storeDocumentationRegister(boardRows, { today, notRequired })) {
+  for (const store of storeDocumentationRegister(boardRows, { today, notRequired, windowDays })) {
     const linkedSiteId = siteIdByItemId.get(store.id) ?? null;
     for (const document of store.documents) {
       const registerRow = registerRowFor(store.id, document.kind);
@@ -962,6 +983,7 @@ export async function readComplianceRegister(
           expiry: row.expiryDate,
           fileCount,
           today,
+          windowDays,
         });
     entries.push({
       itemId: null,
@@ -1017,7 +1039,7 @@ export async function readComplianceRegister(
       left.kind.localeCompare(right.kind, "en-GB"),
   );
 
-  return { entries, bySite };
+  return { entries, bySite, windowDays };
 }
 
 /* ── One site's documents ────────────────────────────────────────────────── */

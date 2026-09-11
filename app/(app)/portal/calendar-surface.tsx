@@ -37,6 +37,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../../components";
 import { useCapability } from "../../lib/client-capabilities";
+import { complianceDay } from "../../lib/expiry-status";
 import type { MaintenanceRequest } from "../../lib/types";
 import type { WorkspaceSnapshot } from "../../lib/workspace-data";
 import {
@@ -217,6 +218,8 @@ export function OperationsCalendarPanel({
 }: OperationsCalendarPanelProps) {
   const today = useMemo(() => new Date(), []);
   const todayDay = useMemo(() => todayCalendarDay(today), [today]);
+  /* Certificates are due on the UK day the register classifies on. */
+  const complianceToday = useMemo(() => complianceDay(today), [today]);
 
   /*
    * ── MODULE 2: THE JOBS THIS PANEL HAS WRITTEN, OVER THE ONES IT WAS GIVEN ─
@@ -476,8 +479,9 @@ export function OperationsCalendarPanel({
         sourceIds: EVERY_CALENDAR_SOURCE_ID,
         filters,
         today: todayDay,
+        complianceToday,
       }),
-    [filters, manualItems, periodCompliance, periodRequests, todayDay],
+    [complianceToday, filters, manualItems, periodCompliance, periodRequests, todayDay],
   );
 
   /*
@@ -540,6 +544,7 @@ export function OperationsCalendarPanel({
         sourceIds,
         filters,
         today: todayDay,
+        complianceToday,
       }).length
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -63,7 +63,7 @@ export type CpCountdownKey = "expired" | "band-1" | "band-2" | "band-3" | "no-da
 
 export type CpCountdownRing = {
   key: CpCountdownKey;
-  /** "Expired", "0–20 days", "21–40 days", "41–60 days", "No due date". */
+  /** "Expired", "0–30 days", "31–60 days", "61–90 days" (thirds of the window), "No due date". */
   label: string;
   value: number;
   colour: string;
@@ -80,10 +80,10 @@ export type CpMetrics = {
   /** The instant the register was classified at, ISO. */
   generatedAt: string;
   /**
-   * The calendar day the classifier used, `YYYY-MM-DD`. The product's compliance
-   * classifier counts whole UTC days (`expiryStatus`), the same "today" the
-   * board calendar and job due dates use; a certificate due today flips to
-   * Expired when that day ends, with no data change.
+   * The calendar day the classifier used, `YYYY-MM-DD`: the Europe/London day
+   * (`complianceDay`), which is what `expiryStatus` counts whole days from. A
+   * certificate due today flips to Expired when that UK day ends — in winter
+   * and in British Summer Time alike — with no data change.
    */
   today: string;
   portfolio: { id: string; name: string; siteIds: string[] };
@@ -95,7 +95,7 @@ export type CpMetrics = {
    */
   range: { from: string | null; to: string | null; label: string };
   policy: {
-    /** `EXPIRY_DUE_SOON_DAYS` — the amber window, and what the countdown splits. */
+    /** The organisation's warning window (default 90) — the amber window, and what the countdown splits. */
     warningWindowDays: number;
     /** The three countdown windows, inclusive day bounds. */
     bands: { key: "band-1" | "band-2" | "band-3"; label: string; fromDays: number; toDays: number }[];

@@ -102,6 +102,8 @@ import { RESERVED_EMAIL_TLD } from "../../lib/contact-links";
 import { isUnreachableEmail } from "../../lib/site-metrics";
 import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
+import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
+import { mergeWorkspaceSettingsBlob } from "../../lib/workspace-settings";
 import {
   DUTY_HOLDERS,
   isDutyHolder,
@@ -293,6 +295,28 @@ function parseObject<T>(value: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * A SETTINGS SAVE MERGES INTO THE STORED BLOB; IT DOES NOT REPLACE IT.
+ *
+ * Both settings branches below wrote `JSON.stringify(data)` over the whole
+ * column, and the Settings screen sends only its own three sections — so every
+ * save silently erased the compliance template, the reminder settings and (it
+ * would have) the compliance warning window kept in the same blob. The stored
+ * row is read here and `mergeWorkspaceSettingsBlob` decides the result.
+ */
+async function mergeWorkspaceSettings(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  data: Record<string, unknown>,
+): Promise<{ ok: true; settings: string } | { ok: false; error: string }> {
+  const [row] = await db
+    .select({ settings: workspaceSettings.settings })
+    .from(workspaceSettings)
+    .where(eq(workspaceSettings.organisationId, orgId))
+    .limit(1);
+  return mergeWorkspaceSettingsBlob(row?.settings ?? null, data);
 }
 
 function slug(value: string) {
@@ -1020,9 +1044,12 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
    * expire on the same day into two different buckets.
    */
   const classifiedAt = new Date();
+  /* The organisation's compliance warning window, so a contractor's ticket and
+     a store's certificate turn amber on the same day. */
+  const warningWindowDays = compliancePolicyFromBlob(settingsRows[0]?.settings ?? null).warningWindowDays;
   const certificationsByContractor = new Map<string, WorkspaceCertification[]>();
   for (const row of certificationRows) {
-    const status = expiryStatus(row.expiresOn, classifiedAt);
+    const status = expiryStatus(row.expiresOn, classifiedAt, warningWindowDays);
     const list = certificationsByContractor.get(row.contractorId) ?? [];
     list.push({
       id: row.id,
@@ -1038,9 +1065,9 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
        * down is a status that stops being true the day after it was written,
        * which is exactly how `compliance_documents.status` came to say
        * "Compliant" about a certificate that had expired months earlier. This
-       * is `expiryStatus` — the platform's one classifier, at the platform's
-       * one 60-day amber threshold — so a contractor's ticket and a store's
-       * certificate cannot mean different things by "due soon".
+       * is `expiryStatus` — the platform's one classifier, at the
+       * organisation's one amber threshold — so a contractor's ticket and a
+       * store's certificate cannot mean different things by "due soon".
        */
       expiryState: status.state,
       expiryLabel: status.label,
@@ -1057,7 +1084,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
      */
     const byId = jobsByContractorId.get(contractor.id);
     const byName = jobsByContractorName.get(contractor.name);
-    const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt);
+    const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt, warningWindowDays);
     return {
       id: contractor.id,
       name: contractor.name,
@@ -1191,6 +1218,13 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
           .filter((value): value is string => typeof value === "string" && !!value.trim())
           .map((value) => value.trim())
       : defaultWorkspaceSettings.completionEvidenceCategories,
+    /*
+     * The compliance warning window, EFFECTIVE value plus whether it was chosen.
+     * The shell hands it to the browser's classifier (`setBrowserWarningWindow`)
+     * so board cells, the tracker and the expiry calendar colour with the same
+     * window the server's register uses; the Settings screen edits it.
+     */
+    compliancePolicy: compliancePolicyFromBlob(settingsRows[0]?.settings ?? null),
   };
 
   const activity: WorkspaceActivity[] = activities.map((item) => ({
@@ -1533,8 +1567,9 @@ export async function POST(request: Request) {
       await db.insert(users).values({ id, organisationId: orgId, fullName: name, email, role: text(data.role, 60) || "Client", active: booleanValue(data.active) });
     } else if (entity === "settings") {
       id = orgId;
-      const settings = data as unknown as WorkspaceSettings;
-      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
+      const merged = await mergeWorkspaceSettings(db, orgId, data);
+      if (!merged.ok) return Response.json({ error: merged.error }, { status: 400 });
+      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
     } else {
       return Response.json({ error: "Unsupported workspace record." }, { status: 400 });
     }
@@ -3361,8 +3396,9 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     } else if (entity === "settings") {
-      const settings = data as unknown as WorkspaceSettings;
-      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
+      const merged = await mergeWorkspaceSettings(db, orgId, data);
+      if (!merged.ok) return Response.json({ error: merged.error }, { status: 400 });
+      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
     } else {
       return Response.json({ error: "Unsupported workspace record." }, { status: 400 });
     }

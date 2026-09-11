@@ -135,8 +135,8 @@ export type ComplianceFilters = {
    */
   scored: boolean;
   /**
-   * Days-remaining bands — `?due=band:0-20` — the countdown rings' windows.
-   * They are thirds of `EXPIRY_DUE_SOON_DAYS`, so they cannot be fixed keys in
+   * Days-remaining bands — `?due=band:0-30` — the countdown rings' windows.
+   * They are thirds of the organisation's warning window, so they cannot be fixed keys in
    * `DUE_WINDOWS`; they travel as their own bounds. OR'd with `due`.
    */
   dueBands: Array<{ from: number; to: number }>;

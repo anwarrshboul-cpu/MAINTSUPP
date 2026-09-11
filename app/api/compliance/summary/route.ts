@@ -33,7 +33,7 @@ import {
   GROUP_SORTS,
   type ComplianceRow,
 } from "../../../lib/compliance-view";
-import { DUE_WINDOWS, EXPIRY_DUE_SOON_DAYS } from "../../../lib/compliance-status";
+import { DUE_WINDOWS } from "../../../lib/compliance-status";
 
 export const dynamic = "force-dynamic";
 
@@ -134,7 +134,9 @@ export async function GET(request: Request) {
       })),
       sorts: GROUP_SORTS,
       dueWindows: DUE_WINDOWS,
-      expiryWindowDays: EXPIRY_DUE_SOON_DAYS,
+      /* The window this register was classified with, so "expiring within N
+         days" names the window that turned these records amber. */
+      expiryWindowDays: register.windowDays,
       options: complianceFilterOptions(rows),
     });
   } catch (error) {

@@ -395,7 +395,7 @@ function fieldsFor(
      * One `insurance_expiry` for a whole contractor could never answer "is
      * their gas ticket still valid". Each row here carries its own date and the
      * STATUS IS DERIVED from it by `expiryStatus` — the platform's one
-     * classifier, at the platform's one 60-day amber threshold — so a
+     * classifier, at the organisation's one amber threshold — so a
      * contractor's ticket and a store's certificate cannot mean different
      * things by "due soon".
      */
@@ -601,7 +601,7 @@ function recordTitle(tab: ManagerTab, record: Record<string, unknown>) {
  * the server against one instant) and only DERIVED here when it is absent —
  * `app/lib/mock-data.ts` builds these records too and has no classifier behind
  * them. Either way the verdict is `expiryStatus`, the platform's one
- * classifier at its one 60-day amber threshold, so this line and the
+ * classifier at the organisation's one amber threshold, so this line and the
  * certificate chips in the editor cannot disagree.
  *
  * Worst-first, and at most one phrase: this sits at the end of a list subtitle
@@ -1576,7 +1576,7 @@ export function WorkspaceDataManager({
                     The one control here that edits a list of records rather
                     than a value. The STATUS beside each row is DERIVED from the
                     date in the box next to it by `expiryStatus` — the
-                    platform's one classifier at its one 60-day amber threshold
+                    platform's one classifier at the organisation's one amber threshold
                     — and is never stored: a status written into a column stops
                     being true the day after it is written, which is exactly how
                     `compliance_documents.status` came to say "Compliant" about

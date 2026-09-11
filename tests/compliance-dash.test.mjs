@@ -168,20 +168,41 @@ test("a certificate held with no due date follows the shipped rule and keeps the
   const windows = metrics.countdown.rings
     .filter((ring) => ring.key !== "expired")
     .reduce((sum, ring) => sum + ring.value, 0);
-  assert.equal(windows, metrics.score.counts.expiring, "0–20 + 21–40 + 41–60 + no date = Expiring soon");
+  assert.equal(windows, metrics.score.counts.expiring, "0–30 + 31–60 + 61–90 + no date = Expiring soon");
 });
 
-test("the countdown windows are thirds of the shipped warning window", () => {
-  assert.equal(EXPIRY_DUE_SOON_DAYS, 60);
-  assert.deepEqual(countdownBands(60).map((band) => band.label), ["0–20 days", "21–40 days", "41–60 days"]);
-  assert.deepEqual(countdownBands(90).map((band) => band.label), ["0–30 days", "31–60 days", "61–90 days"],
-    "the brief's own 90 would split the way the brief draws it");
-  const metrics = build(ESTATE);
+test("the countdown windows are thirds of the approved 90-day warning window", () => {
+  /*
+   * Re-pointed from 60 to 90, not relaxed. The approved Compliance
+   * specification's window is "a config value in Settings (default 90 days)"
+   * with bands 0–30 / 31–60 / 61–90; the product shipped a hard-coded 60 for a
+   * while and the owner has since approved the original. The contract this pin
+   * protects — the countdown is thirds of the SAME window that coloured the
+   * states — is unchanged, and an organisation's own 60 still splits into 20s.
+   */
+  assert.equal(EXPIRY_DUE_SOON_DAYS, 90);
+  assert.deepEqual(countdownBands(90).map((band) => band.label), ["0–30 days", "31–60 days", "61–90 days"]);
+  assert.deepEqual(countdownBands(60).map((band) => band.label), ["0–20 days", "21–40 days", "41–60 days"],
+    "an organisation that chooses 60 in Settings gets its own thirds");
+  const metrics = build([...ESTATE, entry({ site: "s3", kind: "Legionella", expiry: inDays(75) })]);
   const value = (key) => metrics.countdown.rings.find((ring) => ring.key === key).value;
   assert.equal(value("expired"), metrics.score.counts.expired, "Expired ring = Expired in the legend");
   assert.equal(value("band-1"), 1, "PAT at s1, 5 days");
-  assert.equal(value("band-2"), 1, "Fire Alarm at s2, 35 days");
-  assert.equal(value("band-3"), 1, "PAT at s2, 55 days");
+  assert.equal(value("band-2"), 2, "Fire Alarm at s2 (35 days) and PAT at s2 (55 days)");
+  assert.equal(value("band-3"), 1, "Legionella at s3, 75 days — amber under 90, green under the old 60");
+  assert.deepEqual(metrics.reconciliation, []);
+});
+
+test("a certificate 61–90 days out is Expiring soon at the default, and Compliant under a chosen 60", () => {
+  const at = (days, windowDays) =>
+    complianceStateFor({ tracksExpiry: true, expiry: inDays(days), fileCount: 1, today: TODAY, windowDays });
+  assert.equal(at(90, undefined), "Expiring soon", "day 90 is the last amber day at the default");
+  assert.equal(at(91, undefined), "Compliant");
+  assert.equal(at(61, undefined), "Expiring soon");
+  assert.equal(at(61, 60), "Compliant", "an organisation's configured window is honoured");
+  assert.equal(at(60, 60), "Expiring soon");
+  assert.equal(at(0, undefined), "Expiring soon", "due today is still in date");
+  assert.equal(at(-1, undefined), "Expired");
 });
 
 test("free-text responsibilities are grouped by their normalised name and reported as unlinked", () => {
@@ -197,7 +218,7 @@ test("free-text responsibilities are grouped by their normalised name and report
     portfolios: [],
     range: { from: null, to: null, label: "Any due date" },
     activeSiteIds: ["s1", "s2", "s3"],
-    warningWindowDays: 60,
+    warningWindowDays: EXPIRY_DUE_SOON_DAYS,
   });
   assert.equal(metrics.renewals.slices.length, 1, "two spellings, one party");
   assert.equal(metrics.renewals.slices[0].value, metrics.renewals.total);
@@ -248,19 +269,22 @@ test("with a fixed clock, a certificate due today is Expiring soon — and Expir
     entry({ site: "s1", kind: "Fire Alarm", expiry: dueToday }, today),
     entry({ site: "s1", kind: "PAT Testing", expiry: inDays(400) }, today),
   ];
-  /* The last second of the certificate's day, and the first of the next. The
-     product's classifier counts whole UTC days — the same "today" the board
-     calendar and job due dates use — so this is midnight in winter London time
-     and 01:00 in summer. */
-  const lastSecond = new Date(`${dueToday}T23:59:59Z`);
-  const nextDay = new Date(`${inDays(1)}T00:00:01Z`);
+  /* The last second of the certificate's day, and the first of the next — in
+     Europe/London, which is the day a UK certificate is due on. TODAY is 11
+     September, British Summer Time, so the London day ends at 23:00 UTC. (It
+     used to be counted in whole UTC days, which kept a certificate "in date"
+     until 00:59 BST the next morning; re-pointed to the approved rule.) */
+  const lastSecond = new Date(`${dueToday}T22:59:59Z`);
+  const nextDay = new Date(`${dueToday}T23:00:00Z`);
 
   const before = build(estate(lastSecond), {}, lastSecond);
+  assert.equal(before.today, dueToday, "the payload's day is the London day");
   assert.equal(before.score.counts.expiring, 1);
   assert.equal(before.score.counts.expired, 0);
-  assert.equal(before.countdown.rings.find((ring) => ring.key === "band-1").value, 1, "0 days left is inside 0–20");
+  assert.equal(before.countdown.rings.find((ring) => ring.key === "band-1").value, 1, "0 days left is inside 0–30");
 
   const after = build(estate(nextDay), {}, nextDay);
+  assert.equal(after.today, inDays(1), "23:00 UTC in summer is already tomorrow in London");
   assert.equal(after.score.counts.expiring, 0);
   assert.equal(after.score.counts.expired, 1, "flipped by the clock alone");
   assert.equal(after.countdown.rings.find((ring) => ring.key === "expired").value, 1);
@@ -271,6 +295,24 @@ test("with a fixed clock, a certificate due today is Expiring soon — and Expir
   assert.equal(before.sites.fullyCompliant, 1);
   assert.equal(before.score.percent, after.score.percent, "the score counts Compliant only, so it holds");
   assert.deepEqual(after.reconciliation, []);
+});
+
+test("the day boundary is Europe/London in winter (GMT) and summer (BST), not UTC", () => {
+  const stateAt = (expiry, at) =>
+    complianceStateFor({ tracksExpiry: true, expiry, fileCount: 1, today: new Date(at) });
+  /* Winter: London is on GMT, so the UK day and the UTC day coincide. */
+  assert.equal(stateAt("2026-01-15", "2026-01-15T23:59:59Z"), "Expiring soon", "GMT: last second of the due day");
+  assert.equal(stateAt("2026-01-15", "2026-01-16T00:00:00Z"), "Expired", "GMT: first second of the next day");
+  /* Summer: London is on BST (UTC+1), so the UK day ends at 23:00 UTC. */
+  assert.equal(stateAt("2026-07-15", "2026-07-15T22:59:59Z"), "Expiring soon", "BST: 23:59:59 in London");
+  assert.equal(stateAt("2026-07-15", "2026-07-15T23:00:00Z"), "Expired", "BST: midnight in London, still the 15th in UTC");
+  /* Near midnight UTC in summer: UTC still says the 15th, London says the 16th. */
+  assert.equal(stateAt("2026-07-16", "2026-07-15T23:30:00Z"), "Expiring soon", "due today in London at 00:30 BST");
+  /* The clocks change: last Sunday of March (into BST) and of October (out of it). */
+  assert.equal(stateAt("2026-03-29", "2026-03-29T22:59:59Z"), "Expiring soon", "the first BST evening");
+  assert.equal(stateAt("2026-03-29", "2026-03-29T23:00:00Z"), "Expired");
+  assert.equal(stateAt("2026-10-25", "2026-10-25T23:59:59Z"), "Expiring soon", "the first GMT evening");
+  assert.equal(stateAt("2026-10-25", "2026-10-26T00:00:00Z"), "Expired");
 });
 
 /* ── Updates ──────────────────────────────────────────────────────────────── */
@@ -304,7 +346,7 @@ test("uploading a certificate, changing a due date and reassigning a party move 
     portfolios: [],
     range: { from: null, to: null, label: "Any due date" },
     activeSiteIds: ["s1", "s2", "s3"],
-    warningWindowDays: 60,
+    warningWindowDays: EXPIRY_DUE_SOON_DAYS,
   });
   assert.ok(reassigned.renewals.slices.some((slice) => slice.label === "Acme Electrical"), "the contractor donut moves");
   /* The Overview's compliance KPI is `complianceCompletion` over the same
