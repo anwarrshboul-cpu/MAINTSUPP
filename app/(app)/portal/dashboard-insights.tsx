@@ -41,6 +41,7 @@ import {
 } from "./period-model";
 import { isClosedRequest, isOpenRequest } from "./dashboard-meters";
 import { TrendChart } from "./dashboard-analytics";
+import { spendTypeOf, type SpendType } from "../../lib/job-metrics";
 import {
   CONTRACTOR_SPEND_BASIS,
   attributeContractorWork,
@@ -92,22 +93,21 @@ const TONE_TEXT = {
 /** De-emphasis only — too low in chroma to identify anything. */
 const MUTED = "#6f8793";
 
-export type SpendClass = "planned" | "projects" | "reactive";
+export type SpendClass = SpendType;
 
 /**
  * How a job's spend is classified.
  *
- * Exported and shared, because the Reports page shows the same split twice —
- * once as the four tiles at the top, once as the six-month trend below. Two
- * copies of this rule would drift, and a page that contradicts itself is worse
- * than one that only tells you half the story.
+ * Exported and shared, because the Reports page shows the same split in more
+ * than one place. Two copies of this rule would drift, and a page that
+ * contradicts itself is worse than one that only tells you half the story.
+ *
+ * The rule itself now lives in `spendTypeOf` (`app/lib/job-metrics.ts`), so the
+ * server's Reports metrics and the Jobs page's `type=` filter read the very
+ * same one; this name survives for the widgets that already call it.
  */
 export function classifySpend(request: MaintenanceRequest): SpendClass {
-  if ((request.category ?? "").toLowerCase().includes("compliance") || request.tier >= 4) {
-    return "planned";
-  }
-  if ((request.cost ?? 0) >= 1000) return "projects";
-  return "reactive";
+  return spendTypeOf(request);
 }
 
 /**
