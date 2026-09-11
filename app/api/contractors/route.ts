@@ -59,6 +59,7 @@ import {
 import { isUnreachableEmail } from "../../lib/site-metrics";
 import { expiryStatus } from "../../lib/expiry-status";
 import { listContractorsInRegisters } from "../../lib/contractor-repository";
+import { selectInChunks } from "../../lib/sql-batching";
 import {
   SCOPE_PARAM,
   aggregateScopes,
@@ -179,47 +180,62 @@ export async function GET(request: Request) {
     /*
      * BY ID, and only by id — see the header. Both tallies are empty for a new
      * instance, which is the true answer rather than a placeholder.
+     *
+     * IN CHUNKS. Each `IN` element is one bound variable, and D1 refuses a
+     * statement past ~100 of them: `registers=all` over a workspace holding more
+     * than about a hundred contractors answered 503 "The contractor register is
+     * temporarily unavailable." Every tally is grouped or bucketed BY CONTRACTOR
+     * ID, and one contractor's rows all fall in one chunk, so concatenating the
+     * chunks gives the same totals and the same per-contractor certification
+     * order as the single statement did. Postgres has no such ceiling, so on the
+     * deployed path only the statement count changes.
      */
     const [jobRows, documentRows, certificationRows] = ids.length
       ? await Promise.all([
-          db
-            .select({
-              contractorId: maintenanceRequests.contractorId,
-              assigned: count(),
-              completed: sql<number>`sum(case when ${maintenanceRequests.stage} = 'Completed' then 1 else 0 end)`,
-              urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = 'Urgent' and ${maintenanceRequests.stage} <> 'Completed' then 1 else 0 end)`,
-              spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
-            })
-            .from(maintenanceRequests)
-            .where(
-              and(
-                eq(maintenanceRequests.organisationId, orgId),
-                isNotNull(maintenanceRequests.contractorId),
-                inArray(maintenanceRequests.contractorId, ids),
-              ),
-            )
-            .groupBy(maintenanceRequests.contractorId),
-          db
-            .select({ contractorId: attachments.contractorId, total: count() })
-            .from(attachments)
-            .where(
-              and(
-                eq(attachments.organisationId, orgId),
-                isNotNull(attachments.contractorId),
-                inArray(attachments.contractorId, ids),
-              ),
-            )
-            .groupBy(attachments.contractorId),
-          db
-            .select()
-            .from(contractorCertifications)
-            .where(
-              and(
-                eq(contractorCertifications.organisationId, orgId),
-                inArray(contractorCertifications.contractorId, ids),
-              ),
-            )
-            .orderBy(contractorCertifications.position, contractorCertifications.name),
+          selectInChunks(ids, (chunk) =>
+            db
+              .select({
+                contractorId: maintenanceRequests.contractorId,
+                assigned: count(),
+                completed: sql<number>`sum(case when ${maintenanceRequests.stage} = 'Completed' then 1 else 0 end)`,
+                urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = 'Urgent' and ${maintenanceRequests.stage} <> 'Completed' then 1 else 0 end)`,
+                spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+              })
+              .from(maintenanceRequests)
+              .where(
+                and(
+                  eq(maintenanceRequests.organisationId, orgId),
+                  isNotNull(maintenanceRequests.contractorId),
+                  inArray(maintenanceRequests.contractorId, chunk),
+                ),
+              )
+              .groupBy(maintenanceRequests.contractorId),
+          ),
+          selectInChunks(ids, (chunk) =>
+            db
+              .select({ contractorId: attachments.contractorId, total: count() })
+              .from(attachments)
+              .where(
+                and(
+                  eq(attachments.organisationId, orgId),
+                  isNotNull(attachments.contractorId),
+                  inArray(attachments.contractorId, chunk),
+                ),
+              )
+              .groupBy(attachments.contractorId),
+          ),
+          selectInChunks(ids, (chunk) =>
+            db
+              .select()
+              .from(contractorCertifications)
+              .where(
+                and(
+                  eq(contractorCertifications.organisationId, orgId),
+                  inArray(contractorCertifications.contractorId, chunk),
+                ),
+              )
+              .orderBy(contractorCertifications.position, contractorCertifications.name),
+          ),
         ])
       : [
           [] as Array<{
