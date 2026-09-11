@@ -40,8 +40,8 @@
 }
 
 .login-field input:focus-visible {
-  border-color: var(--brand-bright);
-  outline: 2px solid rgba(18, 180, 168, 0.35);
+  border-color: var(--brand-primary);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -57,17 +57,17 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border: 1px solid var(--brand-bright);
+  border: 1px solid var(--brand-primary);
   border-radius: 10px;
-  background: var(--brand-bright);
-  color: var(--on-brand-bright);
+  background: var(--brand-primary);
+  color: var(--on-brand-primary);
   font-size: 15px;
   font-weight: 750;
   font-family: inherit;
   cursor: pointer;
 }
 
-.login-form__submit:hover:not(:disabled) { background: #22c9bd; }
+.login-form__submit:hover:not(:disabled) { background: var(--brand-bright); }
 .login-form__submit:disabled { cursor: progress; opacity: 0.7; }
 
 /* One message region, always present in the DOM and announced when it fills.
@@ -75,7 +75,7 @@
 .login-form__error {
   margin: 0;
   padding: 11px 13px;
-  border: 1px solid rgba(218, 70, 70, 0.5);
+  border: 1px solid var(--status-red);
   border-radius: 9px;
   background: var(--red-100);
   color: var(--red-600);

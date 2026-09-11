@@ -96,7 +96,7 @@ a.topbar-icon.icon-button {
   overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: var(--radius, 13px);
-  background: var(--surface-card);
+  background: var(--background-elevated);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
   color: var(--ink);
 }
@@ -153,7 +153,7 @@ a.topbar-icon.icon-button {
 
 .account-menu__plan:hover,
 .account-menu__plan:focus-visible {
-  border-color: var(--brand-bright);
+  border-color: var(--brand-primary);
   background: var(--surface-active);
   color: var(--accent-fg);
   outline: none;
@@ -264,7 +264,7 @@ a.topbar-icon.icon-button {
   white-space: nowrap;
 }
 
-.account-menu__status-label > svg { color: #6f8894; }
+.account-menu__status-label > svg { color: var(--muted-2); }
 
 .account-menu__toggle {
   display: inline-flex;
@@ -297,7 +297,7 @@ a.topbar-icon.icon-button {
 }
 
 .account-menu__toggle button:focus-visible {
-  outline: 2px solid #12b4a8;
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -315,7 +315,7 @@ a.topbar-icon.icon-button {
 }
 
 .account-menu__more:hover:not(:disabled) {
-  border-color: var(--brand-bright);
+  border-color: var(--brand-primary);
   color: var(--accent-fg);
 }
 

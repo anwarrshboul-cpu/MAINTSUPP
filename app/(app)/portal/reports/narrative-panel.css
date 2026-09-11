@@ -265,12 +265,12 @@
 }
 
 .narrative-panel__button--primary {
-  border-color: var(--brand-bright);
-  background: var(--brand-bright);
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
   /* The token globals.css itself pairs with `--brand-bright` — see the primary
      control rule there. `--accent-fg` is a mid teal and would sit on it at
      about 1.3:1. */
-  --control-own-fg: var(--on-brand-bright);
+  --control-own-fg: var(--on-brand-primary);
   color: var(--control-own-fg);
 }
 

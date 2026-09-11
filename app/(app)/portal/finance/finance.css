@@ -47,24 +47,24 @@
  * clear AA as a foreground and none of them is asked to.
  */
 :root {
-  /* Draft / Received — slate */
-  --fin-draft: #64748b;
-  /* Under review / Query raised — amber */
-  --fin-review: #f59e0b;
-  /* Approved / Scheduled / Sent — teal */
-  --fin-approved: #14b8a6;
+  /* Draft / Received — blue */
+  --fin-draft: var(--status-blue);
+  /* Under review / Query raised — yellow */
+  --fin-review: var(--status-yellow);
+  /* Approved / Scheduled / Sent — turquoise */
+  --fin-approved: var(--brand-fill);
   /* Due within 7 days — yellow */
-  --fin-due-soon: #eab308;
+  --fin-due-soon: var(--status-yellow);
   /* Overdue 1–30 — orange */
-  --fin-overdue-30: #f97316;
+  --fin-overdue-30: var(--status-orange);
   /* Overdue 31–60 — red */
-  --fin-overdue-60: #ef4444;
+  --fin-overdue-60: var(--status-red);
   /* Overdue 60+ — dark red */
-  --fin-overdue-90: #991b1b;
+  --fin-overdue-90: #ca0134;
   /* Paid — green */
-  --fin-paid: #22c55e;
-  /* Disputed — purple */
-  --fin-disputed: #8b5cf6;
+  --fin-paid: var(--status-green);
+  /* Disputed — red */
+  --fin-disputed: var(--status-red);
   /* Voided / Written off — grey, and the row is struck through */
   --fin-void: #475569;
   /* A status the map has never heard of. §5: grey, raw label, never dropped. */
@@ -73,15 +73,15 @@
 
 :root:not([data-theme="light"]),
 body[data-theme="dark"] {
-  --fin-draft: #94a3b8;
-  --fin-review: #fbbf24;
-  --fin-approved: #2dd4bf;
-  --fin-due-soon: #facc15;
-  --fin-overdue-30: #fb923c;
-  --fin-overdue-60: #f87171;
-  --fin-overdue-90: #dc6262;
-  --fin-paid: #4ade80;
-  --fin-disputed: #a78bfa;
+  --fin-draft: var(--status-blue);
+  --fin-review: var(--status-yellow);
+  --fin-approved: var(--brand-fill);
+  --fin-due-soon: var(--status-yellow);
+  --fin-overdue-30: var(--status-orange);
+  --fin-overdue-60: var(--status-red);
+  --fin-overdue-90: #c8283a;
+  --fin-paid: var(--status-green);
+  --fin-disputed: var(--status-red);
   --fin-void: #6b7c8f;
   --fin-unmapped: #94a3b8;
 }

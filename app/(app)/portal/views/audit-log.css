@@ -300,14 +300,14 @@
  * colour-coding it exists for.
  */
 .audit__chip--session {
-  border-color: rgba(62, 143, 216, 0.5);
+  border-color: color-mix(in srgb, var(--status-blue) 50%, transparent);
   color: var(--blue-600);
 }
 
 .audit__chip--user,
 .audit__chip--role,
 .audit__chip--permission {
-  border-color: rgba(238, 171, 37, 0.5);
+  border-color: color-mix(in srgb, var(--status-yellow) 50%, transparent);
   color: var(--amber-600);
 }
 
@@ -318,7 +318,7 @@
 
 .audit__chip--board,
 .audit__chip--data {
-  border-color: rgba(218, 70, 70, 0.55);
+  border-color: color-mix(in srgb, var(--status-red) 55%, transparent);
   color: var(--red-600);
 }
 
@@ -360,14 +360,14 @@
 /* Before and after are told apart by a leading rule and a word in the header,
    not by colour alone. */
 .audit__before {
-  border-left: 3px solid rgba(218, 70, 70, 0.6);
+  border-left: 3px solid color-mix(in srgb, var(--status-red) 60%, transparent);
   color: var(--muted);
   text-decoration: line-through;
-  text-decoration-color: rgba(218, 70, 70, 0.5);
+  text-decoration-color: color-mix(in srgb, var(--status-red) 50%, transparent);
 }
 
 .audit__after {
-  border-left: 3px solid rgba(56, 190, 123, 0.7);
+  border-left: 3px solid color-mix(in srgb, var(--status-green) 70%, transparent);
   color: var(--ink);
 }
 

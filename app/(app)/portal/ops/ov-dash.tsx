@@ -150,11 +150,11 @@ type TrendPoint = {
  * does not colour because they are not slices.
  */
 const OV_COLOURS = {
-  teal: "#46A2AD",
-  amber: "#E3A140",
-  blue: "#5A7293",
-  green: "#5E946E",
-  red: "#D34E49",
+  teal: "#12B4A8",
+  amber: "#FFD447",
+  blue: "#38BDF8",
+  green: "#25D98B",
+  red: "#FF4D5E",
 } as const;
 
 const KPI_COLOUR: Record<OvKpiKey, string> = {

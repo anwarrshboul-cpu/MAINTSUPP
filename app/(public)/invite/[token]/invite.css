@@ -15,8 +15,8 @@
   background:
     radial-gradient(circle at 20% 10%, rgba(18, 180, 168, 0.15), transparent 30%),
     radial-gradient(circle at 85% 85%, rgba(18, 180, 168, 0.1), transparent 28%),
-    #101820;
-  color: #f4f8fa;
+    #07131c;
+  color: #f5fafc;
   font: 15px/1.6 Inter, ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -35,15 +35,15 @@
 .invite__card {
   width: min(100%, 480px);
   padding: 36px;
-  border: 1px solid #2a424d;
+  border: 1px solid #163640;
   border-radius: 20px;
-  background: rgba(24, 40, 48, 0.94);
+  background: rgba(16, 38, 48, 0.94);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
 }
 
 .invite__eyebrow {
   margin: 0;
-  color: #5ad4cb;
+  color: #20d8c6;
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.13em;
@@ -52,7 +52,7 @@
 
 .invite__card h1 {
   margin: 10px 0 12px;
-  color: #fff;
+  color: #f5fafc;
   font-size: 27px;
   line-height: 1.18;
   font-family: Manrope, Inter, ui-sans-serif, system-ui, sans-serif;
@@ -60,7 +60,7 @@
 
 .invite__lede {
   margin: 0 0 20px;
-  color: #a9bbc4;
+  color: #b8c8ce;
 }
 
 .invite__facts {
@@ -69,20 +69,20 @@
   gap: 7px 16px;
   margin: 0 0 22px;
   padding: 15px 16px;
-  border: 1px solid #2b414b;
+  border: 1px solid #163640;
   border-radius: 12px;
-  background: rgba(16, 24, 32, 0.6);
+  background: rgba(12, 32, 41, 0.6);
   font-size: 13px;
 }
-.invite__facts dt { color: #81949f; }
-.invite__facts dd { margin: 0; color: #edf4f6; font-weight: 600; }
+.invite__facts dt { color: #8099a3; }
+.invite__facts dd { margin: 0; color: #f5fafc; font-weight: 600; }
 
 .invite__role {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 999px;
   background: rgba(18, 180, 168, 0.16);
-  color: #64d8d0;
+  color: #20d8c6;
   font-size: 12px;
   font-weight: 700;
 }
@@ -92,7 +92,7 @@
 .invite__field { display: grid; gap: 7px; }
 
 .invite__field label {
-  color: #a9bbc4;
+  color: #b8c8ce;
   font-size: 12px;
   font-weight: 650;
 }
@@ -110,23 +110,23 @@
 .invite__field input {
   min-height: 46px;
   padding: 0 14px;
-  border: 1px solid #35505d;
+  border: 1px solid #1b4650;
   border-radius: 10px;
-  background: #101820;
-  color: #edf4f6;
+  background: #0c2029;
+  color: #f5fafc;
   font-size: 16px;
   font-family: inherit;
 }
 
 .invite__field input:focus-visible {
   border-color: #12b4a8;
-  outline: 2px solid rgba(18, 180, 168, 0.35);
+  outline: 2px solid #20d8c6;
   outline-offset: 1px;
 }
 
 .invite__field input:disabled { opacity: 0.6; }
 
-.invite__hint { color: #718690; font-size: 12px; }
+.invite__hint { color: #8099a3; font-size: 12px; }
 
 .invite__submit {
   display: inline-flex;
@@ -138,22 +138,22 @@
   border: 1px solid #12b4a8;
   border-radius: 10px;
   background: #12b4a8;
-  color: #06191a;
+  color: #06221f;
   font-size: 15px;
   font-weight: 750;
   font-family: inherit;
   cursor: pointer;
 }
-.invite__submit:hover:not(:disabled) { background: #22c9bd; }
+.invite__submit:hover:not(:disabled) { background: #20d8c6; }
 .invite__submit:disabled { cursor: progress; opacity: 0.7; }
 
 .invite__error {
   margin: 0;
   padding: 11px 13px;
-  border: 1px solid rgba(218, 70, 70, 0.5);
+  border: 1px solid rgba(255, 77, 94, 0.5);
   border-radius: 9px;
-  background: rgba(218, 70, 70, 0.12);
-  color: #ffbcb6;
+  background: rgba(255, 77, 94, 0.12);
+  color: #ff6b77;
   font-size: 13px;
 }
 
@@ -166,14 +166,14 @@
   margin: 0 auto 18px;
   place-items: center;
   border-radius: 14px;
-  background: rgba(218, 70, 70, 0.15);
-  color: #ff9f97;
+  background: rgba(255, 77, 94, 0.15);
+  color: #ff4d5e;
 }
 
 .invite__link {
   display: inline-block;
   margin-top: 20px;
-  color: #64d8d0;
+  color: #20d8c6;
   font-size: 13px;
   font-weight: 650;
   text-decoration: underline;
@@ -182,7 +182,7 @@
 
 .invite__legal {
   max-width: 460px;
-  color: #718690;
+  color: #8099a3;
   font-size: 12px;
   text-align: center;
 }

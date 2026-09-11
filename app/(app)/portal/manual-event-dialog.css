@@ -147,9 +147,9 @@
   gap: 7px;
   margin: 0;
   padding: 9px 11px;
-  border: 1px solid var(--danger-line, #e2445c);
+  border: 1px solid var(--danger-line, var(--status-red));
   border-radius: 9px;
-  color: var(--danger-fg, #b3283c);
+  color: var(--danger-fg, var(--status-red-fg));
   font-size: 12px;
   line-height: 1.45;
 }
@@ -187,14 +187,14 @@
  * one does it" rather than "this one is about removal".
  */
 .manual-event-dialog__danger {
-  color: var(--danger-fg, #b3283c);
-  border-color: var(--danger-line, #e2445c);
+  color: var(--danger-fg, var(--status-red-fg));
+  border-color: var(--danger-line, var(--status-red));
 }
 
 .manual-event-dialog__confirm {
-  border-color: var(--danger-line, #e2445c);
-  background: var(--danger-fg, #b3283c);
-  color: #fff;
+  border-color: var(--danger-line, var(--danger-solid));
+  background: var(--danger-fg, var(--danger-solid));
+  color: var(--on-danger-solid);
 }
 
 /*

@@ -261,7 +261,7 @@ export function labelFor(options: OptionChoice[], value: string) {
 
 export function styleFor(options: OptionChoice[], value: string) {
   const match = options.find((option) => option.value === value);
-  const background = match?.colourHex ?? "#5c82af";
+  const background = match?.colourHex ?? "#38bdf8";
   // The stored `textColour` is kept whenever it is legible on its own ground;
   // `chipInk` only steps in for the pairs that are not. See chip-ink.ts.
   return { backgroundColor: background, color: chipInk(background, match?.textColour) };

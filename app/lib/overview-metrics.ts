@@ -172,16 +172,17 @@ export type OvMetrics = {
  *
  * These are the `--ov-*` accents, restated here because a SERVER cannot read a
  * stylesheet and the widgets are drawn from data — an arc's colour travels
- * with its slice. The names are the brief's; the values are the brief's.
+ * with its slice. The names are the brief's; the values are the approved
+ * colour system's dark palette, identical to `ov-dash.css`.
  */
 export const OV_COLOURS = {
-  teal: "#46A2AD",
-  orange: "#D8652B",
-  amber: "#E3A140",
-  blue: "#5A7293",
-  green: "#5E946E",
-  red: "#D34E49",
-  grey: "#5E697E",
+  teal: "#12B4A8",
+  orange: "#FF8A3D",
+  amber: "#FFD447",
+  blue: "#38BDF8",
+  green: "#25D98B",
+  red: "#FF4D5E",
+  grey: "#64707B",
 } as const;
 
 /** "Default colour order: teal, orange, amber, blue, green, grey." */
@@ -197,7 +198,7 @@ const SERIES_ORDER = [
 const PRIORITY_COLOUR: Record<string, string> = {
   urgent: OV_COLOURS.red,
   medium: OV_COLOURS.amber,
-  low: OV_COLOURS.grey,
+  low: OV_COLOURS.blue,
   not_recorded: OV_COLOURS.grey,
 };
 

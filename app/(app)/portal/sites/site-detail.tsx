@@ -134,19 +134,18 @@ function fileSize(bytes: number) {
 /**
  * The colour for each of the five register states.
  *
- * These five hexes are the product's existing compliance palette, taken from the
- * Dashboard's compliance donut (`complianceSegments` in portal-app.tsx) so that
- * a document which is amber on the Dashboard is the same amber here. "Not
- * required" has no donut segment — it is excluded from the counts rather than
- * coloured — so it takes the neutral grey this screen already used for a state
- * that is not a finding.
+ * The approved colour system's one compliance palette — Compliant green,
+ * Expiring soon yellow, Expired red, Missing orange — as the tinted `-wash`
+ * grounds, because the chip's word sits on this colour and the chip's own
+ * neutral ink reads on a wash in both themes, where it could not on a fill.
+ * "Not required" is not a finding, so it keeps the chip's neutral ground.
  */
 const COMPLIANCE_TONES: Record<ComplianceState, string> = {
-  Compliant: "#12b4a8",
-  "Expiring soon": "#f0a91f",
-  Expired: "#e2445c",
-  Missing: "#5c82af",
-  "Not required": "#808799",
+  Compliant: "var(--status-green-wash)",
+  "Expiring soon": "var(--status-yellow-wash)",
+  Expired: "var(--status-red-wash)",
+  Missing: "var(--status-orange-wash)",
+  "Not required": "var(--chip-neutral-bg)",
 };
 
 /*
@@ -489,7 +488,7 @@ export function SiteDetail({
                       <td data-label="State">
                         <span
                           className="status-chip"
-                          style={{ backgroundColor: COMPLIANCE_TONES[record.status] ?? "#808799" }}
+                          style={{ backgroundColor: COMPLIANCE_TONES[record.status] ?? "var(--chip-neutral-bg)" }}
                           title={`${record.kind}: ${detail}`}
                         >
                           {record.status}

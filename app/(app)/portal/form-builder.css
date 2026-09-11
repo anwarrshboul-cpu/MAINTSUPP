@@ -214,7 +214,7 @@
 }
 
 .form-builder__sharebtn:hover {
-  background: var(--accent-fg);
+  background: var(--brand-bright);
 }
 
 .form-builder__copy {
@@ -1242,7 +1242,7 @@
 }
 
 .form-share__copy:hover {
-  background: var(--accent-fg);
+  background: var(--brand-bright);
 }
 
 .form-share__settings {

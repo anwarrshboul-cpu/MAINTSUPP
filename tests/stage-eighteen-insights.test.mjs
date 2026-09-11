@@ -9,9 +9,18 @@ const read = (file) => readFile(path.join(root, file), "utf8");
 
 test("insight panels use the site's own palette", async () => {
   const source = await read("app/(app)/portal/dashboard-insights.tsx");
-  // The brand hues, unchanged — this is the palette of the whole site.
-  for (const hex of ["#12b4a8", "#f0a91f", "#e2445c", "#3899e8"]) {
-    assert.ok(source.includes(hex), `${hex} must come from the site palette`);
+  // The brand hues — this is the palette of the whole site. RE-POINTED: the
+  // approved colour system replaced the literal hues #12b4a8 / #f0a91f /
+  // #e2445c / #3899e8 with its theme-following fill tokens (turquoise, yellow,
+  // red, blue), and added orange for reactive work and missing certificates.
+  for (const token of [
+    'teal: "var(--brand-fill)"',
+    'amber: "var(--status-yellow)"',
+    'orange: "var(--status-orange)"',
+    'red: "var(--status-red)"',
+    'blue: "var(--status-blue)"',
+  ]) {
+    assert.ok(source.includes(token), `${token} must come from the site palette`);
   }
   // No invented colours: every hex must be a brand hue or a step of the one
   // validated teal ramp.

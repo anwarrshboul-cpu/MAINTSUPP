@@ -83,17 +83,17 @@ export function complianceUrgency(state: ComplianceState): number {
 /**
  * Semantic colours, fixed and never reassigned.
  *
- * Expired is orange rather than red and Missing is red, which is the right way
- * round even though it reads oddly at first: a lapsed certificate was at least
- * obtained once and its renewal is a known, bookable job, while a requirement
- * with no document at all has never been started and nobody knows how long it
- * will take.
+ * The approved colour system's one compliance palette, used on every page:
+ * Compliant green, Expiring soon yellow, Expired red, Missing orange (a missing
+ * document), Not required grey. One hex serves both themes (these reach the
+ * page as inline styles and API payloads), so they are the mid-tone fills,
+ * each clearing 3:1 on the white card and on the dark one.
  */
 export const COMPLIANCE_COLOUR: Record<ComplianceState, string> = {
-  Compliant: "#22C55E",
-  "Expiring soon": "#E8A33D",
-  Expired: "#F97316",
-  Missing: "#E5484D",
+  Compliant: "#00A056",
+  "Expiring soon": "#AE8500",
+  Expired: "#FB495A",
+  Missing: "#DC6A0D",
   "Not required": "#64748B",
 };
 
@@ -260,10 +260,10 @@ export type ComplianceBand = {
  * so a store that is amber on one screen is amber on the other.
  */
 export const COMPLETION_BANDS: readonly ComplianceBand[] = [
-  { key: "complete", label: "Complete", colour: "#22C55E", from: 100 },
-  { key: "near", label: "Nearly complete", colour: "#E8A33D", from: 80 },
-  { key: "partial", label: "Partly complete", colour: "#F97316", from: 50 },
-  { key: "poor", label: "Largely outstanding", colour: "#E5484D", from: 0 },
+  { key: "complete", label: "Complete", colour: "#00A056", from: 100 },
+  { key: "near", label: "Nearly complete", colour: "#AE8500", from: 80 },
+  { key: "partial", label: "Partly complete", colour: "#DC6A0D", from: 50 },
+  { key: "poor", label: "Largely outstanding", colour: "#FB495A", from: 0 },
 ] as const;
 
 export function completionBand(percent: number): ComplianceBand {

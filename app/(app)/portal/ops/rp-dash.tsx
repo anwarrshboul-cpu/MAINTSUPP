@@ -509,8 +509,8 @@ export function RpDash({
               <AreaTrend
                 points={trendPoints}
                 lineColour="var(--rp-line)"
-                /* The brief's `--rp-area-top` is the teal rgb(70 162 173) at
-                   35% — the line is the lighter `--rp-line` over it. */
+                /* The brief's `--rp-area-top` is the turquoise rgb(18 180 168)
+                   at 35% — the line is the brighter `--rp-line` over it. */
                 areaColour="var(--ov-teal)"
                 tipLines={(point, index, share) => {
                   const source = trendPoints[index];

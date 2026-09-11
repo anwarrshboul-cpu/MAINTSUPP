@@ -121,20 +121,20 @@ export const boardDateIconOptions: Array<{
   icon?: IconName;
   glyph?: string;
 }> = [
-  { id: "clock-green", label: "On time", color: "#19835f", icon: "clock" },
-  { id: "notice-green", label: "Notice", color: "#19835f", glyph: "!" },
-  { id: "check-green", label: "Complete", color: "#19835f", icon: "check" },
-  { id: "arrow-green", label: "Moving", color: "#19835f", icon: "arrow" },
-  { id: "help-green", label: "Question", color: "#19835f", glyph: "?" },
-  { id: "clock-red", label: "Late", color: "#c83e3e", icon: "clock" },
-  { id: "warning-red", label: "Warning", color: "#c83e3e", icon: "alert" },
-  { id: "back-red", label: "Return", color: "#c83e3e", glyph: "←" },
-  { id: "close-red", label: "Stopped", color: "#c83e3e", icon: "close" },
-  { id: "bolt-blue", label: "Fast", color: "#079a90", glyph: "ϟ" },
-  { id: "warning-orange", label: "Attention", color: "#a66507", icon: "alert" },
-  { id: "rocket-blue", label: "Launch", color: "#12b5aa", glyph: "▲" },
-  { id: "smile-grey", label: "Good", color: "#667889", glyph: "☺" },
-  { id: "important-grey", label: "Important", color: "#667889", glyph: "!" },
+  { id: "clock-green", label: "On time", color: "var(--status-green-fg)", icon: "clock" },
+  { id: "notice-green", label: "Notice", color: "var(--status-green-fg)", glyph: "!" },
+  { id: "check-green", label: "Complete", color: "var(--status-green-fg)", icon: "check" },
+  { id: "arrow-green", label: "Moving", color: "var(--status-green-fg)", icon: "arrow" },
+  { id: "help-green", label: "Question", color: "var(--status-green-fg)", glyph: "?" },
+  { id: "clock-red", label: "Late", color: "var(--status-red-fg)", icon: "clock" },
+  { id: "warning-red", label: "Warning", color: "var(--status-red-fg)", icon: "alert" },
+  { id: "back-red", label: "Return", color: "var(--status-red-fg)", glyph: "←" },
+  { id: "close-red", label: "Stopped", color: "var(--status-red-fg)", icon: "close" },
+  { id: "bolt-blue", label: "Fast", color: "var(--brand-fg)", glyph: "ϟ" },
+  { id: "warning-orange", label: "Attention", color: "var(--status-orange-fg)", icon: "alert" },
+  { id: "rocket-blue", label: "Launch", color: "var(--brand-fill)", glyph: "▲" },
+  { id: "smile-grey", label: "Good", color: "var(--text-muted)", glyph: "☺" },
+  { id: "important-grey", label: "Important", color: "var(--text-muted)", glyph: "!" },
 ];
 
 export const boardDateIconIds = new Set<BoardDateIcon>(

@@ -237,7 +237,7 @@ export function DonutChart({
   );
   const stops = segments.some((segment) => segment.value > 0)
     ? calculated.stops
-    : ["#29404d 0 100%"];
+    : ["var(--border-default) 0 100%"];
   return (
     <div
       className={`analytics-donut analytics-donut--${size}`}
@@ -280,7 +280,7 @@ export function HorizontalBars({
         const row = (
           <>
             <span title={item.label}>{item.label}</span>
-            <div><i style={{ width: `${Math.max((item.value / maximum) * 100, item.value ? 3 : 0)}%`, background: item.color ?? "#12b4a8" }} /></div>
+            <div><i style={{ width: `${Math.max((item.value / maximum) * 100, item.value ? 3 : 0)}%`, background: item.color ?? "var(--brand-fill)" }} /></div>
             <strong>{valueFormatter(item.value)}</strong>
           </>
         );

@@ -89,7 +89,7 @@
 
 .teams__error {
   border-left-color: var(--red-600, #da4646);
-  color: #ff9a9a;
+  color: var(--red-600);
 }
 
 .teams__notice {
@@ -124,13 +124,13 @@
   /* Was `--teal-600` as a ground with dark ink on it: 2.22:1 in dark once that
      token became the ink for a teal wash. A filled button takes the fill
      tokens, which are the same in both themes and carry their own label. */
-  border-color: var(--brand-bright);
-  background: var(--brand-bright);
-  color: var(--on-brand-bright);
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: var(--on-brand-primary);
 }
 
 .teams__primary:hover:not(:disabled) {
-  background: var(--teal-500);
+  background: var(--brand-bright);
 }
 
 .teams__ghost:hover:not(:disabled),
@@ -140,8 +140,8 @@
 }
 
 .teams__ghost--danger:hover:not(:disabled) {
-  border-color: #da4646;
-  color: #ff9a9a;
+  border-color: var(--status-red);
+  color: var(--red-600);
 }
 
 .teams__toggle.is-on {

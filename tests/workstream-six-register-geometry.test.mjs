@@ -355,7 +355,9 @@ test("GEO-12/14 the frozen lane declares a tier token and an opaque ground in bo
 
   // A dark edge colour, and no depth shadow there: black on near-black says
   // nothing, so in dark the line carries the whole signal.
-  assert.match(styles, /--register-lane-edge: #2b414b;/);
+  // The approved colour system moved the dark edge from #2b414b (the old dark
+  // --line) to var(--line) itself, so it follows the dark palette.
+  assert.match(styles, /--register-lane-edge: var\(--line\);/);
   assert.match(styles, /--register-lane-depth: transparent;/);
 });
 

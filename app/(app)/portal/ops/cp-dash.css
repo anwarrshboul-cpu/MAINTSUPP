@@ -27,9 +27,9 @@
  * ── CONTRAST ──────────────────────────────────────────────────────────────
  *
  * The four status colours and the three urgency colours are FILLS ONLY — arcs,
- * swatches, the expired dot. `--cp-expired` (#C0442E) measures about 3.4:1 on
- * `--ov-card`, which clears the 3:1 non-text threshold and not the 4.5:1 text
- * one, so no number or word on this block is printed in a status colour.
+ * swatches, the expired dot. `--cp-expired` (#FF4D5E) measures 4.83:1 on
+ * `--ov-card` but 4.22:1 on its hover ground, and `--cp-other` 3.09:1, so no
+ * number or word on this block is printed in a status colour.
  *
  * ── BREAKPOINTS ARE 640 / 767 / 768 / 1024 / 1280 AND NOTHING ELSE ────────
  *
@@ -38,17 +38,19 @@
  */
 
 .ov-dash.cp-dash {
-  /* Compliance status — sampled from the reference's donut and legend. */
-  --cp-compliant: #48a0a8;
-  --cp-expiring: #e09438;
-  --cp-expired: #c0442e;
-  --cp-missing: #5c7ca8;
+  /* Compliance status — the approved palette: compliant green, expiring
+     yellow, expired red, missing orange. */
+  --cp-compliant: #25d98b;
+  --cp-expiring: #ffd447;
+  --cp-expired: #ff4d5e;
+  --cp-missing: #ff8a3d;
 
-  /* Renewal urgency — sampled from the reference's old bar chart. */
-  --cp-due-30: #c85024;
-  --cp-due-60: #d88c38;
-  --cp-due-90: #5878a4;
-  --cp-other: #44546c;
+  /* Renewal urgency — due soonest orange, then yellow, then blue; grey for
+     anything without a date. */
+  --cp-due-30: #ff8a3d;
+  --cp-due-60: #ffd447;
+  --cp-due-90: #38bdf8;
+  --cp-other: #64707b;
 
   /*
    * The block sits ABOVE `.ops-page` on this route rather than inside it, as

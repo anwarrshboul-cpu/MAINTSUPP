@@ -330,15 +330,23 @@ test("every chart states its values to a screen reader", () => {
 /* ── The stylesheet ───────────────────────────────────────────────────────── */
 
 test("the stylesheet declares the brief's compliance tokens and no second Overview palette", () => {
+  /*
+   * RE-POINTED: the approved colour system gives compliance one palette
+   * everywhere — compliant green #25d98b (was #48a0a8), expiring yellow
+   * #ffd447 (was #e09438), expired red #ff4d5e (was #c0442e), missing orange
+   * #ff8a3d (was #5c7ca8) — and the renewal urgency scale orange #ff8a3d /
+   * yellow #ffd447 / blue #38bdf8 (was #c85024 / #d88c38 / #5878a4), with the
+   * neutral grey #64707b (was #44546c).
+   */
   for (const [token, hex] of [
-    ["--cp-compliant", "#48a0a8"],
-    ["--cp-expiring", "#e09438"],
-    ["--cp-expired", "#c0442e"],
-    ["--cp-missing", "#5c7ca8"],
-    ["--cp-due-30", "#c85024"],
-    ["--cp-due-60", "#d88c38"],
-    ["--cp-due-90", "#5878a4"],
-    ["--cp-other", "#44546c"],
+    ["--cp-compliant", "#25d98b"],
+    ["--cp-expiring", "#ffd447"],
+    ["--cp-expired", "#ff4d5e"],
+    ["--cp-missing", "#ff8a3d"],
+    ["--cp-due-30", "#ff8a3d"],
+    ["--cp-due-60", "#ffd447"],
+    ["--cp-due-90", "#38bdf8"],
+    ["--cp-other", "#64707b"],
   ]) {
     assert.match(css, new RegExp(`${token}: ${hex};`, "i"), `${token} is ${hex}`);
   }

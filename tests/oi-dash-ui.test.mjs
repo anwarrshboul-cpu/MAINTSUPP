@@ -371,20 +371,31 @@ test("the target bars draw a marker at the payload's SLA target", () => {
 /* ── The stylesheet ───────────────────────────────────────────────────────── */
 
 test("the stylesheet declares the brief's palette, and repoints the shared tokens at it", () => {
+  /*
+   * RE-POINTED: the approved colour system replaced the neon palette with its
+   * dark palette — turquoise #12b4a8 primary (was #22e6c5), light turquoise
+   * #55e8d8 secondary (was violet #c74fff; the palette has no purple), yellow
+   * #ffd447 (was #ffc24b), red #ff4d5e (was #ff4d7a), blue #38bdf8 (was
+   * #3fa9f5), muted turquoise #147d77 (was #7af5db), and the approved text,
+   * card, ground and border values. `--muted` is the approved muted text grey
+   * #8099a3 (was #4a5b72) because a muted KPI caption is printed in it.
+   */
   for (const [token, hex] of [
-    ["--accent-primary", "#22e6c5"],
-    ["--accent-secondary", "#c74fff"],
-    ["--accent-amber", "#ffc24b"],
-    ["--accent-critical", "#ff4d7a"],
-    ["--accent-blue", "#3fa9f5"],
-    ["--accent-teal-light", "#7af5db"],
-    ["--muted", "#4a5b72"],
-    ["--text-primary", "#f4faf8"],
-    ["--text-secondary", "#b9c8d6"],
-    ["--text-tertiary", "#6c8397"],
-    ["--ov-bg", "#070c16"],
-    ["--ov-card", "#0d1526"],
-    ["--ov-card-border", "#182338"],
+    ["--accent-primary", "#12b4a8"],
+    ["--accent-secondary", "#55e8d8"],
+    ["--accent-amber", "#ffd447"],
+    ["--accent-critical", "#ff4d5e"],
+    ["--accent-blue", "#38bdf8"],
+    ["--accent-teal-light", "#147d77"],
+    ["--accent-green", "#25d98b"],
+    ["--accent-orange", "#ff8a3d"],
+    ["--muted", "#8099a3"],
+    ["--text-primary", "#f5fafc"],
+    ["--text-secondary", "#b8c8ce"],
+    ["--text-tertiary", "#8099a3"],
+    ["--ov-bg", "#07131c"],
+    ["--ov-card", "#102630"],
+    ["--ov-card-border", "#163640"],
   ]) {
     assert.match(css, new RegExp(`${token}: ${hex};`, "i"), `${token} is ${hex}`);
   }

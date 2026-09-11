@@ -79,7 +79,7 @@
 }
 
 .appearance-swatch--dark {
-  background: linear-gradient(135deg, #0b1218 50%, #182830 50%);
+  background: linear-gradient(135deg, #07131c 50%, #102630 50%);
 }
 
 .appearance-swatch--light {
@@ -87,7 +87,7 @@
 }
 
 .appearance-swatch--system {
-  background: linear-gradient(135deg, #0b1218 50%, #f4f7f8 50%);
+  background: linear-gradient(135deg, #07131c 50%, #f4f7f8 50%);
 }
 
 .appearance-summary {
