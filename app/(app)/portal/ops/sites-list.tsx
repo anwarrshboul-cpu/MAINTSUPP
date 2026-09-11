@@ -224,8 +224,33 @@ export function SitesList({
   const details = params.get("details");
   const demo = parseDemoFilter(params.get("demo"));
 
+  /*
+   * A NAMED SET OF SITES, ARRIVING FROM SOMEWHERE ELSE — §6 of the dashboard
+   * brief: "If a destination page does not yet read these filters from the
+   * URL, add that filtering to that page so the numbers it shows match the
+   * number clicked."
+   *
+   * The Overview block's "Requiring attention" tile counts DISTINCT SITES with
+   * at least one open job that is high or medium priority, or overdue. Nothing
+   * on this page could express that, so the tile had nowhere truthful to go: a
+   * link to the unfiltered register shows 31 rows under a figure of 7, which is
+   * the "list wider than the figure" fault the rest of that block is careful to
+   * avoid.
+   *
+   * `sites` — PLURAL — is deliberately not `site`. That one is already taken:
+   * `sites-manager.tsx` reads it to open a single site's DETAIL screen, and a
+   * pipe-joined list handed to that would ask for a site whose id is
+   * "a|b|c" and open nothing. A separate parameter leaves the deep link that
+   * already works exactly as it was.
+   */
+  const onlySites = useMemo(() => {
+    const raw = params.getAll("sites").flatMap((value) => value.split("|"));
+    return new Set(raw.map((value) => value.trim()).filter(Boolean));
+  }, [params]);
+
   const visible = useMemo(() => {
     const filtered = sites.filter((site) => {
+      if (onlySites.size && !onlySites.has(site.id)) return false;
       if (selectedStatus.length && !selectedStatus.includes(site.status)) return false;
       if (selectedType.length && !selectedType.includes(site.siteTypeValue ?? site.type)) {
         return false;
@@ -297,6 +322,7 @@ export function SitesList({
   }, [
     budget,
     complianceBelow,
+    onlySites,
     demo,
     details,
     hasJobs,
@@ -333,6 +359,20 @@ export function SitesList({
           onRemove: removeFrom(group.key, value),
         });
       }
+    }
+    if (onlySites.size) {
+      out.push({
+        key: "sites",
+        label: "Sites",
+        value: `${onlySites.size} selected`,
+        /* Clearing it drops the whole list rather than one id: it arrived as
+           one decision from one figure, so it comes off as one. */
+        onRemove: () => {
+          const next = new URLSearchParams(window.location.search);
+          next.delete("sites");
+          setParams(next);
+        },
+      });
     }
     if (hasJobs) {
       out.push({
@@ -386,6 +426,7 @@ export function SitesList({
   }, [
     budget,
     complianceBelow,
+    onlySites,
     demo,
     details,
     groups,
