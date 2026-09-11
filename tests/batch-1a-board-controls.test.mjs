@@ -738,9 +738,13 @@ test("the dashboard reads the same predicate as the board's meters", async () =>
   );
 
   const portal = await read("app/(app)/portal/portal-app.tsx");
+  /* RE-POINTED: the same import line now also brings `isOnJobsBoard` and
+     `spendLineOf`, so `openJobCount` is read as one named import of the shared
+     module rather than the only one. The contract — the badge counts with the
+     module's function — is unchanged. */
   assert.match(
     portal,
-    /import \{ openJobCount \} from "\.\.\/\.\.\/lib\/job-metrics"/,
+    /import \{[^}]*\bopenJobCount\b[^}]*\} from "\.\.\/\.\.\/lib\/job-metrics"/,
     "and the shell's badge reads the same module",
   );
 });
