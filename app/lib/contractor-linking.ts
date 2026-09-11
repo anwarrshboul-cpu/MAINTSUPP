@@ -30,6 +30,7 @@ import {
   contractors,
   maintenanceRequests,
 } from "../../db/schema";
+import { jobsBoardCondition } from "./dashboard-filters";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -110,6 +111,8 @@ export async function unlinkedContractorNames(
           isNull(maintenanceRequests.deletedAt),
           eq(maintenanceRequests.archived, false),
           isNull(maintenanceRequests.parentId),
+          // Jobs only: rows on another board are not work a contractor did.
+          jobsBoardCondition(),
           sql`${maintenanceRequests.contractor} is not null and trim(${maintenanceRequests.contractor}) <> ''`,
         ),
       )
@@ -133,6 +136,7 @@ export async function unlinkedContractorNames(
           isNull(maintenanceRequests.deletedAt),
           eq(maintenanceRequests.archived, false),
           isNull(maintenanceRequests.parentId),
+          jobsBoardCondition(),
         ),
       ),
   ]);

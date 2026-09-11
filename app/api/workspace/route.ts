@@ -100,6 +100,7 @@ import {
 import { linkedContractorIds } from "../../lib/contractor-linking";
 import { RESERVED_EMAIL_TLD } from "../../lib/contact-links";
 import { isUnreachableEmail } from "../../lib/site-metrics";
+import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import {
   DUTY_HOLDERS,
@@ -568,6 +569,9 @@ const liveWorkOrder = (orgId: string) =>
     isNull(maintenanceRequests.deletedAt),
     eq(maintenanceRequests.archived, false),
     isNull(maintenanceRequests.parentId),
+    /* The fourth exclusion `countsAsWorkOrder` makes: a row on another board
+       (a Store Documentation store, a section's row) is not a job. */
+    jobsBoardCondition(),
   );
 
 async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceSnapshot> {

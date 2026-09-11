@@ -390,6 +390,19 @@ export async function moveItemsToGroup(
       )
       .limit(1);
     if (!existing) continue;
+    /*
+     * A ROW MOVES ONLY INTO A GROUP OF THE BOARD IT IS PLACED ON.
+     *
+     * The placement is found by row, on whatever board it lives, and its group
+     * id rewritten — so a group from ANOTHER board (named directly, or reached
+     * by a `?board=` the row is not on) filed a job into a Store Documentation
+     * group, or a register row into the Jobs board's, and the row vanished from
+     * a board that draws only its own groups. Checked here, per row, so every
+     * caller is held to it: the phone drawer that sends no `?board=`, the
+     * board's bulk bar, and archive. A row that fails is skipped, and a request
+     * that moves nothing is refused by the caller.
+     */
+    if (existing.boardId !== group.boardId) continue;
     if (existing.groupId !== group.id) {
       movedFrom.push({ requestId, fromGroupId: existing.groupId });
     }

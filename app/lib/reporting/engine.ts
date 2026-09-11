@@ -84,6 +84,7 @@ import { computeInvoiceSection } from "./invoice-compute";
 import { computeMaintenanceSection } from "./maintenance-compute";
 import { poundsToPence } from "./money";
 import { addDays, dateOnly, previousComparablePeriod } from "./period";
+import { jobsBoardCondition } from "../dashboard-filters";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -94,6 +95,8 @@ function liveWorkOrder(organisationId: string) {
     isNull(maintenanceRequests.deletedAt),
     eq(maintenanceRequests.archived, false),
     isNull(maintenanceRequests.parentId),
+    // A Store Documentation store or a section's row is not a job to report on.
+    jobsBoardCondition(),
   );
 }
 

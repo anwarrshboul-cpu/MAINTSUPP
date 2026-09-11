@@ -186,8 +186,19 @@ test("no write path can file a row into a group its board does not draw", async 
    */
   const route = await read("app/api/board/route.ts");
   const moveItems = route.slice(route.indexOf('if (action === "move_items" || action === "archive_items")'));
-  assert.match(moveItems.slice(0, 2400), /eq\(maintenanceGroups\.boardId, boardId\),\s*isNull\(maintenanceGroups\.deletedAt\),/,
-    "move_items accepts only a live group on this board");
+  assert.match(moveItems.slice(0, 3200), /eq\(maintenanceGroups\.organisationId, orgId\),\s*isNull\(maintenanceGroups\.deletedAt\),/,
+    "move_items accepts only a live group");
+  /*
+   * And each ROW only into a group of the board it is placed on — checked per
+   * row in `moveItemsToGroup`, not by matching `?board=`: the phone drawer
+   * moves a section board's row without naming the board (requiring the match
+   * broke that), and naming another board in the query was a way round it.
+   * Verified live on a marked section-board row: drawer move 200; into a Store
+   * Documentation group 404 with or without `?board=`.
+   */
+  const mutations = await read("app/lib/board-mutations.ts");
+  const move = mutations.slice(mutations.indexOf("export async function moveItemsToGroup"));
+  assert.match(move.slice(0, 2400), /if \(existing\.boardId !== group\.boardId\) continue;/);
   const groups = await read("app/api/board/groups/route.ts");
   assert.match(groups, /eq\(maintenanceGroups\.id, moveTo\),[\s\S]{0,200}eq\(maintenanceGroups\.boardId, existing\.boardId\),\s*isNull\(maintenanceGroups\.deletedAt\),/,
     "a deleted group's rows can only be re-parented onto a live group of the same board");
