@@ -11,6 +11,7 @@ import {
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
+import { complianceCompletion } from "../../lib/compliance-status";
 import {
   complianceProfileGap,
   ensureComplianceProfile,
@@ -965,6 +966,21 @@ export async function GET(request: Request) {
     const siteIds = rows.map((row) => row.id);
     const register = await readComplianceRegister(db, orgId, { today: new Date() });
     const metrics = await loadSiteMetrics(db, orgId, siteIds, register.bySite);
+    /*
+     * THE PORTFOLIO'S COMPLIANCE SCORE — the one every other screen prints.
+     *
+     * The Sites page's "Portfolio compliance" tile summed the per-site meters,
+     * which count only register rows LINKED to a site record. The Overview's
+     * KPI and gauge, the Compliance page's headline and the Compliance
+     * dashboard block score the WHOLE register through `complianceCompletion`
+     * — so one estate read 45% here and 23% there, under one name. The score
+     * is sent from the same register read, so the tile prints the product's
+     * number; the per-site meters are unchanged and still describe each store.
+     * Only for the workspace's own register — a section's Sites register is a
+     * different list of stores and keeps the per-site sum.
+     */
+    const portfolioCompliance =
+      scope === CANONICAL_REGISTER ? complianceCompletion(register.entries) : null;
 
     return Response.json({
       sites: rows.map((row) => ({
@@ -996,6 +1012,14 @@ export async function GET(request: Request) {
       groups,
       siteTypes,
       statuses,
+      portfolioCompliance: portfolioCompliance
+        ? {
+            percent: portfolioCompliance.percent,
+            satisfied: portfolioCompliance.satisfied,
+            applicable: portfolioCompliance.applicable,
+            scored: portfolioCompliance.scored,
+          }
+        : null,
       /*
        * Estate-wide coverage, so the page header can say "X of 10 sites have
        * incomplete details" and link to them. A field that is empty everywhere

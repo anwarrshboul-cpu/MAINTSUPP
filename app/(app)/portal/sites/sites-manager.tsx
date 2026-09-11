@@ -45,6 +45,8 @@ type ListPayload = {
    * been told".
    */
   coverage?: SiteCoverage;
+  /** The product's compliance score for the whole register — see `GET /api/sites`. */
+  portfolioCompliance?: { percent: number; satisfied: number; applicable: number; scored: boolean } | null;
 };
 
 type ImportResult = {
@@ -390,6 +392,7 @@ export function SitesManager({
       <SitesList
         sites={(data?.sites ?? []) as unknown as SiteListRow[]}
         coverage={data?.coverage ?? null}
+        portfolioCompliance={data?.portfolioCompliance ?? null}
         loading={!data}
         statuses={(data?.statuses ?? []).map((status) => ({
           value: status.value,

@@ -425,6 +425,27 @@ test("the live block reconciles, and its score is the Overview's", async (t) => 
   assert.equal(kpi.value, block.score.percent);
 });
 
+test("the Sites page's portfolio compliance is the same score, not a second definition", async (t) => {
+  /*
+   * The Sites tile summed its per-site meters, which count only register rows
+   * linked to a site record, and read 45% where the Overview and the Compliance
+   * page read 23% on the same estate. It now prints the payload's
+   * `complianceCompletion` over the whole register.
+   */
+  const list = await read("app/(app)/portal/ops/sites-list.tsx");
+  assert.match(list, /compliancePercent: portfolioCompliance\s*\?\s*portfolioCompliance\.percent/);
+  const route = await read("app/api/sites/route.ts");
+  assert.match(route, /scope === CANONICAL_REGISTER \? complianceCompletion\(register\.entries\) : null/);
+  if (!(await serverIsUp())) {
+    t.skip("no development server for the live half");
+    return;
+  }
+  const sites = await (await fetch(`${BASE}/api/sites`, { headers })).json();
+  const block = await (await fetch(`${BASE}/api/compliance/metrics`, { headers })).json();
+  assert.equal(sites.portfolioCompliance.percent, block.score.percent);
+  assert.equal(sites.portfolioCompliance.applicable, block.score.applicable);
+});
+
 test("the live register opens exactly the count each drill was counted with", async (t) => {
   if (!(await serverIsUp())) {
     t.skip("no development server");
