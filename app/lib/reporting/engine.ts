@@ -84,7 +84,6 @@ import { computeInvoiceSection } from "./invoice-compute";
 import { computeMaintenanceSection } from "./maintenance-compute";
 import { poundsToPence } from "./money";
 import { addDays, dateOnly, previousComparablePeriod } from "./period";
-import { jobsBoardCondition } from "../dashboard-filters";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -95,8 +94,13 @@ function liveWorkOrder(organisationId: string) {
     isNull(maintenanceRequests.deletedAt),
     eq(maintenanceRequests.archived, false),
     isNull(maintenanceRequests.parentId),
-    // A Store Documentation store or a section's row is not a job to report on.
-    jobsBoardCondition(),
+    /*
+     * DELIBERATELY WITHOUT `jobsBoardCondition`, unlike its twin in the
+     * workspace route. This population feeds generated INVOICES as well as
+     * client reports, and a row on a section's board may be chargeable work;
+     * narrowing it to the Jobs board would silently change what a client is
+     * billed for. That is an owner's decision, not a dashboard fix.
+     */
   );
 }
 
