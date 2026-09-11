@@ -129,12 +129,12 @@ test("both cards are exported with the agreed names", async () => {
   assert.match(
     breakdownSource,
     /export function JobBreakdownCard\(/,
-    "overview-page.tsx calls JobBreakdownCard by name",
+    "the card module exports JobBreakdownCard by name (retired from the Overview on 2026-09-11, still in the tree)",
   );
   assert.match(
     sitesSource,
     /export function SitesAttentionCard\(/,
-    "overview-page.tsx calls SitesAttentionCard by name",
+    "the card module exports SitesAttentionCard by name (retired from the Overview on 2026-09-11, still in the tree)",
   );
 });
 

@@ -46,7 +46,13 @@ async function overviewSource() {
  * than merely absent: the page holds no series at all.
  */
 test("no Overview figure is a hand-written series", async () => {
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  /* RE-POINTED 2026-09-11: the shell draws nothing; the page is `oi-dash.tsx`
+     and its primitives, so all three are read. */
+  const page = (
+    await Promise.all(
+      ["overview-page", "oi-dash", "oi-dash-charts"].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
+    )
+  ).join("\n");
   assert.ok(
     !page.includes("[72, 74, 73, 76, 78, 77, 81, 82, 84, 86, 88"),
     "the invented compliance history must not come back",
@@ -299,44 +305,50 @@ test("panels with nothing behind them say so instead of drawing an empty axis", 
    */
   const page = (
     await Promise.all(
-      [
-        "overview-page",
-        "overview-glance",
-        "overview-financial",
-        "overview-performance",
-        "overview-breakdown",
-        "overview-sites",
-        "overview-shared",
-      ].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
+      /* RE-POINTED 2026-09-11: the rebuilt Overview's family. */
+      ["overview-page", "oi-dash", "oi-dash-charts"].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
     )
   ).join("\n");
 
+  /*
+   * RE-POINTED 2026-09-11 — THE OVERVIEW WAS REBUILT, rule unchanged. The
+   * rebuilt page has no `ChartFrame`: each chart that can come back empty is
+   * given its own sentence instead of an axis — the open-work splits when no
+   * job is open, the completion donut when nothing is open or closed, the
+   * engineer and site bars through their `emptyText`, and the repeat donuts
+   * when nothing repeated. A ratio with nothing under it prints "—".
+   */
   for (const copy of [
-    "No costed job in this period names a contractor",
-    "No job was requested in this period",
+    "No open job to split by status.",
+    "No open job to split by tier.",
+    "No open job to split by label.",
+    "No open job to split by engineer.",
+    "No site has completed spend in",
+    "No repeat issue in this range.",
+    "No site has repeat jobs in this range.",
   ]) {
     assert.ok(page.includes(copy), `missing honest empty state: ${copy}`);
   }
   /*
-   * Comment-stripped: `overview-financial.tsx` explains in prose why the budget
-   * block went, and a rule against naming it would be a rule against writing
-   * the explanation down. Same `codeOnly` idiom the other ops suites use.
+   * Comment-stripped: the rebuilt page's own notes may explain the budget
+   * block's absence, and a rule against naming it would be a rule against
+   * writing the explanation down. Same `codeOnly` idiom the other ops suites use.
    */
   const code = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.ok(
     !code.includes("annual budget"),
-    "§3.3 — the budget comparison is gone from the card, so it captions nothing",
+    "§3.3 — the budget comparison stays gone, so it captions nothing",
   );
   // The charts are behind that guard, not rendered regardless.
   assert.match(
     page,
-    /empty=\{[^}]*length === 0\}/,
+    /\{intel\.open === 0 \? \(\s*<p className="oi-note oi-empty-note">/,
     "a chart is told it is empty rather than being asked to draw nothing",
   );
   assert.match(
     page,
-    /emptyLabel=/,
-    "and the empty state is a sentence the frame prints, not a blank axis",
+    /emptyText=/,
+    "and a bar list's empty state is a sentence it prints, not a blank axis",
   );
 });
 
@@ -391,7 +403,12 @@ test("the Overview reads only from scoped endpoints, never from the mock module"
    * workspace snapshot and no import of either — every number arrives from an
    * endpoint that resolved the organisation from the session.
    */
-  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  /* RE-POINTED 2026-09-11: the shell and the page it renders. */
+  const page = (
+    await Promise.all(
+      ["overview-page", "oi-dash", "oi-dash-charts"].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
+    )
+  ).join("\n");
   for (const symbol of [
     "sampleRequests",
     "sampleFiles",

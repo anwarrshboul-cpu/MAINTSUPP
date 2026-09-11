@@ -259,16 +259,18 @@ test("the Overview's overdue figure uses the rule, on the server", async () => {
  * where it looks has moved, and for the `doesNotMatch` checks the family read is
  * strictly stronger — there is more source that could violate them.
  */
+/*
+ * RE-POINTED 2026-09-11 — THE OVERVIEW WAS REBUILT. The page is the thin
+ * `overview-page.tsx` shell around `oi-dash.tsx` (Job Intelligence, Spend &
+ * Reporting, Compliance) and its primitives in `oi-dash-charts.tsx`. The six
+ * cards listed here before are no longer mounted; reading them would let every
+ * assertion below pass against code no reader sees, so the family is the page
+ * as it ships.
+ */
 const OVERVIEW_FAMILY = [
   "app/(app)/portal/ops/overview-page.tsx",
-  "app/(app)/portal/ops/overview-glance.tsx",
-  "app/(app)/portal/ops/overview-financial.tsx",
-  "app/(app)/portal/ops/overview-performance.tsx",
-  "app/(app)/portal/ops/overview-breakdown.tsx",
-  "app/(app)/portal/ops/overview-sites.tsx",
-  "app/(app)/portal/ops/overview-records.tsx",
-  "app/(app)/portal/ops/overview-shared.tsx",
-  "app/(app)/portal/ops/overview-charts.tsx",
+  "app/(app)/portal/ops/oi-dash.tsx",
+  "app/(app)/portal/ops/oi-dash-charts.tsx",
 ];
 
 const overviewPage = async () =>
@@ -332,21 +334,30 @@ test("every Overview tile carries its own words and its own numbers", async () =
    * table, and a delta with nothing to compare against is omitted rather than
    * printed as a zero.
    */
-  assert.match(page, /const figures = \[/, "the Pulse row is built from a list");
-  const pulseLabels = page.match(/\n      label: "/g) ?? [];
-  assert.equal(pulseLabels.length, 4, "the four Pulse figures §2.2 specifies");
+  /*
+   * RE-POINTED 2026-09-11 — THE OVERVIEW WAS REBUILT. Its figures are now two
+   * KPI strips: Job Intelligence's four (Open jobs, Completed jobs, Completion
+   * rate, SLA met) and Spend & Reporting's four, drawn from the Reports
+   * payload's own `kpis` rather than from literals. The contract this test has
+   * always held is intact: a reader never has to guess what a tile measures.
+   * Every tile takes a label, a value and a caption that says what it counts;
+   * a linked tile's accessible name states the figure in full and what opening
+   * it shows; and a comparison with nothing to compare against is SAID, never
+   * printed as a zero change.
+   */
+  assert.match(page, /<span className="oi-kpi__label">\{label\}<\/span>/, "every tile names what it measures");
+  assert.match(page, /<span className="oi-kpi__caption">\{caption\}<\/span>/, "and says what it counts");
+  for (const label of ["Open jobs", "Completed jobs", "Completion rate", "SLA met"]) {
+    assert.ok(page.includes(`label="${label}"`), `Job Intelligence has its ${label} tile`);
+  }
+  assert.match(page, /\{kpis\.map\(\(kpi\) => \{/, "and the spend tiles come from the payload, not from a literal");
   assert.match(
     page,
-    /visible\.map\(\(meter\) => \(/,
-    "and the meter tiles come from the payload, not from a literal",
+    /ariaLabel=\{`Open jobs: \$\{oiCount\(intel\.open\)\}\. Opens the open jobs on the jobs board\.`\}/,
+    "a linked tile states its full value in words",
   );
-  assert.match(page, /accessibleValue=\{/, "every tile states its full value in words");
-  assert.match(page, /caption: "At a glance"/, "and the same numbers are reachable as a table");
-  assert.match(
-    page,
-    /previous !== null[\s\S]{0,260}delta !== null/,
-    "a delta with nothing to compare against is omitted, never printed as zero",
-  );
+  assert.match(page, /\{ text: "No previous period to compare", tone: "muted" \}/, "no comparison is said, not zeroed");
+  assert.match(page, /return \{ text: `New — nothing was spent in the previous period`, tone: "blue" \};/);
 });
 
 test("open-job ages are floored, and computed once on the server", async () => {
@@ -426,51 +437,37 @@ test("a figure that has not loaded is never printed as a definitive zero", async
    * the whole point — "Compliance 0%" over an account that had simply not
    * loaded is the defect this test exists for.
    */
+  /*
+   * RE-POINTED 2026-09-11 — THE OVERVIEW WAS REBUILT, contract intact. There
+   * is one fetch per SECTION now, and each section draws a skeleton shaped
+   * like its answer while its payload is in flight, an error card with a retry
+   * when it failed, and never a zero it did not count. An empty answer is a
+   * sentence ("No job closed in …", "No open job to split by engineer"), and a
+   * ratio with nothing under it — no open work, no scored requirement, no site
+   * in the score — prints "—" rather than a failing 0%.
+   */
   const page = await overviewPage();
-  const skeletons = page.match(/<SkeletonRow/g) ?? [];
-  assert.ok(skeletons.length >= 5, "every card has a loading state of its own");
-  assert.ok(
-    !/String\(totals\.\w+\) : "0"/.test(page),
-    "no card falls back to a printed zero while it is loading",
-  );
-  assert.match(page, /<EmptyState>/, "and an empty answer says so in words");
-  /*
-   * RE-POINTED: the sentence is measure-aware now. "No jobs in this period" was
-   * true when the cohort could only ever be jobs REQUESTED in the period; §1.1
-   * added the second axis, and a card showing nothing under "Measure by: Date
-   * completed" is saying something different from the same card under "Date
-   * requested". The contract — an empty answer is a sentence, never a blank
-   * axis — is unchanged, and it now says which question came back empty.
-   */
-  assert.match(
-    page,
-    /No job was requested in this period/,
-    "with an honest sentence rather than a blank axis",
-  );
-  assert.match(
-    page,
-    /No job was completed in this period/,
-    "and the sentence follows the cohort axis, because they are different facts",
-  );
+  const skeletons = page.match(/<SectionSkeleton kpis=/g) ?? [];
+  assert.equal(skeletons.length, 3, "every section has a loading state of its own");
+  assert.equal((page.match(/<SectionError error=\{error\} onRetry=\{reload\} \/>/g) ?? []).length, 3, "and an error of its own");
+  assert.match(page, /\{ text: `No job closed in \$\{range\.label\}`, tone: "muted" \}/, "an empty answer says so in words");
+  assert.match(page, /emptyText="No open job to split by engineer\."/);
+  assert.match(page, /value=\{intel\.completionRate === null \? "—" : `\$\{intel\.completionRate\}%`\}/, "no work is '—', not 0%");
+  assert.match(page, /value=\{sla\.percent === null \? "—" : `\$\{sla\.percent\}%`\}/);
 
   /*
-   * `scored` is the same distinction one level down: a site with no compliance
-   * requirements set up is NOT a site scoring zero, and rendering the first as
-   * the second is the more dangerous of the two.
+   * `scored` is the same distinction one level down: a portfolio with no
+   * requirement in the score is NOT one scoring zero, and nor is a portfolio
+   * whose sites hold nothing to score. Both print "—".
    */
-  /*
-   * RE-POINTED at the helper the rule moved into. `complianceReadout` is now
-   * the one function that decides what a site's compliance cell says, and it is
-   * exported so it can be called rather than only matched — which is a stronger
-   * hold on the same contract than reading `site.compliance.scored` off the
-   * markup ever was.
-   */
-  assert.match(page, /complianceReadout\(site\.compliance\)/, "one function decides the cell");
-  assert.match(page, /if \(!compliance\.scored\)/, "and an unset profile is its own branch");
-  assert.match(page, /Not set up/);
+  assert.match(page, /centreValue=\{score\.scored \? `\$\{score\.percent\}%` : "—"\}/, "an unscored register is its own branch");
+  assert.match(page, /value=\{sitesScored \? `\$\{sites\.percent\}%` : "—"\}/);
+  assert.match(page, /No requirement on this portfolio is scored yet/);
 
-  const route = await read("app/api/dashboard/sites-attention/route.ts");
-  assert.match(route, /scored: false/, "and the server is what says so");
+  /* RE-POINTED with the page: the Compliance section's payload is the
+     Compliance block's, and its builder is what says "not scored". */
+  const builder = await read("app/lib/compliance-dash.ts");
+  assert.match(builder, /scored: completion\.scored,/, "and the server is what says so");
 });
 
 /* ── 5. The by-priority split cannot be captioned with wreckage ──────────── */

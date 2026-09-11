@@ -640,17 +640,15 @@ test("each surface still owns a separate period, and remembers it", async () => 
    * laptop - and a rule against naming it would be a rule against writing that
    * reasoning down.
    */
+  /*
+   * RE-POINTED AGAIN, 2026-09-11: the Overview was rebuilt, and the family is
+   * the page as it ships — the shell, `oi-dash.tsx` (which owns `portfolio`,
+   * `from` and `to` in the address bar) and its primitives. The retired cards
+   * are no longer mounted, so reading them would check code nobody runs.
+   */
   const overviewFamily = (
     await Promise.all(
-      [
-        "overview-page",
-        "overview-glance",
-        "overview-financial",
-        "overview-performance",
-        "overview-breakdown",
-        "overview-sites",
-        "overview-records",
-      ].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
+      ["overview-page", "oi-dash", "oi-dash-charts"].map((name) => read(`app/(app)/portal/ops/${name}.tsx`)),
     )
   ).join("\n");
   const overviewCode = overviewFamily

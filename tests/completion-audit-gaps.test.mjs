@@ -151,28 +151,40 @@ test("every analytics page owns a date range with presets and a custom span", as
     /case "custom": \{[\s\S]{0,600}DAY_PATTERN\.test\(from\)/,
     "whose two dates are validated rather than trusted",
   );
-  const overview = await read("app/(app)/portal/ops/overview-page.tsx");
-  assert.match(overview, /<PeriodControl/, "the page draws the control");
   /*
-   * RE-POINTED. `/api/dashboard/summary` still exists and still answers; the
-   * Overview stopped reading it, because the Pulse row and the eight meters both
-   * come out of `/api/dashboard/meters` and fetching the old summary as well
-   * would be a second round trip for numbers already on the page — §1.6 asks for
-   * one per card.
-   *
-   * The contract is the one that matters, and it is now asserted across every
-   * card rather than one: each passes `search` — the live address bar — to its
-   * own `useOpsQuery`, so changing the period REFETCHES rather than filtering a
-   * list that was downloaded once.
+   * RE-POINTED 2026-09-11 — THE OVERVIEW WAS REBUILT (`oi-dash.tsx`: Job
+   * Intelligence, Spend & Reporting, Compliance). Its range is the shared
+   * dashboard header's picker, which now offers the same named spans the old
+   * period control did — and the default twelve months — above a custom
+   * From/To. The range is in the URL, and every section's endpoint is SENT
+   * the explicit window, so the server filters on it: the same "filters, not
+   * just displays" in its stronger, server-side form.
    */
+  const overview = await read("app/(app)/portal/ops/oi-dash.tsx");
+  for (const label of ["Last 7 days", "Last 30 days", "Last 90 days", "This month", "Last month", "Year to date"]) {
+    assert.ok(overview.includes(`label: "${label}"`), `the Overview must offer ${label}`);
+  }
+  assert.match(overview, /presets=\{presets\}/, "the page hands its presets to the picker");
+  const header = await read("app/(app)/portal/ops/dash-header.tsx");
+  assert.match(header, /onClick=\{\(event\) => \{\s*onRange\(preset\.from, preset\.to\);/, "a preset sets the range");
+  assert.match(header, /type="date"/, "and the picker keeps a custom span");
   assert.match(
     overview,
-    /useOpsQuery<MetersPayload>\("\/api\/dashboard\/meters", search\)/,
-    "and every card refetches against the window rather than filtering a downloaded list",
+    /next\.set\("from", from\);\s*next\.set\("to", to\);/,
+    "every section is sent the explicit window",
   );
-  const refetching =
-    overview.match(/useOpsQuery<[A-Za-z]+>\("\/api\/dashboard\/[a-z-]+", search\)/g) ?? [];
-  assert.ok(refetching.length >= 6, `every card follows the window, got ${refetching.length}`);
+  /*
+   * The two windowed sections refetch on the window itself: the Overview's
+   * aggregate is fetched with `search`, and the Reports read is built FROM
+   * `search`. Compliance is deliberately a snapshot as of today and carries
+   * the portfolio alone — asserted too, so a range can never silently start
+   * narrowing a register that is not dated by it.
+   */
+  assert.match(overview, /useOpsQuery<OvOverview>\("\/api\/overview\/metrics", search, /);
+  assert.match(overview, /const reportsSearch = useMemo\(\(\) => \{\s*const next = new URLSearchParams\(search\);/);
+  assert.match(overview, /useOpsQuery<RpMetrics>\("\/api\/reports\/metrics", reportsSearch, /);
+  const complianceRead = overview.slice(overview.indexOf("const complianceSearch = useMemo"), overview.indexOf("}, [portfolio]);"));
+  assert.doesNotMatch(complianceRead, /"from"|"to"/, "the compliance snapshot is not dated by the range");
 
   /*
    * Compliance keeps its expiry-horizon semantics — Overdue, next 30, next 90,
