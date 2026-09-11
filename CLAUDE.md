@@ -9,7 +9,7 @@ npm ci                     # Node 22.13+
 npm run dev                # Vite + vinext on :5173 (Miniflare D1 + R2 bindings)
 npm run build              # scripts/build-verified.sh -> dist/ (bounded vinext build)
 npm run lint               # eslint via scripts/sites-env.sh
-npm test                   # NOTE: runs `npm run build` first, then all 137 test files
+npm test                   # NOTE: runs `npm run build` first, then all 237 test files
 ```
 
 Running tests without the build (much faster, and what you usually want):
@@ -122,7 +122,7 @@ server's `Content-Disposition` follows the same rule.
 
 ## Test suite conventions
 
-137 files, `node:test`, no framework. Three things make it unlike a typical suite:
+237 files, `node:test`, no framework. Three things make it unlike a typical suite:
 
 **Tests pin source text.** There are ~3,100 `assert.match` calls against file
 contents, so a rename or a move *breaks tests that were protecting a real
