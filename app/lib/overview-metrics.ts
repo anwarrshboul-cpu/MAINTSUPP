@@ -48,7 +48,7 @@
  * exists to prevent.
  */
 
-import { and, count, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   jobStatusMap,
@@ -480,11 +480,14 @@ export async function loadOverviewMetrics(
     db
       .select({ total: count() })
       .from(units)
+      /* `deleted_at` is the Assets section's soft delete: a binned asset is off
+         the register, so it is not an active unit either. */
       .where(
         siteIds
           ? and(
               eq(units.organisationId, orgId),
               eq(units.status, "Active"),
+              isNull(units.deletedAt),
               siteIds.length ? inArray(units.siteId, siteIds) : sql`1 = 0`,
             )!
           : and(eq(units.organisationId, orgId), eq(units.status, "Active"))!,

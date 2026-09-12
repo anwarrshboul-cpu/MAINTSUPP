@@ -166,7 +166,11 @@ async function usage(db: Database, orgId: string) {
           registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
         ),
       ),
-    db.select({ value: count() }).from(units).where(eq(units.organisationId, orgId)),
+    /* Binned assets are off the register and out of the count. */
+    db
+      .select({ value: count() })
+      .from(units)
+      .where(and(eq(units.organisationId, orgId), isNull(units.deletedAt))),
     db
       .select({ value: count() })
       .from(memberships)

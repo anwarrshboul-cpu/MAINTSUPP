@@ -229,7 +229,7 @@ test("W12 the raise-ticket control itself and its four other homes are untouched
    * "the product no longer raises tickets from context".
    */
   for (const file of [
-    "app/(app)/portal/units/units-manager.tsx",
+    "app/(app)/portal/assets/asset-detail.tsx",
     "app/(app)/portal/views/store-compliance-tracker.tsx",
     "app/(app)/portal/views/store-documentation-board.tsx",
     "app/(app)/portal/portal-app.tsx",

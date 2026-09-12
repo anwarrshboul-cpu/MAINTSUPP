@@ -211,7 +211,7 @@ import { AdminUsersView } from "./views/admin-users";
 import { AuditLog } from "./views/audit-log";
 import { ReconcilePanel } from "./views/reconcile-panel";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
-import { UnitsManager } from "./units/units-manager";
+import { AssetsManager } from "./assets/assets-manager";
 import {
   defaultWorkspaceSettings,
   type WorkspaceContractor,
@@ -252,6 +252,7 @@ import { GeneratedDocuments } from "./reports/generated-documents";
 export type Section =
   | "overview"
   | "maintenance"
+  | "assets"
   | "units"
   | "stores"
   | "store-documentation"
@@ -446,11 +447,28 @@ const sectionMeta: Record<
     title: "Live job list",
     icon: "wrench",
   },
+  /*
+   * THE ASSETS SECTION, and the older key that now points at the same screen.
+   *
+   * `units` is kept rather than renamed, and that is a compatibility decision
+   * rather than indecision: `/dashboard/units` is a live URL somebody may have
+   * bookmarked, `navExcluded` names this key to keep it OUT of the sidebar, and
+   * `tests/stage-two-menu-platform-sections.test.mjs` holds all three facts
+   * level. What changed is only what it draws — `AssetsManager`, the same
+   * component `assets` draws — so there is one screen behind two addresses
+   * rather than two screens over one table.
+   */
+  assets: {
+    label: "Assets",
+    eyebrow: "Store equipment & replacement parts",
+    title: "Assets",
+    icon: "tool",
+  },
   units: {
-    label: "Units",
-    eyebrow: "Asset register",
-    title: "Units & assets",
-    icon: "building",
+    label: "Assets",
+    eyebrow: "Store equipment & replacement parts",
+    title: "Assets",
+    icon: "tool",
   },
   stores: {
     label: "Sites",
@@ -562,6 +580,11 @@ const navPrimary: Section[] = [
   "compliance",
   "calendar",
   "stores",
+  /* Beside Sites, and after it: an asset is a fact about a store, so the
+     reader who wants one has usually just looked at the other. Kept level
+     with `BUILT_IN_ORDER` in app/api/navigation/layout.ts by
+     tests/stage-twenty-navigation. */
+  "assets",
   "contractors",
   "documents",
   // Module 5, between Documents and Reports. Kept level with `BUILT_IN_ORDER`
@@ -614,18 +637,28 @@ const navSecondary: Section[] = [
  */
 const navExcluded: ReadonlySet<string> = new Set<string>(["units"]);
 
+/*
+ * The surfaces that still read the whole job list.
+ *
+ * `units` was here because the screen behind that address used to draw jobs
+ * beside each unit. It draws `AssetsManager` now — the same component `assets`
+ * draws, which reads `/api/assets` and nothing else — so leaving the key here
+ * would have made the two addresses for ONE screen behave differently: a visit
+ * to `/dashboard/units` downloading a paged job list the register never looks
+ * at, and `/dashboard/assets` not.
+ */
 const JOB_LIST_SURFACES: ReadonlySet<Section> = new Set<Section>([
   "maintenance",
   "calendar",
   "contractors",
   "reports",
-  "units",
 ]);
 
 const sectionRoutes: Record<Section, string> = {
   overview: "",
   maintenance: "jobs",
   calendar: "planned",
+  assets: "assets",
   units: "units",
   stores: "sites",
   "store-documentation": "store-documentation",
@@ -3359,8 +3392,15 @@ export default function PortalApp({
               onItemActionsChange={setBoardItemActions}
             />
           )}
-          {activeSurface === "units" && (
-            <UnitsManager sites={currentStores} onNotify={setToast} />
+          {(activeSurface === "assets" || activeSurface === "units") && (
+            /*
+              ONE COMPONENT, TWO SURFACES. `assets` is the section in the
+              sidebar; `units` is the address this screen used to live at and
+              still answers on. Drawing the same component for both is what
+              stops a bookmark and a nav click reaching two different registers
+              over one table.
+            */
+            <AssetsManager onNotify={setToast} />
           )}
           {/*
             THE FAILURE STATE REACHES THE TWO SCREENS THAT ARE MADE OF JOBS.

@@ -56,14 +56,17 @@ import {
   siteGroupMembers,
   siteGroups,
   sites,
+  unitServiceRecords,
   units,
   workspaceSections,
 } from "../../../db/schema";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { can, resolvePermissions } from "../../lib/permissions";
 import {
+  ASSET_ENTITY_TYPE,
   RETENTION_DAYS,
   SECTION_ENTITY_TYPE,
+  binnedAssetSite,
   binnedSectionBoards,
   listBin,
   maybeSweepRecycleBin,
@@ -224,13 +227,50 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor, identityEmail, session } = guard.scope;
+    const { db, orgId, actor, identityEmail, session, siteScope } = guard.scope;
 
     // `?? {}` because a body of literal `null` parses — the catch never
     // fires, and `body.id` below threw into the 503 catch instead of a 400.
     const body = ((await request.json().catch(() => null)) ?? {}) as { id?: unknown };
     const id = typeof body.id === "string" ? body.id.slice(0, 64) : "";
     if (!id) return Response.json({ error: "A bin entry id is required." }, { status: 400 });
+
+    /*
+     * AN ASSET GOES BACK ONLY WHERE THE CALLER COULD HAVE BINNED IT FROM.
+     *
+     * This route's blanket `board.edit` is right for a job, a group, a view or
+     * a column — all board things. An asset is a site thing: `/api/assets`
+     * demands `sites.edit` to bin one and narrows every query by the
+     * membership's `siteScope`. Without this, restore was the way round both:
+     * a member confined to three stores could put back an asset at a fourth,
+     * and a role holding `board.edit` without `sites.edit` could restore assets
+     * it was refused permission to touch.
+     *
+     * Checked here rather than inside `restoreFromBin` because this is where
+     * the capability and the scope are resolved; that module takes a database
+     * and an organisation and is deliberately not in the permissions business.
+     */
+    const assetSite = await binnedAssetSite(db, orgId, id);
+    if (assetSite !== null) {
+      const subject = await resolvePermissions(db, orgId, actor.role);
+      if (!can(subject, "sites.edit")) {
+        return Response.json(
+          {
+            error:
+              `Your role (${actor.role}) cannot restore an asset. ` +
+              "Putting one back on the register needs the same permission as editing it.",
+            capability: "sites.edit",
+            denied: true,
+          },
+          { status: 403 },
+        );
+      }
+      if (siteScope && siteScope.length && !siteScope.includes(assetSite)) {
+        /* The same words a missing entry gets: confirming that it exists at a
+           store they cannot see is itself a disclosure. */
+        return Response.json({ error: "That item is no longer in the bin." }, { status: 404 });
+      }
+    }
 
     const outcome = await restoreFromBin(db, orgId, id);
     if (!outcome.ok) {
@@ -269,6 +309,7 @@ const RESTORED_ENTITY_TYPES: Record<string, string> = {
   // The correction: a column can be in the bin now, and a restored one is a
   // `maintenance_board_column` in the audit trail like every change to it.
   column: "maintenance_board_column",
+  asset: "unit",
   /* W2C — a restored section is a `workspace_section` in the audit trail, the
      same name its create, rename and archive lines already carry. */
   section: "workspace_section",
@@ -442,6 +483,9 @@ export function purgeFor(db: Database): PurgeFn {
      */
     if (entityType === "board_view") return true;
     if (entityType === "column") return purgeColumn(db, organisationId, entityId);
+    if (entityType === ASSET_ENTITY_TYPE) {
+      return purgeAsset(db, organisationId, entityId);
+    }
     /*
      * W2C — a whole custom section, and everything its register owned.
      *
@@ -701,6 +745,48 @@ async function purgeGroup(db: Database, orgId: string, groupId: string) {
     .where(
       and(eq(maintenanceGroups.id, groupId), eq(maintenanceGroups.organisationId, orgId)),
     );
+
+  return true;
+}
+
+/**
+ * Destroy an asset: its files, its history, then the row.
+ *
+ * THE ORDER IS THE DESIGN, and it is `purgeColumn`'s order for the same reason.
+ * The R2 objects go first, then the `attachments` rows that point at them, then
+ * the history, then the asset. Deleting the rows first would leave bytes in the
+ * bucket that nothing in the database names any more — unreachable, unbilled
+ * for by anyone paying attention, and impossible to find later.
+ *
+ * ── CHILDREN ARE ORPHANED, NOT DESTROYED ───────────────────────────────────
+ *
+ * A cabinet purged for good leaves its LED strip and its lock on the register
+ * with `parent_unit_id` pointing at nothing, and every reader already renders
+ * that as "no parent" because the parent lookup is a scoped SELECT that simply
+ * returns no row. The alternative — cascading — would destroy four components
+ * somebody still has at the site because a fifth record was tidied away, and
+ * this is the one verb in the product with no undo.
+ *
+ * The row is NOT refused when children exist, which is where this differs from
+ * `purgeGroup`. A group with stragglers refuses because deleting it would take
+ * live placements off a board; an asset with children takes nothing with it,
+ * and refusing would wedge a thirty-day-old entry in the bin for ever.
+ */
+async function purgeAsset(db: Database, orgId: string, assetId: string) {
+  await purgeAttachmentsOf(db, orgId, eq(attachments.unitId, assetId));
+
+  await db
+    .delete(unitServiceRecords)
+    .where(
+      and(
+        eq(unitServiceRecords.unitId, assetId),
+        eq(unitServiceRecords.organisationId, orgId),
+      ),
+    );
+
+  await db
+    .delete(units)
+    .where(and(eq(units.id, assetId), eq(units.organisationId, orgId)));
 
   return true;
 }

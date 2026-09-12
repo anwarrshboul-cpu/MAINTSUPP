@@ -606,7 +606,7 @@ async function logChange(
      * from one of them. "It failed" has to mean nothing happened, and here it
      * did not. Same suffix shape as `newId` above.
      *
-     * `app/api/units/route.ts:110` builds its audit id the identical way and
+     * `app/api/assets/route.ts` once built its audit id the identical way and
      * has the identical defect; it is outside this workstream and unchanged.
      */
     id: `activity-site-${siteId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -783,7 +783,17 @@ export async function GET(request: Request) {
         db
           .select()
           .from(units)
-          .where(and(eq(units.organisationId, orgId), eq(units.siteId, id))),
+          /* A binned asset is not on the register, and the site's Overview
+             counts this list. Without the predicate the "assets" figure at the
+             top of a site kept counting rows the Assets tab below it had
+             already stopped listing. */
+          .where(
+            and(
+              eq(units.organisationId, orgId),
+              eq(units.siteId, id),
+              isNull(units.deletedAt),
+            ),
+          ),
         /*
          * THE DERIVED REGISTER, not the override table.
          *

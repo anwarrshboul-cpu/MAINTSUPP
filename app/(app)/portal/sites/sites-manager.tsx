@@ -245,6 +245,7 @@ export function SitesManager({
     return (
       <SiteDetail
         sectionKey={sectionKey}
+        onNotify={onNotify}
         siteId={mode.siteId}
         siteTypes={data?.siteTypes ?? []}
         statuses={data?.statuses ?? []}

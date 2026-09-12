@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, gte, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { AttachmentKind, MaintenanceRequest } from "../../lib/types";
 import { ensureDatabase } from "../../../db/init";
 import {
@@ -6,6 +19,8 @@ import {
   attachments,
   maintenanceBoardColumns,
   maintenanceRequests,
+  sites,
+  units,
 } from "../../../db/schema";
 import { boardKeyForRequest } from "../../lib/board-registry";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
@@ -253,7 +268,53 @@ async function listFiles(request: Request) {
    * A contractor does not need this endpoint: the share link returns the
    * photographs for its own job.
    */
-  const { db, orgId } = await scopedDb(request);
+  const { db, orgId, siteScope } = await scopedDb(request);
+
+  /*
+   * THE MEMBERSHIP'S SITE RESTRICTION REACHES THE DOCUMENTS, NOT ONLY THE ROWS.
+   *
+   * `siteScope` is an array of site ids a member is confined to, or null for
+   * unrestricted. Every asset query in `/api/assets` folds it in — but the
+   * documents ON those assets are served from here, and this route was scoped
+   * to the organisation alone. So a member confined to three stores could not
+   * see an asset at a fourth, and could list and download its photographs,
+   * invoices and certificates by asking for them directly.
+   *
+   * Both anchors are narrowed, and through a SUBQUERY over `sites` rather than
+   * a join, because this `where` is reused by the count query below and a join
+   * would have to be repeated identically in two places to stay true.
+   *
+   * A document with NEITHER anchor — a contractor's insurance certificate, a
+   * job's evidence — is deliberately untouched: it is not about a site, and a
+   * restriction on sites has nothing to say about it.
+   */
+  const permittedSites =
+    siteScope && siteScope.length
+      ? db
+          .select({ id: sites.id })
+          .from(sites)
+          .where(and(eq(sites.organisationId, orgId), inArray(sites.id, siteScope)))
+      : null;
+  const siteScopeFilter = permittedSites
+    ? or(
+        isNull(attachments.siteId),
+        inArray(attachments.siteId, permittedSites),
+      )
+    : undefined;
+  const unitScopeFilter = permittedSites
+    ? or(
+        isNull(attachments.unitId),
+        inArray(
+          attachments.unitId,
+          db
+            .select({ id: units.id })
+            .from(units)
+            .where(
+              and(eq(units.organisationId, orgId), inArray(units.siteId, siteScope ?? [])),
+            ),
+        ),
+      )
+    : undefined;
 
   /*
    * A column filter matches THE SAME rows the board counts for that cell.
@@ -317,6 +378,8 @@ async function listFiles(request: Request) {
 
   const where = and(
     eq(attachments.organisationId, orgId),
+    siteScopeFilter,
+    unitScopeFilter,
     requestId ? eq(attachments.requestId, requestId) : undefined,
     kind ? eq(attachments.kind, kind) : undefined,
     columnFilter,

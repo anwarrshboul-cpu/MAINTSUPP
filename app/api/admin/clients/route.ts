@@ -129,7 +129,9 @@ export async function GET(request: Request) {
       context.db
         .select({ organisationId: units.organisationId, value: count() })
         .from(units)
-        .where(inArray(units.organisationId, scope))
+        /* Binned assets are off the register, so the cross-client console does
+           not count them either. */
+        .where(and(inArray(units.organisationId, scope), isNull(units.deletedAt)))
         .groupBy(units.organisationId),
       context.db
         .select({

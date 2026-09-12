@@ -53,6 +53,7 @@ import {
   maintenanceGroups,
   maintenanceRequests,
   recycleBin,
+  units,
   workspaceSections,
 } from "../../db/schema";
 import { chunkIds, chunkRows } from "./sql-batching";
@@ -457,6 +458,9 @@ export async function sendBoardViewToBin(
  */
 export const SECTION_ENTITY_TYPE = "section";
 
+/** The asset register’s bin kind. See `sendAssetToBin`. */
+export const ASSET_ENTITY_TYPE = "asset";
+
 /** What a section bundle records, so restore and the bin's line can be exact. */
 export type SectionBundleSnapshot = {
   /** `section:north-region-jobs`. The bin entry's `entity_id`. */
@@ -779,6 +783,7 @@ export async function restoreFromBin(
   if (entry.entityType === "group") return restoreGroup(db, orgId, entry);
   if (entry.entityType === "board_view") return restoreBoardView(db, orgId, entry);
   if (entry.entityType === "column") return restoreColumn(db, orgId, entry);
+  if (entry.entityType === ASSET_ENTITY_TYPE) return restoreAsset(db, orgId, entry);
 
   return {
     ok: false,
@@ -788,6 +793,194 @@ export async function restoreFromBin(
 }
 
 type BinRow = typeof recycleBin.$inferSelect;
+
+/**
+ * AN ASSET TO THE BIN, with everything it owns left exactly where it is.
+ *
+ * ── WHAT IS DELIBERATELY NOT TOUCHED ───────────────────────────────────────
+ *
+ * Its history rows, its attachments, and its children. All three survive
+ * untouched, and each for its own reason:
+ *
+ *   · THE HISTORY is the record of what was installed and what replaced it.
+ *     A site that moved from transformer A to B must not lose A because
+ *     somebody binned the asset row, and restoring an asset to an empty
+ *     timeline would be a worse outcome than not restoring it at all.
+ *   · THE FILES stay anchored on `attachments.unit_id`. They are already
+ *     invisible everywhere the asset is, because every screen reaches them
+ *     through the asset, and destroying bytes on a REVERSIBLE verb is exactly
+ *     the mistake `data.delete` exists to keep behind a separate door.
+ *   · THE CHILDREN keep pointing at a parent they can no longer see, which
+ *     every reader renders as "no parent". Cascading them would destroy four
+ *     components because somebody binned the cabinet, and the bin's promise is
+ *     that one action removes one thing.
+ *
+ * ── THE SNAPSHOT ───────────────────────────────────────────────────────────
+ *
+ * `title` carries the asset number as well as the name, because the bin lists
+ * without joining and "LED strip" alone does not identify which of eleven. The
+ * placement records the site and the parent so a reader can see where it will
+ * go back to before they press restore.
+ *
+ * Returns false rather than throwing for an id in another workspace or already
+ * in the bin — deleting an already-deleted row is not a failure, which is the
+ * same contract `sendJobsToBin` keeps.
+ */
+/**
+ * The site an asset would be restored TO, given a bin entry id.
+ *
+ * Returns null when the entry is not an asset — which is every other kind, and
+ * is what lets the caller apply the asset-specific rule to asset entries only.
+ *
+ * Takes the BIN ENTRY id, not the asset id, because that is what the restore
+ * route is handed and resolving it anywhere else would mean two lookups of the
+ * same row. The site is read from the asset row rather than from the entry's
+ * placement snapshot: the caller uses it to decide whether a restore is
+ * allowed, and a snapshot is a record of where the asset used to be.
+ */
+export async function binnedAssetSite(
+  db: Database,
+  orgId: string,
+  entryId: string,
+): Promise<string | null> {
+  const [entry] = await db
+    .select({ entityId: recycleBin.entityId, entityType: recycleBin.entityType })
+    .from(recycleBin)
+    .where(and(eq(recycleBin.id, entryId), eq(recycleBin.organisationId, orgId)));
+  if (!entry || entry.entityType !== ASSET_ENTITY_TYPE) return null;
+
+  const [row] = await db
+    .select({ siteId: units.siteId })
+    .from(units)
+    .where(and(eq(units.id, entry.entityId), eq(units.organisationId, orgId)));
+  /*
+   * An asset entry whose row has gone is still an ASSET entry, and must not
+   * fall through to "not an asset" — that would hand it back to the blanket
+   * `board.edit` path. The empty string is a site nobody's scope contains, so
+   * the caller refuses; `restoreAsset` then answers 410 for the missing row if
+   * the caller does hold `sites.edit`.
+   */
+  return row?.siteId ?? "";
+}
+
+export async function sendAssetToBin(
+  db: Database,
+  orgId: string,
+  actor: BinActor,
+  assetId: string,
+): Promise<boolean> {
+  const [asset] = await db
+    .select({
+      id: units.id,
+      name: units.name,
+      assetNumber: units.assetNumber,
+      siteId: units.siteId,
+      parentUnitId: units.parentUnitId,
+      category: units.category,
+      status: units.status,
+      position: units.position,
+    })
+    .from(units)
+    .where(
+      and(
+        eq(units.id, assetId),
+        eq(units.organisationId, orgId),
+        isNull(units.deletedAt),
+      ),
+    );
+  if (!asset) return false;
+
+  const deletedAt = nowIso();
+
+  /*
+   * One live entry per thing — `recycle_bin_entity_idx` is UNIQUE on
+   * (organisation, entity_type, entity_id). An asset binned, restored and
+   * binned again would collide with its own first entry, so the stale one is
+   * cleared first. This is the same guard `recordSectionBundle` carries.
+   */
+  await db
+    .delete(recycleBin)
+    .where(
+      and(
+        eq(recycleBin.organisationId, orgId),
+        eq(recycleBin.entityType, ASSET_ENTITY_TYPE),
+        eq(recycleBin.entityId, asset.id),
+      ),
+    );
+
+  await db.insert(recycleBin).values({
+    id: newId(),
+    organisationId: orgId,
+    entityType: ASSET_ENTITY_TYPE,
+    entityId: asset.id,
+    /* No board. An asset belongs to a SITE, and `boardId` here means the
+       register a row was filed on — leaving it null keeps the bin's
+       board filter honest rather than inventing a board for it. */
+    boardId: null,
+    title: asset.assetNumber ? `${asset.assetNumber} — ${asset.name}` : asset.name,
+    summary: [asset.category, asset.status].filter(Boolean).join(" · ") || null,
+    placement: JSON.stringify({
+      siteId: asset.siteId,
+      parentUnitId: asset.parentUnitId,
+      position: asset.position,
+    }),
+    deletedByEmail: actor.email ?? null,
+    deletedByName: actor.displayName ?? null,
+    deletedAt,
+    expiresAt: expiryFrom(deletedAt),
+  });
+
+  await db
+    .update(units)
+    .set({ deletedAt, deletedBy: actor.email ?? null })
+    .where(and(eq(units.id, asset.id), eq(units.organisationId, orgId)));
+
+  return true;
+}
+
+/**
+ * An asset out of the bin.
+ *
+ * Clearing `deleted_at` is the whole restore, and that is a property of the
+ * design rather than a shortcut: nothing was moved out from under the row when
+ * it was binned, so nothing has to be put back. The one thing that can have
+ * changed in thirty days is the SITE — a site can be closed — and an asset is
+ * restored anyway, because a closed site's equipment is exactly the record
+ * somebody is looking for when they go to the bin.
+ */
+async function restoreAsset(
+  db: Database,
+  orgId: string,
+  entry: BinRow,
+): Promise<RestoreOutcome> {
+  const [asset] = await db
+    .select({ id: units.id, name: units.name, assetNumber: units.assetNumber })
+    .from(units)
+    .where(and(eq(units.id, entry.entityId), eq(units.organisationId, orgId)));
+
+  if (!asset) {
+    await db.delete(recycleBin).where(eq(recycleBin.id, entry.id));
+    return {
+      ok: false,
+      error: "That asset's row has already been removed, so there is nothing to restore.",
+      status: 410,
+    };
+  }
+
+  await db
+    .update(units)
+    .set({ deletedAt: null, deletedBy: null })
+    .where(and(eq(units.id, asset.id), eq(units.organisationId, orgId)));
+
+  await db.delete(recycleBin).where(eq(recycleBin.id, entry.id));
+
+  return {
+    ok: true,
+    entityType: ASSET_ENTITY_TYPE,
+    entityId: asset.id,
+    message: `${asset.assetNumber ?? asset.name} is back on the asset register.`,
+  };
+}
 
 async function restoreJob(
   db: Database,

@@ -4,6 +4,7 @@ import {
   activityLog,
   attachments,
   maintenanceRequests,
+  units,
 } from "../../../../db/schema";
 import type { MaintenanceRequest } from "../../../lib/types";
 import { resolveJobToken } from "../../../lib/job-tokens";
@@ -311,7 +312,7 @@ export async function GET(
     if (refusal) return refusal;
     throw error;
   }
-  const { db, orgId, authenticated } = scope;
+  const { db, orgId, authenticated, siteScope } = scope;
 
   const linkScope =
     !authenticated && shareToken ? await resolveJobToken(db, shareToken) : null;
@@ -335,6 +336,28 @@ export async function GET(
   // a token holder learns nothing about what exists outside their job.
   if (linkScope && record.requestId !== linkScope.requestId) {
     return Response.json({ error: "File not found." }, { status: 404 });
+  }
+
+  /*
+   * THE MEMBERSHIP'S SITE RESTRICTION, applied to the bytes and not only to the
+   * catalogue.
+   *
+   * `GET /api/files` now narrows its listing by `siteScope` — but an id is the
+   * capability for the bytes, so a listing filter alone would leave the
+   * documents readable to anyone who learned an id by another route. A member
+   * confined to three stores must not download the photographs, invoices or
+   * certificates filed against a fourth.
+   *
+   * Only a document that names a site or an asset is checked. One that names
+   * neither — a contractor's insurance certificate, a job's evidence — is not
+   * about a site, and a restriction on sites has nothing to say about it.
+   *
+   * Same 404 as a missing file, deliberately: a refusal that said "forbidden"
+   * would confirm the document exists.
+   */
+  if (!linkScope && siteScope && siteScope.length) {
+    const denied = await outsideSiteScope(db, orgId, siteScope, record);
+    if (denied) return Response.json({ error: "File not found." }, { status: 404 });
   }
 
   const storage = await bucket();
@@ -524,6 +547,35 @@ async function archiveInstead(denied: Response) {
  *    document, and the head — the row every register reads — is untouched. The
  *    audit event says which of the two happened.
  */
+/**
+ * Whether this document belongs to a site the caller may not reach.
+ *
+ * Two anchors, one question. `site_id` is the direct one; `unit_id` is resolved
+ * through the asset, because an asset's photographs carry the asset and often
+ * the site, and either alone has to be enough to refuse.
+ *
+ * Returns false for a document anchored to neither — see the call site.
+ */
+async function outsideSiteScope(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  siteScope: string[],
+  record: { siteId: string | null; unitId: string | null },
+): Promise<boolean> {
+  if (record.siteId) return !siteScope.includes(record.siteId);
+  if (record.unitId) {
+    const [asset] = await db
+      .select({ siteId: units.siteId })
+      .from(units)
+      .where(and(eq(units.id, record.unitId), eq(units.organisationId, orgId)))
+      .limit(1);
+    /* An asset that does not resolve is not proof of permission. */
+    if (!asset) return true;
+    return !siteScope.includes(asset.siteId);
+  }
+  return false;
+}
+
 export async function DELETE(
   request: Request,
   context: { params: Promise<{ id: string }> },

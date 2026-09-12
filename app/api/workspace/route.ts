@@ -620,7 +620,13 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         ),
       )
       .orderBy(sites.name),
-    db.select().from(units).where(eq(units.organisationId, orgId)).orderBy(units.name),
+    /* Binned assets are off the register, so they are not in the workspace
+       payload the Manage-data drawer draws from either. */
+    db
+      .select()
+      .from(units)
+      .where(and(eq(units.organisationId, orgId), isNull(units.deletedAt)))
+      .orderBy(units.name),
     /*
      * THE CANONICAL ROSTER, not every register — W2.
      *

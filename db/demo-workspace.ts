@@ -666,3 +666,585 @@ export async function seedDemoWorkspaceData(d1: D1DatabaseLike, today: string): 
       .run();
   }
 }
+
+
+/* ── The asset register ───────────────────────────────────────────────────── */
+
+/**
+ * THE ASSETS EACH DEMONSTRATION STORE IS FITTED WITH.
+ *
+ * Invented outright. Every brand below — Lumaflex, Voltarc, Wexford, Kestrel,
+ * Aldermoor, Northgate — belongs to no real company, and every model and part
+ * number is made up to look like one rather than to be one. Nothing here is
+ * copied from a customer's estate, which is the rule the whole of this file is
+ * written to.
+ *
+ * ── WHAT IT IS BUILT TO DEMONSTRATE ────────────────────────────────────────
+ *
+ * The catalogue is shaped by the questions the section exists to answer, so
+ * each one has a visible answer on screen:
+ *
+ *   · "What exact LED strip does this store use?"  — a component with five
+ *     typed specifications, a part number and a supplier.
+ *   · "What transformer should we order?"          — the driver beneath it,
+ *     with its own replacement part number and cost.
+ *   · "What paint reference is on this kiosk?"     — a Reference-kind asset
+ *     that is a specification rather than an object.
+ *   · "What is inside the display cabinet?"        — a four-child parent, which
+ *     is what the relationship model is for.
+ *   · "What is about to fail?"                     — two per store carry
+ *     `Needs replacement`, so the KPI tile and the filter have members.
+ *   · "What did we use before?"                    — a replacement event on the
+ *     driver, naming the part that came out.
+ *
+ * `parent` names another entry's `key` in this same list. Both rows are written
+ * in one pass over one site, so the parent always exists by the time the child
+ * references it, and both ids are derived from the same two strings.
+ */
+type DemoAsset = {
+  key: string;
+  name: string;
+  kind: "equipment" | "component" | "replacement_part" | "reference";
+  category: string;
+  parent?: string;
+  manufacturer?: string;
+  model?: string;
+  partNumber?: string;
+  specification?: string;
+  paintReference?: string;
+  colour?: string;
+  location: string;
+  supplierKey?: string;
+  supplierReference?: string;
+  replacementPartNumber?: string;
+  replacementModel?: string;
+  replacementCostPence?: number;
+  replacementNotes?: string;
+  quantity?: number;
+  /** `[name, value, unit]`, exactly the shape `parseSpecs` reads back. */
+  specs?: ReadonlyArray<readonly [string, string, string]>;
+  /** Sites whose copy of this asset is on borrowed time, by site key. */
+  needsReplacementAt?: readonly string[];
+};
+
+const DEMO_ASSETS: readonly DemoAsset[] = [
+  {
+    key: "cabinet",
+    name: "Front display cabinet",
+    kind: "equipment",
+    category: "Cabinetry & furniture",
+    manufacturer: "Wexford Shopfitting",
+    model: "WX-DC1800",
+    partNumber: "WX-DC1800-OAK",
+    location: "Front of house",
+    supplierKey: "joinery",
+    supplierReference: "WX-2231",
+    specification: "1800mm three-bay glazed display cabinet, oak veneer, integrated lighting",
+    specs: [
+      ["Width", "1800", "mm"],
+      ["Depth", "600", "mm"],
+      ["Height", "2100", "mm"],
+      ["Finish", "Oak veneer", ""],
+    ],
+  },
+  {
+    key: "ledstrip",
+    parent: "cabinet",
+    name: "LED strip — display cabinet",
+    kind: "component",
+    category: "Lighting",
+    manufacturer: "Lumaflex",
+    model: "LF-STRIP-3000",
+    partNumber: "LF-STRIP-3000-IP20-5M",
+    location: "Front of house",
+    supplierKey: "electrical",
+    supplierReference: "LUM-3000-5M",
+    specification: "24V warm white LED tape, 5 metre reel, cut to 300mm multiples",
+    replacementPartNumber: "LF-STRIP-3000-IP20-5M",
+    replacementModel: "Lumaflex LF-STRIP-3000",
+    replacementCostPence: 4250,
+    replacementNotes:
+      "Cut to 300mm multiples only. Order the 5m reel — the 2m reel is a different connector.",
+    quantity: 3,
+    specs: [
+      ["Voltage", "24", "V"],
+      ["Power", "14.4", "W/m"],
+      ["Colour temperature", "3000", "K"],
+      ["IP rating", "20", ""],
+      ["Width", "10", "mm"],
+    ],
+    needsReplacementAt: ["castle", "priory"],
+  },
+  {
+    key: "driver",
+    parent: "cabinet",
+    name: "LED driver / transformer",
+    kind: "component",
+    category: "Electrical",
+    manufacturer: "Voltarc",
+    model: "VT-LPV-60-24",
+    partNumber: "VT-LPV-60-24",
+    location: "Cabinet plinth",
+    supplierKey: "electrical",
+    supplierReference: "VLT-LPV6024",
+    specification: "Constant-voltage LED driver, IP67 potted, screw terminals",
+    replacementPartNumber: "VT-LPV-60-24",
+    replacementModel: "Voltarc VT-LPV-60-24",
+    replacementCostPence: 3180,
+    replacementNotes: "Direct swap for the older VT-LPV-40-24. Do not fit the 12V unit.",
+    specs: [
+      ["Input voltage", "240", "V"],
+      ["Output voltage", "24", "V"],
+      ["Power", "60", "W"],
+      ["IP rating", "67", ""],
+    ],
+  },
+  {
+    key: "lock",
+    parent: "cabinet",
+    name: "Cabinet lock",
+    kind: "component",
+    category: "Locks & security hardware",
+    manufacturer: "Kestrel Hardware",
+    model: "KH-CAM-22",
+    partNumber: "KH-CAM-22-CP",
+    location: "Front of house",
+    supplierKey: "locksmith",
+    supplierReference: "KES-CAM22",
+    specification: "22mm cam lock, chrome plated, keyed alike across the cabinet run",
+    replacementPartNumber: "KH-CAM-22-CP",
+    replacementCostPence: 1150,
+    replacementNotes: "Keyed alike — quote the suite number KA-4471 when ordering.",
+    quantity: 3,
+    specs: [
+      ["Barrel length", "22", "mm"],
+      ["Finish", "Chrome plated", ""],
+      ["Keying", "Keyed alike KA-4471", ""],
+    ],
+  },
+  {
+    key: "hinge",
+    parent: "cabinet",
+    name: "Cabinet hinge",
+    kind: "component",
+    category: "Cabinetry & furniture",
+    manufacturer: "Kestrel Hardware",
+    model: "KH-CONC-110",
+    partNumber: "KH-CONC-110-SC",
+    location: "Front of house",
+    supplierKey: "joinery",
+    supplierReference: "KES-C110",
+    specification: "110 degree concealed soft-close hinge, full overlay",
+    replacementPartNumber: "KH-CONC-110-SC",
+    replacementCostPence: 640,
+    quantity: 6,
+    specs: [
+      ["Opening angle", "110", "deg"],
+      ["Overlay", "Full", ""],
+      ["Cup diameter", "35", "mm"],
+    ],
+  },
+  {
+    key: "ac",
+    name: "Air conditioning indoor unit",
+    kind: "equipment",
+    category: "Air conditioning",
+    manufacturer: "Northgate Climate",
+    model: "NC-WM-12",
+    partNumber: "NC-WM-12K-R32",
+    location: "Shop floor, rear wall",
+    supplierKey: "hvac",
+    supplierReference: "NG-WM12",
+    specification: "12,000 BTU wall-mounted split indoor unit",
+    replacementPartNumber: "NC-FLT-12",
+    replacementNotes: "Filters are the replaceable part — the unit itself is a specialist job.",
+    replacementCostPence: 2400,
+    specs: [
+      ["Cooling capacity", "12000", "BTU"],
+      ["Refrigerant", "R32", ""],
+      ["Noise", "38", "dB"],
+    ],
+    needsReplacementAt: ["oldmill"],
+  },
+  {
+    key: "accontrol",
+    parent: "ac",
+    name: "Air conditioning wall controller",
+    kind: "component",
+    category: "Air conditioning",
+    manufacturer: "Northgate Climate",
+    model: "NC-CTRL-3",
+    partNumber: "NC-CTRL-3W",
+    location: "Shop floor, rear wall",
+    supplierKey: "hvac",
+    specification: "Wired wall controller with weekly schedule and lockout",
+    replacementPartNumber: "NC-CTRL-3W",
+    replacementCostPence: 8900,
+    specs: [
+      ["Supply", "12", "V"],
+      ["Cable", "4-core shielded", ""],
+    ],
+  },
+  {
+    key: "paint",
+    name: "Shop floor wall paint",
+    kind: "reference",
+    category: "Paint & finishes",
+    manufacturer: "Aldermoor Paints",
+    model: "Durable Matt",
+    paintReference: "AP 7016 Anthracite",
+    colour: "Anthracite grey",
+    location: "Shop floor",
+    supplierKey: "decorating",
+    supplierReference: "ALD-7016-M",
+    specification: "Scrubbable matt emulsion. Two coats over the existing finish.",
+    specs: [
+      ["Finish", "Matt", ""],
+      ["Coverage", "12", "m2/L"],
+      ["Coats", "2", ""],
+    ],
+  },
+  {
+    key: "tap",
+    name: "Back-of-house mixer tap",
+    kind: "equipment",
+    category: "Plumbing",
+    manufacturer: "Brackenhall",
+    model: "BH-MX-200",
+    partNumber: "BH-MX-200-CH",
+    location: "Staff kitchen",
+    supplierKey: "plumbing",
+    specification: "Single-lever monobloc mixer, chrome, 1/2 inch tails",
+    replacementPartNumber: "BH-CART-35",
+    replacementNotes: "The cartridge fails long before the tap. Order the 35mm cartridge first.",
+    replacementCostPence: 1490,
+    specs: [
+      ["Cartridge", "35", "mm"],
+      ["Connection", "1/2", "in"],
+    ],
+  },
+  {
+    key: "screen",
+    name: "Window display screen",
+    kind: "equipment",
+    category: "Displays & AV",
+    manufacturer: "Vantis Display",
+    model: "VD-43-COM",
+    partNumber: "VD-43-COM-P",
+    location: "Window bay",
+    supplierKey: "av",
+    supplierReference: "VAN-43P",
+    specification: "43 inch commercial portrait display, 24/7 rated, 700 nits",
+    replacementPartNumber: "VD-PSU-43",
+    replacementNotes: "Power supply is the usual failure. Panel replacement is a warranty claim.",
+    replacementCostPence: 7600,
+    specs: [
+      ["Diagonal", "43", "in"],
+      ["Brightness", "700", "nits"],
+      ["Orientation", "Portrait", ""],
+    ],
+  },
+  {
+    key: "shutter",
+    name: "Shopfront shutter motor",
+    kind: "equipment",
+    category: "Doors & shutters",
+    manufacturer: "Thorne Access",
+    model: "TA-RS-180",
+    partNumber: "TA-RS-180-M",
+    location: "Shopfront",
+    supplierKey: "shutters",
+    supplierReference: "THA-RS180",
+    specification: "180Nm tubular shutter motor with manual override",
+    replacementPartNumber: "TA-RS-180-M",
+    replacementCostPence: 31500,
+    replacementNotes: "Specialist fit. The override crank is a separate part, TA-CRANK-2.",
+    specs: [
+      ["Torque", "180", "Nm"],
+      ["Supply", "240", "V"],
+      ["Tube", "70", "mm"],
+    ],
+  },
+  {
+    key: "handle",
+    name: "Entrance door handle",
+    kind: "component",
+    category: "Doors & shutters",
+    manufacturer: "Kestrel Hardware",
+    model: "KH-PULL-600",
+    partNumber: "KH-PULL-600-SS",
+    location: "Main entrance",
+    supplierKey: "locksmith",
+    specification: "600mm stainless back-to-back pull handle",
+    replacementPartNumber: "KH-PULL-600-SS",
+    replacementCostPence: 4300,
+    specs: [
+      ["Length", "600", "mm"],
+      ["Finish", "Satin stainless", ""],
+    ],
+  },
+  {
+    key: "sparelock",
+    name: "Spare cabinet lock (held on site)",
+    kind: "replacement_part",
+    category: "Locks & security hardware",
+    manufacturer: "Kestrel Hardware",
+    model: "KH-CAM-22",
+    partNumber: "KH-CAM-22-CP",
+    location: "Stock room",
+    supplierKey: "locksmith",
+    specification: "Held against the display cabinet run. Suite KA-4471.",
+    quantity: 2,
+    specs: [["Keying", "Keyed alike KA-4471", ""]],
+  },
+];
+
+const assetId = (site: string, key: string) => `demo-asset-${site}-${key}`;
+
+/**
+ * WHICH DEMONSTRATION SUPPLIER SUPPLIES WHAT.
+ *
+ * The contractor rows this workspace already seeds are maintenance providers,
+ * and several of them legitimately also supply the parts they fit — which is
+ * exactly the case `supplier_contractor_id` exists for. Where a trade has no
+ * matching contractor the asset carries a typed supplier name instead, which
+ * is the other half of the same design.
+ *
+ * Resolved by TRADE rather than by a hardcoded contractor key, so this cannot
+ * drift if the contractor list above is edited.
+ */
+const DEMO_ASSET_SUPPLIERS: Readonly<Record<string, string>> = {
+  electrical: "Electrical",
+  locksmith: "Carpentry",
+  shutters: "Carpentry",
+  joinery: "Carpentry",
+  plumbing: "Plumbing",
+  /*
+   * `hvac`, `decorating` and `av` deliberately map to nothing. This workspace's
+   * seven contractors do not include an air-conditioning firm, a decorator or
+   * an AV installer, and inventing a link to the nearest one would be a lie in
+   * the demonstration data. Those assets carry a typed supplier name and no
+   * link — which is the other half of the supplier model, and worth showing.
+   */
+};
+
+/**
+ * Whether this workspace's assets have already been written.
+ *
+ * A SECOND guard, separate from `alreadySeeded`, and that separation is the
+ * whole reason this is its own exported function rather than more lines at the
+ * end of `seedDemoWorkspaceData`. That function returns early once the
+ * workspace has sites — which it already does, on every deployment that has
+ * booted since the workspace shipped — so assets appended inside it would never
+ * have been written to any database that already exists.
+ *
+ * One indexed primary-key lookup on the last asset of the last site, for the
+ * same reason its sibling is: this runs on the first request of every instance
+ * for the life of the deployment.
+ */
+async function assetsAlreadySeeded(d1: D1DatabaseLike): Promise<boolean> {
+  const row = (await d1
+    .prepare("SELECT id FROM units WHERE id = ? LIMIT 1")
+    .bind(
+      assetId(
+        DEMO_SITES[DEMO_SITES.length - 1].key,
+        DEMO_ASSETS[DEMO_ASSETS.length - 1].key,
+      ),
+    )
+    .first()) as { id?: string } | null;
+  return Boolean(row?.id);
+}
+
+/**
+ * The demonstration asset register, and the history behind two of its rows.
+ *
+ * Additive throughout and on the same terms as the rest of this file:
+ * `INSERT OR IGNORE` only, `DEMO_WORKSPACE_ID` named as a literal in every
+ * statement, every id beginning `demo-`, and no argument naming an
+ * organisation — so it cannot be pointed at a client even by mistake.
+ *
+ * Dates are offsets from the boot date, never calendar dates, so an install
+ * date does not drift into reading as absurd and a replacement recorded "eight
+ * months ago" stays eight months ago for ever.
+ */
+export async function seedDemoWorkspaceAssets(
+  d1: D1DatabaseLike,
+  today: string,
+): Promise<void> {
+  const demo = (await d1
+    .prepare("SELECT id FROM organisations WHERE id = ? AND status = 'active' LIMIT 1")
+    .bind(DEMO_WORKSPACE_ID)
+    .first()) as { id?: string } | null;
+  if (!demo?.id) return;
+  if (await assetsAlreadySeeded(d1)) return;
+
+  /*
+   * The suppliers, resolved once. A contractor whose trade matches an asset's
+   * becomes a real `supplier_contractor_id`; the rest fall back to the typed
+   * name. Read rather than assumed because a contractor row may have been
+   * edited, and a dangling link is worse than no link.
+   */
+  const supplierByTrade = new Map<string, { id: string; name: string }>();
+  for (const contractor of DEMO_CONTRACTORS) {
+    supplierByTrade.set(contractor.trade, {
+      id: contractorId(contractor.key),
+      name: contractor.name,
+    });
+  }
+
+  /*
+   * The three trades with no contractor behind them still have a supplier —
+   * they simply have a NAME and no link, which is the case the free-text half
+   * of the supplier model exists for and the case worth demonstrating.
+   */
+  const unlinkedSupplier: Readonly<Record<string, string>> = {
+    hvac: "Northgate Climate Direct",
+    decorating: "Aldermoor Paints Trade Counter",
+    av: "Vantis Display Supply",
+  };
+
+  for (const [siteIndex, site] of DEMO_SITES.entries()) {
+    for (const [index, asset] of DEMO_ASSETS.entries()) {
+      const trade = asset.supplierKey ? DEMO_ASSET_SUPPLIERS[asset.supplierKey] : undefined;
+      const supplier = trade ? supplierByTrade.get(trade) : undefined;
+      const needsReplacement = (asset.needsReplacementAt ?? []).includes(site.key);
+
+      await d1
+        .prepare(
+          `INSERT OR IGNORE INTO units
+             (id, organisation_id, site_id, name, category, kind, status,
+              manufacturer, model, serial_number, part_number, asset_number,
+              specification, colour, paint_reference, specs, quantity,
+              location_in_site, installed_at, warranty_expiry,
+              supplier, supplier_contractor_id, supplier_reference, supplier_url,
+              replacement_part_number, replacement_model, replacement_notes,
+              replacement_cost_pence, parent_unit_id, position,
+              created_by_email, updated_by_email)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          assetId(site.key, asset.key),
+          DEMO_WORKSPACE_ID,
+          siteId(site.key),
+          asset.name,
+          asset.category,
+          asset.kind,
+          needsReplacement ? "Needs replacement" : "Active",
+          asset.manufacturer ?? null,
+          asset.model ?? null,
+          `DEMO-${site.key.toUpperCase()}-${asset.key.toUpperCase()}`,
+          asset.partNumber ?? null,
+          /* A demonstration reference rather than the live counter: these rows
+             are written straight to the table, and taking numbers from
+             `organisations.asset_sequence` here would leave the workspace's own
+             next asset starting at 97. */
+          `AST-9${String(siteIndex * 100 + index).padStart(5, "0")}`,
+          asset.specification ?? null,
+          asset.colour ?? null,
+          asset.paintReference ?? null,
+          JSON.stringify(
+            (asset.specs ?? []).map(([key, value, unit]) => ({ key, value, unit })),
+          ),
+          asset.quantity ?? null,
+          asset.location,
+          day(today, -420 - index * 11),
+          day(today, 300 - index * 17),
+          supplier?.name ?? (asset.supplierKey ? unlinkedSupplier[asset.supplierKey] ?? null : null),
+          supplier?.id ?? null,
+          asset.supplierReference ?? null,
+          /* `example.com` is reserved and resolves to nothing anywhere, which
+             is what makes it safe to put in a link a demonstration audience
+             will click. */
+          asset.supplierReference
+            ? `https://parts.example.com/${asset.supplierReference.toLowerCase()}`
+            : null,
+          asset.replacementPartNumber ?? null,
+          asset.replacementModel ?? null,
+          asset.replacementNotes ?? null,
+          asset.replacementCostPence ?? null,
+          asset.parent ? assetId(site.key, asset.parent) : null,
+          index,
+          "demo@example.com",
+          "demo@example.com",
+        )
+        .run();
+    }
+  }
+
+  /*
+   * THE HISTORY, which is the half that proves the point.
+   *
+   * Two events per store on the LED driver: the original install, and the
+   * replacement that superseded it. `previous_detail` names the part that came
+   * out — a model the asset row no longer carries anywhere, because the row now
+   * describes what is fitted today. That is precisely the fact this table
+   * exists to keep, and the one an overwrite of `model` would have destroyed.
+   */
+  for (const site of DEMO_SITES) {
+    await d1
+      .prepare(
+        `INSERT OR IGNORE INTO unit_service_records
+           (id, organisation_id, unit_id, site_id, performed_at, event_type,
+            service_type, contractor_name, outcome, cost_pence,
+            previous_detail, replacement_detail, notes, recorded_by_email)
+         VALUES (?, ?, ?, ?, ?, 'Installed', 'Installation', ?, 'Completed', ?, NULL, ?, ?, ?)`,
+      )
+      .bind(
+        `demo-asset-event-${site.key}-driver-install`,
+        DEMO_WORKSPACE_ID,
+        assetId(site.key, "driver"),
+        siteId(site.key),
+        day(today, -1180),
+        "Brightwell Electrical Services",
+        3180,
+        "Voltarc VT-LPV-40-24",
+        "Fitted with the cabinet at first fit-out.",
+        "demo@example.com",
+      )
+      .run();
+
+    await d1
+      .prepare(
+        `INSERT OR IGNORE INTO unit_service_records
+           (id, organisation_id, unit_id, site_id, performed_at, event_type,
+            service_type, contractor_name, outcome, cost_pence,
+            previous_detail, replacement_detail, notes, recorded_by_email)
+         VALUES (?, ?, ?, ?, ?, 'Replaced', 'Callout', ?, 'Completed', ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        `demo-asset-event-${site.key}-driver-replaced`,
+        DEMO_WORKSPACE_ID,
+        assetId(site.key, "driver"),
+        siteId(site.key),
+        day(today, -240),
+        "Brightwell Electrical Services",
+        3180,
+        "Voltarc VT-LPV-40-24 (40W) — failed after flickering",
+        "Voltarc VT-LPV-60-24 (60W)",
+        "Uprated to 60W. The 40W unit was at its limit with the third bay added.",
+        "demo@example.com",
+      )
+      .run();
+
+    await d1
+      .prepare(
+        `INSERT OR IGNORE INTO unit_service_records
+           (id, organisation_id, unit_id, site_id, performed_at, event_type,
+            service_type, contractor_name, outcome, cost_pence,
+            previous_detail, replacement_detail, notes, recorded_by_email)
+         VALUES (?, ?, ?, ?, ?, 'Serviced', 'Annual', ?, 'Completed', ?, NULL, NULL, ?, ?)`,
+      )
+      .bind(
+        `demo-asset-event-${site.key}-ac-serviced`,
+        DEMO_WORKSPACE_ID,
+        assetId(site.key, "ac"),
+        siteId(site.key),
+        day(today, -95),
+        "Brightwell Electrical Services",
+        14500,
+        "Annual service. Filters cleaned, gas pressure within range.",
+        "demo@example.com",
+      )
+      .run();
+  }
+}

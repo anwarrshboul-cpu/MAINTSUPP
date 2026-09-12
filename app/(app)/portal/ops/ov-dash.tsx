@@ -751,13 +751,13 @@ export function OvDash({
     switch (key) {
       /*
        * ACTIVE UNITS opens the unit register, narrowed to the portfolio when
-       * one is chosen. `units-manager.tsx` now reads `site=` from the address
+       * one is chosen. `assets/assets-manager.tsx` reads `site=` from the address
        * bar, so the register shows the same estate the figure was counted over
        * instead of every unit in the workspace.
        */
       case "activeUnits": {
         /*
-         * ONE site or none. `units-manager.tsx` reads `site=` and its control
+         * ONE site or none. `assets-manager.tsx` reads `site=` and its control
          * is a single-site select, so a portfolio of several stores cannot be
          * expressed there — and sending a pipe-joined list would be a
          * parameter that screen deliberately ignores. A portfolio of exactly
