@@ -454,18 +454,36 @@ button.ops-meter__fill:focus-visible {
   min-width: 0;
 }
 
-/* Part 4: the state-tinted left edge, drawn as a pseudo-element so it follows
-   the radius instead of squaring the corners off. */
+/*
+ * Part 4: the state-tinted left edge, CLIPPED TO THE ROW'S OWN OUTLINE.
+ *
+ * It used to be a 3px-wide box carrying its own 12px corner radii, and a 12px
+ * corner does not fit in a 3px box. CSS scales overlapping radii down by the
+ * ratio the box can hold — 3/12 here — so the strip drew a 3px curve against
+ * the row's 12px one and stood outside it at both left corners: the red
+ * slivers above and below the rounded corners on the Compliance register, and
+ * the same fault on every Sites and Contractors row.
+ *
+ * So the edge is no longer a box of its own. The pseudo-element covers the
+ * row's whole BORDER box — `inset: -1px`, because an absolutely positioned
+ * child is placed against the PADDING box and the border is the 1px outside it
+ * — and inherits the row's radius, which makes its outline exactly the one the
+ * row paints. The accent is then an INSET shadow, and an inset shadow is
+ * clipped to that outline, so the edge follows the curve at both corners and
+ * cannot be drawn outside the shape it belongs to whatever the radius becomes.
+ *
+ * `pointer-events: none` keeps the row, its name button and its actions menu
+ * clickable through the edge. NO stacking context here, on purpose: the row's
+ * actions menu (`.ops-menu__list`, z-index 30) has to open over the rows below
+ * it, and isolating the row would trap it inside this one.
+ */
 .ops-row::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  border-top-left-radius: 12px;
-  border-bottom-left-radius: 12px;
-  background: var(--ops-edge, var(--line));
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: inset 3px 0 0 var(--ops-edge, var(--line));
+  pointer-events: none;
 }
 
 .ops-row:hover,
@@ -745,18 +763,44 @@ button.ops-meter__fill:focus-visible {
   border: 1px solid var(--line);
   border-radius: 12px;
   position: relative;
+  /*
+   * A STACKING CONTEXT, SO THE EDGE'S z-index IS A PRIVATE NUMBER.
+   *
+   * The edge below has to paint over this card's own sticky header (z-index 2)
+   * or it arrives as two crescents with the header's ground between them. A
+   * bare `z-index: 3` would say that about the whole page as well — and the
+   * responsibility queue floats a sticky bulk bar (z-index 2) above cards of
+   * exactly this class, which every edge would then have crossed on its way
+   * under. Isolating the group keeps the 3 inside the card. Nothing in a group
+   * opens outside it: the actions menu that must escape (`.ops-menu__list`,
+   * z-index 30) belongs to `.ops-row`, which is deliberately not isolated.
+   */
+  isolation: isolate;
 }
 
+/*
+ * The state-tinted left edge: the site's completion band on the Compliance
+ * register, the group's accent elsewhere. Same geometry as `.ops-row::before`
+ * and for the same reason — the note there explains why a 3px box cannot hold
+ * a 12px corner, and why an inset shadow on the border box can.
+ *
+ * The colour is never the only carrier of the meaning: the header prints the
+ * percentage and what is outstanding in words, right beside it.
+ */
 .ops-group::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  border-top-left-radius: 12px;
-  border-bottom-left-radius: 12px;
-  background: var(--ops-edge, var(--accent-fg));
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: inset 3px 0 0 var(--ops-edge, var(--accent-fg));
+  /*
+   * Over the sticky header (z-index 2), so the edge is ONE continuous line
+   * down the card instead of two crescents; `pointer-events: none` is what
+   * keeps the header underneath it clickable, and the group's own
+   * `isolation: isolate` is what keeps this 3 from meaning anything outside.
+   */
+  pointer-events: none;
+  z-index: 3;
 }
 
 .ops-group__head {

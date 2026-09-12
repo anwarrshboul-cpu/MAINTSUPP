@@ -132,6 +132,73 @@ export function ovPercent(value: number, total: number): number {
 }
 
 /**
+ * The smallest mark a non-zero slice may be drawn as, in CSS pixels of ring —
+ * the arc that is actually painted, after the segment gap has been taken out of
+ * it. Four pixels against a 15-24px stroke is a tick a reader can see and a
+ * pointer can hit; it is not a share, and nothing but the geometry is allowed
+ * to read it as one.
+ */
+export const OV_MIN_SLICE_MARK_PX = 4;
+
+/**
+ * WHAT THE RING IS DRAWN FROM, WHICH IS NOT WHAT IT SAYS.
+ *
+ * A share of one in three hundred is 1.4px of a 427px ring, and a 2px gap is
+ * taken out of every segment: the arc came out negative, `OvArc` drew nothing,
+ * and a category with one job in it looked exactly like a category with none.
+ * That is the one thing a picture of counts may never say.
+ *
+ * So the geometry is computed from DISPLAY fractions. Every non-zero slice is
+ * lifted to at least `minShare` of the turn, and what that costs is taken from
+ * the slices that can afford it in proportion to their own size, so the
+ * fractions still sum to 1 and the ring still closes on itself. Lifting one
+ * slice shrinks the others, which can push the next one under the floor too,
+ * so the set of lifted slices is grown until it stops growing.
+ *
+ * A ZERO STAYS A ZERO. It is the only value the ring is allowed to say nothing
+ * about, and a floor that lifted it would be inventing a category.
+ *
+ * And where the floor cannot be paid for — more non-zero slices than a turn has
+ * room to give a minimum to — the TRUE fractions come back unchanged. A crowded
+ * ring that is honest beats a tidy one that is not.
+ *
+ * Nothing here touches a number a reader sees: every percentage, legend figure,
+ * tooltip line and accessible name in this file divides the real value by the
+ * real sum. This feeds `useOvSweep` and nothing else.
+ */
+export function ovDisplayFractions(values: number[], minShare: number): number[] {
+  const clean = values.map((value) => (Number.isFinite(value) && value > 0 ? value : 0));
+  const total = clean.reduce((running, value) => running + value, 0);
+  const truth = clean.map((value) => ovFraction(value, total));
+  const present = clean.filter((value) => value > 0).length;
+  /* One slice is a closed ring, and a floor nobody can pay for is not a floor. */
+  if (!Number.isFinite(minShare) || minShare <= 0) return truth;
+  if (present < 2 || present * minShare >= 1) return truth;
+
+  const lifted = new Set<number>();
+  for (;;) {
+    const budget = 1 - lifted.size * minShare;
+    let rest = 0;
+    for (let index = 0; index < clean.length; index += 1) {
+      if (clean[index] > 0 && !lifted.has(index)) rest += clean[index];
+    }
+    if (budget <= 0 || rest <= 0) return truth;
+    let grew = false;
+    for (let index = 0; index < clean.length; index += 1) {
+      if (clean[index] <= 0 || lifted.has(index)) continue;
+      if ((budget * clean[index]) / rest < minShare) {
+        lifted.add(index);
+        grew = true;
+      }
+    }
+    if (grew) continue;
+    return clean.map((value, index) =>
+      value <= 0 ? 0 : lifted.has(index) ? minShare : (budget * value) / rest,
+    );
+  }
+}
+
+/**
  * The top of an axis, rounded up to a number a reader can divide into quarters.
  *
  * The ladder is 1 / 2 / 4 / 5 / 10 and it is shorter than the usual one on
@@ -718,7 +785,27 @@ export function Donut({
 
   const values = slices.map((slice) => Math.max(0, Number.isFinite(slice.value) ? slice.value : 0));
   const sum = values.reduce((running, value) => running + value, 0);
-  const eased = useOvSweep(values.map((value) => ovFraction(value, sum)));
+
+  /*
+   * THE GAP IS TAKEN FROM EACH SEGMENT, NOT ADDED BETWEEN THEM, so the ring
+   * still closes on itself and the shares still read true. Only drawn when two
+   * or more segments are present — a single full ring with a notch in it would
+   * look like a missing sliver of data.
+   */
+  const circumference = 2 * Math.PI * radius;
+  const drawnSegments = values.filter((value) => value > 0).length;
+  const gapTurn = gapPx > 0 && drawnSegments > 1 ? gapPx / circumference : 0;
+
+  /*
+   * DRAWING fractions, not the numbers — see `ovDisplayFractions`. A slice has
+   * to survive its own gap and still leave something visible behind, so the
+   * floor is the gap plus the smallest mark worth drawing. The tooltip, the
+   * percentage, the legend and the accessible name below all divide `values`
+   * by `sum` and never see this.
+   */
+  const eased = useOvSweep(
+    ovDisplayFractions(values, gapTurn + OV_MIN_SLICE_MARK_PX / circumference),
+  );
 
   /*
    * A plain loop rather than a `map` over a running total: the React Compiler
@@ -731,16 +818,6 @@ export function Donut({
     starts.push(cursor);
     cursor += eased[index];
   }
-
-  /*
-   * THE GAP IS TAKEN FROM EACH SEGMENT, NOT ADDED BETWEEN THEM, so the ring
-   * still closes on itself and the shares still read true. Only drawn when two
-   * or more segments are present — a single full ring with a notch in it would
-   * look like a missing sliver of data.
-   */
-  const circumference = 2 * Math.PI * radius;
-  const drawnSegments = values.filter((value) => value > 0).length;
-  const gapTurn = gapPx > 0 && drawnSegments > 1 ? gapPx / circumference : 0;
 
   const readout = slices
     .map((slice, index) => `${slice.label} ${write(values[index])} (${ovPercent(values[index], sum)}%)`)
