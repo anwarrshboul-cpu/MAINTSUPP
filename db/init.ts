@@ -1,4 +1,10 @@
 import { seedColumns, seedGroups, seedUiColumns } from "./seed-board-structure";
+import {
+  DEMO_WORKSPACE_ID,
+  ensureDemoWorkspaceOrganisation,
+  seedDemoWorkspaceData,
+} from "./demo-workspace";
+import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
 import { getD1 } from ".";
 import { defaultBoardOptions } from "./seed-options";
@@ -50,6 +56,16 @@ async function initialize() {
    * maintenance board for every organisation that exists by then.
    */
   await ensureDemoClientOrganisation(d1);
+  /*
+   * THE DEMONSTRATION WORKSPACE — see `./demo-workspace.ts` for why it is here
+   * and not in `app/lib/seed/`. Created in the same place and for the same
+   * reason as the tenant above: the stages below fan out across every active
+   * organisation, so a tenant that exists by now is given its board, its status
+   * map, its meters and its Store Documentation register through the product's
+   * own path rather than a copy of it. The DATA is seeded at the end of this
+   * function, once the structure it references exists.
+   */
+  await ensureDemoWorkspaceOrganisation(d1);
   await ensureTenantIdentities(d1);
 
   await ensureStageTwoFoundation(d1);
@@ -107,6 +123,25 @@ async function initialize() {
   await ensureInvoiceTracker(d1);
 
   await repairOrphanedSectionBoards(d1);
+
+  /*
+   * THE DEMONSTRATION WORKSPACE'S DATA — last, and additive only.
+   *
+   * Last because every row it writes points at something the stages above
+   * create: the board its jobs are filed on, the groups they sit in, the status
+   * map that decides what "open" means. Its own board structure is seeded here
+   * rather than by the fan-out, with the SIX OPERATIONAL LANES only
+   * (`JOBS_TEMPLATE_GROUP_KEYS`) — the canonical board's other 32 groups are
+   * 28 lanes named after this client's own stores and three dated month
+   * archives, and a workspace shown to a stranger should carry neither.
+   *
+   * Both calls are guarded and idempotent: `seedBoardStructure` is
+   * `INSERT OR IGNORE` throughout, and `seedDemoWorkspaceData` returns on a
+   * single primary-key lookup once the workspace is populated. Nothing here
+   * touches a row belonging to any other organisation.
+   */
+  await seedBoardStructure(d1, DEMO_WORKSPACE_ID, "maintenance", JOBS_TEMPLATE_GROUP_KEYS);
+  await seedDemoWorkspaceData(d1, new Date().toISOString().slice(0, 10));
 }
 
 /**
