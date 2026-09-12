@@ -599,6 +599,41 @@ const liveWorkOrder = (orgId: string) =>
     jobsBoardCondition(),
   );
 
+/**
+ * THE SNAPSHOT IS ONE SCREEN'S WORTH OF EVERY SITE, SO IT IS SCOPED TOO.
+ *
+ * `/api/sites` sends a restricted member their own sites; this endpoint sends
+ * the same estate under a different name, and an independent review found it
+ * still answering for the whole organisation. `readWorkspace`'s own note above
+ * the site query lists what reads this list: the dashboard's site count, the
+ * Sites tab of the manager, and the location select on Compliance, Units and
+ * Planned. So the leak was not a payload nobody looks at — it was every one of
+ * those surfaces.
+ *
+ * The confinement is applied to the four collections that carry a site, in one
+ * place, immediately before the snapshot is returned: filtering the finished
+ * payload cannot miss a derived field the way scoping four queries separately
+ * could, and every count in it (`openRequests`, the compliance rollup) is
+ * already computed per site and travels with its own row.
+ *
+ * `contractors`, `team`, `settings` and `activity` are organisation-level and
+ * are deliberately not filtered: a site scope says which STORES a member may
+ * see, and narrowing the roster by it would be inventing a rule nothing asked
+ * for. (The team roster's own exposure to a `client` is a separate,
+ * pre-existing question about capabilities, recorded in this batch's report.)
+ */
+function confineSnapshot(snapshot: WorkspaceSnapshot, siteScope: string[] | null): WorkspaceSnapshot {
+  const allowed = memberSiteSet(siteScope);
+  if (!allowed) return snapshot;
+  return {
+    ...snapshot,
+    stores: snapshot.stores.filter((store) => withinMemberScope(allowed, store.id)),
+    compliance: snapshot.compliance.filter((record) => withinMemberScope(allowed, record.siteId)),
+    units: snapshot.units.filter((unit) => withinMemberScope(allowed, unit.siteId)),
+    planned: snapshot.planned.filter((item) => withinMemberScope(allowed, item.siteId)),
+  };
+}
+
 async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceSnapshot> {
   await seedWorkspaceIfEmpty(db, orgId);
   const [
@@ -1266,8 +1301,8 @@ async function logChange(db: WorkspaceDb, orgId: string, entity: WorkspaceEntity
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
-    return Response.json({ workspace: await readWorkspace(db, orgId) });
+    const { db, orgId, siteScope } = await scopedDb(request);
+    return Response.json({ workspace: confineSnapshot(await readWorkspace(db, orgId), siteScope) });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
@@ -1345,6 +1380,67 @@ async function complianceScopeRefusal(
     .limit(1);
   if (!row || !withinMemberScope(allowed, row.siteId)) {
     return Response.json({ error: "Compliance record not found." }, { status: 404 });
+  }
+  return null;
+}
+
+/**
+ * A SITE OUTSIDE THE MEMBER'S SCOPE IS NOT FOUND — for a site, a unit or a
+ * planned visit, on every verb.
+ *
+ * `complianceScopeRefusal` closed this for compliance records; an independent
+ * review pointed out that `entity: "site" | "unit" | "planned"` all carry a
+ * site and none of them checked it, which is the same hole in the same file. A
+ * restricted editor could rename or close a store they cannot see, or attach a
+ * unit or a scheduled visit to one.
+ *
+ * Both ends are checked, because they escape in opposite directions:
+ *
+ *   · the SUPPLIED site — moving a unit onto a store outside the scope;
+ *   · the STORED site — editing a unit that already lives at one. For
+ *     `entity: "site"` the record IS the site, so its own id is the stored one.
+ *
+ * "Not found" rather than "forbidden": the id is not a capability, and the
+ * answer must not confirm that the row exists somewhere the caller cannot see.
+ */
+async function siteScopeRefusal(
+  db: WorkspaceDb,
+  orgId: string,
+  memberScope: string[] | null,
+  entity: WorkspaceEntity,
+  recordId: string | null,
+  suppliedSiteId: string | null,
+): Promise<Response | null> {
+  const allowed = memberSiteSet(memberScope);
+  if (!allowed) return null;
+  if (suppliedSiteId && !withinMemberScope(allowed, suppliedSiteId)) {
+    return Response.json({ error: "Site not found." }, { status: 404 });
+  }
+  if (!recordId) return null;
+  if (entity === "site") {
+    return withinMemberScope(allowed, recordId)
+      ? null
+      : Response.json({ error: "Site not found." }, { status: 404 });
+  }
+  if (entity === "unit") {
+    const [row] = await db
+      .select({ siteId: units.siteId })
+      .from(units)
+      .where(and(eq(units.id, recordId), eq(units.organisationId, orgId)))
+      .limit(1);
+    return row && withinMemberScope(allowed, row.siteId)
+      ? null
+      : Response.json({ error: "Unit not found." }, { status: 404 });
+  }
+  if (entity === "planned") {
+    const [row] = await db
+      .select({ siteId: plannedMaintenance.siteId })
+      .from(plannedMaintenance)
+      .where(and(eq(plannedMaintenance.id, recordId), eq(plannedMaintenance.organisationId, orgId)))
+      .limit(1);
+    return row && withinMemberScope(allowed, row.siteId)
+      ? null
+      : Response.json({ error: "Planned task not found." }, { status: 404 });
   }
   return null;
 }
@@ -1487,6 +1583,8 @@ export async function POST(request: Request) {
       const siteId = text(data.siteId, 100);
       if (!name || !siteId) throw new Error("A unit name and site are required.");
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, null, siteId);
+      if (outOfScope) return outOfScope;
       const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
       if (badReference) return badReference;
       id = newId("unit", name);
@@ -1593,6 +1691,8 @@ export async function POST(request: Request) {
       const unitId = optionalText(data.unitId, 100);
       const contractorId = optionalText(data.contractorId, 100);
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, null, siteId);
+      if (outOfScope) return outOfScope;
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
         { kind: "unit", value: unitId },
@@ -2904,6 +3004,10 @@ export async function PATCH(request: Request) {
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
     if (refusal) return refusal;
     if (entity === "site") {
+      /* Before anything is written, and before the record is described back:
+         a store outside the member's sites is not found. See `siteScopeRefusal`. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, "siteId" in data ? text(data.siteId, 100) || null : null);
+      if (outOfScope) return outOfScope;
       /*
        * Only what was sent — see `supplied`. `name`, `type`, `region`,
        * `lifecycle` and `address` are all NOT NULL on `sites`, and "" satisfies
@@ -3136,6 +3240,10 @@ export async function PATCH(request: Request) {
            requirement as applicable and not-applicable at once. */
         notRequired: state === "Not required" || isNotApplicable(dutyHolder), ...(dutyHolderSent ? { dutyHolder: dutyHolder || null } : {}), ...(providerSent ? { providerContractorId: providerContractorId || null } : {}), updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     } else if (entity === "unit") {
+      /* Before anything is written, and before the record is described back:
+         a store outside the member's sites is not found. See `siteScopeRefusal`. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, "siteId" in data ? text(data.siteId, 100) || null : null);
+      if (outOfScope) return outOfScope;
       /*
        * Only what was sent — see `supplied`. `siteId`, `name`, `category` and
        * `status` are NOT NULL, so a partial PATCH used to blank them, and a
@@ -3381,6 +3489,10 @@ export async function PATCH(request: Request) {
        */
       await writeContractorCertifications(db, orgId, id, data);
     } else if (entity === "planned") {
+      /* Before anything is written, and before the record is described back:
+         a store outside the member's sites is not found. See `siteScopeRefusal`. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, "siteId" in data ? text(data.siteId, 100) || null : null);
+      if (outOfScope) return outOfScope;
       /*
        * Only what was sent — see `supplied`. Every column here except `unitId`,
        * `contractorId` and `lastCompletedAt` is NOT NULL, so a partial PATCH
@@ -3539,6 +3651,9 @@ export async function DELETE(request: Request) {
      * `{ other, Closed, false }` for an 'other' one.
      */
     if (entity === "site") {
+      /* A store, unit or visit outside the member's sites is not found. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, null);
+      if (outOfScope) return outOfScope;
       /* W2C — the same register check as the edit, and for the same reason:
          closing somebody else's register's site through this screen would be a
          write across registers. `siteInRegister` also replaces the old
@@ -3566,7 +3681,12 @@ export async function DELETE(request: Request) {
       if (outOfScope) return outOfScope;
       await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     }
-    else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
+    else if (entity === "unit") {
+      /* A store, unit or visit outside the member's sites is not found. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, null);
+      if (outOfScope) return outOfScope;
+      await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
+    }
     else if (entity === "contractor") {
       /* Same register check as the edit, and for the same reason: inactivating
          somebody else's contractor through this screen would be a write across
@@ -3597,7 +3717,12 @@ export async function DELETE(request: Request) {
           ),
         );
     }
-    else if (entity === "planned") await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
+    else if (entity === "planned") {
+      /* A store, unit or visit outside the member's sites is not found. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, null);
+      if (outOfScope) return outOfScope;
+      await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
+    }
     else if (entity === "member") await db.update(users).set({ active: false, updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     else return Response.json({ error: "This record cannot be archived." }, { status: 400 });
 

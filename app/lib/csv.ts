@@ -85,8 +85,45 @@ export function parseCsvObjects(input: string): Array<Record<string, string>> {
   });
 }
 
+/** Exactly a number: optional sign, digits, optional single decimal part. */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
+/** The characters a spreadsheet treats as the start of a formula. */
+const FORMULA_STARTERS = ["=", "+", "-", "@", "\t", "\r"];
+
+/**
+ * A CELL THAT LOOKS LIKE A FORMULA IS MADE TO LOOK LIKE TEXT.
+ *
+ * Every export this writer produces is meant to be opened in Excel, and Excel
+ * executes a cell beginning `=`, `+`, `-`, `@`, tab or carriage return. The
+ * content of those cells is not ours: `POST /api/report-job` takes a title from
+ * an ANONYMOUS visitor — `scopedDb(request, { allowAnonymous: true })`, filed
+ * onto the primary organisation's Jobs board — and `submissionTitle` trims it
+ * and cuts it to 200 characters without touching a single character. So a
+ * stranger could put `=cmd|'/c calc'!A0` on the board and wait for somebody to
+ * export it; the payload runs on the reader's machine, not the server, which is
+ * why nothing on the way in ever noticed.
+ *
+ * A leading apostrophe is the neutralisation every spreadsheet understands.
+ * `PLAIN_NUMBER` is checked first so that a negative cost stays a number a
+ * spreadsheet can add up — `-` is both a formula starter and a minus sign, and
+ * quoting every negative figure as text would break the arithmetic these
+ * exports exist for.
+ *
+ * The same rule, character for character, is in `finance/exports.ts`, and the
+ * two are deliberately not shared: the finance analytics suite transpiles that
+ * module on its own and rewrites only its `./model` and `./rules` specifiers,
+ * so an import of this file would not resolve there. If one changes, change
+ * both.
+ */
+export function neutraliseCsvCell(raw: string): string {
+  if (!raw) return raw;
+  if (PLAIN_NUMBER.test(raw)) return raw;
+  return FORMULA_STARTERS.includes(raw[0]) ? `'${raw}` : raw;
+}
+
 function escapeCell(value: unknown) {
-  const text = value === null || value === undefined ? "" : String(value);
+  const text = neutraliseCsvCell(value === null || value === undefined ? "" : String(value));
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

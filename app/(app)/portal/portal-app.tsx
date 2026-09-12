@@ -2029,15 +2029,25 @@ export default function PortalApp({
   const drillApplies = drillReadsThisBoard(activeSurface, activeCustom, JOBS_BOARD_KEY);
   /* The organisation's job types name a Type chip. Fetched only when a drill
      could carry one, not on every page load of the shell. */
-  const { jobTypes: drillJobTypes } = useJobTypes(drillApplies && routeSearch.replace(/^\?/, "") !== "");
+  const { jobTypes: drillJobTypes, loaded: drillJobTypesLoaded } = useJobTypes(
+    drillApplies && routeSearch.replace(/^\?/, "") !== "",
+  );
   const drill = useMemo(() => {
     /* The whole list goes in as the population: a repeat is judged against the
        job before it, which the filtered list may not contain. The organisation's
        job types go in beside it so a `type=` chip can name a type instead of
-       printing its id. */
-    const context = { population: requests, jobTypes: drillJobTypes };
+       printing its id.
+       `undefined` UNTIL THE READ SUCCEEDS, never the empty array it starts at.
+       `jobTypeMatcher` reads a list as the whole truth about this organisation:
+       handed `[]` it concludes there are no types, matches nothing, and skips
+       the deterministic-id fallback that exists for exactly this moment. The
+       board would then open at 0 of 38 under a "Type: Reactive" banner for the
+       one frame before the fetch lands — and permanently if `/api/job-types`
+       answers 503, which is the refusal that route carries a `busyRefusal`
+       for. Absent, the three default types are still recognised by their ids. */
+    const context = { population: requests, jobTypes: drillJobTypesLoaded ? drillJobTypes : undefined };
     return readDrillFilter(new URLSearchParams(drillApplies ? routeSearch : ""), new Date(), context);
-  }, [drillApplies, routeSearch, requests, drillJobTypes]);
+  }, [drillApplies, routeSearch, requests, drillJobTypes, drillJobTypesLoaded]);
   const boardRequests = useMemo(
     () => (drill.empty ? requests : requests.filter(drill.matches)),
     [drill, requests],
