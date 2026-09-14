@@ -164,6 +164,27 @@ export type ComplianceFilters = {
    * built before the link existed still type-checks.
    */
   providers?: string[];
+  /**
+   * A RENEWAL GROUP — `?renewal=contractor:<id>` or `?renewal=text:<label>`.
+   *
+   * The "Who's renewing" donut groups a renewal by the CONTRACTOR record when
+   * one is linked and by the normalised responsibility TEXT when none is, and
+   * those two are different dimensions. Every other slice could be expressed
+   * with the dimensions that already exist, but the "Other" slice — the folded
+   * tail — is genuinely an OR ACROSS them: "these three contractors, or these
+   * two roles". `contractor` and `who` are AND-ed like every pair of
+   * dimensions here, so the tail could only be written as
+   * `contractor: [...ids, __none__]`, and `__none__` matches EVERY unlinked
+   * renewal in scope rather than the tail's two. A tail of 5 opened a register
+   * of 45.
+   *
+   * So the donut's own grouping key travels as a dimension of its own. It
+   * makes every renewal slice exact by construction rather than only the ones
+   * that happen to be expressible, and it is the one thing that can be exact:
+   * the register recomputes the same key per row with the same function the
+   * donut grouped by.
+   */
+  renewalGroups?: string[];
 };
 
 export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
@@ -178,6 +199,7 @@ export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
   dueFrom: null,
   dueTo: null,
   providers: [],
+  renewalGroups: [],
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -269,7 +291,35 @@ export function parseComplianceFilters(url: URL): ComplianceFilters {
     dueFrom: DAY.test(dueFrom) ? dueFrom : null,
     dueTo: DAY.test(dueTo) ? dueTo : null,
     providers: list(params, "contractor"),
+    renewalGroups: list(params, "renewal"),
   };
+}
+
+/** Trim, lower-case, collapse whitespace — the shared label normalisation. */
+function normaliseLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * THE KEY THE "WHO'S RENEWING" DONUT GROUPS BY, recomputed from a row.
+ *
+ * One function so the donut and the register cannot disagree about which
+ * slice a requirement belongs to. A linked renewal is keyed by the contractor
+ * RECORD, so two contractors sharing a name stay two slices and a renamed
+ * contractor keeps its own; an unlinked one by the normalised responsibility
+ * text, which is all there is to group it by.
+ *
+ * A row with neither — no contractor and no responsibility — is the donut's
+ * "Unassigned" slice, and returns `""`, a key no group is ever built with, so
+ * it can never be swept up by a group filter.
+ */
+export function renewalGroupKey(row: {
+  providerContractorId?: string | null;
+  responsibility: string;
+}): string {
+  if (row.providerContractorId) return `contractor:${row.providerContractorId}`;
+  const raw = (row.responsibility ?? "").trim();
+  return raw ? `text:${normaliseLabel(raw)}` : "";
 }
 
 /**
@@ -352,6 +402,7 @@ export function filterComplianceRows(
   const kinds = new Set(filters.kinds);
   const who = new Set(filters.responsibilities);
   const providers = new Set(filters.providers ?? []);
+  const renewalGroups = new Set(filters.renewalGroups ?? []);
   const bands = filters.dueBands ?? [];
   const dueFrom = filters.dueFrom ?? null;
   const dueTo = filters.dueTo ?? null;
@@ -373,6 +424,7 @@ export function filterComplianceRows(
     ) {
       return false;
     }
+    if (renewalGroups.size && !renewalGroups.has(renewalGroupKey(row))) return false;
     if (filters.scored && !isScoredRow(row)) return false;
     if (filters.due.length || bands.length) {
       const matches =

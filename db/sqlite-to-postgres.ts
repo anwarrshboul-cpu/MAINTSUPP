@@ -332,6 +332,16 @@ export const BOOLEAN_COLUMN_NAMES: ReadonlySet<string> = new Set(
  *
  * The one consumer is `replace()` in `rewriteFunctions`. See it for what goes
  * wrong without this.
+ *
+ * ONE NAME NO LONGER SATISFIES THAT SURVEY, and saying so is cheaper than
+ * letting the next reader trust a claim that has quietly stopped being true.
+ * `job_type_config.deactivated_at` is declared TEXT rather than a timestamp —
+ * it stores a day, and the table carries no timestamp semantics of its own —
+ * while `deactivated_at` is in the set below because every OTHER column of
+ * that name is a timestamp. Nothing breaks today: the only consumer is
+ * `replace()`, and no statement in the product calls `replace()` on that
+ * column. It is recorded because the set's exactness is the whole argument for
+ * keying it by name, and an argument with one known exception should say which.
  */
 export const TIMESTAMP_COLUMN_NAMES: ReadonlySet<string> = new Set([
   "accepted_at",

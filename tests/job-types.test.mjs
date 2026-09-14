@@ -635,3 +635,25 @@ test("LIVE a type is renamed without moving, deactivated without losing its jobs
     await sweepFixtures(headers);
   }
 });
+
+test("the Job Type settings stylesheet uses only the agreed widths", async () => {
+  /*
+   * The agreed widths, on a sheet nothing else checks.
+   *
+   * `CLAUDE.md` restricts every media query in this product to 640 / 767 / 768
+   * / 1024 / 1280, and several stage tests fail on any other — but each of them
+   * hard-codes the ONE sheet it owns, so a stylesheet no suite names is not
+   * covered by the rule at all. This sheet arrived with the Job Type settings card and this is its owning suite.
+   */
+  const css = await read("app/(app)/portal/admin/job-types-settings.css");
+  const widths = [...css.matchAll(/\(min-width:\s*(\d+)px\)|\(max-width:\s*(\d+)px\)/g)].map(
+    (match) => Number(match[1] ?? match[2]),
+  );
+  assert.ok(widths.length > 0, "the stylesheet is responsive");
+  for (const width of widths) {
+    assert.ok(
+      [640, 767, 768, 1024, 1280].includes(width),
+      `${width}px is not one of the agreed breakpoints — several stage tests fail on any other`,
+    );
+  }
+});

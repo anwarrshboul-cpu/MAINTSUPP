@@ -139,6 +139,96 @@ test("a compliance WRITE cannot reach a site outside the member's scope, on any 
   assert.doesNotMatch(route, /const \{ actor, authenticated, db, orgId, siteScope \} = await scopedDb/, "destructured as memberSiteScope — `siteScope` here is a function");
 });
 
+test("the workspace SNAPSHOT is confined too — it is the same estate under another name", async () => {
+  /*
+   * `/api/sites` was confined first, and `GET /api/workspace` kept answering
+   * for the whole organisation. That payload is not a corner of the product:
+   * `readWorkspace`'s own note lists what reads it — the dashboard's site
+   * count, the Sites tab of the manager, and the location select on
+   * Compliance, Units and Planned. So the leak was every one of those screens.
+   *
+   * The confinement is one function applied at the return rather than four
+   * scoped queries, because a finished payload cannot miss a derived field the
+   * way four separate reads could.
+   */
+  const route = await read("app/api/workspace/route.ts");
+  assert.match(route, /function confineSnapshot\(/, "the snapshot is confined by one named function");
+  assert.match(
+    route,
+    /const allowed = memberSiteSet\(siteScope\);\s*if \(!allowed\) return snapshot;/,
+    "an unrestricted member is handed the snapshot untouched",
+  );
+  for (const collection of ["stores", "compliance", "units", "planned"]) {
+    assert.match(
+      route,
+      new RegExp(String.raw`${collection}: snapshot\.${collection}\.filter\(`),
+      `${collection} carries a site, so it is filtered`,
+    );
+  }
+  /*
+   * And the four that do NOT carry a site are deliberately left whole. A site
+   * scope says which STORES a member may see; narrowing the roster or the
+   * settings by it would be inventing a rule nothing asked for.
+   */
+  for (const collection of ["contractors", "team", "settings", "activity"]) {
+    assert.doesNotMatch(
+      route,
+      new RegExp(String.raw`${collection}: snapshot\.${collection}\.filter\(`),
+      `${collection} is organisation-level and must stay whole`,
+    );
+  }
+  assert.match(
+    route,
+    /confineSnapshot\(await readWorkspace\(db, orgId\), siteScope\)/,
+    "and the GET applies it to what it returns",
+  );
+});
+
+test("a site, unit or planned visit outside the member's scope is not found, on any verb", async () => {
+  /*
+   * `complianceScopeRefusal` closed this for compliance records and left the
+   * three other entities that carry a site open — the same hole in the same
+   * file. A restricted editor could rename or close a store they cannot see,
+   * or attach a unit or a scheduled visit to one.
+   */
+  const route = await read("app/api/workspace/route.ts");
+  assert.match(route, /async function siteScopeRefusal\(/);
+  assert.match(route, /const allowed = memberSiteSet\(memberScope\);\s*if \(!allowed\) return null;/);
+  /* Both ends, because they escape in opposite directions: the SUPPLIED site
+     moves a record onto a store outside the scope, the STORED one edits a
+     record already at one. For a site, its own id is the stored one. */
+  assert.match(route, /if \(suppliedSiteId && !withinMemberScope\(allowed, suppliedSiteId\)\)/);
+  assert.match(route, /if \(entity === "site"\) \{\s*return withinMemberScope\(allowed, recordId\)/);
+  for (const [table, name] of [["units", "Unit"], ["plannedMaintenance", "Planned task"]]) {
+    assert.match(route, new RegExp(String.raw`\.from\(${table}\)`), `${table} is looked up for its stored site`);
+    assert.match(route, new RegExp(String.raw`error: "${name} not found\." \}, \{ status: 404 \}`), "not found, never forbidden");
+  }
+  /* Every call site refuses BEFORE it writes. */
+  const calls = route.match(/await siteScopeRefusal\(db, orgId, memberSiteScope,/g) ?? [];
+  assert.ok(calls.length >= 6, `expected a refusal on every site-bearing write, saw ${calls.length}`);
+  for (const verb of ["export async function POST", "export async function PATCH", "export async function DELETE"]) {
+    const handler = route.slice(route.indexOf(verb));
+    const at = handler.indexOf("siteScopeRefusal");
+    assert.ok(at > 0, `${verb} refuses an out-of-scope site`);
+  }
+});
+
+test("the two guards on a unit DELETE are both present — scope AND the recycle bin", async () => {
+  /*
+   * These arrived from different batches and each protects something the other
+   * does not: the scope decides whether this member may see the unit at all,
+   * `deleted_at` whether the unit is still on the register to be retired.
+   * Taking either alone silently drops a real guard, which is exactly what a
+   * merge resolution is most likely to do.
+   */
+  const route = await read("app/api/workspace/route.ts");
+  const handler = route.slice(route.indexOf("export async function DELETE"));
+  const branch = handler.slice(handler.indexOf('else if (entity === "unit")'));
+  const block = branch.slice(0, branch.indexOf("else if (entity === \"contractor\")"));
+  assert.match(block, /siteScopeRefusal\(db, orgId, memberSiteScope, entity, id, null\)/, "the member's scope");
+  assert.match(block, /isNull\(units\.deletedAt\)/, "and the recycle-bin guard");
+});
+
 test("the site-groups read no longer writes for somebody who may not write", async () => {
   /* `seedStoreDocumentationGroups` creates and rebuilds site_groups rows inside
      a GET that took no capability, so a client caused writes by opening a page —

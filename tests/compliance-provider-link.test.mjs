@@ -122,10 +122,25 @@ test("who's renewing groups by the contractor record, keeps the unlinked by thei
   assert.equal(renewals.linked + renewals.unlinked, renewals.total);
   const acme = renewals.slices.find((slice) => slice.label === "Acme Fire");
   assert.ok(acme?.linked, "a linked slice is marked linked");
-  assert.deepEqual(acme.filter.contractor, ["c-acme"], "and drills by the record's id, not its name");
+  /*
+   * RE-POINTED: the drill still keys on the contractor RECORD rather than its
+   * name — that was the point of the link and it has not changed — but it
+   * travels as the slice's own group key now, so the "Other" slice can name
+   * linked and unlinked groups in one filter. `contractor:` + the id is
+   * exactly what `renewalGroupKey` builds for a linked row.
+   */
+  assert.deepEqual(acme.filter.renewal, ["contractor:c-acme"], "and drills by the record's id, not its name");
   const unlinked = renewals.slices.filter((slice) => !slice.linked);
   assert.ok(unlinked.length >= 1);
-  for (const slice of unlinked) assert.deepEqual(slice.filter.contractor, [NO_PROVIDER], `${slice.label} drills to the unlinked only`);
+  /* An unlinked slice drills to its own normalised text, which is narrower
+     than the old `contractor=__none__`: that matched EVERY unlinked renewal in
+     scope, so two roles sharing the register each opened the other's rows. */
+  for (const slice of unlinked) {
+    assert.ok(
+      slice.filter.renewal?.every((key) => key.startsWith("text:")),
+      `${slice.label} drills to its own group, not to every unlinked renewal`,
+    );
+  }
   assert.equal(metrics.dataGaps.unlinkedResponsibility, 2);
   assert.deepEqual(metrics.reconciliation, []);
 });

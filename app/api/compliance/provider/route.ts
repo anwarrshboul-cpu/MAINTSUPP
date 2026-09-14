@@ -200,7 +200,24 @@ export async function POST(request: Request) {
         actor: auditActor(guard.scope),
         action: contractorId ? "compliance.provider_linked" : "compliance.provider_unlinked",
         entityType: "compliance_requirement",
-        entityId: contractorId ?? null,
+        /*
+         * THE REQUIREMENT THIS EVENT IS ABOUT, OR NOTHING — never the contractor.
+         *
+         * This recorded `contractorId` under an entity type of
+         * `compliance_requirement`, which made the row wrong in two directions
+         * at once. `/api/audit?entityType=compliance_requirement&entityId=…` is
+         * a supported query, and it could never find these events; the audit
+         * screen meanwhile printed a contractor's id in a column headed by the
+         * requirement's entity type. It was also inconsistent with itself — on
+         * an UNLINK there is no contractor, so the field was already null there.
+         *
+         * This route writes many requirements at once, so most of the time
+         * there is no single id to name: one requirement gives its own id,
+         * a bulk write gives null. The contractor is not lost — it is in
+         * `detail` and named in `summary`, which is where it belongs, and the
+         * per-site `activity_log` rows above are keyed by site.
+         */
+        entityId: ids.length === 1 ? ids[0] : null,
         summary: contractorId
           ? `Linked ${contractorName ?? "a contractor"} as the renewal contractor on ${requirements} requirement(s) at ${touchedSites.size} site(s).`
           : `Unlinked the renewal contractor from ${requirements} requirement(s) at ${touchedSites.size} site(s).`,

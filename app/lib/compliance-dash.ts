@@ -352,10 +352,18 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     (left, right) => right[1].value - left[1].value || left[1].label.localeCompare(right[1].label, "en-GB"),
   );
   const renewalState = { ...SCORED, state: ["Expired", "Expiring soon"] };
-  const sliceFilter = (group: RenewalGroup) =>
-    group.contractorId
-      ? { ...renewalState, contractor: [group.contractorId] }
-      : { ...renewalState, who: [...group.raw], contractor: [NO_PROVIDER] };
+  /*
+   * EVERY SLICE DRILLS BY THE KEY IT WAS GROUPED BY.
+   *
+   * `renewal=` carries the donut's own grouping key, and the register
+   * recomputes that key per row with `renewalGroupKey` — the same function, so
+   * the two cannot disagree about which slice a requirement belongs to. This
+   * replaces a pair of filters that were each right on their own and could not
+   * be combined: a linked group went out as `contractor=<id>`, an unlinked one
+   * as `who=<text>&contractor=__none__`, and the folded "Other" tail is an OR
+   * ACROSS those two dimensions, which AND-ed dimensions cannot express.
+   */
+  const sliceFilter = (key: string) => ({ ...renewalState, renewal: [key] });
   const renewalSlices: CpRenewalSlice[] = renewalRanked.slice(0, 5).map(([key, group], index) => ({
     key,
     label: group.label,
@@ -363,17 +371,22 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     colour: RENEWAL_SERIES[index % RENEWAL_SERIES.length],
     labels: group.contractorId ? [group.label] : [...group.raw],
     linked: Boolean(group.contractorId),
-    filter: sliceFilter(group),
+    filter: sliceFilter(key),
   }));
   const tail = renewalRanked.slice(5);
   if (tail.length > 0) {
-    /* "Other" is every remaining group, linked or not, so its drill is the
-       union: those contractors, OR those unlinked texts. Two dimensions cannot
-       express an OR across them, so a mixed tail drills to the contractor ids
-       plus `__none__` and the texts' own slices stay the precise way in. */
-    const contractorIds = tail.flatMap(([, group]) => (group.contractorId ? [group.contractorId] : []));
-    const texts = tail.flatMap(([, group]) => (group.contractorId ? [] : [...group.raw]));
-    const mixed = contractorIds.length > 0 && texts.length > 0;
+    /*
+     * "Other" is every remaining group, linked or not — an OR across the two
+     * ways a renewal is grouped. It now names those groups' own keys, so the
+     * register opens on exactly the requirements the slice counted.
+     *
+     * What this replaces was the one drill in this block that could lie. A
+     * MIXED tail had to go out as `contractor: [...ids, __none__]`, because
+     * adding `who` would have AND-ed and dropped the linked rows — and
+     * `__none__` matches every unlinked renewal in scope, not the tail's. On a
+     * register whose top five already held 40 unlinked renewals, a slice
+     * reading "Other 5" opened 45 rows.
+     */
     renewalSlices.push({
       key: "__other__",
       label: "Other",
@@ -381,11 +394,7 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
       colour: CP_COLOURS.other,
       labels: tail.map(([, group]) => group.label),
       linked: false,
-      filter: mixed
-        ? { ...renewalState, contractor: [...contractorIds, NO_PROVIDER] }
-        : contractorIds.length > 0
-          ? { ...renewalState, contractor: contractorIds }
-          : { ...renewalState, who: texts, contractor: [NO_PROVIDER] },
+      filter: { ...renewalState, renewal: tail.map(([key]) => key) },
     });
   }
   if (unassigned > 0) {

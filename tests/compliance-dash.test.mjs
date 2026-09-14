@@ -222,8 +222,16 @@ test("free-text responsibilities are grouped by their normalised name and report
   });
   assert.equal(metrics.renewals.slices.length, 1, "two spellings, one party");
   assert.equal(metrics.renewals.slices[0].value, metrics.renewals.total);
-  assert.deepEqual(new Set(metrics.renewals.slices[0].filter.who), new Set(["Fire  safety partner", "fire safety partner"]),
-    "and the drill carries both spellings, so the register opens every renewal the segment counted");
+  /*
+   * RE-POINTED: the drill carried both raw spellings in `who`; it now carries
+   * the ONE normalised group key the slice was built from, and the register
+   * recomputes that key per row with the same function. The contract is
+   * unchanged and strictly stronger — "the register opens every renewal the
+   * segment counted" no longer depends on the filter listing every spelling
+   * that happens to exist, so a spelling nobody has seen yet cannot escape it.
+   */
+  assert.deepEqual(metrics.renewals.slices[0].filter.renewal, ["text:fire safety partner"],
+    "the drill carries the normalised group key, so the register opens every renewal the segment counted");
   assert.equal(metrics.renewals.unlinked, metrics.renewals.total, "none is silently linked to a contractor record");
   assert.equal(metrics.renewals.linked, 0);
   assert.equal(metrics.renewals.total, metrics.score.counts.expired + metrics.score.counts.expiring);

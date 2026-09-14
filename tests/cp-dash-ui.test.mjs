@@ -157,9 +157,12 @@ test("every element applies the filter the server counted it with", () => {
 test("a drill replaces the register's filters and keeps the block's own", () => {
   assert.match(
     block,
-    /* Re-pointed: a "Who's renewing" slice now drills by contractor RECORD
-       (`contractor=`), so a drill replaces that key too. */
-    /const REGISTER_KEYS = \["site", "state", "kind", "who", "due", "q", "scored", "open", "view", "contractor"\] as const;/,
+    /* Re-pointed twice: a "Who's renewing" slice first drilled by contractor
+       RECORD (`contractor=`), and now also by the slice's own GROUP KEY
+       (`renewal=`) — the only narrowing that can describe the folded "Other"
+       slice, which is an OR across the two ways a renewal is grouped. A drill
+       must replace both keys, or a stale one narrows the new list. */
+    /const REGISTER_KEYS = \["site", "state", "kind", "who", "due", "q", "scored", "open", "view", "contractor", "renewal"\] as const;/,
   );
   const keys = block.match(/const REGISTER_KEYS = \[([^\]]*)\]/)[1];
   for (const own of ["portfolio", "from", "to", "sort"]) {

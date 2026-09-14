@@ -86,7 +86,7 @@ const REGISTER_ANCHOR = "compliance-register";
  * header's `from`/`to` stay only on the plain "View register" link; a figure's
  * drill drops them (see `registerQuery`).
  */
-const REGISTER_KEYS = ["site", "state", "kind", "who", "due", "q", "scored", "open", "view", "contractor"] as const;
+const REGISTER_KEYS = ["site", "state", "kind", "who", "due", "q", "scored", "open", "view", "contractor", "renewal"] as const;
 
 /** The four states inside the score, in the order every ring draws them. */
 const STATUS_ORDER: readonly CpStateKey[] = ["compliant", "expiring", "expired", "missing"];

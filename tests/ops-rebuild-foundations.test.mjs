@@ -1138,3 +1138,25 @@ test("the two new dimensions round-trip through the URL like every other one", a
   assert.match(drill, /chips\.push\(\{ key: "contractor", label: "Contractor", value:/);
   assert.match(drill, /"contractor",\s*\n\s*"nature",/, "and both are among the keys the board clears");
 });
+
+test("the dashboard-block stylesheet uses only the agreed widths", async () => {
+  /*
+   * The agreed widths, on a sheet nothing else checks.
+   *
+   * `CLAUDE.md` restricts every media query in this product to 640 / 767 / 768
+   * / 1024 / 1280, and several stage tests fail on any other — but each of them
+   * hard-codes the ONE sheet it owns, so a stylesheet no suite names is not
+   * covered by the rule at all. `ov-dash.css` is the shared base for all three dashboard blocks and no suite read it at all — the widest uncovered sheet in the product.
+   */
+  const css = await read("app/(app)/portal/ops/ov-dash.css");
+  const widths = [...css.matchAll(/\(min-width:\s*(\d+)px\)|\(max-width:\s*(\d+)px\)/g)].map(
+    (match) => Number(match[1] ?? match[2]),
+  );
+  assert.ok(widths.length > 0, "the stylesheet is responsive");
+  for (const width of widths) {
+    assert.ok(
+      [640, 767, 768, 1024, 1280].includes(width),
+      `${width}px is not one of the agreed breakpoints — several stage tests fail on any other`,
+    );
+  }
+});

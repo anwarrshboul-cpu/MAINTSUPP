@@ -267,9 +267,18 @@
   min-width: 0;
 }
 
-.resp-record > .resp-control {
-  padding-bottom: 8px;
-}
+/*
+ * `.resp-record > .resp-control` USED TO BE HERE, AND MATCHED NOTHING.
+ *
+ * The control is no longer a direct child of the record: `compliance-page.tsx`
+ * wraps it in `<span class="resp-controls">` so the duty holder and the renewal
+ * contractor sit on one line. Both rules that selected it as a child — this one
+ * and its counterpart in the wide-screen block below — therefore stopped
+ * applying the day that span arrived, and the layout they described is now in
+ * `compliance-provider-control.css` (`.resp-controls > .resp-control` and
+ * `.resp-record > .resp-controls`). Removed rather than re-pointed: the sheet
+ * that owns the wrapper owns its geometry.
+ */
 
 /*
  * The per-site sentence under a collapsed group header.
@@ -371,10 +380,5 @@
     flex: 1 1 auto;
     border-top: 0;
     min-width: 0;
-  }
-
-  .resp-record > .resp-control {
-    flex: 0 0 200px;
-    padding-bottom: 0;
   }
 }

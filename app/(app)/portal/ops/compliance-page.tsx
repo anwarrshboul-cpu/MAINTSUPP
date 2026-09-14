@@ -201,6 +201,7 @@ const FILTER_KEYS = [
   "from",
   "to",
   "contractor",
+  "renewal",
 ] as const;
 
 /**
@@ -417,6 +418,34 @@ export function CompliancePage({
         onRemove: () => {
           const next = new URLSearchParams(window.location.search);
           next.delete("contractor");
+          setParams(next);
+        },
+      });
+    }
+    /*
+      * A "Who's renewing" slice drills by the GROUP it was counted in
+      * (`renewal=contractor:<id>` / `renewal=text:<label>`), which is the only
+      * narrowing that can describe the folded "Other" slice — an OR across the
+      * two ways a renewal is grouped. Named from the key rather than looked up:
+      * the text half carries its own label already, and the contractor half
+      * resolves against the same provider list the chip above uses.
+      */
+    const renewalKeys = params.getAll("renewal");
+    if (renewalKeys.length) {
+      const names = renewalKeys.map((key) => {
+        if (key.startsWith("contractor:")) {
+          const id = key.slice("contractor:".length);
+          return summary.data?.providers?.find((provider) => provider.id === id)?.name ?? "A contractor";
+        }
+        return key.startsWith("text:") ? key.slice("text:".length) : key;
+      });
+      out.push({
+        key: "renewal",
+        label: "Renewing",
+        value: names.length > 3 ? `${names.length} selected` : names.join(", "),
+        onRemove: () => {
+          const next = new URLSearchParams(window.location.search);
+          next.delete("renewal");
           setParams(next);
         },
       });

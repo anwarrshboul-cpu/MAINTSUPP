@@ -6030,6 +6030,21 @@ function ReportsView({
     openDocumentId,
     active: reportTab === "report" || reportTab === "invoice",
   });
+  /*
+   * THE ORGANISATION'S JOB TYPES, so "Reactive vs planned" reads the
+   * configuration rather than a guess.
+   *
+   * `ReactiveVsPlanned` has taken a `jobTypes` prop since the Job Type
+   * dimension arrived, and this — its only caller — never passed it, so the
+   * panel always fell through to `defaultJobTypeCodeOf`. That fallback agrees
+   * with the configuration for every id the product can currently write (a
+   * seeded default is `jt_<org>_<code>`, which the fallback parses; a custom
+   * type is `jt_<32 hex>`, which neither recognises), so nothing on screen was
+   * wrong — but the panel was the one spend split on this page not reading the
+   * configuration, and it would have diverged silently the first time a code
+   * was renamed or an id minted another way.
+   */
+  const { jobTypes: reportJobTypes } = useJobTypes();
   const scopedRequests = useMemo(
     () => requests.filter((request) =>
       countsAsWorkOrder(request) &&
@@ -6215,7 +6230,7 @@ function ReportsView({
             key: "reactive-planned",
             label: "Reactive vs planned",
             render: () => (
-              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} loading={loading} />
+              <ReactiveVsPlanned requests={scopedRequests} now={now} period={period} loading={loading} jobTypes={reportJobTypes} />
             ),
           },
         ] satisfies DashboardWidget[]}
