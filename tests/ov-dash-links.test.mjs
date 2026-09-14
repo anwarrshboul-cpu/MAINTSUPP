@@ -259,7 +259,7 @@ test("the destination pages read the filters the block sends them", async () => 
    * that do not exist", and this screen's filter is a single-site select. A
    * caller that cannot name one site sends nothing.
    */
-  const units = await read("app/(app)/portal/units/units-manager.tsx");
+  const units = await read("app/(app)/portal/assets/assets-manager.tsx");
   assert.match(units, /new URLSearchParams\(window\.location\.search\)\.get\("site"\)/);
   assert.match(units, /wanted\.includes\("\|"\) \? "" : wanted\.trim\(\)/, "a list is not one site");
 

@@ -54,7 +54,8 @@ const dataRoutes = [
   "app/api/sites/route.ts",
   "app/api/sites/csv/route.ts",
   "app/api/sites/groups/route.ts",
-  "app/api/units/route.ts",
+  "app/api/assets/route.ts",
+  "app/api/assets/csv/route.ts",
   "app/api/workspace/route.ts",
 ];
 

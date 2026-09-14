@@ -255,6 +255,18 @@ export const organisations = sqliteTable("organisations", {
   primaryColour: text("primary_colour").notNull().default("#12B4A8"),
   planTier: text("plan_tier").notNull().default("development"),
   status: text("status").notNull().default("active"),
+  /*
+   * THE ASSET NUMBER COUNTER — `AST-000123`, per workspace.
+   *
+   * Here rather than in a sequence table of its own, and incremented with
+   * `UPDATE … RETURNING` exactly as `nextReference` increments
+   * `boards.reference_counter`: the write and the read are ONE statement, so
+   * two concurrent creates get consecutive numbers rather than the same one.
+   * An increment-then-select would not — that bug has already been measured
+   * once in this codebase, on job references, where ten simultaneous creates
+   * were handed three distinct numbers.
+   */
+  assetSequence: integer("asset_sequence").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -274,6 +286,21 @@ export const users = sqliteTable(
   (table) => [index("users_organisation_idx").on(table.organisationId)],
 );
 
+/**
+ * THE ASSET RECORD. The table is `units`; the product calls it an Asset.
+ *
+ * See `app/lib/asset-model.ts` for why the Assets section was built on this
+ * table rather than beside it. In short: this HAS been the asset register since
+ * W5, `attachments.unit_id` is an upload anchor the file routes already check
+ * against the tenant, `unit_service_records` is already its timeline, the Sites
+ * screen already draws a tab called "Assets" from these rows, and `sites.edit`
+ * is already described as "Edit sites and assets". A second table would have
+ * given the product two answers to one question.
+ *
+ * The columns below Stage 0 all arrive through guarded `addColumn` calls in
+ * `db/init.ts` — `CREATE TABLE IF NOT EXISTS` does nothing to a table that
+ * exists, so declaring them here is necessary and never sufficient.
+ */
 export const units = sqliteTable(
   "units",
   {
@@ -300,6 +327,102 @@ export const units = sqliteTable(
     serviceIntervalMonths: integer("service_interval_months"),
     position: integer("position").notNull().default(0),
 
+    /* ── Assets — identity ────────────────────────────────────── */
+
+    /**
+     * `AST-000123`, minted once from `organisations.asset_sequence`.
+     *
+     * NULLABLE, because every row that existed before this column did not have
+     * one and back-filling on a boot path would be a write per asset per cold
+     * start. `GET /api/assets` fills a missing number in on first read of the
+     * record, which spreads that cost over the people who actually look.
+     * Unique per workspace — several NULLs are allowed by both dialects.
+     */
+    assetNumber: text("asset_number"),
+    /** equipment | component | replacement_part | reference. `asset-model.ts`. */
+    kind: text("kind").notNull().default("equipment"),
+
+    /* ── Assets — technical identity ────────────────────────────── */
+
+    partNumber: text("part_number"),
+    /** Free prose: "24V 14.4W/m IP20, 3000K". The typed facts go in `specs`. */
+    specification: text("specification"),
+    colour: text("colour"),
+    colourCode: text("colour_code"),
+    /** Kept apart from `colour_code` on purpose: "RAL 7016" is not a hex. */
+    paintReference: text("paint_reference"),
+    /**
+     * `[{ key, value, unit }]`, JSON.
+     *
+     * The flexible half of the specification. See `parseSpecs` for why this is
+     * a column and not a table: it is always read and written whole, and never
+     * queried across assets. `'[]'` rather than NULL so every reader gets an
+     * array without a null check.
+     */
+    specs: text("specs").notNull().default("[]"),
+    quantity: integer("quantity"),
+
+    /* ── Assets — supply ─────────────────────────────────────── */
+
+    /**
+     * The contractor record this was bought from, when there is one.
+     *
+     * OPTIONAL, and it does not replace the `supplier` text above. Contractors
+     * in this product are maintenance service providers; some of them also
+     * supply parts and some suppliers never attend a job. So a workspace may
+     * point at a real contractor row OR simply type a name, and the register
+     * reads whichever it was given. No foreign key — a contractor can be
+     * deactivated, and that must not take the asset with it — so the tenant
+     * check is the route's, in `assertSupplier`.
+     */
+    supplierContractorId: text("supplier_contractor_id"),
+    supplierReference: text("supplier_reference"),
+    supplierEmail: text("supplier_email"),
+    supplierPhone: text("supplier_phone"),
+    /** http(s) only — see `safeUrl`. A `javascript:` href is refused, not stored. */
+    supplierUrl: text("supplier_url"),
+
+    /* ── Assets — replacement ───────────────────────────────── */
+
+    lastReplacedAt: text("last_replaced_at"),
+    replacementIntervalMonths: integer("replacement_interval_months"),
+    replacementPartNumber: text("replacement_part_number"),
+    replacementModel: text("replacement_model"),
+    replacementSpecification: text("replacement_specification"),
+    replacementSupplier: text("replacement_supplier"),
+    replacementNotes: text("replacement_notes"),
+    /** Pence. Never a float — the product holds every figure in GBP this way. */
+    replacementCostPence: integer("replacement_cost_pence"),
+
+    /* ── Assets — relationships and presentation ──────────────────── */
+
+    /**
+     * The asset this one is part of. Same workspace, same site, no cycles.
+     *
+     * No foreign key, for the reason `deletedAt` exists: binning a cabinet must
+     * not cascade its four components into nothing. The route enforces the
+     * three rules and the bin leaves children pointing at a parent they can be
+     * restored alongside.
+     */
+    parentUnitId: text("parent_unit_id"),
+    /** An `attachments.id` the register draws as the row thumbnail. */
+    primaryImageId: text("primary_image_id"),
+
+    /* ── Assets — provenance and soft delete ────────────────────── */
+
+    createdByEmail: text("created_by_email"),
+    updatedByEmail: text("updated_by_email"),
+    /**
+     * NULL means live. A timestamp means it is in the recycle bin — the row,
+     * its history and its files all survive, which is what makes restore real.
+     *
+     * Deliberately NOT the same thing as the "Retired" status: a retired asset
+     * is still on the register and still answers "what used to be here"; a
+     * binned one was entered by mistake.
+     */
+    deletedAt: text("deleted_at"),
+    deletedBy: text("deleted_by"),
+
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -307,6 +430,14 @@ export const units = sqliteTable(
     index("units_organisation_idx").on(table.organisationId),
     index("units_site_idx").on(table.siteId),
     index("units_next_service_idx").on(table.organisationId, table.nextServiceDueAt),
+    /* The register's own reads: the list filters by status inside a workspace,
+       the site tab filters by site, and the tree resolves parents by id. The
+       unique index is what makes an asset number a reference rather than a
+       label — it is per workspace, and NULL is allowed many times over, which
+       is what lets rows that predate the column stay unnumbered until read. */
+    index("units_status_idx").on(table.organisationId, table.status),
+    index("units_parent_idx").on(table.parentUnitId),
+    uniqueIndex("units_asset_number_idx").on(table.organisationId, table.assetNumber),
   ],
 );
 
@@ -321,6 +452,25 @@ export const unitServiceRecords = sqliteTable(
     siteId: text("site_id").notNull().references(() => sites.id),
     performedAt: text("performed_at").notNull(),
     serviceType: text("service_type").notNull().default("Service"),
+    /**
+     * Installed | Replaced | Serviced | Retired | Status changed.
+     *
+     * Added beside `service_type` rather than over it. That column means the
+     * KIND of visit ("Annual", "Callout"), and every existing row carries a
+     * value under that meaning; overloading it would have made each of them
+     * claim to be an event type it had never been told about.
+     */
+    eventType: text("event_type").notNull().default("Serviced"),
+    /**
+     * WHAT WAS THERE, and WHAT REPLACED IT.
+     *
+     * The reason this table earns its place. A site that moves from transformer
+     * A to transformer B keeps A here in plain text — model, part number,
+     * whatever the operator knew — so "what did we use before" survives the
+     * edit that overwrites `model` on the asset itself.
+     */
+    previousDetail: text("previous_detail"),
+    replacementDetail: text("replacement_detail"),
     contractorId: text("contractor_id"),
     contractorName: text("contractor_name"),
     requestId: text("request_id"),
@@ -333,6 +483,7 @@ export const unitServiceRecords = sqliteTable(
   (table) => [
     index("unit_service_unit_idx").on(table.unitId, table.performedAt),
     index("unit_service_organisation_idx").on(table.organisationId),
+    index("unit_service_event_idx").on(table.organisationId, table.eventType),
   ],
 );
 

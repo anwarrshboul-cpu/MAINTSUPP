@@ -82,6 +82,9 @@ export const BUILT_IN_ORDER: ReadonlyArray<{ key: string; group: string }> = [
   { key: "compliance", group: "group:operations" },
   { key: "calendar", group: "group:operations" },
   { key: "stores", group: "group:operations" },
+  /* Beside Sites. Must stay at the same index as in `navPrimary` —
+     tests/stage-twenty-navigation asserts the two lists cannot drift. */
+  { key: "assets", group: "group:operations" },
   { key: "contractors", group: "group:operations" },
   { key: "documents", group: "group:operations" },
   /*
@@ -137,6 +140,7 @@ const BUILT_IN_LABELS: Record<string, string> = {
   maintenance: "Jobs",
   calendar: "Planned",
   stores: "Sites",
+  assets: "Assets",
   "store-documentation": "Store Documentation",
   contractors: "Contractors",
   compliance: "Compliance",

@@ -23,7 +23,7 @@ const STAGE_TWO_ROUTES = [
   "app/api/sites/route.ts",
   "app/api/sites/csv/route.ts",
   "app/api/sites/groups/route.ts",
-  "app/api/units/route.ts",
+  "app/api/assets/route.ts",
   "app/api/options/route.ts",
 ];
 
@@ -370,13 +370,49 @@ test("the runtime compatibility path mirrors the Stage 2 migration", async () =>
 });
 
 test("money is stored in pence and never as a float", async () => {
-  for (const path of ["app/api/sites/route.ts", "app/api/units/route.ts"]) {
-    const source = await read(path);
-    assert.match(source, /Math\.round\(parsed \* 100\)/, `${path} must convert pounds to pence`);
-  }
+  /*
+   * RE-POINTED, NOT WEAKENED.
+   *
+   * This asserted `Math.round(parsed * 100)` inside two route files. The Assets
+   * section moved the asset register's half of it out of the route and into
+   * `app/lib/asset-model.ts`, because the same conversion is now needed by the
+   * purchase price, the replacement cost and a history entry's cost, and three
+   * copies of a money rule is how two of them come to disagree. The contract is
+   * unchanged and is asserted in both of its homes below: pounds reach pence
+   * through `Math.round(x * 100)` and never through a float.
+   *
+   * `costPence` is additionally checked for the thing a shared helper made
+   * possible and a per-route copy did not — that a NEGATIVE cost is refused.
+   * An asset cannot cost minus four hundred pounds to replace, and the money
+   * columns are integers a report sums.
+   */
+  const sites = await read("app/api/sites/route.ts");
+  assert.match(sites, /Math\.round\(parsed \* 100\)/, "sites must convert pounds to pence");
+
+  const model = await read("app/lib/asset-model.ts");
+  assert.match(
+    model,
+    /Math\.round\(parsed \* 100\)/,
+    "the asset register's money conversion lives in costPence now",
+  );
+  assert.match(model, /parsed < 0/, "a negative cost is refused rather than stored");
+
+  const assets = await read("app/api/assets/route.ts");
+  assert.match(
+    assets,
+    /costPence\(/,
+    "and the assets route must go through it rather than rounding its own",
+  );
+  assert.doesNotMatch(
+    assets,
+    /\* 100\b/,
+    "no second copy of the conversion in the route",
+  );
+
   const schema = await read("db/schema.ts");
   assert.match(schema, /serviceChargePence: integer\("service_charge_pence"\)/);
   assert.match(schema, /purchasePricePence: integer\("purchase_price_pence"\)/);
+  assert.match(schema, /replacementCostPence: integer\("replacement_cost_pence"\)/);
 });
 
 test("import corrections are recorded rather than applied silently", async () => {

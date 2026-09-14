@@ -19,6 +19,10 @@ const routes: Record<string, Section> = {
   overview: "overview",
   jobs: "maintenance",
   planned: "calendar",
+  assets: "assets",
+  /* The address the asset register used to live at. It resolves to the
+     `units` section, whose screen IS the Assets screen — see `sectionMeta`
+     in portal-app.tsx — so an old bookmark lands on the real thing. */
   units: "units",
   sites: "stores",
   "store-documentation": "store-documentation",

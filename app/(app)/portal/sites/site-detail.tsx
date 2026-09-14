@@ -3,6 +3,17 @@
 import { useState } from "react";
 import { SectionPanel, SectionTabs } from "./section-tabs";
 /*
+ * W05 — THE SITE’S ASSETS TAB IS THE ASSETS SECTION, SCOPED.
+ *
+ * It used to be a five-column read-only table off `data.units` whose empty
+ * state said "Add one from the Units screen" — a screen that was not in the
+ * sidebar. Mounting the real register instead is what the brief asks for in
+ * so many words: the site view is the same Assets system scoped to one site,
+ * not a second implementation of it, and adding from here pre-selects the
+ * store rather than making somebody choose the one they are looking at.
+ */
+import { AssetsManager } from "../assets/assets-manager";
+/*
  * W05-09 — the fifth connection. Its own component because it is the only part
  * of this screen with its own fetch and its own writes; see site-contractors.tsx.
  */
@@ -187,6 +198,7 @@ export function SiteDetail({
   statuses,
   onEdit,
   onClose,
+  onNotify,
 }: {
   /** The register this site belongs to — see `scopedUrl`. */
   sectionKey?: string | null;
@@ -207,6 +219,8 @@ export function SiteDetail({
    */
   onEdit: (site: SiteRecord, groupIds: string[]) => void;
   onClose: () => void;
+  /** Passed straight through to the embedded asset register’s toasts. */
+  onNotify: (message: string) => void;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   const { data, error } = useLoader<DetailPayload>(
@@ -510,35 +524,13 @@ export function SiteDetail({
         focusable
         active={tab === "Assets"}
       >
-        {data.units.length === 0 ? (
-          <Empty>No assets recorded here yet. Add one from the Units screen.</Empty>
-        ) : (
-          <div className="table-scroll">
-            <table className="analytics-table analytics-table--mobile-cards">
-              <caption className="visually-hidden">Assets at {site.name}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Asset</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Serial</th>
-                  <th scope="col">Warranty</th>
-                  <th scope="col">Next service</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.units.map((unit) => (
-                  <tr key={unit.id}>
-                    <td data-label="Asset">{unit.name}</td>
-                    <td data-label="Category">{unit.category}</td>
-                    <td data-label="Serial">{unit.serialNumber ?? "—"}</td>
-                    <td data-label="Warranty">{formatDate(unit.warrantyExpiry)}</td>
-                    <td data-label="Next service">{formatDate(unit.nextServiceDueAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/*
+          EMBEDDED, so the register draws no page header and its detail and
+          editor use an `h2`. This panel already sits under the site’s own
+          `<h1>`, and a second level-one heading is the axe failure the Sites
+          screens were fixed for once already.
+        */}
+        <AssetsManager siteId={site.id} embedded onNotify={onNotify} />
       </SectionPanel>
 
       <SectionPanel

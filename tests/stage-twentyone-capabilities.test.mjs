@@ -38,7 +38,7 @@ const GUARDED = {
   "app/api/options/route.ts": "board.edit",
   "app/api/sites/route.ts": "sites.edit",
   "app/api/sites/groups/route.ts": "sites.edit",
-  "app/api/units/route.ts": "sites.edit",
+  "app/api/assets/route.ts": "sites.edit",
   "app/api/import/route.ts": "data.import",
 };
 

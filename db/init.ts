@@ -2,6 +2,7 @@ import { seedColumns, seedGroups, seedUiColumns } from "./seed-board-structure";
 import {
   DEMO_WORKSPACE_ID,
   ensureDemoWorkspaceOrganisation,
+  seedDemoWorkspaceAssets,
   seedDemoWorkspaceData,
 } from "./demo-workspace";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
@@ -122,6 +123,13 @@ async function initialize() {
      `ensureOwnerFixesAndBilling`. */
   await ensureInvoiceTracker(d1);
 
+  /* THE ASSETS SECTION. Last of the schema stages and deliberately so: it
+     extends `units` and `unit_service_records`, both of which are created by
+     Stage 2, and `addColumn` silently no-ops on a table that does not exist
+     yet. It must also run BEFORE the demo data seed at the end of this
+     function, because that seed writes assets through these columns. */
+  await ensureAssetsFoundation(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -142,6 +150,21 @@ async function initialize() {
    */
   await seedBoardStructure(d1, DEMO_WORKSPACE_ID, "maintenance", JOBS_TEMPLATE_GROUP_KEYS);
   await seedDemoWorkspaceData(d1, new Date().toISOString().slice(0, 10));
+  /*
+   * THE DEMONSTRATION ASSET REGISTER, and its own guard.
+   *
+   * A SEPARATE call rather than more lines inside `seedDemoWorkspaceData`,
+   * and
+   * that is the load-bearing detail: that function returns early once the
+   * workspace has sites, which it already does on every database that has
+   * booted since the workspace shipped. Assets appended inside it would
+   * therefore have been written to a fresh database and to no existing one —
+   * including Production, where the workspace is live.
+   *
+   * It carries its own `assetsAlreadySeeded` lookup, so the cost on a warm
+   * instance is one indexed primary-key read and nothing else.
+   */
+  await seedDemoWorkspaceAssets(d1, new Date().toISOString().slice(0, 10));
 }
 
 /**
@@ -315,6 +338,41 @@ async function addColumn(
   await d1
     .prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
     .run();
+}
+
+/**
+ * Many columns on ONE table, with a single `PRAGMA table_info` between them.
+ *
+ * `addColumn` reads the table's shape itself, which is right for a one-off call
+ * and wrong for a loop: a stage adding twenty-eight columns to `units` issues
+ * twenty-eight catalogue reads, every one of them on the boot path of every
+ * instance, and deployed each is rewritten by `sqlite-to-postgres.ts` into a
+ * real query over the session pooler. That is twenty-eight serialised round
+ * trips to discover, on every cold start for ever, that there is nothing to do.
+ *
+ * One read, the difference taken in memory, and an `ALTER TABLE` only for what
+ * is genuinely missing — so a migrated database pays exactly one query here.
+ *
+ * The existing per-column stages are deliberately NOT converted. They are
+ * correct, they are somebody else's, and a boot path is the last place to make
+ * a change that is only a tidy-up.
+ */
+async function addColumns(
+  d1: D1DatabaseLike,
+  table: string,
+  columns: ReadonlyArray<readonly [string, string]>,
+) {
+  const info = await d1.prepare(`PRAGMA table_info(${table})`).all();
+  const rows = (info.results ?? []) as Array<{ name?: string }>;
+  /* A table that does not exist reports no columns. Treated as "nothing to
+     extend" rather than an error, exactly as `addColumn` treats it, so a stage
+     may safely name a table a later stage creates. */
+  if (rows.length === 0) return;
+  const present = new Set(rows.map((row) => row.name));
+  for (const [column, definition] of columns) {
+    if (present.has(column)) continue;
+    await d1.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  }
 }
 
 /**
@@ -6180,5 +6238,309 @@ async function seedApprovalRules(d1: D1DatabaseLike) {
           ),
       ),
     );
+  }
+}
+
+/**
+ * THE ASSETS SECTION — the columns, the indexes and the vocabulary.
+ *
+ * ── WHY `units` AND NOT A NEW TABLE ────────────────────────────────────────
+ *
+ * `app/lib/asset-model.ts` carries the full argument. The short version is that
+ * this table has been the asset register since W5 and half the product already
+ * knows it: `attachments.unit_id` is an upload anchor the file routes validate
+ * against the tenant, `unit_service_records` is already its timeline, the Sites
+ * screen already draws a tab called "Assets" from these rows, and the
+ * capability guarding it is already called "Edit sites and assets". A parallel
+ * `assets` table would have given the product two answers to "what equipment is
+ * at Kingsway".
+ *
+ * ── WHAT THIS COSTS ON THE BOOT PATH, WHICH IS THE POINT ───────────────────
+ *
+ * `ensureDatabase()` runs on the first request of every instance, so a stage
+ * that is careless here is careless on every cold start of a product that
+ * already has a cold-start problem.
+ *
+ *   · The column work is a `PRAGMA table_info` per TABLE, not per column, and
+ *     that is what `addColumns` exists for. `addColumn` reads the shape itself,
+ *     so a loop over it would have been thirty-two catalogue reads rather than
+ *     three — the claim this comment made before anybody measured it. On a
+ *     database that has already been migrated the stage is three reads and
+ *     zero writes.
+ *   · The indexes are `IF NOT EXISTS` and therefore no-ops once created.
+ *   · THE VOCABULARY SEED IS THE ONE THAT COULD HAVE BEEN EXPENSIVE, and it is
+ *     guarded by a single query that returns NO ROWS on a warm database. It
+ *     asks which organisations are missing the marker value and seeds only
+ *     those. The naive shape — loop every organisation, fire twenty
+ *     `INSERT OR IGNORE`s — would have been eighty no-op writes per boot for
+ *     the four tenants this database holds, forever.
+ *
+ * Nothing here back-fills a row. `asset_number` is minted on first read of a
+ * record rather than for every existing asset at once, for the same reason: a
+ * write per asset on a boot path is the kind of thing that is fine at 5 rows
+ * and an outage at 5,000.
+ */
+async function ensureAssetsFoundation(d1: D1DatabaseLike) {
+  /*
+   * The counter behind `AST-000123`, on the organisation.
+   *
+   * Beside `boards.reference_counter`, which is the established shape for a
+   * per-tenant gapless number in this codebase, and incremented the same way:
+   * `UPDATE … RETURNING`, one statement, so two concurrent creates cannot be
+   * handed the same number. A separate sequence table was considered and is not
+   * worth a join for one integer.
+   */
+  await addColumn(d1, "organisations", "asset_sequence", "INTEGER NOT NULL DEFAULT 0");
+
+  const assetColumns: Array<[string, string]> = [
+    /* Identity */
+    ["asset_number", "TEXT"],
+    ["kind", "TEXT NOT NULL DEFAULT 'equipment'"],
+    /* Technical identity */
+    ["part_number", "TEXT"],
+    ["specification", "TEXT"],
+    ["colour", "TEXT"],
+    ["colour_code", "TEXT"],
+    ["paint_reference", "TEXT"],
+    ["specs", "TEXT NOT NULL DEFAULT '[]'"],
+    ["quantity", "INTEGER"],
+    /* Supply */
+    ["supplier_contractor_id", "TEXT"],
+    ["supplier_reference", "TEXT"],
+    ["supplier_email", "TEXT"],
+    ["supplier_phone", "TEXT"],
+    ["supplier_url", "TEXT"],
+    /* Replacement */
+    ["last_replaced_at", "TEXT"],
+    ["replacement_interval_months", "INTEGER"],
+    ["replacement_part_number", "TEXT"],
+    ["replacement_model", "TEXT"],
+    ["replacement_specification", "TEXT"],
+    ["replacement_supplier", "TEXT"],
+    ["replacement_notes", "TEXT"],
+    ["replacement_cost_pence", "INTEGER"],
+    /* Relationships and presentation */
+    ["parent_unit_id", "TEXT"],
+    ["primary_image_id", "TEXT"],
+    /* Provenance and soft delete */
+    ["created_by_email", "TEXT"],
+    ["updated_by_email", "TEXT"],
+    ["deleted_at", "TEXT"],
+    ["deleted_by", "TEXT"],
+  ];
+  await addColumns(d1, "units", assetColumns);
+
+  /*
+   * The history table becomes a lifecycle rather than a service log.
+   *
+   * `event_type` is added BESIDE `service_type`, never over it. That column
+   * means the kind of visit — "Annual", "Callout" — and every row already
+   * written carries a value under that meaning. Overloading it would have made
+   * each of those rows claim to be an event type nobody had ever assigned.
+   */
+  await addColumns(d1, "unit_service_records", [
+    ["event_type", "TEXT NOT NULL DEFAULT 'Serviced'"],
+    ["previous_detail", "TEXT"],
+    ["replacement_detail", "TEXT"],
+  ]);
+
+  /*
+   * Four indexes, and no more than four.
+   *
+   * The register is a few hundred rows per workspace, so an index earns its
+   * place only where a predicate is used on every read: the list filters by
+   * status inside an organisation, the site tab and the parent tree resolve by
+   * their own keys, and the history is read by event. The searchable text is
+   * deliberately NOT indexed — the search runs in the browser over rows the
+   * server has already sent (see `assetHaystack`), because the one question
+   * that would need a text index is "3000K", which lives inside the
+   * specification JSON and which SQLite and Postgres spell differently.
+   *
+   * `units_asset_number_idx` is UNIQUE and that is a constraint rather than an
+   * optimisation: it is what makes an asset number a reference somebody can
+   * quote. Both dialects treat NULLs as distinct, so every row that predates
+   * the column coexists happily until it is read and numbered.
+   */
+  await d1.batch([
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS units_status_idx ON units (organisation_id, status)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS units_parent_idx ON units (parent_unit_id)",
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS units_asset_number_idx ON units (organisation_id, asset_number)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS unit_service_event_idx ON unit_service_records (organisation_id, event_type)",
+    ),
+  ]);
+
+  await seedAssetVocabulary(d1);
+}
+
+/**
+ * The categories and statuses the Assets section ships with.
+ *
+ * ── WHY THE OPTION STORE ───────────────────────────────────────────────────
+ *
+ * The brief asked for categories that do not need a migration when the business
+ * buys a new kind of thing, and this product already has exactly that
+ * mechanism: `option_sets` / `option_values`, edited in Settings, mirrored by
+ * `/api/options`, and already the home of `unit_category` and `unit_status`.
+ * So nothing new is invented — the existing two sets are simply given the rest
+ * of the vocabulary the section needs.
+ *
+ * ── ADDITIVE, AND THAT IS LOAD-BEARING ─────────────────────────────────────
+ *
+ * `INSERT OR IGNORE` throughout, positions starting past the seeded block so a
+ * value an administrator has reordered is not disturbed, and NOT ONE `UPDATE`
+ * or `DELETE`. A workspace that has renamed "Lighting" keeps its name; one that
+ * has deleted a category does not have it resurrected. The seed adds what is
+ * missing and never has an opinion about what is there.
+ *
+ * ── THE GUARD ──────────────────────────────────────────────────────────────
+ *
+ * One query, and on a warm database it returns nothing and this function ends.
+ * `Needs replacement` is the marker because it is the value the KPI and the
+ * filter both count, so a workspace that has it has the whole vocabulary, and a
+ * workspace created next year is picked up on its own first boot without any
+ * of the others paying for a re-check.
+ */
+async function seedAssetVocabulary(d1: D1DatabaseLike) {
+  const pending = await d1
+    .prepare(
+      `SELECT id FROM organisations o
+        WHERE o.status = 'active'
+          AND NOT EXISTS (
+            SELECT 1 FROM option_values v
+              JOIN option_sets s ON s.id = v.option_set_id
+             WHERE v.organisation_id = o.id
+               AND s.key = 'unit_status'
+               AND v.value = 'Needs replacement'
+          )`,
+    )
+    .all();
+  const organisations = (pending.results ?? []) as Array<{ id?: string }>;
+  if (organisations.length === 0) return;
+
+  /*
+   * THE WHOLE ASSET VOCABULARY, not just the part that is new.
+   *
+   * The first seven are already seeded — but only for the organisation Stage 1
+   * happened to pick, plus the second tenant that copies it. The demonstration
+   * workspace deliberately clones no customer configuration, and a workspace
+   * onboarded next year gets whatever it gets, so an "add the missing nine"
+   * seed would have left those tenants with a category list that could not
+   * describe a light fitting.
+   *
+   * Restating them is safe rather than duplicative because `option_values`
+   * carries a UNIQUE index on (organisation_id, option_set_id, value): for a
+   * workspace that already has `Lighting`, the `INSERT OR IGNORE` below is a
+   * no-op that leaves its position, colour and any rename exactly as they are.
+   *
+   * The nine after them are the brief's list, reconciled against those seven so
+   * nothing is restated under a second name — two vocabularies for one concept
+   * is the thing the option store exists to prevent.
+   */
+  const categories: ReadonlyArray<readonly [string, string, string]> = [
+    ["Air conditioning", "#579bfc", "#ffffff"],
+    ["Refrigeration", "#12B4A8", "#101820"],
+    ["Electrical", "#fdab3d", "#101820"],
+    ["Lighting", "#f0a91f", "#101820"],
+    ["Security", "#a25ddc", "#ffffff"],
+    ["Shopfront", "#5c82af", "#ffffff"],
+    ["Cabinetry & furniture", "#a25ddc", "#ffffff"],
+    ["Locks & security hardware", "#5c82af", "#ffffff"],
+    ["Doors & shutters", "#579bfc", "#ffffff"],
+    ["Plumbing", "#0095ce", "#ffffff"],
+    ["Displays & AV", "#9cd326", "#101820"],
+    ["Signage", "#ff7575", "#101820"],
+    ["Paint & finishes", "#ffcb00", "#101820"],
+    ["Fixtures & fittings", "#bb3354", "#ffffff"],
+    ["Flooring", "#7f5347", "#ffffff"],
+    ["Other", "#808799", "#ffffff"],
+  ];
+
+  /*
+   * ONE genuinely new status, and the four that were already right.
+   *
+   * `Active`, `Inactive`, `Out of service` and `Retired` already mean what the
+   * brief wants them to mean, and are restated here for the same reason the
+   * categories are: a workspace that never ran the Stage 1 seed has none of
+   * them. `Needs replacement` is the state the section adds, and the one the
+   * KPI row and the filter are built on — "this still works, and it is on
+   * borrowed time" is precisely the list a maintenance team wants.
+   */
+  const statuses: ReadonlyArray<readonly [string, string, string]> = [
+    ["Active", "#12B4A8", "#101820"],
+    ["Needs replacement", "#fdab3d", "#101820"],
+    ["Inactive", "#5c82af", "#ffffff"],
+    ["Out of service", "#e2445c", "#ffffff"],
+    ["Retired", "#808799", "#ffffff"],
+  ];
+
+  for (const organisation of organisations) {
+    const organisationId = organisation.id;
+    if (!organisationId) continue;
+    await seedOptionValues(d1, organisationId, "unit_category", "Unit category", categories);
+    await seedOptionValues(d1, organisationId, "unit_status", "Unit status", statuses);
+  }
+}
+
+/**
+ * Values appended to one option set, creating the set if the workspace has none.
+ *
+ * The set is created rather than assumed because not every organisation in this
+ * database was given one: the primary tenant is seeded by Stage 1 and the
+ * second tenant copies it, but the demonstration workspace builds its own
+ * vocabulary deliberately, and a workspace onboarded next year has whatever it
+ * has. `option_sets` carries a UNIQUE (organisation_id, key), so the
+ * `INSERT OR IGNORE` cannot produce a second set, and the id is read back
+ * afterwards rather than assumed so an existing set under a different id is the
+ * one written into.
+ *
+ * `position` starts at 100 so appended values sort after everything seeded or
+ * arranged by hand, and `system` is 0 — these are the workspace's own values to
+ * rename, recolour or remove, not the product's.
+ */
+async function seedOptionValues(
+  d1: D1DatabaseLike,
+  organisationId: string,
+  key: string,
+  name: string,
+  values: ReadonlyArray<readonly [string, string, string]>,
+) {
+  await d1
+    .prepare(
+      "INSERT OR IGNORE INTO option_sets (id, organisation_id, key, name, description) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(`optset-${organisationId}-${key}`, organisationId, key, name, "Asset register vocabulary")
+    .run();
+
+  const set = (await d1
+    .prepare("SELECT id FROM option_sets WHERE organisation_id = ? AND key = ? LIMIT 1")
+    .bind(organisationId, key)
+    .first()) as { id?: string } | null;
+  if (!set?.id) return;
+
+  for (const [position, [value, colour, textColour]] of values.entries()) {
+    await d1
+      .prepare(
+        `INSERT OR IGNORE INTO option_values
+          (id, organisation_id, option_set_id, value, label, colour_hex, text_colour, position, is_done, is_default, active, system)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, 0)`,
+      )
+      .bind(
+        `asset-${organisationId}-${key}-${position}`,
+        organisationId,
+        set.id,
+        value,
+        value,
+        colour,
+        textColour,
+        100 + position,
+      )
+      .run();
   }
 }
