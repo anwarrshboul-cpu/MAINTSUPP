@@ -526,13 +526,43 @@ test("every workspace reference is resolved against the caller's organisation", 
 
   // The lookup carries both predicates, so "missing" and "not yours" cannot
   // drift into distinguishable answers later.
+  //
+  // RE-POINTED, NOT WEAKENED. This matched the two predicates as ONE line —
+  // `eq(x.id, value), eq(x.organisationId, orgId)` — which held only while
+  // every arm fitted on one line. The Assets section gave the `units` arm a
+  // third predicate (`deleted_at`: a binned asset is not a reference anything
+  // may be filed against) and the formatter wrapped it.
+  //
+  // Each arm is now sliced by the TABLE IT SELECTS FROM rather than by the
+  // `kind ===` test it sits under — the contractor arm is the trailing `else`
+  // and has no such test — and asserted against its own text, so a predicate
+  // landing in the wrong arm still fails.
+  const reference = route.slice(
+    route.indexOf("async function referenceRefusal("),
+    route.indexOf("const label = kind ==="),
+  );
+  assert.ok(reference.length > 0, "referenceRefusal must exist");
+
   for (const table of ["sites", "units", "contractors"]) {
+    const at = reference.indexOf(`.from(${table})`);
+    assert.ok(at > 0, `${table} arm must exist`);
+    const body = reference.slice(at, reference.indexOf(".limit(1)", at));
+    assert.match(body, new RegExp(`eq\\(${table}\\.id, value\\)`), `${table} looked up by id`);
     assert.match(
-      route,
-      new RegExp(`eq\\(${table}\\.id, value\\), eq\\(${table}\\.organisationId, orgId\\)`),
+      body,
+      new RegExp(`eq\\(${table}\\.organisationId, orgId\\)`),
       `${table} must be looked up by id AND organisation`,
     );
   }
+
+  // And the one the Assets section added: a reference may not resolve to a row
+  // sitting in the recycle bin.
+  const unitsAt = reference.indexOf(".from(units)");
+  assert.match(
+    reference.slice(unitsAt, reference.indexOf(".limit(1)", unitsAt)),
+    /isNull\(units\.deletedAt\)/,
+    "a binned asset is not a reference anything may be filed against",
+  );
 
   assert.match(route, /status: 404/, "a reference miss is a 404");
   assert.doesNotMatch(route, /status: 403/, "never 403 — that would confirm the row exists elsewhere");

@@ -721,111 +721,6 @@ export async function sendColumnToBin(
   return { ok: true, title: column.title, values };
 }
 
-/* ── Restoring ─────────────────────────────────────────────────────────── */
-
-export type RestoreOutcome =
-  | { ok: true; entityType: string; entityId: string; message: string }
-  | { ok: false; error: string; status: number };
-
-/**
- * Put one thing back where it came from.
- *
- * "Where it came from" is load-bearing. For a job it means the group it was in
- * and the position it held in that group, not merely clearing a flag — a job
- * that comes back at the bottom of the wrong group has not been restored, it
- * has been re-created.
- */
-export async function restoreFromBin(
-  db: Database,
-  orgId: string,
-  entryId: string,
-): Promise<RestoreOutcome> {
-  const [entry] = await db
-    .select()
-    .from(recycleBin)
-    .where(and(eq(recycleBin.id, entryId), eq(recycleBin.organisationId, orgId)));
-
-  if (!entry) {
-    return { ok: false, error: "That item is no longer in the bin.", status: 404 };
-  }
-
-  if (entry.entityType === SECTION_ENTITY_TYPE) return restoreSection(db, orgId, entry);
-
-  /*
-   * W2C — A CHILD CANNOT ESCAPE A DELETED PARENT, and this is the chosen policy
-   * rather than the only one available.
-   *
-   * The alternative was "restore the parent first, silently". It was rejected:
-   * restoring one row would then put a whole section, its register and every
-   * other row on it back into the sidebar for everybody, which is a far bigger
-   * act than the one the person clicked — and they would have no way to tell it
-   * had happened. Refusing says what is in the way and names the one thing to
-   * do about it, and it makes the section the single recovery object the owner
-   * asked for.
-   *
-   * It is enforced HERE rather than in the screen because the bin's listing
-   * already hides these entries, so anything reaching this line is a stale tab
-   * or a script — exactly the caller a UI-only rule does not stop.
-   */
-  if (entry.boardId) {
-    const binnedBoards = await binnedSectionBoards(db, orgId);
-    if (binnedBoards.has(entry.boardId)) {
-      return {
-        ok: false,
-        status: 409,
-        error:
-          "The section this belonged to is in the recycle bin. Restore the section and this comes back with it, exactly where it was.",
-      };
-    }
-  }
-
-  if (entry.entityType === "job") return restoreJob(db, orgId, entry);
-  if (entry.entityType === "group") return restoreGroup(db, orgId, entry);
-  if (entry.entityType === "board_view") return restoreBoardView(db, orgId, entry);
-  if (entry.entityType === "column") return restoreColumn(db, orgId, entry);
-  if (entry.entityType === ASSET_ENTITY_TYPE) return restoreAsset(db, orgId, entry);
-
-  return {
-    ok: false,
-    error: `Nothing here knows how to restore a "${entry.entityType}".`,
-    status: 409,
-  };
-}
-
-type BinRow = typeof recycleBin.$inferSelect;
-
-/**
- * AN ASSET TO THE BIN, with everything it owns left exactly where it is.
- *
- * ── WHAT IS DELIBERATELY NOT TOUCHED ───────────────────────────────────────
- *
- * Its history rows, its attachments, and its children. All three survive
- * untouched, and each for its own reason:
- *
- *   · THE HISTORY is the record of what was installed and what replaced it.
- *     A site that moved from transformer A to B must not lose A because
- *     somebody binned the asset row, and restoring an asset to an empty
- *     timeline would be a worse outcome than not restoring it at all.
- *   · THE FILES stay anchored on `attachments.unit_id`. They are already
- *     invisible everywhere the asset is, because every screen reaches them
- *     through the asset, and destroying bytes on a REVERSIBLE verb is exactly
- *     the mistake `data.delete` exists to keep behind a separate door.
- *   · THE CHILDREN keep pointing at a parent they can no longer see, which
- *     every reader renders as "no parent". Cascading them would destroy four
- *     components because somebody binned the cabinet, and the bin's promise is
- *     that one action removes one thing.
- *
- * ── THE SNAPSHOT ───────────────────────────────────────────────────────────
- *
- * `title` carries the asset number as well as the name, because the bin lists
- * without joining and "LED strip" alone does not identify which of eleven. The
- * placement records the site and the parent so a reader can see where it will
- * go back to before they press restore.
- *
- * Returns false rather than throwing for an id in another workspace or already
- * in the bin — deleting an already-deleted row is not a failure, which is the
- * same contract `sendJobsToBin` keeps.
- */
 /**
  * The site an asset would be restored TO, given a bin entry id.
  *
@@ -863,6 +758,38 @@ export async function binnedAssetSite(
   return row?.siteId ?? "";
 }
 
+/**
+ * AN ASSET TO THE BIN, with everything it owns left exactly where it is.
+ *
+ * ── WHAT IS DELIBERATELY NOT TOUCHED ───────────────────────────────────────
+ *
+ * Its history rows, its attachments, and its children. All three survive
+ * untouched, and each for its own reason:
+ *
+ *   · THE HISTORY is the record of what was installed and what replaced it.
+ *     A site that moved from transformer A to B must not lose A because
+ *     somebody binned the asset row, and restoring an asset to an empty
+ *     timeline would be a worse outcome than not restoring it at all.
+ *   · THE FILES stay anchored on `attachments.unit_id`. They are already
+ *     invisible everywhere the asset is, because every screen reaches them
+ *     through the asset, and destroying bytes on a REVERSIBLE verb is exactly
+ *     the mistake `data.delete` exists to keep behind a separate door.
+ *   · THE CHILDREN keep pointing at a parent they can no longer see, which
+ *     every reader renders as "no parent". Cascading them would destroy four
+ *     components because somebody binned the cabinet, and the bin's promise is
+ *     that one action removes one thing.
+ *
+ * ── THE SNAPSHOT ───────────────────────────────────────────────────────────
+ *
+ * `title` carries the asset number as well as the name, because the bin lists
+ * without joining and "LED strip" alone does not identify which of eleven. The
+ * placement records the site and the parent so a reader can see where it will
+ * go back to before they press restore.
+ *
+ * Returns false rather than throwing for an id in another workspace or already
+ * in the bin — deleting an already-deleted row is not a failure, which is the
+ * same contract `sendJobsToBin` keeps.
+ */
 export async function sendAssetToBin(
   db: Database,
   orgId: string,
@@ -938,6 +865,79 @@ export async function sendAssetToBin(
   return true;
 }
 
+/* ── Restoring ─────────────────────────────────────────────────────────── */
+
+export type RestoreOutcome =
+  | { ok: true; entityType: string; entityId: string; message: string }
+  | { ok: false; error: string; status: number };
+
+/**
+ * Put one thing back where it came from.
+ *
+ * "Where it came from" is load-bearing. For a job it means the group it was in
+ * and the position it held in that group, not merely clearing a flag — a job
+ * that comes back at the bottom of the wrong group has not been restored, it
+ * has been re-created.
+ */
+export async function restoreFromBin(
+  db: Database,
+  orgId: string,
+  entryId: string,
+): Promise<RestoreOutcome> {
+  const [entry] = await db
+    .select()
+    .from(recycleBin)
+    .where(and(eq(recycleBin.id, entryId), eq(recycleBin.organisationId, orgId)));
+
+  if (!entry) {
+    return { ok: false, error: "That item is no longer in the bin.", status: 404 };
+  }
+
+  if (entry.entityType === SECTION_ENTITY_TYPE) return restoreSection(db, orgId, entry);
+
+  /*
+   * W2C — A CHILD CANNOT ESCAPE A DELETED PARENT, and this is the chosen policy
+   * rather than the only one available.
+   *
+   * The alternative was "restore the parent first, silently". It was rejected:
+   * restoring one row would then put a whole section, its register and every
+   * other row on it back into the sidebar for everybody, which is a far bigger
+   * act than the one the person clicked — and they would have no way to tell it
+   * had happened. Refusing says what is in the way and names the one thing to
+   * do about it, and it makes the section the single recovery object the owner
+   * asked for.
+   *
+   * It is enforced HERE rather than in the screen because the bin's listing
+   * already hides these entries, so anything reaching this line is a stale tab
+   * or a script — exactly the caller a UI-only rule does not stop.
+   */
+  if (entry.boardId) {
+    const binnedBoards = await binnedSectionBoards(db, orgId);
+    if (binnedBoards.has(entry.boardId)) {
+      return {
+        ok: false,
+        status: 409,
+        error:
+          "The section this belonged to is in the recycle bin. Restore the section and this comes back with it, exactly where it was.",
+      };
+    }
+  }
+
+  if (entry.entityType === "job") return restoreJob(db, orgId, entry);
+  if (entry.entityType === "group") return restoreGroup(db, orgId, entry);
+  if (entry.entityType === "board_view") return restoreBoardView(db, orgId, entry);
+  if (entry.entityType === "column") return restoreColumn(db, orgId, entry);
+  if (entry.entityType === ASSET_ENTITY_TYPE) return restoreAsset(db, orgId, entry);
+
+  return {
+    ok: false,
+    error: `Nothing here knows how to restore a "${entry.entityType}".`,
+    status: 409,
+  };
+}
+
+type BinRow = typeof recycleBin.$inferSelect;
+
 /**
  * An asset out of the bin.
  *
@@ -981,6 +981,7 @@ async function restoreAsset(
     message: `${asset.assetNumber ?? asset.name} is back on the asset register.`,
   };
 }
+
 
 async function restoreJob(
   db: Database,
