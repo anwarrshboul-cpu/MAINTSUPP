@@ -113,6 +113,15 @@ export type AssetReference = {
   suppliers: Array<{ id: string; name: string }>;
   kinds: Array<{ value: string; label: string }>;
   events: readonly string[];
+  /**
+   * The status value the KPI counted, resolved from this workspace's own
+   * configured statuses. The tile filters by THIS, never by a literal — see
+   * `referenceData` in `app/api/assets/route.ts` for why a literal drifts.
+   *
+   * Optional because an older cached payload will not carry it; the screen
+   * falls back to the seeded value rather than filtering on `undefined`.
+   */
+  needsReplacementStatus?: string;
 };
 
 export type AssetTotals = {

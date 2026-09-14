@@ -153,8 +153,14 @@ export function AssetForm({
    * against the site the form opened with, so changing the site changes the
    * candidates with it.
    */
+  /*
+   * NO PLACEHOLDER ENTRY. `FormField` prepends its own `<option value="">` to
+   * every select it draws, so passing one here produced TWO consecutive blank
+   * rows — "Choose one" immediately above "Not part of anything", both empty,
+   * in four dropdowns. Measured in the browser: the site select's second option
+   * had an empty value. The Sites editor passes none for the same reason.
+   */
   const parentOptions = [
-    { value: "", label: "Not part of anything" },
     ...parents
       .filter(
         (entry) =>
@@ -184,10 +190,7 @@ export function AssetForm({
             value={form.siteId}
             onChange={set("siteId")}
             required
-            options={[
-              { value: "", label: "Choose a site" },
-              ...sites.map((site) => ({ value: site.id, label: site.name })),
-            ]}
+            options={sites.map((site) => ({ value: site.id, label: site.name }))}
             hint="Every asset belongs to one store. This is the only field that cannot change later without moving the record."
           />
           <FormField
@@ -213,7 +216,7 @@ export function AssetForm({
             value={form.category}
             onChange={set("category")}
             required
-            options={[{ value: "", label: "Choose a category" }, ...categories]}
+            options={categories}
             hint="Categories are configured in Settings — add one there rather than here."
           />
           <FormField
@@ -406,11 +409,8 @@ export function AssetForm({
             label="Supplier on file"
             value={form.supplierContractorId}
             onChange={set("supplierContractorId")}
-            options={[
-              { value: "", label: "Not one of our contractors" },
-              ...suppliers.map((entry) => ({ value: entry.id, label: entry.name })),
-            ]}
-            hint="Link a contractor who also supplies this part. Otherwise type the supplier below."
+            options={suppliers.map((entry) => ({ value: entry.id, label: entry.name }))}
+            hint="Link a contractor who also supplies this part, or leave it blank and type the supplier below."
           />
           <FormField
             id="asset-supplier"

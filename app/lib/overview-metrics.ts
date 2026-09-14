@@ -48,7 +48,7 @@
  * exists to prevent.
  */
 
-import { and, count, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   jobStatusMap,
@@ -480,17 +480,28 @@ export async function loadOverviewMetrics(
     db
       .select({ total: count() })
       .from(units)
-      /* `deleted_at` is the Assets section's soft delete: a binned asset is off
-         the register, so it is not an active unit either. */
+      /*
+       * TWO PREDICATES THE ASSETS SECTION MADE NECESSARY, and this meter's
+       * label is what decides both.
+       *
+       * `deleted_at` — a binned asset is off the register, so it is not an
+       * active unit either.
+       *
+       * `kind <> 'reference'` — the Assets section put four kinds in this
+       * table, and a Reference is a SPECIFICATION rather than an object: a
+       * paint code, a finish, a material. "Active units" counts the plant a
+       * store has, so counting the paint it is painted with would inflate the
+       * figure with things nobody can service. Equipment, components and
+       * replacement parts are all physical and all still count.
+       */
       .where(
-        siteIds
-          ? and(
-              eq(units.organisationId, orgId),
-              eq(units.status, "Active"),
-              isNull(units.deletedAt),
-              siteIds.length ? inArray(units.siteId, siteIds) : sql`1 = 0`,
-            )!
-          : and(eq(units.organisationId, orgId), eq(units.status, "Active"))!,
+        and(
+          eq(units.organisationId, orgId),
+          eq(units.status, "Active"),
+          isNull(units.deletedAt),
+          ne(units.kind, "reference"),
+          siteIds ? (siteIds.length ? inArray(units.siteId, siteIds) : sql`1 = 0`) : undefined,
+        )!,
       ),
     /*
      * Spend by month — `loadSpendByMonth`, the query the Reports block's trend

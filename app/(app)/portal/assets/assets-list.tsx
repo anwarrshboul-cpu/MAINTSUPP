@@ -338,6 +338,9 @@ export function AssetsList({
     needsReplacement: 0,
   };
 
+  /* The seeded value is the fallback for a payload that predates the field. */
+  const replaceableStatus = data?.needsReplacementStatus ?? NEEDS_REPLACEMENT_STATUS;
+
   /*
    * The export carries the filters the reader can see, so the file matches the
    * screen — EVERY chosen value, repeated, not just the first.
@@ -430,10 +433,11 @@ export function AssetsList({
           <button
             type="button"
             className="ops-tile"
-            /* The same constant the server counts the tile's figure with, so
-               the number and the list it opens cannot disagree. */
-            onClick={() => toggleValue("status", NEEDS_REPLACEMENT_STATUS)}
-            aria-pressed={chosenStatuses.includes(NEEDS_REPLACEMENT_STATUS)}
+            /* The value the SERVER counted this figure with, so the number
+               and the list it opens cannot disagree — including after an
+               administrator has renamed the status. */
+            onClick={() => toggleValue("status", replaceableStatus)}
+            aria-pressed={chosenStatuses.includes(replaceableStatus)}
           >
             <span className="ops-tile__value">{totals.needsReplacement}</span>
             <span className="ops-tile__label">Needs replacement</span>

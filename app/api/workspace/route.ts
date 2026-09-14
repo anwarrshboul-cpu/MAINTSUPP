@@ -1621,7 +1621,14 @@ async function referenceRefusal(
         ? await db
             .select({ id: units.id })
             .from(units)
-            .where(and(eq(units.id, value), eq(units.organisationId, orgId)))
+            /* A binned asset is not a reference anything may be filed against. */
+            .where(
+              and(
+                eq(units.id, value),
+                eq(units.organisationId, orgId),
+                isNull(units.deletedAt),
+              ),
+            )
             .limit(1)
         : await db
             .select({ id: contractors.id })
@@ -3054,6 +3061,9 @@ export async function PATCH(request: Request) {
         { kind: "site", value: "siteId" in data ? text(data.siteId, 100) : null },
       ]);
       if (badReference) return badReference;
+      /* A binned asset is off the register, so this drawer cannot edit one
+         either — `units.deleted_at` is the Assets section's soft delete, and a
+         write that ignored it would resurrect a row the bin is holding. */
       await db.update(units).set({
         ...supplied(data, "siteId", (value) => text(value, 100)),
         ...supplied(data, "name", (value) => text(value, 140)),
@@ -3064,7 +3074,9 @@ export async function PATCH(request: Request) {
         ...supplied(data, "status", (value) => text(value, 40)),
         ...supplied(data, "notes", (value) => optionalText(value, 500)),
         updatedAt: new Date().toISOString(),
-      }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
+      }).where(
+        and(eq(units.id, id), eq(units.organisationId, orgId), isNull(units.deletedAt)),
+      );
     } else if (entity === "contractor") {
       /* The register this edit is aimed at, resolved before anything is read
          or written — so a refusal changes nothing, and an id belonging to
@@ -3463,7 +3475,9 @@ export async function DELETE(request: Request) {
         ),
       );
     } else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
-    else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId)));
+    /* `deleted_at` for the reason the edit above carries it: an asset in the
+       recycle bin is not on the register to be retired. */
+    else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId), isNull(units.deletedAt)));
     else if (entity === "contractor") {
       /* Same register check as the edit, and for the same reason: inactivating
          somebody else's contractor through this screen would be a write across

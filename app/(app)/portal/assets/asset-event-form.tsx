@@ -140,10 +140,9 @@ export function AssetEventForm({
           label="Who did the work"
           value={form.contractorId}
           onChange={set("contractorId")}
-          options={[
-            { value: "", label: "Not recorded" },
-            ...suppliers.map((entry) => ({ value: entry.id, label: entry.name })),
-          ]}
+          /* No placeholder entry — `FormField` draws its own blank option, and a
+             second one is two empty rows in the list. */
+          options={suppliers.map((entry) => ({ value: entry.id, label: entry.name }))}
         />
         <FormField
           id="asset-event-cost"

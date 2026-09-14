@@ -448,12 +448,26 @@ test("the export is formula-safe and scoped", async () => {
   assert.match(exports, /FORMULA_STARTERS/);
 });
 
-test("the export joins rather than looking up per row", async () => {
+test("the export joins rather than looking up per row, and both joins are scoped", async () => {
   const csv = await read("app/api/assets/csv/route.ts");
   /* One query for several hundred assets. An export making a lookup per row is
      the N+1 this product has already paid for once. */
-  assert.match(csv, /\.leftJoin\(sites,/);
-  assert.match(csv, /\.leftJoin\(contractors,/);
+  assert.match(csv, /\.leftJoin\(\s*sites,/);
+  assert.match(csv, /\.leftJoin\(\s*contractors,/);
+
+  /*
+   * RE-POINTED AND STRENGTHENED. This matched `.leftJoin(contractors,` on one
+   * line and broke when the join gained a second predicate and wrapped — the
+   * contract it was protecting (one query, not one per row) was never in
+   * question, only its spelling. Both joins now also have to carry the
+   * ORGANISATION: neither `site_id` nor `supplier_contractor_id` has a foreign
+   * key behind it, and this estate was populated by an import, so a row holding
+   * another tenant's id printing that tenant's name into the file is not
+   * something to leave to luck.
+   */
+  const joins = csv.slice(csv.indexOf(".from(units)"), csv.indexOf(".where("));
+  assert.match(joins, /eq\(sites\.organisationId, orgId\)/);
+  assert.match(joins, /eq\(contractors\.organisationId, orgId\)/);
 });
 
 /* ── 4. The recycle bin ───────────────────────────────────────────────────── */

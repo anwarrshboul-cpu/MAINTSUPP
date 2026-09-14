@@ -5,8 +5,19 @@
  *
  * `app/api/units/route.ts`, which was the same register with a narrower model
  * and one consumer. It is not kept alongside: two routes writing one table is
- * how the contractor scorecard ended up printing four disagreeing figures, and
- * this file is the only writer of `units` in the product now.
+ * how the contractor scorecard ended up printing four disagreeing figures.
+ *
+ * THIS IS NOT, HOWEVER, THE ONLY WRITER OF `units`, and an earlier draft of
+ * this comment said it was. Two others exist and both are legitimate:
+ *
+ *   · `app/api/workspace/route.ts` — the Manage-data drawer's create, edit and
+ *     retire. It touches the EIGHT legacy columns only and its update is built
+ *     with `supplied()`, so an absent key is not written: it cannot clear an
+ *     Assets column, and a row it creates takes the schema defaults for `kind`
+ *     and `specs` and is numbered on first read. Verified, not assumed.
+ *   · `app/api/options/route.ts` — the cascade that rewrites `units.category`
+ *     and `units.status` when an administrator renames an option value. See
+ *     `referenceData` below for the one thing that has to survive that.
  *
  * Three defects of that route are deliberately NOT carried over, each of which
  * its own file or a sibling already documents:
@@ -72,6 +83,7 @@ import {
   costPence,
   formatAssetNumber,
   MAX_PARENT_DEPTH,
+  NEEDS_REPLACEMENT_STATUS,
   needsReplacement,
   parseSpecs,
   safeUrl,
@@ -547,6 +559,24 @@ async function referenceData(db: Db, orgId: string, siteScope: string[] | null) 
     suppliers: supplierRows,
     kinds: ASSET_KINDS.map((key) => ({ value: key, label: ASSET_KIND_LABELS[key] })),
     events: ASSET_EVENTS,
+    /*
+     * THE STATUS THE KPI COUNTS AND THE TILE FILTERS BY — one value, resolved
+     * here, so the two cannot disagree.
+     *
+     * `unit_status` is a configurable vocabulary, and `PATCH /api/options`
+     * CASCADES a rename across `units.status`. So an administrator renaming
+     * "Needs replacement" to "Replace soon" rewrites every row — and a tile
+     * that counted one literal while its filter applied the same literal would
+     * then read a figure of 0 and open a list of 0, which is at least
+     * consistent, or worse, count one spelling and filter another.
+     *
+     * Resolved from the workspace's own configured statuses, falling back to
+     * the seeded value when nothing matches, so a rename carries the tile with
+     * it rather than quietly retiring it.
+     */
+    needsReplacementStatus:
+      statuses.find((entry) => needsReplacement(entry.value))?.value ??
+      NEEDS_REPLACEMENT_STATUS,
   };
 }
 
@@ -631,21 +661,25 @@ export async function GET(request: Request) {
      * below it applied. Deriving the four figures from the array that is about
      * to be sent makes the tile and the list incapable of disagreeing.
      */
+    /*
+     * Resolved BEFORE the totals, because the figure and the filter are both
+     * keyed on the same value — see `referenceData`. Counting by a literal here
+     * and filtering by a configured value there is the server/browser drift
+     * `asset-model.ts` exists to prevent.
+     */
+    const reference = await referenceData(db, orgId, siteScope);
+    const replaceable = reference.needsReplacementStatus.toLowerCase();
+
     const totals = {
       all: rows.length,
       equipment: rows.filter((row) => row.kind === "equipment").length,
       replacementParts: rows.filter((row) => row.kind === "replacement_part").length,
-      /* Through the model's own helper, never a literal. The tile's figure and
-         the filter that tile applies were two separate spellings of this rule,
-         which is the server/browser drift `asset-model.ts` exists to prevent. */
-      needsReplacement: rows.filter((row) => needsReplacement(row.status)).length,
+      needsReplacement: rows.filter(
+        (row) => (row.status ?? "").trim().toLowerCase() === replaceable,
+      ).length,
     };
 
-    return Response.json({
-      assets: rows,
-      totals,
-      ...(await referenceData(db, orgId, siteScope)),
-    });
+    return Response.json({ assets: rows, totals, ...reference });
   } catch (error) {
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
@@ -777,7 +811,14 @@ export async function POST(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId, siteScope } = guard.scope;
-    const body = (await request.json()) as {
+    /*
+     * `?? {}` because a body of literal `null` PARSES. `request.json()` returns
+     * null rather than throwing, so the `.catch` never fires, and the property
+     * read below then threw a TypeError into the outer catch — which answered
+     * 503 "temporarily unavailable" for what is a malformed request. The trash
+     * route documented this exact trap; the assets route had inherited it.
+     */
+    const body = ((await request.json().catch(() => null)) ?? {}) as {
       data?: Record<string, unknown>;
       event?: Record<string, unknown>;
       assetId?: string;
@@ -971,7 +1012,17 @@ export async function PATCH(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId, siteScope } = guard.scope;
-    const body = (await request.json()) as { id?: string; data?: Record<string, unknown> };
+    /*
+     * `?? {}` because a body of literal `null` PARSES. `request.json()` returns
+     * null rather than throwing, so the `.catch` never fires, and the property
+     * read below then threw a TypeError into the outer catch — which answered
+     * 503 "temporarily unavailable" for what is a malformed request. The trash
+     * route documented this exact trap; the assets route had inherited it.
+     */
+    const body = ((await request.json().catch(() => null)) ?? {}) as {
+      id?: string;
+      data?: Record<string, unknown>;
+    };
     const id = text(body.id, 120);
     if (!id) invalid("An asset id is required.");
 
@@ -1170,7 +1221,14 @@ export async function DELETE(request: Request) {
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
     const { actor, db, orgId, siteScope } = guard.scope;
-    const body = (await request.json()) as { id?: string };
+    /*
+     * `?? {}` because a body of literal `null` PARSES. `request.json()` returns
+     * null rather than throwing, so the `.catch` never fires, and the property
+     * read below then threw a TypeError into the outer catch — which answered
+     * 503 "temporarily unavailable" for what is a malformed request. The trash
+     * route documented this exact trap; the assets route had inherited it.
+     */
+    const body = ((await request.json().catch(() => null)) ?? {}) as { id?: string };
     const id = text(body.id, 120);
     if (!id) invalid("An asset id is required.");
 
