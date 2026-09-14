@@ -86,11 +86,36 @@ Use the **session pooler (5432)**, never the transaction pooler (6543) — a
 documented deadlock. Supabase allows 15 clients; the app runs 2 per instance.
 
 **Migrations are automatic and additive.** `ensureDatabase()` in `db/init.ts`
-replays `CREATE TABLE IF NOT EXISTS`, guarded `addColumn` and `INSERT OR IGNORE`
-seeds on the first request of every instance. There is no `DROP TABLE`, no
-column rename, no destructive `ALTER`. `db/init.ts` therefore runs on the boot
-path of every request — invariant repairs belong there, and anything expensive
-does not.
+applies `CREATE TABLE IF NOT EXISTS`, guarded `addColumn` and `INSERT OR IGNORE`
+seeds. There is no `DROP TABLE`, no column rename, no destructive `ALTER`.
+
+**They no longer replay on every cold start.** They used to, and it cost **47
+seconds** on the first request of every instance against 0.98s for every request
+after it — 349 prepared statements, spread across 30 stages with no single one
+dominating. `db/schema-fingerprint.ts` now stores a fingerprint of the migration
+sources once a full run finishes, and the replay is skipped while it matches.
+Measured after: **3.0s** cold, and a fresh database still migrates from nothing
+and answers 200.
+
+Three things follow, and the first is the one that bites:
+
+- **Adding a migration means the fingerprint changes.** You do not maintain it —
+  `tests/schema-fingerprint.test.mjs` recomputes it and fails with the value to
+  paste. A red run there is not a flaky test; it is that test doing the only job
+  it has. Never relax it: it is what stands between a changed migration and a
+  database that believes it is already up to date.
+- **A repair is not a migration.** Anything that reads live rows and fixes drift
+  ordinary use can reintroduce belongs in `repairInvariants`, which runs on every
+  boot regardless of the fingerprint. Anything that only ever has work to do once
+  belongs in `applyMigrations`. Putting a repair in the wrong half makes it stop
+  running the day the fingerprint settles.
+- **Do not rely on the boot path to finish a row a write path left incomplete.**
+  One already did: the workspace drawer created sites without their Stage-2
+  columns and four boot-path `UPDATE … WHERE … IS NULL` statements tidied up
+  afterwards. That is no longer a backstop.
+
+`db/init.ts` still runs on the boot path of every request, so anything expensive
+added to `repairInvariants` is paid on every cold start for ever.
 
 **Storage** is R2 locally and Supabase Storage over its S3 API deployed
 (`db/r2-over-s3.ts`), selected by all four `S3_*` vars. With any one missing the
