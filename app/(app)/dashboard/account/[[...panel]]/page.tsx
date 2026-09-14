@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requirePageSession } from "../../../../lib/page-guard";
 import { ACCOUNT_PANEL_KEYS } from "../../../portal/views/account-panels";
 import { AccountShell } from "../../../portal/views/account-shell";
 
@@ -22,6 +23,16 @@ export default async function AccountPage({
   params: Promise<{ panel?: string[] }>;
 }) {
   const { panel } = await params;
+  /*
+   * Every panel behind this route reads the signed-in person's own account, so
+   * an anonymous visitor has nothing to be shown here and must not be sent the
+   * shell while we work that out. See `app/lib/page-guard.ts`.
+   */
+  await requirePageSession(
+    panel?.length
+      ? `/dashboard/account/${panel.join("/")}`
+      : "/dashboard/account",
+  );
   const requested = panel?.[0] ?? "";
   // An unknown segment falls back to the profile rather than 404ing, so a stale
   // bookmark lands somewhere useful.

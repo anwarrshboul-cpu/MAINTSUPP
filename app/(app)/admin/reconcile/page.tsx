@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requirePageSession } from "../../../lib/page-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,14 @@ export const dynamic = "force-dynamic";
  * Same shape as `app/(app)/portal/page.tsx`, which redirects the old portal
  * address to `/dashboard` for the same reason.
  */
-export default function AdminReconcileRedirect() {
+export default async function AdminReconcileRedirect() {
+  /*
+   * Auth is resolved BEFORE the forward, for the same reason `/portal` now
+   * does it: bouncing an anonymous visitor into a protected route and letting
+   * the far end sort it out is what produced the dashboard-then-login flash.
+   * `next` is the destination, not this address, so signing in lands on the
+   * reconciler rather than back on a redirect.
+   */
+  await requirePageSession("/dashboard/reconcile");
   redirect("/dashboard/reconcile");
 }

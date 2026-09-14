@@ -1,5 +1,4 @@
-import { headers } from "next/headers";
-import { getSession } from "../../../lib/auth-session";
+import { requirePageSession } from "../../../lib/page-guard";
 import PortalApp, { type Section } from "../../portal/portal-app";
 
 export const dynamic = "force-dynamic";
@@ -72,24 +71,54 @@ export default async function DashboardPage({
     workspaceSection ?? routes[slug] ?? routes[section?.[0] ?? ""] ?? "overview";
 
   /*
-   * Who is actually looking at this.
+   * WHO IS ASKING — AND WHETHER THEY GET A PAGE AT ALL.
    *
-   * These were the literals "Preview User" / "preview@maintsupp.local", which
-   * was honest while there was no way to sign in and is not any more: a signed-in
-   * owner was greeted by somebody else's name. `getSession` never throws and
-   * returns null when there is no session, so the preview identity survives for
-   * an unauthenticated browser — which is still how the dashboard is demoed.
+   * This used to be a `getSession` call whose null case fell through to the
+   * literals "Preview User" / "preview@maintsupp.local". That was honest while
+   * there was no way to sign in, and it quietly became the whole of the auth
+   * hole once there was: an anonymous GET of this route was answered with
+   * 47,663 bytes of the operations shell under a placeholder identity, and the
+   * only thing that eventually sent the visitor to /login was a client fetch
+   * wrapper reacting to the twelve 401s that followed.
+   *
+   * `requirePageSession` redirects instead. It throws, so nothing below runs
+   * and no element of this tree is ever produced for a browser without a
+   * session — which is the actual fix. See `app/lib/page-guard.ts`.
+   *
+   * The path is rebuilt from the same segments the section was resolved from,
+   * so signing in returns the visitor to the screen they asked for rather than
+   * to the Overview. It is sanitised inside `loginRedirect` and again by the
+   * login page, because route params are attacker-supplied.
+   *
+   * THE QUERY DOES NOT GO WITH IT, AND THAT IS THE FRAMEWORK, NOT A CHOICE.
+   *
+   * `session-guard.ts` carries `window.location.search` on the client half of
+   * this feature, so the obvious thing was to read `searchParams` here and
+   * make the two agree. Measured on vinext 0.0.50, it cannot be done. A page's
+   * redirect is thrown during `probePage()` in `entries/app-rsc-entry.js`,
+   * which builds the props from
+   * `collectAppPageSearchParams(searchParams).searchParamsObject` — a key that
+   * function does not return, so the value is `undefined` and the page sees
+   * `{}`. Measured on `/dashboard/jobs?filter=open&view=chart` and on a static
+   * segment, `/dashboard/teams?zz=1`: both arrive as `{}`. `headers()` is no
+   * way round it either — the whole header set a page can see is accept,
+   * accept-encoding, accept-language, connection, host, sec-fetch-mode,
+   * user-agent and x-forwarded-host, and not one of them carries the URL.
+   *
+   * So a filtered deep link comes back from sign-in as its bare path. Written
+   * down rather than left as a puzzle, because the fix LOOKS like a two-line
+   * change and silently does nothing: the first attempt shipped a source-level
+   * test that passed green while the behaviour was broken, and only a runtime
+   * assertion caught it.
    */
-  const session = await getSession(
-    new Request("https://maintsupp.local/dashboard", {
-      headers: await headers(),
-    }),
+  const session = await requirePageSession(
+    section?.length ? `/dashboard/${section.join("/")}` : "/dashboard",
   );
 
   return (
     <PortalApp
-      userName={session?.user.fullName?.trim() || session?.user.email || "Preview User"}
-      userEmail={session?.user.email ?? "preview@maintsupp.local"}
+      userName={session.user.fullName?.trim() || session.user.email}
+      userEmail={session.user.email}
       initialSection={initialSection}
     />
   );

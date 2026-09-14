@@ -437,7 +437,15 @@ export function AccountMenu({
         };
         throw new Error(payload.error || "Sign-out failed.");
       }
-      window.location.assign("/login");
+      /*
+       * `replace`, not `assign`. The page being left is the dashboard of a
+       * session that no longer exists, and `assign` would leave it as the
+       * previous history entry — where Back can restore it from the browser's
+       * back/forward cache, painted and intact, without a request the server
+       * guard could refuse. Replacing the entry means there is nothing behind
+       * /login to go back to.
+       */
+      window.location.replace("/login");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Sign-out failed.");
     }
