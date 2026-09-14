@@ -43,6 +43,35 @@
   background: var(--surface-sunken);
 }
 
+/*
+ * ONE GRID ITEM PER TABLE CELL.
+ *
+ * `analytics-table--mobile-cards` reflows each row into a card by making every
+ * `<td>` a two-column grid: the `data-label` pseudo-element, then the value.
+ * That works only while the cell has ONE child — a second one is given its own
+ * grid cell, which is column 1 of the following row, i.e. under the label.
+ *
+ * Measured on Production at 390px before this existed: an asset's number, kind
+ * and location sat beneath the word "Asset" instead of beneath its name.
+ *
+ * The wrapper also owns the alignment. A `<button>` defaults to centred text,
+ * so the row's PRIMARY value was the one thing in the card not reading from the
+ * left; `align-items: start` sizes it to its content and `text-align: left`
+ * settles the wrap.
+ */
+.asset-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.asset-cell .table-text-action {
+  text-align: left;
+}
+
 /* ── The second line under a row's primary value ──────────────────────────── */
 
 .asset-subline {
@@ -54,6 +83,25 @@
 }
 
 /* ── Detail ───────────────────────────────────────────────────────────────── */
+
+/*
+ * THE RECORD'S ACTIONS WRAP AS BUTTONS, NOT AS WORDS.
+ *
+ * Four controls sit above the tabs — Back to assets, Raise a ticket, Move to
+ * bin, Edit asset. On a phone the row wraps, and without this each LABEL broke
+ * instead: "Back to / assets" and "Move to / bin" over two lines inside a
+ * button sized for one. Measured at 390px on Production.
+ *
+ * `nowrap` keeps each label whole and lets the flex row move a whole button to
+ * the next line, which is what the row was already prepared to do.
+ */
+.asset-detail .section-header__actions {
+  flex-wrap: wrap;
+}
+
+.asset-detail .section-header__actions > * {
+  white-space: nowrap;
+}
 
 .asset-detail__eyebrow {
   margin: 4px 0 0;

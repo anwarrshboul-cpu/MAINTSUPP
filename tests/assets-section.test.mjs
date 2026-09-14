@@ -555,6 +555,96 @@ test("the register is usable on a phone rather than gated behind a wider screen"
   );
 });
 
+test("every card cell presents exactly one grid item", async () => {
+  const list = await read("app/(app)/portal/assets/assets-list.tsx");
+  const css = await read("app/(app)/portal/assets/assets.css");
+
+  /*
+   * THE MOBILE CARD IS A TWO-COLUMN GRID, AND IT COUNTS CHILDREN.
+   *
+   * `analytics-table--mobile-cards` makes every `<td>` a grid of
+   * `minmax(88px, 34%) minmax(0, 1fr)`: the `data-label` pseudo-element is the
+   * first item and the value is meant to be the second. A cell with TWO
+   * children therefore hands the second one its own grid cell — which is
+   * column 1 of the NEXT row, i.e. underneath the label.
+   *
+   * Measured on Production at 390px before this was fixed: an asset's name sat
+   * at x=159 (the value column) and its number/kind/location subline at x=52,
+   * underneath the word "Asset" instead of underneath the name. The same
+   * happened to the specification line in the Model cell, where a bare text
+   * node and a span were two items.
+   *
+   * So: a subline inside the register NEVER appears as a bare child of a `td`.
+   * It is always inside `.asset-cell`, which is one grid item and stacks its
+   * own contents.
+   */
+  assert.match(css, /^\.asset-cell \{/m, "the wrapper must exist");
+  assert.match(
+    css.slice(css.indexOf(".asset-cell {")),
+    /flex-direction: column/,
+    "and it stacks its contents rather than relying on the cell's grid",
+  );
+
+  const cells = [...list.matchAll(/<td data-label="[^"]+">([\s\S]*?)<\/td>/g)];
+  assert.ok(cells.length >= 8, `expected the register's cells, saw ${cells.length}`);
+  for (const [whole, body] of cells) {
+    if (!body.includes("asset-subline")) continue;
+    assert.match(
+      body,
+      /<span className="asset-cell">/,
+      `a cell carrying a subline must wrap its contents: ${whole.slice(0, 90)}`,
+    );
+  }
+});
+
+test("the register's primary value reads from the left", async () => {
+  const css = await read("app/(app)/portal/assets/assets.css");
+  /*
+   * A `<button>` defaults to centred text, so the asset NAME — the primary
+   * value of every row — was the one thing in the mobile card not reading from
+   * the left, wrapping to two centred lines among left-aligned values.
+   */
+  assert.match(css, /\.asset-cell \.table-text-action \{[\s\S]{0,80}text-align: left/);
+});
+
+test("an absent date or price is omitted, not printed as a dash", async () => {
+  const detail = await read("app/(app)/portal/assets/asset-detail.tsx");
+
+  /*
+   * `Fact` omits an absent value. `formatDate(null)` returns an em dash — right
+   * in a table, where a column needs a cell, and wrong here. The two rules
+   * fought and the dash won: a record with no service history showed
+   * "Last serviced —" and "Next service due —" among fields that were simply
+   * not drawn when empty. Half the absent fields as rows and half not is worse
+   * than either alone.
+   */
+  assert.match(detail, /function dateOrNothing\(/);
+  assert.match(detail, /fallback: ""/, "the formatter's own option, not a second formatter");
+  assert.match(detail, /function moneyOrNothing\(/);
+
+  /*
+   * And no fact may go back to the raw formatters. Checked on the `value={…}`
+   * props specifically, so the helpers' own bodies — which legitimately call
+   * them — do not trip it.
+   */
+  const rawDate = [...detail.matchAll(/value=\{formatDate\(/g)];
+  assert.deepEqual(rawDate.map((m) => m[0]), [], "a fact must use dateOrNothing");
+  const rawMoney = [...detail.matchAll(/value=\{formatMoney\(/g)];
+  assert.deepEqual(rawMoney.map((m) => m[0]), [], "a fact must use moneyOrNothing");
+});
+
+test("the record's actions wrap as buttons, not as words", async () => {
+  const css = await read("app/(app)/portal/assets/assets.css");
+  /*
+   * Four controls sit above the tabs. On a phone the row wraps, and without
+   * this each LABEL broke instead — "Back to / assets", "Move to / bin" — over
+   * two lines inside a button sized for one. Measured at 390px on Production.
+   */
+  const block = css.slice(css.indexOf(".asset-detail .section-header__actions"));
+  assert.match(block, /flex-wrap: wrap/);
+  assert.match(block, /white-space: nowrap/);
+});
+
 test("filters and sort live in the URL, never in storage", async () => {
   const list = await read("app/(app)/portal/assets/assets-list.tsx");
   assert.match(list, /useQueryState\(\)/);

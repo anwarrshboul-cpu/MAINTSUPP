@@ -551,34 +551,54 @@ export function AssetsList({
                           </span>
                         )}
                       </td>
+                      {/*
+                        ONE ELEMENT PER CELL. `--mobile-cards` turns each `<td>`
+                        into a two-column grid — the `data-label` pseudo-element
+                        is the first item and the content is meant to be the
+                        second — so a cell with TWO children hands the second one
+                        its own grid cell, which is column 1 of the next row.
+
+                        Measured on Production at 390px: the name sat at x=159
+                        (the value column) and this subline at x=52, underneath
+                        the word "Asset" rather than under the name. The wrapper
+                        is the whole fix; it is one grid item and stacks its own
+                        contents.
+                      */}
                       <td data-label="Asset">
-                        <button
-                          type="button"
-                          className="table-text-action"
-                          onClick={() => onOpenAsset(row.id)}
-                        >
-                          {row.name}
-                        </button>
-                        <span className="asset-subline">
-                          {[row.assetNumber, assetKindLabel(row.kind), row.locationInSite]
-                            .filter(Boolean)
-                            .join(" · ")}
+                        <span className="asset-cell">
+                          <button
+                            type="button"
+                            className="table-text-action"
+                            onClick={() => onOpenAsset(row.id)}
+                          >
+                            {row.name}
+                          </button>
+                          <span className="asset-subline">
+                            {[row.assetNumber, assetKindLabel(row.kind), row.locationInSite]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
                         </span>
                       </td>
                       {fixedSiteId ? null : <td data-label="Site">{siteName(row.siteId)}</td>}
                       <td data-label="Category">
                         {labelFor(data?.categories ?? [], row.category)}
                       </td>
+                      {/* Wrapped for the reason the Asset cell above is: a bare
+                          text node and a span are TWO grid items on a phone, and
+                          the second landed in the label column. */}
                       <td data-label="Model / specification">
-                        {[row.manufacturer, row.model].filter(Boolean).join(" ")}
-                        {specs.length ? (
-                          <span className="asset-subline">
-                            {specs
-                              .slice(0, 3)
-                              .map((spec) => `${spec.key} ${spec.value}${spec.unit}`)
-                              .join(" · ")}
-                          </span>
-                        ) : null}
+                        <span className="asset-cell">
+                          <span>{[row.manufacturer, row.model].filter(Boolean).join(" ")}</span>
+                          {specs.length ? (
+                            <span className="asset-subline">
+                              {specs
+                                .slice(0, 3)
+                                .map((spec) => `${spec.key} ${spec.value}${spec.unit}`)
+                                .join(" · ")}
+                            </span>
+                          ) : null}
+                        </span>
                       </td>
                       <td data-label="Part number">{row.partNumber ?? ""}</td>
                       <td data-label="Supplier">{supplierName(row)}</td>

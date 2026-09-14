@@ -24,6 +24,10 @@ import { Icon } from "../../../components";
 import { RaiseTicketButton } from "../raise-ticket";
 import { SectionPanel, SectionTabs } from "../sites/section-tabs";
 import { formatDate, formatMoney, labelFor, styleFor } from "../sites/site-types";
+/* The shared formatter directly, because the Sites wrapper above does not
+   forward options and `fallback` is the whole point here. Both are the same
+   function; the wrapper exists so the Sites screens need one import. */
+import { formatDate as formatDateWith } from "../../../lib/format-date";
 import { assetKindLabel, parseSpecs } from "../../../lib/asset-model";
 import { AssetFiles } from "./asset-files";
 import { AssetEventForm } from "./asset-event-form";
@@ -45,6 +49,27 @@ const TABS = [
 ] as const;
 
 const TAB_PREFIX = "asset-detail";
+
+/**
+ * A date, or nothing at all.
+ *
+ * `formatDate(null)` returns an em dash, which is right in a TABLE — a column
+ * needs a cell — and wrong in this list, where `Fact` omits an absent field
+ * entirely. The two rules fought and the dash won, so on a record with no
+ * service history the reader saw "Last serviced —" and "Next service due —"
+ * sitting among fields that were simply not drawn when empty. Half the absent
+ * fields shown as rows and half not is worse than either alone.
+ *
+ * `fallback: ""` is the formatter's own option for exactly this.
+ */
+function dateOrNothing(value: string | null | undefined) {
+  return formatDateWith(value, { fallback: "" });
+}
+
+/** The same rule for money: an unrecorded price is not "£0.00" and not a dash. */
+function moneyOrNothing(pence: number | null | undefined) {
+  return pence === null || pence === undefined ? "" : formatMoney(pence);
+}
 
 /** One label/value pair. Absent values are OMITTED, never printed as a dash. */
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
@@ -209,10 +234,10 @@ export function AssetDetail({
             <Fact label="Location at the site" value={asset.locationInSite} />
             <Fact label="Quantity" value={asset.quantity} />
             <Fact label="Asset tag" value={asset.assetTag} />
-            <Fact label="Installed" value={formatDate(asset.installedAt)} />
-            <Fact label="Warranty expires" value={formatDate(asset.warrantyExpiry)} />
-            <Fact label="Last serviced" value={formatDate(asset.lastServicedAt)} />
-            <Fact label="Next service due" value={formatDate(asset.nextServiceDueAt)} />
+            <Fact label="Installed" value={dateOrNothing(asset.installedAt)} />
+            <Fact label="Warranty expires" value={dateOrNothing(asset.warrantyExpiry)} />
+            <Fact label="Last serviced" value={dateOrNothing(asset.lastServicedAt)} />
+            <Fact label="Next service due" value={dateOrNothing(asset.nextServiceDueAt)} />
             <Fact
               label="Part of"
               value={
@@ -269,7 +294,7 @@ export function AssetDetail({
           <Fact label="Colour" value={asset.colour} />
           <Fact label="Colour code" value={asset.colourCode} />
           <Fact label="Paint / finish reference" value={asset.paintReference} />
-          <Fact label="Purchase price" value={formatMoney(asset.purchasePricePence)} />
+          <Fact label="Purchase price" value={moneyOrNothing(asset.purchasePricePence)} />
         </dl>
         {!asset.manufacturer &&
         !asset.model &&
@@ -373,8 +398,8 @@ export function AssetDetail({
           <Fact label="Replacement model" value={asset.replacementModel} />
           <Fact label="Replacement specification" value={asset.replacementSpecification} />
           <Fact label="Replacement supplier" value={asset.replacementSupplier} />
-          <Fact label="Replacement cost" value={formatMoney(asset.replacementCostPence)} />
-          <Fact label="Last replaced" value={formatDate(asset.lastReplacedAt)} />
+          <Fact label="Replacement cost" value={moneyOrNothing(asset.replacementCostPence)} />
+          <Fact label="Last replaced" value={dateOrNothing(asset.lastReplacedAt)} />
           <Fact
             label="Replace every"
             value={
@@ -454,7 +479,7 @@ function HistoryEntry({ entry }: { entry: AssetHistoryRow }) {
         <Fact label="Now" value={entry.replacementDetail} />
         <Fact label="By" value={entry.contractorName} />
         <Fact label="Outcome" value={entry.outcome} />
-        <Fact label="Cost" value={formatMoney(entry.costPence)} />
+        <Fact label="Cost" value={moneyOrNothing(entry.costPence)} />
         <Fact label="Notes" value={entry.notes} />
         <Fact label="Recorded by" value={entry.recordedByEmail} />
       </dl>
