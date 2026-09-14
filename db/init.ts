@@ -1,5 +1,10 @@
 import { seedColumns, seedGroups, seedUiColumns } from "./seed-board-structure";
 import {
+  SCHEMA_FINGERPRINT,
+  SCHEMA_STATE_KEY,
+  schemaStateValue,
+} from "./schema-fingerprint";
+import {
   DEMO_WORKSPACE_ID,
   ensureDemoWorkspaceOrganisation,
   seedDemoWorkspaceAssets,
@@ -43,8 +48,183 @@ export function ensureDatabase() {
   return initialization;
 }
 
+/**
+ * The one-row table the migration fingerprint lives in.
+ *
+ * Created before anything reads it, and with the same `IF NOT EXISTS` guard as
+ * every other table here, so a database that has never booted simply finds it
+ * empty and runs the full replay. No column is nullable and no value is
+ * interpreted: the row is a string compared for equality, which is the whole
+ * reason it can be trusted.
+ */
+async function ensureSchemaState(d1: D1DatabaseLike) {
+  await d1
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS schema_state (
+         key TEXT PRIMARY KEY,
+         value TEXT NOT NULL,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    )
+    .run();
+}
+
+/**
+ * How many tenants the fan-out stages would serve.
+ *
+ * `WHERE status = 'active'` matches the fan-outs themselves
+ * (`INSERT … SELECT … FROM organisations WHERE status = 'active'`), so the
+ * count changes exactly when the set of organisations they would write for
+ * changes — including an organisation being suspended, not only one being
+ * added.
+ *
+ * A fresh database has no `organisations` table yet, and that is not an error
+ * here: it means nothing has been migrated, the count is zero, and the
+ * fingerprint will not match whatever is stored (nothing), so the full replay
+ * runs and creates it.
+ */
+async function activeOrganisationStamp(d1: D1DatabaseLike): Promise<string> {
+  const row = (await d1
+    .prepare(
+      `SELECT count(*) AS total, coalesce(max(id), '') AS newest
+         FROM organisations WHERE status = 'active'`,
+    )
+    .first()
+    .catch(() => null)) as { total?: number | string; newest?: string } | null;
+  const total = Number(row?.total ?? 0);
+  /*
+   * THE COUNT ALONE IS NOT ENOUGH, and the hole is small but real: suspend one
+   * organisation and create another before the next cold start and the count is
+   * unchanged, so the replay is skipped and the new tenant never receives its
+   * form configuration, status map, reminder defaults, meters, SLA targets,
+   * invoice status map or approval rules — none of which has a lazy fallback.
+   * The greatest id moves whenever the set does, and it costs nothing: it is
+   * the same single query.
+   */
+  return `${Number.isFinite(total) ? total : 0}/${row?.newest ?? ""}`;
+}
+
+/** The fingerprint this database last completed a full replay at, or null. */
+async function readSchemaState(d1: D1DatabaseLike): Promise<string | null> {
+  const row = (await d1
+    .prepare("SELECT value FROM schema_state WHERE key = ?")
+    .bind(SCHEMA_STATE_KEY)
+    .first()
+    .catch(() => null)) as { value?: string } | null;
+  return typeof row?.value === "string" ? row.value : null;
+}
+
+/**
+ * Record a COMPLETED replay.
+ *
+ * Called only after every stage has resolved. Two statements rather than one
+ * upsert because the SQLite-to-Postgres translator rewrites `INSERT OR IGNORE`
+ * and not `ON CONFLICT … DO UPDATE`, and this path must behave identically on
+ * both databases; an `UPDATE` followed by an `INSERT OR IGNORE` reaches the
+ * same state from either starting point, in either dialect.
+ *
+ * Concurrent cold instances can both arrive here with the same value, which is
+ * why the last writer winning is not a race worth locking against.
+ */
+async function writeSchemaState(d1: D1DatabaseLike, value: string) {
+  const now = new Date().toISOString();
+  await d1
+    .prepare("UPDATE schema_state SET value = ?, updated_at = ? WHERE key = ?")
+    .bind(value, now, SCHEMA_STATE_KEY)
+    .run();
+  await d1
+    .prepare("INSERT OR IGNORE INTO schema_state (key, value, updated_at) VALUES (?, ?, ?)")
+    .bind(SCHEMA_STATE_KEY, value, now)
+    .run();
+}
+
 async function initialize() {
   const d1 = await getD1();
+
+  /*
+   * THE MIGRATION REPLAY IS SKIPPED WHEN NOTHING HAS CHANGED.
+   *
+   * Everything below `applyMigrations` is idempotent by construction —
+   * `CREATE TABLE IF NOT EXISTS`, guarded `addColumn`, `INSERT OR IGNORE` — and
+   * that is exactly why replaying it on every cold start was pure cost: 349
+   * prepared statements, measured at 47 SECONDS for the first request of an
+   * instance against 0.98s for every request after it. Whoever opened the site
+   * while an instance was cold watched a blank page for most of a minute.
+   *
+   * `schema-fingerprint.ts` holds the reasoning in full. The short version is
+   * that the stored value covers BOTH the migration code and the number of
+   * active organisations, because several stages fan out per tenant and an
+   * organisation created at runtime must still get its board, its status map
+   * and its meters.
+   *
+   * It is written only after every stage has resolved, so a run that throws
+   * records nothing and the next request replays from the beginning. There is
+   * no path that marks a half-applied schema as complete.
+   */
+  await ensureSchemaState(d1);
+  const expected = schemaStateValue(SCHEMA_FINGERPRINT, await activeOrganisationStamp(d1));
+  const stored = await readSchemaState(d1);
+  if (stored !== expected) {
+    await applyMigrations(d1);
+    /*
+     * RECOMPUTED, not reused. `expected` was measured before the replay, and on
+     * a database that had never booted there was no `organisations` table to
+     * count — so it read zero, and storing it would have left the next boot
+     * comparing zero against three and replaying the whole thing a second time.
+     * The stamp records the state the run FINISHED in, which is the state the
+     * next boot will be comparing against.
+     */
+    await writeSchemaState(d1, schemaStateValue(SCHEMA_FINGERPRINT, await activeOrganisationStamp(d1)));
+  }
+
+  /*
+   * THE REPAIRS RUN EVERY TIME, fingerprint or not.
+   *
+   * A migration's effect is a function of the CODE; a repair's is a function of
+   * the DATA. "The code has not changed" therefore says nothing about whether a
+   * repair has work to do, and skipping one would turn a self-healing invariant
+   * into drift that accumulates silently.
+   */
+  await repairInvariants(d1);
+}
+
+/**
+ * The invariants the product re-checks on every boot.
+ *
+ * Small, and deliberately named one by one rather than inferred: each reads
+ * live rows and corrects something ordinary use can reintroduce.
+ *
+ *   · `ensureCanonicalSiteLink` re-attributes jobs to contractors by name, and
+ *     a contractor added, renamed or de-duplicated later makes a name that did
+ *     not resolve yesterday resolve today;
+ *   · `ensureDocumentVersionInvariant` collapses duplicate "current" heads in a
+ *     document lineage, which the concurrent-replace race can create again;
+ *   · `repairOrphanedSectionBoards` removes boards left behind when a workspace
+ *     section is deleted.
+ *
+ * THIS IS AN ADDITIONAL PASS, NOT A RELOCATION, and that distinction was bought
+ * the hard way. Moving these out of `applyMigrations` changed the order the
+ * stages run in on a FRESH database, where the order is load-bearing:
+ * `ensureCanonicalSiteLink` updates `maintenance_requests.contractor_id`, a
+ * stage above it is what puts that column there, and at the end of the sequence
+ * it threw — the first request to a brand-new database answered 503 where the
+ * same commit without this change answered 200. So `applyMigrations` keeps the
+ * sequence it always had, and these run AGAIN afterwards: a few hundred
+ * milliseconds on a replay that already takes forty seconds, and the only thing
+ * that runs at all on the fast path.
+ *
+ * Anything added here costs the cold start on every instance for ever, so it
+ * earns its place by being a repair rather than a migration. If it only ever
+ * has work to do once, it belongs in `applyMigrations` alone.
+ */
+async function repairInvariants(d1: D1DatabaseLike) {
+  await ensureCanonicalSiteLink(d1);
+  await ensureDocumentVersionInvariant(d1);
+  await repairOrphanedSectionBoards(d1);
+}
+
+/** Every migration and seed stage, in the order they depend on each other. */
+async function applyMigrations(d1: D1DatabaseLike) {
   await ensureBaseSchema(d1);
   await ensureBoardEngineColumns(d1);
   await ensureStageOneFoundation(d1);
@@ -103,11 +283,11 @@ async function initialize() {
   await ensureOwnerFixesAndBilling(d1);
 
   /*
-   * Last, because it deletes from tables the stages above create — the forms of
-   * `ensureFormBuilder` and the rules of `ensureBoardAutomations` among them.
-   * A repair that ran before its tables existed would be a silent no-op on a
-   * fresh database and a working one everywhere else, which is the shape of bug
-   * that is found a year later.
+   * The paragraph that stood here described `repairOrphanedSectionBoards` —
+   * "last, because it deletes from tables the stages above create" — and that
+   * repair has since moved out of this function into `repairInvariants`, where
+   * it runs after every stage on every boot. Left where it was, it read as a
+   * warning that Pre-W14 is destructive, which it is not.
    */
   /* Pre-W14 — reminder engine, status map, bank holidays, number sequence. */
   await ensurePreW14Foundation(d1);

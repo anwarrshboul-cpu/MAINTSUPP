@@ -1532,10 +1532,30 @@ export async function POST(request: Request) {
          row lands in, which is the rule `tests/w2-scope-model.test.mjs` holds
          over the Sites route's own inserts. Nothing here spreads the caller's
          payload, so there is nothing for it to overwrite. */
-      await db.insert(sites).values({ id, organisationId: orgId, boardId: scoped.scope, name, type: text(data.type, 40) || "Kiosk", region: text(data.region, 40) || "UK", ...siteState, address: text(data.address, 300), manager: optionalText(data.manager, 120) });
+      /*
+       * THE STAGE-2 NAMES ARE WRITTEN HERE, not left to the boot path.
+       *
+       * `sites` carries two generations of columns: the originals (`type`,
+       * `address`, `manager`) and the Stage-2 ones the Sites screen actually
+       * reads (`site_type_value`, `address_line1`, `manager_name`, `slug`).
+       * This drawer wrote only the originals, and four
+       * `UPDATE sites SET … WHERE … IS NULL` statements on every boot filled the
+       * rest in — which worked only because the migrations replayed on every
+       * cold start. They no longer do (see `db/schema-fingerprint.ts`), so a
+       * backfill that runs once is no longer a substitute for writing the row
+       * correctly, and a store created here would have kept a dash in the
+       * Manager column for ever. That exact regression is described at the top
+       * of this file; this is the write path finally doing what the other three
+       * already do (`sites/route.ts`, `sites/csv/route.ts`, and the seeder
+       * above).
+       */
+      const siteType = text(data.type, 40) || "Kiosk";
+      const siteAddress = text(data.address, 300);
+      const siteManager = optionalText(data.manager, 120);
+      await db.insert(sites).values({ id, organisationId: orgId, boardId: scoped.scope, name, type: siteType, region: text(data.region, 40) || "UK", ...siteState, address: siteAddress, manager: siteManager, siteTypeValue: siteType, addressLine1: siteAddress, managerName: siteManager, slug: slug(name) });
       /* The third caller of the one profile function. This drawer is the
-         thinnest of the three site-create paths — it generates no code, no slug
-         and no position — and it must still not be able to produce a site the
+         thinnest of the three site-create paths — it generates no code and no
+         position — and it must still not be able to produce a site the
          compliance register cannot see. See `app/lib/compliance-profile.ts`. */
       await ensureComplianceProfile(db, orgId, id);
     } else if (entity === "compliance") {
