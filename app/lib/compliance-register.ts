@@ -54,6 +54,7 @@ import {
 } from "../../db/schema";
 import { storeDocumentationCertificates } from "../../db/monday-board-spec";
 import { boardDutyHolder } from "./compliance-duty-holder";
+import { readCompliancePolicy } from "./compliance-policy";
 import { liveAttachmentRows } from "./attachment-counts";
 /*
  * 2A — the site↔board-row link has ONE implementation now, and it is not in
@@ -285,6 +286,12 @@ export type RegisterEntry = {
    * the same answer.
    */
   dutyHolder: string | null;
+  /**
+   * The contractor record linked as this requirement's renewal provider, or
+   * null. Carried from the annotation row for a board-derived requirement too —
+   * a board slot is renewed by somebody without the board growing a column.
+   */
+  providerContractorId: string | null;
   /** The last warning stage the digest sent for this document. */
   lastAlertStage: string | null;
   /**
@@ -304,6 +311,13 @@ export type ComplianceRegister = {
   entries: RegisterEntry[];
   /** Documents per site id, for `StoreRecord.compliance`. */
   bySite: Map<string, ComplianceItem[]>;
+  /**
+   * The warning window every state in this register was classified with — the
+   * organisation's own (`compliance-policy.ts`) or the product default. A screen
+   * that prints "expiring within N days" or splits the countdown prints THIS,
+   * so its words can never describe a different window from its colours.
+   */
+  windowDays: number;
 };
 
 /** Slot key for a requirement name, e.g. "Fire Alarm" → `fire-alarm`. */
@@ -775,12 +789,22 @@ export async function readNotRequiredSlots(
 export async function readComplianceRegister(
   db: Database,
   orgId: string,
-  options: { today?: Date; boardIds?: readonly string[] } = {},
+  options: { today?: Date; boardIds?: readonly string[]; windowDays?: number } = {},
 ): Promise<ComplianceRegister> {
   const today = options.today ?? new Date();
   const boardIds = options.boardIds ?? headlineComplianceBoardIds();
 
-  const [siteRows, aliasRows, registerRows, boardRowsResult] = await Promise.all([
+  /*
+   * THE ORGANISATION'S WARNING WINDOW, resolved here and nowhere else.
+   *
+   * Every compliance surface — the dashboard block, the register, the Overview,
+   * the Sites tile, the digest, the exports — reads this register, so resolving
+   * the window inside it is what makes them one rule rather than seven: none of
+   * them can classify with a different window, because none of them classifies
+   * at all. Read in parallel with the register's own reads, so it costs no
+   * extra round trip.
+   */
+  const [siteRows, aliasRows, registerRows, boardRowsResult, windowDays] = await Promise.all([
     db
       .select({
         id: sites.id,
@@ -808,6 +832,9 @@ export async function readComplianceRegister(
       .where(eq(complianceDocuments.organisationId, orgId))
       .orderBy(complianceDocuments.siteId, complianceDocuments.kind),
     readStoreDocumentationRows(db, orgId, boardIds),
+    options.windowDays !== undefined
+      ? Promise.resolve(options.windowDays)
+      : readCompliancePolicy(db, orgId).then((policy) => policy.warningWindowDays),
   ]);
   const { rows: boardRows, boardIdByItemId } = boardRowsResult;
 
@@ -820,6 +847,7 @@ export async function readComplianceRegister(
     attachmentId: string | null;
     notRequired: boolean;
     dutyHolder: string | null;
+    providerContractorId: string | null;
     lastAlertStage: string | null;
   };
   const rows = registerRows as RegisterRow[];
@@ -872,7 +900,7 @@ export async function readComplianceRegister(
     bySite.set(siteId, current);
   };
 
-  for (const store of storeDocumentationRegister(boardRows, { today, notRequired })) {
+  for (const store of storeDocumentationRegister(boardRows, { today, notRequired, windowDays })) {
     const linkedSiteId = siteIdByItemId.get(store.id) ?? null;
     for (const document of store.documents) {
       const registerRow = registerRowFor(store.id, document.kind);
@@ -901,6 +929,7 @@ export async function readComplianceRegister(
            travel this way — a board row is itself the answer it was waiting
            for. See `boardDutyHolder`. */
         dutyHolder: boardDutyHolder(registerRow?.dutyHolder),
+        providerContractorId: registerRow?.providerContractorId ?? null,
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
@@ -962,6 +991,7 @@ export async function readComplianceRegister(
           expiry: row.expiryDate,
           fileCount,
           today,
+          windowDays,
         });
     entries.push({
       itemId: null,
@@ -981,6 +1011,7 @@ export async function readComplianceRegister(
       fileCount,
       notRequired: row.notRequired || state === "Not required",
       dutyHolder: row.dutyHolder,
+      providerContractorId: row.providerContractorId ?? null,
       lastAlertStage: row.lastAlertStage,
       /* No board row, so no group. The site's own lifecycle is all there is. */
       boardGroup: null,
@@ -1017,7 +1048,7 @@ export async function readComplianceRegister(
       left.kind.localeCompare(right.kind, "en-GB"),
   );
 
-  return { entries, bySite };
+  return { entries, bySite, windowDays };
 }
 
 /* ── One site's documents ────────────────────────────────────────────────── */

@@ -510,10 +510,17 @@ test("the assignment select offers the active, and keeps whoever is already assi
    * because that is what keeps an archived assignee selectable instead of
    * blanking a select that is bound to them.
    */
+  /*
+   * RE-POINTED AGAIN, same promise. A compliance requirement can now carry a
+   * RENEWAL contractor (`providerContractorId`), and that select needs the same
+   * protection: the record's own contractor — whichever of the two fields holds
+   * it — must reach the third argument, so an archived company stays selectable
+   * rather than blanking a select bound to them.
+   */
   assert.match(
     form,
-    /fieldsFor\(\s*tab,\s*workspace,\s*typeof form\?\.contractorId === "string" \? form\.contractorId : null,/,
-    "the open record's own contractor is what makes that possible",
+    /fieldsFor\(\s*tab,\s*workspace,\s*typeof form\?\.contractorId === "string"\s*\?\s*form\.contractorId\s*:\s*typeof form\?\.providerContractorId === "string"\s*\?\s*form\.providerContractorId\s*:\s*null,/,
+    "the open record's own contractor — assigned or renewing — is what makes that possible",
   );
 });
 

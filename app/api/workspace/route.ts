@@ -102,6 +102,9 @@ import { RESERVED_EMAIL_TLD } from "../../lib/contact-links";
 import { isUnreachableEmail } from "../../lib/site-metrics";
 import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
+import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
+import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
+import { mergeWorkspaceSettingsBlob } from "../../lib/workspace-settings";
 import {
   DUTY_HOLDERS,
   isDutyHolder,
@@ -293,6 +296,28 @@ function parseObject<T>(value: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * A SETTINGS SAVE MERGES INTO THE STORED BLOB; IT DOES NOT REPLACE IT.
+ *
+ * Both settings branches below wrote `JSON.stringify(data)` over the whole
+ * column, and the Settings screen sends only its own three sections — so every
+ * save silently erased the compliance template, the reminder settings and (it
+ * would have) the compliance warning window kept in the same blob. The stored
+ * row is read here and `mergeWorkspaceSettingsBlob` decides the result.
+ */
+async function mergeWorkspaceSettings(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  data: Record<string, unknown>,
+): Promise<{ ok: true; settings: string } | { ok: false; error: string }> {
+  const [row] = await db
+    .select({ settings: workspaceSettings.settings })
+    .from(workspaceSettings)
+    .where(eq(workspaceSettings.organisationId, orgId))
+    .limit(1);
+  return mergeWorkspaceSettingsBlob(row?.settings ?? null, data);
 }
 
 function slug(value: string) {
@@ -573,6 +598,41 @@ const liveWorkOrder = (orgId: string) =>
        (a Store Documentation store, a section's row) is not a job. */
     jobsBoardCondition(),
   );
+
+/**
+ * THE SNAPSHOT IS ONE SCREEN'S WORTH OF EVERY SITE, SO IT IS SCOPED TOO.
+ *
+ * `/api/sites` sends a restricted member their own sites; this endpoint sends
+ * the same estate under a different name, and an independent review found it
+ * still answering for the whole organisation. `readWorkspace`'s own note above
+ * the site query lists what reads this list: the dashboard's site count, the
+ * Sites tab of the manager, and the location select on Compliance, Units and
+ * Planned. So the leak was not a payload nobody looks at — it was every one of
+ * those surfaces.
+ *
+ * The confinement is applied to the four collections that carry a site, in one
+ * place, immediately before the snapshot is returned: filtering the finished
+ * payload cannot miss a derived field the way scoping four queries separately
+ * could, and every count in it (`openRequests`, the compliance rollup) is
+ * already computed per site and travels with its own row.
+ *
+ * `contractors`, `team`, `settings` and `activity` are organisation-level and
+ * are deliberately not filtered: a site scope says which STORES a member may
+ * see, and narrowing the roster by it would be inventing a rule nothing asked
+ * for. (The team roster's own exposure to a `client` is a separate,
+ * pre-existing question about capabilities, recorded in this batch's report.)
+ */
+function confineSnapshot(snapshot: WorkspaceSnapshot, siteScope: string[] | null): WorkspaceSnapshot {
+  const allowed = memberSiteSet(siteScope);
+  if (!allowed) return snapshot;
+  return {
+    ...snapshot,
+    stores: snapshot.stores.filter((store) => withinMemberScope(allowed, store.id)),
+    compliance: snapshot.compliance.filter((record) => withinMemberScope(allowed, record.siteId)),
+    units: snapshot.units.filter((unit) => withinMemberScope(allowed, unit.siteId)),
+    planned: snapshot.planned.filter((item) => withinMemberScope(allowed, item.siteId)),
+  };
+}
 
 async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceSnapshot> {
   await seedWorkspaceIfEmpty(db, orgId);
@@ -974,6 +1034,8 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       expiryColumnId: expiryColumnKey
         ? (columnIdByKey.get(expiryColumnKey) ?? null)
         : null,
+      /* The renewal contractor, so "Manage register" can show and change it. */
+      providerContractorId: entry.providerContractorId,
     };
   });
 
@@ -1026,9 +1088,12 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
    * expire on the same day into two different buckets.
    */
   const classifiedAt = new Date();
+  /* The organisation's compliance warning window, so a contractor's ticket and
+     a store's certificate turn amber on the same day. */
+  const warningWindowDays = compliancePolicyFromBlob(settingsRows[0]?.settings ?? null).warningWindowDays;
   const certificationsByContractor = new Map<string, WorkspaceCertification[]>();
   for (const row of certificationRows) {
-    const status = expiryStatus(row.expiresOn, classifiedAt);
+    const status = expiryStatus(row.expiresOn, classifiedAt, warningWindowDays);
     const list = certificationsByContractor.get(row.contractorId) ?? [];
     list.push({
       id: row.id,
@@ -1044,9 +1109,9 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
        * down is a status that stops being true the day after it was written,
        * which is exactly how `compliance_documents.status` came to say
        * "Compliant" about a certificate that had expired months earlier. This
-       * is `expiryStatus` — the platform's one classifier, at the platform's
-       * one 60-day amber threshold — so a contractor's ticket and a store's
-       * certificate cannot mean different things by "due soon".
+       * is `expiryStatus` — the platform's one classifier, at the
+       * organisation's one amber threshold — so a contractor's ticket and a
+       * store's certificate cannot mean different things by "due soon".
        */
       expiryState: status.state,
       expiryLabel: status.label,
@@ -1063,7 +1128,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
      */
     const byId = jobsByContractorId.get(contractor.id);
     const byName = jobsByContractorName.get(contractor.name);
-    const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt);
+    const insurance = expiryStatus(contractor.insuranceExpiry, classifiedAt, warningWindowDays);
     return {
       id: contractor.id,
       name: contractor.name,
@@ -1197,6 +1262,13 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
           .filter((value): value is string => typeof value === "string" && !!value.trim())
           .map((value) => value.trim())
       : defaultWorkspaceSettings.completionEvidenceCategories,
+    /*
+     * The compliance warning window, EFFECTIVE value plus whether it was chosen.
+     * The shell hands it to the browser's classifier (`setBrowserWarningWindow`)
+     * so board cells, the tracker and the expiry calendar colour with the same
+     * window the server's register uses; the Settings screen edits it.
+     */
+    compliancePolicy: compliancePolicyFromBlob(settingsRows[0]?.settings ?? null),
   };
 
   const activity: WorkspaceActivity[] = activities.map((item) => ({
@@ -1235,8 +1307,8 @@ async function logChange(db: WorkspaceDb, orgId: string, entity: WorkspaceEntity
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
-    return Response.json({ workspace: await readWorkspace(db, orgId) });
+    const { db, orgId, siteScope } = await scopedDb(request);
+    return Response.json({ workspace: confineSnapshot(await readWorkspace(db, orgId), siteScope) });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
@@ -1277,6 +1349,108 @@ const WORKSPACE_CAPABILITY: Record<string, Capability> = {
  * unauthenticated stranger reached this route as a client of the live tenant
  * and these writes answered 200. Deactivating the owner was among them.
  */
+/**
+ * A COMPLIANCE RECORD OUTSIDE THE MEMBER'S SITES IS NOT FOUND — on a write.
+ *
+ * `POST /api/compliance/responsibilities` and `POST /api/compliance/provider`
+ * both confine themselves to `memberships.site_scope`, and this route addresses
+ * a record by `compliance_documents.id` with only an organisation filter — so a
+ * site-restricted editor could set the duty holder, state, expiry or renewal
+ * contractor of a requirement at a store they may not see. Nothing in the
+ * product sets a site scope today, so it was an incomplete boundary rather than
+ * a live hole; it is closed here with the same predicate the read paths use,
+ * rather than a second rule.
+ *
+ * The SUPPLIED site is checked as well as the stored one: moving a record onto
+ * a site outside the scope is the same escape in the other direction. "Not
+ * found" rather than "forbidden", because the id is not a capability and the
+ * answer must not confirm the record exists.
+ */
+async function complianceScopeRefusal(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  siteScope: string[] | null,
+  recordId: string | null,
+  suppliedSiteId: string | null,
+): Promise<Response | null> {
+  const allowed = memberSiteSet(siteScope);
+  if (!allowed) return null;
+  if (suppliedSiteId && !withinMemberScope(allowed, suppliedSiteId)) {
+    return Response.json({ error: "Site not found." }, { status: 404 });
+  }
+  if (!recordId) return null;
+  const [row] = await db
+    .select({ siteId: complianceDocuments.siteId })
+    .from(complianceDocuments)
+    .where(and(eq(complianceDocuments.id, recordId), eq(complianceDocuments.organisationId, orgId)))
+    .limit(1);
+  if (!row || !withinMemberScope(allowed, row.siteId)) {
+    return Response.json({ error: "Compliance record not found." }, { status: 404 });
+  }
+  return null;
+}
+
+/**
+ * A SITE OUTSIDE THE MEMBER'S SCOPE IS NOT FOUND — for a site, a unit or a
+ * planned visit, on every verb.
+ *
+ * `complianceScopeRefusal` closed this for compliance records; an independent
+ * review pointed out that `entity: "site" | "unit" | "planned"` all carry a
+ * site and none of them checked it, which is the same hole in the same file. A
+ * restricted editor could rename or close a store they cannot see, or attach a
+ * unit or a scheduled visit to one.
+ *
+ * Both ends are checked, because they escape in opposite directions:
+ *
+ *   · the SUPPLIED site — moving a unit onto a store outside the scope;
+ *   · the STORED site — editing a unit that already lives at one. For
+ *     `entity: "site"` the record IS the site, so its own id is the stored one.
+ *
+ * "Not found" rather than "forbidden": the id is not a capability, and the
+ * answer must not confirm that the row exists somewhere the caller cannot see.
+ */
+async function siteScopeRefusal(
+  db: WorkspaceDb,
+  orgId: string,
+  memberScope: string[] | null,
+  entity: WorkspaceEntity,
+  recordId: string | null,
+  suppliedSiteId: string | null,
+): Promise<Response | null> {
+  const allowed = memberSiteSet(memberScope);
+  if (!allowed) return null;
+  if (suppliedSiteId && !withinMemberScope(allowed, suppliedSiteId)) {
+    return Response.json({ error: "Site not found." }, { status: 404 });
+  }
+  if (!recordId) return null;
+  if (entity === "site") {
+    return withinMemberScope(allowed, recordId)
+      ? null
+      : Response.json({ error: "Site not found." }, { status: 404 });
+  }
+  if (entity === "unit") {
+    const [row] = await db
+      .select({ siteId: units.siteId })
+      .from(units)
+      .where(and(eq(units.id, recordId), eq(units.organisationId, orgId)))
+      .limit(1);
+    return row && withinMemberScope(allowed, row.siteId)
+      ? null
+      : Response.json({ error: "Unit not found." }, { status: 404 });
+  }
+  if (entity === "planned") {
+    const [row] = await db
+      .select({ siteId: plannedMaintenance.siteId })
+      .from(plannedMaintenance)
+      .where(and(eq(plannedMaintenance.id, recordId), eq(plannedMaintenance.organisationId, orgId)))
+      .limit(1);
+    return row && withinMemberScope(allowed, row.siteId)
+      ? null
+      : Response.json({ error: "Planned task not found." }, { status: 404 });
+  }
+  return null;
+}
+
 async function authoriseWorkspaceWrite(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
@@ -1302,7 +1476,7 @@ async function authoriseWorkspaceWrite(
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId } = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; data?: Record<string, unknown> };
     const entity = payload.entity;
@@ -1396,16 +1570,27 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+      /* The renewal contractor, optional on create: a contractor record of THIS
+         organisation, or nothing. See `/api/compliance/provider`. */
+      const providerContractorId = visibleText(data.providerContractorId, 200);
+      /* A member confined to some sites may not file a requirement against another. */
+      const outOfScope = await complianceScopeRefusal(db, orgId, memberSiteScope, null, siteId);
+      if (outOfScope) return outOfScope;
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
-      const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
+      const badReference = await referencesRefusal(db, orgId, [
+        { kind: "site", value: siteId },
+        { kind: "contractor", value: providerContractorId || null },
+      ]);
       if (badReference) return badReference;
       id = newId("compliance", `${siteId}-${kind}`);
-      await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required" });
+      await db.insert(complianceDocuments).values({ id, organisationId: orgId, siteId, kind, status: state, expiryDate: expiry || null, notRequired: state === "Not required", providerContractorId: providerContractorId || null });
     } else if (entity === "unit") {
       const name = text(data.name, 140);
       const siteId = text(data.siteId, 100);
       if (!name || !siteId) throw new Error("A unit name and site are required.");
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, null, siteId);
+      if (outOfScope) return outOfScope;
       const badReference = await referencesRefusal(db, orgId, [{ kind: "site", value: siteId }]);
       if (badReference) return badReference;
       id = newId("unit", name);
@@ -1512,6 +1697,8 @@ export async function POST(request: Request) {
       const unitId = optionalText(data.unitId, 100);
       const contractorId = optionalText(data.contractorId, 100);
       // Before the insert, so a refusal writes nothing. See `referenceRefusal`.
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, null, siteId);
+      if (outOfScope) return outOfScope;
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
         { kind: "unit", value: unitId },
@@ -1539,8 +1726,9 @@ export async function POST(request: Request) {
       await db.insert(users).values({ id, organisationId: orgId, fullName: name, email, role: text(data.role, 60) || "Client", active: booleanValue(data.active) });
     } else if (entity === "settings") {
       id = orgId;
-      const settings = data as unknown as WorkspaceSettings;
-      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
+      const merged = await mergeWorkspaceSettings(db, orgId, data);
+      if (!merged.ok) return Response.json({ error: merged.error }, { status: 400 });
+      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
     } else {
       return Response.json({ error: "Unsupported workspace record." }, { status: 400 });
     }
@@ -2809,7 +2997,10 @@ function contractorResurrectionRefusal(
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId } = await scopedDb(request);
+    /* `memberSiteScope`, not `siteScope`: this module already has a FUNCTION of
+       that name — the register-scope resolver this handler calls a few lines
+       below — and destructuring over it would shadow it into a string array. */
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string; data?: Record<string, unknown> };
     const entity = payload.entity;
@@ -2826,6 +3017,10 @@ export async function PATCH(request: Request) {
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
     if (refusal) return refusal;
     if (entity === "site") {
+      /* Before anything is written, and before the record is described back:
+         a store outside the member's sites is not found. See `siteScopeRefusal`. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, "siteId" in data ? text(data.siteId, 100) || null : null);
+      if (outOfScope) return outOfScope;
       /*
        * Only what was sent — see `supplied`. `name`, `type`, `region`,
        * `lifecycle` and `address` are all NOT NULL on `sites`, and "" satisfies
@@ -3034,8 +3229,21 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      /*
+       * THE RENEWAL CONTRACTOR — optional exactly as `dutyHolder` is, and for
+       * the same reason: the calendar's drag never sends it, so absence means
+       * "leave it"; an explicit null or "" unlinks; anything else must be one of
+       * THIS organisation's contractors (refused below before the UPDATE). Never
+       * inferred from the requirement's `issued_by` text.
+       */
+      const providerSent = "providerContractorId" in data;
+      const providerContractorId = providerSent ? visibleText(data.providerContractorId, 200) : "";
+      /* Before the UPDATE, so a refusal writes nothing. */
+      const outOfScope = await complianceScopeRefusal(db, orgId, memberSiteScope, id, siteId);
+      if (outOfScope) return outOfScope;
       const badReference = await referencesRefusal(db, orgId, [
         { kind: "site", value: siteId },
+        { kind: "contractor", value: providerContractorId || null },
       ]);
       if (badReference) return badReference;
       await db.update(complianceDocuments).set({ siteId, kind, status: state, expiryDate: expiry || null, /* "Not applicable" is the duty-holder answer that means the asset is not
@@ -3043,8 +3251,12 @@ export async function PATCH(request: Request) {
            rather than a sixth state eleven suites would have to learn. Either
            route to it sets the same flag, so the register cannot show a
            requirement as applicable and not-applicable at once. */
-        notRequired: state === "Not required" || isNotApplicable(dutyHolder), ...(dutyHolderSent ? { dutyHolder: dutyHolder || null } : {}), updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+        notRequired: state === "Not required" || isNotApplicable(dutyHolder), ...(dutyHolderSent ? { dutyHolder: dutyHolder || null } : {}), ...(providerSent ? { providerContractorId: providerContractorId || null } : {}), updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
     } else if (entity === "unit") {
+      /* Before anything is written, and before the record is described back:
+         a store outside the member's sites is not found. See `siteScopeRefusal`. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, "siteId" in data ? text(data.siteId, 100) || null : null);
+      if (outOfScope) return outOfScope;
       /*
        * Only what was sent — see `supplied`. `siteId`, `name`, `category` and
        * `status` are NOT NULL, so a partial PATCH used to blank them, and a
@@ -3295,6 +3507,10 @@ export async function PATCH(request: Request) {
        */
       await writeContractorCertifications(db, orgId, id, data);
     } else if (entity === "planned") {
+      /* Before anything is written, and before the record is described back:
+         a store outside the member's sites is not found. See `siteScopeRefusal`. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, "siteId" in data ? text(data.siteId, 100) || null : null);
+      if (outOfScope) return outOfScope;
       /*
        * Only what was sent — see `supplied`. Every column here except `unitId`,
        * `contractorId` and `lastCompletedAt` is NOT NULL, so a partial PATCH
@@ -3379,8 +3595,9 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     } else if (entity === "settings") {
-      const settings = data as unknown as WorkspaceSettings;
-      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: JSON.stringify(settings), updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
+      const merged = await mergeWorkspaceSettings(db, orgId, data);
+      if (!merged.ok) return Response.json({ error: merged.error }, { status: 400 });
+      await db.insert(workspaceSettings).values({ legacyClientId: orgId, organisationId: orgId, settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() }).onConflictDoUpdate({ target: workspaceSettings.organisationId, set: { settings: merged.settings, updatedByEmail: actor.email, updatedAt: new Date().toISOString() } });
     } else {
       return Response.json({ error: "Unsupported workspace record." }, { status: 400 });
     }
@@ -3396,7 +3613,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId } = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string };
     const entity = payload.entity;
@@ -3452,6 +3669,9 @@ export async function DELETE(request: Request) {
      * `{ other, Closed, false }` for an 'other' one.
      */
     if (entity === "site") {
+      /* A store, unit or visit outside the member's sites is not found. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, null);
+      if (outOfScope) return outOfScope;
       /* W2C — the same register check as the edit, and for the same reason:
          closing somebody else's register's site through this screen would be a
          write across registers. `siteInRegister` also replaces the old
@@ -3474,10 +3694,21 @@ export async function DELETE(request: Request) {
           registerScopeFilter(sites.boardId, archiveScope.scope),
         ),
       );
-    } else if (entity === "compliance") await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
-    /* `deleted_at` for the reason the edit above carries it: an asset in the
-       recycle bin is not on the register to be retired. */
-    else if (entity === "unit") await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId), isNull(units.deletedAt)));
+    } else if (entity === "compliance") {
+      const outOfScope = await complianceScopeRefusal(db, orgId, memberSiteScope, id, null);
+      if (outOfScope) return outOfScope;
+      await db.update(complianceDocuments).set({ status: "Not required", notRequired: true, updatedAt: new Date().toISOString() }).where(and(eq(complianceDocuments.id, id), eq(complianceDocuments.organisationId, orgId)));
+    }
+    else if (entity === "unit") {
+      /* A store, unit or visit outside the member's sites is not found. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, null);
+      if (outOfScope) return outOfScope;
+      /* `deleted_at` for the reason the edit above carries it: an asset in the
+         recycle bin is not on the register to be retired. Both guards are
+         needed — the scope decides whether this member may see the unit at all,
+         the `deleted_at` filter whether the unit is on the register to retire. */
+      await db.update(units).set({ status: "Retired", updatedAt: new Date().toISOString() }).where(and(eq(units.id, id), eq(units.organisationId, orgId), isNull(units.deletedAt)));
+    }
     else if (entity === "contractor") {
       /* Same register check as the edit, and for the same reason: inactivating
          somebody else's contractor through this screen would be a write across
@@ -3508,7 +3739,12 @@ export async function DELETE(request: Request) {
           ),
         );
     }
-    else if (entity === "planned") await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
+    else if (entity === "planned") {
+      /* A store, unit or visit outside the member's sites is not found. */
+      const outOfScope = await siteScopeRefusal(db, orgId, memberSiteScope, entity, id, null);
+      if (outOfScope) return outOfScope;
+      await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
+    }
     else if (entity === "member") await db.update(users).set({ active: false, updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
     else return Response.json({ error: "This record cannot be archived." }, { status: 400 });
 

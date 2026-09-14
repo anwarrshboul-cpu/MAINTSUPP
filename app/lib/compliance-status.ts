@@ -33,14 +33,14 @@
  *     Missing         → "Missing"
  *     Not applicable  → "Not required"
  *
- * ── THE WINDOW IS 60 DAYS, NOT 30, AND IT IS PRINTED FROM THE CONSTANT ────
+ * ── THE WINDOW IS 90 DAYS BY DEFAULT, AND IT IS PRINTED, NEVER TYPED ──────
  *
- * `EXPIRY_DUE_SOON_DAYS` is an operational policy with its reasoning written
- * out in `expiry-status.ts`: none of these certificates can be renewed
- * in-house, so sixty days spans two monthly compliance reviews. Every sentence
- * on these pages that states a window interpolates the constant rather than
- * typing a number, which is the defect that made a tile say "Due within 30
- * days" while it was filled from a 60-day classifier.
+ * `EXPIRY_DUE_SOON_DAYS` is the approved default, with its reasoning written
+ * out in `expiry-status.ts`; an organisation may choose its own in Settings
+ * (`compliance-policy.ts`). Every sentence on these pages that states a window
+ * interpolates the window the register was classified with rather than typing
+ * a number, which is the defect that made a tile say "Due within 30 days"
+ * while it was filled from a 60-day classifier.
  *
  * The "next 30 days" and "next 90 days" DUE-WINDOW FILTERS are a different
  * thing and are unaffected: they are questions a reader asks of the register,
@@ -50,6 +50,7 @@
 import { countsTowardCompliance } from "./compliance-duty-holder";
 import {
   EXPIRY_DUE_SOON_DAYS,
+  activeWarningWindow,
   expiryStatus,
   type ExpiryStatus,
 } from "./expiry-status";
@@ -116,6 +117,21 @@ export const COMPLIANCE_MEANING: Record<ComplianceState, string> = {
   Missing: "No certificate on record",
   "Not required": "Marked as not required for this site",
 };
+
+/**
+ * The same sentence for the window a screen actually classified with. In the
+ * browser the default is the organisation's window (`activeWarningWindow`), so
+ * a chip's explanation names the window that coloured it; `COMPLIANCE_MEANING`
+ * above is the product default, kept for callers with no window in hand.
+ */
+export function complianceMeaning(
+  state: ComplianceState,
+  windowDays: number = activeWarningWindow(),
+): string {
+  if (state === "Compliant") return `Certificate on file and more than ${windowDays} days from expiry`;
+  if (state === "Expiring soon") return `Expires within ${windowDays} days`;
+  return COMPLIANCE_MEANING[state];
+}
 
 /* ── Completion ───────────────────────────────────────────────────────────── */
 

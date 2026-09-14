@@ -577,6 +577,15 @@ export async function duplicateBoardItems(
          * fallen out of its contractor's figures for a reason no screen shows.
          */
         contractorId: source.contractorId,
+        /*
+         * And its JOB TYPE, for the same reason and with the same guarantee:
+         * the id was read under this `orgId` and is written back under it, so
+         * it is always this tenant's. Copied as it stands, a deactivated type
+         * included — the copy is the same work, and splitting identical jobs
+         * between a type and Unclassified would move Reports figures for a
+         * reason no screen shows. Omitting it filed every copy as Unclassified.
+         */
+        jobTypeId: source.jobTypeId,
         assignee: source.assignee,
         parentId: source.parentId,
         requestedAt: source.requestedAt,

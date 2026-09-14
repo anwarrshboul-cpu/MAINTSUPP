@@ -345,6 +345,15 @@ export interface MaintenanceRequest {
    * never matched to an account — see `resolveAssignee` in assignee-cell.tsx.
    */
   assigneeUserId: string | null;
+  /*
+   * What kind of work this is — the id of one of the organisation's job types
+   * (`job_type_config`), or null for Unclassified. An id, never a label, so a
+   * renamed type keeps its jobs; see `app/lib/job-type-contract.ts`. Every job
+   * that existed before the dimension is null, because nothing ever recorded a
+   * type to backfill from. Optional because a row assembled in the browser
+   * before the server answers does not carry it yet.
+   */
+  jobTypeId?: string | null;
   requestedAt: string;
   dueAt: string | null;
   completedAt: string | null;

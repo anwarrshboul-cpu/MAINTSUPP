@@ -516,9 +516,11 @@ export const CALENDAR_DATE_SOURCES: readonly CalendarDateSource[] = [
  * Four thresholds, and the spacing is the renewal round trip rather than a
  * round number. None of these certificates can be renewed in-house: each needs
  * a third party booked, quoted, raised on a purchase order and got to site (see
- * `EXPIRY_DUE_SOON_DAYS` in `app/lib/expiry-status.ts`, which is 60 for the
- * same reason). So 90 is "start now", 60 is the register turning amber, 30 is
- * "this is late", and 14 is "it will lapse".
+ * `EXPIRY_DUE_SOON_DAYS` in `app/lib/expiry-status.ts`, 90 by default for the
+ * same reason). So 90 is "start now" — at the default, also the register
+ * turning amber — 60 is the next review, 30 is "this is late", and 14 is "it
+ * will lapse". These are REMINDER days; an organisation's own warning window
+ * moves the amber boundary, not this ladder.
  *
  * Descending, and read in that order everywhere, so the derived marks come out
  * in the order somebody would meet them.
@@ -1162,8 +1164,15 @@ export function buildCalendarEvents(input: {
   sourceIds: readonly string[];
   filters: CalendarFilters;
   today: CalendarDay;
+  /**
+   * The Europe/London day (`complianceDay`), for certificate timing only. A
+   * certificate's "due today" is the UK day the register classifies on; job
+   * dates keep the board's UTC `today`. Omitted, the two are the same day.
+   */
+  complianceToday?: CalendarDay;
 }): CalendarEvent[] {
   const { sourceIds, today } = input;
+  const certificateToday = input.complianceToday ?? today;
   const requests = input.requests ?? [];
   const complianceRecords = input.complianceRecords ?? [];
   const manualItems = input.manualItems ?? [];
@@ -1239,7 +1248,7 @@ export function buildCalendarEvents(input: {
          */
         title: `${record.kind} renewal`,
         subtitle: record.siteName,
-        timing: complianceTiming(record, day, today),
+        timing: complianceTiming(record, day, certificateToday),
         editable: expirySource.editable,
         record,
       });

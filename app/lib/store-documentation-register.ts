@@ -239,6 +239,8 @@ export function complianceStateFor(input: {
   fileCount: number;
   notRequired?: boolean;
   today: Date;
+  /** The organisation's warning window. Omitted, `expiryStatus` uses its own default. */
+  windowDays?: number;
 }): ComplianceState {
   if (input.notRequired) return "Not required";
 
@@ -247,7 +249,8 @@ export function complianceStateFor(input: {
   if (!input.tracksExpiry) return held ? "Compliant" : "Missing";
 
   if (input.expiry) {
-    const status = expiryStatus(input.expiry, input.today);
+    /* An omitted window reaches `expiryStatus` as `undefined`, which takes its default. */
+    const status = expiryStatus(input.expiry, input.today, input.windowDays);
     if (status.state === "expired") return "Expired";
     if (status.state === "due-soon") return "Expiring soon";
     if (status.state === "valid") return "Compliant";
@@ -263,6 +266,7 @@ function documentFor(
   slot: StoreDocumentSlot,
   today: Date,
   notRequired: boolean,
+  windowDays?: number,
 ): RegisterDocument {
   const expiry = slot.expiryColumn
     ? dateOnlyValue(row.cells[slot.expiryColumn]) || null
@@ -282,6 +286,7 @@ function documentFor(
       fileCount,
       notRequired,
       today,
+      windowDays,
     }),
   };
 }
@@ -305,10 +310,11 @@ export function registerDocumentId(itemId: string, slotKey: string) {
  */
 export function storeDocumentationRegister(
   rows: BoardStoreRow[],
-  options: { today?: Date; notRequired?: ReadonlySet<string> } = {},
+  options: { today?: Date; notRequired?: ReadonlySet<string>; windowDays?: number } = {},
 ): RegisterStore[] {
   const today = options.today ?? new Date();
   const notRequired = options.notRequired;
+  const windowDays = options.windowDays;
 
   return rows.map((row) => ({
     id: row.id,
@@ -322,6 +328,7 @@ export function storeDocumentationRegister(
         slot,
         today,
         notRequired?.has(`${row.id}::${slot.key}`) ?? false,
+        windowDays,
       ),
     ),
   }));

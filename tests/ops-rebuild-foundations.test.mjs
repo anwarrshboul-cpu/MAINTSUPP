@@ -985,22 +985,41 @@ test("the chart and the filter cannot disagree about what planned means", async 
   const filters = codeOnly(await read("app/lib/dashboard-filters.ts"));
   const aggregates = codeOnly(await read("app/lib/dashboard-aggregates.ts"));
 
+  /*
+   * RE-POINTED 2026-09-12. "Planned" was an inference (a compliance category
+   * or tier 4+) and the owner ruled it out: it is now the job's canonical job
+   * TYPE, by the stable code `planned`, and "reactive" the code `reactive` —
+   * not "everything that is not planned". The rule still lives beside the
+   * filter that has to honour it, once, and the aggregate still uses it by
+   * name rather than restating it.
+   */
   assert.match(
     filters,
-    /export const plannedCondition = sql`\(lower\(coalesce\(\$\{maintenanceRequests\.category\}/,
-    "the inference lives beside the filter that has to honour it",
+    /export const plannedCondition = jobTypeCodeCondition\("planned"\);/,
+    "the rule lives beside the filter that has to honour it",
   );
+  assert.match(filters, /export const reactiveCondition = jobTypeCodeCondition\("reactive"\);/);
+  assert.match(filters, /export function jobTypeCodeCondition\(code: JobTypeCode\): SQL \{/);
   // The aggregate that DRAWS the bars must use that same expression, because
   // tapping a bar of 30 has to return 30 jobs.
   assert.match(aggregates, /const plannedSql = plannedCondition;/);
+  assert.match(aggregates, /const reactiveSql = reactiveCondition;/);
   assert.doesNotMatch(
     aggregates,
-    /const plannedSql = sql`/,
+    /const (planned|reactive)Sql = sql`/,
     "a second copy of the rule would let the bar and the filtered page drift",
   );
-  // Both selected is the same question as neither, and must not become
-  // `planned AND reactive`, which returns nothing and reads as a broken filter.
-  assert.match(filters, /if \(filters\.natures\.length === 1\) \{/);
+  assert.doesNotMatch(aggregates, /not \$\{plannedSql\}/, "reactive is its own type, not 'not planned' by elimination");
+  // Both selected must not become `planned AND reactive`, which returns
+  // nothing and reads as a broken filter. RE-POINTED 2026-09-12: it used to
+  // collapse to NO condition, which was right only while the two were a
+  // partition; with canonical types a Project or an untyped job is neither, so
+  // both selected is `planned OR reactive` — OR within the dimension, as every
+  // other dimension is.
+  assert.match(
+    filters,
+    /if \(filters\.natures\.length\) \{\s*const clause = anyOf\(\s*filters\.natures\.map\(\(nature\) => \(nature === "planned" \? plannedCondition : reactiveCondition\)\),\s*\);/,
+  );
 });
 
 test("the words are browser-safe and the SQL is not", async () => {

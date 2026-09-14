@@ -47,6 +47,7 @@ import {
 } from "../(app)/portal/board-format";
 import { formatDate } from "./format-date";
 import { boardItemName } from "../(app)/portal/board-ordering";
+import { UNCLASSIFIED_LABEL } from "./job-type-contract";
 
 export type BoardCsvColumn = {
   /** The system column's stable key, or null for a workspace-added column. */
@@ -72,6 +73,14 @@ export type BoardCsvInput = {
    * caller does not know, which prints 0.
    */
   subitemCounts?: Record<string, number>;
+  /**
+   * jobTypeId → the name to print under "Job type".
+   *
+   * The organisation's types, deactivated ones included — a retired type still
+   * names the jobs filed under it. An id missing from the map prints blank
+   * rather than a guess; a job with no type prints "Unclassified".
+   */
+  jobTypeLabels?: Record<string, string>;
 };
 
 /**
@@ -177,6 +186,12 @@ function systemCsvValue(
       return request.formUrl ?? "";
     case "move":
       return request.stage;
+    case "jobType":
+      /* The type's NAME, never its id — a spreadsheet reader has no use for
+         `jt_…`, and the name is what every screen shows. */
+      return request.jobTypeId
+        ? input.jobTypeLabels?.[request.jobTypeId] ?? ""
+        : UNCLASSIFIED_LABEL;
     default:
       // A system key this build does not know. Empty rather than "undefined":
       // a blank cell is honest, a printed keyword is not.

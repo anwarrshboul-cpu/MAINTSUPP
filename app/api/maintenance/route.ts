@@ -48,6 +48,7 @@ import {
 import { unassignedSiteId } from "../../lib/site-reference";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
+import { resolveJobTypeWrite } from "../../lib/job-types";
 import { contractorLinkValues } from "../../lib/contractor-reference";
 import { assigneeLinkValues } from "../../lib/assignee-reference";
 import { recordContractorComment } from "../../lib/contractor-comments";
@@ -444,6 +445,18 @@ export async function POST(request: Request) {
     }
 
     /*
+     * THE JOB'S TYPE, resolved against THIS organisation's types before
+     * anything is written. Absent or empty is Unclassified — which is what the
+     * public and intake forms send, because they never ask — and another
+     * tenant's id, a made-up one, or a type already retired is refused rather
+     * than stored. `resolveJobTypeWrite` owns all three rules.
+     */
+    const jobType = await resolveJobTypeWrite(db, orgId, payload.jobTypeId, null);
+    if (!jobType.ok) {
+      return Response.json({ error: jobType.error }, { status: jobType.status });
+    }
+
+    /*
      * ONE CALL, and it owns the title, the id, the placement, the canonical
      * priority and engineer values, the tier, the due date and the status chip.
      *
@@ -474,6 +487,11 @@ export async function POST(request: Request) {
       engineer: payload.engineer,
       siteId: matchedSite.id,
       requestedAt: trimString(payload.requestedAt, 32) || null,
+      /* A column only this door fills — applied last by the service, like the
+         duplicate path's inherited fields — and recorded on the creation row
+         so the Activity tab says what the job was filed as. */
+      overrides: { jobTypeId: jobType.id },
+      activityDetail: { jobTypeId: jobType.id },
     });
     const created = submission.request;
     const priority = submission.priority;
@@ -914,6 +932,30 @@ export async function PATCH(request: Request) {
         ),
       )
       .limit(1);
+
+    /*
+     * THE JOB'S TYPE — resolved here, after the current row is read, because
+     * the rule needs it: a deactivated type may STAY on a job that already has
+     * it (so re-saving an old job never fails) and may never be newly chosen.
+     * Another tenant's id or a made-up one is refused, not dropped — the same
+     * answer this route gives a bad site or assignee. Kept out of
+     * `requestFieldValues` on purpose; see `invalidRequestFields`.
+     *
+     * Absent is unchanged; `null` or "" is Unclassified. The `{ fields }` this
+     * PATCH logs to `activity_log` below already carries the change.
+     */
+    if (fields && Object.prototype.hasOwnProperty.call(fields, "jobTypeId")) {
+      const jobType = await resolveJobTypeWrite(
+        db,
+        orgId,
+        fields.jobTypeId,
+        before?.jobTypeId ?? null,
+      );
+      if (!jobType.ok) {
+        return Response.json({ error: jobType.error }, { status: jobType.status });
+      }
+      values.jobTypeId = jobType.id;
+    }
 
     let updated;
     if (stage || fields) {

@@ -18,21 +18,23 @@ import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { readComplianceRegister } from "../../../lib/compliance-register";
+import { contractorNamesById, providerOptions } from "../../../lib/compliance-provider";
+import { resolveDashboardPortfolio } from "../../../lib/overview-metrics";
 import {
   complianceFilterOptions,
+  complianceRowsFrom,
   filterComplianceRows,
   groupCompliance,
   isGroupSort,
   parseComplianceFilters,
   portfolioCounts,
-  responsibilityFor,
   soonestDue,
   sortGroups,
   GROUP_SORTS,
-  type ComplianceRow,
 } from "../../../lib/compliance-view";
-import { DUE_WINDOWS, EXPIRY_DUE_SOON_DAYS } from "../../../lib/compliance-status";
+import { DUE_WINDOWS } from "../../../lib/compliance-status";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +49,7 @@ export async function GET(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
-
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     const filters = parseComplianceFilters(url);
     const sortRaw = url.searchParams.get("sort") ?? "";
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
     // drifts and can bucket two certificates expiring on the same day
     // differently.
     const today = new Date();
-    const [register, siteRows] = await Promise.all([
+    const [register, siteRows, providerNames, portfolio] = await Promise.all([
       readComplianceRegister(db, orgId, { today }),
       // Managers, for the responsibility fallback — see the same query in
       // /api/compliance/records.
@@ -66,36 +67,35 @@ export async function GET(request: Request) {
         .select({ id: sites.id, manager: sites.manager, managerName: sites.managerName })
         .from(sites)
         .where(and(eq(sites.organisationId, orgId))),
+      contractorNamesById(db, orgId),
+      /*
+       * THE HEADER'S PORTFOLIO, INTERSECTED WITH THE MEMBER'S SITES.
+       *
+       * The register used to be narrowed to a portfolio only by the `site=`
+       * list a dashboard drill wrote, and it never read `portfolio` itself — so
+       * after the header changed portfolio it went on showing whatever that
+       * list said, including sites outside the new portfolio. It now answers
+       * inside exactly the set the Compliance block counts: the portfolio's
+       * members ∩ the membership's site scope (`resolveDashboardPortfolio`),
+       * or the scope alone for "All portfolios". A stale `site=` list can only
+       * narrow that set further; it can never widen it.
+       */
+      resolveDashboardPortfolio(db, orgId, url.searchParams.get("portfolio"), siteScope),
     ]);
     const managerById = new Map(
       siteRows.map((row) => [row.id, (row.managerName || row.manager || "").trim()]),
     );
 
-    const rows: ComplianceRow[] = register.entries.map((entry) => ({
-      id: entry.id,
-      siteId: entry.siteId,
-      siteName: entry.siteName,
-      kind: entry.kind,
-      responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
-      /* Whose obligation it is, which is a different question from who chases
-         it — and the one the percentage depends on. See ComplianceRow. */
-      dutyHolder: entry.dutyHolder,
-      state: entry.state,
-      expiry: entry.expiry,
-      fileCount: entry.fileCount,
-      /*
-       * Editable only when NO board row stands behind it.
-       *
-       * Both halves of the board address are needed — `itemId` names the row
-       * and `slotKey` names which of the twelve certificates — and a record
-       * carrying one without the other is treated as register-only, which is
-       * the safe direction. The same predicate is `isBoardDerived` in
-       * `compliance-links.ts`; it is spelled out here rather than imported
-       * because that module is a client one and a route handler must not pull
-       * a `"use client"` file into the server graph.
-       */
-      editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
-    }));
+    /* The member's authorised sites — see `member-site-scope.ts` — as the
+       portfolio resolved them (null: every site). */
+    const allowed = memberSiteSet(portfolio.siteIds);
+    const scopedEntries = allowed
+      ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
+      : register.entries;
+    /* One row builder for the register and the dashboard block above it
+       (`complianceRowsFrom`): responsibility, duty holder, whether a board row
+       stands behind it, and the linked renewal contractor. */
+    const rows = complianceRowsFrom(scopedEntries, managerById, providerNames);
 
     const filtered = filterComplianceRows(rows, filters, today);
     const groups = groupCompliance(filtered, today);
@@ -124,8 +124,17 @@ export async function GET(request: Request) {
       })),
       sorts: GROUP_SORTS,
       dueWindows: DUE_WINDOWS,
-      expiryWindowDays: EXPIRY_DUE_SOON_DAYS,
+      /* The window this register was classified with, so "expiring within N
+         days" names the window that turned these records amber. */
+      expiryWindowDays: register.windowDays,
       options: complianceFilterOptions(rows),
+      /* The contractors a renewal can be linked to, and the names behind any
+         `contractor=` chip — this organisation's only. */
+      providers: await providerOptions(
+        db,
+        orgId,
+        new Set(rows.flatMap((row) => (row.providerContractorId ? [row.providerContractorId] : []))),
+      ),
     });
   } catch (error) {
     const refusal = anonymousRefusal(error);

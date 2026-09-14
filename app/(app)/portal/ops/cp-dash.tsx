@@ -86,7 +86,7 @@ const REGISTER_ANCHOR = "compliance-register";
  * header's `from`/`to` stay only on the plain "View register" link; a figure's
  * drill drops them (see `registerQuery`).
  */
-const REGISTER_KEYS = ["site", "state", "kind", "who", "due", "q", "scored", "open", "view"] as const;
+const REGISTER_KEYS = ["site", "state", "kind", "who", "due", "q", "scored", "open", "view", "contractor"] as const;
 
 /** The four states inside the score, in the order every ring draws them. */
 const STATUS_ORDER: readonly CpStateKey[] = ["compliant", "expiring", "expired", "missing"];
@@ -408,23 +408,22 @@ export function CpDash({
           /*
            * THE OLD PORTFOLIO'S SITES GO WITH IT.
            *
-           * A drill writes the portfolio onto the register as its `site=`
-           * list, because the register has never read a portfolio id. Changing
-           * the portfolio here left that list behind — measured: back on "All
-           * portfolios", the register still showed ten Site chips from the
-           * portfolio that had been left. So when the register's sites are
-           * EXACTLY the old portfolio's, they are the block's own narrowing and
-           * are taken off with it; a site selection the reader made in the
-           * register is anything else, and is left alone.
+           * The register now reads `portfolio` itself and answers inside the
+           * new portfolio ∩ the member's sites, so a list left behind can no
+           * longer show a site outside the portfolio — at worst it narrows the
+           * register to nothing. It is taken off anyway, so the reader lands on
+           * the new portfolio rather than on an empty register under chips from
+           * the old one: every applied site that belonged to the portfolio being
+           * left — the block's whole narrowing, or a stale or partial copy of it
+           * written while the payload was refetching — goes, and the expanded
+           * groups with it. A selection the reader made under "All portfolios"
+           * belongs to no portfolio and is left for the server to intersect.
            */
-          const applied = new Set(query.getAll("site"));
-          const previous = data?.portfolio.siteIds ?? [];
-          if (
-            previous.length > 0 &&
-            applied.size === previous.length &&
-            previous.every((id) => applied.has(id))
-          ) {
+          const applied = query.getAll("site");
+          const previous = new Set(data?.portfolio.siteIds ?? []);
+          if (applied.length > 0 && previous.size > 0 && applied.every((id) => previous.has(id))) {
             query.delete("site");
+            query.delete("open");
           }
         })
       }

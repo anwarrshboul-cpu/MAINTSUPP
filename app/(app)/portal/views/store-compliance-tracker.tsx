@@ -74,7 +74,7 @@ import {
   type StoreDocumentSlot,
 } from "../../../../db/monday-board-spec";
 import type { StoreRecord } from "../../../lib/types";
-import { EXPIRY_DUE_SOON_DAYS, expiryStatus } from "../../../lib/expiry-status";
+import { activeWarningWindow, expiryStatus } from "../../../lib/expiry-status";
 import { formatDate } from "./view-model";
 import trackerCss from "./store-compliance-tracker.css?url";
 
@@ -593,7 +593,7 @@ export function StoreComplianceTracker({
           [
             ["expired", "Expired", "Held once, lapsed now"],
             ["missing", "Missing", "Never obtained"],
-            ["due", `Due within ${EXPIRY_DUE_SOON_DAYS} days`, "Still valid, renew now"],
+            ["due", `Due within ${activeWarningWindow()} days`, "Still valid, renew now"],
             ["valid", "In date", "Nothing to do"],
           ] as const
         ).map(([key, label, note]) => (

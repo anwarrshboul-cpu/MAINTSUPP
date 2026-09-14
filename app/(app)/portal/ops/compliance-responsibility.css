@@ -271,10 +271,20 @@
   padding-bottom: 8px;
 }
 
-/* The per-site sentence under a collapsed group header. */
+/*
+ * The per-site sentence under a collapsed group header.
+ *
+ * It takes the HEADER'S OWN INDENTS — 15px from the card's left edge, 12px from
+ * its right — because with none it started hard against that edge, and the
+ * card's state-tinted edge then read as a coloured bar beside "Not yet
+ * confirmed" rather than as the edge of the card. The numbers are the register
+ * header's (`.ops-group__head` is padded `12px 12px 12px 15px` in `ops.css`),
+ * so the sentence lines up under the store name instead of sitting a character
+ * to its left.
+ */
 .resp-group__coverage {
   margin: 0;
-  padding: 0 0 4px;
+  padding: 0 12px 4px 15px;
 }
 
 /* ── One waiting requirement ──────────────────────────────────────────────── */

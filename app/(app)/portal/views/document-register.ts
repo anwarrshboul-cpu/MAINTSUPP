@@ -27,7 +27,8 @@
  */
 
 import {
-  EXPIRY_DUE_SOON_DAYS,
+  activeWarningWindow,
+  complianceDay,
   expiryStatus,
   type ExpiryState,
 } from "../../../lib/expiry-status";
@@ -419,11 +420,13 @@ export function activeFilterCount(filters: DocumentFilters) {
  *
  * Every one is a view of the SAME classifier the status chip uses, so a row can
  * never be amber in the Status column and absent from the "Due soon" filter.
- * The "due soon" window prints from `EXPIRY_DUE_SOON_DAYS` and never from a
+ * The "due soon" window prints the window the classifier uses
+ * (`activeWarningWindow` — the organisation's, or the default 90) and never a
  * number typed here — the Compliance Tracker once declared its own
  * `DUE_SOON_DAYS = 30`, labelled a tile "Due within 30 days" and filled it from
  * a classifier using 60, so a certificate 45 days out was counted in a tile
- * that said 30. One constant, printed wherever the window is named.
+ * that said 30. A getter, so the label is read when it is rendered, after the
+ * shell has set the organisation's window — not once when this module loads.
  */
 export const EXPIRY_FILTERS: ReadonlyArray<{
   value: string;
@@ -433,7 +436,9 @@ export const EXPIRY_FILTERS: ReadonlyArray<{
   { value: "expired", label: "Expired", states: ["expired"] },
   {
     value: "due-soon",
-    label: `Due within ${EXPIRY_DUE_SOON_DAYS} days`,
+    get label() {
+      return `Due within ${activeWarningWindow()} days`;
+    },
     states: ["due-soon"],
   },
   { value: "valid", label: "In date", states: ["valid"] },
@@ -653,11 +658,10 @@ const MS_PER_DAY = 86_400_000;
  * the class of disagreement the shared classifier exists to prevent.
  */
 export function registerDay(today: Date, offset: number) {
-  const base = Date.UTC(
-    today.getUTCFullYear(),
-    today.getUTCMonth(),
-    today.getUTCDate(),
-  );
+  /* From the Europe/London day, which is the day `expiryStatus` counts from —
+     so the bounds sent to the server and the chip on the row agree at 00:30 BST. */
+  const [year, month, day] = complianceDay(today).split("-").map(Number);
+  const base = Date.UTC(year, month - 1, day);
   return new Date(base + offset * MS_PER_DAY).toISOString().slice(0, 10);
 }
 
@@ -667,12 +671,12 @@ function expiryBounds(state: DocumentState, today: Date) {
     // `daysRemaining < 0`, so everything strictly before today.
     case "expired":
       return { from: "", to: registerDay(today, -1) };
-    // `0 <= daysRemaining <= EXPIRY_DUE_SOON_DAYS`, both ends included.
+    // `0 <= daysRemaining <= window`, both ends included.
     case "due-soon":
-      return { from: registerDay(today, 0), to: registerDay(today, EXPIRY_DUE_SOON_DAYS) };
+      return { from: registerDay(today, 0), to: registerDay(today, activeWarningWindow()) };
     // Anything past the amber window.
     case "valid":
-      return { from: registerDay(today, EXPIRY_DUE_SOON_DAYS + 1), to: "" };
+      return { from: registerDay(today, activeWarningWindow() + 1), to: "" };
     default:
       return null;
   }
@@ -681,7 +685,7 @@ function expiryBounds(state: DocumentState, today: Date) {
 /**
  * A range no stored date can satisfy, used to express an EMPTY answer exactly.
  *
- * "Archived" and "Expires within 60 days" selected together match nothing —
+ * "Archived" and "Due within 90 days" selected together match nothing —
  * `documentStatus` returns `archived` for a withdrawn document whatever its
  * expiry, so the register's own rule already answers zero. Left unsent, the
  * server would count every archived document and the page would then be

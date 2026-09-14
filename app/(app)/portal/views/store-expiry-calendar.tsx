@@ -70,7 +70,8 @@ import {
   storeDocumentationUndated,
 } from "../../../../db/monday-board-spec";
 import {
-  EXPIRY_DUE_SOON_DAYS,
+  activeWarningWindow,
+  complianceDay,
   expiryStatus,
 } from "../../../lib/expiry-status";
 import type { BoardItem } from "./view-model";
@@ -148,14 +149,18 @@ function parseIsoDay(value: string | null | undefined): DayNumber | null {
 }
 
 /**
- * Which day it is for the person reading the screen.
+ * Which day it is for compliance: the Europe/London calendar day.
  *
- * Read from the local clock on purpose: "is this certificate overdue?" is asked
- * against the user's own calendar. The fields are then carried as a
- * `DayNumber`, so nothing downstream can re-interpret them in another zone.
+ * This used to read the reader's LOCAL clock, while every other compliance
+ * surface read the UTC one — so a reader in another zone, or anybody at 00:30
+ * BST, could see a certificate overdue here that the register still called
+ * "Expires today". A UK certificate is due on the UK day, so the calendar asks
+ * `complianceDay`, the same question `expiryStatus` asks. The fields are then
+ * carried as a `DayNumber`, so nothing downstream can re-interpret them.
  */
 function todayNumber(now: Date): DayNumber {
-  return dayNumber(now.getFullYear(), now.getMonth(), now.getDate());
+  const [year, month, day] = complianceDay(now).split("-").map(Number);
+  return dayNumber(year, month - 1, day);
 }
 
 const MONTH_LABEL = new Intl.DateTimeFormat("en-GB", {
@@ -206,7 +211,7 @@ type DrawnTone = "expired" | "due-soon" | "valid";
  *
  * This hint used to read `within ${DUE_SOON_DAYS} days` against a local
  * `const DUE_SOON_DAYS = 30`, while the classifier that actually put rows in
- * this bucket uses `EXPIRY_DUE_SOON_DAYS`, which is 60. So the rail labelled
+ * this bucket used `EXPIRY_DUE_SOON_DAYS`, which was then 60. So the rail labelled
  * its amber column "within 30 days" and filled it with certificates up to 60
  * days out — a reader checking a 45-day renewal against that hint would
  * conclude the calendar had put it in the wrong bucket.
@@ -216,14 +221,19 @@ type DrawnTone = "expired" | "due-soon" | "valid";
  * certificate renewal window; the justification was about a different number
  * for a different thing. `EXPIRY_DUE_SOON_DAYS` carries the reasoning for this
  * one — the multi-week round trip of quoting, raising a PO and getting a
- * contractor on site — and it is the only number allowed to name this window.
+ * contractor on site — and the window the classifier actually uses
+ * (`activeWarningWindow`: the organisation's, or that default) is the only
+ * number allowed to name it.
  */
 const TONES: Record<DrawnTone, { word: string; icon: IconName; hint: string }> = {
   expired: { word: "Overdue", icon: "alert", hint: "lapsed — book a contractor" },
   "due-soon": {
     word: "Due soon",
     icon: "clock",
-    hint: `within ${EXPIRY_DUE_SOON_DAYS} days`,
+    /* A getter: read when drawn, after the shell set the organisation's window. */
+    get hint() {
+      return `within ${activeWarningWindow()} days`;
+    },
   },
   valid: { word: "Renewal", icon: "calendar", hint: "in date, scheduled ahead" },
 };

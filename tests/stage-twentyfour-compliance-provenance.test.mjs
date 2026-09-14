@@ -350,19 +350,27 @@ test("state is recomputed from the date on every read", () => {
       today: TODAY,
     });
 
+  /*
+   * Re-pointed to the approved 90-day window (it was 60): the day boundaries
+   * moved, the contract did not — the state is the date against today and the
+   * window, and nothing else.
+   */
   assert.equal(dated("2026-08-09"), "Expired", "yesterday is expired");
   assert.equal(dated("2026-08-10"), "Expiring soon", "today is the last valid day");
   assert.equal(dated("2026-10-09"), "Expiring soon", "60 days out is amber");
-  assert.equal(dated("2026-10-10"), "Compliant", "61 days out is green");
+  assert.equal(dated("2026-10-10"), "Expiring soon", "61 days out is amber under 90");
+  assert.equal(dated("2026-11-08"), "Expiring soon", "90 days out is the last amber day");
+  assert.equal(dated("2026-11-09"), "Compliant", "91 days out is green");
 
   /*
    * The live contradiction from the finding: store-brentcross PAT was STORED
    * "Expiring soon" with an expiry 86 days away, so /dashboard/compliance
    * counted it as expiring while the tracker, which reads the date, called it
    * in date. Same document, two screens, 31 against 32. The stored word cannot
-   * reach this function at all.
+   * reach this function at all — under the 90-day window that same date IS
+   * amber, and it is amber because of its date, on every screen at once.
    */
-  assert.equal(dated("2026-11-03"), "Compliant", "86 days away is not expiring");
+  assert.equal(dated("2026-11-03"), "Expiring soon", "86 days away is amber under 90, from the date alone");
 
   // The three slots the board tracks no date for are answered by holding alone,
   // and are never amber — there is nothing to count down to.
@@ -415,7 +423,8 @@ test("the five-word vocabulary is unchanged", () => {
 /* ── 6. One threshold, one name ──────────────────────────────────────────── */
 
 test("the due-soon window is one constant, and the label prints it", async () => {
-  assert.equal(expiry.EXPIRY_DUE_SOON_DAYS, 60);
+  /* The approved default is 90 (it shipped at 60). */
+  assert.equal(expiry.EXPIRY_DUE_SOON_DAYS, 90);
 
   const tracker = withoutComments(
     await read("app/(app)/portal/views/store-compliance-tracker.tsx"),
@@ -432,10 +441,16 @@ test("the due-soon window is one constant, and the label prints it", async () =>
     /const DUE_SOON_DAYS\s*=/,
     "a second due-soon window is how the label and the count drifted apart",
   );
+  /*
+   * Re-pointed from the constant to `activeWarningWindow()`: the window that
+   * decides the count is now the organisation's (the constant is its default),
+   * and the tile prints the same call `expiryStatus` falls back to — still one
+   * source, still never a number typed into the label.
+   */
   assert.match(
     tracker,
-    /Due within \$\{EXPIRY_DUE_SOON_DAYS\} days/,
-    "the label must be printed from the constant that decides the count",
+    /Due within \$\{activeWarningWindow\(\)\} days/,
+    "the label must be printed from the window that decides the count",
   );
 
   // The case that used to be miscounted, asserted through the classifier.
@@ -676,11 +691,18 @@ test("the classifier takes its today from the caller", () => {
   const iso = "2026-08-10";
   assert.equal(expiry.expiryStatus(iso, new Date("2026-08-10T00:00:00Z")).state, "due-soon");
   assert.equal(expiry.expiryStatus(iso, new Date("2026-08-11T00:00:00Z")).state, "expired");
+  /*
+   * The day is the Europe/London day (re-pointed from whole UTC days). In
+   * August London is on BST, so the certificate's final valid second is
+   * 23:59:59 BST = 22:59:59Z, and 23:00:00Z is already the next UK day.
+   */
   assert.equal(
-    expiry.expiryStatus(iso, new Date("2026-08-10T23:59:59Z")).daysRemaining,
+    expiry.expiryStatus(iso, new Date("2026-08-10T22:59:59Z")).daysRemaining,
     0,
     "the final valid day is zero days remaining, not minus one",
   );
+  assert.equal(expiry.expiryStatus(iso, new Date("2026-08-10T23:00:00Z")).state, "expired",
+    "midnight in London, 23:00 in UTC, is the next day");
 });
 
 /* ── The whole board, against the real capture ───────────────────────────── */

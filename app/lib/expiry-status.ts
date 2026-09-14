@@ -27,10 +27,15 @@ import { formatLongDate, formatShortDate } from "./format-date";
 /* ── Policy ───────────────────────────────────────────────────────────────── */
 
 /**
- * How many days before expiry a certificate turns amber ("due soon").
+ * How many days before expiry a certificate turns amber ("due soon") — THE
+ * DEFAULT WARNING WINDOW, 90 days.
  *
- * Sixty days, and it is a policy number rather than a derived one, so it lives
- * here as the single place to change it.
+ * Ninety is the approved Compliance specification's window ("Warning window is
+ * a config value in Settings (default 90 days)"), with its renewal countdown in
+ * three equal bands: 0–30, 31–60 and 61–90 days. The product shipped at sixty
+ * for a while; that was a global default typed here, never a value any
+ * organisation saved, so moving the default moves every organisation that has
+ * not chosen otherwise and overrides nobody's choice.
  *
  * The reasoning is operational, not regulatory: none of these certificates can
  * be renewed in-house. Each one needs a third party booked — an insurance
@@ -39,19 +44,113 @@ import { formatLongDate, formatShortDate } from "./format-date";
  * sprinkler and fire door tests, the water hygiene partner for the L8 test (see
  * `storeDocumentationResponsibility`). Quote, purchase order, site visit and
  * the certificate coming back is a multi-week round trip, and it can only start
- * once someone notices. Sixty days spans two monthly compliance reviews, so a
- * certificate is flagged amber on at least two consecutive reviews before it
- * can lapse — one to raise it and one to catch it if the first was missed.
+ * once someone notices. Ninety days spans three monthly compliance reviews, so
+ * a certificate is flagged amber on at least three consecutive reviews before
+ * it can lapse.
  *
- * Raise it if renewals are being chased late; lower it if the board is
- * permanently amber and the warning has stopped meaning anything.
+ * AN ORGANISATION MAY CHOOSE ITS OWN WINDOW in Settings
+ * (`workspace_settings.settings.compliancePolicy.warningWindowDays`, read by
+ * `compliance-policy.ts`). The server classifies every register with the
+ * organisation's window — `readComplianceRegister` resolves it once and every
+ * compliance surface reads that register — and hands it to the browser, which
+ * classifies its own cells through `setBrowserWarningWindow` below.
  *
- * Anything that prints a window in words must print it from this constant. The
+ * Anything that prints a window in words must print the window it classified
+ * with — this constant, or the organisation's value where one is in hand. The
  * Compliance Tracker used to declare its own `DUE_SOON_DAYS = 30`, label a tile
- * "Due within 30 days" and then fill it from `expiryStatus`, which is 60 — a
+ * "Due within 30 days" and then fill it from `expiryStatus`, which was 60 — a
  * certificate 45 days out was counted in a tile that said 30.
  */
-export const EXPIRY_DUE_SOON_DAYS = 60;
+export const EXPIRY_DUE_SOON_DAYS = 90;
+
+/** The narrowest and widest window an organisation may choose. */
+export const MIN_WARNING_WINDOW_DAYS = 7;
+export const MAX_WARNING_WINDOW_DAYS = 365;
+
+/**
+ * A warning window from anything a settings row or a form may hold: a whole
+ * number of days inside the bounds, or the default. Total, because it is read
+ * on the path of every compliance screen, and a malformed settings row must
+ * degrade to the default rather than take the register down.
+ */
+export function normaliseWarningWindow(value: unknown): number {
+  const days = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof days !== "number" || !Number.isFinite(days)) return EXPIRY_DUE_SOON_DAYS;
+  const whole = Math.round(days);
+  if (whole < MIN_WARNING_WINDOW_DAYS || whole > MAX_WARNING_WINDOW_DAYS) return EXPIRY_DUE_SOON_DAYS;
+  return whole;
+}
+
+/*
+ * THE BROWSER'S WINDOW.
+ *
+ * Board cells, the Compliance Tracker, the expiry calendar and the document
+ * register classify in the browser, one cell at a time, with no request context
+ * to carry an organisation's setting through dozens of props. The shell sets it
+ * once from the workspace settings it already loads; every `expiryStatus` call
+ * that does not pass a window then uses it.
+ *
+ * NEVER ON THE SERVER. One server process answers many organisations, so a
+ * module-level value there would let one tenant's setting classify another
+ * tenant's register. The setter is inert outside a browser and the reader
+ * returns the default there, so every server classification either passes the
+ * organisation's window explicitly or uses the product default.
+ */
+let browserWindowDays = EXPIRY_DUE_SOON_DAYS;
+
+/** Called by the portal shell when the workspace settings arrive. Inert on the server. */
+export function setBrowserWarningWindow(value: unknown): void {
+  if (typeof window === "undefined") return;
+  browserWindowDays = normaliseWarningWindow(value);
+}
+
+/** The window an `expiryStatus` call uses when none is passed. */
+export function activeWarningWindow(): number {
+  return typeof window === "undefined" ? EXPIRY_DUE_SOON_DAYS : browserWindowDays;
+}
+
+/* ── The compliance day ───────────────────────────────────────────────────── */
+
+/**
+ * WHICH CALENDAR DAY IT IS, FOR COMPLIANCE: the day in Europe/London.
+ *
+ * A certificate "due today" is due on the UK calendar day, and it expires when
+ * that day ends in the UK — not at UTC midnight, which during British Summer
+ * Time is 1am the next morning. Reading the UTC calendar here classified a
+ * certificate due on the 10th as still in date until 00:59 BST on the 11th, and
+ * put the flip from "Expires today" to "Expired" an hour after the day it
+ * named had ended. Stored timestamps stay UTC; only the question "what is
+ * today's date" is asked in London.
+ *
+ * `Intl` with an explicit `timeZone` is the whole mechanism — it knows the BST
+ * transitions, so no offset is hand-computed and none can be an hour out twice
+ * a year. One formatter, built on first use and reused. If the platform cannot
+ * supply the zone at all, the UTC calendar is the fallback: never a throw on a
+ * compliance screen.
+ */
+export const COMPLIANCE_TIME_ZONE = "Europe/London";
+
+let londonDayFormatter: Intl.DateTimeFormat | null = null;
+
+/** `YYYY-MM-DD` for the calendar day `at` falls on in Europe/London. */
+export function complianceDay(at: Date = new Date()): string {
+  const instant = Number.isFinite(at.getTime()) ? at : new Date();
+  try {
+    londonDayFormatter ??= new Intl.DateTimeFormat("en-GB", {
+      timeZone: COMPLIANCE_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = londonDayFormatter.formatToParts(instant);
+    const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? "";
+    const day = `${part("year")}-${part("month")}-${part("day")}`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+  } catch {
+    /* No time-zone data on this platform — fall through to the UTC calendar. */
+  }
+  return instant.toISOString().slice(0, 10);
+}
 
 /* ── Date-only values ─────────────────────────────────────────────────────── */
 
@@ -127,18 +226,12 @@ function utcDayIndex(isoDate: string): number {
 }
 
 /**
- * Today as the same kind of day index, read from `today`'s UTC calendar fields.
- *
- * `todayBoardDate()` in board-format.ts already defines "today" for this board
- * in UTC — it is what highlights the current day in `MobileBoardCalendar`. This
- * matches it so the cell and the calendar can never disagree about which day it
- * is.
+ * Today as the same kind of day index: the Europe/London calendar day `today`
+ * falls on, counted like an expiry date. See `complianceDay` — a certificate's
+ * last valid day ends at midnight in the UK, in winter and in summer alike.
  */
 function todayDayIndex(today: Date): number {
-  return (
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) /
-    MS_PER_DAY
-  );
+  return utcDayIndex(complianceDay(today));
 }
 
 /**
@@ -181,11 +274,17 @@ function pluraliseDays(count: number): string {
  * because those are the three shapes `dateOnlyValue` normalises. Anything
  * unparseable is treated as not recorded, which is the safe direction: it
  * surfaces as an open finding rather than as a pass.
+ *
+ * `windowDays` is the organisation's warning window. A server caller passes
+ * the one its register was resolved with; a browser caller may omit it and get
+ * the window the shell set (`activeWarningWindow`).
  */
 export function expiryStatus(
   iso: string | null | undefined,
   today: Date = new Date(),
+  windowDays: number = activeWarningWindow(),
 ): ExpiryStatus {
+  const window = Number.isFinite(windowDays) ? windowDays : EXPIRY_DUE_SOON_DAYS;
   const date = dateOnlyValue(iso);
 
   if (!date) {
@@ -211,7 +310,7 @@ export function expiryStatus(
     };
   }
 
-  if (daysRemaining <= EXPIRY_DUE_SOON_DAYS) {
+  if (daysRemaining <= window) {
     return {
       state: "due-soon",
       date,

@@ -30,8 +30,10 @@ const STAGES = [90, 60, 30, 14, 7, 0] as const;
  * THIS IS A CADENCE, NOT A STATUS. It answers "have we said anything about this
  * yet, and at what distance", which is a different question from
  * `expiryStatus`'s "is this certificate in date" — that one has a single amber
- * boundary at `EXPIRY_DUE_SOON_DAYS` (60) and it must not be confused with these
- * six. The 90/60/30/14/7/0 ladder is also the promise the marketing site makes
+ * boundary, the organisation's warning window (default `EXPIRY_DUE_SOON_DAYS`,
+ * 90), and it must not be confused with these six. At the default the widest
+ * rung and the window coincide, so the email's "expiring" list and the
+ * register's Expiring soon hold the same certificates. The 90/60/30/14/7/0 ladder is also the promise the marketing site makes
  * in as many words (app/(marketing)/_sections/content.ts:133,265), so it stays.
  *
  * Note for anyone rendering this: the `expiring` bucket below is `daysAway >= 0`
@@ -151,7 +153,8 @@ async function scan(
      * midnight, so the two could disagree by a day about when a certificate
      * lapsed. `expiryStatus` is the classifier the register, the board cells and
      * the Compliance Tracker all read, and its `daysRemaining` is counted in
-     * whole UTC days from the same instant for every row in the scan.
+     * whole Europe/London calendar days from the same instant for every row in
+     * the scan — the UK day a certificate is due on.
      */
     const daysAway = expiryStatus(row.expiry, today).daysRemaining;
     if (daysAway === null) continue;

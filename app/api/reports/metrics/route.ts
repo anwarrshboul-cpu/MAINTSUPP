@@ -18,6 +18,12 @@
  * same rows; the columns selected are exactly the ones `/api/maintenance`
  * sends, raw, so the two see identical inputs.
  *
+ * THE TYPE SPLIT IS THE JOB'S CANONICAL JOB TYPE: `job_type_id` is selected
+ * with the rest, the organisation's types come from `listJobTypes` (retired
+ * ones included, so history keeps its meaning), and `jobTypeBucketOf` puts
+ * every costed job in exactly one of Reactive / Planned / Project / Other /
+ * Unclassified — the same rule the Jobs page's `type=` drill runs.
+ *
  * READ-ONLY, `board.view`, organisation-scoped, and the membership's site
  * restriction applied through `resolveDashboardPortfolio`.
  */
@@ -41,12 +47,12 @@ import {
   type ReportsJob,
 } from "../../../lib/reports-dash";
 import {
-  SPEND_TYPE_LABEL,
   analyseRepeats,
   drillSiteIds,
   spendLineOf,
-  spendTypeOf,
 } from "../../../lib/job-metrics";
+import { listJobTypes } from "../../../lib/job-types";
+import { OTHER_JOB_TYPES_LABEL, UNCLASSIFIED_LABEL } from "../../../lib/job-type-contract";
 import type { RpSitesRange, RpTrendRange } from "../../../lib/reports-dash-contract";
 import { csvCell, csvDownload, poundsText } from "../../../lib/finance/exports";
 
@@ -91,13 +97,14 @@ export async function GET(request: Request) {
       trendRange === "3m" ? 3 : trendRange === "12m" ? 12 : trendRange === "ytd" ? Number(anchor.slice(5, 7)) : 6;
     const firstMonth = shiftMonth(anchor, -(2 * trendMonths - 1));
 
-    const [jobRows, siteRows, monthlySpend] = await Promise.all([
+    const [jobRows, siteRows, monthlySpend, jobTypes] = await Promise.all([
       db
         .select({
           id: maintenanceRequests.id,
           siteId: maintenanceRequests.siteId,
           category: maintenanceRequests.category,
           tier: maintenanceRequests.tier,
+          jobTypeId: maintenanceRequests.jobTypeId,
           cost: maintenanceRequests.cost,
           completedAt: maintenanceRequests.completedAt,
           requestedAt: maintenanceRequests.requestedAt,
@@ -112,6 +119,7 @@ export async function GET(request: Request) {
         .from(sites)
         .where(eq(sites.organisationId, orgId)),
       loadSpendByMonth(db, scope, `${firstMonth}-01`, shiftDays(range.to, 1)),
+      listJobTypes(db, orgId),
     ]);
 
     const jobs = jobRows as unknown as ReportsJob[];
@@ -125,6 +133,7 @@ export async function GET(request: Request) {
     const metrics = buildReportsDashboard({
       jobs,
       siteNames,
+      jobTypes,
       monthlySpend,
       now,
       range,
@@ -171,7 +180,12 @@ export async function GET(request: Request) {
       row("Key figures", `${kpi.label} — jobs`, kpi.jobs);
       row("Key figures", `${kpi.label} — ${kpi.delta.comparedWith}`, kpi.delta.percent === null ? kpi.delta.direction : `${kpi.delta.direction} ${kpi.delta.percent}%`);
     }
-    row("Key figures", "Unclassified", poundsText(metrics.unclassified.pence));
+    /* The two buckets no card claims, so the summary reconciles to the total on
+       paper as it does on screen. */
+    for (const bucket of [metrics.other, metrics.unclassified]) {
+      row("Key figures", bucket.label, poundsText(bucket.pence));
+      row("Key figures", `${bucket.label} — jobs`, bucket.jobs);
+    }
     for (const point of metrics.trend.points) row(`Spend trend (${metrics.trend.label})`, point.longLabel, poundsText(point.pence));
     row(`Spend trend (${metrics.trend.label})`, "Total", poundsText(metrics.trend.totalPence));
     for (const site of metrics.topSites.rows) row(`Top sites (${metrics.topSites.label})`, site.name, poundsText(site.pence));
@@ -186,6 +200,18 @@ export async function GET(request: Request) {
     for (const slice of metrics.repeat.bySite) row("Repeat spend by site", slice.label, poundsText(slice.value));
     for (const band of metrics.repeat.bands) row("Recurrence", band.label, band.value);
     row("");
+    /*
+     * "Job type" is the type's CURRENT label from the organisation's
+     * configuration — a renamed type prints its new name — "Unclassified" for a
+     * job with no type, and "Other" for an id that names no type (which the app
+     * never writes, and which the figures group as Other too).
+     */
+    const typeLabels = new Map(jobTypes.map((type) => [type.id, type.label]));
+    const jobTypeLabel = (job: ReportsJob) => {
+      const id = (job.jobTypeId ?? "").trim();
+      if (!id) return UNCLASSIFIED_LABEL;
+      return typeLabels.get(id) ?? OTHER_JOB_TYPES_LABEL;
+    };
     row("Completed", "Reference", "Job", "Site", "Job type", "Issue category", "Contractor", "Cost (GBP)", "Repeat");
     for (const job of jobs) {
       const line = spendLineOf(job);
@@ -197,7 +223,7 @@ export async function GET(request: Request) {
         job.reference ?? job.id,
         job.title ?? "",
         site ?? NO_SITE_KEY,
-        SPEND_TYPE_LABEL[spendTypeOf(job)],
+        jobTypeLabel(job),
         (job.category ?? "").trim() || "Other",
         (job.contractor ?? "").trim(),
         poundsText(line.pence),

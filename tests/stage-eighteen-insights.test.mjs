@@ -89,10 +89,21 @@ test("the spend split is classified in exactly one place", async () => {
    * Reports dashboard block's server metrics, the Jobs page's `type=` filter
    * and these widgets read ONE rule. The page's own tiles, which were the
    * `classifySpend(request)` call site, were replaced by that block.
+   *
+   * RE-POINTED AGAIN 2026-09-12. The one rule is now the job's CANONICAL job
+   * type — `jobTypeBucketOf` over `jobTypeId` and the organisation's types —
+   * because the owner ruled the compliance-or-tier / £1,000 inference out and
+   * `spendTypeOf` was deleted with it. The contract is unchanged: `classifySpend`
+   * delegates to the shared rule, and the block's split goes through the SAME
+   * function, never a copy.
    */
-  assert.match(insights, /return spendTypeOf\(request\);/);
+  assert.match(
+    insights,
+    /return jobTypeBucketOf\(\(request as MaintenanceRequest & \{ jobTypeId\?: string \| null \}\)\.jobTypeId, types\);/,
+  );
   const metrics = await read("app/lib/reports-dash.ts");
-  assert.match(metrics, /type: spendTypeOf\(job\)/, "the block's split goes through the same rule");
+  assert.match(metrics, /type: jobTypeBucketOf\(job\.jobTypeId, jobTypes\)/, "the block's split goes through the same rule");
+  assert.doesNotMatch(insights, /spendTypeOf|compliance"\) \|\| .*tier/, "and no copy of the retired inference survives here");
 
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.ok(
