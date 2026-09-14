@@ -25,18 +25,19 @@
  *     register's `?scored=1` filter applies;
  *   · "who chases it" is `responsibilityFor`, as the register's `?who=` filter
  *     reads it;
- *   · the warning window is `EXPIRY_DUE_SOON_DAYS` (60).
+ *   · the warning window is the one the register was classified with
+ *     (`register.windowDays`): the organisation's own from Settings, or the
+ *     approved default of 90 days.
  *
- * ── TWO DEFINITIONS THAT DIFFER FROM THE BRIEF, DELIBERATELY ──────────────
+ * ── THE WINDOW, AND ONE DEFINITION THAT DIFFERS FROM THE BRIEF ────────────
  *
  * The brief's warning window is "a config value in Settings (default 90
- * days)". The product's is 60, a named policy constant with its reasoning
- * written beside it, printed from the constant wherever a window is stated. The
- * countdown therefore splits 60 into thirds — 0–20, 21–40, 41–60 — which is
- * exactly the brief's rule ("three equal parts, so they always add up to
- * Expiring soon") applied to the product's window.
+ * days)", and so is the product's now. The countdown splits it into thirds —
+ * 0–30, 31–60, 61–90 at the default — which is the brief's rule ("three equal
+ * parts, so they always add up to Expiring soon"). Days are counted on the
+ * Europe/London calendar (`complianceDay`), the day a UK certificate is due on.
  *
- * And the brief says a certificate on file with no due date should be counted
+ * The brief says a certificate on file with no due date should be counted
  * as Missing "if there is no rule". There IS a rule, in `complianceStateFor`:
  * a dated slot that holds a file but no date is Expiring soon — the
  * certificate exists and nobody can say it is in date. It stays that way, and
@@ -58,9 +59,11 @@ import type {
   CpTypeRing,
 } from "./compliance-dash-contract";
 import { complianceCompletion, expiryStatus } from "./compliance-status";
+import { complianceDay } from "./expiry-status";
 import {
   dueBandToken,
   isScoredRow,
+  NO_PROVIDER,
   NO_RESPONSIBILITY,
   type ComplianceRow,
 } from "./compliance-view";
@@ -74,11 +77,15 @@ import { drillSiteIds } from "./job-metrics";
  * (`workspace_settings.settings.complianceTemplate`) holds a requirement's
  * kind, aliases, whether it is enabled and which board slot it maps to — not
  * the site types it applies to — and a board row's Store Type is a label, not
- * a rule. Applicability is recorded per requirement instead, by marking it
- * "Not required", which the score already excludes. The brief's instruction
- * was to report this rather than guess one, so the payload says so.
+ * a rule. Applicability is recorded per requirement instead — by marking it
+ * "Not required", which the score already excludes, or by its responsibility —
+ * against the common template and each site's own requirement set.
+ *
+ * THAT IS THE DESIGN, NOT A GAP. The owner decided (September 2026) not to
+ * build Site Type → requirement templates in this product yet; the payload
+ * reports "per-site" so nothing downstream lists it as missing configuration.
  */
-const SITE_TYPE_APPLICABILITY = "missing" as const;
+const SITE_TYPE_APPLICABILITY = "per-site" as const;
 
 /* ── Colours: the brief's tokens, restated for a server that cannot read CSS ─ */
 
@@ -143,7 +150,7 @@ function normalise(value: string): string {
 
 /**
  * The three countdown windows: thirds of the warning window, inclusive.
- * 60 → 0–20, 21–40, 41–60; the brief's 90 would be 0–30, 31–60, 61–90.
+ * The default 90 → 0–30, 31–60, 61–90; an organisation's 60 → 0–20, 21–40, 41–60.
  */
 export function countdownBands(windowDays: number) {
   const window = Math.max(3, Math.floor(windowDays));
@@ -297,26 +304,46 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
   }
 
   /*
-   * WHO'S RENEWING — by the party the register says chases each certificate.
+   * WHO'S RENEWING — the linked contractor record first, the free text second.
    *
-   * A compliance requirement carries no contractor id: the schema has none on
-   * `compliance_documents` and the board slots name a ROLE ("Fire safety
-   * partner", "Electrical contractor") or fall back to the site manager. So
-   * every renewal is grouped by that text, normalised, and every one of them is
-   * counted as unlinked — which is reported, not hidden. Matching the text to a
-   * contractor record by name would be linking silently, which the brief rules
-   * out.
+   * A requirement may now carry a renewal provider: a contractor RECORD linked
+   * on purpose (`provider_contractor_id`), never inferred. Those renewals are
+   * grouped by the record — its id is the key and the drill's filter, so two
+   * contractors that share a name are two slices, and a renamed contractor
+   * keeps its slice.
+   *
+   * Every renewal nobody has linked is grouped as before, by the party the
+   * register says chases it (`responsibilityFor`: a ROLE such as "Fire safety
+   * partner", or the site manager), normalised, and reported as UNLINKED — shown,
+   * never dropped. Its drill carries `contractor=__none__` as well as the text,
+   * so a slice reading "Fire safety partner 3" opens those three and not the
+   * linked renewals whose role happens to read the same.
    */
-  const groups = new Map<string, { label: string; raw: Set<string>; value: number }>();
+  type RenewalGroup = { label: string; raw: Set<string>; value: number; contractorId: string | null };
+  const groups = new Map<string, RenewalGroup>();
   let unassigned = 0;
+  let linkedCount = 0;
   for (const row of renewing) {
+    if (row.providerContractorId && row.providerName) {
+      linkedCount += 1;
+      const key = `contractor:${row.providerContractorId}`;
+      const group = groups.get(key) ?? {
+        label: row.providerName,
+        raw: new Set<string>(),
+        value: 0,
+        contractorId: row.providerContractorId,
+      };
+      group.value += 1;
+      groups.set(key, group);
+      continue;
+    }
     const raw = (row.responsibility ?? "").trim();
     if (!raw) {
       unassigned += 1;
       continue;
     }
-    const key = normalise(raw);
-    const group = groups.get(key) ?? { label: raw, raw: new Set<string>(), value: 0 };
+    const key = `text:${normalise(raw)}`;
+    const group = groups.get(key) ?? { label: raw, raw: new Set<string>(), value: 0, contractorId: null };
     group.raw.add(raw);
     group.value += 1;
     groups.set(key, group);
@@ -325,26 +352,49 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     (left, right) => right[1].value - left[1].value || left[1].label.localeCompare(right[1].label, "en-GB"),
   );
   const renewalState = { ...SCORED, state: ["Expired", "Expiring soon"] };
+  /*
+   * EVERY SLICE DRILLS BY THE KEY IT WAS GROUPED BY.
+   *
+   * `renewal=` carries the donut's own grouping key, and the register
+   * recomputes that key per row with `renewalGroupKey` — the same function, so
+   * the two cannot disagree about which slice a requirement belongs to. This
+   * replaces a pair of filters that were each right on their own and could not
+   * be combined: a linked group went out as `contractor=<id>`, an unlinked one
+   * as `who=<text>&contractor=__none__`, and the folded "Other" tail is an OR
+   * ACROSS those two dimensions, which AND-ed dimensions cannot express.
+   */
+  const sliceFilter = (key: string) => ({ ...renewalState, renewal: [key] });
   const renewalSlices: CpRenewalSlice[] = renewalRanked.slice(0, 5).map(([key, group], index) => ({
     key,
     label: group.label,
     value: group.value,
     colour: RENEWAL_SERIES[index % RENEWAL_SERIES.length],
-    labels: [...group.raw],
-    linked: false,
-    filter: { ...renewalState, who: [...group.raw] },
+    labels: group.contractorId ? [group.label] : [...group.raw],
+    linked: Boolean(group.contractorId),
+    filter: sliceFilter(key),
   }));
   const tail = renewalRanked.slice(5);
   if (tail.length > 0) {
-    const raw = tail.flatMap(([, group]) => [...group.raw]);
+    /*
+     * "Other" is every remaining group, linked or not — an OR across the two
+     * ways a renewal is grouped. It now names those groups' own keys, so the
+     * register opens on exactly the requirements the slice counted.
+     *
+     * What this replaces was the one drill in this block that could lie. A
+     * MIXED tail had to go out as `contractor: [...ids, __none__]`, because
+     * adding `who` would have AND-ed and dropped the linked rows — and
+     * `__none__` matches every unlinked renewal in scope, not the tail's. On a
+     * register whose top five already held 40 unlinked renewals, a slice
+     * reading "Other 5" opened 45 rows.
+     */
     renewalSlices.push({
       key: "__other__",
       label: "Other",
       value: tail.reduce((sum, [, group]) => sum + group.value, 0),
       colour: CP_COLOURS.other,
-      labels: raw,
+      labels: tail.map(([, group]) => group.label),
       linked: false,
-      filter: { ...renewalState, who: raw },
+      filter: { ...renewalState, renewal: tail.map(([key]) => key) },
     });
   }
   if (unassigned > 0) {
@@ -356,7 +406,7 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
       colour: `${CP_COLOURS.other}99`,
       labels: [],
       linked: false,
-      filter: { ...renewalState, who: [NO_RESPONSIBILITY] },
+      filter: { ...renewalState, who: [NO_RESPONSIBILITY], contractor: [NO_PROVIDER] },
     });
   }
 
@@ -386,7 +436,9 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
 
   const metrics: CpMetrics = {
     generatedAt: today.toISOString(),
-    today: today.toISOString().slice(0, 10),
+    /* The day every state was classified on — the Europe/London calendar day,
+       the same day `expiryStatus` counted from, not the UTC one. */
+    today: complianceDay(today),
     portfolio: {
       id: input.portfolio.id,
       name: input.portfolio.name,
@@ -417,8 +469,8 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     renewals: {
       slices: renewalSlices,
       total: renewing.length,
-      unlinked: renewing.length,
-      linked: 0,
+      unlinked: renewing.length - linkedCount,
+      linked: linkedCount,
       allFilter: renewalState,
     },
     sites: {
@@ -431,7 +483,7 @@ export function buildComplianceDashboard(input: ComplianceDashInput): CpMetrics 
     dataGaps: {
       heldWithoutDueDate,
       noDueDate: scored.filter((row) => !row.expiry).length,
-      unlinkedResponsibility: renewing.length,
+      unlinkedResponsibility: renewing.length - linkedCount,
       siteTypeApplicability: SITE_TYPE_APPLICABILITY,
     },
     reconciliation: [],

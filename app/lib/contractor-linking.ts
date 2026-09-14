@@ -31,6 +31,7 @@ import {
   maintenanceRequests,
 } from "../../db/schema";
 import { jobsBoardCondition } from "./dashboard-filters";
+import { selectInChunks } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -205,18 +206,24 @@ export async function aliasesByContractor(
 ): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (!contractorIds.length) return out;
-  const rows = await db
-    .select({
-      contractorId: contractorNameAliases.contractorId,
-      alias: contractorNameAliases.alias,
-    })
-    .from(contractorNameAliases)
-    .where(
-      and(
-        eq(contractorNameAliases.organisationId, orgId),
-        inArray(contractorNameAliases.contractorId, [...contractorIds]),
+  /* Chunked for D1's ~100 bound-variable ceiling, like the tallies beside it
+     in `GET /api/contractors`: the ids are every contractor across the
+     requested registers. Bucketed per contractor below, so chunking changes
+     nothing about the answer. */
+  const rows = await selectInChunks(contractorIds, (chunk) =>
+    db
+      .select({
+        contractorId: contractorNameAliases.contractorId,
+        alias: contractorNameAliases.alias,
+      })
+      .from(contractorNameAliases)
+      .where(
+        and(
+          eq(contractorNameAliases.organisationId, orgId),
+          inArray(contractorNameAliases.contractorId, chunk),
+        ),
       ),
-    );
+  );
   for (const row of rows) {
     const list = out.get(row.contractorId);
     if (list) list.push(row.alias);

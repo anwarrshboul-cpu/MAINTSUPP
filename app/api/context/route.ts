@@ -1,6 +1,6 @@
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { getD1 } from "../../../db";
-import { ensureDatabase, seedBoardStructure } from "../../../db/init";
+import { ensureDatabase, seedBoardStructure, seedJobTypes } from "../../../db/init";
 import { seedStoreDocumentationBoard } from "../../../db/seed-store-documentation";
 import { CANONICAL_REGISTER, registerScopeFilter } from "../../lib/register-scope";
 import {
@@ -394,6 +394,14 @@ export async function POST(request: Request) {
       const d1 = await getD1();
       await seedBoardStructure(d1, created.id);
       await seedStoreDocumentationBoard(d1, created.id);
+      /*
+       * And its three default job types — Reactive, Planned, Project — so the
+       * new client's pickers, Settings card and Reports KPIs have them from the
+       * first request. `ensureDatabase` seeds every active organisation, but it
+       * runs once per instance and this organisation did not exist when it
+       * ran. Idempotent on fixed ids, so the next boot's replay is a no-op.
+       */
+      await seedJobTypes(d1, created.id);
       for (const role of ["admin", "client"] as const) {
         const email = organisationIdentityEmail(created.slug, role);
         const userId = `user-${email.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;

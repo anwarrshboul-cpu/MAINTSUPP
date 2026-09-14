@@ -737,3 +737,25 @@ test("the coverage sentence reaches the portfolio band and the group header", as
      when it is "3 of 12 confirmed". */
   assert.match(page, /portfolio\.completion\.excluded > 0/);
 });
+
+test("the renewal-contractor control's stylesheet uses only the agreed widths", async () => {
+  /*
+   * The agreed widths, on a sheet nothing else checks.
+   *
+   * `CLAUDE.md` restricts every media query in this product to 640 / 767 / 768
+   * / 1024 / 1280, and several stage tests fail on any other — but each of them
+   * hard-codes the ONE sheet it owns, so a stylesheet no suite names is not
+   * covered by the rule at all. This sheet and `compliance-responsibility.css` are one `.resp-record` / `.resp-controls` layout system, so they are checked together.
+   */
+  const css = await read("app/(app)/portal/ops/compliance-provider-control.css");
+  const widths = [...css.matchAll(/\(min-width:\s*(\d+)px\)|\(max-width:\s*(\d+)px\)/g)].map(
+    (match) => Number(match[1] ?? match[2]),
+  );
+  assert.ok(widths.length > 0, "the stylesheet is responsive");
+  for (const width of widths) {
+    assert.ok(
+      [640, 767, 768, 1024, 1280].includes(width),
+      `${width}px is not one of the agreed breakpoints — several stage tests fail on any other`,
+    );
+  }
+});

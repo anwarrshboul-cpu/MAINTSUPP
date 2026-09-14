@@ -60,6 +60,7 @@ import {
 import { closedJobSql, dateText, overdueOpenSql } from "./dashboard-aggregates";
 import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters";
 import { drillSiteIds, normalisePriority } from "./job-metrics";
+import { poundsToPence } from "./reporting/money";
 import { complianceCompletion } from "./compliance-status";
 import { readComplianceRegister } from "./compliance-register";
 import {
@@ -308,8 +309,22 @@ export async function resolveDashboardPortfolio(
  *
  * `maintenance_requests.cost` is a REAL in POUNDS — the same column
  * `/api/dashboard/cost` reads — counted when the job has a completion date and
- * dated by it. Summed per month in SQL, converted to integer pence once, here,
- * and never handled as a float again.
+ * dated by it.
+ *
+ * GROUPED BY MONTH *AND COST*, WITH A COUNT — NOT `sum(cost)`. Summing a float
+ * column in SQL and rounding the month's total once is not the same number as
+ * adding up the jobs: two jobs at £0.125 are 26p as two jobs (13p each, which
+ * is what a list of them shows) but 25p as one summed £0.25, and two at £10.004
+ * are 2000p as jobs but 2001p summed. Worse, on Postgres the column is `real`
+ * — single precision — and `sum(real)` is `real` too, so a month past about
+ * £100,000 drifts by whole pennies before it ever reaches this function. So the
+ * database only COUNTS: one row per distinct (month, cost), and each cost is
+ * converted here through `poundsToPence` — the per-job conversion `spendLineOf`
+ * applies — and multiplied by its count. Integer arithmetic from then on, on
+ * both dialects, and the month is by construction the sum of its jobs' pence:
+ * the Reports KPIs, the Reports trend, the Overview trend and a list of the
+ * jobs behind any of them reconcile to the penny. The pattern
+ * `overview-aggregates.ts` already uses for its per-site spend.
  *
  * Extracted from the Overview's own pass so the Reports block's trend is not a
  * second query that happens to agree: it IS this query, over the same scope,
@@ -325,7 +340,8 @@ export async function loadSpendByMonth(
   const rows = await db
     .select({
       month: sql<string>`substr(${dayOnly(maintenanceRequests.completedAt)}, 1, 7)`.as("month"),
-      pounds: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+      cost: maintenanceRequests.cost,
+      jobs: count(),
     })
     .from(maintenanceRequests)
     .where(
@@ -337,12 +353,14 @@ export async function loadSpendByMonth(
         isNotNull(maintenanceRequests.cost),
       ),
     )
-    .groupBy(sql`month`);
+    .groupBy(sql`month`, maintenanceRequests.cost);
   const tally = new Map<string, number>();
   for (const row of rows) {
     const month = String(row.month ?? "").slice(0, 7);
     if (!month) continue;
-    tally.set(month, (tally.get(month) ?? 0) + Math.round(Number(row.pounds ?? 0) * 100));
+    const pence = poundsToPence(Number(row.cost));
+    if (pence === null) continue;
+    tally.set(month, (tally.get(month) ?? 0) + pence * Number(row.jobs ?? 0));
   }
   return tally;
 }

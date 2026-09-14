@@ -86,6 +86,17 @@ export type ComplianceRow = {
    * "Read-only" came off the actions row.
    */
   editable: boolean;
+  /**
+   * WHO RENEWS IT — the contractor record linked as this requirement's renewal
+   * provider (`compliance_documents.provider_contractor_id`), or null when
+   * nobody has linked one. A third axis beside `responsibility` (who chases it)
+   * and `dutyHolder` (whose obligation it is), and never inferred from either.
+   * Optional so every row built before the link existed still type-checks; a
+   * link naming a contractor that no longer exists reads as unlinked.
+   */
+  providerContractorId?: string | null;
+  /** The linked contractor's name, carried so a screen never prints a bare id. */
+  providerName?: string | null;
 };
 
 export type ComplianceGroup = {
@@ -135,8 +146,8 @@ export type ComplianceFilters = {
    */
   scored: boolean;
   /**
-   * Days-remaining bands — `?due=band:0-20` — the countdown rings' windows.
-   * They are thirds of `EXPIRY_DUE_SOON_DAYS`, so they cannot be fixed keys in
+   * Days-remaining bands — `?due=band:0-30` — the countdown rings' windows.
+   * They are thirds of the organisation's warning window, so they cannot be fixed keys in
    * `DUE_WINDOWS`; they travel as their own bounds. OR'd with `due`.
    */
   dueBands: Array<{ from: number; to: number }>;
@@ -147,6 +158,33 @@ export type ComplianceFilters = {
    */
   dueFrom: string | null;
   dueTo: string | null;
+  /**
+   * RENEWAL CONTRACTORS — `?contractor=<id>`, with `__none__` for "none linked".
+   * OR within, AND across, like every dimension. Optional so a filter object
+   * built before the link existed still type-checks.
+   */
+  providers?: string[];
+  /**
+   * A RENEWAL GROUP — `?renewal=contractor:<id>` or `?renewal=text:<label>`.
+   *
+   * The "Who's renewing" donut groups a renewal by the CONTRACTOR record when
+   * one is linked and by the normalised responsibility TEXT when none is, and
+   * those two are different dimensions. Every other slice could be expressed
+   * with the dimensions that already exist, but the "Other" slice — the folded
+   * tail — is genuinely an OR ACROSS them: "these three contractors, or these
+   * two roles". `contractor` and `who` are AND-ed like every pair of
+   * dimensions here, so the tail could only be written as
+   * `contractor: [...ids, __none__]`, and `__none__` matches EVERY unlinked
+   * renewal in scope rather than the tail's two. A tail of 5 opened a register
+   * of 45.
+   *
+   * So the donut's own grouping key travels as a dimension of its own. It
+   * makes every renewal slice exact by construction rather than only the ones
+   * that happen to be expressible, and it is the one thing that can be exact:
+   * the register recomputes the same key per row with the same function the
+   * donut grouped by.
+   */
+  renewalGroups?: string[];
 };
 
 export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
@@ -160,6 +198,8 @@ export const EMPTY_COMPLIANCE_FILTERS: ComplianceFilters = {
   dueBands: [],
   dueFrom: null,
   dueTo: null,
+  providers: [],
+  renewalGroups: [],
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -171,6 +211,12 @@ const BAND = /^band:(\d{1,4})-(\d{1,4})$/;
  * responsibility can never be spelled like this.
  */
 export const NO_RESPONSIBILITY = "__none__";
+
+/**
+ * The `?contractor=` value for "no renewal contractor is linked". A contractor
+ * id can never be spelled like this.
+ */
+export const NO_PROVIDER = "__none__";
 
 /** A `?due=band:a-b` token as its bounds, or null for anything else. */
 export function parseDueBand(value: string): { from: number; to: number } | null {
@@ -244,7 +290,36 @@ export function parseComplianceFilters(url: URL): ComplianceFilters {
       .filter((band): band is { from: number; to: number } => band !== null),
     dueFrom: DAY.test(dueFrom) ? dueFrom : null,
     dueTo: DAY.test(dueTo) ? dueTo : null,
+    providers: list(params, "contractor"),
+    renewalGroups: list(params, "renewal"),
   };
+}
+
+/** Trim, lower-case, collapse whitespace — the shared label normalisation. */
+function normaliseLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * THE KEY THE "WHO'S RENEWING" DONUT GROUPS BY, recomputed from a row.
+ *
+ * One function so the donut and the register cannot disagree about which
+ * slice a requirement belongs to. A linked renewal is keyed by the contractor
+ * RECORD, so two contractors sharing a name stay two slices and a renamed
+ * contractor keeps its own; an unlinked one by the normalised responsibility
+ * text, which is all there is to group it by.
+ *
+ * A row with neither — no contractor and no responsibility — is the donut's
+ * "Unassigned" slice, and returns `""`, a key no group is ever built with, so
+ * it can never be swept up by a group filter.
+ */
+export function renewalGroupKey(row: {
+  providerContractorId?: string | null;
+  responsibility: string;
+}): string {
+  if (row.providerContractorId) return `contractor:${row.providerContractorId}`;
+  const raw = (row.responsibility ?? "").trim();
+  return raw ? `text:${normaliseLabel(raw)}` : "";
 }
 
 /**
@@ -265,21 +340,35 @@ export function complianceRowsFrom(
     fileCount: number;
     itemId: string | null;
     slotKey: string | null;
+    providerContractorId?: string | null;
   }>,
   managerById: ReadonlyMap<string, string>,
+  /**
+   * Contractor names by id, for the renewal provider. A link whose contractor
+   * is not in the map — removed, or never this organisation's — is reported as
+   * unlinked rather than printed as an id.
+   */
+  providerNameById: ReadonlyMap<string, string> = new Map(),
 ): ComplianceRow[] {
-  return entries.map((entry) => ({
-    id: entry.id,
-    siteId: entry.siteId,
-    siteName: entry.siteName,
-    kind: entry.kind,
-    responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
-    dutyHolder: entry.dutyHolder,
-    state: entry.state,
-    expiry: entry.expiry,
-    fileCount: entry.fileCount,
-    editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
-  }));
+  return entries.map((entry) => {
+    const providerName = entry.providerContractorId
+      ? (providerNameById.get(entry.providerContractorId) ?? null)
+      : null;
+    return {
+      id: entry.id,
+      siteId: entry.siteId,
+      siteName: entry.siteName,
+      kind: entry.kind,
+      responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
+      dutyHolder: entry.dutyHolder,
+      state: entry.state,
+      expiry: entry.expiry,
+      fileCount: entry.fileCount,
+      editable: !(Boolean(entry.itemId) && Boolean(entry.slotKey)),
+      providerContractorId: providerName ? (entry.providerContractorId ?? null) : null,
+      providerName,
+    };
+  });
 }
 
 /**
@@ -312,6 +401,8 @@ export function filterComplianceRows(
   const states = new Set(filters.states);
   const kinds = new Set(filters.kinds);
   const who = new Set(filters.responsibilities);
+  const providers = new Set(filters.providers ?? []);
+  const renewalGroups = new Set(filters.renewalGroups ?? []);
   const bands = filters.dueBands ?? [];
   const dueFrom = filters.dueFrom ?? null;
   const dueTo = filters.dueTo ?? null;
@@ -326,6 +417,14 @@ export function filterComplianceRows(
     ) {
       return false;
     }
+    if (
+      providers.size &&
+      !(row.providerContractorId && providers.has(row.providerContractorId)) &&
+      !(providers.has(NO_PROVIDER) && !row.providerContractorId)
+    ) {
+      return false;
+    }
+    if (renewalGroups.size && !renewalGroups.has(renewalGroupKey(row))) return false;
     if (filters.scored && !isScoredRow(row)) return false;
     if (filters.due.length || bands.length) {
       const matches =
@@ -343,7 +442,7 @@ export function filterComplianceRows(
       if (dueTo && due > dueTo) return false;
     }
     if (needle) {
-      const haystack = `${row.kind} ${row.siteName} ${row.responsibility}`.toLowerCase();
+      const haystack = `${row.kind} ${row.siteName} ${row.responsibility} ${row.providerName ?? ""}`.toLowerCase();
       if (!haystack.includes(needle)) return false;
     }
     return true;

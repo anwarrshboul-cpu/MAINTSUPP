@@ -53,6 +53,20 @@ import {
   COMPLETED_STAGE,
   completedStatuses,
 } from "../(app)/portal/dashboard-meters.ts";
+/*
+ * Two more leaves, on the same `.ts` terms and for the same reason: each has no
+ * runtime import of its own (the job type contract imports nothing; `money.ts`
+ * imports one TYPE, which Node's stripper erases), so this module stays
+ * loadable by `node --test` directly and by a client bundle without drizzle.
+ */
+import {
+  JOB_TYPE_CODES,
+  OTHER_JOB_TYPES_LABEL,
+  UNCLASSIFIED_LABEL,
+  type JobType,
+  type JobTypeCode,
+} from "./job-type-contract.ts";
+import { poundsToPence } from "./reporting/money.ts";
 import type { MaintenanceRequest } from "./types";
 
 export { COMPLETED_STAGE, completedStatuses };
@@ -499,11 +513,15 @@ export function isUrgent(request: Pick<MaintenanceRequest, "priority">): boolean
 /**
  * PLANNED VERSUS REACTIVE — the two words, and nothing else.
  *
- * The rule that decides which a job is cannot live here, because it is SQL
- * against columns this module deliberately does not import. It lives in
- * `dashboard-filters.plannedCondition`. What lives here is the vocabulary the
- * browser needs to draw a legend and name a filter chip, so the client never
- * has to import the query builder to render two words.
+ * `nature=planned` / `nature=reactive` name two of the canonical job type CODES
+ * (see "The five spend types" below) — a job whose type's stable code is
+ * `planned`, or `reactive`. It used to be an inference (a compliance category
+ * or tier 4+ was "planned", everything else "reactive"); the owner ruled that
+ * out, and a job with no type is now neither. The SQL half is
+ * `dashboard-filters.plannedCondition` / `reactiveCondition`; the browser half
+ * is `jobTypeBucketOf`. What lives here is the vocabulary the browser needs to
+ * draw a legend and name a filter chip, so the client never has to import the
+ * query builder to render two words.
  */
 export const NATURE_KEYS = ["reactive", "planned"] as const;
 export type NatureKey = (typeof NATURE_KEYS)[number];
@@ -638,46 +656,100 @@ export function isOnJobsBoard(request: { boardId?: string | null }): boolean {
 /* ── Spend ────────────────────────────────────────────────────────────────── */
 
 /**
- * THE THREE SPEND TYPES — Reactive, Planned, Projects.
+ * THE FIVE SPEND TYPES — a job's CANONICAL job type, never an inference.
  *
- * This schema has no job-type column. The split the Reports page has always
- * shown is the one `classifySpend` in `dashboard-insights.tsx` computed, and it
- * moves HERE so the server's metrics, the Jobs page's `type=` filter and that
- * page all read one rule rather than three copies:
+ * A job's type is `maintenance_requests.job_type_id`: the stable id of one of
+ * its organisation's `job_type_config` rows (`job-type-contract.ts`), or null.
+ * Every spend split in the product reads a job through `jobTypeBucketOf` below
+ * and nothing else — the Reports KPIs and their export, the Jobs page's `type=`
+ * and `nature=` drills, the Reports page's "Reactive vs planned" panel and the
+ * Overview's Spend & Reporting tiles:
  *
- *   · Planned  — the category mentions compliance, or the job is tier 4 or
- *                above (the same inference `plannedCondition` makes in SQL);
- *   · Projects — otherwise, a job costing £1,000 or more ("higher-value works");
- *   · Reactive — everything else.
+ *   · reactive / planned / project — the type whose stable `code` is that. A
+ *                  rename moves the words and never the figures;
+ *   · other      — every custom (code-less) type together; and a type id that
+ *                  names no row of the organisation's. The app never writes one
+ *                  (`resolveJobTypeWrite` refuses it), but a job carrying one IS
+ *                  typed, and grouping it here means nothing is dropped;
+ *   · unclassified — no type at all. Every job that predates the dimension is
+ *                  one, because nothing ever recorded a type to backfill from.
  *
- * Tested in that ORDER, which matters: a £5,000 compliance job is Planned, not
- * Projects. Every job lands in exactly one type, which is why the Reports
- * block's "Unclassified" bucket reads £0 under this rule — the bucket is still
- * computed and reconciled, so a future rule that can leave a job untyped is
- * caught rather than silently dropped.
+ * IT REPLACES `spendTypeOf`, which INFERRED a type: Planned for a compliance
+ * category or tier 4+, Projects for £1,000 or more, Reactive for the rest. The
+ * owner ruled those out — a large emergency repair is not a project because it
+ * was expensive, and a tier-4 job is not planned because it is minor — so the
+ * inference is gone, not kept beside the real field as a fallback. A job with
+ * no type is Unclassified, and every figure says so rather than guessing.
+ *
+ * Reconciliation depends on the partition: every job lands in exactly one
+ * bucket, so Reactive + Planned + Project + Other + Unclassified is the total,
+ * to the penny, by construction.
  */
-export const SPEND_TYPES = ["reactive", "planned", "projects"] as const;
-export type SpendType = (typeof SPEND_TYPES)[number];
+export const JOB_TYPE_BUCKETS = ["reactive", "planned", "project", "other", "unclassified"] as const;
+export type JobTypeBucket = (typeof JOB_TYPE_BUCKETS)[number];
 
-export const SPEND_TYPE_LABEL: Record<SpendType, string> = {
+/**
+ * The words for each bucket when an organisation's configuration is NOT at
+ * hand — a chip on a page that was not handed the types, a legend before they
+ * load. The three defaults read as `db/init.ts` seeds them; wherever the
+ * configuration IS present its current label wins, so a rename shows.
+ */
+export const JOB_TYPE_BUCKET_LABEL: Record<JobTypeBucket, string> = {
   reactive: "Reactive",
   planned: "Planned",
-  projects: "Projects",
+  project: "Project",
+  other: OTHER_JOB_TYPES_LABEL,
+  unclassified: UNCLASSIFIED_LABEL,
 };
 
-/** "Higher-value works" — the Projects threshold, in POUNDS like the column it reads. */
-export const PROJECT_COST_THRESHOLD_POUNDS = 1000;
+/**
+ * `jt_<organisationId>_<code>` — the fixed id `seedJobTypes` gives each
+ * organisation's three defaults. Anchored at both ends and matched on the
+ * CODE suffix, because an organisation id can itself contain underscores.
+ */
+const DEFAULT_JOB_TYPE_ID = new RegExp(`^jt_.+_(${JOB_TYPE_CODES.join("|")})$`);
 
-export function spendTypeOf(job: {
-  category?: string | null;
-  tier?: number | string | null;
-  cost?: number | null;
-}): SpendType {
-  const category = String(job.category ?? "").toLowerCase();
-  const tier = Number(job.tier ?? 0);
-  if (category.includes("compliance") || (Number.isFinite(tier) && tier >= 4)) return "planned";
-  if (Number(job.cost ?? 0) >= PROJECT_COST_THRESHOLD_POUNDS) return "projects";
-  return "reactive";
+/**
+ * The code a DEFAULT type's id carries, or null for any other id. What a page
+ * that was not handed the organisation's types can still recognise: the three
+ * defaults by their deterministic ids. A custom type's id says nothing about
+ * it, so it is null here and "other" below.
+ */
+export function defaultJobTypeCodeOf(jobTypeId: string | null | undefined): JobTypeCode | null {
+  const match = DEFAULT_JOB_TYPE_ID.exec((jobTypeId ?? "").trim());
+  return match ? (match[1] as JobTypeCode) : null;
+}
+
+/** Each type list indexed by id once, not searched once per job. */
+const TYPE_INDEX = new WeakMap<readonly JobType[], Map<string, JobType>>();
+
+function typeIndexOf(types: readonly JobType[]): Map<string, JobType> {
+  let index = TYPE_INDEX.get(types);
+  if (!index) {
+    index = new Map(types.map((type) => [type.id, type]));
+    TYPE_INDEX.set(types, index);
+  }
+  return index;
+}
+
+/**
+ * THE BUCKET ONE JOB'S SPEND FALLS IN — the one rule every spend split reads.
+ *
+ * With the organisation's `types` (the server always has them; `listJobTypes`
+ * includes deactivated ones, so a retired type keeps its meaning) the id is
+ * looked up and the type's CODE decides. Without them — a browser page that
+ * was not handed the list — the three defaults are still recognised by their
+ * deterministic ids and every other id is "other". The two modes agree on
+ * every id the application can write.
+ */
+export function jobTypeBucketOf(
+  jobTypeId: string | null | undefined,
+  types?: readonly JobType[] | null,
+): JobTypeBucket {
+  const id = (jobTypeId ?? "").trim();
+  if (!id) return "unclassified";
+  if (types) return typeIndexOf(types).get(id)?.code ?? "other";
+  return defaultJobTypeCodeOf(id) ?? "other";
 }
 
 /**
@@ -692,18 +764,26 @@ export function spendTypeOf(job: {
  *
  * `day` is the first ten characters of the stored completion value, which is
  * what `substr(dateText(completed_at), 1, 10)` yields in SQL on both dialects.
- * Pence are rounded once, here, and never handled as a float again.
+ *
+ * PENCE THROUGH `poundsToPence`, THE ONE CONVERSION BOUNDARY — never a bare
+ * `Math.round(pounds * 100)`. The column is a binary float (`real` on Staging),
+ * so `1.005 * 100` is 100.49999999999999 and rounded bare it loses the penny a
+ * person would check by hand. Each job is converted ONCE, here, and every total
+ * is a sum of these integers: `loadSpendByMonth` adds the same per-job pence
+ * (grouped by cost, times the count), so the Reports KPIs, the Reports trend,
+ * the Overview trend and a list of the jobs behind any of them agree to the
+ * penny — two jobs at £0.125 are 26p everywhere, never 25p in one place.
  */
 export function spendLineOf(job: {
-  cost?: number | null;
+  cost?: number | string | null;
   completedAt?: string | null;
 }): { pence: number; day: string } | null {
   if (job.cost === null || job.cost === undefined) return null;
-  const pounds = Number(job.cost);
-  if (!Number.isFinite(pounds)) return null;
+  const pence = poundsToPence(Number(job.cost));
+  if (pence === null) return null;
   const day = String(job.completedAt ?? "").trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
-  return { pence: Math.round(pounds * 100), day };
+  return { pence, day };
 }
 
 /* ── Repeat jobs ──────────────────────────────────────────────────────────── */

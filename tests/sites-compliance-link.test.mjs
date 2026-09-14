@@ -472,12 +472,26 @@ test("the score depends on ComplianceRow carrying it, so both routes populate it
    * new site read 0% while the register knew perfectly well the requirements
    * were unclaimed — caught by querying the summary, not by reading the diff.
    */
+  /*
+   * RE-POINTED: both routes hand-mapped every field of an entry onto a row, and
+   * each carried its own `dutyHolder: entry.dutyHolder,`. They now build rows
+   * through `complianceRowsFrom`, the ONE builder the dashboard block already
+   * used — which is what stops the register and the block describing the same
+   * record two different ways. So the contract is checked where it now lives:
+   * the builder carries the field, and both routes go through the builder.
+   */
+  const builder = await read("app/lib/compliance-view.ts");
+  assert.match(builder, /dutyHolder: entry\.dutyHolder,/, "the shared row builder carries the duty holder");
   for (const file of [
     "app/api/compliance/summary/route.ts",
     "app/api/compliance/records/route.ts",
   ]) {
     const source = await read(file);
-    assert.match(source, /dutyHolder: entry\.dutyHolder,/, `${file} must pass it through`);
+    assert.match(
+      source,
+      /const rows = complianceRowsFrom\(scopedEntries, managerById, providerNames\);/,
+      `${file} must build its rows through the shared builder`,
+    );
   }
 });
 

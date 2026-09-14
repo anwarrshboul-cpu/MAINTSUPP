@@ -985,22 +985,41 @@ test("the chart and the filter cannot disagree about what planned means", async 
   const filters = codeOnly(await read("app/lib/dashboard-filters.ts"));
   const aggregates = codeOnly(await read("app/lib/dashboard-aggregates.ts"));
 
+  /*
+   * RE-POINTED 2026-09-12. "Planned" was an inference (a compliance category
+   * or tier 4+) and the owner ruled it out: it is now the job's canonical job
+   * TYPE, by the stable code `planned`, and "reactive" the code `reactive` —
+   * not "everything that is not planned". The rule still lives beside the
+   * filter that has to honour it, once, and the aggregate still uses it by
+   * name rather than restating it.
+   */
   assert.match(
     filters,
-    /export const plannedCondition = sql`\(lower\(coalesce\(\$\{maintenanceRequests\.category\}/,
-    "the inference lives beside the filter that has to honour it",
+    /export const plannedCondition = jobTypeCodeCondition\("planned"\);/,
+    "the rule lives beside the filter that has to honour it",
   );
+  assert.match(filters, /export const reactiveCondition = jobTypeCodeCondition\("reactive"\);/);
+  assert.match(filters, /export function jobTypeCodeCondition\(code: JobTypeCode\): SQL \{/);
   // The aggregate that DRAWS the bars must use that same expression, because
   // tapping a bar of 30 has to return 30 jobs.
   assert.match(aggregates, /const plannedSql = plannedCondition;/);
+  assert.match(aggregates, /const reactiveSql = reactiveCondition;/);
   assert.doesNotMatch(
     aggregates,
-    /const plannedSql = sql`/,
+    /const (planned|reactive)Sql = sql`/,
     "a second copy of the rule would let the bar and the filtered page drift",
   );
-  // Both selected is the same question as neither, and must not become
-  // `planned AND reactive`, which returns nothing and reads as a broken filter.
-  assert.match(filters, /if \(filters\.natures\.length === 1\) \{/);
+  assert.doesNotMatch(aggregates, /not \$\{plannedSql\}/, "reactive is its own type, not 'not planned' by elimination");
+  // Both selected must not become `planned AND reactive`, which returns
+  // nothing and reads as a broken filter. RE-POINTED 2026-09-12: it used to
+  // collapse to NO condition, which was right only while the two were a
+  // partition; with canonical types a Project or an untyped job is neither, so
+  // both selected is `planned OR reactive` — OR within the dimension, as every
+  // other dimension is.
+  assert.match(
+    filters,
+    /if \(filters\.natures\.length\) \{\s*const clause = anyOf\(\s*filters\.natures\.map\(\(nature\) => \(nature === "planned" \? plannedCondition : reactiveCondition\)\),\s*\);/,
+  );
 });
 
 test("the words are browser-safe and the SQL is not", async () => {
@@ -1118,4 +1137,26 @@ test("the two new dimensions round-trip through the URL like every other one", a
   assert.match(drill, /chips\.push\(\{ key: "nature", label: "Nature", value:/, "a chip for each");
   assert.match(drill, /chips\.push\(\{ key: "contractor", label: "Contractor", value:/);
   assert.match(drill, /"contractor",\s*\n\s*"nature",/, "and both are among the keys the board clears");
+});
+
+test("the dashboard-block stylesheet uses only the agreed widths", async () => {
+  /*
+   * The agreed widths, on a sheet nothing else checks.
+   *
+   * `CLAUDE.md` restricts every media query in this product to 640 / 767 / 768
+   * / 1024 / 1280, and several stage tests fail on any other — but each of them
+   * hard-codes the ONE sheet it owns, so a stylesheet no suite names is not
+   * covered by the rule at all. `ov-dash.css` is the shared base for all three dashboard blocks and no suite read it at all — the widest uncovered sheet in the product.
+   */
+  const css = await read("app/(app)/portal/ops/ov-dash.css");
+  const widths = [...css.matchAll(/\(min-width:\s*(\d+)px\)|\(max-width:\s*(\d+)px\)/g)].map(
+    (match) => Number(match[1] ?? match[2]),
+  );
+  assert.ok(widths.length > 0, "the stylesheet is responsive");
+  for (const width of widths) {
+    assert.ok(
+      [640, 767, 768, 1024, 1280].includes(width),
+      `${width}px is not one of the agreed breakpoints — several stage tests fail on any other`,
+    );
+  }
 });

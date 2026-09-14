@@ -578,15 +578,52 @@ body[data-theme] .ov-dash .ov-dash__control > select {
 }
 
 /*
- * A chevron, because `appearance: none` takes the platform's away and a select
- * that looks like a text box is a select nobody opens.
+ * THE CHEVRON — a thin outline glyph, drawn as two strokes and not two halves.
+ *
+ * `appearance: none` takes the platform's caret away, and a select that looks
+ * like a text box is a select nobody opens. What replaces it has to belong to
+ * the same icon set as everything around it: the date pill six pixels to the
+ * right of this control draws its caret as a stroked `m6 9 6 6 6-6` at 1.8
+ * units, and the Reports block's card selects draw theirs from two 1.5px
+ * borders on the label. A FILLED triangle was the one solid glyph in a block
+ * of outline ones, and it sat beside the pill's on all three headers.
+ *
+ * A native `<select>` takes no pseudo-element, so the glyph has to be a
+ * background — which rules out both of those techniques, and rules out an SVG
+ * `url()` as well: a data URI is its own document, so neither `currentColor`
+ * nor `--ov-text-2` reaches inside it, and this block's ink is a token that
+ * the Overview repoints. So each arm of the chevron is ONE DIAGONAL BAND cut
+ * out of a gradient rather than one filled half of a square:
+ *
+ *   · the tile is 4px wide and 4.92px tall — 4px of arm, plus the 1.3/√2 the
+ *     stroke needs below the corner the arm turns at;
+ *   · at 45deg (and its mirror, 315deg) a gradient's stops run along the
+ *     tile's diagonal, so the band between two of them IS the arm; putting the
+ *     band's outer edge at 4/√2 = 2.83px sets it exactly on the tile's bottom
+ *     corner, which is where the two arms meet;
+ *   · the 0.5px ramp at each end of the band is the anti-aliasing no engine
+ *     does for a gradient's hard stop — without it the diagonal is a staircase
+ *     at 1x.
+ *
+ * `--ov-text-2`, not the pill's `--ov-text-muted`: this is the control itself
+ * rather than an ornament on one, and the Reports block's selects already draw
+ * their chevron in that ink at that weight.
+ *
+ * Declared once as a token because three rules below have to restate it — the
+ * light skin's field rule out-ranks any one of them on its own.
  */
+.ov-dash {
+  --ov-chevron:
+    linear-gradient(45deg, transparent 2.83px, var(--ov-text-2) 3.33px, var(--ov-text-2) 3.63px, transparent 4.13px),
+    linear-gradient(315deg, transparent 2.83px, var(--ov-text-2) 3.33px, var(--ov-text-2) 3.63px, transparent 4.13px);
+  --ov-chevron-size: 4px 4.92px, 4px 4.92px;
+}
+
 body[data-theme] .ov-dash select {
   padding-right: 26px;
-  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
-    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
-  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
-  background-size: 5px 5px, 5px 5px;
+  background-image: var(--ov-chevron);
+  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
+  background-size: var(--ov-chevron-size);
   background-repeat: no-repeat;
 }
 
@@ -638,12 +675,13 @@ body[data-theme] .ov-dash .ov-dash__control--select > select {
   border: 0;
   background-color: transparent !important;
   /* The chevron, restated: the group rule above clears `background-image` on
-     every select inside a control, at a weight the chevron rule cannot beat. */
-  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
-    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
-  background-size: 5px 5px, 5px 5px;
+     every select inside a control, at a weight the chevron rule cannot beat.
+     Closer to the edge here, because inside a pill the chevron is the last
+     thing on the line rather than a glyph inside a box of its own. */
+  background-image: var(--ov-chevron);
+  background-size: var(--ov-chevron-size);
   background-repeat: no-repeat;
-  background-position: calc(100% - 8px) 50%, calc(100% - 3px) 50%;
+  background-position: calc(100% - 7px) 50%, calc(100% - 3px) 50%;
   font-weight: 500;
   text-overflow: ellipsis;
   cursor: pointer;
@@ -663,16 +701,15 @@ body[data-theme] .ov-dash .ov-dash__control--select > select {
  */
 body[data-theme] .ov-dash :is(.ov-dash__control--select, .ov-card__link) > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
   border-color: var(--ov-card-border);
-  background-image: linear-gradient(45deg, transparent 50%, var(--ov-text-2) 50%),
-    linear-gradient(135deg, var(--ov-text-2) 50%, transparent 50%);
-  background-size: 5px 5px, 5px 5px;
+  background-image: var(--ov-chevron);
+  background-size: var(--ov-chevron-size);
   background-repeat: no-repeat;
-  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
 }
 
 body[data-theme] .ov-dash .ov-dash__control--select > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
   border: 0;
-  background-position: calc(100% - 8px) 50%, calc(100% - 3px) 50%;
+  background-position: calc(100% - 7px) 50%, calc(100% - 3px) 50%;
 }
 
 /*

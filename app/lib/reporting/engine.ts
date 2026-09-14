@@ -11,7 +11,7 @@
  *
  * `liveWorkOrder` below is the twin of the predicate of the same name in
  * `app/api/workspace/route.ts` and of `countsAsWorkOrder` in
- * `portal-app.tsx` — three exclusions, and all three matter:
+ * `portal-app.tsx` — four exclusions, and all four matter:
  *
  *   · `deleted_at IS NULL`  — a binned job is not work.
  *   · `archived = false`    — a row somebody took off the board.
@@ -19,6 +19,10 @@
  *                             parent is another row. Counting them made one job
  *                             split into three visits read as four work orders
  *                             and summed its parts cost alongside its parent's.
+ *   · `jobsBoardCondition()` — a Store Documentation register row, or a row on
+ *                             a section's own board, is not a maintenance job.
+ *                             The same rule every dashboard and the Jobs board
+ *                             use (`app/lib/dashboard-filters.ts`).
  *
  * It is re-declared here rather than imported because the original is a private
  * const inside a route module. Re-declaring is the smaller evil: importing a
@@ -59,6 +63,7 @@ import {
   registerScopeFilter,
 } from "../register-scope";
 import { selectInChunks } from "../sql-batching";
+import { jobsBoardCondition } from "../dashboard-filters";
 import { listHolds, listSlaRules } from "../billing/repository";
 import {
   listClientFees,
@@ -95,12 +100,21 @@ function liveWorkOrder(organisationId: string) {
     eq(maintenanceRequests.archived, false),
     isNull(maintenanceRequests.parentId),
     /*
-     * DELIBERATELY WITHOUT `jobsBoardCondition`, unlike its twin in the
-     * workspace route. This population feeds generated INVOICES as well as
-     * client reports, and a row on a section's board may be chargeable work;
-     * narrowing it to the Jobs board would silently change what a client is
-     * billed for. That is an owner's decision, not a dashboard fix.
+     * THE JOBS BOARD'S POPULATION — the owner's decision, now taken: Store
+     * Documentation and section-board rows are not maintenance jobs, so they
+     * are not in the maintenance report, its job log or its KPIs.
+     *
+     * This was held back on the belief that the population "feeds generated
+     * INVOICES", and it does not reach a payable figure. `computeInvoiceSection`
+     * below is handed period, billing settings, sites, fees, existing charges,
+     * decisions, adjustments and the header — no job — so an invoice's
+     * subtotal, VAT, adjustments, credits, total payable and site counts are
+     * the same whatever this returns (tests/reporting-jobs-population pins
+     * that). What does move is the report's content and the informational
+     * `maintenance_spend_pence` a Draft or Approved document recalculates;
+     * a Finalised document is served from its frozen snapshot and never moves.
      */
+    jobsBoardCondition(),
   );
 }
 

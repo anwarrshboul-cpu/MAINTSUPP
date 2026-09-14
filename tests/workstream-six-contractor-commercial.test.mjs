@@ -499,8 +499,11 @@ test("W06-08: certification status is derived, never stored", async () => {
   );
 
   const route = code(await read("app/api/workspace/route.ts"));
-  assert.match(route, /expiryStatus\(row\.expiresOn, classifiedAt\)/, "classified on read");
-  assert.match(route, /expiryStatus\(contractor\.insuranceExpiry, classifiedAt\)/);
+  /* Re-pointed: the third argument is the organisation's warning window, so a
+     contractor's ticket and a store's certificate still turn amber together. */
+  assert.match(route, /expiryStatus\(row\.expiresOn, classifiedAt, warningWindowDays\)/, "classified on read");
+  assert.match(route, /expiryStatus\(contractor\.insuranceExpiry, classifiedAt, warningWindowDays\)/);
+  assert.match(route, /const warningWindowDays = compliancePolicyFromBlob\(/, "the organisation's window, from its settings");
   assert.match(
     route,
     /const classifiedAt = new Date\(\);/,
@@ -508,7 +511,8 @@ test("W06-08: certification status is derived, never stored", async () => {
   );
   // `expiryStatus` is the platform's one classifier, at its one threshold.
   const classifier = await read("app/lib/expiry-status.ts");
-  assert.match(classifier, /export const EXPIRY_DUE_SOON_DAYS = 60;/);
+  /* The approved default is 90 (it shipped at 60). */
+  assert.match(classifier, /export const EXPIRY_DUE_SOON_DAYS = 90;/);
 
   // The legacy names array is still read, so a contractor with no rows in the
   // new table behaves exactly as they did before it existed.

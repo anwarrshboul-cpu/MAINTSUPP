@@ -13,8 +13,12 @@ import { listSites, normaliseSiteName, recordAnomaly } from "../../lib/sites-rep
 import { unassignedSiteId } from "../../lib/site-reference";
 import { scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { resolveBoard } from "../../lib/board-registry";
+import { legacyJobTypeCode, type JobType } from "../../lib/job-type-contract";
+import { listJobTypes } from "../../lib/job-types";
+import { normaliseCost } from "../../lib/request-fields";
 import {
   EXTERNAL_ID_KEY,
+  JOB_TYPE_KEY,
   planImport,
   type ImportBoardKey,
   type ImportPlan,
@@ -143,6 +147,72 @@ function timelineEnd(value: string | undefined) {
   return /^\d{4}-\d{2}-\d{2}/.test(end) ? end : null;
 }
 
+/**
+ * THE "Job type" COLUMN, RESOLVED — the text a file carries, to one of THIS
+ * organisation's job types, or to nothing.
+ *
+ * By NAME first (case- and whitespace-insensitive), then by the stable code of a
+ * default (`reactive`, `planned`, `project`, and the old plural `projects`), so
+ * a file written before a rename still lands on the same type. Never by
+ * resemblance, and never by creating a type: a spelling the workspace does not
+ * hold is Unclassified and is counted, so the operator can add the type or fix
+ * the file and re-run — the same stance the site matcher takes on a store name.
+ *
+ * A name that belongs to a DEACTIVATED type is reported as `retired`: the
+ * commit keeps it on a job that already carries it and never files anything
+ * new under it, which is `resolveJobTypeWrite`'s rule applied to a file.
+ */
+type JobTypeMatch = { id: string; active: boolean } | null;
+
+function jobTypeKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function jobTypeMatcher(types: readonly JobType[]): (text: string) => JobTypeMatch {
+  const ordered = [...types].sort((left, right) => Number(right.active) - Number(left.active));
+  return (text) => {
+    const wanted = jobTypeKey(text);
+    if (!wanted) return null;
+    /* Active before retired, so a live "Emergency" wins over a retired one. */
+    const byName = ordered.find((type) => jobTypeKey(type.label) === wanted);
+    if (byName) return { id: byName.id, active: byName.active };
+    const code = legacyJobTypeCode(wanted);
+    const byCode = code ? ordered.find((type) => type.code === code) : undefined;
+    return byCode ? { id: byCode.id, active: byCode.active } : null;
+  };
+}
+
+/** How the file's Job type texts resolve — the same figures in the preview and the commit. */
+function summariseJobTypes(plan: ImportPlan, match: (text: string) => JobTypeMatch) {
+  let carried = 0;
+  let matched = 0;
+  let retired = 0;
+  const unmatched = new Map<string, number>();
+  for (const item of plan.items) {
+    const text = (item.values[JOB_TYPE_KEY] ?? "").trim();
+    if (!text) continue;
+    carried += 1;
+    const found = match(text);
+    if (found?.active) matched += 1;
+    else if (found) retired += 1;
+    else unmatched.set(text, (unmatched.get(text) ?? 0) + 1);
+  }
+  return {
+    /** Rows whose file gave a job type at all. A blank cell leaves a job's type alone. */
+    carried,
+    /** Rows filed under an active type. */
+    matched,
+    /** Rows naming a deactivated type: kept where the job already has it, otherwise Unclassified. */
+    retired,
+    /** Rows naming no type this workspace holds: filed Unclassified. */
+    unmatched: carried - matched - retired,
+    unmatchedLabels: [...unmatched.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "en-GB"))
+      .slice(0, 50)
+      .map(([label, rows]) => ({ label, rows })),
+  };
+}
+
 function summarise(plan: ImportPlan) {
   return {
     board: plan.board,
@@ -171,6 +241,11 @@ async function commit(
   boardKey: string,
   plan: ImportPlan,
   batchId: string,
+  /**
+   * Text to one of this organisation's job types — see `jobTypeMatcher`. Null
+   * for a board whose rows are not jobs, where the column is not read at all.
+   */
+  matchJobType: ((text: string) => JobTypeMatch) | null,
 ) {
   // Groups first — an item cannot be placed before its group exists.
   const existingGroups = await db
@@ -333,9 +408,13 @@ async function commit(
       id: maintenanceRequests.id,
       title: maintenanceRequests.title,
       externalId: maintenanceRequests.externalId,
+      jobTypeId: maintenanceRequests.jobTypeId,
     })
     .from(maintenanceRequests)
     .where(eq(maintenanceRequests.organisationId, orgId));
+  /* Each row's type as it stands, so a file naming a DEACTIVATED type can keep
+     it on a job that already carries it and give it to nothing else. */
+  const jobTypeByItem = new Map(existingItems.map((item) => [item.id, item.jobTypeId ?? null]));
   const itemByTitle = new Map(
     existingItems.map((item) => [item.title.trim().toLowerCase(), item.id]),
   );
@@ -401,7 +480,10 @@ async function commit(
       stage,
       completedAt,
       dueAt: timelineEnd(item.values.timeline) ?? null,
-      cost: item.values.cost ? Number(item.values.cost) : null,
+      /* Whole pence, by the one rounding rule every other cost write uses —
+         `normaliseCost` in request-fields.ts. Unreadable text ("TBC") is no
+         cost rather than NaN; negative clamps to zero, as a PATCH would. */
+      cost: item.values.cost ? normaliseCost(Number(item.values.cost)) ?? null : null,
       approvedBy: item.values.approvedBy || null,
       invoice: item.values.invoice || null,
       contractor: item.values.contractor || null,
@@ -424,6 +506,24 @@ async function commit(
     }
     const siteId = matchedSiteId ?? unassignedSiteId();
 
+    /*
+     * The job's type, where the file gives one. A BLANK cell — or no Job type
+     * column at all — says nothing, so a re-import leaves a type somebody set in
+     * the portal exactly where it is. A value is authoritative like every other
+     * field here: an active type is filed, a name the workspace does not hold is
+     * Unclassified (and counted in `jobTypes`), and a deactivated type is kept
+     * only on a job that already carries it.
+     */
+    const jobTypeText = (item.values[JOB_TYPE_KEY] ?? "").trim();
+    let jobTypeWrite: { jobTypeId: string | null } | Record<string, never> = {};
+    if (jobTypeText && matchJobType) {
+      const found = matchJobType(jobTypeText);
+      const current = requestId ? jobTypeByItem.get(requestId) ?? null : null;
+      jobTypeWrite = {
+        jobTypeId: found && (found.active || found.id === current) ? found.id : null,
+      };
+    }
+
     if (!requestId) {
       requestId = newId("req");
       await db.insert(maintenanceRequests).values({
@@ -433,6 +533,7 @@ async function commit(
         source: "monday import",
         externalId: externalId || null,
         ...fields,
+        ...jobTypeWrite,
         // Only set on insert: `requested_at` defaults to now, and a re-import
         // must not restamp a row the board has been working from.
         requestedAt: item.values.requested || new Date().toISOString(),
@@ -454,6 +555,7 @@ async function commit(
         .update(maintenanceRequests)
         .set({
           ...fields,
+          ...jobTypeWrite,
           // Re-attributed too, so a board imported before names were resolved is
           // corrected by a re-run instead of keeping the arbitrary site forever.
           ...(matchedSiteId ? { siteId: matchedSiteId } : {}),
@@ -467,6 +569,8 @@ async function commit(
       if (externalId) itemByExternalId.set(externalId, requestId);
       updated += 1;
     }
+    /* What the row carries now, for a later row of the same file that lands on it. */
+    if ("jobTypeId" in jobTypeWrite) jobTypeByItem.set(requestId, jobTypeWrite.jobTypeId);
 
     if (groupId) {
       /*
@@ -579,6 +683,9 @@ async function commit(
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "en-GB"))
       .slice(0, 50)
       .map(([name, rows]) => ({ name, rows })),
+    /* How the Job type column resolved — the same figures the preview showed,
+       because both come from `summariseJobTypes` over the one plan. */
+    jobTypes: matchJobType ? summariseJobTypes(plan, matchJobType) : null,
     batchId,
   };
 }
@@ -627,8 +734,17 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * The organisation's job types, for the Job type column. Jobs board only:
+     * a Store Documentation row is a store, and a store has no job type — so
+     * there is no matcher, and a stray column on that board writes nothing.
+     */
+    const matchJobType =
+      boardKey === "maintenance" ? jobTypeMatcher(await listJobTypes(db, orgId)) : null;
+    const jobTypes = matchJobType ? summariseJobTypes(plan, matchJobType) : null;
+
     if (mode === "preview") {
-      return Response.json({ mode, preview: summarise(plan) });
+      return Response.json({ mode, preview: { ...summarise(plan), jobTypes } });
     }
 
     /*
@@ -664,7 +780,7 @@ export async function POST(request: Request) {
     // One id for everything this run records, so its anomalies list back
     // together and match the audit entry below.
     const batchId = `import-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-    const result = await commit(db, orgId, board.key, plan, batchId);
+    const result = await commit(db, orgId, board.key, plan, batchId, matchJobType);
 
     /*
      * An import rewrites more rows in one call than any other action in the

@@ -89,6 +89,12 @@ export type WorkspaceComplianceRecord = {
    * says so, rather than posting an id the route will reject.
    */
   expiryColumnId?: string | null;
+  /**
+   * The contractor record linked as this requirement's renewal provider, or
+   * null. Optional so no existing consumer has to change. See
+   * `app/lib/compliance-provider.ts`.
+   */
+  providerContractorId?: string | null;
 };
 
 export type WorkspaceContractor = {
@@ -323,6 +329,15 @@ export type WorkspaceSettings = {
    * recorded in the audit log like any other settings change.
    */
   completionEvidenceCategories: string[];
+  /**
+   * The compliance warning window: how many days before expiry a certificate
+   * turns amber. `warningWindowDays` is the EFFECTIVE value (the organisation's
+   * choice, or the product default of 90) and `configured` says which. Optional
+   * so a settings object built before this existed still type-checks; saving
+   * `{ warningWindowDays: null }` returns the organisation to the default.
+   * See `app/lib/compliance-policy.ts`.
+   */
+  compliancePolicy?: { warningWindowDays: number | null; configured?: boolean };
 };
 
 /**

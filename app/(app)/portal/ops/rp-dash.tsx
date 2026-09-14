@@ -105,15 +105,16 @@ const SITES_RANGES: ReadonlyArray<{ value: RpSitesRange; label: string }> = [
 const SITES_DEFAULT: RpSitesRange = "page";
 
 /**
- * Each KPI's accent, as the brief's token. The payload does not colour the
- * KPIs — they are not slices — so the card names its token and `rp-dash.css`
- * holds the value.
+ * Each KPI's accent, as the brief's token, BY THE JOB TYPE'S STABLE CODE. The
+ * payload does not colour the KPIs — they are not slices — so the card names
+ * its token and `rp-dash.css` holds the value. Keyed on the code rather than
+ * the label, so renaming "Project" to "Capital works" keeps its green.
  */
 const KPI_ACCENT: Record<RpKpi["key"], string> = {
   total: "var(--rp-total)",
   reactive: "var(--rp-reactive)",
   planned: "var(--rp-planned)",
-  projects: "var(--rp-projects)",
+  project: "var(--rp-projects)",
 };
 
 /**
@@ -363,7 +364,7 @@ export function RpDash({
     );
   }
 
-  const { kpis, range, repeat, topSites, trend, unclassified } = data;
+  const { kpis, range, repeat, topSites, trend, other, unclassified } = data;
   const scope = { from: range.from, to: range.to };
 
   /* ── The destinations ─────────────────────────────────────────────────── */
@@ -372,11 +373,22 @@ export function RpDash({
   const siteHref = (siteId: string) => `${ROUTE.sites}?site=${encodeURIComponent(siteId)}`;
   const repeatQuery = rpRepeatQuery(scope, portfolioSites);
 
-  /* The breakdown the total card's tooltip and accessible name state. */
-  const typeKpi = (key: RpKpi["key"]) => kpis.find((kpi) => kpi.key === key)?.pence ?? 0;
-  const breakdown = `Reactive ${rpPounds(typeKpi("reactive"))} · Planned ${rpPounds(
-    typeKpi("planned"),
-  )} · Projects ${rpPounds(typeKpi("projects"))} · Unclassified ${rpPounds(unclassified.pence)}`;
+  /*
+   * The breakdown the total card's tooltip and accessible name state: every
+   * type card by its CURRENT label, then the two buckets no card claims — so
+   * the five figures a reader is shown add up to the one on the card.
+   */
+  const breakdown = `${kpis
+    .filter((kpi) => kpi.key !== "total")
+    .map((kpi) => `${kpi.label} ${rpPounds(kpi.pence)}`)
+    .join(" · ")}${kpis.length > 1 ? " · " : ""}${other.label} ${rpPounds(other.pence)} · Unclassified ${rpPounds(unclassified.pence)}`;
+  /*
+   * OTHER AND UNCLASSIFIED, DRILLABLE. Neither has a card — the brief draws
+   * four — but neither is dropped: each one with spend in the range gets a link
+   * under the KPI row that opens exactly its jobs (`type=__other__` /
+   * `type=__unclassified__`), the same way a card does.
+   */
+  const typeGaps = [unclassified, other].filter((bucket) => bucket.jobs > 0);
 
   /* ── The spend trend's points, as `AreaTrend` wants them ──────────────── */
 
@@ -440,7 +452,8 @@ export function RpDash({
         {/* ── Row 1: the four spend figures ─────────────────────────────── */}
         <div className="rp-kpis">
           {kpis.map((kpi) => {
-            const query = rpKpiQuery(kpi.key, scope, portfolioSites);
+            /* The type's stable id, never its words — a rename keeps the link. */
+            const query = rpKpiQuery(kpi.drillType, scope, portfolioSites);
             const isTotal = kpi.key === "total";
             const spendWord = isTotal ? "jobs with completed cost" : `${kpi.label.toLowerCase()} jobs with completed cost`;
             const describedBy = `${sparkHelp}-${kpi.key}`;
@@ -478,6 +491,31 @@ export function RpDash({
             );
           })}
         </div>
+        {typeGaps.length > 0 ? (
+          <p className="rp-kpis__gaps">
+            <span className="rp-kpis__gaps-lead">Not on a type card:</span>
+            {typeGaps.map((bucket) => {
+              const query = rpKpiQuery(bucket.drillType, scope, portfolioSites);
+              const what =
+                bucket.key === "unclassified"
+                  ? "with no job type"
+                  : `of other job types${bucket.typeLabels.length ? ` (${bucket.typeLabels.join(", ")})` : ""}`;
+              return (
+                <RpLink
+                  key={bucket.key}
+                  className="rp-kpis__gap"
+                  href={jobsHref(query)}
+                  onActivate={() => goToJobs(query)}
+                  label={`${bucket.label}: ${rpPounds(bucket.pence)} from ${rpJobs(bucket.jobs)} ${what}, ${deltaSentence(
+                    bucket.delta,
+                  )}. Opens those jobs with completed cost in ${range.label}.`}
+                >
+                  {bucket.label} {rpPounds(bucket.pence)}
+                </RpLink>
+              );
+            })}
+          </p>
+        ) : null}
 
         {/* ── Row 2: the spend trend, and the top sites ─────────────────── */}
         <div className="rp-row2">
@@ -854,7 +892,10 @@ function RpLink({
   );
 }
 
-/** The four outline glyphs the reference shows. Decorative — every card states its figure. */
+/**
+ * The four outline glyphs the reference shows, by the job type's stable code.
+ * Decorative — every card states its figure.
+ */
 function KpiIcon({ name }: { name: RpKpi["key"] }) {
   const common = {
     width: 18,
@@ -894,7 +935,7 @@ function KpiIcon({ name }: { name: RpKpi["key"] }) {
           <path d="M3.5 10h17M8 3v4M16 3v4M8 14h3" />
         </svg>
       );
-    case "projects":
+    case "project":
     default:
       /* Clipboard. */
       return (
@@ -914,7 +955,10 @@ function KpiIcon({ name }: { name: RpKpi["key"] }) {
  *   spend      hasCost=1 & measure=completed & period=custom & from & to
  *              — a SPEND LINE (cost and a completion date) completed inside the
  *              window, which is exactly what every £ here counts
- *   type       reactive | planned | projects, through the shared classifier
+ *   type       the job type's STABLE token, as the payload names it
+ *              (`drillType`): a type's id, `__other__` or `__unclassified__` —
+ *              never its label, so renaming a type cannot break a link. The
+ *              board still reads an old `reactive|planned|projects` link
  *   repeat     repeat=1 & period=custom & from & to — a repeat job RAISED inside
  *              the window, judged over the whole population
  *   issue      label=<the raw categories behind the slice>, pipe-joined
@@ -963,10 +1007,17 @@ function rpRepeatPairs(span: RpDrillWindow): Array<[string, string]> {
   ];
 }
 
-/** A KPI card: the range's spend, and its type unless it is the total. */
-export function rpKpiQuery(key: string, span: RpDrillWindow, portfolioSites: readonly string[] = []): string {
+/**
+ * A KPI card, or an Other / Unclassified link: the range's spend, and its job
+ * type's stable token — `null` for the total, which names no type at all.
+ */
+export function rpKpiQuery(
+  type: string | null,
+  span: RpDrillWindow,
+  portfolioSites: readonly string[] = [],
+): string {
   return rpJobsQuery(
-    [...rpSpendPairs(span), ...(key === "total" ? [] : ([["type", key]] as Array<[string, string]>))],
+    [...rpSpendPairs(span), ...(type ? ([["type", type]] as Array<[string, string]>) : [])],
     portfolioSites,
   );
 }

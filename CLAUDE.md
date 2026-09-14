@@ -9,7 +9,7 @@ npm ci                     # Node 22.13+
 npm run dev                # Vite + vinext on :5173 (Miniflare D1 + R2 bindings)
 npm run build              # scripts/build-verified.sh -> dist/ (bounded vinext build)
 npm run lint               # eslint via scripts/sites-env.sh
-npm test                   # NOTE: runs `npm run build` first, then all 237 test files
+npm test                   # NOTE: runs `npm run build` first, then every tests/*.test.mjs
 ```
 
 Running tests without the build (much faster, and what you usually want):
@@ -122,7 +122,10 @@ server's `Content-Disposition` follows the same rule.
 
 ## Test suite conventions
 
-237 files, `node:test`, no framework. Three things make it unlike a typical suite:
+Every `tests/*.test.mjs`, `node:test`, no framework — a couple of hundred files,
+and the count moves with almost every batch, so measure it (`ls tests/*.test.mjs |
+wc -l`) rather than trusting a number written here. Three things make the suite
+unlike a typical one:
 
 **Tests pin source text.** There are ~3,100 `assert.match` calls against file
 contents, so a rename or a move *breaks tests that were protecting a real
@@ -134,6 +137,11 @@ home with the reason written in — never delete or weaken it.**
 `board-format.ts` 400, `board-compact.ts` 300, `board-subitems.tsx` 300,
 `board-primitives.tsx` 200, `board-ordering.ts` 200. When one is hit, split the
 file as the failure message says; do not trim comments to squeeze under.
+
+`live-board.tsx` has a SECOND, tighter ceiling in a different file —
+`tests/workstream-seven-official-document-ui.test.mjs` asserts `< 5600`, "the
+extraction must leave real room" — and that is the one a change actually hits
+first. Measure both before planning anything that adds to it.
 
 **CSS media queries are restricted to 640 / 767 / 768 / 1024 / 1280.** Several
 stage tests fail on any other width.

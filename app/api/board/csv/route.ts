@@ -21,6 +21,14 @@
  *
  * POST rather than GET with a query string: a board export can name 745 rows,
  * and a URL cannot carry them.
+ *
+ * ONE COLUMN THE SCREEN DOES NOT DRAW: "Job type", last, on the Jobs board.
+ * Every job now carries a type — Reactive, Planned, Project, a custom one, or
+ * Unclassified — and the grid has no column for it yet, so without this the
+ * export would be the one bulk view of the jobs that could not say what kind of
+ * work each one is. It is appended rather than chosen because there is no
+ * board column to choose; the rows, their order and every other column are
+ * still exactly what the caller asked for.
  */
 
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
@@ -34,7 +42,8 @@ import {
 } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { auditActor, recordAudit } from "../../../lib/audit";
-import { resolveBoard } from "../../../lib/board-registry";
+import { DEFAULT_BOARD_KEY, resolveBoard } from "../../../lib/board-registry";
+import { listJobTypes } from "../../../lib/job-types";
 import { boardCsvTable, type BoardCsvColumn } from "../../../lib/board-csv";
 import { rowsToCsv, csvResponse } from "../../../lib/csv";
 import { exposeRequest } from "../../../lib/request-payload";
@@ -175,6 +184,33 @@ export async function POST(request: Request) {
       },
     }));
 
+    /*
+     * The job's type — see the header. The Jobs board only: a Store
+     * Documentation row is a store and a section register's rows are its own,
+     * and neither has a job type to print. Skipped if a column of that key ever
+     * joins the board, so the file never carries it twice. The labels come from
+     * this organisation's own list, retired types included.
+     */
+    let jobTypeLabels: Record<string, string> | undefined;
+    if (board.key === DEFAULT_BOARD_KEY && !columns.some((entry) => entry.key === "jobType")) {
+      const jobTypes = await listJobTypes(db, orgId);
+      jobTypeLabels = Object.fromEntries(jobTypes.map((type) => [type.id, type.label]));
+      columns.push({
+        key: "jobType",
+        column: {
+          id: "__jobType",
+          key: "jobType",
+          title: "Job type",
+          type: "status",
+          position: columns.length,
+          width: 160,
+          settings: {},
+          system: true,
+          visible: true,
+        },
+      });
+    }
+
     const [requestRows, cellRows, attachmentRows] = await Promise.all([
       selectInChunks(ids, (chunk) =>
         db
@@ -258,6 +294,7 @@ export async function POST(request: Request) {
       cells,
       fileCounts,
       subitemCounts,
+      jobTypeLabels,
     });
 
     await recordAudit({

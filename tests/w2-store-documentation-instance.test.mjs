@@ -417,9 +417,16 @@ test("the groups an instance is seeded with are the ones the digest scopes itsel
 test("the register takes its boards from the caller and defaults to the canonical one", async () => {
   const register = codeOnly(await source("app/lib/compliance-register.ts"));
 
+  /*
+   * RE-POINTED: the options bag gained `windowDays` when the compliance
+   * warning window became configurable per organisation. The contract this
+   * pin protects is `boardIds` — that the register derives from the boards the
+   * CALLER names rather than a hard-coded one — so it is asserted on its own
+   * and the bag may go on growing without breaking it.
+   */
   assert.match(
     register,
-    /options: \{ today\?: Date; boardIds\?: readonly string\[\] \} = \{\}/,
+    /options: \{ today\?: Date; boardIds\?: readonly string\[\][^}]*\} = \{\}/,
     "readComplianceRegister accepts the registers to derive from",
   );
   /*

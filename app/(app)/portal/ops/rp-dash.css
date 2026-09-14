@@ -42,7 +42,9 @@
 .ov-dash.rp-dash {
   /*
    * Spend-type accents, on the approved dark palette: total turquoise,
-   * reactive orange, planned blue, projects the light turquoise.
+   * reactive orange, planned blue, projects the light turquoise. The block
+   * picks one by the job type's stable CODE (`KPI_ACCENT` in `rp-dash.tsx`),
+   * so a renamed type keeps its colour; the token keeps the brief's name.
    */
   --rp-total: #12b4a8;
   --rp-reactive: #ff8a3d;
@@ -250,6 +252,41 @@
   .ov-dash.rp-dash .rp-kpi__spark {
     margin-top: 10px;
   }
+}
+
+/* ── The spend no type card claims ────────────────────────────────────────── */
+
+/*
+ * "Not on a type card: Unclassified £… · Other £…" — one quiet line under the
+ * KPI row, present only when either bucket has spend in the range. The brief
+ * draws four cards and this keeps it at four; the line is how the two buckets
+ * the cards cannot show stay visible and drillable rather than being dropped.
+ * Each figure is a real link, underlined, because it is the only affordance.
+ */
+.ov-dash.rp-dash .rp-kpis__gaps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ov-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme] .ov-dash.rp-dash .rp-kpis__gap {
+  border-radius: 4px;
+  color: var(--ov-text-2);
+  text-decoration: underline;
+  text-decoration-color: var(--ov-text-muted);
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+body[data-theme] .ov-dash.rp-dash .rp-kpis__gap:hover {
+  color: var(--ov-text);
 }
 
 /* ── The delta line ───────────────────────────────────────────────────────── */
@@ -902,6 +939,12 @@ body[data-theme] .ov-dash.rp-dash .rp-zone__title {
   }
 
   body[data-theme] .ov-dash.rp-dash .rp-select select:not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px;
+  }
+
+  body[data-theme] .ov-dash.rp-dash .rp-kpis__gap {
+    display: inline-flex;
+    align-items: center;
     min-height: 44px;
   }
 }

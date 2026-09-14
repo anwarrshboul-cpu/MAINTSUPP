@@ -267,14 +267,33 @@
   min-width: 0;
 }
 
-.resp-record > .resp-control {
-  padding-bottom: 8px;
-}
+/*
+ * `.resp-record > .resp-control` USED TO BE HERE, AND MATCHED NOTHING.
+ *
+ * The control is no longer a direct child of the record: `compliance-page.tsx`
+ * wraps it in `<span class="resp-controls">` so the duty holder and the renewal
+ * contractor sit on one line. Both rules that selected it as a child — this one
+ * and its counterpart in the wide-screen block below — therefore stopped
+ * applying the day that span arrived, and the layout they described is now in
+ * `compliance-provider-control.css` (`.resp-controls > .resp-control` and
+ * `.resp-record > .resp-controls`). Removed rather than re-pointed: the sheet
+ * that owns the wrapper owns its geometry.
+ */
 
-/* The per-site sentence under a collapsed group header. */
+/*
+ * The per-site sentence under a collapsed group header.
+ *
+ * It takes the HEADER'S OWN INDENTS — 15px from the card's left edge, 12px from
+ * its right — because with none it started hard against that edge, and the
+ * card's state-tinted edge then read as a coloured bar beside "Not yet
+ * confirmed" rather than as the edge of the card. The numbers are the register
+ * header's (`.ops-group__head` is padded `12px 12px 12px 15px` in `ops.css`),
+ * so the sentence lines up under the store name instead of sitting a character
+ * to its left.
+ */
 .resp-group__coverage {
   margin: 0;
-  padding: 0 0 4px;
+  padding: 0 12px 4px 15px;
 }
 
 /* ── One waiting requirement ──────────────────────────────────────────────── */
@@ -361,10 +380,5 @@
     flex: 1 1 auto;
     border-top: 0;
     min-width: 0;
-  }
-
-  .resp-record > .resp-control {
-    flex: 0 0 200px;
-    padding-bottom: 0;
   }
 }
