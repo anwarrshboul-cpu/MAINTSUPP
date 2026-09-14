@@ -1,5 +1,4 @@
-import { headers } from "next/headers";
-import { getSession } from "../../../lib/auth-session";
+import { requirePageSession } from "../../../lib/page-guard";
 import PortalApp, { type Section } from "../../portal/portal-app";
 
 export const dynamic = "force-dynamic";
@@ -72,24 +71,33 @@ export default async function DashboardPage({
     workspaceSection ?? routes[slug] ?? routes[section?.[0] ?? ""] ?? "overview";
 
   /*
-   * Who is actually looking at this.
+   * WHO IS ASKING — AND WHETHER THEY GET A PAGE AT ALL.
    *
-   * These were the literals "Preview User" / "preview@maintsupp.local", which
-   * was honest while there was no way to sign in and is not any more: a signed-in
-   * owner was greeted by somebody else's name. `getSession` never throws and
-   * returns null when there is no session, so the preview identity survives for
-   * an unauthenticated browser — which is still how the dashboard is demoed.
+   * This used to be a `getSession` call whose null case fell through to the
+   * literals "Preview User" / "preview@maintsupp.local". That was honest while
+   * there was no way to sign in, and it quietly became the whole of the auth
+   * hole once there was: an anonymous GET of this route was answered with
+   * 47,663 bytes of the operations shell under a placeholder identity, and the
+   * only thing that eventually sent the visitor to /login was a client fetch
+   * wrapper reacting to the twelve 401s that followed.
+   *
+   * `requirePageSession` redirects instead. It throws, so nothing below runs
+   * and no element of this tree is ever produced for a browser without a
+   * session — which is the actual fix. See `app/lib/page-guard.ts`.
+   *
+   * The path is rebuilt from the same segments the section was resolved from,
+   * so signing in returns the visitor to the screen they asked for rather than
+   * to the Overview. It is sanitised inside `loginRedirect` and again by the
+   * login page, because route params are attacker-supplied.
    */
-  const session = await getSession(
-    new Request("https://maintsupp.local/dashboard", {
-      headers: await headers(),
-    }),
+  const session = await requirePageSession(
+    section?.length ? `/dashboard/${section.join("/")}` : "/dashboard",
   );
 
   return (
     <PortalApp
-      userName={session?.user.fullName?.trim() || session?.user.email || "Preview User"}
-      userEmail={session?.user.email ?? "preview@maintsupp.local"}
+      userName={session.user.fullName?.trim() || session.user.email}
+      userEmail={session.user.email}
       initialSection={initialSection}
     />
   );
