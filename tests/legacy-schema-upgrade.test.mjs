@@ -81,6 +81,23 @@ function ageDatabase(file) {
       db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
       dropped.push(`${table}.${column}`);
     }
+    /*
+     * AGE THE MIGRATION LEDGER WITH THE SCHEMA IT DESCRIBES.
+     *
+     * `schema_state` records the fingerprint of the migrations this database
+     * has completed, and `ensureDatabase()` skips the replay when it matches —
+     * which is what turns a 47-second cold start into three. This fixture rolls
+     * the SCHEMA back by hand, so leaving the ledger saying "up to date" would
+     * be asking the boot to detect a lie it is not built to detect, and no
+     * migration ledger in any framework detects that one: the row is the record
+     * of what ran, and altering the schema behind it is what invalidates it.
+     *
+     * A restore from backup carries a consistent pair and needs nothing. The
+     * dangerous direction — a fingerprint NEWER than the schema — cannot arise
+     * from the code, because the fingerprint is written only after every stage
+     * has resolved.
+     */
+    db.exec("DELETE FROM schema_state");
   } finally {
     db.close();
   }
