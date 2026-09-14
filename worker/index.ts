@@ -41,9 +41,31 @@ const worker = {
       }, allowedWidths);
     }
 
-    return withSecurityHeaders(await handler.fetch(request, env, ctx));
+    return withSecurityHeaders(
+      await handler.fetch(request, env, ctx),
+      url.pathname,
+    );
   },
 };
+
+/**
+ * The routes whose ANSWER DEPENDS ON WHO IS ASKING.
+ *
+ * Not "the protected routes" — /login is on this list precisely because it is
+ * public. It returns a form to an anonymous browser and a redirect to a
+ * signed-in one, at one URL, and that is the shape that must never be shared
+ * between two people.
+ */
+function authDependent(pathname: string) {
+  return (
+    pathname === "/login" ||
+    pathname === "/portal" ||
+    pathname === "/dashboard" ||
+    pathname.startsWith("/dashboard/") ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/")
+  );
+}
 
 /**
  * The headers every response gets, because there were none.
@@ -64,8 +86,42 @@ const worker = {
  * A route that has already set one of these keeps it: the file route's CSP and
  * disposition are more specific than anything here.
  */
-function withSecurityHeaders(response: Response): Response {
+function withSecurityHeaders(response: Response, pathname = ""): Response {
   const headers = new Headers(response.headers);
+
+  /*
+   * AN AUTH-DEPENDENT REDIRECT IS NOT A SHAREABLE ANSWER.
+   *
+   * The framework stamps `no-store` on the 200s these routes return, and
+   * nothing at all on the 3xx. So `/dashboard` → `/login?next=…` for an
+   * anonymous browser and `/login` → `/dashboard` for a signed-in one both
+   * went out with no cache metadata and no `Vary: Cookie` — two different
+   * answers at one URL, distinguished only by a cookie nothing was told to
+   * vary on.
+   *
+   * RFC 9111 does not make 307 heuristically cacheable, so no compliant shared
+   * cache stores it and this is latent rather than live. It is closed anyway,
+   * because the failure it would produce is not a slow page: an anonymous
+   * visitor served a cached `/login → /dashboard` loops, and a signed-in one
+   * served a cached `/dashboard → /login` cannot get in at all. A one-line
+   * default is cheaper than either.
+   *
+   * Scoped to the redirect and to these routes on purpose. A blanket
+   * `no-store` here would also land on the marketing pages and on every static
+   * asset the site serves, which is a performance regression dressed as a
+   * security fix.
+   */
+  if (
+    response.status >= 300 &&
+    response.status < 400 &&
+    authDependent(pathname) &&
+    !headers.has("Cache-Control")
+  ) {
+    headers.set("Cache-Control", "private, no-store");
+    const vary = headers.get("Vary");
+    if (!vary) headers.set("Vary", "Cookie");
+    else if (!/\bcookie\b/i.test(vary)) headers.set("Vary", `${vary}, Cookie`);
+  }
 
   // Never let a browser second-guess a declared Content-Type.
   if (!headers.has("X-Content-Type-Options")) {

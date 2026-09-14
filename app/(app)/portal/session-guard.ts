@@ -113,9 +113,55 @@ const inFlight = new Set<AbortController>();
  * Handed back for any request whose answer can no longer matter because the
  * browser is leaving. See the note above: this is how a caller is prevented
  * from rendering an error for a page that is being replaced.
+ *
+ * ITS WHOLE JUSTIFICATION IS "THE DOCUMENT IS LEAVING", so the one thing that
+ * must not happen is for it to outlive a navigation that did not occur. See
+ * `armRecovery`.
  */
 function neverSettles<T>(): Promise<T> {
   return new Promise<T>(() => {});
+}
+
+/**
+ * THE NAVIGATION CAN BE REFUSED, AND THEN THE LATCH IS A DEAD APPLICATION.
+ *
+ * `redirecting` makes every later `fetch` return a promise that never settles.
+ * That is correct while the document is on its way out and catastrophic if it
+ * is not: nothing clears the flag, so an app that stays put answers no request
+ * ever again — no error, no spinner that ends, no redirect. Silent, total, and
+ * only recoverable by a manual reload.
+ *
+ * It is reachable in this repository, not in theory. `portal/form-builder-save.ts`
+ * registers a `beforeunload` handler whenever the builder holds unsaved or
+ * failed edits. Session expires → a widget's 401 calls `beginSignIn` →
+ * `location.assign` raises the browser's "Leave site?" dialog → the person
+ * clicks **Stay** → the navigation is cancelled and the flag is still set.
+ *
+ * So the latch is armed with a release. A real user gesture proves the document
+ * is still here and still being used, which can only mean the navigation did
+ * not happen; the flag is cleared and the wrapper goes back to normal, ready to
+ * redirect again on the next refusal. Capture phase and `once`, so it costs one
+ * listener and cannot be swallowed by a handler that stops propagation.
+ *
+ * NOT A TIMER. There is no interval at which "the navigation must have
+ * happened by now" is true — a slow unload and a cancelled one are
+ * indistinguishable by the clock, and the whole point of this change was that
+ * auth behaviour must not be decided by `setTimeout`.
+ *
+ * The requests already suppressed at the moment of the refusal stay suppressed:
+ * their loaders remain pending. That is the deliberate trade. Somebody who has
+ * just chosen to stay on a page with unsaved work wants the page they are on,
+ * not a dozen widgets reloading behind it — and the next refusal after they are
+ * finished still sends them to sign in.
+ */
+function armRecovery() {
+  const release = () => {
+    redirecting = false;
+    window.removeEventListener("pointerdown", release, true);
+    window.removeEventListener("keydown", release, true);
+  };
+  window.addEventListener("pointerdown", release, { capture: true });
+  window.addEventListener("keydown", release, { capture: true });
 }
 
 /**
@@ -162,7 +208,16 @@ function beginSignIn() {
     }
   }
   inFlight.clear();
-  window.location.assign(`/login?next=${encodeURIComponent(returnTo())}`);
+  // Armed BEFORE the navigation is asked for, so a `beforeunload` dialog that
+  // the person answers with "Stay" is already covered when they do.
+  armRecovery();
+  try {
+    window.location.assign(`/login?next=${encodeURIComponent(returnTo())}`);
+  } catch {
+    // A navigation this browser will not perform must not leave the latch set
+    // with nothing on its way to clear it.
+    redirecting = false;
+  }
 }
 
 export function installSessionGuard() {
@@ -175,13 +230,27 @@ export function installSessionGuard() {
     // Already leaving. Nothing started now can be rendered by anything.
     if (redirecting) return neverSettles<Response>();
 
+    /*
+     * A `Request` OBJECT IS PASSED THROUGH UNTOUCHED.
+     *
+     * Adding our signal means calling `original(input, { ...init, signal })`,
+     * and per the fetch spec a two-argument call whose input is a Request
+     * constructs a NEW Request from it — which marks the original's body as
+     * used. Nothing in `app/` calls `fetch(new Request(…))` today, so this
+     * costs nothing now; it is here so that the day something does, it gets a
+     * working request rather than a "body already read" crash. The trade is
+     * that such a call is not cancellable by `beginSignIn` — it still gets the
+     * 401 handling below, which is the part that matters.
+     */
+    const cancellable = !(typeof Request !== "undefined" && input instanceof Request);
     const controller = new AbortController();
-    const signal = composedSignal(controller, init?.signal);
-    inFlight.add(controller);
+    if (cancellable) inFlight.add(controller);
 
     let response: Response;
     try {
-      response = await original(input, { ...init, signal });
+      response = cancellable
+        ? await original(input, { ...init, signal: composedSignal(controller, init?.signal) })
+        : await original(input, init);
     } catch (error) {
       // The abort that `beginSignIn` fired is not an error a caller should see.
       if (redirecting) return neverSettles<Response>();

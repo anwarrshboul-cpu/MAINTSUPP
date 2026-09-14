@@ -106,15 +106,35 @@ const SHELL_MARKERS = [
 /* Source                                                              */
 /* ------------------------------------------------------------------ */
 
-async function appPages() {
-  const root = new URL("../app/(app)/", import.meta.url);
+/**
+ * Route groups that are public in their entirety, and why.
+ *
+ * The walk covers ALL of `app/`, not just `app/(app)/`, because the failure
+ * this test exists to prevent is a protected page nobody remembered to guard —
+ * and a protected page added under a NEW route group would be invisible to a
+ * walk that only knew about the old one. Excluding a whole tree therefore has
+ * to be a decision written down here.
+ */
+const PUBLIC_GROUPS = new Map([
+  ["app/(marketing)/", "the public website. No account exists behind any of it."],
+  [
+    "app/(public)/",
+    "token-addressed pages — a contractor job link, a shared form, an " +
+      "invitation, a password reset. The single-use token IS the authorisation " +
+      "and the holder has no account, so there is no session to require.",
+  ],
+]);
+
+/** Every `page.tsx` under `app/`, as a repo-relative path. */
+async function allPages() {
+  const root = new URL("../app/", import.meta.url);
   const found = [];
   async function walk(dir, prefix) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
         await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`);
       } else if (entry.name === "page.tsx") {
-        found.push(`app/(app)/${prefix}page.tsx`);
+        found.push(`app/${prefix}page.tsx`);
       }
     }
   }
@@ -122,14 +142,21 @@ async function appPages() {
   return found.sort();
 }
 
-test("every page under the authenticated shell guards, or says why not", async () => {
-  const pages = await appPages();
-  assert.ok(pages.length >= 6, `expected the app routes to be found, got ${pages.length}`);
+test("every page that is not declared public resolves a session first", async () => {
+  const pages = await allPages();
+  assert.ok(pages.length >= 10, `expected the app routes to be found, got ${pages.length}`);
 
   const unguarded = [];
   for (const page of pages) {
+    if ([...PUBLIC_GROUPS.keys()].some((group) => page.startsWith(group))) continue;
+
     const source = await read(page);
-    const guarded = source.includes("requirePageSession");
+    /*
+     * Matched on the CALL, not on the word. `source.includes(...)` passed for
+     * a page carrying `// TODO: requirePageSession` in a comment while being
+     * completely unguarded, which is the one failure mode this test is for.
+     */
+    const guarded = /await\s+requirePageSession\(/.test(code(source));
     if (PUBLIC_PAGES.has(page)) {
       assert.equal(
         guarded,
@@ -147,6 +174,49 @@ test("every page under the authenticated shell guards, or says why not", async (
     "these pages render without resolving a session first. Call " +
       "requirePageSession from app/lib/page-guard.ts, or add the page to " +
       "PUBLIC_PAGES above with the reason it has no session to require.",
+  );
+});
+
+test("nothing streams above a guarded route", async () => {
+  /*
+   * THE EMPTY BODY IS THE WHOLE POINT, AND IT IS CONDITIONAL.
+   *
+   * `redirect()` produces a 307 with no body only while nothing above the page
+   * has already been flushed. Add a `loading.tsx`, `template.tsx` or
+   * `default.tsx` above one of these routes and Next sends the shell
+   * immediately; the guard's redirect can then only arrive as a client-side
+   * navigation inside a 200 that has ALREADY emitted markup — which is the
+   * original defect wearing a different hat, and the enumeration above would
+   * not notice, because it only looks at `page.tsx`.
+   *
+   * `app/(app)/layout.tsx` is synchronous and holds no Suspense boundary, and
+   * this keeps it that way by keeping the files that would change it out.
+   */
+  const root = new URL("../app/(app)/", import.meta.url);
+  const streaming = [];
+  async function walk(dir, prefix) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`);
+      } else if (["loading.tsx", "template.tsx", "default.tsx"].includes(entry.name)) {
+        streaming.push(`app/(app)/${prefix}${entry.name}`);
+      }
+    }
+  }
+  await walk(root, "");
+  assert.deepEqual(
+    streaming,
+    [],
+    "one of these flushes markup before the page's guard has run. If a " +
+      "loading state is genuinely wanted here, the guard has to move above it " +
+      "— into the layout — before the file is added.",
+  );
+
+  const layout = await read("app/(app)/layout.tsx");
+  assert.doesNotMatch(
+    code(layout),
+    /<Suspense|React\.Suspense/,
+    "a Suspense boundary in this layout would flush the shell before the guard",
   );
 });
 
@@ -245,11 +315,10 @@ test("the fix is structural — no timer, no CSS, no hidden shell", async () => 
     "app/(app)/dashboard/[[...section]]/page.tsx",
     "app/(app)/portal/page.tsx",
   ]) {
-    const source = await read(path);
-    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    assert.doesNotMatch(code, /setTimeout|setInterval/, `${path} must not wait`);
+    const source = code(await read(path));
+    assert.doesNotMatch(source, /setTimeout|setInterval/, `${path} must not wait`);
     assert.doesNotMatch(
-      code,
+      source,
       /opacity\s*:|visibility\s*:|display\s*:\s*['"]none/,
       `${path} must not hide the shell instead of not producing it`,
     );
@@ -276,6 +345,89 @@ test("one 401 handler, and it cancels the rest rather than letting them render",
 
   // The redirect is committed exactly once, however many widgets find out.
   assert.match(guard, /function beginSignIn\(\) \{\s*\r?\n\s*if \(redirecting\) return;/);
+});
+
+test("a navigation that is refused does not leave the app unable to fetch", async () => {
+  /*
+   * The suppression above is justified entirely by "the document is leaving".
+   * When it is not — `form-builder-save.ts` registers a `beforeunload` handler
+   * for unsaved edits, and the person answers the browser's dialog with
+   * "Stay" — an unreleased latch means every later fetch returns a promise
+   * that never settles. That is a silently, permanently dead application.
+   */
+  const guard = await read("app/(app)/portal/session-guard.ts");
+
+  assert.match(guard, /function armRecovery\(\)/);
+  assert.match(guard, /armRecovery\(\);/, "the latch must be armed with its release");
+  // A real gesture proves the document is still here and still in use.
+  assert.match(guard, /addEventListener\("pointerdown", release/);
+  assert.match(guard, /addEventListener\("keydown", release/);
+  assert.match(guard, /redirecting = false;/);
+  // Armed BEFORE the navigation is requested, or the dialog beats the arming.
+  assert.ok(
+    guard.indexOf("armRecovery();") < guard.indexOf("window.location.assign("),
+    "the release must be in place before the navigation is asked for",
+  );
+  // And a navigation the browser refuses outright cannot strand the latch.
+  assert.match(guard, /try \{\s*\r?\n\s*window\.location\.assign\(/);
+
+  // Still no timer: there is no interval at which a slow unload and a
+  // cancelled one become distinguishable, and this fix is not allowed a clock.
+  const body = code(guard);
+  assert.doesNotMatch(body, /setTimeout|setInterval/);
+});
+
+test("a Request object is passed through rather than rebuilt", async () => {
+  // `original(input, {...init, signal})` with a Request input constructs a new
+  // Request from it and marks its body used. Nothing calls fetch that way
+  // today; this keeps the day it does from being a "body already read" crash.
+  const guard = await read("app/(app)/portal/session-guard.ts");
+  assert.match(guard, /input instanceof Request/);
+  assert.match(guard, /await original\(input, init\)/);
+});
+
+test("the query the guard cannot see is documented, not silently attempted", async () => {
+  /*
+   * A redirecting page is handed `searchParams: {}` on vinext 0.0.50 — its
+   * redirect is thrown inside `probePage()`, which builds the props from a key
+   * `collectAppPageSearchParams` does not return. So `next` is the bare path,
+   * while `session-guard.ts` carries the search on the client half of the same
+   * feature.
+   *
+   * The trap is that the fix looks trivial and fails silently. This pins the
+   * explanation in place so the next person reads it before writing the same
+   * two lines, and fails if somebody adds the attempt back without a runtime
+   * proof that the framework has started supplying the value.
+   */
+  const page = await read("app/(app)/dashboard/[[...section]]/page.tsx");
+  assert.match(page, /THE QUERY DOES NOT GO WITH IT/);
+  assert.match(page, /probePage\(\)/);
+  assert.doesNotMatch(
+    code(page),
+    /searchParams/,
+    "reading searchParams on this page returns {} — see the note above it",
+  );
+});
+
+test("an auth-dependent redirect is never cacheable", async () => {
+  /*
+   * These routes answer differently depending on a cookie: /dashboard is a
+   * redirect or a page, and /login is a form or a redirect. The framework
+   * stamps `no-store` on their 200s and nothing on their 3xx, so the redirect
+   * went out with no cache metadata and no `Vary: Cookie`. Nothing compliant
+   * caches a 307 — but if anything did, an anonymous visitor served a cached
+   * `/login → /dashboard` loops and a signed-in one served a cached
+   * `/dashboard → /login` is locked out.
+   */
+  const worker = await read("worker/index.ts");
+  assert.match(worker, /function authDependent\(pathname: string\)/);
+  assert.match(worker, /pathname === "\/login"/);
+  assert.match(worker, /pathname\.startsWith\("\/dashboard\/"\)/);
+  assert.match(worker, /headers\.set\("Cache-Control", "private, no-store"\)/);
+  assert.match(worker, /headers\.set\("Vary", "Cookie"\)/);
+  // Scoped to the redirect. A blanket no-store would also land on every
+  // marketing page and every static asset.
+  assert.match(worker, /response\.status >= 300 &&\s*\r?\n\s*response\.status < 400/);
 });
 
 test('"Your session has ended" stays a server sentence and never a widget state', async () => {
@@ -361,6 +513,11 @@ test("signed out, no protected route answers with a page", async (t) => {
     assert.ok(next, `${path} must carry a next target`);
     assert.ok(next.startsWith("/"), `${path} next must be a local path`);
     assert.ok(!next.startsWith("//"), `${path} next must not be protocol-relative`);
+    /* `/portal` and `/admin/reconcile` deliberately name their DESTINATION
+       rather than themselves — signing in should land on the dashboard and on
+       the reconciler, not back on a forwarding address. */
+    const expected = { "/portal": "/dashboard", "/admin/reconcile": "/dashboard/reconcile" };
+    assert.equal(next, expected[path] ?? path, `${path} next target`);
 
     // And the body is empty. This is the assertion the whole file is for.
     const body = await response.text();
@@ -383,6 +540,48 @@ test("the dashboard markup does not exist anywhere in a signed-out response", as
     for (const marker of SHELL_MARKERS) {
       assert.ok(!html.includes(marker), `${path} leaked "${marker}"`);
     }
+  }
+});
+
+test("a deep link comes back from sign-in as the path it asked for", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+
+  /*
+   * The PATH is preserved and the query is not — see the note in the dashboard
+   * page for why the framework makes the second half impossible. This is the
+   * runtime half of that record: it holds the path guarantee, and it is what
+   * caught a source-only pin that read as preserving the query while the
+   * redirect provably dropped it.
+   */
+  for (const [path, expected] of [
+    ["/dashboard/jobs?filter=open&view=chart", "/dashboard/jobs"],
+    ["/dashboard?manage=import", "/dashboard"],
+    ["/dashboard/sites", "/dashboard/sites"],
+    ["/dashboard/admin/roles", "/dashboard/admin/roles"],
+  ]) {
+    const response = await fetch(`${BASE_URL}${path}`, { redirect: "manual" });
+    const location = new URL(response.headers.get("location"), BASE_URL);
+    assert.equal(location.searchParams.get("next"), expected, `next for ${path}`);
+  }
+});
+
+test("an auth-dependent redirect says it may not be cached", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+
+  for (const path of ["/dashboard", "/dashboard/jobs", "/portal", "/admin/reconcile"]) {
+    const response = await fetch(`${BASE_URL}${path}`, { redirect: "manual" });
+    assert.match(
+      response.headers.get("cache-control") ?? "",
+      /no-store/,
+      `${path} redirect must not be cacheable`,
+    );
+    assert.match(response.headers.get("vary") ?? "", /cookie/i, `${path} must vary on cookie`);
   }
 });
 

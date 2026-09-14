@@ -89,6 +89,27 @@ export default async function DashboardPage({
    * so signing in returns the visitor to the screen they asked for rather than
    * to the Overview. It is sanitised inside `loginRedirect` and again by the
    * login page, because route params are attacker-supplied.
+   *
+   * THE QUERY DOES NOT GO WITH IT, AND THAT IS THE FRAMEWORK, NOT A CHOICE.
+   *
+   * `session-guard.ts` carries `window.location.search` on the client half of
+   * this feature, so the obvious thing was to read `searchParams` here and
+   * make the two agree. Measured on vinext 0.0.50, it cannot be done. A page's
+   * redirect is thrown during `probePage()` in `entries/app-rsc-entry.js`,
+   * which builds the props from
+   * `collectAppPageSearchParams(searchParams).searchParamsObject` — a key that
+   * function does not return, so the value is `undefined` and the page sees
+   * `{}`. Measured on `/dashboard/jobs?filter=open&view=chart` and on a static
+   * segment, `/dashboard/teams?zz=1`: both arrive as `{}`. `headers()` is no
+   * way round it either — the whole header set a page can see is accept,
+   * accept-encoding, accept-language, connection, host, sec-fetch-mode,
+   * user-agent and x-forwarded-host, and not one of them carries the URL.
+   *
+   * So a filtered deep link comes back from sign-in as its bare path. Written
+   * down rather than left as a puzzle, because the fix LOOKS like a two-line
+   * change and silently does nothing: the first attempt shipped a source-level
+   * test that passed green while the behaviour was broken, and only a runtime
+   * assertion caught it.
    */
   const session = await requirePageSession(
     section?.length ? `/dashboard/${section.join("/")}` : "/dashboard",
