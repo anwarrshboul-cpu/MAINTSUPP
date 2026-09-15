@@ -73,6 +73,30 @@ export async function POST(request: Request) {
       return Response.json({ error: "Complete the required portfolio and contact details." }, { status: 400 });
     }
 
+    /*
+     * THE HONEYPOT, READ HERE RATHER THAN ONLY IN THE BROWSER.
+     *
+     * `final-cta.tsx` renders an off-screen `website` field and returns early
+     * when it is filled. That stops a bot driving the form and nothing at all
+     * about one posting to this route directly, which never looked at the
+     * field — so the check that existed was a hint rather than a gate.
+     *
+     * Harmless while no key is configured and nothing can be delivered. The
+     * moment one is, every submission becomes an email into a real inbox with
+     * text the sender chose, so the gate belongs on this side.
+     *
+     * The answer is a 201 shaped like a real one, with an id that is not a
+     * row. A 400 saying "you filled the hidden field" teaches the next attempt
+     * to leave it empty; a silent accept costs the sender the same effort and
+     * tells them nothing. Nothing is written and nothing is sent.
+     */
+    if (clean(payload.website, 200)) {
+      return Response.json(
+        { lead: { id: crypto.randomUUID() }, notified: false, confirmationSent: false },
+        { status: 201 },
+      );
+    }
+
     await ensureDatabase();
     // The public lead form has no account behind it by definition.
     const { db, orgId } = await scopedDb(request, { allowAnonymous: true });
@@ -108,6 +132,10 @@ export async function POST(request: Request) {
         subjectType: "lead",
         subjectId: created.id,
         to: salesInbox,
+        /* Reply goes to the person who filled the form, not to the send-only
+           address the alert came from. Their address is already in the body;
+           this is what makes it actionable without copying it out by hand. */
+        replyTo: email,
         subject: alert.subject,
         body: alert.body,
       }),

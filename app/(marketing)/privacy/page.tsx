@@ -74,16 +74,16 @@ export default function PrivacyPage() {
           or any other client.
         </p>
         <p>
-          Our infrastructure is provided by Cloudflare, which hosts the application,
-          the database and the file storage. Transactional email is sent through
-          Resend. Both act as processors on our instructions.
+          The application is hosted by Vercel. The database and the file storage are
+          provided by Supabase. Transactional email is sent through Resend. All three
+          act as processors on our instructions.
         </p>
 
         <h2>Where it is held</h2>
         <p>
-          Data is held on Cloudflare infrastructure. Some processing may take place
-          outside the UK; where it does, it is covered by the safeguards in
-          Cloudflare&rsquo;s data processing terms.
+          Data is held on Vercel and Supabase infrastructure. Some processing may take
+          place outside the UK; where it does, it is covered by the safeguards in each
+          processor&rsquo;s data processing terms.
         </p>
 
         <h2>How long we keep it</h2>

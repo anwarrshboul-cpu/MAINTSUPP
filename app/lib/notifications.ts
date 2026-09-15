@@ -26,6 +26,21 @@ export type NotificationRequest = {
   body: string;
   /** Plain-text alternative. Falls back to the body with tags stripped. */
   text?: string;
+  /**
+   * Who a reply should go to, when that is not the sender.
+   *
+   * The three public forms are the reason this exists. Without it, pressing
+   * Reply on a portfolio enquiry addresses `notifications@maintsupp.com` — a
+   * send-only address — instead of the person who filled the form, and the
+   * only way to answer a lead is to copy their address out of the message
+   * body by hand.
+   *
+   * Optional, and deliberately not defaulted: an alert about a job raised
+   * inside the portal, a compliance digest and a reminder have no single
+   * person to reply to, and inventing one would be worse than the header
+   * being absent.
+   */
+  replyTo?: string;
 };
 
 export type SendResult = {
@@ -142,6 +157,16 @@ function newId() {
   return `ntf_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
+/**
+ * How long the provider gets before the send is recorded as failed.
+ *
+ * Long enough that a slow-but-working Resend still succeeds, short enough that
+ * it expires well inside any platform gateway timeout — so the visitor gets the
+ * 201 their submission earned and the failure is written to the log, rather
+ * than the whole request dying and the submission looking lost.
+ */
+const EMAIL_TIMEOUT_MS = 10_000;
+
 async function deliverEmail(
   config: ReturnType<typeof providerConfig>,
   request: NotificationRequest,
@@ -162,20 +187,50 @@ async function deliverEmail(
       `${escapeHtml(request.to)}</p>${request.body}`
     : request.body;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${config.apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      from: config.from,
-      to: [to],
-      subject,
-      html: body,
-      text: request.text ?? stripTags(body),
-    }),
-  });
+  /*
+   * A DEADLINE, because the caller is a visitor waiting on a form.
+   *
+   * This fetch had no signal. A provider that accepts the connection and then
+   * stops answering held the submission open until the platform killed the
+   * invocation — and the visitor saw a hard failure for a lead that was
+   * already saved, and resubmitted. Ten seconds is far longer than a healthy
+   * send and far shorter than any gateway timeout, so the failure lands HERE,
+   * where it is recorded in `notification_log` and the request still returns
+   * the 201 the row deserves.
+   */
+  let response: Response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      signal: AbortSignal.timeout(EMAIL_TIMEOUT_MS),
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        from: config.from,
+        to: [to],
+        subject,
+        html: body,
+        text: request.text ?? stripTags(body),
+        /*
+         * Omitted rather than sent empty when there is nobody to reply to.
+         * Resend rejects `reply_to: ""`, and an alert about a compliance
+         * digest has no author to answer.
+         */
+        ...(request.replyTo ? { reply_to: [request.replyTo] } : {}),
+      }),
+    });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.name : "fetch failed";
+    const timedOut = reason === "TimeoutError" || reason === "AbortError";
+    return {
+      ok: false,
+      error: timedOut
+        ? `timed out after ${EMAIL_TIMEOUT_MS}ms`
+        : `${reason}: ${cause instanceof Error ? cause.message : ""}`.slice(0, 500),
+    };
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -346,11 +401,25 @@ const SHELL = (title: string, body: string) => `
   </p>
 </div>`;
 
+/**
+ * One label/value row, with the value ESCAPED.
+ *
+ * Every field a stranger can type reaches an HTML email through here: six in
+ * the lead alert, seven in the job alert, five in the contractor job-link
+ * event. Interpolated raw — as this did — a public form is a way to put a
+ * link, a tracking pixel or a block of text that looks like an instruction
+ * into the message that lands in `anwar@` and `operations@`. Nothing here is
+ * rendered in a browser the visitor controls, so this is not XSS; it is
+ * content injection into somebody's inbox, and the mail client will render it.
+ *
+ * The LABEL is not escaped and does not need to be: every one is a literal in
+ * this file.
+ */
 function row(label: string, value: string | null | undefined) {
   if (!value) return "";
   return `<tr>
     <td style="padding:4px 12px 4px 0;color:#6b7a83;font-size:13px;vertical-align:top">${label}</td>
-    <td style="padding:4px 0;font-size:13px">${value}</td>
+    <td style="padding:4px 0;font-size:13px">${escapeHtml(value)}</td>
   </tr>`;
 }
 
@@ -473,9 +542,14 @@ export function jobAlertTemplate(job: {
  * is deliberate rather than an oversight: `site` and `kind` come from the board
  * capture and the fixed slot vocabulary, while a board name is free text an
  * operator typed into the section dialog. It reaches an HTML email either way,
- * so the new field does not become this template's first injection point. The
- * older two are a separate, pre-existing question and widening the surface
- * without saying so is how that question stops being asked.
+ * so the new field does not become this template's first injection point.
+ *
+ * THE SEPARATE QUESTION IT USED TO DEFER IS NOW ANSWERED. This said the older
+ * fields were "a separate, pre-existing question", which was true while no key
+ * was configured and nothing could be delivered. `row()` escapes its value, so
+ * every field in the lead alert, the job alert and the job-link event is
+ * escaped at the one place they all pass through, rather than at each of the
+ * eighteen call sites.
  */
 function escapeHtml(value: string) {
   return value

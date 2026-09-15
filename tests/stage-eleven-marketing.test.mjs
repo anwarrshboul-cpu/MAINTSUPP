@@ -237,10 +237,25 @@ test("the privacy notice is marked as needing review", async () => {
   const privacy = await read("app/(marketing)/privacy/page.tsx");
   assert.match(privacy, /REQUIRES OWNER REVIEW/);
   assert.match(privacy, /\[TO CONFIRM/, "retention periods must not be invented");
-  // It must describe what the platform actually does.
-  for (const topic of ["contractor job link", "Cloudflare", "Resend", "lawful basis"]) {
+  /*
+   * It must describe what the platform actually does — and RE-POINTED, because
+   * what it does changed and the notice had not.
+   *
+   * This listed "Cloudflare", which was right when the app ran on Workers with
+   * D1 and R2. Production has been Vercel, Supabase Postgres and Supabase
+   * Storage since well before this test last passed, so the notice was naming
+   * the wrong sub-processors on the page every public form's consent checkbox
+   * points at. The topic list is the same contract; the processors in it are
+   * the ones that are true.
+   */
+  for (const topic of ["contractor job link", "Vercel", "Supabase", "Resend", "lawful basis"]) {
     assert.match(privacy, new RegExp(topic, "i"), `the notice must cover ${topic}`);
   }
+  assert.doesNotMatch(
+    privacy,
+    /Cloudflare/i,
+    "and must not name a processor Production does not use — that is the disclosure, not a detail",
+  );
 });
 
 test("dashboard CSS is imported only by the app layout", async () => {
