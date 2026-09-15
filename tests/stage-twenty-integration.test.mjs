@@ -60,14 +60,42 @@ test("a signed-in user is not offered the testing role switcher", async () => {
 
 test("the dashboard greets whoever actually signed in", async () => {
   const page = await read("app/(app)/dashboard/[[...section]]/page.tsx");
+  const code = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  assert.match(page, /getSession\(/);
-  // The preview identity has to survive for an unauthenticated browser, which
-  // is still how the dashboard is demoed.
-  assert.match(page, /\|\| "Preview User"/);
-  assert.ok(
-    !/userName="Preview User"/.test(page),
-    "the name must come from the session when there is one",
+  /*
+   * RE-POINTED, AND THE CLAIM IN THE TITLE IS STRONGER THAN IT WAS.
+   *
+   * This pinned two things: that the page reads a session, and that an
+   * unauthenticated browser falls through to the literal "Preview User",
+   * "which is still how the dashboard is demoed".
+   *
+   * That fallback WAS the auth hole. An anonymous `GET /dashboard` was answered
+   * with the whole operations shell under a placeholder identity — measured at
+   * 47,663 bytes — and the only thing that eventually sent the visitor to
+   * /login was a client fetch wrapper reacting to the twelve 401s that
+   * followed. `app/lib/page-guard.ts` closed it: the page now REQUIRES a
+   * session and redirects when there is none, so there is no unauthenticated
+   * case left to have a name for.
+   *
+   * MISSED WHEN THAT LANDED, and this file was red on main until the commercial
+   * update happened to run the full suite. `requirePageSession` still resolves
+   * through the same `getSession` the API uses — see `page-guard.ts` — so the
+   * session half of the claim is unchanged; what goes is the placeholder, and
+   * asserting it is ABSENT is what "greets whoever actually signed in" meant
+   * all along.
+   */
+  assert.match(code, /await requirePageSession\(/, "the page resolves a session before rendering");
+  assert.match(
+    await read("app/lib/page-guard.ts"),
+    /getSession\(/,
+    "and the guard resolves it through the same implementation the API uses",
+  );
+  assert.doesNotMatch(code, /"Preview User"/, "there is no unauthenticated case to name");
+  assert.doesNotMatch(code, /"preview@maintsupp\.local"/);
+  assert.match(
+    code,
+    /userName=\{session\.user\.fullName\?\.trim\(\) \|\| session\.user\.email\}/,
+    "the name comes from the session, with no fallback behind it",
   );
 });
 
