@@ -23,7 +23,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:3000";
@@ -399,27 +399,52 @@ test("changing a password requires the current one and ends other sessions", asy
  * silently, a bootstrap failure is indistinguishable from a wrong password,
  * which is how the first Production bootstrap presented on 2026-09-05.
  *
- * So each file is now held to the strongest rule it actually meets, rather than
- * all nine to one rule that two of them break:
+ * HARDENED 2026-09-16. `login/route.ts` no longer passes the caught error. The
+ * shim in `db/node-pg-d1.ts` builds every failure as
+ * `D1_ERROR: <driver message>: <translated SQL>` and attaches the raw driver
+ * error as `cause`, so printing that object put statement text, the driver's own
+ * detail and a stack trace into the logs of the UNAUTHENTICATED sign-in route.
+ * It logs a static sentence now, which is what the 2026-09-05 incident actually
+ * needed — that the bootstrap failed at all, rather than a wrong-password
+ * message. So both logging files carry literals only, and the weaker
+ * "may carry a value as long as it is not called `password`" tier is gone
+ * rather than left lying around for something to drift back into: a rule that
+ * permits `error` permits whatever `error` happens to hold.
  *
- *  - the seven that log nothing keep the blanket ban, unchanged;
- *  - `auth-session.ts` may log STRING LITERALS AND NOTHING ELSE — strip the
- *    double-quoted literals and the call must be empty, so no template literal,
- *    no concatenated variable, no identifier of any kind;
- *  - `login/route.ts` may pass the caught error along, but NO CREDENTIAL: no
- *    identifier from the credential vocabulary below, and no template literal
- *    through which one could be interpolated.
+ * TWO RULES, and the second is the strict one:
  *
- * Literals are stripped before the vocabulary check on purpose — one of the
+ *  - every auth file that logs nothing keeps the blanket ban;
+ *  - the two that do log may emit STRING LITERALS AND NOTHING ELSE — strip the
+ *    double-quoted literals and the call must come out empty, so no template
+ *    literal, no concatenated variable, no identifier of any kind, and no
+ *    `error`, `cause` or `stack`.
+ *
+ * Literals are stripped before the check on purpose — one of the
  * `auth-session.ts` messages contains the word "password" as prose, and the
  * rule is about values, not about what the sentence is allowed to say.
+ *
+ * THE FILE LIST IS READ OFF DISK, not typed out. Two password-reset files —
+ * `password-resets/[token]/route.ts` and `password-resets/reset-tokens.ts` —
+ * existed for this entire test's life and were never in the hand-written list,
+ * so a `console.error(token)` on the password-reset path would not have been
+ * caught. Enumerating `app/api/auth` fixes the class rather than those two
+ * instances: a route added tomorrow is covered the day it lands.
  */
-const LITERAL_ONLY_LOGGING = new Set(["app/lib/auth-session.ts"]);
-const NO_CREDENTIAL_LOGGING = new Set(["app/api/auth/login/route.ts"]);
+const LITERAL_ONLY_LOGGING = new Set([
+  "app/lib/auth-session.ts",
+  "app/api/auth/login/route.ts",
+]);
 
-/** Anything whose VALUE would be a credential if it reached a log. */
-const CREDENTIAL_VOCABULARY =
-  /\b(password|passwd|token|hash|secret|seed|cookie|credential|session)\b/i;
+/** Every `.ts` under `app/api/auth`, plus the two libraries the routes sign in through. */
+async function authSurface() {
+  const dir = new URL("../app/api/auth/", import.meta.url);
+  const entries = await readdir(dir, { recursive: true });
+  const routes = entries
+    .map((entry) => entry.split("\\").join("/"))
+    .filter((entry) => entry.endsWith(".ts"))
+    .map((entry) => `app/api/auth/${entry}`);
+  return [...routes.sort(), "app/lib/password.ts", "app/lib/auth-session.ts"];
+}
 
 /** Every `console.*` argument list, with double-quoted string literals removed. */
 function consoleArgumentsWithoutLiterals(code) {
@@ -430,40 +455,36 @@ function consoleArgumentsWithoutLiterals(code) {
 }
 
 test("no auth route logs a secret", async () => {
-  const files = [
-    "app/lib/password.ts",
-    "app/lib/auth-session.ts",
+  const files = await authSurface();
+
+  /*
+   * The walk is the thing protecting every other assertion here, so it is
+   * itself asserted: a rename that empties it would otherwise turn this whole
+   * test green while checking nothing. Both password-reset files are named
+   * explicitly because they are the ones the old hand-written list missed.
+   */
+  assert.ok(files.length >= 11, `the auth surface should not shrink: found ${files.length}`);
+  for (const required of [
     "app/api/auth/login/route.ts",
-    "app/api/auth/logout/route.ts",
-    "app/api/auth/logout-all/route.ts",
     "app/api/auth/password/route.ts",
-    "app/api/auth/invitations/route.ts",
-    "app/api/auth/invitations/[token]/route.ts",
-    "app/api/auth/invitations/invitation-tokens.ts",
-  ];
+    "app/api/auth/password-resets/[token]/route.ts",
+    "app/api/auth/password-resets/reset-tokens.ts",
+    "app/lib/auth-session.ts",
+  ]) {
+    assert.ok(files.includes(required), `${required} must be covered by this check`);
+  }
+
   for (const path of files) {
     const text = codeOnly(await source(path));
-    if (!LITERAL_ONLY_LOGGING.has(path) && !NO_CREDENTIAL_LOGGING.has(path)) {
+    if (!LITERAL_ONLY_LOGGING.has(path)) {
       assert.doesNotMatch(text, /console\.(log|info|warn|error|debug)/, `${path} must not log`);
       continue;
     }
     for (const args of consoleArgumentsWithoutLiterals(text)) {
-      if (LITERAL_ONLY_LOGGING.has(path)) {
-        assert.equal(
-          args.replace(/[\s+,]/g, ""),
-          "",
-          `${path} may log string literals only — this call carries a value: ${args.trim()}`,
-        );
-        continue;
-      }
-      assert.doesNotMatch(
-        args,
-        CREDENTIAL_VOCABULARY,
-        `${path} must not log a credential — this call names one: ${args.trim()}`,
-      );
-      assert.ok(
-        !args.includes("`"),
-        `${path} must not log a template literal, which could interpolate one: ${args.trim()}`,
+      assert.equal(
+        args.replace(/[\s+,]/g, ""),
+        "",
+        `${path} may log string literals only — this call carries a value: ${args.trim()}`,
       );
     }
   }
