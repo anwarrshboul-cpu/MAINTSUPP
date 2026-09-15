@@ -1,4 +1,4 @@
-# https://maintsupp.com
+# https://www.maintsupp.com
 
 User-agent: *
 Allow: /
@@ -12,4 +12,4 @@ Disallow: /login
 Disallow: /request
 Disallow: /api/
 
-Sitemap: https://maintsupp.com/sitemap.xml
+Sitemap: https://www.maintsupp.com/sitemap.xml
