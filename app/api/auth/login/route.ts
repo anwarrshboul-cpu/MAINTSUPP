@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
   // Provisions the owner account if it is missing. Here as well as on the
   // sign-in page so a fresh database can be signed into through the API alone.
-  await ensureOwnerAccount(d1).catch((error: unknown) => {
+  await ensureOwnerAccount(d1).catch(() => {
     // A seeding failure must not take down sign-in for accounts that already
     // exist — those are the ones that matter once the workspace is in use.
     //
@@ -60,7 +60,20 @@ export async function POST(request: Request) {
     // (2026-09-05) — the INSERT was failing on a column type and nothing
     // anywhere said so. Keeping the sign-in path alive is worth a swallowed
     // error; keeping it a secret is not.
-    console.error("[auth] owner bootstrap failed", error);
+    //
+    // THE CAUSE IS DELIBERATELY NOT LOGGED, and this is the one place in the
+    // application where that matters. `db/node-pg-d1.ts` builds every failure
+    // as `D1_ERROR: <driver message>: <translated SQL>` and attaches the raw
+    // driver error as `cause`, so printing the object here would put statement
+    // text, the driver's own detail and a stack trace into the logs of the
+    // UNAUTHENTICATED sign-in route — the one endpoint a stranger can reach
+    // without a session. What the 2026-09-05 incident actually needed was to
+    // know the bootstrap had failed at all, rather than reading a wrong-password
+    // message; that is exactly what this line still says. When the statement
+    // itself is the question, `PG_D1_DEBUG=1` prints the original SQL, the
+    // translated SQL and the bind values from inside the shim — off by default,
+    // and deliberately not something the sign-in path decides to emit.
+    console.error("[auth] owner bootstrap failed");
   });
 
   let payload: Record<string, unknown>;
