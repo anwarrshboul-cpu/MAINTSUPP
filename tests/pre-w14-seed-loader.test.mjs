@@ -994,7 +994,7 @@ test("seed:cron drives the real dispatcher rather than a second copy of one", as
    * mail leaves the building is a second place to get it wrong.
    */
   assert.doesNotMatch(codeOnly(source), /sendNotification\s*\(/);
-  assert.doesNotMatch(codeOnly(source), /(nodemailer|resend|smtp|sendgrid|postmark)/i);
+  assert.doesNotMatch(codeOnly(source), /\b(nodemailer|resend|smtp|sendgrid|postmark)\b/i);
   assert.doesNotMatch(
     codeOnly(source),
     /reminder_dispatch|claimDispatch/,

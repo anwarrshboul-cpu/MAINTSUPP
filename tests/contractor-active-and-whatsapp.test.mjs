@@ -77,8 +77,18 @@ test("the Active checkbox says what it does, and what it does not do", async () 
 
 test("`active` and `availability` stay two columns, and archive writes both", async () => {
   const schema = await read("db/schema.ts");
-  const table = schema.slice(schema.indexOf('sqliteTable(\n  "contractors"'));
+  /*
+   * `\r?\n`, not `\n`. db/schema.ts is CRLF on disk, so `sqliteTable(\n  "` —
+   * with a character before the newline — never matched, `indexOf` returned
+   * -1, and `slice(-1)` left `body` as the empty string: this test has been
+   * asserting against nothing. The same trap already ate the `leads.regions`
+   * guard. An anchor that BEGINS with \n is safe; this one could not.
+   */
+  const at = schema.search(/sqliteTable\(\r?\n\s*"contractors"/);
+  assert.ok(at > -1, "the contractors table is still declared with sqliteTable");
+  const table = schema.slice(at);
   const body = table.slice(0, table.indexOf("export const maintenanceRequests"));
+  assert.ok(body.length > 200, "and the slice reaches its columns");
   assert.match(body, /availability: text\("availability"\)\.notNull\(\)\.default\("Available"\)/);
   assert.match(body, /active: integer\("active", \{ mode: "boolean" \}\)\.notNull\(\)\.default\(true\)/);
 

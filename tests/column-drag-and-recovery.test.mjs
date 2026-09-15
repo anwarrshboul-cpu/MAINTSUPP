@@ -432,10 +432,16 @@ test("a deleted column keeps its row, and the row says it is in the bin", () => 
 });
 
 test("sending a column to the bin deletes nothing", () => {
-  const send = bin.slice(
-    bin.indexOf("export async function sendColumnToBin"),
-    bin.indexOf("/* ── Restoring"),
-  );
+  /*
+   * To the next `export`, NOT to the "Restoring" marker. PR #20 put
+   * `binnedAssetSite` and `sendAssetToBin` between those two anchors, and
+   * `sendAssetToBin` clears a stale bin entry with `db.delete(recycleBin)` —
+   * so the old window read a neighbour's delete as this function's and has
+   * been failing since. The claim below is the same one, measured on the
+   * function it is actually about.
+   */
+  const sendStart = bin.indexOf("export async function sendColumnToBin");
+  const send = bin.slice(sendStart, bin.indexOf("\nexport ", sendStart + 1));
   assert.ok(send.length > 200, "the function exists");
   assert.doesNotMatch(send, /\.delete\(/, "no row is deleted — that is the whole point");
   assert.match(send, /entityType: "column"/, "it goes in the bin as a column");
