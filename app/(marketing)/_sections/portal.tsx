@@ -161,8 +161,21 @@ export function Portal() {
               <i />
               <i />
             </span>
+            {/*
+              THE ADDRESS BAR IN THE MOCK SHOWS AN ADDRESS THAT EXISTS.
+
+              It read `portal.maintsupp.com / <tab>`, and portal.maintsupp.com
+              is not a host this product has ever been served from. Portal Login
+              below goes to `/portal`, which resolves to `/dashboard` on this
+              same domain — so a reader who took the caption at face value and
+              typed it in reached nothing, on the one screenshot whose whole job
+              is to show them where their data lives.
+
+              Only the caption changed. The screenshots, the tabs and the
+              section around them are untouched.
+            */}
             <span className="dashshot__url" id="dashUrl">
-              portal.maintsupp.com / {current.url}
+              maintsupp.com/dashboard/{current.url}
             </span>
             <span className="dashshot__tag">Sample data</span>
           </div>

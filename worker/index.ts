@@ -26,9 +26,61 @@ interface ExecutionContext {
 // dangerouslyAllowSVG: true in next.config.js and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
+/**
+ * THE ONE VERCEL HOSTNAME THAT IS A DUPLICATE OF THE SITE, and only that one.
+ *
+ * `maintsupp-portal.vercel.app` is an alias of the SAME production deployment
+ * that serves maintsupp.com, so every page of the marketing site — and the
+ * portal behind it — was reachable at two addresses, both answering 200, both
+ * serving a robots.txt that names `https://maintsupp.com`. That is duplicate
+ * content with no canonical between the two hosts.
+ *
+ * MATCHED EXACTLY, NEVER BY SUFFIX. The Preview deployments this project is
+ * released through are `maintsupp-portal-<hash>-maintsupp.vercel.app` and
+ * `maintsupp-portal-git-<branch>-maintsupp.vercel.app`; a `.endsWith(".vercel.app")`
+ * here would bounce every one of them to production and make Preview QA
+ * impossible — which is the whole mechanism this project verifies releases with.
+ */
+const DUPLICATE_HOST = "maintsupp-portal.vercel.app";
+const CANONICAL_ORIGIN = "https://www.maintsupp.com";
+
+/**
+ * Whether this deployment is one search engines should stay out of.
+ *
+ * `VERCEL_ENV` is "production", "preview" or "development". Only a value that
+ * is present AND not production earns the header: an unset variable means this
+ * is not running on Vercel at all — the Railway box, or a local dev server —
+ * and guessing "noindex" for an unknown host is how a live site disappears
+ * from search.
+ */
+function isUnindexableDeployment() {
+  const env = (globalThis as Record<string, unknown>).process as
+    | { env?: Record<string, string | undefined> }
+    | undefined;
+  const target = env?.env?.VERCEL_ENV;
+  return typeof target === "string" && target !== "" && target !== "production";
+}
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    /*
+     * 301, and the PATH IS KEPT. Sending every address on the duplicate host to
+     * the bare homepage would break a bookmarked `/dashboard` and every deep
+     * link anybody has ever shared; keeping the path means the redirect is a
+     * change of hostname and nothing else. Permanent rather than temporary
+     * because it is: the alias is not coming back as a second front door.
+     */
+    if (url.hostname === DUPLICATE_HOST) {
+      return new Response(null, {
+        status: 301,
+        headers: {
+          Location: `${CANONICAL_ORIGIN}${url.pathname}${url.search}`,
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
@@ -140,6 +192,22 @@ function withSecurityHeaders(response: Response, pathname = ""): Response {
   // Nothing here uses a camera, a microphone or a location.
   if (!headers.has("Permissions-Policy")) {
     headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  }
+
+  /*
+   * A PREVIEW DEPLOYMENT IS NOT A SECOND COPY OF THE SITE FOR GOOGLE TO FIND.
+   *
+   * Every push builds one at its own `*.vercel.app` hash URL, serving the whole
+   * marketing site with the production `robots.txt` — which says `Allow: /` and
+   * names maintsupp.com — so each release quietly published another indexable
+   * duplicate under a different hostname.
+   *
+   * `X-Robots-Tag` rather than a `<meta>` tag, because it covers the non-HTML
+   * responses too and needs no change to any page. `noindex, nofollow` so a
+   * crawler that reaches a preview does not walk it either.
+   */
+  if (isUnindexableDeployment() && !headers.has("X-Robots-Tag")) {
+    headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
   return new Response(response.body, {

@@ -67,9 +67,41 @@ test("no file the marketing site renders carries + VAT, or a synonym for it", as
     const body = name.endsWith(".css")
       ? source.replace(/\/\*[\s\S]*?\*\//g, "")
       : rendered(source);
-    assert.doesNotMatch(body, /\bVAT\b/i, `${name} still mentions VAT`);
-    for (const synonym of [/ex\.?\s*VAT/i, /exclud\w*\s+VAT/i, /plus\s+VAT/i]) {
-      assert.doesNotMatch(body, synonym, `${name} carries the same qualifier renamed`);
+    /*
+     * RE-POINTED FROM THE WORD TO THE QUALIFIER, and widened where it matters.
+     *
+     * What V3 withdrew is the claim that a published price EXCLUDES tax. The
+     * commercial update replaces the silence with the positive form — "Prices
+     * shown are the total payable. Maintauk Ltd is not currently VAT
+     * registered." — which is the opposite statement, and is the one a reader
+     * comparing quotes actually needs. A blanket ban on the three letters made
+     * that sentence unwriteable while catching nothing the list below misses.
+     *
+     * Every form that qualifies a NUMBER is still banned, the old brief's
+     * "+ VAT" included, and three more are added. The single permitted mention
+     * is the narrow one: a statement about the COMPANY's registration status,
+     * checked sentence by sentence so "our prices are subject to VAT" cannot
+     * ride in beside it.
+     */
+    for (const qualifier of [
+      /\+\s*VAT/i,
+      /ex\.?\s*VAT/i,
+      /exclud\w*\s+VAT/i,
+      /plus\s+VAT/i,
+      /VAT\s+extra/i,
+      /subject\s+to\s+VAT/i,
+    ]) {
+      assert.doesNotMatch(body, qualifier, `${name} carries the same qualifier renamed`);
+    }
+    /* Whitespace-collapsed first: this is JSX, so the one permitted sentence is
+       wrapped across source lines and "VAT\n   registered" is the same words. */
+    const flat = body.replace(/\s+/g, " ");
+    for (const sentence of flat.match(/[^.]*\bVAT\b[^.]*\./gi) ?? []) {
+      assert.match(
+        sentence,
+        /not currently VAT registered/i,
+        `${name} mentions VAT for something other than the registration status`,
+      );
     }
   }
 });
@@ -201,11 +233,44 @@ test("there is exactly one price table on the marketing site", async () => {
     "the FAQ must not deny the prices the page publishes",
   );
   const cost = content.slice(content.indexOf('"q": "What does it cost?"'));
+  /* "every rate is published on this page" now, because the answer quotes the
+     two entry rates as well as pointing at the section. What is being held is
+     that the FAQ agrees the prices exist and says where they are — not one
+     particular wording of it. */
   assert.match(
     cost.slice(0, cost.indexOf("\n  }")),
-    /rates are published on this page/,
+    /(?:every rate is|rates are) published on this page/,
     "it must point at the one place the rates live",
   );
+
+  /*
+   * AND THE RULE ABOVE GOT STRONGER RATHER THAN WEAKER when that answer began
+   * quoting figures.
+   *
+   * The commercial brief requires it to name "Essential from £60 per store,
+   * Complete from £100 per store", and separately requires every figure to
+   * agree across the cards, the rate card, the totals, the footnotes and this
+   * sentence. Typing them into `content.ts` would have tripped the offenders
+   * check above — which exists because a second typed copy is a second thing
+   * to keep true. So the NUMBERS moved to `rates.ts`, and both files
+   * interpolate them: the check passes for the right reason, because a `£${…}`
+   * has no digit after the sign.
+   *
+   * These three pins are what stop that being undone by somebody
+   * "simplifying" the answer back to a literal.
+   */
+  const rates = await read(`${SECTIONS_DIR}/rates.ts`);
+  assert.doesNotMatch(
+    rendered(rates),
+    /£/,
+    "rates.ts holds quantities; the two files that render them own the sign",
+  );
+  assert.match(
+    rendered(content),
+    /\$\{ENTRY_BAND\.essential\}/,
+    "the cost answer must derive the entry rate, never restate it",
+  );
+  assert.match(rendered(content), /\$\{ENTRY_BAND\.complete\}/);
 });
 
 /* ── 7. The FAQ, shared rather than copied ───────────────────────────────── */
@@ -293,7 +358,13 @@ test("Report a Job is last, and moving it changed nothing about how it submits",
 /* ── 10. The slider ──────────────────────────────────────────────────────── */
 
 test("the pricing calculator opens at five stores", async () => {
+  /* RE-POINTED AT `rates.ts`. `SLIDER_MIN` and `SLIDER_MAX` moved there with
+     the band table when the cost FAQ began deriving the entry rates too — see
+     the header of that file for why. The claim is unchanged; only the file
+     that holds the number is. `pricing.tsx` is still where the opening value
+     is bound to the floor, so that half stays pinned there. */
   const pricing = await read(`${SECTIONS_DIR}/pricing.tsx`);
+  const rates = await read(`${SECTIONS_DIR}/rates.ts`);
   /*
    * RE-POINTED, at a stronger claim. This pinned the literal `useState(5)`
    * beside `SLIDER_MIN = 1`, which made "opens at five" and "the control starts
@@ -304,9 +375,9 @@ test("the pricing calculator opens at five stores", async () => {
    * The range also had to grow. It ended at 40, and the top band is 51+, so a
    * reader could not reach "Book a Portfolio Review" by dragging.
    */
-  assert.match(pricing, /const SLIDER_MIN = 5;/, "five, and it is the floor as well as the opening value");
+  assert.match(rates, /export const SLIDER_MIN = 5;/, "five, and it is the floor as well as the opening value");
   assert.match(pricing, /useState\(SLIDER_MIN\)/, "opened from the floor, not from a second literal");
-  assert.match(pricing, /const SLIDER_MAX = 60;/, "the range must reach past the 51+ band");
+  assert.match(rates, /export const SLIDER_MAX = 60;/, "the range must reach past the 51+ band");
   /* Five is the number the page already claims to serve from. */
   const who = await read(`${SECTIONS_DIR}/who-we-help.tsx`);
   assert.match(who, /Typically 5–50 locations/, "the calculator opens on the bottom of that range");

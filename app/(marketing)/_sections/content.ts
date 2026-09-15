@@ -6,6 +6,21 @@
  * is to make it indexable, not to change what it says.
  */
 
+/**
+ * WHERE "Book a Portfolio Review" GOES.
+ *
+ * The hero CTA and the final CTA panel both open this, in a new tab. It is
+ * here rather than typed into each of them because two copies of a booking
+ * link is one copy that can be changed and one that cannot, and the one left
+ * behind sends people to a calendar that is no longer being read.
+ *
+ * The on-page enquiry form is deliberately still there as the fallback for
+ * anyone who would rather write than book a slot.
+ */
+import { ENTRY_BAND, INCLUDED_JOBS, MINIMUM_SITES, inWords } from "./rates";
+
+export const BOOKING_URL = "https://cal.com/maintsupp/portfolio-review";
+
 export const trades = [
   {
     "id": "electrical",
@@ -412,12 +427,27 @@ export const faq = [
        It read: "We do not publish fixed fees, because a small reactive-only
        estate and a large fully managed portfolio are not the same product."
        That was true when the site published no prices. The Pricing section now
-       publishes a per-store rate for three plans across three portfolio bands,
+       publishes a per-store rate for two plans across four portfolio bands,
        so the old answer told a reader the page was lying to them.
-       NO FIGURE IS TYPED HERE, deliberately. `pricing.tsx` holds the only price
-       table on the site and a second copy of a rate in this file is exactly how
-       an FAQ comes to quote a price the cards no longer charge. */
-    "a": "Coordination is priced per store per month, and the rates are published on this page — pick your portfolio size on the pricing calculator and every figure follows from it. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Your final quote is confirmed at the free portfolio review."
+
+       THE TWO FIGURES ARE INTERPOLATED, NOT TYPED, and that is the whole
+       reason `./rates.ts` exists. The commercial brief asks this answer to
+       quote the entry rates AND asks every figure to agree across the cards,
+       the rate card, the totals, the footnotes and this sentence.
+       `tests/homepage-v3.test.mjs` forbids a typed `£<digit>` outside
+       `pricing.tsx` precisely so a second copy cannot go stale — deriving
+       them satisfies the brief and keeps that rule, because a `£${…}` has no
+       digit after the sign. Never type one in here. */
+    "a": `Coordination is priced per store per month and every rate is published on this page — Essential from £${ENTRY_BAND.essential} per store, Complete from £${ENTRY_BAND.complete} per store, falling as the portfolio grows. It includes ${inWords(INCLUDED_JOBS)} coordinated jobs per store per month, pooled across the whole portfolio, so a bad month at one site doesn't cost you extra. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Our minimum portfolio is ${inWords(MINIMUM_SITES)} sites. Your final quote is confirmed at the free portfolio review.`
+  },
+  {
+    /* ADDED WITH THE COMMERCIAL UPDATE, immediately after the cost answer,
+       because it is the question the cost answer provokes. It turns a lead
+       away in plain words, which is the point: below five sites the
+       coordination fee costs more than the coordination saves, and saying so
+       is worth more than the fee. */
+    "q": "What if we only have three or four sites?",
+    "a": "Then you're probably better served calling trades directly, and we'd rather say so than take the fee. Our minimum is five sites — below that the coordination cost outweighs what you'd save. If you're opening more this year, come back to us when you reach five."
   },
   {
     "q": "Can store teams report jobs directly?",

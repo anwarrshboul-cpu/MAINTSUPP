@@ -1,14 +1,29 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import {
+  ADDITIONAL_JOB,
+  BANDS,
+  ENTRY_BAND,
+  INCLUDED_JOBS,
+  ONBOARDING_CAP,
+  ONBOARDING_PER_STORE,
+  OUT_OF_HOURS_P1,
+  PORTFOLIO_MINIMUM,
+  PROJECT_MINIMUM,
+  PROJECT_PERCENT,
+  SLIDER_MAX,
+  SLIDER_MIN,
+  bandForCount,
+  type Band,
+} from "./rates";
 
 /**
  * SECTION 7 — Pricing.
  *
- * WHAT THE PAGE SAYS: two plans a reader chooses between, one smaller option
- * beside them, four portfolio bands, and the actual numbers — except above
- * fifty stores, where the honest answer is a conversation and the card says so
- * rather than inventing a rate.
+ * WHAT THE PAGE SAYS: two plans a reader chooses between, four portfolio bands,
+ * and the actual numbers — except above fifty stores, where the honest answer is
+ * a conversation and the card says so rather than inventing a rate.
  *
  * THE READER GIVES ONE NUMBER. A slider for how many stores they have; the band
  * follows, the per-store rate follows, and each card shows what that costs them
@@ -17,79 +32,44 @@ import { useState, type ReactNode } from "react";
  *
  * ── WHAT CHANGED IN THIS REVISION, AND WHY EACH ONE MATTERS ───────────────
  *
- * TWO MAIN CARDS, NOT THREE EQUAL ONES. Essential and Complete are the choice;
- * Compliance Administration is a smaller option beside them. Three equal cards
- * asked the reader to compare three things when only two of them are the
- * decision — and the third is a component of the second, which a row of equals
- * cannot say.
+ * THE RATES MOVED OUT, to `./rates.ts`. The cost FAQ now quotes the entry rates
+ * too, and the brief requires every figure to agree across the cards, the rate
+ * card, the totals, the footnotes and that answer. One module knows the numbers
+ * and three places render them; see the header there for the rule this keeps
+ * rather than breaks.
  *
- * THE MATRIX IS GONE. Below 768px this section used to swap the cards for a
- * nineteen-row comparison table, because three stacked cards ran to 2294px.
- * Two cards and a compact third do not, so the table is deleted rather than
- * kept for a problem that no longer exists. It took a `(min-width:601px)`
- * media query with it, which was the one width in this stylesheet outside the
- * five the parity tests permit.
+ * TWO CARDS, AND NO THIRD. Essential and Complete are the decision. Compliance
+ * administration is still sold on its own and is still priced — it is a LINE OF
+ * SMALL PRINT under the cards and a row in the rate card, not a card. It was a
+ * card, and an equal-looking third option asked the reader to compare three
+ * things when only two of them are the choice.
  *
- * THE TOP BAND CARRIES NO NUMBER, and that is deliberate. Fifty-one stores and
- * up is "Book a Portfolio Review", so `rate` is `null` there and every place
- * that would print a figure asks first. A made-up rate for a portfolio nobody
- * has scoped is worse than an invitation to talk.
+ * THE PORTFOLIO TOTAL IS THE BIG NUMBER NOW. The per-store rate is the unit;
+ * the total is what the client actually pays, and it was the smaller of the two.
+ *
+ * THE BAND NOTE IS ONE SENTENCE. It used to run on — "At 5 stores you are on the
+ * 5-10 stores rate — £7 per store below the 5-10 stores rate on Complete" — which
+ * says the same thing twice at the entry band and does arithmetic the cards
+ * already show.
+ *
+ * THE FULL RATE CARD IS BEHIND A DISCLOSURE, using the page's existing
+ * `<details>`/`<summary>` pattern — the same one the FAQ uses — because a
+ * twelve-cell table above the fold competes with the two cards that are the
+ * actual decision. It scrolls horizontally rather than overflowing; see
+ * `.ratecard__scroll` in marketing.css.
+ *
+ * NO PRICE CARRIES "+ VAT", AND THAT IS STILL THE RULE. What the footnotes now
+ * say instead is the positive form — the price shown is the price payable, and
+ * Maintauk Ltd is not VAT registered — which is a statement of fact about the
+ * company rather than a qualifier on a number.
  *
  * THE SAVING IS COMPUTED, NOT TYPED. Essential + Compliance − Complete at
- * whatever band is showing: £20 at every band that has numbers (55+50−85,
- * 50+48−78, 45+45−70). Deriving it means the badge cannot come to contradict
+ * whatever band is showing: £15 at every band that has numbers (60+55−100,
+ * 56+51−92, 52+47−84). Deriving it means the badge cannot come to contradict
  * the cards above it after a price change.
- *
- * NO PRICE CARRIES "+ VAT", AND THAT IS THE RULE. This comment used to say the
- * opposite and was enforced by a test named "every price is shown + VAT";
- * Homepage V3 reversed both. It is a REMOVAL, not a substitution — "excluding
- * VAT" and "ex. VAT" are the same qualifier wearing a different hat, so none of
- * them replaced it. The inverted test is
- * `tests/stage-twentyeight-landing-rebuild.test.mjs`.
  */
 
-/**
- * The four bands, at the approved rates.
- *
- * `null` is the top band's rate and means "Book a Portfolio Review". It is
- * `null` rather than 0 or a sentinel string so that anything printing a figure
- * has to handle its absence in the type system rather than by remembering to.
- */
-const BANDS = [
-  { id: "b5", label: "5–10 stores", min: 5, max: 10, essential: 55, compliance: 50, complete: 85 },
-  { id: "b11", label: "11–25 stores", min: 11, max: 25, essential: 50, compliance: 48, complete: 78 },
-  { id: "b26", label: "26–50 stores", min: 26, max: 50, essential: 45, compliance: 45, complete: 70 },
-  {
-    id: "b51",
-    label: "51+ stores",
-    min: 51,
-    max: Infinity,
-    essential: null,
-    compliance: null,
-    complete: null,
-  },
-] as const;
-
-/** The band a portfolio of `count` stores falls in. */
-function bandForCount(count: number) {
-  return BANDS.find((entry) => count <= entry.max) ?? BANDS[BANDS.length - 1];
-}
-
-/* The slider opens at the bottom of the bottom band and reaches past the top
-   one, so a reader with sixty stores can arrive at "Book a Portfolio Review"
-   by dragging rather than by reading a footnote. */
-const SLIDER_MIN = 5;
-const SLIDER_MAX = 60;
-
-type Band = (typeof BANDS)[number];
-type PlanKey = "essential" | "compliance" | "complete";
-
-/** The portfolio floor, and the onboarding fee, in one place each. */
-const PORTFOLIO_MINIMUM = 300;
-const ONBOARDING_PER_STORE = 75;
-const ONBOARDING_CAP = 1200;
-const OUT_OF_HOURS_P1 = 125;
-const REVIEW = "Book a Portfolio Review";
+type PlanKey = "essential" | "complete";
 
 const CHECK = <path d="M20 6 9 17l-5-5" />;
 
@@ -110,13 +90,20 @@ function Tick() {
   );
 }
 
+const REVIEW = "Book a Portfolio Review";
+
+/** Pounds, with a thousands separator and no decimals. */
+function money(amount: number) {
+  return amount.toLocaleString("en-GB");
+}
+
 /**
  * The price line.
  *
  * `amount` is `null` in the top band, where the card offers a conversation
  * instead of a number. `was` is the same plan's entry-band rate, struck through
- * only once the reader has moved past that band — a "was £55" beside £55 is
- * noise, and beside £45 it is the discount.
+ * only once the reader has moved past that band — a "was £60" beside £60 is
+ * noise, and beside £52 it is the discount.
  */
 function Price({ amount, was }: { amount: number | null; was: number }) {
   if (amount === null) {
@@ -150,11 +137,12 @@ type Plan = {
 };
 
 /**
- * The two plans the reader is choosing between.
+ * The two plans the reader is choosing between, and there are only two.
  *
- * Compliance Administration is deliberately NOT in this list — it is rendered
- * once, smaller, below them. Keeping it out of `MAIN_PLANS` is what stops a
- * later edit quietly restoring it to a third equal column.
+ * Compliance administration is deliberately NOT a plan object any more. It is a
+ * rate (`BANDS[].compliance`) rendered as one line of small print beneath the
+ * cards and as one row of the rate card. Keeping it out of this list is what
+ * stops a later edit quietly restoring it to a third equal column.
  */
 const MAIN_PLANS: readonly Plan[] = [
   {
@@ -173,24 +161,9 @@ const MAIN_PLANS: readonly Plan[] = [
         <path d="m3 7 9 5 9-5M12 12v10" />
       </>
     ),
-    rollup: ["essential", "compliance"],
+    rollup: ["essential"],
   },
 ];
-
-/** The smaller option beside them. */
-const COMPLIANCE_PLAN: Plan = {
-  key: "compliance",
-  title: "Compliance Administration",
-  for: "Certificates tracked before they expire.",
-  icon: (
-    <>
-      <path d="M12 21s8-3.5 8-9V5l-8-3-8 3v7c0 5.5 8 9 8 9Z" />
-      <path d="m9 12 2 2 4-4" />
-    </>
-  ),
-};
-
-const ALL_PLANS: readonly Plan[] = [MAIN_PLANS[0]!, COMPLIANCE_PLAN, MAIN_PLANS[1]!];
 
 /* Every feature, once, against the plan that introduces it. The cards derive
    their bullet lists from this, so "Everything in Essential" on the Complete
@@ -202,25 +175,24 @@ const FEATURES: readonly { label: string; plan: PlanKey }[] = [
   { label: "Attendance chasing", plan: "essential" },
   { label: "Photo-verified close-out", plan: "essential" },
   { label: "Monthly report", plan: "essential" },
-  { label: "Certificate register", plan: "compliance" },
-  { label: "90/60/30-day reminders", plan: "compliance" },
-  { label: "Provider booking", plan: "compliance" },
-  { label: "Certificate chasing", plan: "compliance" },
-  { label: "Remedial tracking", plan: "compliance" },
-  { label: "Traffic-light compliance dashboard", plan: "compliance" },
+  { label: "Certificate register", plan: "complete" },
+  { label: "90/60/30-day reminders", plan: "complete" },
+  { label: "Provider booking and certificate chasing", plan: "complete" },
+  { label: "Remedial tracking", plan: "complete" },
+  { label: "Traffic-light compliance dashboard", plan: "complete" },
   { label: "Quarterly portfolio review", plan: "complete" },
 ];
 
 /**
  * The card's bullet list: a plan's own features, preceded by one line per
- * rolled-up plan. Complete therefore reads "Everything in Essential /
- * Everything in Compliance Administration / Quarterly portfolio review" —
- * derived, so it cannot drift from what the other cards claim.
+ * rolled-up plan. Complete therefore reads "Everything in Essential" and then
+ * the compliance and review lines — derived, so it cannot drift from what the
+ * other card claims.
  */
 function cardPoints(plan: Plan) {
   const own = FEATURES.filter((feature) => feature.plan === plan.key).map((f) => f.label);
   if (!plan.rollup) return own;
-  const titleOf = (key: PlanKey) => ALL_PLANS.find((entry) => entry.key === key)?.title ?? key;
+  const titleOf = (key: PlanKey) => MAIN_PLANS.find((entry) => entry.key === key)?.title ?? key;
   return [...plan.rollup.map((key) => `Everything in ${titleOf(key)}`), ...own];
 }
 
@@ -243,6 +215,11 @@ function PlanIcon({ icon }: { icon: ReactNode }) {
   );
 }
 
+/** A rate as it appears in the rate-card table: a figure, or "Bespoke". */
+function rateCell(value: number | null) {
+  return value === null ? "Bespoke" : `£${value}`;
+}
+
 export function Pricing() {
   /*
    * The store count is the single input, and the band follows from it. The
@@ -250,10 +227,9 @@ export function Pricing() {
    * setting one moves the slider to that band's low end so the two controls
    * can never disagree.
    *
-   * IT OPENS AT FIVE. Five is the bottom of the bottom band and the number the
-   * page already tells the reader it is for — "typically 5–50 locations" on the
-   * Who we help note — so the calculator opens on the bottom of the range the
-   * site claims to serve rather than in the middle of it.
+   * IT OPENS AT FIVE, which is the floor rather than a default — Maintsupp
+   * coordinates portfolios of five sites and above, so the calculator must not
+   * be able to describe a portfolio the business will not take.
    */
   const [storeCount, setStoreCount] = useState(SLIDER_MIN);
   const band = bandForCount(storeCount);
@@ -263,7 +239,7 @@ export function Pricing() {
     setStoreCount(target.min);
   };
 
-  const entryBand = BANDS[0];
+  const entryBand = ENTRY_BAND;
   /* Both parts bought separately, against Complete — computed, never typed,
      and absent in the band that carries no rates. */
   const saving =
@@ -275,21 +251,14 @@ export function Pricing() {
 
   /* The sentence under the slider, for ANY band at ANY count rather than only
      the current pair — hidden twins of it are what reserve the row's height. */
-  const noteForBand = (entry: Band, count: number) => {
-    const head = `At ${count} ${count === 1 ? "store" : "stores"} you are on the ${entry.label} rate`;
-    if (entry.complete === null) {
-      return `${head} — above fifty stores we scope the portfolio with you before quoting.`;
-    }
-    if (entry.id === entryBand.id) return `${head}.`;
-    return `${head} — £${entryBand.complete - entry.complete} per store below the ${entryBand.label} rate on Complete.`;
-  };
+  const noteForBand = (entry: Band, count: number) =>
+    `At ${count} ${count === 1 ? "store" : "stores"} you are on the ${entry.label} rate.`;
+
   const rateFor = (plan: Plan) => band[plan.key] as number | null;
   const monthlyFor = (plan: Plan) => {
     const rate = rateFor(plan);
     return rate === null ? null : rate * storeCount;
   };
-  /* The onboarding fee a reader would actually pay, capped. */
-  const onboarding = Math.min(ONBOARDING_PER_STORE * storeCount, ONBOARDING_CAP);
 
   return (
     <section className="section section--tint" id="pricing">
@@ -329,18 +298,18 @@ export function Pricing() {
             * The buttons below used to move 21px under the thumb that had just
             * pressed them, because a band note is one line for some bands and
             * two or three for others. That was fixed twice with min-height
-            * media queries measured against the copy of the day, and this
-            * rebuild broke it a third time.
+            * media queries measured against the copy of the day, and a rebuild
+            * broke it a third time.
             *
             * So the height is no longer measured. A grid row is as tall as its
             * tallest item, so hidden twins reserve exactly what the longest
             * sentence needs at any width, with nothing to re-measure when a
-            * word changes.
+            * word changes. The sentence is one line now rather than three, and
+            * the twins stay: the mechanism costs nothing and the next copy
+            * change does not have to remember to reinstate it.
             *
             * THE TWINS CARRY EACH BAND'S HIGHEST STORE COUNT, not the current
-            * one, because the count changes the wrap as well: at 407px "At 5
-            * stores..." takes two lines and "At 51 stores..." takes three, and
-            * a set of twins that all say "5" reserves for neither. With
+            * one, because the count changes the wrap as well. With
             * `tabular-nums` in the stylesheet every two-digit count is exactly
             * as wide as every other, so a twin at the top of its band covers
             * every count inside it.
@@ -353,6 +322,57 @@ export function Pricing() {
               </span>
             ))}
           </p>
+
+          {/*
+            THE FULL RATE CARD, behind the page's existing disclosure pattern.
+
+            `<details>`/`<summary>` is what the FAQ uses, so this introduces no
+            new component and no JavaScript — and it collapses by default
+            because the two cards below are the decision, not the twelve-cell
+            table. The table scrolls inside its own container rather than
+            widening the page; §10 of the brief asks for exactly that, and the
+            stylesheet does it with one `overflow-x`.
+          */}
+          <details className="ratecard">
+            <summary className="ratecard__toggle">See the full rate card</summary>
+            <div className="ratecard__scroll">
+              <table className="ratecard__table">
+                <caption className="vh">
+                  Coordination rates per store per month, by portfolio size
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Per store / month</th>
+                    {BANDS.map((entry) => (
+                      <th scope="col" key={entry.id}>
+                        {entry.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MAIN_PLANS.map((plan) => (
+                    <tr key={plan.key}>
+                      <th scope="row">{plan.title}</th>
+                      {BANDS.map((entry) => (
+                        <td key={entry.id}>{rateCell(entry[plan.key])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr>
+                    <th scope="row">Compliance only</th>
+                    {BANDS.map((entry) => (
+                      <td key={entry.id}>{rateCell(entry.compliance)}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="ratecard__note">
+              Compliance administration on its own:{" "}
+              {BANDS.map((entry) => rateCell(entry.compliance)).join(" · ")}.
+            </p>
+          </details>
         </div>
 
         <div
@@ -396,7 +416,7 @@ export function Pricing() {
                   <Price amount={rate} was={entryBand[plan.key]} />
                   {monthly !== null ? (
                     <p className="pkg__total">
-                      ≈ <strong>£{monthly.toLocaleString("en-GB")}</strong>
+                      ≈ <strong>£{money(monthly)}</strong>
                       /month for {storeCount} {plural}
                     </p>
                   ) : (
@@ -418,65 +438,67 @@ export function Pricing() {
           </div>
 
           {/*
-            THE SMALLER OPTION, not a third column.
+            COMPLIANCE ADMINISTRATION, AS SMALL PRINT RATHER THAN A CARD.
 
-            Compliance Administration is part of Complete and is offered alone
-            for an estate that already has its repairs handled. Rendering it as
-            an equal card asked the reader to compare three things when the
-            decision is between two — so it sits below them, narrower, with the
-            same rate mechanics and no "most popular" flag to compete for.
+            It is part of Complete and is offered alone for an estate that
+            already has its repairs handled. As an equal card it asked the
+            reader to compare three things when the decision is between two, so
+            what remains is the one sentence that tells somebody in that
+            position the option exists, and the rate card behind the disclosure
+            above, which prices it at every band.
           */}
-          <aside className="pkgalt" aria-label="Compliance Administration, available on its own">
-            <div className="pkgalt__head">
-              <PlanIcon icon={COMPLIANCE_PLAN.icon} />
-              <div>
-                <h3>{COMPLIANCE_PLAN.title}</h3>
-                <p className="pkg__for">{COMPLIANCE_PLAN.for}</p>
-              </div>
-              <Price amount={rateFor(COMPLIANCE_PLAN)} was={entryBand.compliance} />
-            </div>
-            <p className="pkgalt__note">
-              Included in <strong>Complete</strong>. Available on its own when repairs are
-              already handled
-              {monthlyFor(COMPLIANCE_PLAN) !== null
-                ? ` — ≈ £${monthlyFor(COMPLIANCE_PLAN)!.toLocaleString("en-GB")}/month for ${storeCount} ${plural}.`
-                : "."}
-            </p>
-            <ul className="pkgalt__list">
-              {cardPoints(COMPLIANCE_PLAN).map((point) => (
-                <li key={point}>
-                  <Tick />
-                  <span>{point}</span>
-                </li>
-              ))}
-            </ul>
-          </aside>
+          <p className="pkgfine">
+            Compliance administration is also available on its own, where repairs are
+            already handled — from £{entryBand.compliance} per store / month, portfolios
+            of five sites and above.
+          </p>
         </div>
 
         <div className="pkgfoot reveal">
           <ul className="pricing__notes">
-            <li>Portfolio minimum £{PORTFOLIO_MINIMUM}/month.</li>
             <li>
-              Onboarding and asset capture £{ONBOARDING_PER_STORE}/store, capped at £
-              {ONBOARDING_CAP.toLocaleString("en-GB")}
-              {" — "}
-              {`£${onboarding.toLocaleString("en-GB")} at ${storeCount} ${plural}`}. Waived on a
-              12-month term.
+              Maintsupp coordinates portfolios of five sites and above. Portfolio minimum
+              £{PORTFOLIO_MINIMUM} per month.
             </li>
             <li>
-              Includes 2 coordinated jobs per store per month, pooled across your portfolio
-              over a rolling quarter.
+              Includes {INCLUDED_JOBS} coordinated jobs per store per month, pooled across
+              your portfolio over a rolling quarter. Additional coordinated jobs £
+              {ADDITIONAL_JOB} each.
             </li>
             <li>
-              Projects, kiosk works and out-of-hours P1 incidents (£{OUT_OF_HOURS_P1} each) are
-              quoted and charged separately.
+              If a portfolio exceeds its allowance for two consecutive quarters, we move it
+              to a lower per-store band rather than keep charging per job.
             </li>
-            <li>Compliance pricing assumes a standard retail asset profile.</li>
+            <li>
+              Onboarding and asset capture £{ONBOARDING_PER_STORE} per store, capped at £
+              {money(ONBOARDING_CAP)} — covering site register, access rules, asset capture
+              and certificate baseline.
+            </li>
+            <li>Out-of-hours and P1 escalation £{OUT_OF_HOURS_P1} per incident.</li>
+            <li>
+              Projects and kiosk works are scoped and quoted separately — a fixed fee, or{" "}
+              {PROJECT_PERCENT}% of third-party project spend, minimum £{PROJECT_MINIMUM}.
+            </li>
+            <li>
+              Sites added mid-term are charged pro-rata at your current band, plus £
+              {ONBOARDING_PER_STORE} onboarding.
+            </li>
+            <li>Service hours Mon–Fri, 8:30am–5:30pm.</li>
+            <li>Three-month initial term, then 30 days&rsquo; notice.</li>
             {/* Contractor invoices are the other half of what a reader pays and
                 they are not ours, so the note says so where the fees are. */}
             <li>
               Contractor invoices are separate and come from the contractor at their own
               agreed rates. Maintsupp charges the coordination fee and nothing on top.
+            </li>
+            {/*
+              THE POSITIVE FORM, deliberately. "+ VAT" and every synonym for it
+              are withdrawn from this site; what replaces them is not silence
+              but the statement that the number shown is the number payable.
+            */}
+            <li>
+              Prices shown are the total payable. Maintauk Ltd is not currently VAT
+              registered.
             </li>
             <li>Final quote confirmed at your free portfolio review.</li>
           </ul>

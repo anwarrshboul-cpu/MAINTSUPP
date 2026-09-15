@@ -44,13 +44,32 @@ import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } fr
  * phone number, email or address is invented here: the ones the site already
  * publishes live in the utility bar and the footer.
  */
+/**
+ * The primary nav.
+ *
+ * FIVE OF THESE SIX ARE ANCHORS ON THIS PAGE; "Contractors" is a ROUTE.
+ * `/contractors` is a real page — the application form for the contractor
+ * network — and until now the only way to it was a single line in the footer,
+ * which is where links go to not be found. It is rendered with `next/link`
+ * rather than a bare `<a>` so it navigates client-side like every other route
+ * on the site, and the drawer does NOT hand it the anchor handler, which
+ * exists to defer a hash until the body-scroll lock releases and has nothing
+ * to defer for a page change.
+ *
+ * It sits before "Contact Us" so that contacting stays the last thing in the
+ * row, which is where the footer and the utility bar also put it.
+ */
 const NAV = [
   ["#services", "Services"],
   ["#how", "How It Works"],
   ["#pricing", "Pricing"],
   ["#case-study", "Case Study"],
+  ["/contractors", "Contractors"],
   ["#contact", "Contact Us"],
 ] as const;
+
+/** Whether a nav target is a hash on this page rather than another route. */
+const isAnchor = (href: string) => href.startsWith("#");
 
 function Ic({ d, size = "ic--sm" }: { d: string; size?: string }) {
   return (
@@ -279,9 +298,15 @@ export function SiteHeader() {
             <ul className="nav__list">
               {NAV.map(([href, label]) => (
                 <li key={href}>
-                  <a className="nav__link" href={href}>
-                    {label}
-                  </a>
+                  {isAnchor(href) ? (
+                    <a className="nav__link" href={href}>
+                      {label}
+                    </a>
+                  ) : (
+                    <Link className="nav__link" href={href}>
+                      {label}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
@@ -377,9 +402,15 @@ export function SiteHeader() {
               <ul className="drawer__list">
                 {NAV.map(([href, label]) => (
                   <li key={href}>
-                    <a href={href} onClick={onDrawerLink}>
-                      {label}
-                    </a>
+                    {isAnchor(href) ? (
+                      <a href={href} onClick={onDrawerLink}>
+                        {label}
+                      </a>
+                    ) : (
+                      <Link href={href} onClick={() => setOpen(false)}>
+                        {label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>

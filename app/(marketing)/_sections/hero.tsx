@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BOOKING_URL } from "./content";
 import { PhotoSlot } from "./photo";
 
 /* ================================================== 1. HERO BANNER
@@ -222,7 +223,25 @@ export function Hero() {
             </li>
           </ul>
           <div className="hero__actions">
-            <a className="btn btn--primary btn--lg" href="#review">
+            {/*
+              THE PRIMARY CTA BOOKS, IT NO LONGER SCROLLS.
+
+              It used to jump to the enquiry form at `#review`, which asks
+              somebody ready to talk to write instead. It now opens the Cal.com
+              page, where they pick a slot and are done. `target="_blank"` so
+              the page they were reading is still behind them if they change
+              their mind, and `rel="noopener noreferrer"` because a new tab
+              without it hands the opener to the other origin.
+
+              The on-page form stays exactly where it is, as the fallback for
+              anyone who would rather write than book — see `final-cta.tsx`.
+            */}
+            <a
+              className="btn btn--primary btn--lg"
+              href={BOOKING_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Book a Portfolio Review
               <svg
                 className="ic ic--xs"

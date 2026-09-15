@@ -140,7 +140,10 @@ export async function POST(request: Request) {
      * the state this deployment is in — so the row is the record of record and
      * the notification can be replayed once a key exists.
      */
-    const { salesInbox } = notificationTargets();
+    /* The contractor inbox, not sales. A contractor applying to join the
+       network is an admin task — vetting, insurance, references — and not a
+       lead; routing it to the same inbox as portfolio enquiries buried both. */
+    const { contractorInbox } = notificationTargets();
     const summary = [
       `Company: ${company}`,
       `Contact: ${contactName}`,
@@ -162,8 +165,8 @@ export async function POST(request: Request) {
       event: "contractor.application",
       subjectType: "contractor-application",
       subjectId: id,
-      to: salesInbox,
-      subject: `Contractor application — ${company}`,
+      to: contractorInbox,
+      subject: `[CONTRACTOR] ${company}`,
       body: `<pre style="font:14px/1.5 ui-monospace,monospace">${summary
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")}</pre>`,

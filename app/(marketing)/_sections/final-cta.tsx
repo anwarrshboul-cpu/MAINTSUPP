@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { track } from "./analytics";
+import { BOOKING_URL } from "./content";
 
 /**
  * SECTION 10 — Trust strip, then the final CTA.
@@ -46,7 +47,22 @@ import { track } from "./analytics";
  *     object so re-submitting into the same error still moves focus.
  */
 
-const SITE_RANGES = ["1–5", "6–10", "11–25", "26+"] as const;
+/**
+ * THE BANDS THE PRICING SECTION USES, PLUS THE ONE IT DOES NOT SERVE.
+ *
+ * These were "1–5", "6–10", "11–25", "26+" — invented for this form and
+ * matching nothing else on the page, so a reader who had just used the
+ * calculator had to translate their own portfolio into a second vocabulary,
+ * and a lead arrived in a band the rate card could not price.
+ *
+ * `UNDER_MINIMUM` is last on purpose. It is not a band — it is the honest
+ * option for somebody below the five-site floor, and selecting it shows the
+ * note rather than blocking the submit: a three-site operator opening two
+ * more this year is worth hearing from, and telling them so is better than a
+ * validation error they cannot fix.
+ */
+const UNDER_MINIMUM = "Fewer than 5";
+const SITE_RANGES = ["5–10", "11–25", "26–50", "51+", UNDER_MINIMUM] as const;
 
 const REVIEW_POINTS = [
   "A review of how repairs are reported and chased today",
@@ -109,16 +125,22 @@ const CLAIMS = [
       </>
     ),
   },
-  {
-    title: "Data protection",
-    body: "ICO registered",
-    icon: (
-      <>
-        <rect x="3" y="11" width="18" height="11" rx="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-      </>
-    ),
-  },
+  /*
+   * THE "DATA PROTECTION / ICO REGISTERED" CHIP IS GONE, AND IT IS NOT COMING
+   * BACK UNTIL SOMEBODY CAN POINT AT THE ENTRY.
+   *
+   * Searched on 15 September 2026 against the ICO's own public register at
+   * ico.org.uk/ESDWebPages/Search, by name, for "Maintauk", "MAINTAUK LTD" and
+   * "Maintsupp": "There are no entries that match your search criteria" for
+   * every one of them.
+   *
+   * A trust strip is where a reader checks whether the claims are the kind you
+   * can verify, and this is a business that sells compliance administration —
+   * an unevidenced compliance claim on that strip is worse than a shorter
+   * strip. If the registration is completed and paid, restore this chip with
+   * the registration reference appended to `body`, so the claim arrives with
+   * the thing that proves it.
+   */
   {
     title: "Maintsupp",
     body: "A trading name of Maintauk Ltd",
@@ -353,6 +375,30 @@ export function FinalCta() {
               </li>
             ))}
           </ul>
+          {/*
+            THE PANEL'S PRIMARY ACTION IS NOW BOOKING, and the form beside it is
+            the fallback.
+
+            This panel had no booking affordance at all: its only action was the
+            form's submit, which was labelled "Book My Portfolio Review" and did
+            not book anything — it sent an enquiry and somebody replied. Two
+            things follow. This button books, on Cal.com, in a new tab; and the
+            submit button now says what it actually does, "Send My Enquiry".
+
+            The form is untouched otherwise. Someone who would rather write than
+            pick a slot — or who wants to say what the portfolio is first — has
+            exactly the form they had.
+          */}
+          <p className="finalcta__book">
+            <a
+              className="btn btn--primary btn--lg"
+              href={BOOKING_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Book a Portfolio Review
+            </a>
+          </p>
           <p className="note">
             Best suited to multi-site commercial operators seeking ongoing coordination
             rather than one-off domestic repairs.
@@ -453,6 +499,21 @@ export function FinalCta() {
                   ))}
                 </select>
                 {errorFor("sites") && <p className="field__err">{errorFor("sites")}</p>}
+                {/*
+                  SAYS NO, AND STILL TAKES THE ENQUIRY.
+
+                  The floor is five sites and the page says so in three other
+                  places, so a four-site operator has to be told — but told, not
+                  stopped. `aria-live` because the note appears in response to a
+                  choice the reader just made, and a message that arrives
+                  silently below a select is a message half the readers of this
+                  form never get.
+                */}
+                <p className="field__note" aria-live="polite">
+                  {sites === UNDER_MINIMUM
+                    ? "Maintsupp coordinates portfolios of five sites and above. If you're opening more sites this year, send the form anyway and we'll pick it up when you reach five."
+                    : ""}
+                </p>
               </div>
 
               {/* Honeypot. Off-screen rather than display:none — some bots skip
@@ -490,7 +551,7 @@ export function FinalCta() {
                 disabled={sending}
                 style={{ marginTop: 18 }}
               >
-                {sending ? "Sending…" : "Book My Portfolio Review"}
+                {sending ? "Sending…" : "Send My Enquiry"}
               </button>
               {status && (
                 <p className="formstatus is-error" role="status">

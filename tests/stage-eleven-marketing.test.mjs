@@ -273,7 +273,28 @@ test("the lead form protects a part-completed draft", async () => {
      there is no progress to indicate. The draft protection it sat beside is
      kept, which is what the rest of this test is about. */
   assert.doesNotMatch(form, /stepform__bar/, "there are no steps left to indicate");
-  assert.match(form, /Book My Portfolio Review/, "the brief's button label");
+  /*
+   * RE-POINTED, AND MATCHED ON THE CODE RATHER THAN ON THE FILE.
+   *
+   * The label is "Send My Enquiry" since the commercial update: the panel now
+   * carries a real booking button that opens Cal.com, so a submit that sends an
+   * enquiry and waits for a reply must not claim to book anything.
+   *
+   * THE COMMENT ABOVE THAT BUTTON QUOTES THE OLD LABEL to record what changed,
+   * and a whole-file `assert.match(form, /Book My Portfolio Review/)` therefore
+   * went on passing — green, on a comment, asserting nothing about the button
+   * and contradicting `homepage-commercial-update`, which requires the string
+   * to be absent from the rendered page. That is exactly how a pin comes to
+   * protect nothing, so comments are stripped first here.
+   */
+  const rendered = form.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.match(rendered, /"Send My Enquiry"/, "the brief's button label");
+  assert.doesNotMatch(rendered, /Book My Portfolio Review/, "and the old one is not rendered");
+  assert.match(
+    rendered,
+    /href=\{BOOKING_URL\}[\s\S]{0,140}?target="_blank"/,
+    "booking is the Cal.com link above it, in a new tab",
+  );
 
   /* The draft must carry the fields that exist and only those. A key for a
      removed field would be written on every keystroke and read back into
@@ -359,7 +380,20 @@ test("the leads route stopped requiring what the form stopped asking", async () 
 
   /* The schema is the reason an empty string is written rather than nothing. */
   const schema = await read("db/schema.ts");
-  const table = schema.slice(schema.indexOf('sqliteTable(\n  "leads"'), schema.indexOf("contractorApplications"));
+  /*
+   * NEWLINE-AGNOSTIC, because it was not and the slice was silently empty.
+   *
+   * `db/schema.ts` is CRLF on disk here — `core.autocrlf=true` rewrites the
+   * working tree on checkout — so `indexOf('sqliteTable(\n  "leads"')` found
+   * nothing, `slice(-1, …)` returned an empty string, and BOTH assertions
+   * below failed on a file nobody had touched. A guard that cannot fire is
+   * worse than no guard: `leads.regions NOT NULL` is a real contract and
+   * nothing had been checking it. Found while re-pointing this file for the
+   * commercial update; it is not a consequence of that change.
+   */
+  const leadsAt = schema.search(/sqliteTable\(\r?\n  "leads"/);
+  assert.ok(leadsAt > 0, "the leads table must be findable whatever the line endings");
+  const table = schema.slice(leadsAt, schema.indexOf("contractorApplications"));
   assert.match(table, /regions: text\("regions"\)\.notNull\(\)/, "the column cannot take NULL");
   assert.match(table, /challenge: text\("challenge"\)\.notNull\(\)/, "nor can this one");
 });
@@ -373,7 +407,16 @@ test("an empty challenge prints no section in the sales alert", async () => {
   const helper = source.slice(source.indexOf("function row("), source.indexOf("export function leadAlertTemplate"));
   assert.match(helper, /if \(!value\) return "";/, "an empty value must render no row");
   const template = source.slice(source.indexOf("export function leadAlertTemplate"));
-  assert.match(template.slice(0, 900), /row\("What they said", lead\.challenge\)/);
+  /*
+   * SLICED TO THE NEXT EXPORT, not to 900 characters.
+   *
+   * The window was a byte count, so a comment added above the subject line —
+   * explaining the `[LEAD]` prefix the commercial update introduced — pushed
+   * the row past it and failed a test about behaviour that had not changed at
+   * all. The function's own boundary is what this is asserting about.
+   */
+  const body = template.slice(0, template.indexOf("\nexport function", 1));
+  assert.match(body, /row\("What they said", lead\.challenge\)/);
 });
 
 test("live: a portfolio review is accepted with no regions and no challenge", async (t) => {
@@ -398,7 +441,11 @@ test("live: a portfolio review is accepted with no regions and no challenge", as
     company: "Five Field Ltd",
     email: `suite.${Date.now()}@example.com`,
     phone: "07700900123",
-    siteRange: "6–10",
+    /* RE-POINTED to a band the form actually offers. "6–10" was invented
+       for this form and matched nothing else on the page; the options are the
+       pricing bands since the commercial update. The route accepts free text,
+       so this passed while sending a band the rate card cannot price. */
+    siteRange: "11–25",
   };
   const response = await fetch(`${base}/api/leads`, {
     method: "POST",
@@ -411,7 +458,7 @@ test("live: a portfolio review is accepted with no regions and no challenge", as
   assert.ok(result.lead, "a lead row must come back");
   assert.equal(result.lead.regions, "[]", "an unanswered question is stored as unanswered");
   assert.equal(result.lead.challenge, "", "and nothing is invented to fill it");
-  assert.equal(result.lead.siteRange, "6–10", "what was asked is what was stored");
+  assert.equal(result.lead.siteRange, "11–25", "what was asked is what was stored");
 
   /* The five that remain are still enforced — a body missing one is still a
      400, so this is a shorter form and not an unguarded endpoint. */

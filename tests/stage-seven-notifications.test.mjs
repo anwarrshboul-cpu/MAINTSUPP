@@ -74,8 +74,42 @@ test("leads notify sales and confirm to the prospect", async () => {
 
 test("urgent jobs are flagged in the subject line", async () => {
   const source = await read("app/lib/notifications.ts");
-  const template = source.slice(source.indexOf("export function jobAlertTemplate"));
-  assert.match(template.slice(0, 900), /urgent \? "URGENT — " : ""/);
+  /*
+   * RE-POINTED, and sliced to the function rather than to 900 characters.
+   *
+   * The subject is `[JOB] {site} — {urgency} ({ref})` since the commercial
+   * update, so that an operator can filter these in Outlook and triage by
+   * site — it used to lead with the reference and mention urgency only when
+   * there was some, which made a P1 and a cosmetic request the same shape in
+   * an inbox. URGENT still leads the whole subject, which is the claim this
+   * test exists for and the only one that has not moved.
+   *
+   * The byte window went at the same time: a comment added above the subject
+   * pushed the match past 900 and failed a test about behaviour that had not
+   * changed.
+   */
+  const fromTemplate = source.slice(source.indexOf("export function jobAlertTemplate"));
+  const template = fromTemplate.slice(0, fromTemplate.indexOf("\nexport function", 1));
+  /*
+   * THE TAG IS THE PREFIX, AND THE FLAG IS THE PRIORITY.
+   *
+   * An "URGENT " prefix was tried and withdrawn: it put the flag ahead of the
+   * `[JOB]` tag and so defeated the only thing the tag exists for — an Outlook
+   * rule on the prefix would have caught every routine job and missed every P1.
+   * Urgency is not lost, because `job.priority` IS the urgency and is always in
+   * the subject; `urgent` still picks the heading and the event name, which is
+   * what the flagging claim in this test's title actually rests on.
+   */
+  assert.match(template, /^\s*subject: `\[JOB\] /m, "the tag is the first thing in the subject");
+  assert.match(template, /\[JOB\] \$\{job\.site \?\? "site not set"\}/, "then the site it happened at");
+  assert.match(template, /job\.priority \?\? "priority not set"/, "then the urgency, always");
+  assert.match(template, /job\.reference \? ` \(\$\{job\.reference\}\)` : ""/, "the reference is kept, last");
+  assert.doesNotMatch(
+    template.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /"URGENT /,
+    "nothing may be prefixed ahead of the tag",
+  );
+  assert.match(template, /urgent \? "Urgent job reported" : "New job reported"/, "and urgency still picks the heading");
 
   const route = await read("app/api/maintenance/route.ts");
   assert.match(route, /event: \(priority \?\? ""\)\.toLowerCase\(\) === "urgent"/);
