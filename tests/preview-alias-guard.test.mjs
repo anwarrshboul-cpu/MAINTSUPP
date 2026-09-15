@@ -160,16 +160,43 @@ test("the real protections are untouched", async () => {
   );
 });
 
-test("the expected production URL is stated once, and is overridable", async () => {
+test("the expected production URLs are stated as constants, and are overridable", async () => {
+  /*
+   * RE-POINTED: the guard gained a second acceptable domain, the contract did
+   * not.
+   *
+   * It used to pin one constant defaulting to `https://maintsupp.com`, and
+   * count that string exactly twice in the file. Both facts were true and both
+   * were about the apex being the only production domain. `vercel project ls`
+   * reports whichever domain is PRIMARY, and which of this project's two
+   * domains that is, is a Vercel setting — so a single expected value makes
+   * every ordinary run warn and exit 1 on the day it is switched, which is the
+   * exact failure the header of that script describes having already fixed once.
+   *
+   * What the pin protects is unchanged and is checked more strictly than before:
+   * the values are NAMED CONSTANTS with real defaults, they are overridable,
+   * and — the part the old version could not see — they actually reach the
+   * verdict. A constant that is declared and never used would have passed.
+   */
   const source = await load(SCRIPT);
   assert.match(
     source,
-    /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-https:\/\/maintsupp\.com\}"/,
-    "the value the guard compares against is a named constant with the real domain as its default",
+    /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-https:\/\/www\.maintsupp\.com\}"/,
+    "the canonical domain is a named constant with a real default",
   );
-  assert.equal(
-    (source.match(/https:\/\/maintsupp\.com/g) ?? []).length,
-    2,
-    "and it appears exactly twice: the default above, and the sentence in the header that explains why the old check had to change",
+  assert.match(
+    source,
+    /EXPECTED_PRODUCTION_ALT="\$\{EXPECTED_PRODUCTION_ALT:-https:\/\/maintsupp\.com\}"/,
+    "and so is the apex, which is the same project",
+  );
+  assert.match(
+    source,
+    /production_verdict "\$before" "\$after" "\$EXPECTED_PRODUCTION\|\$EXPECTED_PRODUCTION_ALT"/,
+    "both are passed to the verdict, so neither is a constant nobody reads",
+  );
+  assert.doesNotMatch(
+    source,
+    /production_verdict[^\n]*"\$EXPECTED_PRODUCTION"\s*\|\|/,
+    "the single-value call is gone, not left beside the new one",
   );
 });

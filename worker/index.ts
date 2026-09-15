@@ -32,7 +32,7 @@ interface ExecutionContext {
  * `maintsupp-portal.vercel.app` is an alias of the SAME production deployment
  * that serves maintsupp.com, so every page of the marketing site — and the
  * portal behind it — was reachable at two addresses, both answering 200, both
- * serving a robots.txt that names `https://maintsupp.com`. That is duplicate
+ * serving a robots.txt that names `https://www.maintsupp.com`. That is duplicate
  * content with no canonical between the two hosts.
  *
  * MATCHED EXACTLY, NEVER BY SUFFIX. The Preview deployments this project is
@@ -199,7 +199,7 @@ function withSecurityHeaders(response: Response, pathname = ""): Response {
    *
    * Every push builds one at its own `*.vercel.app` hash URL, serving the whole
    * marketing site with the production `robots.txt` — which says `Allow: /` and
-   * names maintsupp.com — so each release quietly published another indexable
+   * names www.maintsupp.com — so each release quietly published another indexable
    * duplicate under a different hostname.
    *
    * `X-Robots-Tag` rather than a `<meta>` tag, because it covers the non-HTML

@@ -44,7 +44,9 @@
 #
 # What that check watches for now is a CHANGE. The production URL is read
 # before the assignment and again afterwards; the two must agree, and the value
-# must be either "--" or `EXPECTED_PRODUCTION`. The gates that do the real work
+# must be "--" or one of the domains this project legitimately serves on
+# (`EXPECTED_PRODUCTION` or `EXPECTED_PRODUCTION_ALT`) — both, because the
+# column reports whichever is PRIMARY and that is a setting. The real gates
 # are earlier and are untouched: the deployment must belong to this project,
 # its target must be `preview`, and it must answer 200 twice.
 #
@@ -66,7 +68,10 @@ ALIAS="${ALIAS:-maintsupp-preview.vercel.app}"
 # written: nothing in this file can create, promote or retarget a production
 # deployment. Override it on the day the domain legitimately changes, so that
 # the change is stated by whoever makes it rather than discovered later.
-EXPECTED_PRODUCTION="${EXPECTED_PRODUCTION:-https://maintsupp.com}"
+EXPECTED_PRODUCTION="${EXPECTED_PRODUCTION:-https://www.maintsupp.com}"
+# The apex is the same project and stays acceptable, so that this guard
+# does not fire on the day the primary domain is switched between the two.
+EXPECTED_PRODUCTION_ALT="${EXPECTED_PRODUCTION_ALT:-https://maintsupp.com}"
 
 die() { printf '\n  REFUSED: %s\n\n' "$1" >&2; exit 1; }
 say() { printf '  %s\n' "$1"; }
@@ -231,9 +236,19 @@ production_verdict() {
     return 1
   fi
 
-  if [[ "$now" != "--" && "$now" != "$want" ]]; then
+  # `want` is a `|`-separated list of the URLs this project may legitimately
+  # report, because the apex and the www host are both its own production
+  # domains and which one appears here follows whichever is primary. A single
+  # value is still a list of one, so the three-argument contract is unchanged.
+  local ok="no" candidate
+  if [[ "$now" == "--" ]]; then ok="yes"; fi
+  while IFS= read -r candidate; do
+    if [[ -n "$candidate" && "$now" == "$candidate" ]]; then ok="yes"; fi
+  done <<< "${want//|/$'\n'}"
+
+  if [[ "$ok" != "yes" ]]; then
     printf '\n  WARNING: production URL is %s, which is neither "--" nor the expected\n' "$now"
-    printf '  %s. It did not change during this run, so this script did not cause\n' "$want"
+    printf '  %s. It did not change during this run, so this script did not cause\n' "${want//|/ or }"
     printf '  it — but confirm the project is the one you meant.\n\n'
     return 1
   fi
@@ -241,5 +256,5 @@ production_verdict() {
   return 0
 }
 
-production_verdict "$before" "$after" "$EXPECTED_PRODUCTION" || exit 1
+production_verdict "$before" "$after" "$EXPECTED_PRODUCTION|$EXPECTED_PRODUCTION_ALT" || exit 1
 printf '\n  To roll back:  scripts/update-preview-alias.sh %s\n\n' "${PREVIOUS:-<previous-deployment-url>}"
