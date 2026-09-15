@@ -359,7 +359,20 @@ test("the leads route stopped requiring what the form stopped asking", async () 
 
   /* The schema is the reason an empty string is written rather than nothing. */
   const schema = await read("db/schema.ts");
-  const table = schema.slice(schema.indexOf('sqliteTable(\n  "leads"'), schema.indexOf("contractorApplications"));
+  /*
+   * NEWLINE-AGNOSTIC, because it was not and the slice was silently empty.
+   *
+   * `db/schema.ts` is CRLF on disk here — `core.autocrlf=true` rewrites the
+   * working tree on checkout — so `indexOf('sqliteTable(\n  "leads"')` found
+   * nothing, `slice(-1, …)` returned an empty string, and BOTH assertions
+   * below failed on a file nobody had touched. A guard that cannot fire is
+   * worse than no guard: `leads.regions NOT NULL` is a real contract and
+   * nothing had been checking it. Found while re-pointing this file for the
+   * commercial update; it is not a consequence of that change.
+   */
+  const leadsAt = schema.search(/sqliteTable\(\r?\n  "leads"/);
+  assert.ok(leadsAt > 0, "the leads table must be findable whatever the line endings");
+  const table = schema.slice(leadsAt, schema.indexOf("contractorApplications"));
   assert.match(table, /regions: text\("regions"\)\.notNull\(\)/, "the column cannot take NULL");
   assert.match(table, /challenge: text\("challenge"\)\.notNull\(\)/, "nor can this one");
 });
@@ -373,7 +386,16 @@ test("an empty challenge prints no section in the sales alert", async () => {
   const helper = source.slice(source.indexOf("function row("), source.indexOf("export function leadAlertTemplate"));
   assert.match(helper, /if \(!value\) return "";/, "an empty value must render no row");
   const template = source.slice(source.indexOf("export function leadAlertTemplate"));
-  assert.match(template.slice(0, 900), /row\("What they said", lead\.challenge\)/);
+  /*
+   * SLICED TO THE NEXT EXPORT, not to 900 characters.
+   *
+   * The window was a byte count, so a comment added above the subject line —
+   * explaining the `[LEAD]` prefix the commercial update introduced — pushed
+   * the row past it and failed a test about behaviour that had not changed at
+   * all. The function's own boundary is what this is asserting about.
+   */
+  const body = template.slice(0, template.indexOf("\nexport function", 1));
+  assert.match(body, /row\("What they said", lead\.challenge\)/);
 });
 
 test("live: a portfolio review is accepted with no regions and no challenge", async (t) => {

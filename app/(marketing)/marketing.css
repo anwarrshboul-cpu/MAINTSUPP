@@ -927,6 +927,13 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .field :is(input,select,textarea):focus{border-color:var(--steel);box-shadow:0 0 0 3px rgba(46,90,156,.15);outline:none}
 .field.is-invalid :is(input,select,textarea){border-color:var(--critical)}
 .field__err{margin:0;font-size:.77rem;color:var(--critical);font-weight:500}
+/* NOT AN ERROR, so not `--critical`. The under-five note is the form telling a
+   reader the truth about the minimum while still accepting what they send; in
+   error red it would read as a rejection and the sentence says the opposite.
+   It renders empty rather than conditionally, so the live region exists before
+   the message arrives and there is no row to appear and shift the field below. */
+.field__note{margin:0;font-size:.77rem;color:var(--slate);line-height:1.5}
+.field__note:empty{display:none}
 /* Required marker. Red because that is the colour the field turns when the
    requirement is not met, so the mark and the error agree. */
 .req{color:var(--critical);font-weight:700}
@@ -1265,7 +1272,12 @@ fieldset.field:focus{outline:none}
 .pkg__price{display:flex;align-items:baseline;gap:5px;padding-bottom:15px;margin-bottom:15px;
   border-bottom:1px solid var(--border-soft)}
 .pkg__from{font-size:.72rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate)}
-.pkg__num{font-family:var(--font-display);font-size:1.9rem;font-weight:800;color:var(--navy);line-height:1}
+/* THE UNIT, NOT THE HEADLINE. The per-store rate used to be the biggest
+   number in the card at 1.9rem, with the portfolio total under it at .84rem.
+   That is the wrong way round: per store is how the fee is expressed, and the
+   total is what the client actually pays each month, so the total is now the
+   larger of the two and this steps back to make room for it. */
+.pkg__num{font-family:var(--font-display);font-size:1.18rem;font-weight:800;color:var(--navy);line-height:1}
 .pkg__per{font-size:.74rem;color:var(--slate);line-height:1.25}
 .pkg__inc{font-size:.76rem;font-weight:700;color:#06757B;margin:0 0 9px;
   display:flex;align-items:center;gap:6px}
@@ -1278,8 +1290,8 @@ fieldset.field:focus{outline:none}
    adds: the band toggle, the "Custom" price line, the setup footnote and the
    footnote list. */
 /* ------------------------------- trust strip + final CTA (section 10)
-   The strip is the dark band's `.claims` grid, now four icon items rather than
-   a counter and three fragments. `.claim` keeps its left rule; the icon sits
+   The strip is the dark band's `.claims` grid, three icon items rather than a
+   counter and three fragments. `.claim` keeps its left rule; the icon sits
    above the term. */
 .trustbar{padding-block:clamp(28px,3.2vw,38px)}
 .claim--iconed{display:grid;gap:6px;justify-items:start}
@@ -1287,6 +1299,10 @@ fieldset.field:focus{outline:none}
   background:rgba(255,255,255,.1);color:#fff;margin-bottom:2px}
 .claim__ic .ic{width:19px;height:19px}
 .leadsent{display:grid;gap:13px;justify-items:center;text-align:center;padding:20px 0}
+/* The panel's booking action sits between the three ticks and the fit note,
+   which is where a reader who has just been told what the review covers is
+   most likely to act. Block on a phone, inline where there is room. */
+.finalcta__book{margin:22px 0 0}
 .leadsent h3{margin:0}
 .leadsent p{margin:0;color:var(--slate);max-width:44ch}
 .leadsent__meta{font-size:.81rem}
@@ -1364,10 +1380,15 @@ fieldset.field:focus{outline:none}
 .pricing__slider{touch-action:pan-y}
 
 /* What the reader actually pays, under each plan's per-store rate. */
-.pkg__total{margin:-6px 0 14px;font-size:.84rem;color:var(--slate)}
-.pkg__total strong{color:var(--navy);font-weight:700}
+/* THE PORTFOLIO TOTAL IS THE HEADLINE FIGURE. Bold and larger than the
+   per-store rate above it, on the display face, with the qualifier around it
+   left at small-print size — the number is what a reader is looking for and
+   the sentence is what makes it unambiguous. `align-items:baseline` keeps the
+   two sizes sitting on one line rather than on their own box centres. */
+.pkg__total{display:flex;flex-wrap:wrap;align-items:baseline;gap:0;margin:2px 0 14px;font-size:.84rem;color:var(--slate);line-height:1.35}
+.pkg__total strong{font-family:var(--font-display);font-size:1.72rem;font-weight:800;color:var(--navy);line-height:1;margin:0 1px}
 /* No opacity: slate at 75% fails contrast on white (axe flagged all three). */
-.pkg__was{color:var(--slate);font-size:1rem}
+.pkg__was{color:var(--slate);font-size:.92rem}
 .pkg__setup{margin:12px 0 0;font-size:.76rem;color:var(--slate)}
 .pkg__cta{margin-top:16px}
 .pricing__notes{list-style:none;display:grid;gap:8px;margin:0;font-size:.82rem;
@@ -1381,43 +1402,53 @@ fieldset.field:focus{outline:none}
 .pkgfoot p{margin:0;font-size:.82rem;color:var(--slate);line-height:1.6}
 .pkgfoot strong{color:var(--navy)}
 
-/* --------------------------------------- the smaller option (Compliance)
-   NOT A THIRD COLUMN. Essential and Complete are the choice a reader makes;
-   Compliance Administration is a component of Complete offered on its own,
-   so it sits below them, narrower, with no "most popular" flag to compete
-   for. Three equal cards asked the reader to compare three things when only
-   two of them are the decision.
+/* ------------------------- the smaller option (Compliance), as small print
+   NOT A CARD ANY MORE, AND NOT A COLUMN. Essential and Complete are the
+   choice a reader makes; compliance administration is a component of Complete
+   that is also sold on its own. It was a compact third card below the two,
+   which still asked the reader to weigh three things when only two of them
+   are the decision — so what is left is one sentence telling somebody who
+   already has repairs handled that the option exists, plus a row in the rate
+   card that prices it at every band.
 
    THE NINETEEN-ROW COMPARISON MATRIX THAT LIVED HERE IS GONE. It existed
    because THREE stacked `.pkg` cards measured 2294px at 390 and 2510px at
    320 — more than the whole desktop section — so below 768px the section
-   swapped them for a scrollable table. Two cards and this compact third do
-   not run that long, so the table is deleted rather than kept for a problem
-   it no longer has. It took `(min-width:601px)` with it, which was the one
-   width in this stylesheet outside the five the parity tests permit. */
-.pkgalt{margin-top:16px;background:#fff;border:1.5px solid var(--border);
-  border-radius:var(--r-lg);padding:var(--gap-pad);display:grid;gap:10px}
-.pkgalt__head{display:grid;gap:10px;align-items:start}
-@media(min-width:768px){
-  .pkgalt{max-width:none}
-  .pkgalt__head{grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center}
-}
-.pkgalt__head h3{font-size:1.02rem;margin:0 0 3px}
-.pkgalt__head .pkg__for{margin:0}
-/* The price sits flush right of the row on a wide screen and under the name
-   on a phone, which is what `grid-template-columns` above switches. */
-.pkgalt__head .pkg__price{margin:0;text-align:left}
-@media(min-width:768px){.pkgalt__head .pkg__price{text-align:right}}
-.pkgalt__note{margin:0;font-size:.84rem;line-height:1.5;color:var(--slate)}
-.pkgalt__note strong{color:var(--navy)}
-/* Two columns of bullets where there is room, one where there is not — the
-   list is six items and a single column of six pushes the section long on a
-   phone for no gain. */
-.pkgalt__list{list-style:none;margin:0;padding:0;display:grid;gap:7px;font-size:.84rem}
-@media(min-width:640px){.pkgalt__list{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 18px}}
-.pkgalt__list li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;
-  align-items:start;color:var(--slate)}
-.pkgalt__list .ic{color:var(--teal-text);margin-top:2px}
+   swapped them for a scrollable table. Two cards do not run that long, so the
+   table is deleted rather than kept for a problem it no longer has. It took
+   `(min-width:601px)` with it, which was the one width in this stylesheet
+   outside the five the parity tests permit. */
+.pkgfine{margin:16px 0 0;font-size:.84rem;line-height:1.6;color:var(--slate);max-width:72ch}
+
+/* --------------------------------------------------- the full rate card
+   THE PAGE'S EXISTING DISCLOSURE, not a new one. `<details>`/`<summary>` is
+   what the FAQ uses — no state, no JavaScript, no second pattern to learn —
+   and the marker is suppressed the same way there.
+
+   IT SCROLLS RATHER THAN OVERFLOWING. Five columns of figures do not fit a
+   320px phone and must not widen the page, so the table is the only thing
+   that scrolls: `overflow-x` sits on the wrapper, and the table takes its
+   natural width inside it. `-webkit-overflow-scrolling` is deliberately not
+   set; it has been a no-op since iOS 13 and the rule would be noise. */
+.ratecard{margin-top:var(--gap-card)}
+.ratecard__toggle{display:inline-flex;align-items:center;gap:7px;min-height:44px;
+  font-weight:650;color:var(--teal-text);cursor:pointer;list-style:none;
+  text-decoration:underline;text-underline-offset:3px}
+.ratecard__toggle::-webkit-details-marker{display:none}
+.ratecard__toggle::marker{content:""}
+.ratecard__toggle:focus-visible{outline:3px solid var(--amber-strong);outline-offset:3px;
+  border-radius:var(--r-sm)}
+.ratecard[open] .ratecard__toggle{margin-bottom:10px}
+.ratecard__scroll{overflow-x:auto;overscroll-behavior-x:contain}
+.ratecard__table{border-collapse:collapse;font-size:.85rem;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.ratecard__table th,.ratecard__table td{padding:9px 14px 9px 0;text-align:left;
+  border-bottom:1px solid var(--line)}
+.ratecard__table thead th{font-weight:650;color:var(--slate);font-size:.78rem}
+.ratecard__table tbody th{font-weight:700;color:var(--navy)}
+.ratecard__table tbody td{color:var(--navy)}
+.ratecard__table tbody tr:last-child th,.ratecard__table tbody tr:last-child td{border-bottom:0}
+.ratecard__note{margin:10px 0 0;font-size:.82rem;color:var(--slate);line-height:1.6}
 
 /* The two main cards never collapse to one column above 640px: two abreast is
    the comparison, and `auto-fit` would drop them to one the moment the track
@@ -1656,16 +1687,29 @@ fieldset.field:focus{outline:none}
    421 the single column already ruled here stands. The `auto-fit` packing is
    gone because it cannot express "four or two, never three" — with four items
    a three-track row is one orphan, which is what 640–740px used to get. */
+/* THREE CHIPS, NOT FOUR. The "Data protection / ICO registered" chip was
+   removed because the registration is not on the ICO's public register — a
+   compliance claim a compliance business must be able to evidence. Four
+   columns with three items left a gap on the right at the wide breakpoint,
+   so the wide layout follows the count. Two columns below it is unchanged,
+   and the third chip opens its own row there. */
 .claims{display:grid;gap:18px;grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(min-width:1120px){.claims{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(min-width:1120px){.claims{grid-template-columns:repeat(3,minmax(0,1fr))}}
 /* The rule separates a claim from the one BESIDE it, so the claim that opens a
    row never carries one — and with two columns that is every odd item, not
    just the first. `:first-child` alone left the second row starting 17px in
-   behind a divider with nothing on its other side. At four across the rows
-   change, so the third claim takes its rule back. */
+   behind a divider with nothing on its other side. At three across the rows
+   change, so the count below re-points the rule. */
 .claim{border-left:1px solid rgba(255,255,255,.2);padding-left:17px}
 .claim:nth-child(odd){border-left:0;padding-left:0}
-@media(min-width:1120px){.claim:nth-child(3){border-left:1px solid rgba(255,255,255,.2);padding-left:17px}}
+/* At three columns the item that OPENS a row is every third one, so the rule
+   that suppresses the left border has to count in threes rather than in twos.
+   Without this the middle chip lost its rule and the last one gained one it
+   should not have. */
+@media(min-width:1120px){
+  .claim{border-left:1px solid rgba(255,255,255,.2);padding-left:17px}
+  .claim:nth-child(3n+1){border-left:0;padding-left:0}
+}
 /* THE ICON IS A CHILD OF THE <dt>, AND IT STAYS THERE. A <div> group inside a
    <dl> may hold only <dt> and <dd>; a sibling <span> made the list invalid and
    cost a serious axe violation. So the row is built inside the <dt> instead:

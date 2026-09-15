@@ -313,8 +313,20 @@ test("Contact Us is in both navs, and both send you to the section the footer al
   const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
   assert.match(nav, /\["#contact", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
 
-  const order = [...nav.matchAll(/\["#[a-z-]+", "([^"]+)"\]/g)].map((match) => match[1]);
-  assert.deepEqual(order, ["Services", "How It Works", "Pricing", "Case Study", "Contact Us"]);
+  /* RE-POINTED: the nav gained "Contractors", which is a ROUTE and not a hash,
+     so the harvest can no longer assume every target starts with "#". The claim
+     is the one that matters and is unchanged — the shared list is what both
+     navs render, in this order, with Contact Us last. */
+  const order = [...nav.matchAll(/\["[#/][a-z-]+", "([^"]+)"\]/g)].map((match) => match[1]);
+  assert.deepEqual(order, [
+    "Services",
+    "How It Works",
+    "Pricing",
+    "Case Study",
+    "Contractors",
+    "Contact Us",
+  ]);
+  assert.match(nav, /\["\/contractors", "Contractors"\]/, "and the one route target is the page");
 
   /* Desktop: the list renders into .nav__list, and Portal Login follows it. */
   assert.match(chrome, /<nav className="nav" aria-label="Primary">[\s\S]*?NAV\.map/, "the desktop bar renders NAV");
@@ -397,9 +409,13 @@ test("the pricing band buttons do not move under the thumb that pressed them", a
   assert.match(css, /\.switcher button\{touch-action:manipulation\}/, "a tap is a tap, not half a double-tap");
 
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  /* RE-POINTED: the note is ONE sentence now for every band, so the shape ends
+     at the rate rather than running on into a per-store comparison. The claim
+     is unchanged and is the reason the pin exists — the sentence is built from
+     whichever band it is given, never typed per band. */
   assert.match(
     pricing,
-    /you are on the \$\{entry\.label\} rate`;/,
+    /you are on the \$\{entry\.label\} rate\.`;/,
     "one sentence shape for every band, built for whichever band it is given",
   );
   assert.match(
@@ -423,9 +439,28 @@ test("the pricing band buttons do not move under the thumb that pressed them", a
     "with the twins kept out of the accessibility tree",
   );
   assert.ok(!pricing.includes("You have unlocked"), "the contradictory 'save £N' note is gone");
-  /* RE-POINTED: Total Care is called Complete since the pricing rebuild. The
-     claim — the figure in the note says which rate it is below — is unchanged. */
-  assert.match(pricing, /below the \$\{entryBand\.label\} rate on Complete\./, "the figure says what it is");
+  /*
+   * RE-POINTED TWICE, AND THE SECOND TIME IT WITHDRAWS THE FIGURE ENTIRELY.
+   *
+   * The note used to end "— £7 per store below the 5–10 stores rate on
+   * Complete", and this pinned that the figure named which rate it was below,
+   * because a bare "£7 cheaper" is a number with nothing behind it. The
+   * commercial update replaces the run-on with one sentence that quotes no
+   * figure at all, which answers the same worry by removing its subject: the
+   * only saving still claimed on this section is the card badge, which names
+   * both things it is comparing.
+   *
+   * So what is held now is that the note carries NO figure. A number
+   * reappearing here without a sentence saying what it is below is the defect,
+   * and this is where it would show up.
+   */
+  const note = pricing.slice(pricing.indexOf("const noteForBand"), pricing.indexOf("const rateFor"));
+  assert.doesNotMatch(note, /£/, "the band note quotes no figure, so none can be unexplained");
+  assert.match(
+    pricing,
+    /Most popular — save £\{saving\} per store/,
+    "the one saving the section claims is the badge, and it is derived",
+  );
 
   /*
    * RE-POINTED to the approved rates and the new plan names, and extended to
@@ -438,13 +473,26 @@ test("the pricing band buttons do not move under the thumb that pressed them", a
    * note has to ask before it subtracts, and the assertion below is what makes
    * that a contract rather than a coincidence.
    */
-  assert.match(pricing, /essential: 55, compliance: 50, complete: 85/);
-  assert.match(pricing, /essential: 50, compliance: 48, complete: 78/);
-  assert.match(pricing, /essential: 45, compliance: 45, complete: 70/);
-  assert.match(
-    pricing,
-    /if \(entry\.complete === null\) \{/,
-    "the note asks whether the band has a rate before it subtracts one",
+  /* RE-POINTED at `rates.ts`, which is where the band table lives since the
+     cost FAQ began deriving the entry rates too — and at the commercial
+     update's approved figures. */
+  const rates = await read("app/(marketing)/_sections/rates.ts");
+  assert.match(rates, /essential: 60, compliance: 55, complete: 100/);
+  assert.match(rates, /essential: 56, compliance: 51, complete: 92/);
+  assert.match(rates, /essential: 52, compliance: 47, complete: 84/);
+  /*
+   * THE FOURTH BAND'S ARITHMETIC RISK IS GONE WITH THE SENTENCE THAT HAD IT.
+   *
+   * The note used to subtract one band's rate from another's, which is
+   * arithmetic on `null` in a band that carries no rate — so it had to ask
+   * first. The single sentence does no arithmetic at all, so the guard that
+   * made asking a contract is replaced by the stronger fact: there is nothing
+   * left in the note to subtract.
+   */
+  assert.doesNotMatch(
+    pricing.slice(pricing.indexOf("const noteForBand"), pricing.indexOf("const rateFor")),
+    /entryBand|- (band|entry)\./,
+    "the band note does no arithmetic, so it cannot do arithmetic on null",
   );
 });
 

@@ -116,7 +116,16 @@ test("the portal section is trimmed to exactly what the brief keeps", async () =
 
   /* One text link, to /portal, and no button to /dashboard */
   assert.match(portal, /href="\/portal"[\s\S]{0,60}Portal Login/);
-  assert.ok(!portal.includes("/dashboard"), "the /dashboard button is gone");
+  /*
+   * RE-POINTED FROM THE STRING TO THE BUTTON. What was withdrawn is a second,
+   * competing call to action — an "Open Client Portal" button pointing at
+   * `/dashboard` beside the text link. The word itself is now in the mock's
+   * address bar, which reads `maintsupp.com/dashboard/<tab>` because
+   * `portal.maintsupp.com` is a host this product has never been served from
+   * and the caption should name somewhere that exists. That is a caption, not
+   * a link: it is inside a `<span>` and there is no href near it.
+   */
+  assert.doesNotMatch(portal, /href="\/dashboard/, "the /dashboard button is gone");
   assert.ok(!portal.includes("Open Client Portal"), "and so is its label");
 });
 
@@ -584,10 +593,30 @@ test("the footer renames the portal link and adds the contractor route, nav unto
   assert.match(chrome, /<li><a href="#portal">Client portal<\/a><\/li>/);
   assert.ok(!chrome.includes("The software"), "the old label is gone");
   assert.match(chrome, /<li><Link href="\/contractors">Join our contractor network<\/Link><\/li>/);
+  /*
+   * RE-POINTED: the top nav now carries Contractors DELIBERATELY.
+   *
+   * This asserted the opposite — one link, in the footer only — which was
+   * right when the contractor page was a secondary destination and the nav was
+   * five anchors on one page. The commercial brief asks for it in the primary
+   * nav, so the claim becomes the one that is still worth holding: it appears
+   * ONCE in the shared nav list, and the footer link it used to be the only
+   * copy of is still there.
+   *
+   * Three occurrences: the NAV entry, and the desktop and drawer renders of
+   * that one entry. The nav is rendered from the list in two places, so a
+   * second NAV entry would make it five.
+   */
+  const navList = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
+  assert.equal(
+    (navList.match(/\/contractors/g) ?? []).length,
+    1,
+    "named once in the shared nav list, not once per rendering",
+  );
   assert.equal(
     (chrome.match(/\/contractors/g) ?? []).length,
-    1,
-    "exactly one link to it, and it is the footer's — not the top nav's",
+    3,
+    "the list entry, its two renders, and the footer link — no fourth copy",
   );
   /* The legal line is byte-for-byte what it was. */
   assert.match(chrome, /Maintsupp is a trading name of Maintauk Ltd\. Registered in England &amp; Wales,/);
@@ -837,14 +866,35 @@ test("every icon sits on its title's first line, at every width", async () => {
   );
 
   /* The four claims say exactly what they said. */
+  /*
+   * RE-POINTED TO THREE CHIPS, because the fourth was a claim that cannot be
+   * evidenced.
+   *
+   * "Data protection / ICO registered" was removed after searching the ICO's
+   * own public register by name on 15 September 2026 for "Maintauk",
+   * "MAINTAUK LTD" and "Maintsupp": no entries. On a site selling compliance
+   * administration, an unverifiable compliance claim on the trust strip is the
+   * worst possible place for one.
+   *
+   * The three that remain are pinned exactly as before, and the withdrawn pair
+   * is pinned as ABSENT — so restoring the chip is a deliberate act that has to
+   * come back through this test, with the registration reference.
+   */
   for (const line of [
     "Vetted contractors", "Insurance & competence checked",
     "Documented evidence", "Standard on every job",
-    "Data protection", "ICO registered",
     "Maintsupp", "A trading name of Maintauk Ltd",
   ]) {
     assert.ok(cta.includes(line), `the strip still reads "${line}"`);
   }
+  const claims = cta.slice(cta.indexOf("const CLAIMS = ["), cta.indexOf("export function TrustStrip"));
+  const rendered = claims.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(!rendered.includes("ICO registered"), "the ICO claim is not made without the entry");
+  assert.equal(
+    (rendered.match(/title: "/g) ?? []).length,
+    3,
+    "three chips, and a fourth needs evidence before it needs a test change",
+  );
 
   /* Five cards, and Franchise Groups is still withdrawn. */
   const who = await read("app/(marketing)/_sections/who-we-help.tsx");
@@ -868,11 +918,18 @@ test("the trust strip never has fewer columns' worth of room than a claim needs"
      rather than the first child. */
   const css = await read("app/(marketing)/marketing.css");
   assert.match(css, /\.claims\{display:grid;gap:18px;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
-  assert.match(css, /@media\(min-width:1120px\)\{\.claims\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\)\}\}/);
-  assert.doesNotMatch(css, /\.claims\{[^}]*auto-fit/, "auto-fit cannot say four or two, never three");
+  /* RE-POINTED WITH THE CHIP COUNT. Three chips in a four-column grid left a
+     hole on the right at the wide breakpoint, so the wide layout follows the
+     count. Two columns below it is untouched, which is why the first assertion
+     is unchanged. */
+  assert.match(css, /@media\(min-width:1120px\)\{\.claims\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}\}/);
+  assert.doesNotMatch(css, /\.claims\{[^}]*auto-fit/, "auto-fit cannot say three or two, never four");
   assert.match(css, /\.claim\{border-left:1px solid rgba\(255,255,255,\.2\);padding-left:17px\}/, "the divider stays");
   assert.match(css, /\.claim:nth-child\(odd\)\{border-left:0;padding-left:0\}/, "a claim that opens a row carries no rule");
-  assert.match(css, /@media\(min-width:1120px\)\{\.claim:nth-child\(3\)\{border-left:1px solid/, "at four across the third opens no row");
+  /* At three across, the claim that OPENS a row is every third one — counting
+     in twos there left the middle chip without its rule and gave the last one
+     a rule it should not have. */
+  assert.match(css, /\.claim:nth-child\(3n\+1\)\{border-left:0;padding-left:0\}/, "at three across the rows count in threes");
   /* Neither the title nor its dt may push its column wide again. */
   assert.match(css, /\.claim dt\{[^}]*min-width:0\}/);
   assert.match(css, /\.claim__title\{[^}]*min-width:0;overflow-wrap:break-word\}/);

@@ -49,8 +49,25 @@ function providerConfig() {
   const source = env?.env ?? {};
   const apiKey = source.RESEND_API_KEY;
   const from = source.NOTIFY_FROM ?? "MAINTSUPP <notifications@maintsupp.com>";
-  const salesInbox = source.NOTIFY_SALES ?? "info@maintsupp.com";
-  const opsInbox = source.NOTIFY_OPS ?? salesInbox;
+  /*
+   * THREE INBOXES, NOT ONE, AND THE DEFAULTS ARE THE REAL ADDRESSES.
+   *
+   * Every form on the public site used to land in `info@maintsupp.com`,
+   * because `NOTIFY_SALES` defaulted there and `NOTIFY_OPS` fell back to it.
+   * One inbox for a broken shutter, a portfolio enquiry and a contractor
+   * application means the urgent one waits behind the other two.
+   *
+   * The defaults are the addresses themselves rather than a shared fallback,
+   * deliberately. This module reads `process.env` ONLY — it does not consult
+   * a Worker binding — so on any deployment where the variables arrive some
+   * other way an unset variable is silently `undefined`, and a fallback
+   * chain would quietly send three different things to one address again
+   * with nothing to notice it. The environment overrides; it is not required
+   * to be correct for the routing to be.
+   */
+  const salesInbox = source.NOTIFY_SALES ?? "anwar@maintsupp.com";
+  const opsInbox = source.NOTIFY_OPS ?? "operations@maintsupp.com";
+  const contractorInbox = source.NOTIFY_CONTRACTORS ?? "admin@maintsupp.com";
   const smsFrom = source.SMS_FROM;
   const smsKey = source.SMS_API_KEY;
   return {
@@ -58,6 +75,7 @@ function providerConfig() {
     from,
     salesInbox,
     opsInbox,
+    contractorInbox,
     smsFrom,
     smsKey,
     mode: emailMode(source),
@@ -106,8 +124,8 @@ export function outboundEmailMode(): EmailMode {
 }
 
 export function notificationTargets() {
-  const { salesInbox, opsInbox } = providerConfig();
-  return { salesInbox, opsInbox };
+  const { salesInbox, opsInbox, contractorInbox } = providerConfig();
+  return { salesInbox, opsInbox, contractorInbox };
 }
 
 function stripTags(html: string) {
@@ -345,7 +363,18 @@ export function leadAlertTemplate(lead: {
   challenge?: string | null;
 }) {
   return {
-    subject: `New portfolio review request — ${lead.company || lead.name}`,
+    /*
+     * `[LEAD] {company} — {n} sites`, so it can be filtered and flagged.
+     *
+     * The prefix is a bracketed tag on purpose: Outlook rules match a prefix
+     * reliably and a leading capital word ("New portfolio review request")
+     * collides with every other notification this system sends. The site
+     * range is in the subject because it is the one fact that decides whether
+     * this lead is worth a call today.
+     */
+    subject: `[LEAD] ${lead.company || lead.name} — ${lead.siteRange ?? "sites not given"}${
+      lead.siteRange ? " sites" : ""
+    }`,
     body: SHELL(
       "New portfolio review request",
       `<table style="border-collapse:collapse">
@@ -387,7 +416,18 @@ export function jobAlertTemplate(job: {
 }) {
   const urgent = (job.priority ?? "").toLowerCase() === "urgent";
   return {
-    subject: `${urgent ? "URGENT — " : ""}${job.reference ?? "New job"} — ${job.site ?? "site not set"}`,
+    /*
+     * `[JOB] {site} — {urgency}`, and URGENT still leads.
+     *
+     * The old subject put the reference first and the site second and said
+     * nothing about urgency unless it was urgent, so a P1 and a cosmetic
+     * request were the same shape in the list. Site first because that is
+     * what an operator triages by; the reference follows the priority rather
+     * than being dropped, because it is what the job is chased by afterwards.
+     */
+    subject: `${urgent ? "URGENT " : ""}[JOB] ${job.site ?? "site not set"} — ${
+      job.priority ?? "priority not set"
+    }${job.reference ? ` (${job.reference})` : ""}`,
     body: SHELL(
       urgent ? "Urgent job reported" : "New job reported",
       `<table style="border-collapse:collapse">
