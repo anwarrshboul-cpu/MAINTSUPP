@@ -66,22 +66,38 @@ function row(overrides = {}) {
 const compute = (rows, period = "90") =>
   meters.computeJobMeters(rows, period, NOW);
 
-test("every status a meter names is a real monday label", async () => {
+test("every status a meter names is a real monday label", async (t) => {
   // The whole point of naming labels instead of sniffing substrings is lost if
   // a meter names one monday does not have — it would silently count nothing
   // and nobody would see it. The capture is the ground truth.
   // The capture is prose wrapped at 79 columns, so a label can straddle a line
   // break — flatten the whitespace before looking for it.
-  const capture = (
-    await read("db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md")
-  ).replace(/\s+/g, " ");
+  /*
+   * The capture is gitignored: it holds the client's live board, so it exists
+   * only on an operator's machine and its absence is a fact about the checkout
+   * rather than a failure of the meters. Only the label-for-label comparison
+   * needs those bytes; everything else in this test is about constants that are
+   * committed, so — unlike the whole-test skip used where a file's bytes are
+   * the only subject — the rest keeps running on every clone. Same reasoning as
+   * `tests/stage-nineteen-import-identity.test.mjs`.
+   */
+  const captureText = await read(
+    "db/monday-export/MAINTENANCE-MONDAY-CAPTURE.md",
+  ).catch(() => null);
   assert.equal(
     meters.maintenanceStatusLabels.length,
     23,
     "monday's Status column has 23 labels",
   );
-  for (const label of meters.maintenanceStatusLabels) {
-    assert.ok(capture.includes(label), `${label} is not in the monday capture`);
+  if (captureText === null) {
+    t.diagnostic(
+      "no monday capture on this machine (gitignored: client data) — the label-for-label check stands down",
+    );
+  } else {
+    const capture = captureText.replace(/\s+/g, " ");
+    for (const label of meters.maintenanceStatusLabels) {
+      assert.ok(capture.includes(label), `${label} is not in the monday capture`);
+    }
   }
   const vocabulary = new Set(meters.maintenanceStatusLabels);
   /*
