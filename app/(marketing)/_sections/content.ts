@@ -17,7 +17,7 @@
  * The on-page enquiry form is deliberately still there as the fallback for
  * anyone who would rather write than book a slot.
  */
-import { ENTRY_BAND, INCLUDED_JOBS, MINIMUM_SITES } from "./rates";
+import { ENTRY_BAND, INCLUDED_JOBS, MINIMUM_SITES, inWords } from "./rates";
 
 export const BOOKING_URL = "https://cal.com/maintsupp/portfolio-review";
 
@@ -438,7 +438,7 @@ export const faq = [
        `pricing.tsx` precisely so a second copy cannot go stale — deriving
        them satisfies the brief and keeps that rule, because a `£${…}` has no
        digit after the sign. Never type one in here. */
-    "a": `Coordination is priced per store per month and every rate is published on this page — Essential from £${ENTRY_BAND.essential} per store, Complete from £${ENTRY_BAND.complete} per store, falling as the portfolio grows. It includes ${INCLUDED_JOBS} coordinated jobs per store per month, pooled across the whole portfolio, so a bad month at one site doesn't cost you extra. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Our minimum portfolio is ${MINIMUM_SITES} sites. Your final quote is confirmed at the free portfolio review.`
+    "a": `Coordination is priced per store per month and every rate is published on this page — Essential from £${ENTRY_BAND.essential} per store, Complete from £${ENTRY_BAND.complete} per store, falling as the portfolio grows. It includes ${inWords(INCLUDED_JOBS)} coordinated jobs per store per month, pooled across the whole portfolio, so a bad month at one site doesn't cost you extra. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Our minimum portfolio is ${inWords(MINIMUM_SITES)} sites. Your final quote is confirmed at the free portfolio review.`
   },
   {
     /* ADDED WITH THE COMMERCIAL UPDATE, immediately after the cost answer,

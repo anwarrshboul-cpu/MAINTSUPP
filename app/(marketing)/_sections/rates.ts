@@ -92,6 +92,29 @@ export const PROJECT_PERCENT = 12;
 export const PROJECT_MINIMUM = 350;
 
 /**
+ * The two counts the FAQ spells out in words.
+ *
+ * §4.1 of the brief quotes its answer verbatim, and it says "four coordinated
+ * jobs" and "five sites", not "4" and "5". Interpolating the constants is what
+ * keeps that sentence from becoming a second typed copy of the figures — so
+ * the constants come with their own words rather than the sentence giving up
+ * and typing a numeral.
+ *
+ * Deliberately a tiny map rather than a general number-to-words function: only
+ * two values are ever spelled out on this site, and a general one would be
+ * forty lines of code nobody reads to serve two callers.
+ */
+const WORDS: Record<number, string> = {
+  1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+  6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
+};
+
+/** A small count as the word for it, or the numeral when it is not small. */
+export function inWords(value: number): string {
+  return WORDS[value] ?? String(value);
+}
+
+/**
  * The published minimum and the entry rate cannot contradict each other.
  *
  * §10.3 of the brief: "The stated minimum (£300) equals 5 × the Essential entry

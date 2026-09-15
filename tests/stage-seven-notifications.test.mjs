@@ -90,10 +90,26 @@ test("urgent jobs are flagged in the subject line", async () => {
    */
   const fromTemplate = source.slice(source.indexOf("export function jobAlertTemplate"));
   const template = fromTemplate.slice(0, fromTemplate.indexOf("\nexport function", 1));
-  assert.match(template, /urgent \? "URGENT " : ""/, "urgency leads the subject");
+  /*
+   * THE TAG IS THE PREFIX, AND THE FLAG IS THE PRIORITY.
+   *
+   * An "URGENT " prefix was tried and withdrawn: it put the flag ahead of the
+   * `[JOB]` tag and so defeated the only thing the tag exists for — an Outlook
+   * rule on the prefix would have caught every routine job and missed every P1.
+   * Urgency is not lost, because `job.priority` IS the urgency and is always in
+   * the subject; `urgent` still picks the heading and the event name, which is
+   * what the flagging claim in this test's title actually rests on.
+   */
+  assert.match(template, /^\s*subject: `\[JOB\] /m, "the tag is the first thing in the subject");
   assert.match(template, /\[JOB\] \$\{job\.site \?\? "site not set"\}/, "then the site it happened at");
   assert.match(template, /job\.priority \?\? "priority not set"/, "then the urgency, always");
-  assert.match(template, /job\.reference \? ` \(\$\{job\.reference\}\)` : ""/, "the reference is kept");
+  assert.match(template, /job\.reference \? ` \(\$\{job\.reference\}\)` : ""/, "the reference is kept, last");
+  assert.doesNotMatch(
+    template.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /"URGENT /,
+    "nothing may be prefixed ahead of the tag",
+  );
+  assert.match(template, /urgent \? "Urgent job reported" : "New job reported"/, "and urgency still picks the heading");
 
   const route = await read("app/api/maintenance/route.ts");
   assert.match(route, /event: \(priority \?\? ""\)\.toLowerCase\(\) === "urgent"/);

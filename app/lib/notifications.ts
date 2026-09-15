@@ -417,15 +417,26 @@ export function jobAlertTemplate(job: {
   const urgent = (job.priority ?? "").toLowerCase() === "urgent";
   return {
     /*
-     * `[JOB] {site} — {urgency}`, and URGENT still leads.
+     * `[JOB] {site} — {urgency}`, and THE TAG IS THE FIRST THING IN IT.
      *
      * The old subject put the reference first and the site second and said
      * nothing about urgency unless it was urgent, so a P1 and a cosmetic
-     * request were the same shape in the list. Site first because that is
-     * what an operator triages by; the reference follows the priority rather
-     * than being dropped, because it is what the job is chased by afterwards.
+     * request were the same shape in an inbox. Site first because that is what
+     * an operator triages by; the urgency always, because that is what decides
+     * the order.
+     *
+     * AN "URGENT " PREFIX WAS TRIED AND WITHDRAWN. It read
+     * `URGENT [JOB] Aldgate — Urgent`, which put the flag ahead of the tag and
+     * so defeated the only thing the tag is for: an Outlook rule matching the
+     * prefix `[JOB]` would have caught every routine job and missed every P1 —
+     * precisely inverting the intent. Urgency is not lost by dropping it,
+     * because `job.priority` IS the urgency and is already in the subject;
+     * `urgent` still selects the heading and the event name.
+     *
+     * The reference is appended LAST, where it cannot affect a prefix rule,
+     * because it is what the job is chased by afterwards.
      */
-    subject: `${urgent ? "URGENT " : ""}[JOB] ${job.site ?? "site not set"} — ${
+    subject: `[JOB] ${job.site ?? "site not set"} — ${
       job.priority ?? "priority not set"
     }${job.reference ? ` (${job.reference})` : ""}`,
     body: SHELL(

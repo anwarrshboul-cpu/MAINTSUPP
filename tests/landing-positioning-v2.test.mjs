@@ -613,10 +613,20 @@ test("the footer renames the portal link and adds the contractor route, nav unto
     1,
     "named once in the shared nav list, not once per rendering",
   );
+  /*
+   * COMMENTS STRIPPED FIRST. The NAV's own docstring explains that Contractors
+   * is a route rather than an anchor, and it names `/contractors` while doing
+   * so — so a raw count over the file counted a comment as one of the copies
+   * and the number happened to come out right for the wrong reason.
+   *
+   * Three real ones: the entry in the shared list, and the footer link. The two
+   * renders reference `{href}`, not the literal.
+   */
+  const chromeCode = chrome.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
   assert.equal(
-    (chrome.match(/\/contractors/g) ?? []).length,
-    3,
-    "the list entry, its two renders, and the footer link — no fourth copy",
+    (chromeCode.match(/\/contractors/g) ?? []).length,
+    2,
+    "the shared nav entry and the footer link — no third typed copy",
   );
   /* The legal line is byte-for-byte what it was. */
   assert.match(chrome, /Maintsupp is a trading name of Maintauk Ltd\. Registered in England &amp; Wales,/);
@@ -929,7 +939,15 @@ test("the trust strip never has fewer columns' worth of room than a claim needs"
   /* At three across, the claim that OPENS a row is every third one — counting
      in twos there left the middle chip without its rule and gave the last one
      a rule it should not have. */
-  assert.match(css, /\.claim:nth-child\(3n\+1\)\{border-left:0;padding-left:0\}/, "at three across the rows count in threes");
+  /* Matched WITH its media query. A bare `nth-child(3n+1)` pin would be
+     satisfied by the rule sitting anywhere in a 144KB stylesheet, including
+     outside the breakpoint where three columns exist — which is where it would
+     do damage rather than good. */
+  assert.match(
+    css,
+    /@media\(min-width:1120px\)\{\s*\.claim\{border-left:1px solid rgba\(255,255,255,\.2\);padding-left:17px\}\s*\.claim:nth-child\(3n\+1\)\{border-left:0;padding-left:0\}\s*\}/,
+    "at three across the rows count in threes, and only at three across",
+  );
   /* Neither the title nor its dt may push its column wide again. */
   assert.match(css, /\.claim dt\{[^}]*min-width:0\}/);
   assert.match(css, /\.claim__title\{[^}]*min-width:0;overflow-wrap:break-word\}/);

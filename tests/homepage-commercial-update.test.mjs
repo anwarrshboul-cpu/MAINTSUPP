@@ -222,6 +222,33 @@ test("two cards, and compliance-only is small print beneath them", async () => {
   assert.match(pricing, /<p className="pkgfine">/, "the offer survives as small print");
 });
 
+test("§4.2's new question is in the source, not only on a running server", async () => {
+  /* The live half of this file skips without a dev server, so a question pinned
+     only there is a question nothing protects in CI. */
+  const content = await read(`${SECTIONS}/content.ts`);
+  assert.match(content, /"q": "What if we only have three or four sites\?"/);
+  assert.match(content, /better served calling trades directly/);
+  assert.match(content, /Our minimum is five sites/);
+  const costAt = content.indexOf('"q": "What does it cost?"');
+  const newAt = content.indexOf('"q": "What if we only have three or four sites?"');
+  assert.ok(costAt > 0, "the cost answer is still there");
+  assert.ok(newAt > costAt, "and the new one sits after it");
+  /* Immediately after: nothing between the two entries but the closing brace
+     and the opening of the next. */
+  assert.ok(
+    content.slice(costAt, newAt).split('"q": "').length === 2,
+    "immediately after — no other question was inserted between them",
+  );
+
+  /* §4.1 quotes its answer word for word, and the brief writes both counts as
+     WORDS. Interpolating the constants is what keeps the sentence from becoming
+     a second typed copy; `inWords` is what keeps it reading as English. */
+  assert.match(content, /\$\{inWords\(INCLUDED_JOBS\)\} coordinated jobs per store per month/);
+  assert.match(content, /Our minimum portfolio is \$\{inWords\(MINIMUM_SITES\)\} sites/);
+  assert.equal(rates.inWords(rates.INCLUDED_JOBS), "four");
+  assert.equal(rates.inWords(rates.MINIMUM_SITES), "five");
+});
+
 test("the full rate card uses the page's own disclosure, and scrolls", async () => {
   /* §1.5 and §10.10. `<details>`/`<summary>` is what the FAQ uses — no new UI
      pattern — and the table scrolls inside its own box rather than widening
@@ -297,8 +324,12 @@ test("the enquiry form offers the pricing bands, plus the honest way to say no",
      else on the page; a lead could arrive in a band the rate card cannot
      price. */
   const form = await read(`${SECTIONS}/final-cta.tsx`);
-  const ranges = form.slice(form.indexOf("const SITE_RANGES = ["));
-  const offered = [...ranges.slice(0, 160).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  /* Sliced to the END OF THE DECLARATION, not to a byte count — the same
+     anti-pattern this release removes from three other suites. A comment or a
+     longer label above it must not be able to truncate what is compared. */
+  const from = form.indexOf("const SITE_RANGES = [");
+  const ranges = form.slice(from, form.indexOf("] as const;", from));
+  const offered = [...ranges.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(offered, ["5–10", "11–25", "26–50", "51+"]);
   assert.match(form, /const UNDER_MINIMUM = "Fewer than 5";/);
   assert.match(form, /SITE_RANGES = \["5–10", "11–25", "26–50", "51\+", UNDER_MINIMUM\]/);
@@ -380,6 +411,22 @@ test("the duplicate Vercel hostname redirects, and Preview deployments do not", 
    */
   const worker = await read("worker/index.ts");
   assert.match(worker, /const DUPLICATE_HOST = "maintsupp-portal\.vercel\.app";/);
+  /*
+   * AND THE PRE-DEPLOY HARNESS MUST NOT PROBE THAT HOST.
+   *
+   * `vercel/local-check.mjs` drives the BUILT function in-process against real
+   * Postgres and sets `host:` on every probe. It was set to
+   * `maintsupp-portal.vercel.app` — the very hostname this redirect now
+   * catches — so every probe would have answered 301 with a zero-byte body
+   * while the script, which exits 0 regardless, printed a tidy table and
+   * reported success. A verification harness that silently stops verifying is
+   * worse than none, so the two are pinned against each other here.
+   */
+  const check = await read("vercel/local-check.mjs");
+  const host = /const HOST = "([^"]+)";/.exec(check);
+  assert.ok(host, "local-check must declare the host it probes");
+  assert.notEqual(host[1], "maintsupp-portal.vercel.app", "the harness must not probe the redirected host");
+  assert.equal(host[1], "www.maintsupp.com", "it probes the canonical host");
   assert.match(worker, /const CANONICAL_ORIGIN = "https:\/\/www\.maintsupp\.com";/);
   assert.match(worker, /url\.hostname === DUPLICATE_HOST/, "an exact host match, never a suffix");
   /* Comments stripped: the note above the constant has to name the mistake it
@@ -479,8 +526,17 @@ test("live: the cost FAQ quotes the same two rates the cards do", async (t) => {
       html.includes(`Complete from £${rates.ENTRY_BAND.complete} per store`),
       `${where}: the Complete entry rate`,
     );
-    assert.ok(html.includes(`It includes ${rates.INCLUDED_JOBS} coordinated jobs per store`));
-    assert.ok(html.includes(`Our minimum portfolio is ${rates.MINIMUM_SITES} sites`));
+    /* Spelled out, because §4.1 quotes the answer word for word and the brief
+       writes both counts as words. `inWords` is how the derived constant still
+       reads as English. */
+    assert.ok(
+      html.includes(`It includes ${rates.inWords(rates.INCLUDED_JOBS)} coordinated jobs per store`),
+      `${where}: the coordinated-job allowance, in words`,
+    );
+    assert.ok(
+      html.includes(`Our minimum portfolio is ${rates.inWords(rates.MINIMUM_SITES)} sites`),
+      `${where}: the minimum, in words`,
+    );
     assert.ok(
       html.includes("What if we only have three or four sites?"),
       `${where}: the new FAQ is there too`,

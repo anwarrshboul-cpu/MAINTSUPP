@@ -55,7 +55,21 @@ const origin = `http://127.0.0.1:${port}`;
 
 /* ------------------------------------------------------------------ checks -- */
 
-const HOST = "maintsupp-portal.vercel.app";
+/*
+ * THE CANONICAL HOST, NOT THE ALIAS — AND THAT IS NOW LOAD-BEARING.
+ *
+ * This was `maintsupp-portal.vercel.app`, which is an alias of the production
+ * deployment and was as good as any other name for it. It stopped being, the
+ * moment `worker/index.ts` began 301-ing that exact hostname to the canonical
+ * origin: every probe below would have answered `301` with a zero-byte body,
+ * and this script exits 0 regardless — so it would have printed a tidy table
+ * of redirects and reported success while testing nothing at all.
+ *
+ * That is the worst failure a verification harness can have, so the host it
+ * probes is pinned by `tests/homepage-commercial-update.test.mjs` against the
+ * redirect's own constant: if one moves, the test says so.
+ */
+const HOST = "www.maintsupp.com";
 
 /*
  * Optional. `maintsupp_session` holds a 256-bit token whose SHA-256 is what the

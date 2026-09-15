@@ -239,7 +239,7 @@ test("there is exactly one price table on the marketing site", async () => {
      particular wording of it. */
   assert.match(
     cost.slice(0, cost.indexOf("\n  }")),
-    /published on this page/,
+    /(?:every rate is|rates are) published on this page/,
     "it must point at the one place the rates live",
   );
 
