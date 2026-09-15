@@ -119,6 +119,9 @@ export default async function DashboardPage({
     <PortalApp
       userName={session.user.fullName?.trim() || session.user.email}
       userEmail={session.user.email}
+      /* The account's own `users.timezone`, so the Overview greeting reads the
+         viewer's clock rather than whichever region this instance runs in. */
+      userTimeZone={session.user.timezone}
       initialSection={initialSection}
     />
   );

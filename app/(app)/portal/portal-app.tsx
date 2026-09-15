@@ -174,6 +174,7 @@ import { useBodyScrollLock } from "./overlay/scroll-lock";
 import { AnchoredPopover } from "./overlay/anchored";
 import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
 import { installSessionGuard } from "./session-guard";
+import { useGreeting } from "./use-greeting";
 import { publishedBoardOptions } from "../../lib/board-option-registry";
 import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
 import { priorityOptions } from "./board-model";
@@ -445,7 +446,15 @@ const sectionMeta: Record<
   overview: {
     label: "Overview",
     eyebrow: "Operations centre",
-    title: "Good morning",
+    /*
+     * NOT THE GREETING. This was the literal "Good morning", which the topbar
+     * printed as "Good morning, <name>" at four in the afternoon, in every
+     * timezone, for ever — no clock was consulted anywhere. The heading is now
+     * computed by `useGreeting` from the account's own timezone; this stays as
+     * the screen's plain name, for anything that wants a label rather than a
+     * time of day.
+     */
+    title: "Overview",
     icon: "grid",
   },
   maintenance: {
@@ -1087,10 +1096,23 @@ function downloadFileRegister(files: FileRecord[], now = new Date()) {
 export default function PortalApp({
   userName,
   userEmail,
+  userTimeZone,
   initialSection = "overview",
 }: {
   userName: string;
   userEmail: string;
+  /*
+   * The signed-in account's own `users.timezone`, straight off the session.
+   *
+   * The Overview heading is a time-of-day greeting and it must read the
+   * VIEWER's clock, never this deployment's — a serverless region is not where
+   * the reader is, and "Good morning" computed in us-east at 16:44 BST is the
+   * defect this prop exists to close. Passing the stored preference rather than
+   * letting the browser decide also means the server and the client compute the
+   * same string, so it renders once instead of flickering. See
+   * `app/lib/greeting.ts`.
+   */
+  userTimeZone?: string | null;
   /*
    * A string, not a `Section`: `/dashboard/s/<slug>` resolves to a workspace
    * section key, which is not in the union by construction.
@@ -1835,6 +1857,14 @@ export default function PortalApp({
   const currentSettings = workspace?.settings ?? defaultWorkspaceSettings;
   const displayUserName = runtimeContext?.actor.displayName ?? userName;
   const displayUserEmail = runtimeContext?.actor.email ?? userEmail;
+  /*
+   * "Good morning" / "Good afternoon" / "Good evening", on the VIEWER's clock.
+   *
+   * It is not taken from `runtimeContext` because that payload carries no
+   * timezone — the prop off the session is the only source, and using one
+   * source is what keeps the server render and the client render identical.
+   */
+  const greeting = useGreeting(userTimeZone);
 
   /*
    * The workspace's own sections.
@@ -2902,8 +2932,14 @@ export default function PortalApp({
             <div className="page-identity">
               <span>{meta.eyebrow}</span>
               <strong>
+                {/*
+                  THE OVERVIEW HEADING IS A CLOCK, not a label. `meta.title`
+                  used to be the literal "Good morning" and was printed here at
+                  every hour of the day; `greeting` is derived from the account's
+                  own timezone. Every other surface still uses its own title.
+                */}
                 {activeSection === "overview"
-                  ? `${meta.title}, ${displayUserName.split(" ")[0]}`
+                  ? `${greeting}, ${displayUserName.split(" ")[0]}`
                   : meta.title}
               </strong>
             </div>
