@@ -376,6 +376,59 @@ test("changing a password requires the current one and ends other sessions", asy
   );
 });
 
+/*
+ * RE-POINTED 2026-09-16, not weakened.
+ *
+ * This forbade `console.*` outright in all nine files. That was a proxy for the
+ * property in the test's own name — no auth route logs a SECRET — and the proxy
+ * and the property came apart when `auth-session.ts` gained three deliberate
+ * diagnostics (7e151b5 "A password-less owner row now says so", 10f8aaa "Say
+ * whether owner recovery would work, while it can still be checked"). Both
+ * commits say in the source, twice, "No value is logged": they report a
+ * CONFIGURATION decision — that MAINTSUPP_OWNER_PASSWORD is missing, so sign-in
+ * will fail closed — on a fresh Production database where the alternative is a
+ * silent wrong-password message that sends the operator to check the password.
+ * Removing them to satisfy a blanket rule would delete a deliberate operability
+ * fix; that would be changing the product to suit the test.
+ *
+ * A NINTH CALL WAS HIDING BEHIND THE EIGHTH. The old loop threw on
+ * `auth-session.ts`, which is second in the list, so files three to nine were
+ * never reached — and `app/api/auth/login/route.ts` has logged
+ * `console.error("[auth] owner bootstrap failed", error)` since 4565cd3 without
+ * this test ever seeing it. Its comment gives the same reason: swallowed
+ * silently, a bootstrap failure is indistinguishable from a wrong password,
+ * which is how the first Production bootstrap presented on 2026-09-05.
+ *
+ * So each file is now held to the strongest rule it actually meets, rather than
+ * all nine to one rule that two of them break:
+ *
+ *  - the seven that log nothing keep the blanket ban, unchanged;
+ *  - `auth-session.ts` may log STRING LITERALS AND NOTHING ELSE — strip the
+ *    double-quoted literals and the call must be empty, so no template literal,
+ *    no concatenated variable, no identifier of any kind;
+ *  - `login/route.ts` may pass the caught error along, but NO CREDENTIAL: no
+ *    identifier from the credential vocabulary below, and no template literal
+ *    through which one could be interpolated.
+ *
+ * Literals are stripped before the vocabulary check on purpose — one of the
+ * `auth-session.ts` messages contains the word "password" as prose, and the
+ * rule is about values, not about what the sentence is allowed to say.
+ */
+const LITERAL_ONLY_LOGGING = new Set(["app/lib/auth-session.ts"]);
+const NO_CREDENTIAL_LOGGING = new Set(["app/api/auth/login/route.ts"]);
+
+/** Anything whose VALUE would be a credential if it reached a log. */
+const CREDENTIAL_VOCABULARY =
+  /\b(password|passwd|token|hash|secret|seed|cookie|credential|session)\b/i;
+
+/** Every `console.*` argument list, with double-quoted string literals removed. */
+function consoleArgumentsWithoutLiterals(code) {
+  const stripped = code.replace(/"(?:[^"\\]|\\.)*"/g, "");
+  return [...stripped.matchAll(/console\.(?:log|info|warn|error|debug)\s*\(([^)]*)\)/g)].map(
+    ([, args]) => args,
+  );
+}
+
 test("no auth route logs a secret", async () => {
   const files = [
     "app/lib/password.ts",
@@ -390,7 +443,29 @@ test("no auth route logs a secret", async () => {
   ];
   for (const path of files) {
     const text = codeOnly(await source(path));
-    assert.doesNotMatch(text, /console\.(log|info|warn|error|debug)/, `${path} must not log`);
+    if (!LITERAL_ONLY_LOGGING.has(path) && !NO_CREDENTIAL_LOGGING.has(path)) {
+      assert.doesNotMatch(text, /console\.(log|info|warn|error|debug)/, `${path} must not log`);
+      continue;
+    }
+    for (const args of consoleArgumentsWithoutLiterals(text)) {
+      if (LITERAL_ONLY_LOGGING.has(path)) {
+        assert.equal(
+          args.replace(/[\s+,]/g, ""),
+          "",
+          `${path} may log string literals only — this call carries a value: ${args.trim()}`,
+        );
+        continue;
+      }
+      assert.doesNotMatch(
+        args,
+        CREDENTIAL_VOCABULARY,
+        `${path} must not log a credential — this call names one: ${args.trim()}`,
+      );
+      assert.ok(
+        !args.includes("`"),
+        `${path} must not log a template literal, which could interpolate one: ${args.trim()}`,
+      );
+    }
   }
 });
 

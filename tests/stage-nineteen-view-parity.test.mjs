@@ -27,7 +27,15 @@ const VIEWS_CSS = "app/(app)/portal/views/parity-views.css";
  * repeated the list would only prove this file agrees with itself.
  */
 async function mondayTabOrder() {
-  const capture = await read(CAPTURE);
+  /*
+   * `null` when the capture is not on this machine. It is gitignored because it
+   * is the client's live board, so it exists only on an operator's checkout and
+   * its absence says nothing about the tab strip. The caller stands down rather
+   * than failing for ever — the same idiom as
+   * `tests/stage-nineteen-import-identity.test.mjs`.
+   */
+  const capture = await read(CAPTURE).catch(() => null);
+  if (capture === null) return null;
   const table = capture.slice(
     capture.indexOf("## Views, in monday's own tab order"),
     capture.indexOf("The form is titled"),
@@ -49,8 +57,19 @@ async function seededViews() {
   );
 }
 
-test("the seeded tabs are monday's eleven, in monday's tab order", async () => {
+test("the seeded tabs are monday's eleven, in monday's tab order", async (t) => {
   const expected = await mondayTabOrder();
+  /*
+   * Both assertions below compare against the capture's own list, so there is
+   * nothing left to check without it and the whole test stands down. The seeded
+   * list itself is NOT left unguarded: the test immediately below names every
+   * view it must contain, and the one after that pins the glyphs — both from
+   * the committed route, both on every clone.
+   */
+  if (expected === null) {
+    t.skip("no monday capture on this machine (gitignored: client data)");
+    return;
+  }
   const seeded = await seededViews();
 
   assert.equal(expected.length, 11, "the capture records eleven views");
@@ -171,11 +190,26 @@ test("no new panel is a 'coming soon' stub", async () => {
 
 test("every new panel has an empty state that says what will fill it", async () => {
   const views = await read(VIEWS);
-  // One `view-empty` per panel that can legitimately have nothing to show.
-  assert.equal((views.match(/className="view-empty"/g) ?? []).length, 3);
+  /*
+   * RE-POINTED 2026-09-16, not weakened — 3 became 4.
+   *
+   * It was one `view-empty` per panel that can legitimately have nothing to
+   * show. Results then gained a date range, and with it a SECOND empty state:
+   * a half-specified custom range is not an empty period, and reporting it as
+   * one would put "no responses" over a form that has collected hundreds, so
+   * `window.reason` names the missing part instead. Two different facts that
+   * must not share a sentence, which is exactly what this test is for — so the
+   * fourth state is pinned below rather than absorbed into a bumped number.
+   */
+  assert.equal((views.match(/className="view-empty"/g) ?? []).length, 4);
   assert.match(views, /No responses to <strong>\{maintenanceFormSpec\.title\}<\/strong> yet/);
   assert.match(views, /appears here as its own card, newest first/);
   assert.match(views, /No items match the current filters/);
+  assert.match(
+    views,
+    /<p className="view-empty">\{window\.reason\}<\/p>/,
+    "an unreadable date range says which end is missing, rather than reporting no responses",
+  );
 });
 
 test("the form panels count real submissions and nothing else", async () => {
@@ -186,9 +220,17 @@ test("the form panels count real submissions and nothing else", async () => {
   // "Manual" and counting them would overstate the response rate.
   assert.match(views, /item\.source === "Portal form"/);
   assert.match(views, /FORM_ANSWER = \/incoming form answer\/i/);
+  /*
+   * `\s+` where the sentence used to have a single space. The wording is
+   * unchanged and still pinned in full; what moved is the JSX line break. The
+   * date range added "raised in {window.label}" to this paragraph, which
+   * reflowed it so "to a" and "response" landed on different lines, and a
+   * literal space then matched nothing. Prose in JSX wraps wherever the
+   * formatter puts it, so a pin on a sentence has to read it as prose.
+   */
   assert.match(
     views,
-    /cannot be traced back to a response and is left out/,
+    /cannot be traced back to a\s+response and is left out/,
     "the panel must say which rows it could not count",
   );
   assert.match(views, /function newestFirst/, "monday's viewer opens newest first");
@@ -373,6 +415,11 @@ test("the parity panels restyle nothing that already existed", async () => {
     "form-results__free",
     "form-results__head",
     "form-results__note",
+    /* The Results date range's own wrapper. Added with the picker, and it is a
+       new-panel selector like every other name here — the rule this test
+       enforces is that the stylesheet restyles nothing that already existed,
+       not that the list never grows. */
+    "form-results__period",
     "form-results__question",
     "form-results__questions",
     "form-results__scope",

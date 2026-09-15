@@ -940,7 +940,7 @@ test("travelling rebuilds at a later day rather than shifting stored dates", asy
 
 /* ─────────────────────────────────────────────── 8. the commands and page ── */
 
-test("package.json carries the five commands §5 names, and nothing else moved", async () => {
+test("package.json carries the five commands §5 names, and nothing else moved", async (t) => {
   const raw = await read("package.json");
   const parsed = JSON.parse(raw);
   assert.deepEqual(
@@ -959,9 +959,44 @@ test("package.json carries the five commands §5 names, and nothing else moved",
       "seed:travel": "node scripts/seed.mjs travel",
     },
   );
-  /* The file's own line endings are CRLF and there is no .gitattributes; a
-     rewrite that normalised them would make the diff unreadable. */
-  assert.ok(raw.includes("\r\n"), "package.json is CRLF and must stay CRLF");
+  /*
+   * RE-POINTED 2026-09-16, not weakened.
+   *
+   * This read the WORKING-TREE bytes and required them to contain CRLF. The
+   * committed blob is pure LF, so the assertion only ever held on a Windows
+   * checkout where `core.autocrlf=true` smudged LF to CRLF on the way out of
+   * git — it failed on a byte-exact checkout and would fail on Linux CI. It
+   * was pinning a property of somebody's git config, not a property of this
+   * repository.
+   *
+   * The property the old comment named is still worth protecting: nobody
+   * normalises the whole file and turns a one-line script change into a
+   * whole-file diff. That is a claim about what is COMMITTED, so it is read
+   * from git rather than from disk, and it holds whatever `core.autocrlf` is
+   * set to on the machine running the suite.
+   */
+  const { execFileSync } = await import("node:child_process");
+  const committed = (() => {
+    try {
+      return execFileSync("git", ["cat-file", "blob", "HEAD:package.json"], {
+        cwd: root,
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 1024 * 1024,
+      });
+    } catch {
+      /* No git, or no HEAD — an exported tarball rather than a checkout. The
+         script assertions above do not need it and have already run. */
+      return null;
+    }
+  })();
+  if (committed === null) {
+    t.diagnostic("no git checkout here — the committed line-ending check stands down");
+  } else {
+    assert.ok(
+      !committed.includes("\r\n"),
+      "package.json is committed as LF and must stay LF — a whole-file line-ending rewrite buries the real change",
+    );
+  }
 });
 
 test("seed:verify exits non-zero on a mismatch, because CI branches on that", async () => {
