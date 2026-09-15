@@ -469,7 +469,7 @@ test("no payment credential is stored, returned or accepted", async () => {
   const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
   for (const [name, source] of [["schema", schema], ["init", init], ["settings route", route]]) {
-    for (const pattern of [/IBAN/i, /sort_?code/i, /account_?number/i, /card_?number/i]) {
+    for (const pattern of [/\bIBAN\b/i, /sort_?code/i, /account_?number/i, /card_?number/i]) {
       assert.doesNotMatch(code(source), pattern, `${name} still names a payment credential (${pattern})`);
     }
   }

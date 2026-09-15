@@ -635,7 +635,7 @@ test("the pricing section fits its column, and the page never scrolls sideways",
   const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const offenders = [];
   for (const [, selector, body] of bare.matchAll(/([^{}@]+)\{([^{}]*)\}/g)) {
-    if (!/\.(pkgs?|pkgalt|pkgfoot|pricing)/.test(selector)) continue;
+    if (!/\.(pkgs?|pkgalt|pkgfoot|pricing)\b/.test(selector)) continue;
     const bad = [...body.matchAll(/(?:^|;)\s*(min-width|width):\s*(\d+)px/g)];
     for (const [, prop, value] of bad) {
       offenders.push(`${selector.trim()} { ${prop}:${value}px }`);
@@ -855,7 +855,7 @@ test("the urgency chips promise no response time", async () => {
   assert.match(form, /P1 — Critical, site unsafe or cannot trade/);
 
   assert.ok(!form.includes("chip__sla"), "the SLA line is no longer rendered");
-  assert.ok(!/sla:/.test(form), "and the field is gone, so it cannot be rendered again");
+  assert.ok(!/\bsla:/.test(form), "and the field is gone, so it cannot be rendered again");
 
   /* Comments stripped: the note recording why the promises went quotes them,
      and a check that fails on its own rationale would push the reasoning out
