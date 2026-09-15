@@ -1026,7 +1026,9 @@ test("every nav anchor names a section that exists", async () => {
   assert.match(cta, /<section className="section finalcta" id="review">/, "#review must still resolve");
   /* The footer's own Contact link moves with the nav; the CTA buttons do not. */
   const chromeSrc = await read("app/(marketing)/_sections/chrome.tsx");
-  assert.match(chromeSrc, /<li><a href="#contact">Contact<\/a><\/li>/);
+  /* RE-POINTED at `SectionLink` — same destination, same position in the
+     footer, now resolved against the page it is rendered on. */
+  assert.match(chromeSrc, /<li><SectionLink href="#contact">Contact<\/SectionLink><\/li>/);
   assert.ok(
     (chromeSrc.match(/href="#review"/g) ?? []).length >= 2,
     "the header and drawer Book a Portfolio Review buttons still point at #review",

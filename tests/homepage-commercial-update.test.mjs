@@ -353,11 +353,32 @@ test("the nav carries Contractors, and it is a route rather than an anchor", asy
   const chrome = await read(`${SECTIONS}/chrome.tsx`);
   assert.match(chrome, /\["\/contractors", "Contractors"\]/);
   assert.match(chrome, /const isAnchor = \(href: string\) => href\.startsWith\("#"\);/);
-  assert.match(chrome, /<Link className="nav__link" href=\{href\}>/, "rendered with next/link");
-  /* The drawer's anchor handler defers a hash until the scroll lock releases;
-     a route change has nothing to defer and must not be given it. */
-  const drawer = chrome.slice(chrome.indexOf('<nav aria-label="Mobile">'));
-  assert.match(drawer.slice(0, 700), /<Link href=\{href\} onClick=\{\(\) => setOpen\(false\)\}>/);
+  /*
+   * RE-POINTED: one component now decides `<a>` versus `<Link>`, and the rule
+   * it applies is the one this test was asserting at each call site.
+   *
+   * These pinned the desktop nav rendering a route through `next/link` and the
+   * drawer handing a route `setOpen(false)` rather than the deferred-hash
+   * handler. Both were spelled out inline at nineteen call sites, and all
+   * nineteen were also emitting section hashes that are dead on every page
+   * except the homepage. `SectionLink` resolves the href for the current page
+   * and then picks the element, so the claim is checked once, where it is now
+   * made — and checked more strictly: the anchor handler must reach ONLY the
+   * in-page branch, which the old per-site pins could not express.
+   */
+  assert.match(chrome, /<SectionLink className="nav__link" href=\{href\}>/, "the nav renders through it");
+  const link = chrome.slice(chrome.indexOf("function SectionLink"));
+  assert.match(link.slice(0, 1400), /const resolved = sectionHref\(href\);/);
+  assert.match(
+    link.slice(0, 1400),
+    /if \(isAnchor\(resolved\)\) \{[\s\S]*?<a className=\{className\} href=\{resolved\} onClick=\{onAnchorClick\}/,
+    "a hash on this page is a plain anchor and keeps the deferred-hash handler",
+  );
+  assert.match(
+    link.slice(0, 1400),
+    /<Link className=\{className\} href=\{resolved\} onClick=\{onNavigate\}/,
+    "anything that is a route goes through next/link and never sees onAnchorClick",
+  );
 });
 
 /* ------------------------------------------------------------------ */

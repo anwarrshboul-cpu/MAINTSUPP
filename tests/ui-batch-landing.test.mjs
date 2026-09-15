@@ -147,8 +147,13 @@ test("the drawer opens from the left edge and locks the page without shifting it
      * One handler reading the anchor's own href (not a `follow(href)` factory
      * called during render — react-hooks/refs forbids a ref-touching function
      * from running in render). The behaviour is identical: close, then follow.
+     *
+     * RE-POINTED at the prop `SectionLink` takes it through. The contract is
+     * exactly the one above and is now easier to see: `onDrawerLink` is passed
+     * by reference, still not built per href, and `SectionLink` forwards it to
+     * the in-page branch only — a route change has no hash to defer.
      */
-    /<a href=\{href\} onClick=\{onDrawerLink\}>/);
+    /onAnchorClick=\{onDrawerLink\}/);
   /* An anchor chosen from the drawer is followed AFTER the lock releases —
      otherwise the release's scroll restore undoes the jump a frame later. */
   assert.match(chrome, /pendingHash\.current = href;/);
@@ -337,15 +342,25 @@ test("Contact Us is in both navs, and both send you to the section the footer al
 
   /* Drawer: the same list, the same close-then-go handler as its siblings, and
      it sits above the Book a Portfolio Review button. */
-  assert.match(chrome, /<nav aria-label="Mobile">[\s\S]*?NAV\.map[\s\S]*?<a href=\{href\} onClick=\{onDrawerLink\}>/);
+  /* RE-POINTED: the drawer's links go through `SectionLink`, which hands the
+     deferred-hash handler to the in-page branch only. What is asserted is the
+     same thing — the mobile list is NAV, and it still passes `onDrawerLink`. */
+  assert.match(
+    chrome,
+    /<nav aria-label="Mobile">[\s\S]*?NAV\.map[\s\S]*?<SectionLink[\s\S]*?onAnchorClick=\{onDrawerLink\}/,
+  );
   assert.ok(
-    chrome.indexOf('aria-label="Mobile"') < chrome.lastIndexOf('href="#review" onClick={onDrawerLink}'),
+    chrome.indexOf('aria-label="Mobile"') < chrome.lastIndexOf('href="#review"'),
     "the section links precede the CTA in the drawer",
   );
 
   /* And the destination exists — the same anchor the footer uses. The footer's
      Contact link moved with the nav, so both now say `#contact`. */
-  assert.match(chrome, /<a href="#contact">Contact<\/a>/, "the footer convention this reuses");
+  assert.match(
+    chrome,
+    /<SectionLink href="#contact">Contact<\/SectionLink>/,
+    "the footer convention this reuses",
+  );
   const finalCta = await read("app/(marketing)/_sections/final-cta.tsx");
   assert.match(finalCta, /<section className="section finalcta" id="review">/, "#review is still a real section");
   assert.match(finalCta, /className="wrap finalcta__inner" id="contact"/, "#contact names the same place");
