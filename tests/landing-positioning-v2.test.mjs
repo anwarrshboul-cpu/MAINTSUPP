@@ -590,7 +590,10 @@ test("the SVG path leak is fixed where it was produced", async () => {
 
 test("the footer renames the portal link and adds the contractor route, nav untouched", async () => {
   const chrome = await read("app/(marketing)/_sections/chrome.tsx");
-  assert.match(chrome, /<li><a href="#portal">Client portal<\/a><\/li>/);
+  /* RE-POINTED at `SectionLink`, which renders these footer entries now so
+     that a section hash resolves against whichever marketing page the footer
+     is drawn on. The label and the destination are unchanged. */
+  assert.match(chrome, /<li><SectionLink href="#portal">Client portal<\/SectionLink><\/li>/);
   assert.ok(!chrome.includes("The software"), "the old label is gone");
   assert.match(chrome, /<li><Link href="\/contractors">Join our contractor network<\/Link><\/li>/);
   /*

@@ -20,7 +20,16 @@
  */
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { usePathname } from "next/navigation";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type AnchorHTMLAttributes,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 /*
  * Five links, and every one of them lands on a section that exists.
@@ -70,6 +79,68 @@ const NAV = [
 
 /** Whether a nav target is a hash on this page rather than another route. */
 const isAnchor = (href: string) => href.startsWith("#");
+
+/**
+ * A section hash, resolved against the page it is being rendered on.
+ *
+ * This chrome is rendered by the marketing LAYOUT, so every link in it also
+ * appears on /contractors, /faqs, /privacy, /terms and /cookies — and every one
+ * of those pages was serving a header and a footer whose thirteen section links
+ * pointed at sections it does not have. Measured on Production before this
+ * change: clicking "Pricing" on /contractors set the URL to
+ * /contractors#pricing and left scrollY at 0.
+ *
+ * On the homepage the hash is returned untouched, so the in-page scroll, the
+ * drawer's deferred-hash handler and the smooth-scroll behaviour are all
+ * exactly as they were. Anywhere else it becomes a root-relative URL with a
+ * hash, which `SectionLink` then routes through next/link like any other page
+ * change.
+ */
+function useSectionHref() {
+  const pathname = usePathname();
+  const onHomepage = pathname === "/" || pathname === "";
+  return (href: string) => (onHomepage || !isAnchor(href) ? href : `/${href}`);
+}
+
+/**
+ * One link that is an in-page jump on the homepage and a navigation anywhere
+ * else, so no caller has to decide which it is.
+ *
+ * `onAnchorClick` is the drawer's deferred-hash handler: it holds the jump
+ * until the body-scroll lock has been released. It is passed ONLY to the
+ * in-page case, because there is nothing to defer across a page change —
+ * `onNavigate` closes the drawer instead, which is what the drawer's route
+ * links already do.
+ */
+function SectionLink({
+  href,
+  className,
+  children,
+  onAnchorClick,
+  onNavigate,
+  ...rest
+}: {
+  href: string;
+  className?: string;
+  children: ReactNode;
+  onAnchorClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  onNavigate?: () => void;
+} & Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick">) {
+  const sectionHref = useSectionHref();
+  const resolved = sectionHref(href);
+  if (isAnchor(resolved)) {
+    return (
+      <a className={className} href={resolved} onClick={onAnchorClick} {...rest}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link className={className} href={resolved} onClick={onNavigate} {...rest}>
+      {children}
+    </Link>
+  );
+}
 
 function Ic({ d, size = "ic--sm" }: { d: string; size?: string }) {
   return (
@@ -147,10 +218,10 @@ export function UtilityBar() {
             <Ic d={LOCK} size="ic--xs" />
             <span>Portal Login</span>
           </Link>
-          <a href="#report">
+          <SectionLink href="#report">
             <Ic d={USER} size="ic--xs" />
             <span>Report a Job</span>
-          </a>
+          </SectionLink>
         </div>
       </div>
     </div>
@@ -298,15 +369,9 @@ export function SiteHeader() {
             <ul className="nav__list">
               {NAV.map(([href, label]) => (
                 <li key={href}>
-                  {isAnchor(href) ? (
-                    <a className="nav__link" href={href}>
-                      {label}
-                    </a>
-                  ) : (
-                    <Link className="nav__link" href={href}>
-                      {label}
-                    </Link>
-                  )}
+                  <SectionLink className="nav__link" href={href}>
+                    {label}
+                  </SectionLink>
                 </li>
               ))}
             </ul>
@@ -323,9 +388,9 @@ export function SiteHeader() {
             <Link className="nav__link hdr__login" href="/portal">
               Portal Login
             </Link>
-            <a className="btn btn--outline btn--sm hdr__report" href="#report">
+            <SectionLink className="btn btn--outline btn--sm hdr__report" href="#report">
               Report a Job
-            </a>
+            </SectionLink>
             {/*
               ONE NAME, whatever the CSS does.
 
@@ -340,7 +405,7 @@ export function SiteHeader() {
               both spans from assistive tech means the name can only come from
               there. The visual swap is untouched.
             */}
-            <a
+            <SectionLink
               className="btn btn--primary btn--sm hdr__cta"
               href="#review"
               aria-label="Book a Portfolio Review"
@@ -351,7 +416,7 @@ export function SiteHeader() {
               <span className="cta-short" aria-hidden="true">
                 Book Review
               </span>
-            </a>
+            </SectionLink>
             <button
               ref={burger}
               type="button"
@@ -392,9 +457,14 @@ export function SiteHeader() {
                 </svg>
               </button>
             </div>
-            <a className="btn btn--primary btn--block" href="#report" onClick={onDrawerLink}>
+            <SectionLink
+              className="btn btn--primary btn--block"
+              href="#report"
+              onAnchorClick={onDrawerLink}
+              onNavigate={() => setOpen(false)}
+            >
               Report a Job
-            </a>
+            </SectionLink>
             <Link className="btn btn--ghost btn--block" href="/portal" onClick={() => setOpen(false)}>
               Portal Login
             </Link>
@@ -402,22 +472,25 @@ export function SiteHeader() {
               <ul className="drawer__list">
                 {NAV.map(([href, label]) => (
                   <li key={href}>
-                    {isAnchor(href) ? (
-                      <a href={href} onClick={onDrawerLink}>
-                        {label}
-                      </a>
-                    ) : (
-                      <Link href={href} onClick={() => setOpen(false)}>
-                        {label}
-                      </Link>
-                    )}
+                    <SectionLink
+                      href={href}
+                      onAnchorClick={onDrawerLink}
+                      onNavigate={() => setOpen(false)}
+                    >
+                      {label}
+                    </SectionLink>
                   </li>
                 ))}
               </ul>
             </nav>
-            <a className="btn btn--primary btn--block" href="#review" onClick={onDrawerLink}>
+            <SectionLink
+              className="btn btn--primary btn--block"
+              href="#review"
+              onAnchorClick={onDrawerLink}
+              onNavigate={() => setOpen(false)}
+            >
               Book a Portfolio Review
-            </a>
+            </SectionLink>
           </div>
         </div>
       )}
@@ -450,20 +523,20 @@ export function SiteFooter() {
         <div>
           <h3>Services</h3>
           <ul>
-            <li><a href="#services">Reactive Maintenance</a></li>
-            <li><a href="#services">Planned Maintenance</a></li>
-            <li><a href="#services">Compliance Coordination</a></li>
-            <li><a href="#services">Projects &amp; Store Works</a></li>
+            <li><SectionLink href="#services">Reactive Maintenance</SectionLink></li>
+            <li><SectionLink href="#services">Planned Maintenance</SectionLink></li>
+            <li><SectionLink href="#services">Compliance Coordination</SectionLink></li>
+            <li><SectionLink href="#services">Projects &amp; Store Works</SectionLink></li>
           </ul>
         </div>
 
         <div>
           <h3>Company</h3>
           <ul>
-            <li><a href="#how">How It Works</a></li>
-            <li><a href="#pricing">Pricing</a></li>
-            <li><a href="#case-study">Case Study</a></li>
-            <li><a href="#sectors">Who We Help</a></li>
+            <li><SectionLink href="#how">How It Works</SectionLink></li>
+            <li><SectionLink href="#pricing">Pricing</SectionLink></li>
+            <li><SectionLink href="#case-study">Case Study</SectionLink></li>
+            <li><SectionLink href="#sectors">Who We Help</SectionLink></li>
             {/*
               THE THREE V3 SECTIONS ARE REACHABLE FROM HERE, NOT FROM THE NAV.
 
@@ -475,29 +548,29 @@ export function SiteFooter() {
               looks for by name after they have read the page rather than
               before.
             */}
-            <li><a href="#replaces">What This Replaces</a></li>
-            <li><a href="#your-contractors">Your Contractors or Ours</a></li>
+            <li><SectionLink href="#replaces">What This Replaces</SectionLink></li>
+            <li><SectionLink href="#your-contractors">Your Contractors or Ours</SectionLink></li>
             {/* Footer only, deliberately — the top nav is for the people the
                 site is selling to, and a contractor looking for work is not
                 that reader. */}
             <li><Link href="/contractors">Join our contractor network</Link></li>
-            <li><a href="#contact">Contact</a></li>
+            <li><SectionLink href="#contact">Contact</SectionLink></li>
           </ul>
         </div>
 
         <div>
           <h3>Clients</h3>
           <ul>
-            <li><a href="#report">Report a Job</a></li>
+            <li><SectionLink href="#report">Report a Job</SectionLink></li>
             {/* Same door, same name as the header and the utility bar. */}
             <li><Link href="/portal">Portal Login</Link></li>
             {/* Two FAQ destinations, and they are not a duplicate: the anchor
                 is the accordion further up THIS page, the link is the standalone
                 page that renders every answer open and carries the FAQPage
                 markup. Named so the difference is visible before the click. */}
-            <li><a href="#faq">FAQs on this page</a></li>
+            <li><SectionLink href="#faq">FAQs on this page</SectionLink></li>
             <li><Link href="/faqs">All FAQs</Link></li>
-            <li><a href="#portal">Client portal</a></li>
+            <li><SectionLink href="#portal">Client portal</SectionLink></li>
           </ul>
         </div>
 
