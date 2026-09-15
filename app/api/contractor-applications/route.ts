@@ -166,10 +166,18 @@ export async function POST(request: Request) {
       subjectType: "contractor-application",
       subjectId: id,
       to: contractorInbox,
+      /* Vetting a contractor is a conversation — insurance, references, areas
+         covered — so Reply has to reach the applicant. */
+      replyTo: email,
       subject: `[CONTRACTOR] ${company}`,
+      /* `>` and `"` matter as much as `&` and `<`: without them an applicant
+         can close an attribute and open their own. It is a <pre> of plain
+         text, so every one of the four is escaped and nothing is lost. */
       body: `<pre style="font:14px/1.5 ui-monospace,monospace">${summary
         .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")}</pre>`,
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")}</pre>`,
     });
 
     return Response.json({ ok: true, id, notified: delivered.ok }, { status: 201 });
