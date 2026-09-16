@@ -34,6 +34,8 @@ import { announceDataChanged } from "./ops-url-state";
 import { OiDash } from "./oi-dash";
 import { ResolveNames } from "./resolve-names";
 import { BulkSiteAssign } from "./bulk-site-assign";
+import { LayerPortal } from "../overlay/anchored";
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 
 export function OverviewPage({
   onNavigateToJobs,
@@ -100,6 +102,25 @@ export function OverviewPage({
  * the problem it fixes, and sending the reader to another screen loses that
  * context — which is most of why "31 jobs point at no site" went unfixed for as
  * long as it did.
+ *
+ * ── IT SAID `aria-modal`, AND WAS NOT ONE ─────────────────────────────────
+ *
+ * This shell declared `role="dialog" aria-modal="true"` and then implemented a
+ * close button and a backdrop click and nothing else. Escape did nothing. Focus
+ * stayed on the footer button that opened it, so a keyboard reader was told a
+ * modal had opened and left standing outside it, and Tab walked out into the
+ * page behind rather than cycling inside. And it sat on `.ops-sheet`'s
+ * hardcoded `z-index: 60`, under the topbar (300) and the sidebar (410): the
+ * measured result was that clicking "Jobs" in the sidebar navigated away with
+ * the dialog still open on top of a different section.
+ *
+ * Both halves are now the product's own answer rather than a local one.
+ * `LayerPortal layer="modal"` is the shared z scale — the same one
+ * `board-modal.tsx` uses — so the ordering is a property of the layer rather
+ * than a number that has to win an argument with the chrome. And
+ * `useDialogBehaviour` is `board-modal.tsx`'s hook, extracted so there is one
+ * implementation of what `aria-modal` promises: Escape, focus in, focus back to
+ * the opener, the Tab trap, and the one body scroll lock.
  */
 function OverviewTool({
   title,
@@ -110,25 +131,29 @@ function OverviewTool({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const { surface, onBackdrop, onKeyDown } = useDialogBehaviour(true, onClose);
+  const titleId = `ovw-tool-${title.replace(/\W+/g, "-").toLowerCase()}`;
   return (
-    <div
-      className="ops-sheet ovw-tool oi-tool"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="ops-sheet__panel ovw-tool__panel">
-        <div className="ops-sheet__head">
-          <h2>{title}</h2>
-          <button type="button" className="ops-menu__button" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+    <LayerPortal layer="modal">
+      <div className="ops-sheet ovw-tool oi-tool" onPointerDown={onBackdrop}>
+        <div
+          ref={surface}
+          className="ops-sheet__panel ovw-tool__panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+        >
+          <div className="ops-sheet__head">
+            <h2 id={titleId}>{title}</h2>
+            <button type="button" className="ops-menu__button" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </div>
+          {children}
         </div>
-        {children}
       </div>
-    </div>
+    </LayerPortal>
   );
 }

@@ -132,6 +132,64 @@ export function ovPercent(value: number, total: number): number {
 }
 
 /**
+ * THE SAME PERCENTAGE, FOR TEXT RATHER THAN GEOMETRY — `null` when there is
+ * nothing to take a share OF.
+ *
+ * `ovFraction` answers 0 for an impossible denominator and must keep doing so:
+ * it is what sweeps the arcs and sizes the bars, and a null there would draw
+ * nothing at all. But a LABEL built on it printed "£0 of £0, 0%" on a card
+ * where no spend had been recorded, and 0% is a measurement — it says the share
+ * was taken and came out at nothing. §1.5 of the Overview's own contract keeps
+ * zero, null and "no data" apart precisely so that a reader can tell "none of
+ * them" from "there were none".
+ *
+ * So the split is by PURPOSE, not by caller: geometry keeps `ovFraction`, and
+ * anything a person reads goes through here and renders `—` for null. A real
+ * measured zero — value 0 against a total above 0 — still returns 0, because
+ * that one IS an answer.
+ */
+/**
+ * A WHOLE SET OF SHARES THAT ADDS UP TO A HUNDRED.
+ *
+ * `ovPercent` rounds each slice on its own, which is right for one slice and
+ * wrong for a set: the live split 61/12/12/2/1/1 of 89 rounds to
+ * 69+13+13+2+1+1 = **99**, and the status and engineer rings did the same. A
+ * reader who adds up the parts of a pie is entitled to reach the whole, and
+ * `overview-contract.ts` says so — "the eight sum to 100 after rounding".
+ *
+ * Largest remainder: floor everything, then hand the leftover points to the
+ * slices with the biggest fractional parts. Nothing about the underlying values
+ * changes — this is a presentation rule for a set that is drawn as one shape.
+ *
+ * A zero stays zero: it is the one value the ring is not allowed to invent, and
+ * a slice with nothing in it must not be handed a point to make the sum work.
+ */
+export function ovShares(values: readonly number[], total: number): number[] {
+  if (!Number.isFinite(total) || total <= 0) return values.map(() => 0);
+  const exact = values.map((value) =>
+    Number.isFinite(value) && value > 0 ? (Math.max(0, value) / total) * 100 : 0,
+  );
+  const floors = exact.map((value) => Math.floor(value));
+  let remainder = Math.round(exact.reduce((sum, value) => sum + value, 0)) - floors.reduce((a, b) => a + b, 0);
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - Math.floor(value), value }))
+    /* Only slices that actually hold something may be rounded up. */
+    .filter((entry) => entry.value > 0)
+    .sort((a, b) => b.fraction - a.fraction);
+  for (const entry of order) {
+    if (remainder <= 0) break;
+    floors[entry.index] += 1;
+    remainder -= 1;
+  }
+  return floors;
+}
+
+export function ovPercentOrNull(value: number, total: number): number | null {
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return ovPercent(value, total);
+}
+
+/**
  * The smallest mark a non-zero slice may be drawn as, in CSS pixels of ring —
  * the arc that is actually painted, after the segment gap has been taken out of
  * it. Four pixels against a 15-24px stroke is a tick a reader can see and a
@@ -819,8 +877,10 @@ export function Donut({
     cursor += eased[index];
   }
 
+  /* One shape, so the parts must add up to the whole — see `ovShares`. */
+  const readoutShares = ovShares(values, sum);
   const readout = slices
-    .map((slice, index) => `${slice.label} ${write(values[index])} (${ovPercent(values[index], sum)}%)`)
+    .map((slice, index) => `${slice.label} ${write(values[index])} (${readoutShares[index]}%)`)
     .join(", ");
   const activeIndex = slices.findIndex((slice) => slice.key === active);
   const printed = centreValue ?? String(Number.isFinite(total) ? total : 0);
@@ -1140,8 +1200,10 @@ export function RingMeter({
   const radius = (size - stroke) / 2;
   const printed = centreText ?? String(safeValue);
   const centre = ovCentreSize(2 * (radius - stroke / 2) - 6, printed.length);
-  const percent = ovPercent(safeValue, safeTotal);
-  const name = `${label}: ${safeValue} of ${safeTotal}, ${percent}%${describe ? `. ${describe}` : ""}`;
+  /* A ring with nothing in it says "0 of 0" and stops there: the trailing "0%"
+     was a share of an empty total — see `ovPercentOrNull`. */
+  const percent = ovPercentOrNull(safeValue, safeTotal);
+  const name = `${label}: ${safeValue} of ${safeTotal}${percent === null ? "" : `, ${percent}%`}${describe ? `. ${describe}` : ""}`;
 
   const body = (
     <span className="ov-ring__body">
@@ -1295,8 +1357,10 @@ export function RadialRings({
   const innermost = RADIAL_OUTER - (count - 1) * pitch;
   const centre = ovCentreSize(Math.max(28, 2 * (innermost - RADIAL_STROKE / 2) - 8));
 
+  /* One shape, so the parts must add up to the whole — see `ovShares`. */
+  const radialShares = ovShares(values, sum);
   const readout = ordered
-    .map((slice, index) => `${slice.label} ${values[index]} (${ovPercent(values[index], sum)}%)`)
+    .map((slice, index) => `${slice.label} ${values[index]} (${radialShares[index]}%)`)
     .join(", ");
   const activeIndex = ordered.findIndex((slice) => slice.key === active);
 

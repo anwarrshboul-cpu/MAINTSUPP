@@ -552,7 +552,15 @@ test("the route counts the Overview's jobs with the Overview's spend query — a
   const builder = await read("app/lib/reports-dash.ts");
   assert.doesNotMatch(builder, /from "drizzle-orm"|from "\.\.\/\.\.\/db/, "the builder is pure");
   const overview = await read("app/lib/overview-metrics.ts");
-  assert.match(overview, /loadSpendByMonth\(db, scope, shiftDay\(rangeTo, -364\), endExclusive\)/,
+  /* RE-POINTED: the window now starts at the first day of the earliest month
+     the payload reports, not 364 days back. The two disagreed whenever the span
+     contained a leap day — `shiftDay(rangeTo, -364)` landed on the 2nd, so the
+     earliest column silently lost a day while being drawn as a whole month. The
+     contract this pin exists for is unchanged and is still what is asserted:
+     the Overview reads spend through the SAME `loadSpendByMonth` the Reports
+     route uses, over the same scope, rather than a second query that happens to
+     agree. */
+  assert.match(overview, /loadSpendByMonth\(db, scope, `\$\{spendMonths\[0\]\}-01`, endExclusive\)/,
     "and the Overview reads spend through the very same function");
 });
 

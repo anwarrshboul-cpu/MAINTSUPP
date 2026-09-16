@@ -770,12 +770,28 @@ body[data-theme] .ov-dash.oi-dash .ov-ring__label {
   min-width: 0;
 }
 
+/*
+ * B24 — ONE ROW WHEN THERE IS ROOM FOR ONE ROW, AND NOT OTHERWISE.
+ *
+ * This was `grid-auto-flow: column` with `grid-auto-columns: minmax(0, 1fr)`,
+ * which is an instruction to fit EVERY requirement type into a single row at
+ * any cost. At 1440px that is eight comfortable 120px cells. At 1024px the same
+ * card is about 470px wide, so the same eight became 55px: the rings shrank to
+ * a size that cannot carry a percentage and the labels under them clipped. It
+ * also got worse with every requirement type an organisation adds, which is the
+ * one direction this card is certain to grow.
+ *
+ * `auto-fit` with a floor says the intent instead of the outcome: fill the row,
+ * and wrap when a cell would go under 104px. At 1440 that is still one row; at
+ * 1024 it becomes two comfortable ones; at 1280 it is whatever fits. The phone
+ * layout above is untouched — it is a deliberate 4 x 2 and this block never
+ * applies there.
+ */
 @media (min-width: 1024px) {
   .ov-dash.oi-dash .oi-types {
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+    grid-auto-flow: row;
+    gap: 14px 12px;
   }
 }
 
@@ -1313,4 +1329,32 @@ body[data-theme] .ov-dash.oi-dash .oi-footer__tool:hover {
   max-height: 88vh;
   margin-inline: auto;
   overflow-y: auto;
+}
+
+/*
+ * B6 — A SECTION WHOSE FIGURES BELONG TO THE PREVIOUS FILTER.
+ *
+ * The payload deliberately stays on screen while the next one is fetched:
+ * blanking all three sections on every tap made a filter change read as a page
+ * reload, especially on a phone. What was missing was any sign that the numbers
+ * under a newly chosen portfolio were still the old portfolio's — measured at
+ * several seconds, during which the page looked settled and was wrong.
+ *
+ * So the treatment is the smallest one that cannot be mistaken for data: the
+ * section fades and stops taking clicks, and `aria-busy` says the same thing to
+ * a screen reader. NOTHING MOVES — no skeleton swap, no height change, no
+ * zeroes — because a layout jump on every filter change is the flicker this was
+ * avoiding in the first place. A drill-through is blocked while it is pending,
+ * so a tap cannot open the previous filter's list.
+ */
+.ov-dash.oi-dash .oi-section--pending {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-dash.oi-dash .oi-section--pending {
+    transition: none;
+  }
 }

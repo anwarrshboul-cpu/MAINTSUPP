@@ -33,6 +33,7 @@ import { ensureDatabase } from "../../../../db/init";
 import { maintenanceRequests, sites } from "../../../../db/schema";
 import { scopedDbWithCapability } from "../../../lib/tenant-db";
 import { dashboardFailure } from "../../../lib/dashboard-route";
+import { refuseBadRange } from "../../../lib/range-params";
 import {
   dashboardJobScope,
   loadSpendByMonth,
@@ -68,6 +69,13 @@ export async function GET(request: Request) {
     if (guard.denied) return guard.denied;
     const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
+    /* The same refusal the Overview block makes, for the same parameters. This
+       route used to let a shape-valid impossible date through to `shiftDays`,
+       where `new Date("2026-13-01T00:00:00Z").toISOString()` throws and the
+       catch below reported it as a 503. */
+    const badRange = refuseBadRange(url);
+    if (badRange) return badRange;
+
     const now = new Date();
 
     const range = resolveReportsRange(

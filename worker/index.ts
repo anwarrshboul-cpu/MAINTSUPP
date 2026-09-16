@@ -175,6 +175,43 @@ function withSecurityHeaders(response: Response, pathname = ""): Response {
     else if (!/\bcookie\b/i.test(vary)) headers.set("Vary", `${vary}, Cookie`);
   }
 
+  /*
+   * A PER-TENANT JSON ANSWER IS NOT A PUBLIC ONE.
+   *
+   * Measured on the deployed site: `/api/**` sets no `Cache-Control` at all, so
+   * Vercel supplies its own default of `public, max-age=0, must-revalidate` —
+   * and `Vary` lists the framework's RSC headers but NOT `Cookie`, which is the
+   * only thing that distinguishes one tenant's Overview from another's
+   * (`app/lib/auth-session.ts` — production identity is the `maintsupp_session`
+   * cookie and nothing else).
+   *
+   * `must-revalidate` with no `ETag` means a compliant shared cache must
+   * refetch, and Vercel's edge stores nothing without `s-maxage`
+   * (`X-Vercel-Cache: MISS` on every repeat), so this is LATENT rather than
+   * live — the same standing this file's redirect block describes. It is closed
+   * for the same reason: the word `public` on a body containing one
+   * organisation's job counts, spend and compliance is wrong wherever a
+   * non-compliant proxy or a shared machine's disk cache honours it.
+   *
+   * The floor goes here rather than on the three Overview routes because the
+   * gap is the whole `/api` surface — 139 route files, of which exactly two set
+   * a cache header, and neither returns JSON. `!headers.has(...)` keeps both of
+   * those deliberate exceptions: the immutable blob bytes in
+   * `app/api/files/[id]/route.ts` and the `no-store` CSV in
+   * `app/api/reports/exports/route.ts`. `private, no-store` is this file's own
+   * existing wording, and the value `app/lib/csv.ts` already uses.
+   *
+   * Scoped to `/api/` deliberately, for the reason the block above gives: a
+   * blanket `no-store` would also land on the marketing pages and every static
+   * asset, which is a performance regression dressed as a security fix.
+   */
+  if (pathname.startsWith("/api/") && !headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "private, no-store");
+    const vary = headers.get("Vary");
+    if (!vary) headers.set("Vary", "Cookie");
+    else if (!/cookie/i.test(vary)) headers.set("Vary", `${vary}, Cookie`);
+  }
+
   // Never let a browser second-guess a declared Content-Type.
   if (!headers.has("X-Content-Type-Options")) {
     headers.set("X-Content-Type-Options", "nosniff");

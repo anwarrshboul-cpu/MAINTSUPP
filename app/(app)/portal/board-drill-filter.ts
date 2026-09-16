@@ -64,7 +64,9 @@ import {
   legacyJobTypeCode,
   type JobType,
 } from "../../lib/job-type-contract.ts";
-import { COMPLETED_STAGE, completedStatuses } from "./dashboard-meters.ts";
+import { COMPLETED_STAGE, PRIORITY_DISPLAY_LABEL, completedStatuses } from "./dashboard-meters.ts";
+/* The display names for the priority KEYS a drill carries — the same map the
+   Overview's priority ring labels itself from. Pure module, no drizzle. */
 import type { MaintenanceRequest } from "../../lib/types";
 
 /** Trim, lower-case, collapse runs of whitespace. The shared normalisation. */
@@ -347,6 +349,45 @@ function resolveDays(period: string, from: string, to: string, now: Date) {
  * names — and the pipe-joined status list is what actually selects the rows, so
  * the filter does not need this screen to know the meter model.
  */
+/*
+ * B18 — THE SENTINELS ARE FOR THE FILTER, NOT FOR THE READER.
+ *
+ * "Jobs by Label → Unassigned" drills with `label=__not_recorded__|[object
+ * Object]`, and both halves are deliberate: the first is the board's own
+ * not-recorded value and the second is a real stored category, written by an
+ * importer that stringified an object. Sending both is what makes the list
+ * match the figure exactly.
+ *
+ * But the chip printed them verbatim, so a reader who tapped a segment called
+ * "Unassigned" landed on a board announcing `Label __not_recorded__, [object
+ * object]`. That is an internal vocabulary and a decade-old JavaScript joke, in
+ * a banner, on a link people share.
+ *
+ * The QUERY is untouched — the two values still travel and the list is still
+ * exactly the counted one. Only the words change, to the words the card that
+ * opened them already uses: `buildEngineers` calls that bucket "Not recorded",
+ * `buildLabels` calls it "Unassigned", and `buildTiers` calls it "No tier".
+ * Both sentinels collapse to one entry because they are one bucket.
+ */
+const OBJECT_TEXT_KEY = "[object object]";
+
+function readableValues(values: Iterable<string>, unrecorded: string): string {
+  const out: string[] = [];
+  let sawUnrecorded = false;
+  for (const value of values) {
+    if (value === NOT_RECORDED_VALUE || value === OBJECT_TEXT_KEY) {
+      if (sawUnrecorded) continue;
+      sawUnrecorded = true;
+      out.push(unrecorded);
+      continue;
+    }
+    out.push(value);
+  }
+  return out.join(", ");
+}
+
+const NOT_RECORDED_VALUE = "__not_recorded__";
+
 export function readDrillFilter(
   searchParams: URLSearchParams,
   now: Date = new Date(),
@@ -468,16 +509,30 @@ export function readDrillFilter(
   );
 
   const chips: DrillChip[] = [];
-  if (meterLabel) chips.push({ key: "meter", label: "Meter", value: meterLabel.replace(/_/g, " ") });
+  /* "Meter" is the name of the QUERY PARAMETER, not a word the product uses
+     with a reader. What the chip describes is a status. */
+  if (meterLabel) chips.push({ key: "meter", label: "Status", value: meterLabel.replace(/_/g, " ") });
   else if (statuses.size) chips.push({ key: "status", label: "Status", value: `${statuses.size} selected` });
   if (sites.size) {
     const named = [...sites].map((id) => (id === NO_SITE_IN_SCOPE ? NO_SITE_IN_SCOPE_LABEL : id));
     chips.push({ key: "site", label: "Site", value: named.join(", ") });
   }
-  if (priorities.size) chips.push({ key: "priority", label: "Priority", value: [...priorities].join(", ") });
-  if (tiers.size) chips.push({ key: "tier", label: "Tier", value: [...tiers].join(", ") });
-  if (engineers.size) chips.push({ key: "engineer", label: "Engineer", value: [...engineers].join(", ") });
-  if (labels.size) chips.push({ key: "label", label: "Label", value: [...labels].join(", ") });
+  if (priorities.size) {
+    /* The Overview's ring is labelled "High"; its drill carries `priority=urgent`,
+       which is the internal key. Printing the key put "Priority urgent" on screen
+       under a figure the reader had just seen called High. `PRIORITY_DISPLAY_LABEL` is
+       the map that ring itself draws from. */
+    chips.push({
+      key: "priority",
+      label: "Priority",
+      value: [...priorities]
+        .map((value) => PRIORITY_DISPLAY_LABEL[value] ?? value)
+        .join(", "),
+    });
+  }
+  if (tiers.size) chips.push({ key: "tier", label: "Tier", value: readableValues(tiers, "No tier") });
+  if (engineers.size) chips.push({ key: "engineer", label: "Engineer", value: readableValues(engineers, "Not recorded") });
+  if (labels.size) chips.push({ key: "label", label: "Label", value: readableValues(labels, "Unassigned") });
   if (contractors.size) chips.push({ key: "contractor", label: "Contractor", value: [...contractors].join(", ") });
   if (natures.size) chips.push({ key: "nature", label: "Nature", value: [...natures].join(", ") });
   if (families.size) {
@@ -507,10 +562,24 @@ export function readDrillFilter(
     });
   }
   if (window) {
+    /*
+     * B23 — THE CHIP SAID ONE DAY MORE THAN THE READER ASKED FOR.
+     *
+     * `endExclusive` is the right thing to FILTER on — a day-wide window has to
+     * end at the start of the next day or the last day is excluded — and the
+     * counts were always correct. But it was also what the chip PRINTED, so a
+     * drill carrying `to=2026-09-16` announced itself as "to 2026-09-17" and a
+     * reader comparing the chip against the range they picked saw the product
+     * disagree with itself by a day.
+     *
+     * The date maths is untouched. Only the label steps back to the last day
+     * the window actually includes.
+     */
+    const lastIncluded = shiftDayString(window.endExclusive, -1);
     chips.push({
       key: "period",
       label: measure === "completed" ? "Completed" : "Requested",
-      value: `${window.start ?? "any"} to ${window.endExclusive}`,
+      value: `${window.start ?? "any"} to ${lastIncluded}`,
     });
   }
 

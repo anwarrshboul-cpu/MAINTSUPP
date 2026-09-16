@@ -32,7 +32,7 @@
  */
 
 import { useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { ovFraction, ovPercent, useOvHoverCapable, useOvSweep } from "./ov-dash-charts";
+import { ovFraction, ovPercentOrNull, useOvHoverCapable, useOvSweep } from "./ov-dash-charts";
 
 /* ── The palette, by name ─────────────────────────────────────────────────── */
 
@@ -719,7 +719,16 @@ export function OiLegend({ rows, className }: { rows: readonly OiLegendRow[]; cl
   );
 }
 
-/** "12 of 87, 14%" — the share a legend row or a ring states in its accessible name. */
+/**
+ * "12 of 87, 14%" — the share a legend row or a ring states in its accessible name.
+ *
+ * With nothing to take a share of, the share is omitted rather than printed as
+ * 0%: "0 of 0" is the whole truth, and "0 of 0, 0%" adds a measurement that was
+ * never taken. See `ovPercentOrNull`.
+ */
 export function oiShare(value: number, total: number): string {
-  return `${oiCount(value)} of ${oiCount(total)}, ${ovPercent(value, total)}%`;
+  const share = ovPercentOrNull(value, total);
+  return share === null
+    ? `${oiCount(value)} of ${oiCount(total)}`
+    : `${oiCount(value)} of ${oiCount(total)}, ${share}%`;
 }

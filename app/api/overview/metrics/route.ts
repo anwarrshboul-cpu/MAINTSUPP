@@ -34,6 +34,7 @@ import { dashboardFailure } from "../../../lib/dashboard-route";
 import { loadOverviewMetrics, reconcile } from "../../../lib/overview-metrics";
 import { reconcileIntelWithOverview } from "../../../lib/overview-intel";
 import { ensureDatabase } from "../../../../db/init";
+import { refuseBadRange } from "../../../lib/range-params";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,12 @@ export async function GET(request: Request) {
     if (guard.denied) return guard.denied;
 
     const url = new URL(request.url);
+    /* A present-but-impossible `from`/`to` is the caller's mistake, not an
+       outage — and the Reports block used to answer the same query string with
+       a 503. See `refuseBadRange`. */
+    const badRange = refuseBadRange(url);
+    if (badRange) return badRange;
+
     const metrics = await loadOverviewMetrics(guard.scope.db, guard.scope.orgId, {
       portfolio: url.searchParams.get("portfolio"),
       from: url.searchParams.get("from"),

@@ -25,6 +25,7 @@
  *     jobs completed inside the range, against the equal-length period before.
  */
 import { SLA_TARGET_ARC } from "./dashboard-policy";
+import { PRIORITY_DISPLAY_LABEL } from "../(app)/portal/dashboard-meters.ts";
 import type {
   OiIntel,
   OiPriority,
@@ -279,12 +280,8 @@ export function buildLabels(rows: JobIntelInput["categoryRows"]): OiSlice[] {
 }
 
 const PRIORITY_ORDER: OiPriorityKey[] = ["urgent", "medium", "low", "not_recorded"];
-const PRIORITY_LABEL: Record<OiPriorityKey, string> = {
-  urgent: "High",
-  medium: "Medium",
-  low: "Low",
-  not_recorded: "Unset",
-};
+/** One map, kept in `dashboard-meters.ts` so the drill chips can read it too. */
+const PRIORITY_LABEL = PRIORITY_DISPLAY_LABEL as Record<OiPriorityKey, string>;
 
 /** The SLA ratio inside each priority; "Unset" only when it holds jobs. */
 export function buildSlaByPriority(

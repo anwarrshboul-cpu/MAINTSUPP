@@ -67,6 +67,8 @@ import {
   type JobType,
 } from "./job-type-contract";
 import { REPEAT_RATE_ARC } from "./dashboard-policy";
+/* Pure, imports only `dashboard-policy` — no drizzle reaches this module. */
+import { isCalendarDay } from "./overview-intel";
 
 /* ── Day arithmetic, on the calendar and in UTC ───────────────────────────── */
 
@@ -120,7 +122,6 @@ export function rangeLabel(from: string, to: string): string {
 
 /* ── The range ────────────────────────────────────────────────────────────── */
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_TOKEN = /^month:(\d{4}-\d{2})$/;
 
 export type ResolvedRange = {
@@ -150,8 +151,22 @@ export function resolveReportsRange(
   now: Date,
 ): ResolvedRange {
   const today = dayOf(now);
-  let from = params.from && DAY.test(params.from) ? params.from : null;
-  let to = params.to && DAY.test(params.to) ? params.to : null;
+  /*
+   * `isCalendarDay`, not the bare `DAY` shape.
+   *
+   * `DAY` is `/^\d{4}-\d{2}-\d{2}$/` — a SHAPE. "2026-13-01" and "2026-02-30"
+   * match it, reached `shiftDays` below, and threw `RangeError: Invalid time
+   * value` out of `new Date(...).toISOString()`, which the route reported as a
+   * 503. `isCalendarDay` round-trips the value through `Date`, so it knows
+   * month 13 does not exist — it is the check `overview-metrics.ts` has always
+   * used for the same two parameters.
+   *
+   * `refuseBadRange` now turns these away with a 400 before either route gets
+   * here. This stays as the honest fallback for any other caller: an impossible
+   * date resolves to the default window rather than throwing.
+   */
+  let from = isCalendarDay(params.from) ? params.from : null;
+  let to = isCalendarDay(params.to) ? params.to : null;
   if (!from && !to) {
     const token = MONTH_TOKEN.exec((params.reportPeriod ?? "").trim());
     if (token) {
@@ -503,6 +518,9 @@ export function buildReportsDashboard(input: ReportsDashInput): RpMetrics {
     to: month === anchor ? range.to : monthEnd(month),
     pence: input.monthlySpend.get(month) ?? 0,
     jobs: trendJobs.get(month) ?? 0,
+    /* The anchor month is cut short by the page's range whenever the range ends
+       before the month does — see `RpTrendPoint.partial`. */
+    partial: month === anchor && range.to < monthEnd(month),
   }));
   const trendTotal = points.reduce((sum, point) => sum + point.pence, 0);
   /* The previous EQUAL window: the same number of months immediately before. */

@@ -1222,6 +1222,23 @@ export default function PortalApp({
     useState<WorkspaceManagerState | null>(null);
   const [documents, setDocuments] = useState<FileRecord[]>([]);
   /*
+   * WHETHER THE REGISTER IS STILL BEING WALKED.
+   *
+   * Needed the moment the walk stopped happening on every screen: `documents`
+   * starts empty, and the register's `emptyRegisterReason` reads an empty array
+   * as a FACT — "No documents were uploaded in <window>." Before the gate below,
+   * the walk had usually finished while the reader was somewhere else, so that
+   * sentence was never seen mid-load. Deferred to the moment Documents opens, it
+   * would have been the first thing on screen every time, and it is not true.
+   *
+   * IT STARTS TRUE, and that is the fix rather than an oversight. The effect
+   * that starts the walk runs AFTER the first paint, so a flag initialised
+   * `false` left a measured 340-465ms window — reproduced on 3 of 3 cold loads
+   * — in which a screen about to list 215 documents asserted there were none.
+   * "Not walked yet" is the honest starting state: nothing has looked.
+   */
+  const [documentsLoading, setDocumentsLoading] = useState(true);
+  /*
    * Whether the walk stopped at its bound rather than at the end of the
    * register. Passed to the view so the reader is told, because a total that
    * is short without saying so is the defect this walk replaces.
@@ -1411,6 +1428,7 @@ export default function PortalApp({
      */
     const ticket = (documentsLoadRef.current += 1);
     const current = () => documentsLoadRef.current === ticket;
+    setDocumentsLoading(true);
     try {
       /*
        * `archived=all`, and the register hides them itself.
@@ -1569,15 +1587,13 @@ export default function PortalApp({
        * — the one question a stand-in answers wrongly, and confidently.
        */
       if (current()) setDocuments([]);
+    } finally {
+      /* Only the newest walk may clear the flag, for the same reason only the
+         newest may write the rows. */
+      if (current()) setDocumentsLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void loadDocuments();
-    window.addEventListener("maintsupp:refresh-board", loadDocuments);
-    return () =>
-      window.removeEventListener("maintsupp:refresh-board", loadDocuments);
-  }, [loadDocuments]);
 
   /**
    * The register, with each document's site named.
@@ -2172,6 +2188,41 @@ export default function PortalApp({
    * A custom `section:` register resolves to the `maintenance` surface, so a
    * section bound to its own board is covered by the first entry.
    */
+  /*
+   * THE DOCUMENT REGISTER IS WALKED ONLY ON THE SCREEN THAT DRAWS IT.
+   *
+   * `loadDocuments` pages `/api/files?limit=100&page=N&archived=all` up to
+   * forty times, sequentially, and every page runs its own `COUNT(*)` over the
+   * whole authorised set. This effect used to sit at the top of the shell with
+   * no guard at all, so it ran on the mount of PortalApp — which is every
+   * `/dashboard/*` route. Measured on Production: **31 requests on each load of
+   * the Overview**, ~7 seconds of serial request time, for a list the Overview
+   * never draws. Measured locally on this estate it also fires on
+   * `/dashboard/settings`, a screen with no file surface whatsoever.
+   *
+   * `documents` has exactly one reader — `documentsWithSites`, which is passed
+   * only to `DocumentsView`, which renders only under `activeSurface ===
+   * "documents"`. So the data can never be wanted while it is absent, and the
+   * guard is the same one the render already applies.
+   *
+   * This is `JOB_LIST_SURFACES` below, for the register instead of the board,
+   * and for the same reason: the comment there records that the Overview
+   * stopped downloading the job list and the shell had to name the surfaces
+   * that still read it. The register was simply never given the same treatment.
+   *
+   * The refresh listener is attached on the same terms. An upload elsewhere in
+   * the app dispatches `maintsupp:refresh-board`, and there is no point
+   * replaying a forty-page walk for a register nobody is looking at — opening
+   * Documents reloads it anyway, which is fresher rather than staler.
+   */
+  useEffect(() => {
+    if (activeSurface !== "documents") return undefined;
+    void loadDocuments();
+    window.addEventListener("maintsupp:refresh-board", loadDocuments);
+    return () =>
+      window.removeEventListener("maintsupp:refresh-board", loadDocuments);
+  }, [activeSurface, loadDocuments]);
+
   useEffect(() => {
     /*
      * The latch, inside the effect rather than in a second one beside it.
@@ -3590,6 +3641,7 @@ export default function PortalApp({
               files={documentsWithSites}
               contractors={currentContractors}
               truncated={documentsTruncated}
+              loading={documentsLoading}
               onNotify={setToast}
               onChanged={() => void loadDocuments()}
             />
@@ -4135,17 +4187,29 @@ function OverviewView({
       onNavigateToCompliance={(query) => openSectionWithQuery(onNavigate, "compliance", query ?? "")}
       onNavigateToSites={(query) => {
         /*
-         * Same ordering trap as `goToJobs`, and it was losing the `site=`
-         * filter the same way: this wrote the query onto the CURRENT path
-         * (still `/dashboard`) and then `setSection` pushed `/dashboard/sites`
-         * without it. The existing search is captured before navigating
-         * because the section push is what clears it.
+         * Same ordering trap as `goToJobs`: this wrote the query onto the
+         * CURRENT path (still `/dashboard`) and then `setSection` pushed
+         * `/dashboard/sites` without it, losing the `site=` filter. So the
+         * address is rewritten after the push rather than before it.
+         *
+         * B17 — WHAT IS NOT CARRIED ACROSS, AND WHY.
+         *
+         * This used to seed the destination from `window.location.search`, so
+         * a drill from the Overview arrived at the Sites register carrying the
+         * Overview's own `from`, `to` and an empty `portfolio=`. The register
+         * reads none of them (`sites-list.tsx` takes `sort`, `layout`, `q`,
+         * `status`, `type`, `hasJobs`, `compliance`, `budget`, `details`,
+         * `demo` and `sites`), so they narrowed nothing — they simply rode
+         * along into every link a reader might copy out of the address bar.
+         *
+         * `openSectionWithQuery` already explains the rule for every other
+         * section: carrying them "would narrow the destination by filters
+         * nobody chose there". The `site=` list this drill exists to send is in
+         * `query`, so nothing it needs comes from the old search.
          */
-        const carried = window.location.search;
         onNavigate("stores");
         if (query) {
-          const params = new URLSearchParams(carried);
-          for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
+          const params = new URLSearchParams(query);
           window.history.replaceState(
             {},
             "",
@@ -4801,11 +4865,22 @@ function DocumentsView({
   files,
   contractors,
   truncated,
+  loading,
   sectionKey,
   onNotify,
   onChanged,
 }: {
   files: FileRecord[];
+  /*
+   * Whether the register is still being walked.
+   *
+   * `emptyRegisterReason` reads an empty list as a finding — "No documents were
+   * uploaded in <window>." That is a statement about the estate, and it must
+   * not be made about a list that has not arrived yet. The walk now starts when
+   * this screen opens rather than on the mount of the shell, so the
+   * before-it-lands moment is one a reader actually sees.
+   */
+  loading: boolean;
   /**
    * The contractor register, so a document can be FILED against one — W06-08.
    *
@@ -5013,15 +5088,20 @@ function DocumentsView({
     const state = documentStatus(file, today).state;
     return state === "expired" || state === "due-soon";
   }).length;
-  const emptyReason = emptyRegisterReason({
-    windowRecognised: window.recognised,
-    windowReason: window.reason,
-    windowLabel: window.label,
-    inRangeCount: visible.length,
-    afterFiltersCount: matching.length,
-    filters,
-    query,
-  });
+  /* A register still being walked has found nothing YET, which is not the same
+     as holding nothing — see the `loading` prop. */
+  const registerPending = loading && !files.length;
+  const emptyReason = registerPending
+    ? "Loading the document register…"
+    : emptyRegisterReason({
+        windowRecognised: window.recognised,
+        windowReason: window.reason,
+        windowLabel: window.label,
+        inRangeCount: visible.length,
+        afterFiltersCount: matching.length,
+        filters,
+        query,
+      });
 
   /* Keep the open drawer pointing at the server's copy, not a stale one. */
   const openFile = selectedFile

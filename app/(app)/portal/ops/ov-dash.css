@@ -1415,6 +1415,61 @@ body[data-theme] .ov-dash .ov-card__link {
     min-height: 44px;
   }
 
+  /*
+   * B16 — THE PILL WAS 44px AND THE THING YOU HAD TO HIT WAS 14px.
+   *
+   * The rule above puts the floor on `.ov-dash__control`, which for the date
+   * range is the `<details>` element. But a `<details>` does not forward a
+   * press to its `<summary>`: the summary is the only part that toggles, and it
+   * was an `inline-flex` sized by its text — measured at 180x14.4 inside a
+   * 208x44 pill. Tapping three pixels below the top edge of a control that
+   * looks 44px tall did nothing at all, which reads as a broken button rather
+   * than a missed target.
+   *
+   * The portfolio control next to it was never affected: it is a `<label>`
+   * wrapping a `<select>`, and a label DOES forward its press.
+   *
+   * The pill's OWN vertical padding goes with it, and that is not tidiness.
+   * `.ov-dash__control` is `min-height: 44px` on the `<details>`; adding a 44px
+   * summary INSIDE its 6px padding stacked the two, and the pill measured 58px
+   * beside 44px siblings — a visible step in the phone header. Measured after
+   * removing it: 46px, which is the 44px summary plus the control's own 1px
+   * borders, flush with Export.
+   *
+   * `body[data-theme]` on BOTH rules below, and for the reason the date-input
+   * comment further down gives: `body[data-theme] .ov-dash .ov-dash__control`
+   * at `:544` sets the 6px padding at (0,3,1), and a media query adds no
+   * weight, so a bare `.ov-dash .ov-dash__range` at (0,2,0) loses and changes
+   * nothing. This file has now lost that argument twice; the prefix is the
+   * price of entry.
+   *
+   * Desktop is untouched: this whole block is `pointer: coarse`.
+   */
+  body[data-theme] .ov-dash .ov-dash__range {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .ov-dash .ov-dash__range > summary {
+    min-height: 44px;
+  }
+
+  /*
+   * The two date fields inside the panel measured 34px. A native date input is
+   * a real tap target — it opens the platform picker — so it takes the same
+   * floor as everything else a finger is asked to hit.
+   */
+  /*
+   * `body[data-theme]` to clear the 34px set by
+   * `body[data-theme] .ov-dash .ov-dash__control input` (:544) — the `<details>`
+   * IS an `.ov-dash__control` and is an ancestor of these inputs, so that rule
+   * matches at (0,3,2) and outranked the (0,3,1) this started as. Measured in
+   * the browser at 34px with the rule applying but losing.
+   */
+  body[data-theme] .ov-dash .ov-dash__range-panel input[type="date"] {
+    min-height: 44px;
+  }
+
   .ov-dash .ov-legend__row {
     padding: 8px 6px;
   }

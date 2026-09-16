@@ -111,6 +111,21 @@ export type RpTrendPoint = {
   to: string;
   pence: number;
   jobs: number;
+  /**
+   * THE PERIOD IS STILL RUNNING — this column is not comparable with the ones
+   * beside it.
+   *
+   * True only for the last month of the trend, and only when the page's range
+   * ends before that month does: `to` is `range.to` for the anchor month and
+   * the month's real end for every other, so the final column can cover three
+   * days while its neighbours cover thirty. Drawn identically they produce the
+   * classic "the last bar dips" misread — a reader sees a collapse in spend
+   * where there is only a month that has not finished.
+   *
+   * The FIGURE is not adjusted. Nothing is extrapolated, scaled or hidden:
+   * £265 in three days is £265. Only the label says which column is still open.
+   */
+  partial: boolean;
 };
 
 export type RpTrendRange = "3m" | "6m" | "12m" | "ytd";
