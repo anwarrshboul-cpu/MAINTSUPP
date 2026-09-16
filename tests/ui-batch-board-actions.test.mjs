@@ -260,8 +260,19 @@ test("the discussion drawer reuses the item thread against the board route", asy
   assert.match(discussion, /canPost/);
   assert.match(discussion, /No discussion yet/);
   assert.match(discussion, /Files cannot be attached to a board discussion/);
+  /*
+   * RE-POINTED: `useBodyScrollLock` moved with the rest of the dialog behaviour
+   * into `overlay/dialog-behaviour.ts`, so that the Overview's data tools use
+   * the SAME implementation of what `aria-modal` promises rather than a second
+   * one that drifts. The drawer still takes the lock — it takes it through the
+   * shared hook — so both halves are asserted here: the shell must use the
+   * hook, and the hook must still take the lock.
+   */
   const shell = await read(`${ACTIONS}/board-modal.tsx`);
-  assert.match(shell, /useBodyScrollLock\(open\)/, "the drawer takes the body scroll lock");
+  assert.match(shell, /const \{ surface, onBackdrop, onKeyDown \} = useDialogBehaviour\(open, onClose\);/,
+    "the drawer gets its behaviour from the shared hook");
+  const behaviour = await read("app/(app)/portal/overlay/dialog-behaviour.ts");
+  assert.match(behaviour, /useBodyScrollLock\(open\)/, "and the drawer takes the body scroll lock");
 });
 
 test("the view strip's three menus ride the shared layer, not the strip", async () => {
