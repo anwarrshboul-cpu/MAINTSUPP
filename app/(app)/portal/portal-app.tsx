@@ -159,6 +159,7 @@ import { EvidenceManager } from "./evidence-manager";
 import { BeforeAfter } from "./before-after";
 // Stage 20 — the sidebar is arranged per person. See sidebar-nav.tsx.
 import { SidebarNav, type SidebarNavEntry } from "./sidebar-nav";
+import { useDrillStatusMap } from "./use-drill-status-map";
 import { SectionManager } from "./section-manager";
 import { uploadEvidenceFile } from "../../lib/client-upload";
 import {
@@ -2095,6 +2096,12 @@ export default function PortalApp({
   const { jobTypes: drillJobTypes, loaded: drillJobTypesLoaded } = useJobTypes(
     drillApplies && routeSearch.replace(/^\?/, "") !== "",
   );
+  /* And the organisation's closed statuses, on the same terms: `family=open`
+     has to cut the list where the Overview's figure cut the count, and that
+     cut is configuration now rather than a constant. */
+  const { closedStatusKeys: drillClosedKeys, loaded: drillClosedKeysLoaded } = useDrillStatusMap(
+    drillApplies && routeSearch.replace(/^\?/, "") !== "",
+  );
   const drill = useMemo(() => {
     /* The whole list goes in as the population: a repeat is judged against the
        job before it, which the filtered list may not contain. The organisation's
@@ -2108,9 +2115,24 @@ export default function PortalApp({
        one frame before the fetch lands — and permanently if `/api/job-types`
        answers 503, which is the refusal that route carries a `busyRefusal`
        for. Absent, the three default types are still recognised by their ids. */
-    const context = { population: requests, jobTypes: drillJobTypesLoaded ? drillJobTypes : undefined };
+    const context = {
+      population: requests,
+      jobTypes: drillJobTypesLoaded ? drillJobTypes : undefined,
+      /* Same `undefined`-until-loaded rule, for the same reason: `[]` would
+         read as "this organisation closes nothing" and let completed jobs into
+         an open list. */
+      closedStatusKeys: drillClosedKeysLoaded ? drillClosedKeys : undefined,
+    };
     return readDrillFilter(new URLSearchParams(drillApplies ? routeSearch : ""), new Date(), context);
-  }, [drillApplies, routeSearch, requests, drillJobTypes, drillJobTypesLoaded]);
+  }, [
+    drillApplies,
+    routeSearch,
+    requests,
+    drillJobTypes,
+    drillJobTypesLoaded,
+    drillClosedKeys,
+    drillClosedKeysLoaded,
+  ]);
   const boardRequests = useMemo(
     () => (drill.empty ? requests : requests.filter(drill.matches)),
     [drill, requests],

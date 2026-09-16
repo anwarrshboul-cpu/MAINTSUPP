@@ -194,6 +194,11 @@ function fixture(over = {}) {
     open: 10,
     overdue: 3,
     completed: 5,
+    /* The completion COHORT — jobs raised in the range and how many are closed
+       now. Added when `completionRate` stopped being `completed / (completed +
+       open)`, which mixed a windowed numerator with an all-time denominator;
+       see tests/overview-completion-cohort.test.mjs for the rule itself. */
+    cohort: { raised: 12, closed: 5 },
     statusSlices: [slice("Pending Approval", 6), slice("Job Scheduled", 4)],
     prioritySlices: [slice("urgent", 2), slice("medium", 7), slice("low", 1)],
     categoryRows: [{ category: "Electrical", total: 6 }, { category: "Other", total: 4 }],
@@ -214,7 +219,13 @@ function fixture(over = {}) {
 
 test("the section: headline figures, and every split sums back to open work", () => {
   const built = buildJobIntel(fixture());
-  assert.equal(built.completionRate, 33, "5 ÷ (5 + 10)");
+  /* RE-POINTED. This asserted `33, "5 ÷ (5 + 10)"` — the old formula, which
+     divided jobs COMPLETED in the range by that plus open work as it stands
+     today, all time. Two populations, so the figure moved when the reader moved
+     the date picker and the estate had not changed. It is now a share of ONE
+     cohort: of the 12 jobs raised in the range, the 5 that are closed. */
+  assert.equal(built.completionRate, 42, "5 of the 12 jobs raised in the range");
+  assert.deepEqual(built.completion, { raised: 12, closed: 5, open: 7 });
   assert.deepEqual(built.sla, { percent: 70, withinSla: 7, overdue: 3, open: 10 });
   assert.equal(built.aging.percent, 40);
   assert.equal(built.aging.cutoff, "2026-08-27", `requested more than ${AGING_THRESHOLD_DAYS} days before 11 Sept`);
@@ -237,9 +248,13 @@ test("the section: headline figures, and every split sums back to open work", ()
       aging: { count: 0, oldestDay: null },
       breach: { pool: 0, count: 0 },
       closures: [],
+      /* Nothing raised in the range either — the cohort is what the rate is a
+         share OF, so an empty estate has to empty it too. */
+      cohort: { raised: 0, closed: 0 },
     }),
   );
   assert.equal(empty.completionRate, null, "no work at all is '—', never a failing 0%");
+  assert.deepEqual(empty.completion, { raised: 0, closed: 0, open: 0 });
   assert.equal(empty.sla.percent, null);
   assert.equal(empty.aging.percent, null);
   assert.equal(empty.timeToClose.averageDays, null);
@@ -422,7 +437,13 @@ test("the section is built once, from the Overview's own scope and predicates", 
   /* Open work is `openScope` (not closedJobSql) in every split query. */
   const block = metrics.slice(metrics.indexOf("const [tierRows, engineerRows"), metrics.indexOf("const openJobs = Number"));
   assert.equal((block.match(/\.where\(openScope\)/g) ?? []).length, 3, "tier, engineer and priority splits");
-  assert.match(block, /sum\(case when \$\{overdueOpenSql\(now\)\} then 1 else 0 end\)/, "the headline's overdue rule");
+  /* RE-POINTED: the overdue expression is now built once, above this block, as
+     `overdueSql = overdueOpenSql(now, closedSql)` — the same closure test the
+     open figure uses. It had to stop being `overdueOpenSql(now)` here: that
+     form closes jobs off the hardcoded list, so a page whose open figure
+     honoured `job_status_map` and whose overdue figure did not contradicted
+     itself inside `sla.percent`, which is computed from both. */
+  assert.match(block, /sum\(case when \$\{overdueSql\} then 1 else 0 end\)/, "the headline's overdue rule");
   assert.doesNotMatch(block, /julianday|over \(/i, "dual-dialect: no julianday, no window functions");
   const contract = await read("app/lib/overview-intel-contract.ts");
   assert.doesNotMatch(contract, /^import /m, "the wire contract imports nothing");

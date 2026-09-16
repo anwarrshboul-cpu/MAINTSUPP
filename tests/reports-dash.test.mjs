@@ -534,7 +534,15 @@ test("the day helpers agree with the dashboard filters they restate", () => {
 
 test("the route counts the Overview's jobs with the Overview's spend query — and writes nothing", async () => {
   const route = await read("app/api/reports/metrics/route.ts");
-  assert.match(route, /dashboardJobScope\(orgId, portfolio\.siteIds\)/, "the same scope as the Overview block");
+  /* RE-POINTED: `dashboardJobScope` now takes the resolved PORTFOLIO rather
+     than its site-id list. The list was one bound SQL variable per site, and a
+     151-site portfolio put both this route and the Overview past D1's variable
+     ceiling — two of the page's three sections answered 503 together, because
+     they share this scope. The portfolio travels as a subquery instead. The
+     contract this pin protects is unchanged and is the reason it stays: this
+     route must count THE SAME JOBS as the Overview block, through the same
+     helper, never a second scope that happens to agree. */
+  assert.match(route, /dashboardJobScope\(orgId, portfolio\)/, "the same scope as the Overview block");
   assert.match(route, /loadSpendByMonth\(db, scope,/, "the trend is the Overview's own query");
   assert.match(route, /resolveDashboardPortfolio\(\s*db,\s*orgId,\s*url\.searchParams\.get\("portfolio"\),\s*siteScope,?\s*\)/,
     "with the membership's site restriction");

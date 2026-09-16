@@ -64,8 +64,30 @@ export type OiIntel = {
   open: number;
   /** RANGE — jobs completed inside the page's range. */
   completed: number;
-  /** completed ÷ (completed + open), whole percent; null when both are 0. */
+  /**
+   * RANGE — of the jobs RAISED in this range, the share now closed.
+   *
+   * ONE COHORT, which it was not. This used to be
+   * `completed ÷ (completed + open)`, and those are two different populations:
+   * the numerator was jobs closed inside the range, the denominator added open
+   * work as it stands today, all time. Moving the date picker changed the
+   * figure while the estate stood still — a one-day window read 0%, a
+   * twelve-month window 5%, a future window 0% — and it was drawn as a
+   * two-slice donut, which claimed the two halves were parts of one whole.
+   *
+   * Now both halves are the same jobs: raised between `range.from` and
+   * `range.to`, closed judged by the organisation's own `job_status_map`. Null
+   * when nothing was raised in the range, because a share of no jobs is not 0%.
+   */
   completionRate: number | null;
+  /**
+   * The cohort the rate is computed over, so a card can show its denominator.
+   *
+   * §1.4 — a percentage is always a share of stated values, never a bare
+   * number whose denominator the reader cannot see. `closed + open == raised`
+   * by construction.
+   */
+  completion: { raised: number; closed: number; open: number };
 
   /**
    * NOW — the product's SLA metric: open jobs not yet past their due date,

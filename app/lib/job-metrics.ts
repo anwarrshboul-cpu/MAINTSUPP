@@ -227,6 +227,64 @@ export function statusKey(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/**
+ * WHICH STATUSES CLOSE A JOB — from configuration, with the shipped list behind it.
+ *
+ * `job_status_map.counts_as_open` is the configurable category, and the
+ * Calendar, the unscheduled tray and every chip have honoured it for as long as
+ * it has existed. The Overview did not: it selected the column and threw the
+ * value away, and closed off a hardcoded list instead. So an administrator who
+ * marked "Awaiting client PO" as closed watched twenty jobs leave the tray and
+ * stay in the Overview's open figure — the product disagreeing with itself
+ * about the one question the whole page is built on.
+ *
+ * The rule, which BOTH sides of the wire use so a figure and the list it opens
+ * cannot disagree:
+ *
+ *   · a status the organisation has configured is closed exactly when its
+ *     active row says `counts_as_open` is false;
+ *   · a status with no active row falls back to `completedStatuses`, the
+ *     shipped vocabulary.
+ *
+ * The fallback is not a leftover, it is what makes this safe to deploy. A
+ * freshly seeded organisation can have no map rows at all, and a rule that
+ * trusted the map alone would call every completed job on such an estate OPEN.
+ * Note this is deliberately NOT the same fallback as `jobChipAppearance`, which
+ * treats an unmapped status as open so a job cannot silently vanish from a
+ * tray; a counting rule has the opposite duty, and the two are reconciled by
+ * the fact that a seeded estate has a row for every status it uses.
+ *
+ * The STAGE is not a status and is not configurable, so it is tested separately
+ * by the callers and always closes a job. Measured before this existed: no row
+ * in any of the three organisations on this estate has a `Completed` stage and
+ * a status the map calls open, so the two signals do not currently disagree.
+ */
+export type StatusOpenness = {
+  sourceStatusLabel: string;
+  countsAsOpen: boolean;
+  /** Absent means active; only an explicit `false` retires a row. */
+  active?: boolean | null;
+};
+
+export function closedStatusKeys(mappings: readonly StatusOpenness[]): string[] {
+  const configured = new Map<string, boolean>();
+  for (const row of mappings) {
+    if (row.active === false) continue;
+    /* `countsAsOpen` crosses the wire as 0/1 on SQLite and as a boolean on
+       Postgres — see `BOOLEAN_COLUMNS` in `db/sqlite-to-postgres.ts` — so it is
+       read for truthiness rather than compared against either spelling. */
+    configured.set(statusKey(row.sourceStatusLabel), Boolean(row.countsAsOpen));
+  }
+
+  const closed = new Set<string>();
+  for (const [key, open] of configured) if (!open) closed.add(key);
+  for (const label of completedStatuses) {
+    const key = statusKey(label);
+    if (!configured.has(key)) closed.add(key);
+  }
+  return [...closed].sort();
+}
+
 /** Statuses met at runtime that `STATUS_FAMILY` has no entry for. */
 const unmappedSeen = new Set<string>();
 

@@ -83,6 +83,34 @@ export const closedJobSql = sql`(${eq(maintenanceRequests.stage, COMPLETED_STAGE
 
 const openJobSql = sql`not ${closedJobSql}`;
 
+/**
+ * The same closure test, but for an organisation that has configured it.
+ *
+ * `closedJobSql` above is the shipped vocabulary and stays exactly as it is:
+ * the Sites register counts on it, four suites pin its text, and the statement
+ * it sits in has had its bound-variable budget counted by hand. This is the
+ * configurable twin, given the keys `closedStatusKeys` resolved from
+ * `job_status_map` — see there for the rule and for why the shipped list is
+ * still the fallback.
+ *
+ * The STAGE arm is kept and is load-bearing. A stage is not a status and is not
+ * configurable, so marking "Completed" as open in the map must not resurrect a
+ * job that has actually been finished; the arm is what stops that. It also
+ * means an organisation with an empty key set still closes finished work.
+ *
+ * `lower(trim(...))` matches `closedJobSql` exactly rather than collapsing
+ * internal whitespace the way `statusKey` does. Keeping the two spellings
+ * identical is deliberate: a label would have to contain a double space for
+ * them to differ, no label on this estate does, and one closure expression that
+ * behaves two ways depending on which helper built its list would be worse than
+ * the narrow gap it closed.
+ */
+export function closedJobSqlFor(closedKeys: readonly string[]): SQL {
+  const stage = eq(maintenanceRequests.stage, COMPLETED_STAGE);
+  if (closedKeys.length === 0) return sql`(${stage})`;
+  return sql`(${stage} or lower(trim(${maintenanceRequests.status})) in ${[...closedKeys]})`;
+}
+
 /** Urgent, by the same spellings `normalisePriority` recognises. */
 const urgentSql = sql`lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "p1"]}`;
 
@@ -147,12 +175,22 @@ export function dateText(column: TextColumn): SQL {
   return sql`replace(trim(cast(${column} as text)), ' ', 'T')`;
 }
 
-export function overdueOpenSql(now: Date): SQL {
+/**
+ * Overdue is OPEN work past its date, so it inherits whatever "open" means.
+ *
+ * `closedSql` is optional and defaults to the shipped vocabulary, which keeps
+ * every existing caller counting exactly what it counted before. The Overview
+ * passes its organisation's configured test, because a page whose open figure
+ * honours the status map and whose overdue figure does not would disagree with
+ * itself — and `sla.percent` is computed from both, so the contradiction would
+ * land in a single number.
+ */
+export function overdueOpenSql(now: Date, closedSql: SQL = closedJobSql): SQL {
   const today = dayString(now);
   const instant = now.toISOString();
   const raw = maintenanceRequests.dueAt;
   const due = dateText(raw);
-  return sql`(${openJobSql} and ${raw} is not null and ${due} <> '' and ((length(${due}) <= 10 and substr(${due}, 1, 10) < ${today}) or (length(${due}) > 10 and ${due} < ${instant})))`;
+  return sql`(not ${closedSql} and ${raw} is not null and ${due} <> '' and ((length(${due}) <= 10 and substr(${due}, 1, 10) < ${today}) or (length(${due}) > 10 and ${due} < ${instant})))`;
 }
 
 /* ── Summary ──────────────────────────────────────────────────────────────── */

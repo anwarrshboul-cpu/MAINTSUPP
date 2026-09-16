@@ -89,7 +89,7 @@ export async function GET(request: Request) {
       url.searchParams.get("portfolio"),
       siteScope,
     );
-    const scope = dashboardJobScope(orgId, portfolio.siteIds);
+    const scope = dashboardJobScope(orgId, portfolio);
 
     /* The trend's months and the equal window before them, for its delta. */
     const anchor = range.to.slice(0, 7);

@@ -179,9 +179,29 @@ function jobTypeTokenLabel(token: string, types: readonly JobType[] | null): str
  */
 const CLOSED_STATUS_KEYS = new Set(completedStatuses.map((label) => statusKey(label)));
 
-function isClosed(request: MaintenanceRequest): boolean {
+/**
+ * ...AND THAT VOCABULARY IS NOW CONFIGURABLE.
+ *
+ * `closedJobSqlFor` takes the keys `closedStatusKeys` resolves from
+ * `job_status_map`, so an administrator who marks a status closed changes what
+ * the Overview counts. This list has to follow, or the figure and the board it
+ * opens go back to disagreeing — which is the defect the paragraph above
+ * describes, arriving by a new route.
+ *
+ * The shipped list stays the default, and that is load-bearing in two ways: a
+ * caller with no mappings to hand (several suites call `readDrillFilter` with
+ * no context at all) keeps counting exactly what it counted before, and a
+ * status the organisation has not configured is judged by the same fallback the
+ * server uses. Passing `[]` would mean "this organisation closes nothing", so
+ * the shell passes `undefined` until the read succeeds — never an empty array.
+ */
+function closedKeysOf(closedStatusKeys: readonly string[] | undefined): ReadonlySet<string> {
+  return closedStatusKeys?.length ? new Set(closedStatusKeys) : CLOSED_STATUS_KEYS;
+}
+
+function isClosed(request: MaintenanceRequest, closedKeys: ReadonlySet<string>): boolean {
   if ((request.stage ?? "") === COMPLETED_STAGE) return true;
-  return CLOSED_STATUS_KEYS.has(statusKey(request.status));
+  return closedKeys.has(statusKey(request.status));
 }
 
 /**
@@ -205,8 +225,8 @@ function isClosed(request: MaintenanceRequest): boolean {
  * is late only once the day has PASSED, and a timestamp is late once the
  * instant has.
  */
-function isOverdue(request: MaintenanceRequest, now: Date): boolean {
-  if (isClosed(request)) return false;
+function isOverdue(request: MaintenanceRequest, now: Date, closedKeys: ReadonlySet<string>): boolean {
+  if (isClosed(request, closedKeys)) return false;
   const due = String(request.dueAt ?? "").trim();
   if (!due) return false;
   if (due.length <= 10) return due.slice(0, 10) < isoDay(now);
@@ -226,8 +246,8 @@ function isOverdue(request: MaintenanceRequest, now: Date): boolean {
  */
 const BREACH_WINDOW_MS = 48 * 3_600_000;
 
-function isBreachRisk(request: MaintenanceRequest, now: Date): boolean {
-  if (isClosed(request)) return false;
+function isBreachRisk(request: MaintenanceRequest, now: Date, closedKeys: ReadonlySet<string>): boolean {
+  if (isClosed(request, closedKeys)) return false;
   if (priorityKey(request.priority) !== "urgent" && Number(request.tier) !== 1) return false;
   const due = String(request.dueAt ?? "").trim();
   if (!due) return false;
@@ -344,9 +364,20 @@ export function readDrillFilter(
    * label. Omitted, the three default types are still recognised by their
    * deterministic ids; see `jobTypeMatcher`.
    */
-  context: { population?: readonly MaintenanceRequest[]; jobTypes?: readonly JobType[] } = {},
+  context: {
+    population?: readonly MaintenanceRequest[];
+    jobTypes?: readonly JobType[];
+    /**
+     * The organisation's closed statuses, as `closedStatusKeys` resolves them
+     * from `job_status_map` — see `closedKeysOf`. Omitted, the shipped list
+     * stands, which is what every caller did before the map became
+     * authoritative.
+     */
+    closedStatusKeys?: readonly string[];
+  } = {},
 ): DrillFilter {
   const jobTypes = context.jobTypes ?? null;
+  const closedKeys = closedKeysOf(context.closedStatusKeys);
   const list = (name: string) =>
     searchParams
       .getAll(name)
@@ -377,6 +408,14 @@ export function readDrillFilter(
    * `in_progress`: the model is completed / in_progress / attention, so a job
    * needing attention is open too, and filtering to `in_progress` alone would
    * under-report the very figure the reader tapped.
+   *
+   * `closed` is its exact mirror, and is NOT a synonym for `completed` either.
+   * The family model reads a status label; the closure test reads the
+   * organisation's `job_status_map`. A status an administrator has marked
+   * closed is closed to every figure on the Overview while `statusFamily` still
+   * calls it `in_progress`, so the Job Completion card — whose whole point is
+   * that both halves are one cohort — needs the aggregate's own test on both
+   * sides, not the family model on one and the closure rule on the other.
    */
   const families = new Set(list("family").map((value) => value.toLowerCase()));
   /*
@@ -538,8 +577,8 @@ export function readDrillFilter(
            it in SQL: a Project, a custom type or an untyped job is neither. */
         if (!natures.has(jobTypeBucketOf(jobTypeIdOf(request), jobTypes))) return false;
       }
-      if (overdueOnly && !isOverdue(request, now)) return false;
-      if (breachOnly && !isBreachRisk(request, now)) return false;
+      if (overdueOnly && !isOverdue(request, now, closedKeys)) return false;
+      if (breachOnly && !isBreachRisk(request, now, closedKeys)) return false;
       if (matchesType && !matchesType(request)) return false;
       if (costedOnly && spendLineOf(request) === null) return false;
       if (repeats) {
@@ -557,7 +596,12 @@ export function readDrillFilter(
         /* `open` is the AGGREGATE's closure test, not `family !== "completed"`
            — see `isClosed`. The three named families keep the family model,
            which is what they are for. */
-        if (!families.has(family) && !(families.has("open") && !isClosed(request))) {
+        const closed = isClosed(request, closedKeys);
+        if (
+          !families.has(family) &&
+          !(families.has("open") && !closed) &&
+          !(families.has("closed") && closed)
+        ) {
           return false;
         }
       }
