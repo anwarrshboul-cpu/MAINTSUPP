@@ -214,9 +214,18 @@ test("the duty holder vocabulary is the one the scorer actually recognises", () 
 
 test("completed work carries the stage and status the open/closed cut reads", () => {
   /*
-   * `closedJobSql` is `stage = 'Completed' OR status IN completedStatuses` —
-   * `job_status_map.counts_as_open` does NOT decide this, which is the trap.
-   * Every completed demo job therefore sets both.
+   * CORRECTED. This used to say `job_status_map.counts_as_open` does NOT decide
+   * the open/closed cut, "which is the trap". That was an accurate description
+   * of a defect, not of an intention: the Overview selected the column and
+   * discarded it, so an administrator's setting moved the Calendar and the
+   * unscheduled tray and not the dashboard. The map IS authoritative now — see
+   * `closedStatusKeys` in app/lib/job-metrics.ts.
+   *
+   * The seed's own contract is unchanged and is what this test still checks:
+   * a completed demo job sets BOTH stage and status. That still matters,
+   * because the stage arm closes a job regardless of configuration, and a seed
+   * that set only one of the two would leave the demo estate's figures
+   * depending on which signal a given query happened to read.
    */
   const jobs = seed.slice(seed.indexOf("const DEMO_JOBS"), seed.indexOf("/** A row, positionally"));
   const completed = [...jobs.matchAll(/"(Job Completed)", "(Completed)"/g)];

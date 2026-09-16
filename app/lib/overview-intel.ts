@@ -111,6 +111,12 @@ export type JobIntelInput = {
   open: number;
   overdue: number;
   completed: number;
+  /**
+   * THE COMPLETION COHORT — jobs RAISED in the page range, and how many of them
+   * are now closed. One population, counted once on the server; see
+   * `OiIntel.completionRate` for the two-population defect this replaced.
+   */
+  cohort: { raised: number; closed: number };
   /** The Overview's own splits of open work, already computed. */
   statusSlices: readonly Slice[];
   prioritySlices: readonly Slice[];
@@ -384,10 +390,19 @@ export function buildJobIntel(input: JobIntelInput): OiIntel {
       labels: [...slice.labels],
     }));
 
+  /*
+   * ONE COHORT, BOTH HALVES. `closed` is clamped into the cohort rather than
+   * trusted: the two come from separate aggregates, and a rate above 100% on a
+   * dashboard is worse than a rate that is merely wrong.
+   */
+  const raised = Math.max(0, input.cohort.raised);
+  const cohortClosed = Math.min(Math.max(0, input.cohort.closed), raised);
+
   return {
     open,
     completed,
-    completionRate: percentOf(completed, completed + open),
+    completionRate: percentOf(cohortClosed, raised),
+    completion: { raised, closed: cohortClosed, open: raised - cohortClosed },
     sla: { percent: percentOf(withinSla, open), withinSla, overdue, open },
     priority,
     status: capStatuses(input.statusSlices),

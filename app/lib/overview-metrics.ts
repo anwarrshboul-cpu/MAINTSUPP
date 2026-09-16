@@ -18,7 +18,14 @@
  * brief's own instruction was to reuse it and say so:
  *
  *   · open / closed comes from `job_status_map.counts_as_open`, the
- *     configurable category, not from a hardcoded status list;
+ *     configurable category, with the shipped `completedStatuses` list behind
+ *     it for any status the organisation has not configured — see
+ *     `closedStatusKeys`. This paragraph claimed as much for a long time while
+ *     the code did the opposite: the column was selected and discarded, the
+ *     closure test was the hardcoded list, and a test asserting the STRING
+ *     `jobStatusMap.countsAsOpen` appeared below passed on the strength of the
+ *     discarded select. It is true now, and `tests/overview-status-map.test.mjs`
+ *     holds it true by changing a mapping and watching the figures move;
  *   · overdue is `overdueOpenSql`, the same expression the Jobs board and the
  *     ageing card use;
  *   · a job counts as work at all through `liveWorkOrderCondition` — not
@@ -57,9 +64,9 @@ import {
   siteGroups,
   units,
 } from "../../db/schema";
-import { closedJobSql, dateText, overdueOpenSql } from "./dashboard-aggregates";
+import { closedJobSqlFor, dateText, overdueOpenSql } from "./dashboard-aggregates";
 import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters";
-import { drillSiteIds, normalisePriority } from "./job-metrics";
+import { closedStatusKeys, drillSiteIds, normalisePriority } from "./job-metrics";
 import { poundsToPence } from "./reporting/money";
 import { complianceCompletion } from "./compliance-status";
 import { readComplianceRegister } from "./compliance-register";
@@ -227,13 +234,81 @@ const PRIORITY_LABEL: Record<string, string> = {
  * Exported because the Reports block counts the same jobs and must count them
  * the same way — one scope, two dashboards.
  */
-export function dashboardJobScope(orgId: string, siteIds: readonly string[] | null): SQL {
-  const base = liveWorkOrderCondition(orgId);
-  if (!siteIds) return base;
+/**
+ * WHICH SITES A PORTFOLIO MEANS — without binding one variable per site.
+ *
+ * `site_id in (?, ?, … ×151)` is one bound parameter per member, and D1 refuses
+ * a statement past roughly a hundred of them. So the Overview and the Reports
+ * block both answered 503 for the one portfolio on this estate that holds the
+ * whole shop list, while a fifty-site portfolio answered 200 — two of the three
+ * sections replaced by "temporarily unavailable" for the filter a reader is
+ * most likely to pick.
+ *
+ * `sql-batching.ts` exists for exactly that ceiling, but `selectInChunks`
+ * splits a QUERY, and what is shared here is a CONDITION that eighteen separate
+ * aggregates build on. Chunking would have meant re-summing every one of them,
+ * each with its own merge rule.
+ *
+ * The membership is a TABLE, so the list need not travel as parameters at all.
+ * `in (select site_id from site_group_members where …)` binds TWO values
+ * whatever the portfolio holds, and it is ordinary SQL — no `json_each`, no
+ * array literal, nothing `db/sqlite-to-postgres.ts` has to learn — so one
+ * statement runs on Miniflare D1 and on Supabase Postgres alike.
+ *
+ * The membership's own restriction still travels as a list, deliberately: it
+ * comes from `memberships.site_scope`, a column on one row rather than a table
+ * to join, and it is bounded by how many stores an administrator named for one
+ * person. The portfolio was the unbounded half, and it is the half this removes.
+ */
+export type DashboardSiteFilter =
+  /** Every site this organisation holds — no site predicate at all. */
+  | { kind: "all" }
+  /** Nothing can match: an empty portfolio, or a scope that excluded all of it. */
+  | { kind: "none" }
+  /** A portfolio's members, read from the membership table, plus any scope. */
+  | { kind: "group"; groupId: string; scope: readonly string[] | null }
+  /** The membership's own restriction, with no portfolio chosen. */
+  | { kind: "scope"; scope: readonly string[] };
+
+/** What `dashboardJobScope` needs from a resolved portfolio. */
+export type DashboardSiteScope = { siteFilter: DashboardSiteFilter };
+
+/**
+ * The portfolio narrowing for ANY column holding a site id.
+ *
+ * Jobs are not the only rows this page counts per portfolio — the active-units
+ * figure filters `units.site_id` the same way and carried the same ceiling, so
+ * the rule lives here once rather than being written out twice and drifting.
+ * `undefined` means "no predicate", which is what `and()` wants for a filter
+ * that does not apply.
+ */
+function siteFilterCondition(
+  column: typeof maintenanceRequests.siteId | typeof units.siteId,
+  orgId: string,
+  filter: DashboardSiteFilter,
+): SQL | undefined {
+  if (filter.kind === "all") return undefined;
   /* An empty portfolio matches nothing rather than everything — the same trap
      `confineToSiteScope` documents on the dashboard routes. */
-  if (siteIds.length === 0) return and(base, sql`1 = 0`)!;
-  return and(base, inArray(maintenanceRequests.siteId, [...siteIds]))!;
+  if (filter.kind === "none") return sql`1 = 0`;
+
+  const clauses: SQL[] = [];
+  if (filter.kind === "group") {
+    clauses.push(
+      sql`${column} in (select ${siteGroupMembers.siteId} from ${siteGroupMembers} where ${siteGroupMembers.organisationId} = ${orgId} and ${siteGroupMembers.siteGroupId} = ${filter.groupId})`,
+    );
+    /* The intersection, when a member is also confined to named stores. */
+    if (filter.scope) clauses.push(inArray(column, [...filter.scope]));
+  } else {
+    clauses.push(inArray(column, [...filter.scope]));
+  }
+  return clauses.length === 1 ? clauses[0] : and(...clauses)!;
+}
+
+export function dashboardJobScope(orgId: string, portfolio: DashboardSiteScope): SQL {
+  const base = liveWorkOrderCondition(orgId);
+  const sites = siteFilterCondition(maintenanceRequests.siteId, orgId, portfolio.siteFilter);
+  return sites ? and(base, sites)! : base;
 }
 
 /* ── Portfolios, shared by the three blocks ───────────────────────────────── */
@@ -241,8 +316,18 @@ export function dashboardJobScope(orgId: string, siteIds: readonly string[] | nu
 export type DashboardPortfolio = {
   portfolios: { id: string; name: string }[];
   chosen: { id: string; name: string } | null;
-  /** The chosen portfolio's member sites; null for "All portfolios". */
+  /**
+   * The chosen portfolio's member sites; null for "All portfolios".
+   *
+   * Still resolved, because the compliance routes filter their register rows in
+   * JavaScript and the drill-through needs the ids to hand the destination
+   * board. What no longer travels as a bound list is the JOB filter — see
+   * `siteFilter`, which says the same thing in a form SQL can read from the
+   * membership table.
+   */
   siteIds: string[] | null;
+  /** The same narrowing, as SQL can express it without a parameter per site. */
+  siteFilter: DashboardSiteFilter;
 };
 
 /**
@@ -299,7 +384,30 @@ export async function resolveDashboardPortfolio(
     const allowed = new Set(siteScope);
     siteIds = siteIds ? siteIds.filter((id) => allowed.has(id)) : [...allowed];
   }
-  return { portfolios, chosen, siteIds };
+
+  /*
+   * THE SAME NARROWING, SAID TWICE, ON PURPOSE.
+   *
+   * `siteIds` is the resolved list, and the compliance routes and the drill
+   * builders still want it. `siteFilter` is the same decision in the form the
+   * job queries bind — the portfolio as a subquery against the membership
+   * table, so a 151-site portfolio costs two parameters rather than 151.
+   *
+   * They are derived from the same three inputs in the same order, so they
+   * cannot disagree: an empty resolved list is exactly the case where nothing
+   * can match, whether the portfolio is empty or the scope excluded all of it.
+   */
+  let siteFilter: DashboardSiteFilter;
+  if (chosen) {
+    siteFilter = { kind: "group", groupId: chosen.id, scope: siteScope ? [...siteScope] : null };
+  } else if (siteScope) {
+    siteFilter = { kind: "scope", scope: [...siteScope] };
+  } else {
+    siteFilter = { kind: "all" };
+  }
+  if (siteIds && siteIds.length === 0) siteFilter = { kind: "none" };
+
+  return { portfolios, chosen, siteIds, siteFilter };
 }
 
 /* ── Spend, shared by the Overview and Reports ───────────────────────────── */
@@ -402,15 +510,14 @@ export async function loadOverviewMetrics(
 
   /* ── Portfolios ─────────────────────────────────────────────────────────── */
 
-  const { portfolios, chosen, siteIds } = await resolveDashboardPortfolio(
+  const { portfolios, chosen, siteIds, siteFilter } = await resolveDashboardPortfolio(
     db,
     orgId,
     options.portfolio,
     options.siteScope ?? null,
   );
 
-  const scope = dashboardJobScope(orgId, siteIds);
-  const openScope = and(scope, sql`not ${closedJobSql}`)!;
+  const scope = dashboardJobScope(orgId, { siteFilter });
 
   /* ── Statuses, from configuration ───────────────────────────────────────── */
 
@@ -424,6 +531,33 @@ export async function loadOverviewMetrics(
     })
     .from(jobStatusMap)
     .where(and(eq(jobStatusMap.organisationId, orgId), eq(jobStatusMap.active, true)));
+
+  /*
+   * OPEN, AS THIS ORGANISATION HAS CONFIGURED IT.
+   *
+   * `open: jobStatusMap.countsAsOpen` was already selected above — and thrown
+   * away. The closure test was the hardcoded `closedJobSql`, so the Calendar
+   * and the unscheduled tray honoured an administrator's setting and this page
+   * ignored it, while `tests/ov-dash-metrics.test.mjs` asserted the string
+   * `jobStatusMap.countsAsOpen` appeared in this file and called that proof.
+   * The select is now read, which is what makes the setting mean something
+   * here; see `closedStatusKeys` for the rule and its fallback.
+   *
+   * Built AFTER `statusRows` for the obvious reason, and it costs nothing:
+   * `openScope` is a pure SQL fragment, the first statement that uses it is the
+   * `Promise.all` below, and `statusRows` was already awaited on that path.
+   */
+  const closedKeys = closedStatusKeys(
+    statusRows.map((row) => ({
+      sourceStatusLabel: String(row.label ?? ""),
+      countsAsOpen: Boolean(row.open),
+    })),
+  );
+  const closedSql = closedJobSqlFor(closedKeys);
+  const openScope = and(scope, sql`not ${closedSql}`)!;
+  /* Overdue is open work past its date, so it takes the same test — otherwise
+     `sla.percent`, computed from both, contradicts itself. */
+  const overdueSql = overdueOpenSql(now, closedSql);
 
   const statusMeta = new Map(
     statusRows.map((row) => [
@@ -453,7 +587,7 @@ export async function loadOverviewMetrics(
     completedByDay,
   ] = await Promise.all([
     db.select({ total: count() }).from(maintenanceRequests).where(openScope),
-    db.select({ total: count() }).from(maintenanceRequests).where(and(scope, overdueOpenSql(now))),
+    db.select({ total: count() }).from(maintenanceRequests).where(and(scope, overdueSql)),
     db
       .select({ total: count() })
       .from(maintenanceRequests)
@@ -491,7 +625,7 @@ export async function loadOverviewMetrics(
       .where(
         and(
           openScope,
-          sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1", "medium", "normal", "standard"]} or ${overdueOpenSql(now)})`,
+          sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1", "medium", "normal", "standard"]} or ${overdueSql})`,
         ),
       )
       .groupBy(maintenanceRequests.siteId),
@@ -518,7 +652,10 @@ export async function loadOverviewMetrics(
           eq(units.status, "Active"),
           isNull(units.deletedAt),
           ne(units.kind, "reference"),
-          siteIds ? (siteIds.length ? inArray(units.siteId, siteIds) : sql`1 = 0`) : undefined,
+          /* The same portfolio narrowing the jobs use, and for the same reason
+             it is a subquery: a 151-site portfolio bound 151 parameters here
+             too. See `siteFilterCondition`. */
+          siteFilterCondition(units.siteId, orgId, siteFilter),
         )!,
       ),
     /*
@@ -585,7 +722,7 @@ export async function loadOverviewMetrics(
   const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1"]} or ${maintenanceRequests.tier} = 1)`;
   const requestedDay = dayOnly(maintenanceRequests.requestedAt);
   const completedDay = dayOnly(maintenanceRequests.completedAt);
-  const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, closureRows] = await Promise.all([
+  const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, cohortRows, closureRows] = await Promise.all([
     db
       .select({ tier: maintenanceRequests.tier, total: count() })
       .from(maintenanceRequests)
@@ -600,7 +737,7 @@ export async function loadOverviewMetrics(
       .select({
         priority: maintenanceRequests.priority,
         total: count(),
-        overdue: sql<number>`sum(case when ${overdueOpenSql(now)} then 1 else 0 end)`,
+        overdue: sql<number>`sum(case when ${overdueSql} then 1 else 0 end)`,
       })
       .from(maintenanceRequests)
       .where(openScope)
@@ -613,6 +750,33 @@ export async function loadOverviewMetrics(
       .select({ pool: count(), risk: sql<number>`sum(case when ${dueSoonSql} then 1 else 0 end)` })
       .from(maintenanceRequests)
       .where(and(openScope, riskPoolSql)),
+    /*
+     * THE COMPLETION COHORT — one population, counted once.
+     *
+     * Jobs RAISED inside the page range, and how many of them are closed now,
+     * by this organisation's own closure test. Both halves come off the same
+     * `where`, so the rate built from them is a share of a population rather
+     * than the ratio of two different ones that `completionRate` used to be.
+     *
+     * `scope`, not `openScope`: the cohort deliberately contains closed jobs —
+     * they are the numerator. The empty-day guard is the same one the ageing
+     * query uses, because `requested_at` is nullable and `substr` of null is
+     * not a day.
+     */
+    db
+      .select({
+        raised: count(),
+        closed: sql<number>`sum(case when ${closedSql} then 1 else 0 end)`,
+      })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          scope,
+          sql`${requestedDay} <> ''`,
+          sql`${requestedDay} >= ${rangeFrom}`,
+          sql`${requestedDay} <= ${rangeTo}`,
+        ),
+      ),
     db
       .select({ requestedDay: sql<string>`${requestedDay}`, completedDay: sql<string>`${completedDay}` })
       .from(maintenanceRequests)
@@ -898,6 +1062,10 @@ export async function loadOverviewMetrics(
       open: openJobs,
       overdue,
       completed,
+      cohort: {
+        raised: Number(cohortRows[0]?.raised ?? 0),
+        closed: Number(cohortRows[0]?.closed ?? 0),
+      },
       statusSlices: jobsByStatus,
       prioritySlices: priority,
       categoryRows: categoryGrouped.map((row) => ({ category: row.category, total: Number(row.total ?? 0) })),

@@ -152,12 +152,48 @@ test("jobs with no priority and no category still reconcile", () => {
 test("the metrics reuse the product's existing definitions", async () => {
   const source = metricsSource;
 
-  /* Open/closed is the CONFIGURABLE category, not a hardcoded status list. */
-  assert.match(source, /jobStatusMap\.countsAsOpen/, "open/closed comes from job_status_map");
-  assert.match(source, /not \$\{closedJobSql\}/, "and the closure test is the shared one");
+  /*
+   * Open/closed is the CONFIGURABLE category, not a hardcoded status list.
+   *
+   * RE-POINTED, and this one is worth reading before writing another pin like
+   * the pair it replaces. They were:
+   *
+   *     assert.match(source, /jobStatusMap\.countsAsOpen/, "open/closed comes from job_status_map");
+   *     assert.match(source, /not \$\{closedJobSql\}/, "and the closure test is the shared one");
+   *
+   * Both passed for months while the opposite was true. The module SELECTED
+   * `open: jobStatusMap.countsAsOpen` and then built `statusMeta` out of
+   * `display`, `colour` and `sortOrder` only, so the value was fetched and
+   * discarded — and the first assertion matched that discarded select. The
+   * closure test really was the hardcoded `closedJobSql`, so an administrator
+   * who marked a status closed moved the Calendar and the unscheduled tray and
+   * not this page. A test whose message said "comes from job_status_map" was
+   * the reason nobody looked.
+   *
+   * The behaviour now lives in `tests/overview-status-map.test.mjs`, which
+   * changes a mapping through the product's own API and watches Open jobs, the
+   * donut, the tier and engineer splits and the SLA figures all move — an
+   * assertion that could not have passed before the fix. What stays HERE is the
+   * structural half: the closure test is derived from the rows, not a constant.
+   */
+  assert.match(
+    source,
+    /const closedKeys = closedStatusKeys\(\s*statusRows\.map\(/,
+    "the closed statuses are DERIVED from the job_status_map rows, not a constant",
+  );
+  assert.match(
+    source,
+    /const openScope = and\(scope, sql`not \$\{closedSql\}`\)!;/,
+    "and open work is the negation of that derived test",
+  );
 
-  /* Overdue is the same expression the board and the ageing card use. */
-  assert.match(source, /overdueOpenSql\(now\)/);
+  /*
+   * Overdue is the same expression the board and the ageing card use — and it
+   * is handed the SAME closure test, because a page whose open figure honours
+   * the status map and whose overdue figure does not disagrees with itself
+   * inside `sla.percent`, which is computed from both.
+   */
+  assert.match(source, /const overdueSql = overdueOpenSql\(now, closedSql\);/);
 
   /*
    * A job counts as work at all by the same exclusions as everywhere.

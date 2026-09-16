@@ -537,6 +537,10 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
   const openDrill = drill(OI_OPEN);
   const overdueDrill = drill(OI_OVERDUE);
   const completedDrill = drill(oiCompletedPairs(range));
+  /* The two halves of the completion cohort — jobs raised in the range, split
+     by the same closure test the figure was counted with. */
+  const cohortClosedDrill = drill(oiCohortPairs("closed", range));
+  const cohortOpenDrill = drill(oiCohortPairs("open", range));
   const statusDrill = (slice: OiSlice) => drill(oiStatusPairs(slice));
   const priorityDrill = (labels: readonly string[]) => drill(oiOpenByPairs("priority", labels));
   const tierDrill = (slice: OiSlice) => drill(oiOpenByPairs("tier", slice.labels));
@@ -558,9 +562,12 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
   const tierSlices = toOvSlices(intel.tiers, tierColours(intel.tiers));
   const labelSlices = toOvSlices(intel.labels, oiSeriesColours(intel.labels.map((slice) => slice.key)));
   const engineerColours = oiSeriesColours(intel.engineers.map((slice) => slice.key));
+  /* ONE COHORT: both slices are jobs RAISED in the range. The card used to put
+     "completed in this range" beside "open right now, all time" and print the
+     ratio of the two as a rate. */
   const completionSlices: OvSlice[] = [
-    { key: "completed", label: "Completed", value: intel.completed, colour: OI_COLOUR.green, labels: [] },
-    { key: "open", label: "Still open", value: intel.open, colour: OI_COLOUR.muted, labels: [] },
+    { key: "closed", label: "Closed", value: intel.completion.closed, colour: OI_COLOUR.green, labels: [] },
+    { key: "open", label: "Still open", value: intel.completion.open, colour: OI_COLOUR.muted, labels: [] },
   ];
   const bySlice = <T extends { key: string }>(list: readonly T[], key: string) =>
     list.find((entry) => entry.key === key);
@@ -650,9 +657,17 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         <OiKpiTile
           label="Completion rate"
           value={intel.completionRate === null ? "—" : `${intel.completionRate}%`}
-          caption="completed vs still open"
+          caption={
+            intel.completionRate === null
+              ? `no jobs raised in ${range.label}`
+              : `${oiCount(intel.completion.closed)} of ${oiCount(intel.completion.raised)} raised in ${range.label} are closed`
+          }
           tone={completionTone}
-          ariaLabel="Completion rate"
+          ariaLabel={
+            intel.completionRate === null
+              ? `Completion rate: no jobs were raised in ${range.label}, so there is nothing to measure.`
+              : `Completion rate: ${intel.completionRate}% — ${oiCount(intel.completion.closed)} of the ${oiCount(intel.completion.raised)} jobs raised in ${range.label} are now closed.`
+          }
         />
         <OiKpiTile
           label="SLA met"
@@ -743,46 +758,52 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         </OiCard>
 
         {/* 3 — Job completion */}
-        <OiCard title="Job Completion" pill="Completed vs open">
-          {intel.completed + intel.open === 0 ? (
-            <p className="oi-note oi-empty-note">{`No job is open, and none closed in ${range.label}.`}</p>
+        <OiCard title="Job Completion" pill="Raised in range · closed vs open">
+          {intel.completion.raised === 0 ? (
+            <p className="oi-note oi-empty-note">{`No job was raised in ${range.label}.`}</p>
           ) : (
             <div className="oi-donut">
               <Donut
                 slices={completionSlices}
-                total={intel.completed + intel.open}
-                caption="completed"
+                total={intel.completion.raised}
+                caption="closed"
                 centreValue={intel.completionRate === null ? "—" : `${intel.completionRate}%`}
                 geometry={DONUT}
                 formatValue={oiCount}
-                onSelect={(slice) => (slice.key === "completed" ? completedDrill.go() : openDrill.go())}
+                onSelect={(slice) =>
+                  slice.key === "closed" ? cohortClosedDrill.go() : cohortOpenDrill.go()
+                }
                 ariaLabel="Job completion"
               />
               <OiLegend
                 rows={[
                   {
-                    key: "completed",
-                    label: "Completed",
-                    valueText: oiCount(intel.completed),
+                    key: "closed",
+                    label: "Closed",
+                    valueText: oiCount(intel.completion.closed),
                     colour: OI_COLOUR.green,
-                    href: completedDrill.href,
-                    onActivate: completedDrill.go,
-                    ariaLabel: `Completed: ${plural(intel.completed, "job", "jobs")} closed in ${range.label}. Opens those jobs.`,
+                    href: cohortClosedDrill.href,
+                    onActivate: cohortClosedDrill.go,
+                    ariaLabel: `Closed: ${plural(intel.completion.closed, "job", "jobs")} raised in ${range.label} and now closed. Opens those jobs.`,
                   },
                   {
                     key: "open",
                     label: "Still open",
-                    valueText: oiCount(intel.open),
+                    valueText: oiCount(intel.completion.open),
                     colour: OI_COLOUR.muted,
-                    href: openDrill.href,
-                    onActivate: openDrill.go,
-                    ariaLabel: `Still open: ${plural(intel.open, "job", "jobs")}. Opens the open jobs.`,
+                    href: cohortOpenDrill.href,
+                    onActivate: cohortOpenDrill.go,
+                    ariaLabel: `Still open: ${plural(intel.completion.open, "job", "jobs")} raised in ${range.label} and still open. Opens those jobs.`,
                   },
                 ]}
               />
             </div>
           )}
-          <p className="oi-note">Jobs completed in {range.label}, against the jobs still open on the board today.</p>
+          <p className="oi-note">
+            Of the {oiCount(intel.completion.raised)} jobs raised in {range.label}, how many are
+            closed today. The Completed tile above counts something different on purpose — jobs
+            CLOSED in this range, whenever they were raised.
+          </p>
         </OiCard>
 
         {/* 4 — Tier level */}
@@ -1562,6 +1583,31 @@ function oiPipe(labels: readonly string[]): string {
 export function oiCompletedPairs(range: { from: string; to: string }): OiPair[] {
   return [
     ["measure", "completed"],
+    ["period", "custom"],
+    ["from", range.from],
+    ["to", range.to],
+  ];
+}
+
+/**
+ * ONE HALF OF THE COMPLETION COHORT — jobs RAISED in the range, open or closed.
+ *
+ * `measure=requested` is the same axis the aged-jobs drill uses, so the window
+ * filters the day a job was raised rather than the day it closed. The family is
+ * the board's closure test on both sides — `closed` being the mirror
+ * `board-drill-filter.ts` gained for this card — and NOT `family=completed`,
+ * which reads a status label through `statusFamily` and would ignore the
+ * organisation's `job_status_map` entirely. Using it would have put a list that
+ * disagrees with the figure under a card whose whole purpose is that the two
+ * halves are one cohort.
+ */
+export function oiCohortPairs(
+  side: "open" | "closed",
+  range: { from: string; to: string },
+): OiPair[] {
+  return [
+    ["family", side],
+    ["measure", "requested"],
     ["period", "custom"],
     ["from", range.from],
     ["to", range.to],
