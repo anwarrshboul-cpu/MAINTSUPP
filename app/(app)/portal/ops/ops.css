@@ -336,10 +336,24 @@ button.ops-meter__fill:focus-visible {
 
 /* ── The mobile sheet ─────────────────────────────────────────────────────── */
 
+/*
+ * THE SHARED z SCALE, not a number that has to out-argue the chrome.
+ *
+ * This was `z-index: 60`, while `app/globals.css` puts the topbar at 300 and
+ * the sidebar at 410 — so every surface built on this class rendered UNDER the
+ * app chrome. On the Overview's data tools, which also declare
+ * `aria-modal="true"`, the measured result was that the sidebar stayed
+ * clickable straight through the "modal" and navigated away with it still open.
+ *
+ * `--z-modal` is the tier the rest of the product's dialogs use. The Overview's
+ * tools additionally render through `LayerPortal`, which puts them on that tier
+ * by construction; this keeps the class itself honest for `ops-filter-bar.tsx`,
+ * its other consumer, which does not portal.
+ */
 .ops-sheet {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-modal);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;

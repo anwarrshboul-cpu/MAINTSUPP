@@ -886,7 +886,21 @@ test("the two registers say why they are empty", async () => {
    * wiring cannot rot: the view must ask, and the module must still be able to
    * say all three things.
    */
-  assert.match(documents, /const emptyReason = emptyRegisterReason\(\{/);
+  /*
+   * RE-POINTED: `emptyReason` is now a ternary — a register still being walked
+   * is not a register that holds nothing, and "No documents were uploaded in
+   * <window>" is a FINDING about the estate that must not be made about a list
+   * that has not arrived. The document walk used to run on the mount of the
+   * shell, so it had usually finished before anyone opened this screen; it is
+   * now deferred to the screen that draws it, which made the before-it-lands
+   * moment one a reader actually sees (measured at 340-465ms, 3 of 3 loads).
+   *
+   * Both halves of the original contract are still asserted, plus the new one:
+   * the view must ASK `emptyRegisterReason` when it has something to report,
+   * must RENDER the answer, and must not report at all while loading.
+   */
+  assert.match(documents, /const registerPending = loading && !files\.length;/, "a pending walk is not an empty estate");
+  assert.match(documents, /emptyRegisterReason\(\{/, "the view still asks the module why it is empty");
   assert.match(documents, /\{emptyReason\}/, "and it must actually be rendered");
   assert.match(documents, /windowReason: window\.reason/, "an unreadable window must say so");
 

@@ -12,90 +12,14 @@
  * drawer becomes a full-height sheet.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  type ReactNode,
-} from "react";
-import { LayerPortal, useBodyScrollLock } from "../overlay/anchored";
+import { type ReactNode } from "react";
+import { LayerPortal } from "../overlay/anchored";
+/* Escape, focus-in, focus-restore, the Tab trap and the scroll lock, lifted out
+   of this file so the Overview's data tools use the SAME implementation rather
+   than a second one. Behaviour here is unchanged. */
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 import { ActionIcon } from "./board-icons";
 import "./board-actions.css";
-
-const FOCUSABLE =
-  'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-function useDialogBehaviour(open: boolean, onClose: () => void) {
-  const surface = useRef<HTMLDivElement | null>(null);
-  const closeRef = useRef(onClose);
-  useEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
-
-  useBodyScrollLock(open);
-
-  // Focus in on open; back to the opener on close.
-  useLayoutEffect(() => {
-    if (!open) return undefined;
-    const opener = document.activeElement as HTMLElement | null;
-    const node = surface.current;
-    if (node && !node.contains(document.activeElement)) {
-      const first = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).find(
-        (candidate) => !candidate.closest("[data-autofocus-skip]"),
-      );
-      (node.querySelector<HTMLElement>("[data-autofocus]") ?? first ?? node).focus({
-        preventScroll: true,
-      });
-    }
-    return () => {
-      const active = document.activeElement;
-      if (!active || active === document.body || node?.contains(active)) {
-        opener?.focus?.({ preventScroll: true });
-      }
-    };
-  }, [open]);
-
-  // Escape from anywhere, unless a popover above us has already taken it.
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const target = event.target instanceof Element ? event.target : null;
-      // A raised popover (a picker inside the modal) owns its own Escape.
-      if (target?.closest('.ms-layer[data-layer="popover-raised"], .ms-layer[data-layer="popover"], .ms-layer[data-layer="submenu"]')) return;
-      closeRef.current();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open]);
-
-  const onBackdrop = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) closeRef.current();
-  }, []);
-
-  // Keep Tab inside the dialog.
-  const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Tab") return;
-    const node = surface.current;
-    if (!node) return;
-    const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-      (candidate) => candidate.offsetParent !== null,
-    );
-    if (!items.length) return;
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }, []);
-
-  return { surface, onBackdrop, onKeyDown };
-}
 
 export function BoardModal({
   open,

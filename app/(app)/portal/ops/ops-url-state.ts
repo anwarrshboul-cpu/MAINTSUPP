@@ -239,7 +239,24 @@ export function useOpsQuery<T>(
      */
     keepOnError?: boolean;
   } = {},
-): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
+): {
+  data: T | null;
+  loading: boolean;
+  /**
+   * The payload on screen answers a DIFFERENT question from the one now being
+   * asked — the filter moved and the new figures have not landed.
+   *
+   * Distinct from `loading`, which is also true for a poll or a Retry, where
+   * the figures on screen are still the right answer and must not flicker.
+   * Here they are the previous filter's, and a card that presents them as the
+   * new one's is telling the reader something untrue for as long as the read
+   * takes. Measured: selecting a portfolio left the old counts on screen for
+   * several seconds, with no visible sign anything was in flight.
+   */
+  stale: boolean;
+  error: string | null;
+  reload: () => void;
+} {
   const enabled = options.enabled !== false;
   const keepOnError = options.keepOnError === true;
   const [nonce, setNonce] = useState(0);
@@ -318,8 +335,16 @@ export function useOpsQuery<T>(
   }, [enabled]);
 
   return {
+    /*
+     * The previous payload is still returned while the next one is in flight —
+     * blanking every card on each filter change made a tap look like a page
+     * reload, which is why it was kept. What was missing is that the caller
+     * could not tell WHICH question the retained figures answered. `stale` says
+     * so, and the page marks the section instead of lying about it.
+     */
     data: result?.data ?? null,
     loading: enabled && result?.key !== key,
+    stale: enabled && result != null && result.base !== base,
     error: result?.key === key ? result.error : null,
     reload,
   };

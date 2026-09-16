@@ -104,7 +104,14 @@ type OvOverview = {
   intel?: OiIntel | null;
 };
 
-type Query<T> = { data: T | null; loading: boolean; error: string | null; reload: () => void };
+type Query<T> = {
+  data: T | null;
+  loading: boolean;
+  /** The figures on screen answer the PREVIOUS filter — see `useOpsQuery`. */
+  stale: boolean;
+  error: string | null;
+  reload: () => void;
+};
 
 /** One destination: the address a link shows, and the navigation a click runs. */
 type Drill = { href: string; go: () => void };
@@ -373,6 +380,51 @@ export function OiDash({
 
   const portfolios =
     overview.data?.portfolios ?? reports.data?.portfolios ?? compliance.data?.portfolios ?? [];
+
+  /*
+   * B19 — A PORTFOLIO THAT NO LONGER EXISTS MUST NOT LOOK LIKE A FILTER.
+   *
+   * `resolveDashboardPortfolio` answers an id this organisation does not hold
+   * by falling back to every site, and that fallback is right: it is what keeps
+   * a foreign id from reaching another tenant's data — it matches nothing and
+   * is ignored. What was wrong is what the reader was then shown. The address
+   * bar still said `?portfolio=<something>`, the picker had no option with that
+   * value so it rendered blank, and the figures underneath were the WHOLE
+   * ESTATE. A deleted portfolio, or a link shared after one was renamed, showed
+   * org-wide totals under what looked like a filtered view.
+   *
+   * The server already tells us: it echoes the portfolio it actually used, and
+   * for an unrecognised id that is `all`. So when the address bar asks for one
+   * and the answer came back `all`, the selection was not honoured, and the
+   * honest thing is to stop claiming it — the parameter is dropped and the page
+   * says "All portfolios", which is what it is showing.
+   *
+   * It cannot loop: the parameter is removed, so the next render has nothing to
+   * normalise. It waits for a payload rather than acting on the empty first
+   * render, so a slow read never clears a selection that was perfectly valid.
+   */
+  const echoedPortfolioId = overview.data?.portfolio.id ?? null;
+  useEffect(() => {
+    if (!portfolio || echoedPortfolioId === null) return;
+    /*
+     * ONLY ACT ON A PAYLOAD THAT ANSWERS THE QUESTION NOW BEING ASKED.
+     *
+     * `useOpsQuery` keeps the PREVIOUS payload on screen while the next one is
+     * in flight — that is the whole point of `stale`, and of the pending
+     * treatment below. So for the first ~40ms after a portfolio is chosen,
+     * `overview.data` is still the unfiltered read, and the server echoes `all`
+     * for that one. Without this line the effect read that stale echo as "your
+     * selection was not honoured" and deleted the parameter before the real
+     * answer could land: choosing any portfolio from "All portfolios" snapped
+     * straight back to "All portfolios", which is every reader's first action
+     * on this page. Caught in the browser, not by a test — which is why the
+     * behavioural test below drives the whole sequence rather than the effect.
+     */
+    if (overview.stale) return;
+    if (echoedPortfolioId === portfolio) return;
+    if (echoedPortfolioId !== "all") return;
+    setFilter((query) => query.delete("portfolio"));
+  }, [portfolio, echoedPortfolioId, overview.stale, setFilter]);
   const rangeLabel =
     overview.data && overview.data.range.from === from && overview.data.range.to === to
       ? overview.data.range.label
@@ -499,6 +551,10 @@ function SectionError({ error, onRetry }: { error: string; onRetry: () => void }
 
 function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: (query: string) => void }) {
   const { data, error, reload } = query;
+  /* B6 — the figures below answer the PREVIOUS filter until the new read lands.
+     They stay put (blanking every card on each tap read as a page reload), but
+     the section says so rather than presenting them as the new selection's. */
+  const sectionClass = `oi-section${query.stale ? " oi-section--pending" : ""}`;
   const intel = data?.intel ?? null;
   const titleId = "oi-section-jobs";
   const subtitle = data
@@ -508,7 +564,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
 
   if (!data || !intel) {
     return (
-      <section className="oi-section" aria-labelledby={titleId}>
+      <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
         {head}
         {!data && error ? (
           <SectionError error={error} onRetry={reload} />
@@ -632,7 +688,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
   });
 
   return (
-    <section className="oi-section" aria-labelledby={titleId}>
+    <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
       {head}
 
       <div className="oi-kpis">
@@ -979,13 +1035,17 @@ function toneName(tone: "good" | "warn" | "poor"): OiTone {
 
 function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (query: string) => void }) {
   const { data, error, reload } = query;
+  /* B6 — the figures below answer the PREVIOUS filter until the new read lands.
+     They stay put (blanking every card on each tap read as a page reload), but
+     the section says so rather than presenting them as the new selection's. */
+  const sectionClass = `oi-section${query.stale ? " oi-section--pending" : ""}`;
   const titleId = "oi-section-spend";
   const subtitle =
     "Completed spend from the Reports page — split by job type, where it goes, and the issues that keep coming back.";
 
   if (!data) {
     return (
-      <section className="oi-section" aria-labelledby={titleId}>
+      <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
         <SectionHead id={titleId} title="Spend & Reporting" subtitle={subtitle} />
         {error ? <SectionError error={error} onRetry={reload} /> : <SectionSkeleton kpis={4} cards={3} />}
       </section>
@@ -1011,11 +1071,21 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
 
   /* ── The trend ─────────────────────────────────────────────────────────── */
 
+  /*
+   * B22 — THE LAST COLUMN IS OFTEN A PART-MONTH, AND WAS DRAWN LIKE A WHOLE ONE.
+   *
+   * `reports-dash.ts` ends the anchor month at the page's range rather than at
+   * the month's end, so on the default range the final column covers a fortnight
+   * beside eleven full months. Identical treatment produces the "last bar dips"
+   * misread: a reader sees spend collapsing where a month has simply not
+   * finished. The figure is untouched — nothing is scaled or projected — the
+   * label just says which column is still open, wherever it is read out.
+   */
   const trendPoints = trend.points.map((point) => ({
     label: point.label,
     pence: point.pence,
     jobs: point.jobs,
-    longLabel: point.longLabel,
+    longLabel: point.partial ? `${point.longLabel} (part month so far)` : point.longLabel,
   }));
   const trendDelta = deltaLine(trend.delta);
 
@@ -1053,6 +1123,17 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
 
   /* ── Repeat activity ───────────────────────────────────────────────────── */
 
+  /*
+   * B10 — A RATE NEEDS SOMETHING TO BE A RATE OF.
+   *
+   * `reports-dash.ts` returns `percent: 0` for a range with no jobs in it, so
+   * an empty range drew a confident green "0% repeat rate" — the best possible
+   * score, reported on no observation at all. That is the §1.5 rule the KPI
+   * tiles already keep: zero, null and "no data" are three different things.
+   * The payload's 0 stays as it is (a contract several tests pin); what changes
+   * is that this page stops reading it as an answer when `jobsInRange` is 0.
+   */
+  const repeatMeasured = repeat.jobsInRange > 0;
   const repeatTone = rateTone(repeat.percent, policy.repeatThresholds);
   const repeatDrill = drillTo(rpRepeatQuery(scope, sites));
   const issueSlices = toOvSlices(repeat.byIssue, oiSeriesColours(repeat.byIssue.map((slice) => slice.key)));
@@ -1089,7 +1170,7 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
   const volumeDrill = drillTo(rpJobsQuery(oiVolumePairs(range), sites));
 
   return (
-    <section className="oi-section" aria-labelledby={titleId}>
+    <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
       <SectionHead
         id={titleId}
         title="Spend & Reporting"
@@ -1167,21 +1248,47 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
         </OiCard>
 
         {/* 3 — Repeat rate */}
-        <OiCard title="Repeat Rate" pill="Same site, same issue" pillTone={repeatTone === "good" ? "primary" : repeatTone === "warn" ? "amber" : "critical"}>
+        <OiCard
+          title="Repeat Rate"
+          pill="Same site, same issue"
+          pillTone={
+            !repeatMeasured
+              ? "muted"
+              : repeatTone === "good"
+                ? "primary"
+                : repeatTone === "warn"
+                  ? "amber"
+                  : "critical"
+          }
+        >
           <OiGauge
-            fraction={repeat.percent / 100}
-            value={`${repeat.percent}%`}
+            fraction={repeatMeasured ? repeat.percent / 100 : 0}
+            value={repeatMeasured ? `${repeat.percent}%` : "—"}
             caption="repeat rate"
-            sub={`${plural(repeat.repeatJobs, "repeat job", "repeat jobs")} across ${plural(repeat.sitesAffected, "site", "sites")}`}
-            colour={oiToneColour(repeatTone)}
-            onSelect={repeatDrill.go}
-            ariaLabel={`Repeat rate — repeat jobs as a share of the ${rpJobs(repeat.jobsInRange)} raised in ${range.label}; lower is better (opens the repeat jobs)`}
+            sub={
+              repeatMeasured
+                ? `${plural(repeat.repeatJobs, "repeat job", "repeat jobs")} across ${plural(repeat.sitesAffected, "site", "sites")}`
+                : `no job was raised in ${range.label}`
+            }
+            colour={repeatMeasured ? oiToneColour(repeatTone) : OI_COLOUR.muted}
+            onSelect={repeatMeasured ? repeatDrill.go : undefined}
+            ariaLabel={
+              repeatMeasured
+                ? `Repeat rate — repeat jobs as a share of the ${rpJobs(repeat.jobsInRange)} raised in ${range.label}; lower is better (opens the repeat jobs)`
+                : `Repeat rate — no job was raised in ${range.label}, so there is nothing to measure.`
+            }
           />
         </OiCard>
 
         {/* 4 — Repeat spend by issue */}
         <OiCard title="Repeat Spend by Issue" pill="Field · Issue" pillTone="secondary">
-          {repeat.byIssue.length > 0 ? (
+          {/* B7 — `.length > 0` was the wrong question. Rows can exist with no
+              money against them, and the card then drew a donut whose only
+              stroke was the grey track, centred on "£0", with a legend reading
+              "Electrical £0". The empty state four lines down already said the
+              true thing and never fired. `spendPence > 0` is the predicate the
+              solo-site check two hundred lines up already uses. */}
+          {repeat.byIssue.length > 0 && repeat.spendPence > 0 ? (
             <div className="oi-donut">
               <Donut
                 slices={issueSlices}
@@ -1211,7 +1318,9 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
 
         {/* 5 — Repeat spend by site */}
         <OiCard title="Repeat Spend by Site" pill="Field · Site">
-          {repeat.bySite.length > 0 ? (
+          {/* B7, the same defect on the sibling card: rows with no money behind
+              them drew an empty ring over "£0" instead of the empty state. */}
+          {repeat.bySite.length > 0 && repeat.spendPence > 0 ? (
             <>
               <div className={`oi-donut${oneSite ? " oi-donut--solo" : ""}`}>
                 <Donut
@@ -1304,13 +1413,17 @@ function ComplianceSection({
   onSites: (query: string) => void;
 }) {
   const { data, error, reload } = query;
+  /* B6 — the figures below answer the PREVIOUS filter until the new read lands.
+     They stay put (blanking every card on each tap read as a page reload), but
+     the section says so rather than presenting them as the new selection's. */
+  const sectionClass = `oi-section${query.stale ? " oi-section--pending" : ""}`;
   const titleId = "oi-section-compliance";
   const subtitle =
     "Straight from the Compliance tracker — portfolio status, every requirement type, renewals and site readiness, as of today.";
 
   if (!data) {
     return (
-      <section className="oi-section" aria-labelledby={titleId}>
+      <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
         <SectionHead id={titleId} title="Compliance" subtitle={subtitle} />
         {error ? <SectionError error={error} onRetry={reload} /> : <SectionSkeleton kpis={0} cards={3} />}
       </section>
@@ -1363,7 +1476,7 @@ function ComplianceSection({
   const renewalSlices = toOvSlices(renewals.slices, renewalColours);
 
   return (
-    <section className="oi-section" aria-labelledby={titleId}>
+    <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
       <SectionHead
         id={titleId}
         title="Compliance"

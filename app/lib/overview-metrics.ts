@@ -570,6 +570,19 @@ export async function loadOverviewMetrics(
     ]),
   );
 
+  /*
+   * THE TWELVE MONTHS THE SPEND TREND REPORTS, resolved before anything is
+   * queried so the window and the columns are the same decision.
+   */
+  const spendMonths: string[] = [];
+  {
+    let cursor = `${rangeTo.slice(0, 7)}-01`;
+    for (let index = 0; index < 12; index += 1) {
+      spendMonths.unshift(cursor.slice(0, 7));
+      cursor = `${shiftDay(cursor, -1).slice(0, 7)}-01`;
+    }
+  }
+
   /* ── The counts ─────────────────────────────────────────────────────────── */
 
   const [
@@ -662,7 +675,12 @@ export async function loadOverviewMetrics(
      * Spend by month — `loadSpendByMonth`, the query the Reports block's trend
      * is also drawn from. Pounds become integer pence once, inside it.
      */
-    loadSpendByMonth(db, scope, shiftDay(rangeTo, -364), endExclusive),
+    /* B21 — from the FIRST DAY of the earliest month this payload will report,
+       not 364 days back. The two disagreed whenever the span contained a leap
+       day: `shiftDay(rangeTo, -364)` landed on the 2nd, so the earliest column
+       silently lost its first day while being drawn as a whole month. One list,
+       used for the window and for the columns, cannot drift. */
+    loadSpendByMonth(db, scope, `${spendMonths[0]}-01`, endExclusive),
     /* The three sparkline series, each reconstructed from dates the rows
        already carry. Grouped in SQL and expanded to a dense series in JS. */
     db
@@ -995,13 +1013,7 @@ export async function loadOverviewMetrics(
   /* ── Spend ──────────────────────────────────────────────────────────────── */
 
   const spend: { month: string; label: string; pence: number }[] = [];
-  let cursor = `${rangeTo.slice(0, 7)}-01`;
-  const months: string[] = [];
-  for (let index = 0; index < 12; index += 1) {
-    months.unshift(cursor.slice(0, 7));
-    cursor = `${shiftDay(cursor, -1).slice(0, 7)}-01`;
-  }
-  for (const month of months) {
+  for (const month of spendMonths) {
     spend.push({
       month,
       label: monthLabel(month),

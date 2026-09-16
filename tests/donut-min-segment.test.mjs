@@ -175,10 +175,24 @@ test("the ring is swept from display fractions, and only the ring is", () => {
 });
 
 test("every number a reader is given is still the real one", () => {
+  /*
+   * RE-POINTED. The readout's percentage is now `ovShares(values, sum)[index]`
+   * rather than `ovPercent(values[index], sum)`, because rounding each slice on
+   * its own made the set add up to 99 — the live split 61/12/12/2/1/1 of 89
+   * read 69+13+13+2+1+1. `ovShares` is largest-remainder over the SAME values
+   * against the SAME sum, so the contract this test exists for is untouched:
+   * the numbers a reader is given still come from the payload, never from the
+   * drawing. Both halves are asserted below.
+   */
   assert.match(
     donut,
-    /const readout = slices\s*\.map\(\(slice, index\) => `\$\{slice\.label\} \$\{write\(values\[index\]\)\} \(\$\{ovPercent\(values\[index\], sum\)\}%\)`\)/,
-    "the accessible readout counts values against the real sum",
+    /const readoutShares = ovShares\(values, sum\);/,
+    "the readout's shares are computed from the values against the real sum",
+  );
+  assert.match(
+    donut,
+    /const readout = slices\s*\.map\(\(slice, index\) => `\$\{slice\.label\} \$\{write\(values\[index\]\)\} \(\$\{readoutShares\[index\]\}%\)`\)/,
+    "and the accessible readout prints those",
   );
   assert.match(donut, /aria-label=\{`\$\{ariaLabel\}: \$\{readout \|\| "no data"\}\. \$\{printed\} \$\{caption\}`\}/);
   assert.match(donut, /tipLines\(slices\[activeIndex\], ovFraction\(values\[activeIndex\], sum\)\)/, "a caller's tooltip is handed the true share");
@@ -196,7 +210,10 @@ test("no sentence the reader hears is built from the drawing", () => {
    */
   const speaking = donut
     .split("\n")
-    .filter((line) => /aria-label|readout|tipLines|ovPercent|ovFraction|write\(/.test(line));
+    /* `readoutShares`/`radialShares` are in the net too — they are the largest-
+       remainder percentages the readouts print, and a future edit that derived
+       them from the geometry must be caught here like any other spoken figure. */
+    .filter((line) => /aria-label|readout|tipLines|ovPercent|ovFraction|Shares|write\(/.test(line));
   assert.ok(speaking.length >= 6, "the lines that speak are still here to check");
   for (const line of speaking) {
     assert.doesNotMatch(line, /\beased\b|ovDisplayFractions|OV_MIN_SLICE_MARK_PX/, `a spoken figure reads the drawing: ${line.trim()}`);

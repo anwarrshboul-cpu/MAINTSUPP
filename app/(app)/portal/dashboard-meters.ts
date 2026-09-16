@@ -203,6 +203,26 @@ export const completedStatuses = [
  */
 export const COMPLETED_STAGE = "Completed" as const;
 
+/**
+ * THE WORDS A READER SEES FOR A PRIORITY KEY.
+ *
+ * `urgent` / `medium` / `low` / `not_recorded` are the internal keys the board's
+ * filter and the Overview's drills carry. "High" is what the ring is labelled,
+ * and a chip that printed `Priority urgent` under a figure the reader had just
+ * seen called High was showing them the query string.
+ *
+ * Here rather than in `overview-intel.ts` for a mechanical reason: this module
+ * imports nothing but a type, so `board-drill-filter.ts` can take it with an
+ * explicit `.ts` and still load in the suites that run without a resolver hook.
+ * `overview-intel.ts` reads it from here, so there is one map.
+ */
+export const PRIORITY_DISPLAY_LABEL: Record<string, string> = {
+  urgent: "High",
+  medium: "Medium",
+  low: "Low",
+  not_recorded: "Unset",
+};
+
 const isAwaitingParts = statusMatcher(awaitingPartsStatuses);
 const isAwaitingApproval = statusMatcher(awaitingApprovalStatuses);
 const hasCompletedStatus = statusMatcher(completedStatuses);

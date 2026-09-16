@@ -77,9 +77,14 @@ test("a meter tile sends one chip named after the meter, not five status names",
   const filter = q(
     "meter=waiting_approval&status=Pending Approval|Quote requested|Quote approved",
   );
+  /* RE-POINTED: the chip's LABEL is now "Status", not "Meter". The contract this
+     test exists for is unchanged and is still asserted — ONE chip, named after
+     the meter, rather than five status names. What changed is only the word in
+     front of it: "meter" is the name of the query parameter, and it was being
+     printed at a reader as though it were a term the product uses. */
   assert.deepEqual(
     filter.chips.map((chip) => `${chip.label}=${chip.value}`),
-    ["Meter=waiting approval"],
+    ["Status=waiting approval"],
     "one chip, and it names the meter",
   );
   assert.equal(filter.matches(job({ status: "Pending Approval" })), true);
