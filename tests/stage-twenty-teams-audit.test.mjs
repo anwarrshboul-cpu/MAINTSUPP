@@ -106,12 +106,104 @@ test("recording an event can never fail the action it describes", async () => {
   const body = audit.slice(audit.indexOf("export async function recordAudit"));
 
   assert.match(body, /try\s*{/, "recordAudit must wrap its work in try/catch");
-  assert.match(body, /catch\s*\(error\)/);
+  /*
+   * RE-POINTED 2026-09-16, not weakened. This required `catch (error)` — the
+   * BINDING, not the catch. The binding is gone now precisely because nothing
+   * may read that error on a path the unauthenticated sign-in route reaches
+   * (see `safeActionTag` in audit.ts), and an optional-binding `catch {` is the
+   * same guarantee this test exists for: the throw is caught and the action the
+   * event describes survives. So the assertion is on the catch, either spelling.
+   */
+  assert.match(body, /catch\s*(\{|\()/, "recordAudit must catch");
   // Swallowed, but never silently: the lost event has to be visible somewhere.
   assert.match(body, /console\.error\(/);
   // Nothing may be re-thrown out of the catch.
   assert.doesNotMatch(body, /catch[\s\S]*?\bthrow\b/);
   assert.match(body, /Promise<string \| null>/, "it must resolve rather than reject");
+});
+
+test("a lost audit event is reported without naming the person it was about", async () => {
+  /*
+   * `recordAudit` runs on `session.signed_in` AND `session.sign_in_failed`, so
+   * a stranger who cannot sign in still reaches these two lines. Until
+   * 2026-09-16 the failure branch logged `actor: input.actor?.email` and the
+   * caught error object — an address someone typed, plus a `D1_ERROR` whose
+   * message carries the translated SQL and whose `cause` is the raw driver
+   * error. Both are gone, and this is what stops them coming back.
+   *
+   * Deliberately NOT a blanket "audit.ts may not log". The module must stay
+   * loud — a lost audit event is a gap in a compliance record — so the rule is
+   * about WHICH VALUES may travel, not about whether logging is allowed.
+   */
+  const audit = await source("app/lib/audit.ts");
+  // The rule is about what runs; these decisions are explained at length above
+  // the code that implements them.
+  const code = audit
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  // String literals are the one thing these lines MAY carry, so they come out
+  // first: the tag "[audit] failed to record an event" is not a value and must
+  // not trip a rule about values.
+  const stripped = code.replace(/"(?:[^"\\]|\\.)*"/g, "");
+  const calls = [
+    ...stripped.matchAll(/console\.(?:log|info|warn|error|debug)\s*\(([\s\S]*?)\);/g),
+  ].map(([, args]) => args);
+
+  assert.equal(
+    calls.length,
+    2,
+    `recordAudit has two diagnostics — the refusal and the failure; found ${calls.length}`,
+  );
+
+  /** Locals and fields whose VALUE is the person, the payload, or the failure. */
+  const FORBIDDEN = [
+    "actor",
+    "email",
+    "summary",
+    "detail",
+    "error",
+    "cause",
+    "stack",
+    "ipAddress",
+    "userAgent",
+    "entityId",
+    "userId",
+    "token",
+    "password",
+    "hash",
+  ];
+
+  for (const args of calls) {
+    for (const name of FORBIDDEN) {
+      assert.doesNotMatch(
+        args,
+        new RegExp(`\\b${name}\\b`, "i"),
+        `audit logging must not pass \`${name}\` to console: ${args.trim()}`,
+      );
+    }
+    /*
+     * And the positive half, which is the stronger of the two: `action` is the
+     * only field of `input` allowed through, and only via the guard. Remove the
+     * guarded call and NO reference to `input` may survive — so `input.actor`,
+     * `input.summary`, `input.detail` and anything added later are all refused
+     * by construction rather than by remembering to extend the list above.
+     */
+    const withoutGuard = args.replace(/safeActionTag\(input\.action\)/g, "");
+    assert.doesNotMatch(
+      withoutGuard,
+      /\binput\b/,
+      `only safeActionTag(input.action) may reach the log: ${args.trim()}`,
+    );
+  }
+
+  // The guard is real, and it shape-checks rather than trusting its caller —
+  // internal helpers forward `action` as a bare `string`.
+  assert.match(code, /function safeActionTag/, "the guard must exist");
+  assert.match(
+    code,
+    /\/\^\[a-z\]\[a-z0-9_\.\]\{0,\d+\}\$\//,
+    "safeActionTag must test the machine-token shape, so an email or a sentence cannot pass",
+  );
 });
 
 /* ------------------------------------------------------------------ */

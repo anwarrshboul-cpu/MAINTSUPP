@@ -223,6 +223,34 @@ function serialiseDetail(detail: unknown): string | null {
 }
 
 /**
+ * The ONE value either log line below is allowed to carry.
+ *
+ * `recordAudit` runs on the unauthenticated sign-in path — `session.signed_in`
+ * and `session.sign_in_failed` — and every other field it is handed is derived
+ * from a person: `actor.email` IS the address someone typed, and `summary` is
+ * built from it ("Failed sign-in for <email>."). The caught error is no better:
+ * `db/node-pg-d1.ts` builds every failure as
+ * `D1_ERROR: <driver message>: <translated SQL>` with the driver error as
+ * `cause`, so printing it puts statement text and a stack trace in the log.
+ * None of that is needed to answer the operational question, which is only ever
+ * "which kind of event is failing to record".
+ *
+ * `action` is the one field that answers it and is not user-derived: all 129
+ * call sites pass a developer-authored constant, and all 129 match the machine
+ * token shape below with 30 characters as the longest. The shape is checked
+ * anyway rather than trusted, because some internal helpers forward `action` as
+ * a bare `string` and nothing in the type system would stop a future caller
+ * putting a person's data there. An email fails on `@`, a summary sentence on
+ * its spaces, a UUID on its dashes, and a session token or password hash on the
+ * length cap — so anything that is not already a machine token is reported as
+ * `unrecognised` instead of being printed.
+ */
+function safeActionTag(action: unknown): string {
+  if (typeof action !== "string" || !action) return "missing";
+  return /^[a-z][a-z0-9_.]{0,47}$/.test(action) ? action : "unrecognised";
+}
+
+/**
  * Append one event. The only write this module performs.
  *
  * Resolves to the new row's id, or `null` when the event could not be stored —
@@ -237,9 +265,13 @@ export async function recordAudit(input: RecordAuditInput): Promise<string | nul
     // An event with no verb or no sentence is unreadable later, and a row
     // nobody can interpret is worse than an honest gap.
     if (!action || !summary) {
+      // Which of the two was missing, without reprinting either. The summary is
+      // the sentence built from the actor's own data ("Failed sign-in for
+      // <email>."), so it is reported as a flag rather than quoted back.
+      const hasSummary = Boolean(summary);
       console.error("[audit] refused an event with no action or summary", {
-        action: input.action,
-        summary: input.summary,
+        action: safeActionTag(input.action),
+        hasSummary,
       });
       return null;
     }
@@ -262,14 +294,17 @@ export async function recordAudit(input: RecordAuditInput): Promise<string | nul
       createdAt: new Date().toISOString(),
     });
     return id;
-  } catch (error) {
+  } catch {
     // Loud, but only here. The action that triggered this has already happened
     // and must be allowed to report its own success.
+    //
+    // The actor and the caught error used to be on this line. Both are gone:
+    // see `safeActionTag` above for why neither can be on a path the sign-in
+    // route reaches without a session. What is left still says the thing worth
+    // saying — that audit events of this kind are being lost, which is a gap in
+    // a compliance record and wants investigating.
     console.error("[audit] failed to record an event", {
-      action: input.action,
-      organisationId: input.organisationId,
-      actor: input.actor?.email ?? null,
-      error,
+      action: safeActionTag(input.action),
     });
     return null;
   }
